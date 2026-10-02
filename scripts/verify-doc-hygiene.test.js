@@ -258,3 +258,178 @@ test('without the name list, an over-limit built-in count still fails', () => {
   });
   assert.equal(run(root, []).code, 1);
 });
+
+// ---- --stdin-diff: added lines of a commit range, from real `git log -p` output ----
+
+const { SCOPE } = require('./verify-doc-hygiene');
+
+const HISTORY_ENV = (() => {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  delete env.OSI_DOC_HYGIENE_TERMS;
+  env.GIT_CONFIG_GLOBAL = os.devNull;
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  return env;
+})();
+
+function g(root, ...args) {
+  return execFileSync('git', args, { cwd: root, env: HISTORY_ENV, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+}
+
+function historyRepo(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-hygiene-diff-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  g(root, 'init', '-q', '-b', 'main');
+  g(root, 'config', 'user.name', 'Test User');
+  g(root, 'config', 'user.email', 'test@example.invalid');
+  g(root, 'config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(root, 'README.md'), 'clean\n');
+  g(root, 'add', '-A');
+  g(root, 'commit', '-q', '-m', 'initial');
+  return { root, base: g(root, 'rev-parse', 'HEAD') };
+}
+
+// files: { rel: string | Buffer | null }, null deletes the file.
+function commitFiles(root, files, message = 'change') {
+  for (const [rel, content] of Object.entries(files)) {
+    const abs = path.join(root, rel);
+    if (content === null) {
+      fs.rmSync(abs);
+    } else {
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, content);
+    }
+  }
+  g(root, 'add', '-A');
+  g(root, 'commit', '-q', '-m', message);
+  return g(root, 'rev-parse', 'HEAD');
+}
+
+// The same `git log -p` the pre-push hook runs.
+function diffOf(root, range, gitConfig = ['-c', 'core.quotePath=false']) {
+  return g(root, ...gitConfig, '-c', 'log.showRoot=true', '-c', 'log.showSignature=false', 'log', '-p',
+    '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/',
+    '--format=commit %H', range, '--', ...SCOPE);
+}
+
+function runDiff(root, input, terms = 'zebrafarm') {
+  const env = { ...HISTORY_ENV };
+  if (terms !== undefined) env.OSI_DOC_HYGIENE_TERMS = terms;
+  const r = spawnSync(process.execPath, [SCRIPT, `--root=${root}`, '--stdin-diff', '--require-terms'], { env, input, encoding: 'utf8' });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+test('SCOPE is exported for the pre-push hook', () => {
+  assert.deepEqual(SCOPE, ['README.md', 'AGENTS.md', 'CLAUDE.md', 'CHANGELOG.md', 'docs', '.claude/skills', '.github', 'analysis']);
+});
+
+test('--stdin-diff reports a name added in one commit and removed in the next, for the adding commit', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/a.md': 'intro\nvisit ZebraFarm today\n' });
+  const b = commitFiles(root, { 'docs/a.md': 'intro\nvisit the reference farm today\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: term #1$`, 'm'));
+  assert.doesNotMatch(r.out, new RegExp(b.slice(0, 7)));
+  assert.match(r.out, /verify-doc-hygiene: FAIL \(1 findings in added lines of the supplied commits\)/);
+  assert.doesNotMatch(r.out, /zebra/i);
+  assert.doesNotMatch(r.out, /visit/);
+});
+
+test('--stdin-diff reports built-in identifiers in added lines too', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/a.md': 'gw 0016C001F1A7B3D9\n' });
+  commitFiles(root, { 'docs/a.md': 'gw 0016C001F1000001\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: eui64$`, 'm'));
+});
+
+test('--stdin-diff skips files that have an allowlist entry in --root', (t) => {
+  const { root, base } = historyRepo(t);
+  commitFiles(root, {
+    'docs/a.md': 'one zebrafarm mention\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/a.md', max: 1, reason: 'test', issue: 1 }] }),
+  });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /verify-doc-hygiene: OK \(supplied commits\)/);
+});
+
+test('--stdin-diff reports a file that was added and deleted again', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/tmp.md': 'zebrafarm\n' });
+  commitFiles(root, { 'docs/tmp.md': null });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/tmp\\.md: added line: term #1$`, 'm'));
+  assert.doesNotMatch(r.out, /zebra/i);
+});
+
+test('--stdin-diff reports a path that carries a term, masked', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/zebrafarm-notes.md': 'clean\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/\\*\\*\\*-notes\\.md: path: term #1$`, 'm'));
+  assert.doesNotMatch(r.out, /zebra/i);
+});
+
+test('--stdin-diff reads quoted paths and masks them', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/zebrafarm "q" ü.md': 'visit zebrafarm\n' });
+  // default core.quotePath: the path is C-quoted with octal escapes
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`, []));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/\\*\\*\\* "q" ü\\.md: path: term #1$`, 'm'));
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/\\*\\*\\* "q" ü\\.md: added line: term #1$`, 'm'));
+  assert.doesNotMatch(r.out, /zebra/i);
+});
+
+test('--stdin-diff treats an added line that looks like a diff header as content', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/a.md': 'first\n++ b/zebrafarm\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/a\\.md: added line: term #1$`, 'm'));
+});
+
+test('--stdin-diff passes a clean range', (t) => {
+  const { root, base } = historyRepo(t);
+  commitFiles(root, { 'docs/a.md': 'the reference gateway\n' });
+  commitFiles(root, { 'docs/a.md': null, 'docs/b.md': 'a customer gateway\n' });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /verify-doc-hygiene: OK \(supplied commits\)/);
+});
+
+test('--stdin-diff copes with binary files and mode-only changes', (t) => {
+  const { root, base } = historyRepo(t);
+  commitFiles(root, { 'docs/blob.bin': Buffer.from([0x7a, 0x00, 0x7a, 0x65, 0x62, 0x72, 0x61]), 'docs/x.md': 'clean\n' });
+  g(root, 'update-index', '--chmod=+x', 'docs/x.md');
+  g(root, 'commit', '-q', '-m', 'mode only');
+  commitFiles(root, { 'docs/blob.bin': Buffer.from([0x00, 0x01, 0x02]) });
+  const input = diffOf(root, `${base}..HEAD`);
+  assert.match(input, /Binary files/);
+  assert.match(input, /new mode/);
+  const r = runDiff(root, input);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /verify-doc-hygiene: OK \(supplied commits\)/);
+});
+
+test('--stdin-diff with --require-terms and an empty list is a configuration error', (t) => {
+  const { root, base } = historyRepo(t);
+  commitFiles(root, { 'docs/a.md': 'clean\n' });
+  assert.equal(runDiff(root, diffOf(root, `${base}..HEAD`), '').code, 2);
+});
+
+test('--stdin-diff reads a path with spaces (git appends a tab to it) and matches it to the allowlist', (t) => {
+  const { root, base } = historyRepo(t);
+  const a = commitFiles(root, { 'docs/zebrafarm notes.md': 'visit zebrafarm\n', 'docs/old notes.md': 'zebrafarm\n',
+    'scripts/verify-doc-hygiene-allowlist.json': JSON.stringify({ entries: [{ path: 'docs/old notes.md', max: 1, reason: 'test', issue: 1 }] }) });
+  const r = runDiff(root, diffOf(root, `${base}..HEAD`));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, new RegExp(`^${a.slice(0, 7)} docs/\\*\\*\\* notes\\.md: added line: term #1$`, 'm'));
+  assert.doesNotMatch(r.out, /old notes/);
+  assert.match(r.out, /FAIL \(2 findings/);
+});

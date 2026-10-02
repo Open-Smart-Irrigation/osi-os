@@ -10,17 +10,24 @@
 # pushed ref to standard input: <local ref> <local sha> <remote ref> <remote sha>.
 #
 # The hook acts only when the URL names the public repository. For such a push
-# it refuses any commit whose tree, or whose history new to the remote,
-# contains a private document folder; then it scans the documents of each
-# pushed commit (not the checkout) and the messages of the commits new to the
-# remote with scripts/verify-doc-hygiene.js. Any unexpected failure refuses
-# the push. The name list is passed to the scanner in the environment and is
-# never printed.
+# it refuses any commit new to the remote whose tree contains a private
+# document folder. Then, with scripts/verify-doc-hygiene.js, it scans the
+# documents of each pushed commit (not the checkout), the lines that the new
+# commits add to them, and the new commits' messages together with the pushed
+# ref name. Any unexpected failure refuses the push. The name list is passed
+# to the scanner in the environment and is never printed.
 
 remote_name=$1
 remote_url=$2
 
+# The path lists below are expanded unquoted on purpose; no globbing.
+set -f
+
 SCANNER_PATH=scripts/verify-doc-hygiene.js
+ALLOWLIST_PATH=scripts/verify-doc-hygiene-allowlist.json
+# Must equal SCOPE in scripts/verify-doc-hygiene.js (a test checks this).
+SCOPE_PATHS='README.md AGENTS.md CLAUDE.md CHANGELOG.md docs .claude/skills .github analysis'
+PRIVATE_PATHS='docs/policy docs/customers docs/gateways docs/customer-operations docs/releases docs/reviews docs/records docs/archive'
 
 die() {
   printf 'pre-push: %s\n' "$*" >&2
@@ -61,17 +68,27 @@ is_zero() {
 
 # Private folders in the tree of $1; prints the matching paths.
 private_in_tree() {
-  git ls-tree --full-tree --name-only "$1" -- \
-    docs/policy docs/customers docs/gateways docs/customer-operations \
-    docs/releases docs/reviews docs/records docs/archive </dev/null
+  # shellcheck disable=SC2086
+  git ls-tree --full-tree --name-only "$1" -- $PRIVATE_PATHS </dev/null
 }
 
-# Commits new to the remote that add, change or remove a private folder.
-# $1 = commit, $2 = remote sha to exclude (may be empty).
+# Prints the first commit new to the remote whose own tree still contains a
+# private folder (a commit that only removes one is fine). Candidates are the
+# new commits that touch a private folder: a new commit that holds one without
+# touching it inherits it from a parent that is either such a candidate or
+# already on the remote. $1 = commit, $2 = remote sha to exclude (may be empty).
 private_in_history() {
-  git rev-list --full-history "$1" --not --remotes="$remote_name" ${2:+"$2"} -- \
-    docs/policy docs/customers docs/gateways docs/customer-operations \
-    docs/releases docs/reviews docs/records docs/archive </dev/null
+  # shellcheck disable=SC2086
+  git rev-list --full-history "$1" --not --remotes="$remote_name" ${2:+"$2"} -- $PRIVATE_PATHS \
+    >"$tmp/candidates" </dev/null || return 1
+  while IFS= read -r candidate; do
+    private_in_tree "$candidate" >"$tmp/hits" || return 1
+    if [ -s "$tmp/hits" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done <"$tmp/candidates"
+  return 0
 }
 
 # The remote's current sha for the ref, when it is a commit we have: commits
@@ -110,8 +127,9 @@ is_public_url "$remote_url" || exit 0
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/osi-pre-push.XXXXXX") || die "cannot create a temporary directory; refusing to push"
 [ -n "$tmp" ] && [ -d "$tmp" ] || die "cannot create a temporary directory; refusing to push"
 trap 'rm -rf "$tmp"' EXIT
-tmp=$(cd "$tmp" && pwd) || die "cannot resolve the temporary directory; refusing to push"
 trap 'exit 1' HUP INT TERM
+resolved=$(cd "$tmp" && pwd) || die "cannot resolve the temporary directory; refusing to push"
+tmp=$resolved
 
 cat >"$tmp/refs" || die "cannot read the pushed refs; refusing to push"
 
@@ -135,10 +153,9 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   fi
 
   exclude=$(known_remote_sha "$remote_sha")
-  private_in_history "$commit" "$exclude" >"$tmp/hits" ||
+  first=$(private_in_history "$commit" "$exclude") ||
     die "cannot list the new history of $local_ref; refusing to push"
-  if [ -s "$tmp/hits" ]; then
-    IFS= read -r first <"$tmp/hits"
+  if [ -n "$first" ]; then
     die "refusing to push $local_ref: its history contains private document folders (commit $first); if that history is already public, fetch the remote and push by remote name"
   fi
 done 3<"$tmp/refs"
@@ -153,7 +170,8 @@ fi
 terms=$(cat -- "$terms_file" </dev/null) ||
   die "osi.docHygieneTermsFile is not set or not readable; refusing to push to the public repository"
 
-# Pass 2: scan the documents of each pushed commit and the new messages.
+# Pass 2: per ref, the documents of the pushed commit, the lines the new
+# commits add, and the new messages with the ref name.
 blocked=0
 n=0
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -n "$local_ref" ]; do
@@ -164,29 +182,40 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   commit=$(git rev-parse --verify --quiet "$local_sha^{commit}" </dev/null) ||
     die "refusing to push $local_ref: $local_sha is not a commit"
 
-  # Scanner: from the pushed commit, else from the remote's main.
-  scanner_from=
+  # Scanner and allowlist come from one source: the pushed commit, or else
+  # the remote's main (fallback). Only a remote main that is known and has no
+  # scanner itself lets the scans be skipped.
+  fallback=0
   found=$(git ls-tree --full-tree "$commit" -- "$SCANNER_PATH" </dev/null) ||
     die "cannot list the tree of $local_ref; refusing to push"
   if [ -n "$found" ]; then
     scanner_from=$commit
-  elif remote_main=$(git rev-parse --verify --quiet "refs/remotes/$remote_name/main^{commit}" </dev/null 2>/dev/null); then
-    found=$(git ls-tree --full-tree "$remote_main" -- "$SCANNER_PATH" </dev/null) ||
+  else
+    scanner_from=$(git rev-parse --verify --quiet "refs/remotes/$remote_name/main^{commit}" </dev/null 2>/dev/null) ||
+      die "cannot find a hygiene scanner for $local_ref; fetch $remote_name first"
+    found=$(git ls-tree --full-tree "$scanner_from" -- "$SCANNER_PATH" </dev/null) ||
       die "cannot list the tree of $remote_name/main; refusing to push"
-    [ -n "$found" ] && scanner_from=$remote_main
-  fi
-  if [ -z "$scanner_from" ]; then
-    printf 'pre-push: no hygiene scanner in %s or on %s/main; file and message scan skipped\n' "$local_ref" "$remote_name" >&2
-    continue
+    if [ -z "$found" ]; then
+      printf 'pre-push: no hygiene scanner in %s or on %s/main; file and message scan skipped\n' "$local_ref" "$remote_name" >&2
+      continue
+    fi
+    fallback=1
   fi
   command -v node >/dev/null 2>&1 || die "node is not installed; refusing to push to the public repository"
   git cat-file blob "$scanner_from:$SCANNER_PATH" >"$work/scanner.js" </dev/null ||
     die "cannot read the hygiene scanner for $local_ref; refusing to push"
+  grep -q 'stdin-diff' "$work/scanner.js"
+  case $? in
+    0) ;;
+    1) die "the hygiene scanner for $local_ref has no --stdin-diff mode; refusing to push (the scanner in the pushed commit, or on $remote_name/main without one, must have it)" ;;
+    *) die "cannot read the hygiene scanner for $local_ref; refusing to push" ;;
+  esac
 
-  # Export the scanner's scope from the pushed commit.
+  # Export the scanner's scope from the pushed commit; the allowlist comes
+  # from the scanner's source.
   set --
-  for p in README.md AGENTS.md CLAUDE.md CHANGELOG.md docs .claude/skills .github analysis \
-    scripts/verify-doc-hygiene-allowlist.json; do
+  for p in $SCOPE_PATHS $ALLOWLIST_PATH; do
+    if [ "$p" = "$ALLOWLIST_PATH" ] && [ "$fallback" -eq 1 ]; then continue; fi
     found=$(git ls-tree --full-tree --name-only "$commit" -- "$p" </dev/null) ||
       die "cannot list the tree of $local_ref; refusing to push"
     if [ -n "$found" ]; then set -- "$@" "$p"; fi
@@ -199,6 +228,18 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
       die "cannot unpack the export of $local_ref; refusing to push"
     git ls-tree -r --full-tree "$commit" -- "$@" >"$work/expected" </dev/null ||
       die "cannot list the tree of $local_ref; refusing to push"
+  fi
+  extra_files=0
+  if [ "$fallback" -eq 1 ]; then
+    found=$(git ls-tree --full-tree --name-only "$scanner_from" -- "$ALLOWLIST_PATH" </dev/null) ||
+      die "cannot list the tree of $remote_name/main; refusing to push"
+    if [ -n "$found" ]; then
+      mkdir -p "$work/tree/${ALLOWLIST_PATH%/*}" ||
+        die "cannot create a temporary directory; refusing to push"
+      git cat-file blob "$scanner_from:$ALLOWLIST_PATH" >"$work/tree/$ALLOWLIST_PATH" </dev/null ||
+        die "cannot read the allowlist of $remote_name/main; refusing to push"
+      extra_files=1
+    fi
   fi
   # The scanner lists files with git ls-files, so the export becomes a
   # repository of its own.
@@ -214,23 +255,50 @@ while IFS=' ' read -r local_ref local_sha remote_ref remote_sha extra <&3 || [ -
   # would otherwise hide files from the scan).
   expected=$(grep -c '^[0-7]* blob ' "$work/expected")
   [ "$?" -le 1 ] || die "cannot count the files of $local_ref; refusing to push"
+  expected=$((expected + extra_files))
   actual=$(wc -l <"$work/listed") || die "cannot count the exported files of $local_ref; refusing to push"
   if [ "$expected" -ne "$actual" ]; then
     die "refusing to push $local_ref: the export has $actual of $expected files (export attributes?), so it cannot be scanned"
   fi
 
+  # 1. The documents of the pushed commit.
   if ! run_scanner "$work/scanner.js" --root="$work/tree" --require-terms </dev/null; then
     printf 'pre-push: refusing to push %s: its documents failed the hygiene scan\n' "$local_ref" >&2
+    if [ "$fallback" -eq 1 ]; then
+      printf 'pre-push: %s has no hygiene baseline of its own; merge or rebase onto %s/main and push again\n' "$local_ref" "$remote_name" >&2
+    fi
     blocked=1
   fi
 
-  # Messages of the commits new to the remote.
+  # 2. The lines that the commits new to the remote add to those documents.
   exclude=$(known_remote_sha "$remote_sha")
+  # shellcheck disable=SC2086
+  git -c core.quotePath=false -c log.showRoot=true -c log.showSignature=false \
+    log -p --no-ext-diff --no-textconv --no-color --no-renames --src-prefix=a/ --dst-prefix=b/ \
+    --format='commit %H' "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} -- $SCOPE_PATHS \
+    >"$work/changes" </dev/null ||
+    die "cannot list the changes of $local_ref; refusing to push"
+  run_scanner "$work/scanner.js" --root="$work/tree" --stdin-diff --require-terms <"$work/changes" >"$work/changes.out"
+  status=$?
+  cat "$work/changes.out" || die "cannot read a temporary file; refusing to push"
+  if [ "$status" -eq 1 ]; then
+    printf 'pre-push: a commit in %s adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing\n' "$local_ref" >&2
+    blocked=1
+  elif [ "$status" -ne 0 ]; then
+    printf 'pre-push: refusing to push %s: the scan of the added lines failed (exit %s)\n' "$local_ref" "$status" >&2
+    blocked=1
+  elif ! grep -q 'OK (supplied commits)' "$work/changes.out"; then
+    printf 'pre-push: refusing to push %s: the hygiene scanner did not run its --stdin-diff mode\n' "$local_ref" >&2
+    blocked=1
+  fi
+
+  # 3. The messages of the commits new to the remote, and the pushed ref name.
   git -c log.showSignature=false log --format=%B "$commit" --not --remotes="$remote_name" ${exclude:+"$exclude"} \
     >"$work/messages" </dev/null ||
     die "cannot list the commit messages of $local_ref; refusing to push"
+  printf 'ref\n%s\n' "$remote_ref" >>"$work/messages" || die "cannot write a temporary file; refusing to push"
   if ! run_scanner "$work/scanner.js" --stdin --require-terms <"$work/messages"; then
-    printf 'pre-push: refusing to push %s: a commit message failed the hygiene scan\n' "$local_ref" >&2
+    printf 'pre-push: refusing to push %s: a commit message or the pushed ref name failed the hygiene scan\n' "$local_ref" >&2
     blocked=1
   fi
 done 3<"$tmp/refs"

@@ -238,6 +238,7 @@ test('10b. a commit without a scanner uses the scanner on the remote main', (t) 
   const r = push(s.work, 'public', 'feature');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /docs\/a\.md:1: term #1/);
+  assert.match(r.out, /pre-push: refs\/heads\/feature has no hygiene baseline of its own; merge or rebase onto public\/main and push again/);
   assert.equal(remoteHas(s.pub, 'refs/heads/feature'), false);
 });
 
@@ -311,16 +312,28 @@ test('16. an empty name list blocks the push', (t) => {
   assert.match(r.out, /OSI_DOC_HYGIENE_TERMS is required but empty/);
 });
 
-test('17. private folders anywhere in the new history are refused', (t) => {
+test('17. a new commit whose own tree holds a private folder is refused, even if a later one removes it', (t) => {
   const s = setup(t);
   git(s.work, 'checkout', '-q', '-b', 'laundered');
-  commit(s.work, { 'docs/policy/x.txt': 'private\n' });
+  const added = commit(s.work, { 'docs/policy/x.txt': 'private\n' });
   git(s.work, 'rm', '-q', '-r', 'docs/policy');
   git(s.work, 'commit', '-q', '-m', 'remove the folder again');
   const r = push(s.work, 'public', 'laundered');
   assert.notEqual(r.code, 0, r.out);
-  assert.match(r.out, /pre-push: refusing to push refs\/heads\/laundered: its history contains private document folders/);
+  assert.match(r.out, new RegExp(`pre-push: refusing to push refs/heads/laundered: its history contains private document folders \\(commit ${added}\\)`));
   assert.equal(remoteHas(s.pub, 'refs/heads/laundered'), false);
+});
+
+test('17b. a clean-up commit that only removes a private folder already on the remote is accepted', (t) => {
+  const s = setup(t);
+  commit(s.work, { 'docs/archive/old.md': 'old notes\n' });
+  git(s.work, 'push', '-q', '--no-verify', 'public', 'main');
+  git(s.work, 'rm', '-q', '-r', 'docs/archive');
+  git(s.work, 'commit', '-q', '-m', 'move the archive out');
+  const sha = git(s.work, 'rev-parse', 'HEAD');
+  const r = push(s.work, 'public', 'main');
+  assert.equal(r.code, 0, r.out);
+  assert.equal(git(s.pub, 'rev-parse', 'refs/heads/main'), sha);
 });
 
 test('18. export-ignore attributes cannot hide a file from the scan', (t) => {
@@ -394,4 +407,88 @@ test('22. a failing mktemp refuses the push', (t) => {
   const r = tryGitEnv(s.work, env, 'push', 'public', 'main');
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /pre-push: cannot create a temporary directory; refusing to push/);
+});
+
+test('23. a name added in one new commit and removed in the next is refused (intermediate content)', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'p1');
+  commit(s.work, { 'docs/a.md': `visit ${TERM}\n` });
+  commit(s.work, { 'docs/a.md': 'visit the reference farm\n' });
+  const r = push(s.work, 'public', 'p1');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /docs\/a\.md: added line: term #1/);
+  assert.match(r.out, /pre-push: a commit in refs\/heads\/p1 adds a listed term or identifier that a later commit removes or keeps; squash or rewrite those commits before pushing/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/p1'), false);
+});
+
+test('24. without a scanner in the commit, a push by URL is refused', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'probe');
+  git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
+  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  const r = push(s.work, s.pub, 'HEAD:refs/heads/probe');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /pre-push: cannot find a hygiene scanner for HEAD; fetch .*osi-os\.git first/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
+});
+
+test('25. without a scanner in the commit and without the remote-tracking main, a push by name is refused', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'probe');
+  git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js');
+  commit(s.work, { 'docs/a.md': `${TERM}\n` });
+  git(s.work, 'update-ref', '-d', 'refs/remotes/public/main');
+  const r = push(s.work, 'public', 'probe');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /pre-push: cannot find a hygiene scanner for refs\/heads\/probe; fetch public first/);
+  assert.equal(remoteHas(s.pub, 'refs/heads/probe'), false);
+});
+
+test('26. the fallback scanner uses the allowlist of the remote main as well', (t) => {
+  const s = setup(t);
+  const allow = { entries: [{ path: 'docs/a.md', max: 1, reason: 'test fixture', issue: 1 }] };
+  commit(s.work, {
+    'docs/a.md': `one ${TERM} mention\n`,
+    'scripts/verify-doc-hygiene-allowlist.json': `${JSON.stringify(allow, null, 2)}\n`,
+  });
+  git(s.work, 'push', '-q', '--no-verify', 'public', 'main');
+  git(s.work, 'checkout', '-q', '-b', 'slim');
+  git(s.work, 'rm', '-q', 'scripts/verify-doc-hygiene.js', 'scripts/verify-doc-hygiene-allowlist.json');
+  const sha = commit(s.work, { 'docs/b.md': 'clean\n' });
+  const r = push(s.work, 'public', 'slim');
+  assert.equal(r.code, 0, r.out);
+  assert.equal(git(s.pub, 'rev-parse', 'refs/heads/slim'), sha);
+});
+
+test('27. a scanner without the --stdin-diff mode refuses the push', (t) => {
+  const s = setup(t);
+  git(s.work, 'checkout', '-q', '-b', 'old-scanner');
+  commit(s.work, { 'scripts/verify-doc-hygiene.js': "console.log('verify-doc-hygiene: OK (old)');\n", 'docs/ok.md': 'clean\n' });
+  const r = push(s.work, 'public', 'old-scanner');
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /pre-push: the hygiene scanner for refs\/heads\/old-scanner has no --stdin-diff mode; refusing to push/);
+  assert.equal(remoteHas(s.pub, 'refs/heads/old-scanner'), false);
+});
+
+test('28. a pushed ref name that carries a name is refused', (t) => {
+  const s = setup(t);
+  commit(s.work, { 'docs/ok.md': 'clean\n' });
+  const r = push(s.work, 'public', `HEAD:refs/heads/customer/${TERM}`);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /stdin:\d+: term #1/);
+  assertNoTerm(r.out);
+  assert.equal(remoteHas(s.pub, `refs/heads/customer/${TERM}`), false);
+});
+
+test('29. the hook exports exactly the scanner scope plus the allowlist', () => {
+  const { SCOPE } = require('../verify-doc-hygiene');
+  const text = fs.readFileSync(HOOK, 'utf8');
+  const scope = text.match(/^SCOPE_PATHS='([^']*)'$/m);
+  assert.ok(scope, 'SCOPE_PATHS definition not found');
+  assert.deepEqual(scope[1].split(/\s+/).filter(Boolean), SCOPE);
+  const allow = text.match(/^ALLOWLIST_PATH=(\S+)$/m);
+  assert.ok(allow, 'ALLOWLIST_PATH definition not found');
+  assert.equal(allow[1], 'scripts/verify-doc-hygiene-allowlist.json');
 });

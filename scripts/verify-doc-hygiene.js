@@ -124,6 +124,89 @@ function judge(findingsByFile, entries) {
   return { violations, stale };
 }
 
+// Unquotes a path as git prints it when it contains special characters:
+// "docs/a \"b\" \303\274.md" (C escapes, octal bytes). Unquoted paths pass through.
+function unquoteGitPath(text) {
+  if (!text.startsWith('"')) return text;
+  const bytes = [];
+  const simple = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, '\\': 92 };
+  for (let i = 1; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '"') break;
+    if (ch !== '\\') {
+      const cp = text.codePointAt(i);
+      bytes.push(...Buffer.from(String.fromCodePoint(cp), 'utf8'));
+      if (cp > 0xffff) i += 1;
+      continue;
+    }
+    const next = text[i + 1];
+    if (next === undefined) break;
+    if (/[0-7]/.test(next)) {
+      const oct = text.slice(i + 1, i + 4).match(/^[0-7]{1,3}/)[0];
+      bytes.push(parseInt(oct, 8) & 0xff);
+      i += oct.length;
+    } else {
+      bytes.push(next in simple ? simple[next] : next.charCodeAt(0));
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+// Path of a `diff --git a/P b/P` header (renames are off, so both sides match).
+function diffHeaderPath(rest) {
+  // a quoted a-path ends at its first unescaped quote
+  if (rest.startsWith('"')) return unquoteGitPath(rest).replace(/^a\//, '');
+  const half = (rest.length - 1) / 2;
+  return rest.slice(2, half);
+}
+
+// Scans the lines that commits add, from
+// `git log -p --no-renames --format='commit %H' <range> -- <scope>` output.
+// Files with an allowlist entry are skipped: the tip scan governs their count.
+function scanDiff(text, patterns, allowed) {
+  const findings = [];
+  let sha = null;
+  let file = null;
+  let deleted = false;
+  let inHeader = false;
+  let inHunk = false;
+  const finishHeader = () => {
+    if (inHeader && file !== null && !deleted && !allowed.has(file)) {
+      for (const f of scanText(file, patterns)) findings.push({ sha, file, kind: 'path', id: f.id });
+    }
+    inHeader = false;
+  };
+  for (const line of text.split('\n')) {
+    if (/^commit [0-9a-f]{40,64}$/.test(line)) {
+      finishHeader();
+      sha = line.slice(7);
+      file = null;
+      inHunk = false;
+    } else if (line.startsWith('diff --git ')) {
+      finishHeader();
+      file = diffHeaderPath(line.slice('diff --git '.length));
+      deleted = false;
+      inHeader = true;
+      inHunk = false;
+    } else if (inHeader) {
+      if (line.startsWith('deleted file mode') || line === '+++ /dev/null') {
+        deleted = true;
+      } else if (line.startsWith('+++ ')) {
+        // git appends a tab to an unquoted name that contains a space
+        file = unquoteGitPath(line.slice(4).replace(/\t$/, '')).replace(/^b\//, '');
+      } else if (line.startsWith('@@')) {
+        finishHeader();
+        inHunk = true;
+      }
+    } else if (inHunk && line.startsWith('+') && file !== null && !deleted && !allowed.has(file)) {
+      for (const f of scanText(line.slice(1), patterns)) findings.push({ sha, file, kind: 'added line', id: f.id });
+    }
+  }
+  finishHeader();
+  return findings;
+}
+
 function option(argv, name) {
   const hit = argv.find((a) => a.startsWith(`--${name}=`));
   return hit ? hit.slice(name.length + 3) : null;
@@ -145,6 +228,27 @@ function main(argv, env) {
       return 2;
     }
     console.log('verify-doc-hygiene: name list not supplied, built-in patterns only');
+  }
+
+  if (argv.includes('--stdin-diff')) {
+    let entries;
+    try {
+      entries = loadAllowlist(root);
+    } catch (err) {
+      console.error(`verify-doc-hygiene: ${err.message}`);
+      return 2;
+    }
+    const allowed = new Set(entries.map((e) => e.path));
+    const findings = scanDiff(fs.readFileSync(0, 'utf8'), [...BUILTIN, ...terms], allowed);
+    for (const f of findings) {
+      console.error(`${(f.sha || '(none)').slice(0, 7)} ${maskPath(f.file, terms)}: ${f.kind}: ${f.id}`);
+    }
+    if (findings.length) {
+      console.error(`verify-doc-hygiene: FAIL (${findings.length} findings in added lines of the supplied commits)`);
+      return 1;
+    }
+    console.log('verify-doc-hygiene: OK (supplied commits)');
+    return 0;
   }
 
   if (argv.includes('--stdin')) {
@@ -217,4 +321,4 @@ function main(argv, env) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2), process.env));
 
-module.exports = { loadTerms, scanText, judge, isFakeEui, maskPath, main };
+module.exports = { SCOPE, loadTerms, scanText, scanDiff, unquoteGitPath, judge, isFakeEui, maskPath, main };
