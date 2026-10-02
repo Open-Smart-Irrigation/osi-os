@@ -1310,10 +1310,11 @@ Expected: final count `0`; zones/devices back on `user_id=2`.
 
 - [ ] **Step 6: Record results + commit any doc updates**
 
-Append a dated verification section to the field test's issue list (archived privately), with pass/fail per checklist row, screenshot paths and served bundle hash, then:
+Record a dated verification section in the field test's issue list, which is kept privately (not in this repository), with pass/fail per checklist row, screenshot paths and served bundle hash. Then commit any public documentation updates:
 
 ```bash
-git add <the field test's issue list (archived privately)>
+# the field test's issue list is kept privately; record the section there, then commit any public doc updates
+git add docs/
 git commit -m "docs: record 2026-07 mobile gesture fix verification on the demo gateway"
 ```
 

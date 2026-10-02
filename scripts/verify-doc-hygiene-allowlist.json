@@ -9,7 +9,7 @@
     {
       "path": ".claude/skills/osi-config-and-flags/SKILL.md",
       "max": 1,
-      "reason": "hex value that is part of a worked example; not an identifier",
+      "reason": "documents the CGNAT address range itself; not a device address",
       "issue": 380
     },
     {
