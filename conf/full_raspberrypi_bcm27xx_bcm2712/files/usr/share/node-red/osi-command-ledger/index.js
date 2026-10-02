@@ -719,11 +719,17 @@ async function recordProtectedDecision(db, envelope, result, reason) {
           null, null, null, null, null, null, null, null]
       );
     }
-    await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [storedId]);
-    await tx.run(
-      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
-      [storedId, JSON.stringify(ack), new Date().toISOString()]
-    );
+    // A changed binding for an already-terminal delivery is rejected, but it
+    // must not overwrite the original terminal result or its durable ACK.
+    // The existing row is the evidence for the command that actually ran;
+    // only a first terminal decision creates a durable record.
+    if (!existing) {
+      await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [storedId]);
+      await tx.run(
+        'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+        [storedId, JSON.stringify(ack), new Date().toISOString()]
+      );
+    }
     return { handled: true, ack };
   });
 }

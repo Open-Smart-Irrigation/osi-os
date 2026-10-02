@@ -134,6 +134,8 @@ test('valid calibration set uses exact base and terminal ACK atomically', async 
   const { raw, db } = fixture(t);
   const result = await commands.applyWatermarkCommand(db, envelope(1, 'SET_WATERMARK_CALIBRATION', CAL), runtime());
   assert.equal(result.ack.result, 'APPLIED');
+  const originalDetail = raw.prepare('SELECT result_detail FROM applied_commands WHERE command_id=?').get('1').result_detail;
+  const originalAck = raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('1').payload_json;
   assert.equal(raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
@@ -143,6 +145,8 @@ test('valid calibration set uses exact base and terminal ACK atomically', async 
   assert.equal(conflict.ack.result, 'CONFLICT');
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1);
   assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 1);
+  assert.equal(raw.prepare('SELECT result_detail FROM applied_commands WHERE command_id=?').get('1').result_detail, originalDetail);
+  assert.equal(raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('1').payload_json, originalAck);
 });
 
 test('semantic values are normalized before binding and malformed input is terminal', async (t) => {

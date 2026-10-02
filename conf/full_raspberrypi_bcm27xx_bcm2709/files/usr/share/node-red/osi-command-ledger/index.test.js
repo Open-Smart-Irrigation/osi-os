@@ -672,6 +672,34 @@ test('protected configuration rejects every changed binding or intent without mu
   }
 });
 
+test('recordProtectedDecision preserves terminal evidence for a changed binding', async () => {
+  const db = new TestDb();
+  const stored = watermarkBinding();
+  const originalDetail = {
+    commandId: 804, commandType: 'SET_WATERMARK_CALIBRATION',
+    status: 'ACKED', result: 'APPLIED', duplicate: false,
+  };
+  insertAppliedCommand(db, {
+    commandId: '804', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: originalDetail,
+    bindingHash: stored.binding_hash, intentHash: stored.intent_hash,
+    resourceType: stored.resource_type, resourceId: stored.resource_id,
+    gatewayDeviceEui: stored.gateway_device_eui, actorUserUuid: stored.actor_user_uuid,
+    baseSyncVersion: stored.base_sync_version, operation: stored.operation,
+  });
+  const originalAck = JSON.stringify({ commandId: 804, result: 'APPLIED', status: 'ACKED' });
+  db.native.prepare('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES(?,?,?)')
+    .run('804', originalAck, '2026-10-01T05:00:00.000Z');
+
+  const decision = await ledger.recordProtectedDecision(db, watermarkEnvelope(804), 'CONFLICT', 'binding_conflict');
+  assert.equal(decision.ack.result, 'CONFLICT');
+  assert.equal((await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['804'])).result, 'APPLIED');
+  assert.equal((await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['804'])).result_detail, JSON.stringify(originalDetail));
+  assert.equal((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['804'])).payload_json, originalAck);
+});
+
 test('queueCommandAck persists trusted WATERMARK terminal binding fields', async () => {
   const db = new TestDb();
   const context = watermarkBinding();

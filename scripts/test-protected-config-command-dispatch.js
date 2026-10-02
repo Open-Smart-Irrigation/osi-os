@@ -139,6 +139,7 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
     const exact = await invoke(makeEnvelope(9124));
     assert.equal(exact.result, 'APPLIED');
     assert.equal(exact.duplicate, false);
+    const durableAckBeforeConflicts = sharedRaw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('9124').payload_json;
     const effect = await invoke(makeEnvelope(9125));
     assert.equal(effect.result, 'APPLIED');
     assert.equal(effect.duplicate, true);
@@ -159,7 +160,7 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
       const row = sharedRaw.prepare('SELECT command_type,binding_hash,intent_hash,gateway_device_eui,actor_user_uuid,base_sync_version,operation FROM applied_commands WHERE command_id=?').get('9124');
       assert.deepEqual(row, baseline, item.label + ' rewrote terminal ledger');
       assert.deepEqual(sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device), calibrationBefore, item.label + ' mutated calibration');
-      assert.deepEqual(JSON.parse(sharedRaw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('9124').payload_json), conflict, item.label + ' lacked durable ACK');
+      assert.deepEqual(JSON.parse(sharedRaw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get('9124').payload_json), JSON.parse(durableAckBeforeConflicts), item.label + ' rewrote durable ACK');
     }
     sharedRaw.prepare('INSERT INTO applied_commands(command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator) VALUES(?,?,?,?,?,?,?,?)').run('9130', 'watermark_calibration:set:' + gateway + ':' + device + ':0', device, 'SET_WATERMARK_CALIBRATION', 'APPLIED', now, JSON.stringify({ commandId: 9130, result: 'APPLIED', status: 'ACKED', duplicate: false }), 'edge');
     const legacy = await invoke(makeEnvelope(9130));
