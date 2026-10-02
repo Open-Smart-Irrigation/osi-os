@@ -424,7 +424,7 @@ Decide BEFORE the per-source split spec is written — it determines whether tha
 
 ### P2 — 1.A3 residue: dual helper test suites
 
-1.A3's plan (`docs/superpowers/plans/2026-07-08-osi-history-helper-tests.md`) defines
+1.A3's plan (`docs/superpowers/plans/2026-07-08-osi-history-helper-tests.md`, archived) defines
 relocating the full 2,141-line `scripts/test-history-helper.js` suite to co-located
 `index.test.js` and retiring the scripts copy. What landed: a 446-line co-located suite
 PLUS the un-retired scripts suite, both CI-wired (`migrations.yml:56` and `:74`). The
