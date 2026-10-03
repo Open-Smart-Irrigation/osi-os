@@ -9,6 +9,11 @@ const deploy = fs.readFileSync(path.resolve(__dirname, '..', 'deploy.sh'), 'utf8
 
 const NODE_RED_ROOT = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red';
 
+const MODULE_DESTINATION_ROOTS = {
+  'osi-journal': '/srv/node-red',
+  'osi-command-ledger': '$COMMAND_LEDGER_STAGE',
+};
+
 // Every osi-journal-adjacent module whose deploy.sh wiring this fence covers.
 // osi-command-ledger was extracted out of osi-journal (2026-07-14, field-journal
 // review Task 10): the fleet-wide command dedupe/ACK pipeline must not depend on
@@ -36,9 +41,7 @@ function listExpectedModuleFiles(moduleDir) {
 }
 
 function escapeForRegex(filename) {
-  // Module filenames only ever contain word chars, '-' and '.'; only '.' is
-  // regex-special among those, so that's the only character that needs escaping.
-  return filename.replace(/\./g, '\\.');
+  return filename.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
 // Builds the same block pattern the original hardcoded assertions used
@@ -46,10 +49,12 @@ function escapeForRegex(filename) {
 // continuation backslash and one-or-more newlines), parameterized on module
 // name + filename so it can be applied to any fenced module's full discovered
 // file set instead of a hand-picked list.
-function fetchBlockPattern(moduleName, filename) {
+function fetchBlockPattern(moduleName, filename, destinationRoot = MODULE_DESTINATION_ROOTS[moduleName]) {
+  assert.ok(destinationRoot, `test setup assumption broken: no destination root for ${moduleName}`);
   const escaped = escapeForRegex(filename);
+  const escapedDestination = escapeForRegex(`${destinationRoot}/${moduleName}/${filename}`);
   return new RegExp(
-    String.raw`fetch_required "${moduleName} ${escaped}" \\\n+\s+"${NODE_RED_ROOT}/${moduleName}/${escaped}" \\\n+\s+"/srv/node-red/${moduleName}/${escaped}"`
+    String.raw`fetch_required "${moduleName} ${escaped}" \\\n+\s+"${NODE_RED_ROOT}/${moduleName}/${escaped}" \\\n+\s+"${escapedDestination}"`
   );
 }
 
@@ -116,6 +121,37 @@ test('missingFetches fence self-test: a doctored deploy.sh missing one fetch blo
     [targetFile],
     'doctored deploy.sh (one fetch block removed) must report exactly the removed filename'
   );
+});
+
+test('module destination fence rejects live, wrong-stage, and cross-module destinations', () => {
+  const cases = [
+    {
+      moduleName: 'osi-command-ledger',
+      filename: 'index.js',
+      badDestination: '/srv/node-red/osi-command-ledger/index.js',
+    },
+    {
+      moduleName: 'osi-command-ledger',
+      filename: 'index.js',
+      badDestination: '$COMMAND_LEDGER_STAGE_WRONG/osi-command-ledger/index.js',
+    },
+    {
+      moduleName: 'osi-journal',
+      filename: 'index.js',
+      badDestination: '$COMMAND_LEDGER_STAGE/osi-journal/index.js',
+    },
+  ];
+
+  for (const { moduleName, filename, badDestination } of cases) {
+    const expectedDestination = `${MODULE_DESTINATION_ROOTS[moduleName]}/${moduleName}/${filename}`;
+    const doctoredDeploy = deploy.replace(`"${expectedDestination}"`, `"${badDestination}"`);
+    assert.notEqual(doctoredDeploy, deploy, `test setup assumption broken: ${expectedDestination} not found`);
+    assert.deepEqual(
+      missingFetches(doctoredDeploy, moduleName, [filename]),
+      [filename],
+      `${moduleName} must reject destination ${badDestination}`
+    );
+  }
 });
 
 test('deploy.sh stages flows before migration and flips only after migration succeeds', () => {
