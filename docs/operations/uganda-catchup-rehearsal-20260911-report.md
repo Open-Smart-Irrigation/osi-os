@@ -287,7 +287,7 @@ Full output: `11-node-red-boot-fallback-verifiers.log`.
 
 These matter beyond generic coverage: `database/migrations/ordered/0001__baseline.sql`'s trigger bodies
 (the source this catch-up artifact copies verbatim) contain a hardcoded fallback gateway EUI literal,
-`'0016C001F1000002'` — **that is a customer test gateway's EUI, not Uganda's** (`COALESCE(NEW.gateway_device_eui, '0016C001F1000002')` (literal replaced by an example value),
+`'0016C001F1000002'` — **that is a customer test gateway's EUI, not Uganda's** (`COALESCE(NEW.gateway_device_eui, '<customer-test-gateway EUI>')` (the literal is the customer test gateway's EUI; see `0001__baseline.sql`),
 the same osi-os#153 class of defect tracked in project memory). This literal only matters if a row's own
 `gateway_device_eui` is null at insert time, and `verify-boot-ddl-interpolation.js` confirms `sync-init-fn`
 (the frozen boot node) rewrites all 60 `trg_dp_*`/`trg_sync_*`/`trg_gateway_locations_*` boot statements with

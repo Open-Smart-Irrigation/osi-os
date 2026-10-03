@@ -230,7 +230,7 @@ On the exfiltrated copy (never the live file):
 
 Uganda's `0001__baseline.sql`-sourced trigger bodies carry a hardcoded
 fallback gateway EUI literal that is a customer test gateway's, not Uganda's
-(`COALESCE(NEW.gateway_device_eui, '0016C001F1000002')`) (literal replaced by an example value). `sync-init-fn`
+(`COALESCE(NEW.gateway_device_eui, '<customer-test-gateway EUI>')`) (the literal is the customer test gateway's EUI; see `0001__baseline.sql`). `sync-init-fn`
 rewrites it to the real `DEVICE_EUI` on every Node-RED start, so it is
 transient. On prior gateways, though, that transient rewrite showed up as a
 `schema_object_fingerprints` drift that needed a manual
