@@ -4,301 +4,301 @@
       "path": ".claude/skills/osi-agronomy-sensors-reference/SKILL.md",
       "max": 2,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": ".claude/skills/osi-config-and-flags/SKILL.md",
       "max": 1,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": ".claude/skills/osi-flows-json-editing/SKILL.md",
       "max": 8,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": ".claude/skills/osi-live-ops-runbook/SKILL.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": ".claude/skills/osi-schema-change-control/SKILL.md",
       "max": 2,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": ".github/workflows/field-journal.yml",
       "max": 2,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "analysis/refactor-program-2026/expert-iot-edge.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/refactor-program-2026.md",
       "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map-technical/02-edge-gateway.md",
       "max": 1,
       "reason": "documents the CGNAT address range itself; not a device address",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map-technical/03-edge-backend-flows.md",
       "max": 2,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map-technical/07-cloud-server.md",
       "max": 5,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map-technical/08-operations.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map/03-edge-backend-flows.md",
       "max": 2,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map/07-cloud-server.md",
       "max": 4,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/architecture/system-map/08-operations.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/chameleon-integration.md",
       "max": 5,
       "reason": "hex value that is part of a worked example; not an identifier",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/contracts/journal-catalog/README.md",
       "max": 1,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/contracts/journal-catalog/journal-catalog.json",
       "max": 1094,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/contracts/sync-schema/canonicalization.md",
       "max": 5,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/contracts/sync-schema/journal-v2-golden.json",
       "max": 64,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/contracts/sync-schema/resources.schema.json",
       "max": 1,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/hardware/chameleon-reference.md",
       "max": 1,
       "reason": "hex value that is part of a worked example; not an identifier",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-07-15-sync-delivery-stop-loss.md",
       "max": 8,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-07-21-journal-capture-followups-plan.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-12-boot-node-schema-safety.md",
       "max": 12,
       "reason": "quotes code that carries a real identifier or name; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-21-zone-device-rename-stage-1-edge.md",
       "max": 78,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-22-rak10701-coverage-field-test.md",
       "max": 8,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-25-watermark-lsn50-phase1.md",
       "max": 6,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-26-chameleon-enabled-command-fix.md",
       "max": 16,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-26-daily-agronomy.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-26-watermark-lsn50-phase2.md",
       "max": 37,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-26-watermark-lsn50-phase3.md",
       "max": 49,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-27-daily-agronomy-parity-E2a-stage-date-core.md",
       "max": 25,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-27-daily-agronomy-parity-E4-daily-record-sync.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-27-daily-agronomy-parity-edge-execution-report.md",
       "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-27-weather-data-view-execution-report.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-27-weather-data-view.md",
       "max": 24,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/plans/2026-09-29-watermark-deferred-work.md",
       "max": 4,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-07-07-osi-lib-loader-design.md",
       "max": 16,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-07-08-outbox-retention-size-cap-design.md",
       "max": 1,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-08-19-valve-control-design.md",
       "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-09-11-uganda-schema-reconciliation-design.md",
       "max": 1,
       "reason": "quotes code that carries a real identifier or name; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-09-21-zone-device-rename-design.md",
       "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md",
       "max": 1,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/superpowers/specs/2026-09-27-weather-data-view-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/sync/history-hash-v1-fixtures.json",
       "max": 22,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/twatch-ultra/03-review-of-previous-suggestions.md",
       "max": 1,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     },
     {
       "path": "docs/ux/timed-valve-control-research-brief.md",
       "max": 6,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
-      "issue": 380
+      "issue": 384
     }
   ]
 }
