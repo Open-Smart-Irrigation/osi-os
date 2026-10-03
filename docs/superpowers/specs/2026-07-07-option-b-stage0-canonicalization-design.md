@@ -1,6 +1,6 @@
 # Option B Stage 0 — Edge Schema Canonicalization
 
-**Status:** Spec, revised per review rounds 1–2 (accepted; implementation plan: [`docs/superpowers/plans/2026-07-07-option-b-stage0-canonicalization.md`](../plans/2026-07-07-option-b-stage0-canonicalization.md)) — refactor-program item 0.3, issue #88
+**Status:** Spec, revised per review rounds 1–2 (accepted; implementation plan: `docs/superpowers/plans/2026-07-07-option-b-stage0-canonicalization.md` (archived)) — refactor-program item 0.3, issue #88
 **Scope:** osi-os edge only. No boot-node change (frozen, per `osi-schema-change-control`), no deploy.sh wiring (Stage 1), no Uganda execution (#87).
 **Governs:** [`docs/superpowers/plans/2026-07-05-option-b-boot-path-cutover.md`](../plans/2026-07-05-option-b-boot-path-cutover.md) §2. Reshape decisions there (semantic reference, not fingerprint canonicalization; deploy-time CLI only) are SETTLED and not relitigated here.
 **ADR:** [`docs/adr/2026-06-30-schema-and-contract-ownership.md`](../../adr/2026-06-30-schema-and-contract-ownership.md) — this spec's baseline tool is the **second** sanctioned schema-bookkeeping tool after `scripts/restamp-fingerprints.js`; see §E for its guardrails.

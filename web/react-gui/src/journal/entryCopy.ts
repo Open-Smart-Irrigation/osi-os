@@ -1,6 +1,6 @@
 // Aggregate -> CreateEntryPayload adapter for desktop full-record "copy this
 // entry" (session wrap-up plan, 2026-07-23, docs/superpowers/plans/
-// 2026-07-23-journal-copy-entry-and-polish-plan.md §A). Unlike
+// 2026-07-23-journal-copy-entry-and-polish-plan.md §A, archived). Unlike
 // entryCorrection.ts's buildCorrectionPayload (which PUTs against the
 // source's own entry_uuid + base_sync_version), this ALWAYS builds a brand
 // new create: a fresh client uuid, base_sync_version 0, no path segment

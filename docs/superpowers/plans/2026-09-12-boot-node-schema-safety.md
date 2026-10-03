@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js 20 (`node:test`, `node:sqlite`), SQLite 3 (`sqlite3` CLI on device), Node-RED function nodes inside `flows.json`, OpenWrt procd init scripts, `lib/osi-migrate` ordered-migration runner.
 
-**Spec:** `docs/superpowers/specs/2026-09-12-boot-node-schema-safety-brief.md` (verified P0 brief, 2026-09-12) and its adversarial review `docs/superpowers/specs/2026-09-13-boot-node-schema-safety-review.md` (2026-09-13), plus GitHub issues osi-os #219, #220, #221, #224, #223, #173, #157, #153, #93, #87, #222.
+**Spec:** `docs/superpowers/specs/2026-09-12-boot-node-schema-safety-brief.md` (archived; verified P0 brief, 2026-09-12) and its adversarial review `docs/superpowers/specs/2026-09-13-boot-node-schema-safety-review.md` (archived; 2026-09-13), plus GitHub issues osi-os #219, #220, #221, #224, #223, #173, #157, #153, #93, #87, #222.
 
 ## Execution status / review decisions (2026-09-13)
 

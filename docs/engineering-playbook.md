@@ -248,7 +248,9 @@ down where the next person will trip.
 ## 8. Definition of done
 
 A change is done when: the issue's claim was re-verified against reality; the plan
-and its review live in the repo; tests exist that fail without the change; every
+and its review live in the repo while the work is in progress (finished
+records move to the maintainers' archive, see `docs/superpowers/README.md`);
+tests exist that fail without the change; every
 gate is green *as re-run by a non-author*; **a user can actually reach the
 behaviour** — a fully-tested component that nothing mounts is zero delivered
 capability, and its suite is green precisely because nothing exercises it; both
