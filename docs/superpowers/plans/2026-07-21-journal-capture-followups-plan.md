@@ -1,7 +1,7 @@
 # Plan — Journal capture-streamlining follow-ups (W1/W2/W3)
 
 **Date:** 2026-07-21
-**Branch:** design-sync/agrolink (worktree /home/phil/Repos/osi-os-agrolink)
+**Branch:** `<customer design branch>` (worktree `<worktree of that branch>`)
 **Owner decisions (all confirmed by the maintainer):**
 - **W1** Full-mode irrigation required fields → **relax to essentials via the requiredness-rule change** (keep amount + unit + treated-area required; make measurement-source, denominator, block/bed/row, cover type optional-but-shown). Confirmed the maintainer wants the small GUI rule change, not the narrower catalog-only subset.
 - **W2** Desktop capture modal → **widen for desktop**.
@@ -9,7 +9,7 @@
 
 **REVISED after Fable plan review (verdict was REVISE — two blockers):** the original plan tagged the new `open_field` layout `version: 4` (would rewrite frozen migration `0026` — the generator sets `since: layout.version`) and trimmed `minimum_fields` while keeping `static_context_fields` (violates the subset invariant, and would strip block/bed/row + cover type from the Quick plot-context feature since those fields have no other render path in Full). Both are resolved below: **no layout version bump at all** (open_field stays `@3`), and requiredness is relaxed via a `templateEngine` decouple that leaves `static_context_fields` populated. Confirmed against the edge: `minimum_fields` requiredness is **GUI-only** (the edge `index.js` validator enforces only `conditional_groups`/`activity_requirements`, never layout `minimum_fields`), so this needs **no edge change** and the byte-identical edge modules are untouched.
 
-Follows the live UX pass on kaba100 that closed P1 (activity-label leak) and P2 (desktop pass grouping) in commit `96b36da6`. These three are the product/scope decisions that pass surfaced.
+Follows the live UX pass on the demo gateway that closed P1 (activity-label leak) and P2 (desktop pass grouping) in commit `96b36da6`. These three are the product/scope decisions that pass surfaced.
 
 ---
 
@@ -21,7 +21,7 @@ Follows the live UX pass on kaba100 that closed P1 (activity-label leak) and P2 
   - `open_field` layout `minimum_fields: ['attr.block_bed_row','attr.treated_area','attr.cover_type','attr.denominator']` (force-required for full_record; Quick skips minimum_fields).
 - GUI resolves/enforces requiredness in `web/react-gui/src/journal/templateEngine.ts` (`deriveFieldStates` → `requiredFieldsSatisfied`) and `JournalCaptureFlow.tsx` `next()` gate; `EntryForm.tsx` reads `state.required` from the same derived states. **No GUI code change for W1** — it reflects new catalog data automatically once regenerated.
 - `agroscope_open_field` layout is unaffected by W1: it only `supported_templates: ['research_observation']`, which has no conditional_groups/requirements — Full-mode on that layout forces research_observation and requires nothing today.
-- Crop choices feed `attr.crop`; 26 Agroscope-aligned crops (`since=1`) + 5 v4 farmer additions (`since_version: 4`, `journal-catalog-core.js:389-393`). Row shape via `choice(code, parent_code, label, sort_order)` + optional `since_version`/`metadata`. Labels are **English-only** for every crop (generator hardcodes `labels_json: {en: label}`); GUI `catalogLabel()` falls back `[locale] ?? en ?? code`. `public/locales/*/journal.json` has **no** `crop.*` namespace — so vegetables need **no** locale-file edits.
+- Crop choices feed `attr.crop`; 26 partner-institute-aligned crops (`since=1`) + 5 v4 farmer additions (`since_version: 4`, `journal-catalog-core.js:389-393`). Row shape via `choice(code, parent_code, label, sort_order)` + optional `since_version`/`metadata`. Labels are **English-only** for every crop (generator hardcodes `labels_json: {en: label}`); GUI `catalogLabel()` falls back `[locale] ?? en ?? code`. `public/locales/*/journal.json` has **no** `crop.*` namespace — so vegetables need **no** locale-file edits.
 - Desktop capture modal width lives at `web/react-gui/src/components/journal/desktop/JournalWorkspace.tsx:186` — `CaptureModal` inner panel className `... w-full max-w-lg ...` (stock Tailwind `max-w-lg` = 512px, no responsive variants). The capture form's own `sm:grid-cols-2/3` sections (`ActivityPicker`, `PlotForm`, `ConfirmStrip`, etc.) are viewport-gated at 640px and already active on a desktop viewport, but render cramped inside 512px. `lg:` (1024px) is the workspace's own breakpoint convention (`JournalWorkspace.tsx:330`).
 
 ---
@@ -35,7 +35,7 @@ Follows the live UX pass on kaba100 that closed P1 (activity-label leak) and P2 
 5. **Crop labels English-only** (`labels_json: {en: …}`) — do **not** introduce a vegetables-only multi-locale path; full crop-vocab i18n is a separate follow-up. No `public/locales/*/journal.json` edits for crops.
 6. **GUI code changes are limited to two, small and independent:** (i) W1's `templateEngine` requiredness-rule decouple (Task 1.1b), and (ii) W2's modal-width class (Slice 2). W3 requires **zero** `.tsx`/`.ts` edits beyond regenerated catalog fixtures. Do **not** touch the edge `osi-journal` JS modules (W1 is GUI-only; the edge does not enforce `minimum_fields`).
 7. **`static_context_fields` stays populated.** The Quick plot-context feature (`PlotContextFields`, `plotContextDisplay`, `plotContextInputs`) reads `static_context_fields`; never empty it to change Full-mode requiredness. The decouple in Task 1.1b changes only how the *non-quick* branch treats those fields, leaving Quick untouched.
-7. **Verification bar:** edge `index.test.js` per profile green (the established 157/157); GUI `npm run test:unit` fully green (vitest + tsx mirror); generator `--check` parity + any replay/consistency scripts green. Then deploy to kaba100 and live-verify.
+7. **Verification bar:** edge `index.test.js` per profile green (the established 157/157); GUI `npm run test:unit` fully green (vitest + tsx mirror); generator `--check` parity + any replay/consistency scripts green. Then deploy to the demo gateway and live-verify.
 
 ---
 
@@ -92,9 +92,9 @@ In `scripts/journal-catalog-core.js`, mirror the v4 crop-additions pattern (`jou
 { ...choice('choice.crop.garden_pea',    'attr.crop', 'Garden pea',          <s>), since_version: 7 },
 { ...choice('choice.crop.green_bean',    'attr.crop', 'Green bean',          <s>), since_version: 7 },
 ```
-**Sort order:** choose a contiguous block that groups vegetables with the crops. Suggested `<s>` = 3500,3504,…3560 (step 4) so vegetables sort **after** the Agroscope arable crops (~3000–3025) and **before** the generic v4 buckets (permanent_grassland/field_vegetable/fallow/other at 4000–4040). Do not renumber any frozen row. Confirm the crop step and read-only crop banner (`InheritedCropBanner`, `canonicalCropValue`) pick these up with no GUI change (they filter `parent_code==='attr.crop' && active===1`).
+**Sort order:** choose a contiguous block that groups vegetables with the crops. Suggested `<s>` = 3500,3504,…3560 (step 4) so vegetables sort **after** the partner institute's arable crops (~3000–3025) and **before** the generic v4 buckets (permanent_grassland/field_vegetable/fallow/other at 4000–4040). Do not renumber any frozen row. Confirm the crop step and read-only crop banner (`InheritedCropBanner`, `canonicalCropValue`) pick these up with no GUI change (they filter `parent_code==='attr.crop' && active===1`).
 
-Codes distinct from existing crops: `garden_pea` ≠ the Agroscope `pea, spring/winter` (field pea); `table_beet` ≠ `beet, sugar/fodder`; `sweetcorn` ≠ `maize, grain/silage` — intentional (different crops agronomically). Reviewer with agronomy lens: confirm the set + labels are sensible for Central-European open-field production.
+Codes distinct from existing crops: `garden_pea` ≠ the partner institute's `pea, spring/winter` (field pea); `table_beet` ≠ `beet, sugar/fodder`; `sweetcorn` ≠ `maize, grain/silage` — intentional (different crops agronomically). Reviewer with agronomy lens: confirm the set + labels are sensible for Central-European open-field production.
 
 ### Task 1.3 — Regenerate + register migration
 
@@ -132,13 +132,13 @@ Keep the modal responsive/scroll behavior intact (`my-8 max-h-[calc(100vh-4rem)]
 
 ## Deploy + live verification (after both slices green)
 
-1. Build GUI, bundle **fresh** (`tar` from the current `build/` — verify the tarball's hashed main chunk matches the fresh build before deploying; a stale tarball silently deploys old GUI), deploy to kaba100 via the reverse-tunnel `deploy.sh` flow. Migration `0029` applies on the live DB (pre-migration backup + integrity check are automatic).
-2. Confirm on kaba100: `journal_catalog_state` at v7; existing journal entries preserved (count unchanged, integrity ok); edge catalog loads.
+1. Build GUI, bundle **fresh** (`tar` from the current `build/` — verify the tarball's hashed main chunk matches the fresh build before deploying; a stale tarball silently deploys old GUI), deploy to the demo gateway via the reverse-tunnel `deploy.sh` flow. Migration `0029` applies on the live DB (pre-migration backup + integrity check are automatic).
+2. Confirm on the demo gateway: `journal_catalog_state` at v7; existing journal entries preserved (count unchanged, integrity ok); edge catalog loads.
 3. Live GUI (admin) checks:
    - **W1:** capture an **Irrigation** entry in **Full** mode on an open_field plot; confirm it saves with only amount + amount kind + treated area, leaving measurement source / denominator / block-bed-row / cover type blank (previously blocked).
    - **W3:** the crop step lists the 16 vegetables; selecting one (e.g. Carrot) seeds/records correctly and the read-only crop banner shows the label.
    - **W2:** the desktop capture modal is visibly wider and multi-field sections render in columns.
-4. Commit path-scoped (catalog core + generator + migration `0029` + CHECKSUMS + regenerated bundled DBs/seed + edge tests + W2 GUI + GUI tests; **exclude** build artifacts and the pre-existing dirty feed assets/common/settings), push to `design-sync/agrolink`.
+4. Commit path-scoped (catalog core + generator + migration `0029` + CHECKSUMS + regenerated bundled DBs/seed + edge tests + W2 GUI + GUI tests; **exclude** build artifacts and the pre-existing dirty feed assets/common/settings), push to `<customer design branch>`.
 
 ---
 
@@ -147,5 +147,5 @@ Keep the modal responsive/scroll behavior intact (`my-8 max-h-[calc(100vh-4rem)]
 - **Version mechanics (Fable B1):** the generator sets a template/layout row's global `since` = its `version` field (`generate-journal-catalog.js` ~lines 727/736). So `full_record` MUST be tagged `version: 7` (→ global v7). There is **no** layout row this slice — do not add one (a `version: 4` layout would land in the frozen v4 delta and abort generation). Choice rows use `since_version: 7`. Confirm `compileCatalog`'s "distinct versions contiguous from 1, exactly one `CATALOG_MIGRATIONS` entry per version" invariant still holds with v7 added.
 - **`static_context_fields` subset invariant (Fable B2):** never trim `minimum_fields` without also trimming `static_context_fields` (validator asserts subset) — this slice trims **neither**; requiredness is relaxed in `templateEngine`, so the invariant is untouched. Do not "fix" a generator error by emptying `static_context_fields`.
 - **Decouple must not touch Quick (Fable B3):** the `templateEngine` change lives in the non-quick branch only. Verify the Quick plot-context tests stay green unchanged; if one breaks, fix the code, not the test.
-- **Live migration on kaba100:** kaba100 already ran through 0028 (catalog v6, 26 entries). 0029 must apply cleanly forward; take the automatic pre-migration backup seriously and verify entry count post-migration.
+- **Live migration on the demo gateway:** the demo gateway already ran through 0028 (catalog v6, 26 entries). 0029 must apply cleanly forward; take the automatic pre-migration backup seriously and verify entry count post-migration.
 - **Migration `0029` = full_record@7 + 16 crop choices only** (no layout row). Confirm the generated delta contains exactly those and the `journal_catalog_state` v6→v7 stamp — nothing touching existing rows.

@@ -25,7 +25,7 @@ Exit codes: `0` = pass, advance to the next gateway; `1` = fail, investigate the
 
 ## Rollout Shape
 
-`deploy kaba100 -> gate kaba100 -> deploy Silvan -> gate Silvan`
+`deploy demo -> gate demo -> deploy customer-test -> gate customer-test`
 
 Each gateway is gated independently before moving to the next. A fail or exit `2` stops the rollout at that gateway.
 
@@ -41,4 +41,4 @@ Uganda (#87) runs inside its own deploy window using this same gate as the final
 
 ## Evidence
 
-Item 0.1's demo-gateway deploy for kaba100 and Silvan is the gate's first live validation. Record its pass output from stdout/stderr as evidence in that rollout's tracking issue or PR.
+Item 0.1's deploy for the demo gateway and the customer test gateway is the gate's first live validation. Record its pass output from stdout/stderr as evidence in that rollout's tracking issue or PR.

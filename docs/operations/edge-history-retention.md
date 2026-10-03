@@ -119,7 +119,7 @@ A third window is a fixed constant rather than an env knob:
 `REJECTED_RETENTION_DAYS = 14` deletes rows the cloud terminally **rejected**
 (`rejected_at IS NOT NULL`) once they are older than 14 days. A rejected row is
 never retried and is never re-selected by `sync-outbox-build`, so nothing but
-forensics keeps it; without a window the pile grows without bound (the Silvan
+forensics keeps it; without a window the pile grows without bound (a customer test
 gateway held 17,996 such rows spanning ten weeks). Fourteen days matches the
 `command_ack_outbox` dead-letter window and is deliberately independent of
 `OSI_OUTBOX_RETENTION_DAYS`, which governs delivered rows only. The DELETE is
@@ -159,7 +159,7 @@ gateway location, or irrigation events are not draining.
 
 Since ordered migration `database/migrations/ordered/0002__gateway_health.sql`
 (2026-07, osi-os #68), every gateway persists its own 60 s heartbeat locally in
-`/data/db/farming.db`. This closes the gap found during the 2026-06-28 kaba100
+`/data/db/farming.db`. This closes the gap found during the 2026-06-28 demo-gateway
 Chameleon-1 I2C outage analysis: before this, CPU temperature/load/fan state
 was live MQTT telemetry only, so "was the Pi throttling when the gap started?"
 could not be answered from the edge database.
@@ -203,7 +203,7 @@ SELECT hour_start, sample_count,
        ROUND(load_1_max,2)      AS load1_max,
        fan_value_max, throttled_max
 FROM gateway_health_hourly
-WHERE gateway_device_eui = '0016C001F11766E7'
+WHERE gateway_device_eui = '0016C001F1000001'
   AND hour_start >= '2026-06-27T00:00:00Z'
   AND hour_start <  '2026-06-29T00:00:00Z'
 ORDER BY hour_start;
@@ -214,7 +214,7 @@ Minute-level detail around a suspected gap (raw window, last 14 days):
 ```sql
 SELECT sampled_at, cpu_temp_c, mem_percent, load_1, fan_value, throttled
 FROM gateway_health_samples
-WHERE gateway_device_eui = '0016C001F11766E7'
+WHERE gateway_device_eui = '0016C001F1000001'
   AND sampled_at >= '2026-06-28T08:30:00Z'
   AND sampled_at <  '2026-06-28T10:30:00Z'
 ORDER BY sampled_at;
@@ -227,7 +227,7 @@ SELECT COUNT(*) AS samples,
        SUM(CASE WHEN (throttled & 0x4) != 0 THEN 1 ELSE 0 END) AS throttled_now_samples,
        MAX(cpu_temp_c) AS max_temp_c
 FROM gateway_health_samples
-WHERE gateway_device_eui = '0016C001F11766E7'
+WHERE gateway_device_eui = '0016C001F1000001'
   AND sampled_at >= '2026-06-28T08:00:00Z'
   AND sampled_at <  '2026-06-28T12:00:00Z';
 ```
@@ -239,7 +239,7 @@ SELECT prev_at, sampled_at,
        ROUND((julianday(sampled_at) - julianday(prev_at)) * 1440, 1) AS gap_min
 FROM (SELECT sampled_at, LAG(sampled_at) OVER (ORDER BY sampled_at) AS prev_at
       FROM gateway_health_samples
-      WHERE gateway_device_eui = '0016C001F11766E7')
+      WHERE gateway_device_eui = '0016C001F1000001')
 WHERE prev_at IS NOT NULL
   AND (julianday(sampled_at) - julianday(prev_at)) * 1440 > 5
 ORDER BY sampled_at;

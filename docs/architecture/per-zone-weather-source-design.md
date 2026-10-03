@@ -8,8 +8,8 @@
 
 Let each irrigation zone choose which weather source feeds it, instead of the current hardcoded
 best-available cascade. This gives operators control (e.g. prefer an on-site station, or MeteoSwiss for
-Swiss sites) and is the groundwork for the dendrometer/Agroscope work: selecting **MeteoSwiss** aligns a
-zone's weather with Agroscope's own logic.
+Swiss sites) and is the groundwork for the dendrometer work with the partner institute: selecting **MeteoSwiss** aligns a
+zone's weather with the partner institute's own logic.
 
 Every weather-dependent consumer — prediction advisory, the Weather tab, the Water tab, and the v6/dendro
 analytics — reads from the zone's selected source, consistently, on both the cloud and the edge.
@@ -150,6 +150,6 @@ Cloud can land and be validated before the edge, but this single spec covers all
 - Exact `WeatherProvider` method set and how capability gaps (e.g. S2120 no-forecast, MeteoSwiss out-of-CH)
   are expressed (return empty vs. an explicit "unsupported").
 - MeteoSwiss provider details (nearest-point selection, param set, measured/forecast split) — reuse the
-  approach documented in the Agroscope weather-pipeline analysis, minus its known bugs (per-row commits,
+  approach documented in the partner-institute weather-pipeline analysis, minus its known bugs (per-row commits,
   Euclidean nearest without cos(lat), five clock conventions).
 - Whether provenance is surfaced only in the tabs or also in the prediction/dendro payloads.

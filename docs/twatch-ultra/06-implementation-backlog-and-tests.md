@@ -141,7 +141,7 @@ roadmap's 16–22 pw for R1 plus 3–4 pw for R0.**
 | Join / frame counters | 20-cycle reboot matrix incl. full power-off; DevNonce growth audit | Bench | Semi |
 | Duty cycle | Airtime accounting vs `TX_RESULT` logs over forced-fast sessions; per-sub-band ≤ 1%/rolling hour | Bench + log analysis script | Yes (analysis) |
 | Downlink | ACK sampling schedule honoured; DL_QUEUED vs DL_RX bracketing; gateway half-duplex impact noted at high rates | Bench + hub | Semi |
-| Multi-gateway | Two-gateway rig (Silvan + kaba100 class); rx_info fan-out rows; per-gateway map filter | Field/bench hybrid | Manual + asserts |
+| Multi-gateway | Two-gateway rig (customer-test + demo gateway class); rx_info fan-out rows; per-gateway map filter | Field/bench hybrid | Manual + asserts |
 | GNSS accuracy | Fix accuracy vs surveyed reference points, open sky and under canopy; stale/no-fix paths | Field | Manual, recorded |
 | Battery | 7.14 measurement plan; 4 h point and 3 h walk targets; gauge drift | Bench + field | Manual, recorded |
 | Sunlight / ergonomics | Glance readability outdoors at noon; glove and wet-finger operation of button-mapped actions | Field | Manual checklist |
@@ -153,7 +153,7 @@ roadmap's 16–22 pw for R1 plus 3–4 pw for R0.**
 
 ## Pilot field protocol
 
-Site: an existing OSI gateway with known-good devices (kaba100 or Silvan; EU868;
+Site: an existing OSI gateway with known-good devices (the demo gateway or the customer test gateway; EU868;
 two-gateway overlap achievable between them if within range, otherwise single-gateway
 plus the bench gateway transported). One day, two people, both watches.
 

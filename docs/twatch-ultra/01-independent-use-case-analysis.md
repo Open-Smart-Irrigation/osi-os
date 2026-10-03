@@ -316,7 +316,7 @@ sessions must be short-lived by design. Effort: moderate.
 
 Researchers and super-users generate ground truth that the sensor network cannot:
 crop stage, visible stress, pest presence, "the farmer irrigated by hand this
-morning". Agroscope's trial methodology and the AquaMind data partnership both gain
+morning". The partner institute's trial methodology and the AquaMind data partnership both gain
 from labelled observations attached to time and place, and the current capture path
 is paper or a phone form filled in later, with the losses later entry implies. The
 watch can capture a structured observation in four taps (zone, category, severity,

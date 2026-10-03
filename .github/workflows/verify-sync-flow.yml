@@ -94,7 +94,7 @@ jobs:
       # Statically sweeps every function node's `return [...]`/`node.send([...])`
       # arrays for an element count exceeding the node's real wired output
       # count. Added after F28 (2026-09-17 overnight stabilization,
-      # Silvan harness run-full2/Z2.md): assign-device-update declared
+      # harness run on the customer test gateway, run-full2/Z2.md): assign-device-update declared
       # outputs:1 but returned [null, msg] on its not-found path, so the 404
       # had no wire to travel on and PUT .../devices/:deveui for an unknown
       # DevEUI hung forever. No existing verifier checked this.

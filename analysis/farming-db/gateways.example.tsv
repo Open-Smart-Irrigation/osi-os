@@ -1,4 +1,4 @@
 # gateway	host	user
-kaba100	<kaba100-tailscale-host>	root
-silvan	<silvan-tailscale-host>	root
-uganda	<uganda-tailscale-host>	root
+demo-gateway	100.x.y.z	root
+field-gateway-1	100.x.y.z	root
+field-gateway-2	100.x.y.z	root

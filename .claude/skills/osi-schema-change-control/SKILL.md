@@ -435,11 +435,11 @@ appropriate to reach for at all.
 
 `scripts/reconcile-ledger-numbering.js` is the **only** sanctioned way to
 recover a gateway whose `schema_migrations` ledger was stamped under a
-foreign branch's own version numbering — currently the AgroLink and
-Bovey/Valve-focused lines, both audited (stabilization plan §3.5c,
+foreign branch's own version numbering — currently two customer
+lines (one valve-focused, one not), both audited (stabilization plan §3.5c,
 2026-09-10) as mapping 1:1 by content onto main, just under different version
 numbers. The symptom: that branch's version numbers collide with main's own
-(e.g. `v22` is `journal_catalog_v2` on AgroLink, `valve_control` on main).
+(e.g. `v22` is `journal_catalog_v2` on a customer branch, `valve_control` on main).
 `applyPending` correctly refuses the moment it hits the mismatch (checksum
 mismatch → `repair_required`) and `deploy.sh` aborts before the payload
 flip — safe, but the device is then wedged with no forward path. Never
@@ -495,7 +495,7 @@ scripts/verify-head-cli.js`): `verifyHead` requires the applied set to equal
 *every* migration main has ever shipped ("head reached"), which a
 foreign-numbered device will not satisfy immediately after reconciliation
 whenever it is genuinely missing whole features the other lineage never
-had (an AgroLink-only device has never run main's valve-control migrations
+had (a device that only ran the non-valve customer line has never run main's valve-control migrations
 at all) — that is real pending work for the `applyPending` carry-forward
 that follows, not a reconciliation failure. `verifyReconciliationConsistency`
 checks only what reconciliation can actually guarantee: no row left
@@ -622,7 +622,7 @@ that live without also reading `osi-live-ops-runbook`.
    node scripts/verify-no-stray-ddl.js
    node scripts/verify-profile-parity.js
    node scripts/test-journal-schema.js   # MANDATORY for journal-catalog changes
-   node scripts/verify-agroscope-linkage.js   # MANDATORY for journal-catalog changes: guards the catalog against Agroscope-template drift; CI-gated via .github/workflows/field-journal.yml
+   node scripts/verify-agroscope-linkage.js   # MANDATORY for journal-catalog changes: guards the catalog against partner-institute-template drift; CI-gated via .github/workflows/field-journal.yml
    ```
    `test-journal-schema.js` is the **only** gate that compares the 7 bundled DBs'
    journal-catalog **row content** (`journal_templates`/`layouts`/`vocab`
@@ -659,7 +659,7 @@ node scripts/verify-db-schema-consistency.js            # all 7 bundled DBs matc
 node scripts/verify-no-stray-ddl.js                     # no ad hoc DDL-marker drift in flows/deploy surfaces
 node scripts/verify-profile-parity.js                   # bcm2712 == bcm2709 byte-for-byte
 node scripts/test-journal-schema.js                     # 7 bundled DBs' journal-catalog ROW CONTENT == seed-built reference (only gate that checks row bytes)
-node scripts/verify-agroscope-linkage.js                # journal catalog's vocab/activity/operation/device/unit linkages still match the Agroscope SoilManageR template (both directions)
+node scripts/verify-agroscope-linkage.js                # journal catalog's vocab/activity/operation/device/unit linkages still match the partner institute SoilManageR template (both directions)
 node scripts/verify-devices-rebuild-fence.js            # boot-node rebuild is still fail-closed
 node --test scripts/rehearse-devices-rebuild.test.js    # boot-node rebuild behaves correctly against 4 seeded cases
 node --test lib/osi-migrate/__tests__/*.test.js         # runner unit tests (risk classes, atomicity, drift preflight, partial-batch retry)

@@ -313,7 +313,7 @@ Reading straight through the script, in order:
    `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `edge-channels.json`,
    the `chirpstack-bootstrap.js` bootstrap script, every file under `codecs/`
    that `deploy.sh` names (list them with `grep -o 'codecs/[a-z0-9_]*\.js' deploy.sh | sort -u`),
-   and the Agroscope uplink transform (`agroscope_uplink_transform.js`, an
+   and the partner-institute uplink transform (`agroscope_uplink_transform.js`, an
    edge→cloud forwarding transform, not a device decoder).
 7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting
    non-zero on failure.

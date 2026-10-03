@@ -123,7 +123,7 @@ The system's newest subsystem turns farmer feedback into reviewed code changes:
 
 ## The live fleet & access rules
 
-Three live gateways at the snapshot date: two demo units (Silvan, kaba100) and
+Three live gateways at the snapshot date: two demo units (the customer test gateway, the demo gateway) and
 one production farm (Uganda). Operational identities and addresses are kept in
 the private memory/runbooks, not in repo docs. Standing rules:
 

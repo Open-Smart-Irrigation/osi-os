@@ -40,7 +40,7 @@ unchanged:
 
 Also relevant: `devices.irrigation_zone_id` is single-valued, so a valve has 0
 or 1 zone. `irrigation_schedules` syncs to the cloud as aggregate `SCHEDULE`;
-any new table that should appear in AgroLink needs its own outbox trigger, a
+any new table that should appear in a customer cloud instance needs its own outbox trigger, a
 new op in `events.schema.json`, and a matching osi-server change.
 
 ## How other products solve it
@@ -85,7 +85,7 @@ certain periods and night-only irrigation as planning inputs, and observes
 that members coordinate with "Doodle-Einträge, gemeinsame Kalender". Turnus of
 6–7 days at 25–30 mm is the reported main-season cadence for vegetables
 (Agropool). No Swiss vendor found offers a sensor-less LoRaWAN-valve scheduler
-for this use; PlantCare, Smart Farm Tech, and Agroscope's Vaud pilots are all
+for this use; PlantCare, Smart Farm Tech, and the partner institute's Vaud pilots are all
 sensor-driven.
 
 **Icon idioms.** Material Symbols ships `valve`, `faucet`, `water_drop`,
@@ -220,7 +220,7 @@ irrigations and history?**
 (a) Yes: reason `scheduler_timed` vs `manual`, with a small label on the card.
 (b) No distinction.
 
-**Q5. Cloud visibility.** Should timed schedules sync to AgroLink (new
+**Q5. Cloud visibility.** Should timed schedules sync to a customer cloud instance (new
 aggregate + osi-server change, lockstep merge), or stay edge-only for v1?
 (a) Edge-only v1; sync in the next wave.
 (b) Sync from day one.

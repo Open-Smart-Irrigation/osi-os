@@ -24,7 +24,7 @@ Then fill in the host values in `.local/farming-db/gateways.tsv`.
 ## Download A Snapshot
 
 ```bash
-scripts/download-farming-db.sh --gateway kaba100
+scripts/download-farming-db.sh --gateway demo-gateway
 scripts/download-farming-db.sh --all
 ```
 
@@ -38,7 +38,7 @@ Snapshots are written to:
 
 ```r
 source("analysis/farming-db/load_device_data.R")
-db <- open_device_data(gateway = "kaba100")
+db <- open_device_data(gateway = "demo-gateway")
 
 db$device_data
 db$dendrometer_readings

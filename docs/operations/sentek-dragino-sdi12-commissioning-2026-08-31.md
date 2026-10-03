@@ -11,8 +11,8 @@ not as a generic recipe for other probes.
 - Sentek interface hardware revision 2.4, firmware 1.39, identity
   `012SENTEK  XEPI  139D938D7150000`.
 - Dragino hardware revision 1.3.
-- Field Dragino DevEUI `A8404135955C327D`, gateway EUI
-  `0016C001F116EBF2`.
+- Field Dragino DevEUI `A840410000000001` (identifier redacted; example value), gateway EUI
+  `0016C001F1000001` (identifier redacted; example value).
 - Saved SDI-12 address `0`. The address belongs to the probe and remains saved
   layout data; the compiler does not hard-code it.
 - Modules: TriSCAN at 10 and 50 cm; EnviroSCAN at 20, 30, 40, 60, 80, and

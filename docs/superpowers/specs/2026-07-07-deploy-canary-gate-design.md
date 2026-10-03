@@ -34,7 +34,7 @@ Exit contract: `0` = PASS (advance the rollout); `1` = FAIL with a reason summar
 
 ### D. Rollout runbook shape (documented, not automated)
 
-`deploy kaba100 → gate kaba100 → deploy Silvan → gate Silvan` — Uganda only inside its #87 window with this same gate as the final verification step (the heartbeat is the only remote post-migration signal Uganda has, per the Option B plan). The gate does not deploy, does not roll back (payload atomicity/rollback is item 5.3), and does not orchestrate the fleet — it is the go/no-go check between manual steps. Its first live validation is item 0.1's own deploy of the merged flows to the demo gateways.
+`deploy the demo gateway → gate the demo gateway → deploy the customer test gateway → gate the customer test gateway` — Uganda only inside its #87 window with this same gate as the final verification step (the heartbeat is the only remote post-migration signal Uganda has, per the Option B plan). The gate does not deploy, does not roll back (payload atomicity/rollback is item 5.3), and does not orchestrate the fleet — it is the go/no-go check between manual steps. Its first live validation is item 0.1's own deploy of the merged flows to the demo gateways.
 
 ## Fable review findings (2026-07-10) — applied
 
