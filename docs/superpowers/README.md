@@ -7,8 +7,8 @@ archive.
 
 A spec stays here while one of these is true:
 
-- a file outside this folder refers to it by path
-  (`git grep -lF docs/superpowers/<file> -- . ':!docs/superpowers'`);
+- a file outside this folder refers to it, by path or by file name
+  (`git grep -lF <file name> -- . ':!docs/superpowers'`);
 - its work has an open branch or pull request;
 - it is the only description of behaviour that ships;
 - it is a design preview that a document or test refers to;
