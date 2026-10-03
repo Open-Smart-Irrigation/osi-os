@@ -167,13 +167,13 @@ Do not store production SSH credentials, private keys, or host aliases in this r
 Run the deploy through SSH with the rollout key. Replace the host with the selected cloud environment from the table.
 
 ```bash
-# set REMOTE_USER to the deploy account on the host before running this block
+# set REMOTE_USER to the deploy account on the host; inside the heredoc, $HOME is that account's home
 # Test host shown. Production (osicloud.ch) needs explicit consent in the current
 # conversation; see AGENTS.md "Production cloud access".
 ssh -i /path/to/ephemeral-key "$REMOTE_USER"@server.opensmartirrigation.org <<'REMOTE'
 set -e
-git -C /home/"$REMOTE_USER"/docker/osi-server pull --ff-only origin main
-cd /home/"$REMOTE_USER"/docker/osi-server/docker
+git -C "$HOME"/docker/osi-server pull --ff-only origin main
+cd "$HOME"/docker/osi-server/docker
 docker compose build backend
 docker compose up -d backend
 docker logs osi-backend 2>&1 | grep -E "Started|ERROR" | tail -5
