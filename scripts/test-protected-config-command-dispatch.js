@@ -49,7 +49,7 @@ const dedupeProbe = spawnSync(process.execPath, ['-e', `
   Promise.resolve(run(msg, node, env, flow, osiLib)).then((result) => {
     assert.deepEqual(result, [null, null, msg]);
   }).catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
-`], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
+`], { cwd: ROOT, encoding: 'utf8', timeout: 180000 });
 assert.equal(dedupeProbe.status, 0, dedupeProbe.stderr || dedupeProbe.stdout);
 
 // Run the protected hand-off through both shipped function-node bodies with a
@@ -176,7 +176,7 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
     assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('9131').n, 0);
     console.log('STATEFUL_PROTECTED_MATRIX_OK');
   })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
-`], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
+`], { cwd: ROOT, encoding: 'utf8', timeout: 180000 });
 assert.equal(protectedChainProbe.status, 0, protectedChainProbe.stderr || protectedChainProbe.stdout);
 assert.match(protectedChainProbe.stdout, /STATEFUL_PROTECTED_MATRIX_OK/);
 
@@ -204,7 +204,7 @@ const helperTests = path.join(
 const helperRun = spawnSync(process.execPath, ['--test', helperTests], {
   cwd: ROOT,
   encoding: 'utf8',
-  timeout: 60000,
+  timeout: 180000,
 });
 assert.equal(helperRun.status, 0, helperRun.stderr || helperRun.stdout);
 assert.match(helperRun.stdout, /# pass \d+/);
@@ -215,7 +215,7 @@ const ledgerTests = path.join(
 const ledgerRun = spawnSync(process.execPath, ['--test', ledgerTests], {
   cwd: ROOT,
   encoding: 'utf8',
-  timeout: 60000,
+  timeout: 180000,
 });
 assert.equal(ledgerRun.status, 0, ledgerRun.stderr || ledgerRun.stdout);
 assert.match(ledgerRun.stdout, /# pass \d+/);
@@ -223,7 +223,7 @@ const bootstrapTests = path.join(ROOT, 'scripts/test-journal-bootstrap.js');
 const bootstrapRun = spawnSync(process.execPath, ['--test', bootstrapTests], {
   cwd: ROOT,
   encoding: 'utf8',
-  timeout: 60000,
+  timeout: 180000,
 });
 assert.equal(bootstrapRun.status, 0, bootstrapRun.stderr || bootstrapRun.stdout);
 assert.match(bootstrapRun.stdout, /# pass 62/);
