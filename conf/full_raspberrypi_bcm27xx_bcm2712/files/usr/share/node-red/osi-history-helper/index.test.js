@@ -209,10 +209,9 @@ test('deriveCardsForZone derives soil/dendro/environment/irrigation cards for a 
   const srcKey = (prefix, deveui) => `${prefix}-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
 
   assert.equal(byType.soil.id, 'zone-1:soil:root-zone');
-  assert.equal(byType.soil.sourceDeviceCount, 2);
+  assert.equal(byType.soil.sourceDeviceCount, 1);
   assert.deepEqual(byType.soil.sourceDevices, [
     { name: 'Generic', typeId: 'GENERIC', role: 'soil', sourceKey: srcKey('soil', soilDevice.deveui) },
-    { name: 'Dragino Lsn50', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: srcKey('soil', dendroDevice.deveui) },
   ]);
 
   assert.equal(byType.environment.id, 'zone-1:environment:microclimate');
@@ -239,7 +238,7 @@ test('deriveCardsForZone returns no cards for a zone with no matching devices', 
   assert.deepEqual(hh.deriveCardsForZone({ zone_uuid: '' }, []), []);
 });
 
-test('deriveCardsForZone treats every assigned LSN50 as a soil source', () => {
+test('deriveCardsForZone treats a plain LSN50 as a soil source before samples arrive', () => {
   const watermark = {
     deveui: '6666666666666666',
     type_id: 'DRAGINO_LSN50',
@@ -251,6 +250,38 @@ test('deriveCardsForZone treats every assigned LSN50 as a soil source', () => {
 
   assert.deepEqual(cards.map((card) => card.cardType), ['soil']);
   assert.equal(cards[0].sourceDeviceCount, 1);
+});
+
+test('aggregateRows filters non-Chameleon LSN50 SWT3 before aggregation and cadence', () => {
+  const rows = [
+    { deveui: 'A84041A171000001', recorded_at: '2026-07-10T00:00:00.000Z', swt_1: 10, swt_3: 90 },
+    { deveui: 'A84041A171000002', recorded_at: '2026-07-10T00:00:00.000Z', swt_1: 20, swt_3: 30 },
+  ];
+  const channels = [
+    { id: 'swt_1', field: 'swt_1' },
+    { id: 'swt_3', field: 'swt_3' },
+  ];
+  const sourceDevices = [
+    { deveui: 'A84041A171000001', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 },
+    { deveui: 'A84041A171000002', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 },
+  ];
+  const result = hh.aggregateRows(rows, { aggregation: 'raw', channels, sourceDevices });
+  assert.deepEqual(result.series.swt_3.points, [{ recordedAt: '2026-07-10T00:00:00.000Z', value: 30 }]);
+  assert.equal(result.channelSourceKeys.swt_3, 'A84041A171000002');
+
+  const hourly = hh.aggregateRows(rows, {
+    aggregation: 'hourly',
+    channels,
+    sourceDevices,
+    sourceKeys: sourceDevices.map((device) => device.deveui),
+    expectedCadenceSeconds: 3600,
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-10T01:00:00.000Z',
+  });
+  assert.equal(hourly.buckets[0].series.swt_3.mean, 30);
+  assert.equal(hourly.buckets[0].series.swt_3.sampleCount, 1);
+  assert.equal(hourly.sourceCadences['A84041A171000001|swt_3'], undefined);
+  assert.equal(hourly.sourceCadences['A84041A171000002|swt_3'].seconds, 3600);
 });
 
 test('soilDepthCm uses generic SWT depths and only exposes LSN50 SWT3 for Chameleon', () => {

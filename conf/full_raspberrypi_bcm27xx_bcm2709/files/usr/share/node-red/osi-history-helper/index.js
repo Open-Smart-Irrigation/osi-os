@@ -356,6 +356,72 @@ function hasNumber(device, keys) {
   return keys.some((key) => toFiniteNumber(device && device[key]) !== null);
 }
 
+const DEVICE_FLAG_ALIASES = {
+  chameleon_enabled: ['chameleonEnabled'],
+  dendro_enabled: ['dendroEnabled'],
+  temp_enabled: ['tempEnabled'],
+  rain_gauge_enabled: ['rainGaugeEnabled'],
+  flow_meter_enabled: ['flowMeterEnabled'],
+};
+
+function hasOwn(object, key) {
+  return !!object && Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function flagEnabled(device, canonical) {
+  if (!device) return false;
+  const aliases = DEVICE_FLAG_ALIASES[canonical] || [];
+  let raw;
+  if (hasOwn(device, canonical)) raw = device[canonical];
+  else {
+    const alias = aliases.find((key) => hasOwn(device, key));
+    raw = alias ? device[alias] : undefined;
+  }
+  if (raw === true) return true;
+  if (raw === false || raw === null || raw === undefined || raw === '') return false;
+  return Number(raw) === 1 || String(raw).trim().toLowerCase() === 'true';
+}
+
+function isChameleonDevice(device) {
+  return flagEnabled(device, 'chameleon_enabled');
+}
+
+function deviceTypeId(device) {
+  if (hasOwn(device, 'type_id')) return String(device.type_id || '').trim().toUpperCase();
+  if (hasOwn(device, 'typeId')) return String(device.typeId || '').trim().toUpperCase();
+  return String(device && device.type || '').trim().toUpperCase();
+}
+
+function isLsn50Swt3Eligible(device) {
+  const type = deviceTypeId(device);
+  return type !== 'DRAGINO_LSN50' || isChameleonDevice(device);
+}
+
+function filterSoilChannelsForSources(channels, sourceDevices) {
+  const normalized = normalizeChannels(channels);
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  if (!devices.length) return normalized;
+  return devices.some(isLsn50Swt3Eligible)
+    ? normalized
+    : normalized.filter((channel) => channel.id !== 'swt_3');
+}
+
+function filterSoilRowsForSources(rows, sourceDevices) {
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  if (!devices.length) return Array.isArray(rows) ? rows : [];
+  const byEui = new Map();
+  for (const device of devices) {
+    const eui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    if (eui) byEui.set(eui, device);
+  }
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const eui = normalizeDeveui(row && (row.deveui || row.device_eui || row.deviceEui));
+    const device = eui ? byEui.get(eui) : null;
+    if (!device || isLsn50Swt3Eligible(device)) return row;
+    return { ...row, swt_3: null };
+  });
+}
+
 function deviceBelongsToZone(device, zone) {
   if (!device || !zone) return false;
   const zoneId = toFiniteNumber(zone.id ?? zone.zone_id);
@@ -367,9 +433,14 @@ function deviceBelongsToZone(device, zone) {
 }
 
 function isSoilSource(device) {
-  const type = String(device && device.type_id || '').toUpperCase();
-  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12', 'DRAGINO_LSN50'].includes(type)
-    || Number(device && device.chameleon_enabled || 0) === 1
+  const type = deviceTypeId(device);
+  if (type === 'DRAGINO_LSN50') {
+    if (isChameleonDevice(device)) return true;
+    return !['dendro_enabled', 'temp_enabled', 'rain_gauge_enabled', 'flow_meter_enabled']
+      .some((flag) => flagEnabled(device, flag));
+  }
+  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12'].includes(type)
+    || isChameleonDevice(device)
     || hasNumber(device, ['swt_1', 'swt_2', 'swt_3', 'swt_wm1', 'swt_wm2']);
 }
 
@@ -443,10 +514,7 @@ function channelsForCard(card, sourceDevices) {
       { id: 'soil_ec_7', field: 'soil_ec_7', unit: 'µS/cm', label: 'Soil EC 7' },
       { id: 'soil_ec_8', field: 'soil_ec_8', unit: 'µS/cm', label: 'Soil EC 8' },
     ];
-    const lsn50WithoutChameleon = Array.isArray(sourceDevices) && sourceDevices.length > 0
-      && sourceDevices.every((device) => String(device && device.type_id || '').toUpperCase() === 'DRAGINO_LSN50'
-        && Number(device && device.chameleon_enabled || 0) !== 1);
-    return lsn50WithoutChameleon ? channels.filter((channel) => channel.id !== 'swt_3') : channels;
+    return filterSoilChannelsForSources(channels, sourceDevices);
   }
   if (cardType === 'environment') {
     return [
@@ -780,6 +848,13 @@ function sourceChannelKey(sourceKey, channel) {
   return `${sourceKey}|${channel.id}`;
 }
 
+function sourceSupportsChannel(sourceKey, channel, options = {}) {
+  if (!channel || channel.id !== 'swt_3' || !Array.isArray(options.sourceDevices) || !options.sourceDevices.length) return true;
+  const normalized = normalizeDeveui(sourceKey);
+  const source = options.sourceDevices.find((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)) === normalized);
+  return !source || isLsn50Swt3Eligible(source);
+}
+
 function normalizeSourceKey(value) {
   if (value === null || value === undefined) return null;
   const raw = typeof value === 'object'
@@ -892,7 +967,7 @@ function seedConfiguredSourceChannelSamples(samples, channels, options = {}) {
       const sourceKey = normalizeSourceKey(rawKey.slice(0, separatorIndex));
       const channelKey = rawKey.slice(separatorIndex + 1);
       const channel = channels.find((candidate) => candidate.id === channelKey || candidate.field === channelKey);
-      if (sourceKey && channel) addSourceChannelSample(samples, sourceKey, channel);
+      if (sourceKey && channel && sourceSupportsChannel(sourceKey, channel, options)) addSourceChannelSample(samples, sourceKey, channel);
     }
   }
 
@@ -906,14 +981,18 @@ function seedConfiguredSourceChannelSamples(samples, channels, options = {}) {
     for (const rawKey of Object.keys(map)) {
       const sourceKey = normalizeSourceKey(rawKey);
       if (!sourceKey) continue;
-      for (const channel of channels) addSourceChannelSample(samples, sourceKey, channel);
+      for (const channel of channels) {
+        if (sourceSupportsChannel(sourceKey, channel, options)) addSourceChannelSample(samples, sourceKey, channel);
+      }
     }
   }
 }
 
 function seedRequestedSourceChannelSamples(samples, channels, options = {}) {
   for (const sourceKey of requestedSourceKeys(options)) {
-    for (const channel of channels) addSourceChannelSample(samples, sourceKey, channel);
+    for (const channel of channels) {
+      if (sourceSupportsChannel(sourceKey, channel, options)) addSourceChannelSample(samples, sourceKey, channel);
+    }
   }
 }
 
@@ -1104,16 +1183,26 @@ function aggregateRows(rows, options = {}) {
   const aggregationInfo = resolveAggregation(options);
   const aggregation = aggregationInfo.level;
   const aggregationRequested = options.aggregationRequested || aggregationInfo.requested;
-  const channels = normalizeChannels(options.channels);
+  const channels = filterSoilChannelsForSources(options.channels, options.sourceDevices);
   const startMs = parseTime(options.start || options.startAt || options.from);
   const endMs = parseTime(options.end || options.endAt || options.to);
   if (channels.length === 0) throw new Error('aggregateRows requires at least one channel');
 
-  const sortedRows = (Array.isArray(rows) ? rows : [])
+  const sortedRows = filterSoilRowsForSources(rows, options.sourceDevices)
     .map((row) => ({ row, recordedAtMs: parseTime(row.recorded_at || row.recordedAt) }))
     .filter((entry) => entry.recordedAtMs !== null)
     .filter((entry) => (startMs === null || entry.recordedAtMs >= startMs) && (endMs === null || entry.recordedAtMs < endMs))
     .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
+
+  const channelSourceKeys = {};
+  for (const channel of channels) {
+    for (let index = sortedRows.length - 1; index >= 0; index -= 1) {
+      if (channelValue(sortedRows[index].row, channel) !== null) {
+        channelSourceKeys[channel.id] = rowSourceKey(sortedRows[index].row, channel);
+        break;
+      }
+    }
+  }
 
   const sourceCadences = deriveSourceCadences(sortedRows, channels, options, aggregation !== 'raw');
   const cadence = {
@@ -1136,6 +1225,7 @@ function aggregateRows(rows, options = {}) {
       aggregationRequested,
       bucketSizeSeconds: null,
       source: 'device_data',
+      channelSourceKeys,
       expectedCadenceSeconds: cadence.seconds,
       coverageConfidence: cadence.confidence,
       coveragePct: null,
@@ -1197,6 +1287,7 @@ function aggregateRows(rows, options = {}) {
     aggregationRequested,
     bucketSizeSeconds: aggregationInfo.bucketSizeSeconds,
     source: 'device_data',
+    channelSourceKeys,
     expectedCadenceSeconds: cadence.seconds,
     coverageConfidence: totalCoverage.coverageConfidence,
     coveragePct: totalCoverage.coveragePct,
@@ -1256,7 +1347,7 @@ function normalizeQueryChannels(channels) {
 async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const aggregation = String(level || '').trim();
   if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
-  const channels = normalizeQueryChannels(scope.channels);
+  const channels = normalizeQueryChannels(filterSoilChannelsForSources(scope.channels, scope.sourceDevices));
   const deveuis = Array.from(new Set((Array.isArray(scope.deveuis) ? scope.deveuis : [])
     .map(normalizeDeveui)
     .filter(Boolean)));
@@ -1271,7 +1362,7 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
   const rows = await dbAll(db, sql, deveuis.concat([start, end]));
-  const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences });
+  const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices });
   const out = [];
   for (const bucket of result.buckets || []) {
     for (const channel of channels) {
@@ -1474,7 +1565,7 @@ function queryDeviceEuis(query = {}) {
 async function aggregateDeviceData(db, query = {}) {
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
-  const channels = normalizeQueryChannels(query.channels);
+  const channels = normalizeQueryChannels(filterSoilChannelsForSources(query.channels, query.sourceDevices));
   const start = query.start || query.startAt || query.from;
   const end = query.end || query.endAt || query.to;
   if (!start || !end) throw new Error('aggregateDeviceData requires start and end');
@@ -1513,7 +1604,7 @@ async function aggregateDeviceData(db, query = {}) {
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
       const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
       const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
-      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
+      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: query.sourceDevices });
     }
     if (rollupRows.length || live) {
       const buckets = (completed.buckets || []).concat(live && live.buckets || [])
@@ -1538,7 +1629,7 @@ async function aggregateDeviceData(db, query = {}) {
   const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
   const params = deveuis.concat([start, end]);
   const rows = await dbAll(db, sql, params);
-  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end });
+  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices: query.sourceDevices });
   if (shouldUseRollups) result.source = 'device_data_fallback';
   return result;
 }
@@ -2251,6 +2342,7 @@ async function runRollupJob(db, options = {}) {
           logicalSourceKey: card.logicalSourceKey,
           channels,
           deveuis,
+          sourceDevices,
           timezone: zone.timezone || 'UTC',
         };
         for (const level of levels) {
@@ -2299,8 +2391,7 @@ function parseDepthJson(value) {
 }
 
 function soilDepthCm(device, channelId) {
-  const deviceType = String(device && device.type_id || '').toUpperCase();
-  if (channelId === 'swt_3' && deviceType === 'DRAGINO_LSN50' && Number(device && device.chameleon_enabled || 0) !== 1) {
+  if (channelId === 'swt_3' && !isLsn50Swt3Eligible(device)) {
     return null;
   }
   const direct = {
@@ -2875,6 +2966,10 @@ module.exports = {
   rotateZoneCsv,
   aggregateRows,
   soilDepthCm,
+  filterSoilChannelsForSources,
+  filterSoilRowsForSources,
+  isSoilSource,
+  isLsn50Swt3Eligible,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,
   buildAdvancedDiagnostics,

@@ -691,7 +691,19 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error('[fatal]', e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    console.error('[fatal]', e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  seedFixtureDb,
+  runNodeForRoute,
+  readNodeFunc,
+  makeFacadeShim,
+  TEST_JWT_SECRET,
+  PINNED_NOW_MS,
+  PINNED_NOW_ISO,
+};
