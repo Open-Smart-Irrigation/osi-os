@@ -77,6 +77,18 @@ test('computeFetchList includes the WATERMARK binding dependency', () => {
   ));
 });
 
+test('computeFetchList includes every staged command-ledger dependency artifact', () => {
+  const list = computeFetchList(REPO_ROOT);
+  for (const artifact of [
+    'scripts/deploy-command-ledger-dependency.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js',
+  ]) {
+    assert.ok(list.includes(artifact), `expected ${artifact} in fetch list`);
+  }
+});
+
 test('computeFetchList includes the WATERMARK command receiver', () => {
   const list = computeFetchList(REPO_ROOT);
   assert.ok(list.includes(

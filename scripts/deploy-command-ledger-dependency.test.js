@@ -1,0 +1,313 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync, spawn } = require('node:child_process');
+const http = require('node:http');
+
+const ROOT = path.resolve(__dirname, '..');
+const DEPLOY = fs.readFileSync(path.join(ROOT, 'deploy.sh'), 'utf8');
+const HELPER_PATH = path.join(__dirname, 'deploy-command-ledger-dependency.js');
+const PROFILE = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
+const NODE_RED = path.join(PROFILE, 'usr/share/node-red');
+const LEDGER = path.join(NODE_RED, 'osi-command-ledger');
+const BINDING = path.join(NODE_RED, 'osi-watermark-binding');
+const OLD_LEDGER_COMMIT = '15d9126e3^';
+const LEDGER_INDEX = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js';
+const LEDGER_PACKAGE = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json';
+const BINDING_INDEX = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js';
+
+function sha256(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function gitFile(revision, relative) {
+  return execFileSync('git', ['show', `${revision}:${relative}`], { cwd: ROOT });
+}
+
+function mkdirFor(file) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+}
+
+function copyCandidate(stage) {
+  fs.mkdirSync(path.join(stage, 'osi-command-ledger'), { recursive: true });
+  fs.mkdirSync(path.join(stage, 'osi-watermark-binding'), { recursive: true });
+  fs.copyFileSync(path.join(LEDGER, 'package.json'), path.join(stage, 'osi-command-ledger/package.json'));
+  fs.copyFileSync(path.join(LEDGER, 'index.js'), path.join(stage, 'osi-command-ledger/index.js'));
+  fs.copyFileSync(path.join(BINDING, 'canonicalization.js'), path.join(stage, 'osi-watermark-binding/canonicalization.js'));
+}
+
+function writeOldPair(root, { withBinding = false } = {}) {
+  mkdirFor(path.join(root, 'osi-command-ledger/index.js'));
+  fs.writeFileSync(path.join(root, 'osi-command-ledger/package.json'), gitFile(OLD_LEDGER_COMMIT, LEDGER_PACKAGE));
+  fs.writeFileSync(path.join(root, 'osi-command-ledger/index.js'), gitFile(OLD_LEDGER_COMMIT, LEDGER_INDEX));
+  if (withBinding) {
+    mkdirFor(path.join(root, 'osi-watermark-binding/canonicalization.js'));
+    fs.copyFileSync(path.join(BINDING, 'canonicalization.js'), path.join(root, 'osi-watermark-binding/canonicalization.js'));
+  }
+}
+
+function writeCurrentPair(root) {
+  mkdirFor(path.join(root, 'osi-command-ledger/index.js'));
+  mkdirFor(path.join(root, 'osi-watermark-binding/canonicalization.js'));
+  fs.copyFileSync(path.join(LEDGER, 'package.json'), path.join(root, 'osi-command-ledger/package.json'));
+  fs.copyFileSync(path.join(LEDGER, 'index.js'), path.join(root, 'osi-command-ledger/index.js'));
+  fs.copyFileSync(path.join(BINDING, 'canonicalization.js'), path.join(root, 'osi-watermark-binding/canonicalization.js'));
+}
+
+function expectedHashes() {
+  return {
+    packageJson: sha256(path.join(LEDGER, 'package.json')),
+    ledgerIndex: sha256(path.join(LEDGER, 'index.js')),
+    bindingCanonicalization: sha256(path.join(BINDING, 'canonicalization.js')),
+  };
+}
+
+function probeFreshLedger(root) {
+  const probe = `
+    const fs = require('node:fs');
+    const assert = require('node:assert/strict');
+    const { DatabaseSync } = require('node:sqlite');
+    const ledger = require(${JSON.stringify(path.join(root, 'osi-command-ledger'))});
+    const native = new DatabaseSync(':memory:');
+    native.exec(fs.readFileSync(${JSON.stringify(path.join(ROOT, 'database/seed-blank.sql'))}, 'utf8'));
+    const db = {
+      get: (sql, params) => native.prepare(sql).get(...(params || [])),
+      run: (sql, params) => native.prepare(sql).run(...(params || [])),
+      transaction: async (fn) => { native.exec('BEGIN IMMEDIATE'); try { const result = await fn(db); native.exec('COMMIT'); return result; } catch (error) { native.exec('ROLLBACK'); throw error; } }
+    };
+    ledger.queueCommandAck(db, {
+      commandId: 701,
+      commandType: 'CONFIG_UPDATE',
+      result: 'APPLIED',
+      deviceEui: '0016C001F1000001',
+      gatewayDeviceEui: '0016C001F1000001',
+      effectKey: 'config:0016C001F1000001:probe:1'
+    }, { gateway_device_eui: '0016C001F1000001' }).then((ack) => {
+      if (!ack || ack.result !== 'APPLIED') throw new Error('legacy ACK probe did not apply');
+      const durableBefore = {
+        applied: db.get('SELECT COUNT(*) AS n FROM applied_commands').n,
+        outbox: db.get('SELECT COUNT(*) AS n FROM command_ack_outbox').n,
+        detail: db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['701']).result_detail,
+        payload: db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['701']).payload_json,
+      };
+      if (durableBefore.applied !== 1 || durableBefore.outbox !== 1) throw new Error('legacy ACK probe did not persist one ledger row and ACK');
+      return ledger.deduplicatePendingCommand(db, {
+        commandId: 701,
+        commandType: 'CONFIG_UPDATE',
+        payload: { malformed: true }
+      }, { gateway_device_eui: '0016C001F1000001' }).then((replay) => ({ replay, durableBefore }));
+    }).then(({ replay, durableBefore }) => {
+      if (!replay || !replay.handled || replay.ack.result !== 'APPLIED') throw new Error('legacy dedupe probe did not replay');
+      assert.deepEqual(replay.ack, JSON.parse(durableBefore.detail), 'legacy replay ACK differs from durable result_detail');
+      const durableAfter = {
+        applied: db.get('SELECT COUNT(*) AS n FROM applied_commands').n,
+        outbox: db.get('SELECT COUNT(*) AS n FROM command_ack_outbox').n,
+        detail: db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['701']).result_detail,
+        payload: db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['701']).payload_json,
+      };
+      if (durableAfter.applied !== durableBefore.applied || durableAfter.outbox !== durableBefore.outbox || durableAfter.detail !== durableBefore.detail || durableAfter.payload !== durableBefore.payload) throw new Error('legacy replay mutated durable ledger or ACK');
+      native.close();
+    }).catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+  `;
+  execFileSync(process.execPath, ['-e', probe], { cwd: ROOT, stdio: 'pipe' });
+}
+
+function installOptions(root, stage, extra = {}) {
+  return {
+    liveRoot: root,
+    stageDir: stage,
+    expectedHashes: expectedHashes(),
+    ...extra,
+  };
+}
+
+function runChild(root, stage, marker, signalAt) {
+  const child = spawn(process.execPath, [HELPER_PATH, '--install', JSON.stringify(installOptions(root, stage, {
+    checkpoint: signalAt,
+    checkpointMarker: marker,
+  }))], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const onData = (chunk) => {
+      output += chunk.toString();
+      if (output.includes(`CHECKPOINT ${signalAt}`)) child.kill('SIGKILL');
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', (chunk) => { output += chunk.toString(); });
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal, output }));
+  });
+}
+
+function runProcess(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
+  });
+}
+
+test('the deploy script uses a pinned staged dependency installer and seed installs binding first', () => {
+  assert.ok(fs.existsSync(HELPER_PATH), 'expected a checked-in installer helper');
+  assert.match(DEPLOY, /scripts\/deploy-command-ledger-dependency\.js/);
+  assert.match(DEPLOY, /osi-command-ledger package\.json/);
+  assert.match(DEPLOY, /osi-command-ledger index\.js/);
+  assert.match(DEPLOY, /osi-watermark-binding canonicalization\.js/);
+  for (const [label, livePath] of [
+    ['package', '/srv/node-red/osi-command-ledger/package.json'],
+    ['index', '/srv/node-red/osi-command-ledger/index.js'],
+    ['binding', '/srv/node-red/osi-watermark-binding/canonicalization.js'],
+  ]) {
+    assert.doesNotMatch(DEPLOY, new RegExp(`fetch_required[\\s\\S]{0,300}\\"${livePath.replaceAll('/', '\\\\/')}\\"`),
+      `${label} must not be fetched directly over its live pathname`);
+  }
+  assert.match(DEPLOY, /sha256/);
+  assert.match(DEPLOY, /atomic|rename|install-command-ledger/i);
+  for (const [name, file] of [
+    ['COMMAND_LEDGER_HELPER_SHA256', HELPER_PATH],
+    ['COMMAND_LEDGER_PACKAGE_SHA256', path.join(LEDGER, 'package.json')],
+    ['COMMAND_LEDGER_INDEX_SHA256', path.join(LEDGER, 'index.js')],
+    ['COMMAND_LEDGER_BINDING_SHA256', path.join(BINDING, 'canonicalization.js')],
+  ]) {
+    const match = new RegExp(`${name}="([0-9a-f]{64})"`).exec(DEPLOY);
+    assert.ok(match, `missing independent ${name} pin`);
+    assert.equal(match[1], sha256(file), `${name} must match the checked-in source`);
+  }
+  for (const profile of ['bcm2712', 'bcm2709']) {
+    const seed = fs.readFileSync(path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/etc/uci-defaults/98_osi_node_red_seed`), 'utf8');
+    const bindingIndex = seed.indexOf('osi-watermark-binding');
+    const ledgerIndex = seed.indexOf('osi-command-ledger');
+    assert.ok(bindingIndex >= 0, `${profile} seed must install the binding`);
+    assert.ok(bindingIndex < ledgerIndex, `${profile} seed must install binding before ledger`);
+  }
+});
+
+test('stages and activates a new pair while retaining a runnable old pair on every injected failure', () => {
+  const { install } = require(HELPER_PATH);
+  const scenarios = [
+    ['missing binding fetch', (stage) => fs.rmSync(path.join(stage, 'osi-watermark-binding/canonicalization.js'))],
+    ['failed fetch', (stage) => fs.rmSync(path.join(stage, 'osi-command-ledger/index.js'))],
+    ['checksum failure', (stage) => fs.appendFileSync(path.join(stage, 'osi-watermark-binding/canonicalization.js'), '\n')],
+    ['binding rename failure', null],
+    ['ledger package rename failure', null],
+    ['ledger index rename failure', null],
+  ];
+  for (const withBinding of [false, true]) {
+    for (const [label, mutate] of scenarios) {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-'));
+      const stage = path.join(root, '.stage');
+      try {
+        if (withBinding) writeCurrentPair(root);
+        else writeOldPair(root);
+        copyCandidate(stage);
+        if (mutate) mutate(stage);
+        const failAt = label === 'binding rename failure' ? 'binding' :
+          label === 'ledger package rename failure' ? 'ledger-package' :
+            label === 'ledger index rename failure' ? 'ledger-index' : null;
+        assert.throws(() => install(installOptions(root, stage, failAt ? {
+          rename: (from, to) => { if (to.endsWith(failAt === 'binding' ? 'canonicalization.js' : `${failAt === 'ledger-package' ? 'package.json' : 'index.js'}`)) throw new Error(`injected ${label}`); fs.renameSync(from, to); },
+        } : {})), label === 'missing binding fetch' ? /bindingCanonicalization missing/ :
+          label === 'failed fetch' ? /ledgerIndex missing/ :
+            label === 'checksum failure' ? /checksum mismatch/ : new RegExp(label));
+        probeFreshLedger(root);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test('an aborted local fetch leaves a partial candidate unactivated and the retained pair runnable', async () => {
+  const { install } = require(HELPER_PATH);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-'));
+  const stage = path.join(root, '.stage');
+  let emittedBytes = 0;
+  const server = http.createServer((_request, response) => {
+    const bytes = fs.readFileSync(path.join(BINDING, 'canonicalization.js'));
+    const partial = bytes.subarray(0, 19);
+    emittedBytes = partial.length;
+    response.writeHead(200, { 'content-length': bytes.length, connection: 'close' });
+    response.end(partial);
+  });
+  try {
+    writeCurrentPair(root);
+    copyCandidate(stage);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const destination = path.join(stage, 'osi-watermark-binding/canonicalization.js');
+    const result = await runProcess('curl', ['--max-time', '2', '-fsSLo', destination, `http://127.0.0.1:${server.address().port}/binding`]);
+    assert.notEqual(result.code, 0, 'the injected fetch must fail at the transport boundary');
+    assert.equal(emittedBytes, 19, 'the fixture server must emit a partial response');
+    assert.equal(fs.statSync(destination).size, emittedBytes, 'the failed fetch must leave exactly the emitted partial file');
+    assert.throws(() => install(installOptions(root, stage)), /checksum mismatch/);
+    probeFreshLedger(root);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('refuses symlinked layouts and cross-filesystem staging', () => {
+  const { install } = require(HELPER_PATH);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-'));
+  try {
+    writeCurrentPair(root);
+    const stage = path.join(root, '.stage');
+    copyCandidate(stage);
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-outside-'));
+    fs.rmSync(path.join(root, 'osi-command-ledger/package.json'));
+    fs.symlinkSync(path.join(outside, 'package.json'), path.join(root, 'osi-command-ledger/package.json'));
+    assert.throws(() => install(installOptions(root, stage)), /must not be a symlink/);
+    fs.rmSync(path.join(root, 'osi-command-ledger/package.json'));
+    fs.copyFileSync(path.join(LEDGER, 'package.json'), path.join(root, 'osi-command-ledger/package.json'));
+    if (fs.existsSync('/dev/shm') && fs.statSync('/dev/shm').dev !== fs.statSync(root).dev) {
+      const foreignStage = fs.mkdtempSync('/dev/shm/osi-ledger-stage-');
+      try {
+        copyCandidate(foreignStage);
+        assert.throws(() => install(installOptions(root, foreignStage)), /same filesystem/);
+      } finally {
+        fs.rmSync(foreignStage, { recursive: true, force: true });
+      }
+    }
+    fs.rmSync(outside, { recursive: true, force: true });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('validates old-ledger plus candidate-binding compatibility and preserves it across SIGKILL checkpoints', async () => {
+  const { install } = require(HELPER_PATH);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-'));
+  try {
+    writeOldPair(root);
+    const stage = path.join(root, '.stage');
+    copyCandidate(stage);
+    const marker = path.join(root, 'marker-staged');
+    const staged = await runChild(root, stage, marker, 'after-staging');
+    assert.equal(staged.signal, 'SIGKILL');
+    assert.equal(fs.readFileSync(marker, 'utf8'), 'after-staging');
+    probeFreshLedger(root);
+
+    copyCandidate(stage);
+    const activatedMarker = path.join(root, 'marker-binding');
+    const activated = await runChild(root, stage, activatedMarker, 'after-binding');
+    assert.equal(activated.signal, 'SIGKILL');
+    assert.equal(fs.readFileSync(activatedMarker, 'utf8'), 'after-binding');
+    probeFreshLedger(root);
+
+    // A fresh process must also load the fully activated, binding-aware ledger.
+    copyCandidate(stage);
+    install(installOptions(root, stage));
+    probeFreshLedger(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

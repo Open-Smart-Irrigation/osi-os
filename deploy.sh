@@ -60,10 +60,17 @@ DEPLOY_HOLD_SERVICES=0
 MIGRATION_RUNNER_AVAILABLE=0
 SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 SWAP_ROOT="${SWAP_ROOT:-/srv/node-red}"
+COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
+COMMAND_LEDGER_STAGE="/srv/node-red/.osi-command-ledger-stage.$$"
+COMMAND_LEDGER_HELPER_SHA256="4fd608db8c5f9f846c190220de7cdf1fab31c1b0f482473a32e7825aba29e9dd"
+COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
+COMMAND_LEDGER_INDEX_SHA256="6f3ea8e01d12157daa763a75dd9edd3bc823779f42a314b40d3c9b46c70e7856"
+COMMAND_LEDGER_BINDING_SHA256="92faea11371c26290dde61bb019988449a08b2248cca564dc015fd32c8fb0708"
 export SWAP_ROOT
 
 cleanup() {
     rm -rf "$TMP_DIR"
+    rm -rf "$COMMAND_LEDGER_STAGE"
 }
 trap cleanup EXIT INT TERM
 
@@ -83,6 +90,38 @@ fetch_required() {
     echo "--- $label ---"
     fetch "$src" "$dest"
     echo "OK"
+}
+
+# The command ledger has a top-level require() on the WATERMARK binding. Keep
+# this pair out of the live tree until every candidate file has been fetched,
+# pinned, syntax-checked, and loaded in a fresh Node process. The helper itself
+# is fetched into the deploy-private directory and checked against an
+# independent digest before it is executed.
+install_command_ledger_dependency() {
+    echo "--- WATERMARK command-ledger dependency pair ---"
+    rm -rf "$COMMAND_LEDGER_STAGE"
+    mkdir -m 700 -p "$COMMAND_LEDGER_STAGE"
+    fetch_required "command-ledger dependency installer" \
+        "scripts/deploy-command-ledger-dependency.js" \
+        "$COMMAND_LEDGER_INSTALLER"
+    helper_sha256="$(node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$COMMAND_LEDGER_INSTALLER")"
+    [ "$helper_sha256" = "$COMMAND_LEDGER_HELPER_SHA256" ] || {
+        echo "ERROR: command-ledger dependency installer SHA-256 mismatch" >&2
+        return 1
+    }
+    fetch_required "osi-command-ledger package.json" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json"
+    fetch_required "osi-command-ledger index.js" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js"
+    fetch_required "osi-watermark-binding canonicalization.js" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
+        "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"
+    install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
+        "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
+    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    echo "OK: command-ledger dependency pair activated"
 }
 
 same_fs_or_die() {
@@ -1540,17 +1579,7 @@ fetch_required "osi-journal-replication canonicalization.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js" \
     "/srv/node-red/osi-journal-replication/canonicalization.js"
 
-fetch_required "osi-command-ledger package.json" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
-    "/srv/node-red/osi-command-ledger/package.json"
-
-fetch_required "osi-command-ledger index.js" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
-    "/srv/node-red/osi-command-ledger/index.js"
-
-fetch_required "osi-watermark-binding canonicalization.js" \
-    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
-    "/srv/node-red/osi-watermark-binding/canonicalization.js"
+install_command_ledger_dependency
 
 fetch_required "osi-zone-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/package.json" \
