@@ -17,12 +17,6 @@ const EUI = /^[0-9A-F]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TYPES = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
 const CAL_TYPES = new Set(['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG']);
-const CAPABILITY = {
-  SET_WATERMARK_CALIBRATION: 'watermark_v1',
-  DELETE_WATERMARK_CALIBRATION: 'watermark_v1',
-  SET_CHAMELEON_CONFIG: 'chameleon_config_commands_v1',
-  UPSERT_DEVICE_SOIL_DEPTHS: 'device_soil_depth_commands_v1',
-};
 
 function error(code, message, result = 'REJECTED_PERMANENT') {
   const e = new Error(message);
@@ -109,12 +103,6 @@ async function authorizeDevice(tx, identity, type, runtime) {
   const account = runtime && (runtime.linkedAccount || runtime.linked_account);
   if (account && (account.enabled === false || account.disabled === true || account.disabled_at)) {
     throw error('gateway_account_disabled', 'linked gateway account is disabled');
-  }
-  const capability = runtime && runtime.capabilities;
-  const advertised = Array.isArray(capability) ? capability.includes(CAPABILITY[type]) :
-    (capability && typeof capability === 'object' ? capability[CAPABILITY[type]] === true : false);
-  if (!advertised || (account && account.capabilities && account.capabilities[CAPABILITY[type]] === false)) {
-    throw error('capability_missing', 'gateway does not advertise this configuration capability');
   }
   if (device.irrigation_zone_id != null) {
     if (!device.zone_id || device.zone_deleted || upperEui(device.zone_gateway) !== identity.gateway) {

@@ -17,6 +17,18 @@ const protectedTypes = [
   'SET_CHAMELEON_CONFIG',
   'UPSERT_DEVICE_SOIL_DEPTHS'
 ];
+const capabilityBase = [
+  'linked_auth_sync_v1',
+  'force_edge_sync_v1',
+  'installation_recovery_v1',
+  'installation_locations_v1',
+  'entity_name_commands_v1',
+  'zone_config_weather_source_v1',
+  'zone_config_stage_started_on_v1',
+  'watermark_v1',
+  'chameleon_config_commands_v1',
+  'device_soil_depth_commands_v1',
+];
 const registry = byId['cmd-type-registry'];
 const route = byId['934bf2bc19a8ce22'];
 const helper = flows.find((node) => node.name === 'Apply WATERMARK Protected Command');
@@ -41,6 +53,31 @@ assert.match(helper.func, /return \[msg, null\]/);
 assert.match(helper.func, /return \[null, \{/);
 assert.match(helper.func, /applyLegacySoilDepthsCommand/, 'legacy soil-depth compatibility path is shipped');
 assert.match(helper.func, /isExactLegacySoilDepthsPayload/, 'legacy classifier is consulted before protected apply');
+assert.doesNotMatch(helper.func, /\bcapabilities\s*:/, 'protected applier does not inject runtime capability metadata');
+
+function capabilityBaseFrom(source, builderId) {
+  const match = String(source).match(/const syncCapabilities = \[([^\]]*)\];/);
+  assert.ok(match, `${builderId} has an unconditional capability base`);
+  const values = [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+  assert.deepEqual(values, capabilityBase, `${builderId} advertises the canonical capability base`);
+  assert.equal(new Set(values).size, values.length, `${builderId} capability base has no duplicates`);
+  return values;
+}
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  const profileFlowPath = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
+  const profileFlows = JSON.parse(fs.readFileSync(profileFlowPath, 'utf8'));
+  const profileById = Object.fromEntries(profileFlows.map((node) => [node.id, node]));
+  const profileApplier = profileById['watermark-config-command-apply-fn'];
+  assert.ok(profileApplier, `${profile} protected applier is shipped`);
+  assert.doesNotMatch(profileApplier.func, /\bcapabilities\s*:/, `${profile} protected applier supplies no runtime capability metadata`);
+  const bases = ['sync-bootstrap-build', 'al-link-build-req', 'sync-force-build'].map((id) => capabilityBaseFrom(profileById[id].func, `${profile}/${id}`));
+  assert.deepEqual(bases[0], bases[1], `${profile} bootstrap/link capability bases match`);
+  assert.deepEqual(bases[0], bases[2], `${profile} bootstrap/force capability bases match`);
+  assert.match(profileById['sync-bootstrap-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} bootstrap keeps journal conditional capability`);
+  assert.match(profileById['sync-force-build'].func, /if \(journalAdvertisement\) syncCapabilities\.push\('field_journal_v1'\);/, `${profile} force keeps journal conditional capability`);
+  assert.doesNotMatch(profileById['al-link-build-req'].func, /field_journal_v1/, `${profile} link keeps journal capability distinction`);
+}
 
 const buildSql = byId['4f4a765f36cee6f3'];
 assert.ok(buildSql, 'legacy SQL builder is shipped');

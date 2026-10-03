@@ -60,6 +60,10 @@ function runtime(extra = {}) {
     capabilities: ['watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1'] }, extra);
 }
 
+function runtimeWithoutCapabilities(extra = {}) {
+  return Object.assign({ gateway_device_eui: GATEWAY, scopedMode: true, command_type_recognized: true }, extra);
+}
+
 function envelope(id, type, values, extra = {}) {
   const operation = type === 'DELETE_WATERMARK_CALIBRATION' ? 'delete' : 'set';
   const payload = Object.assign({
@@ -301,6 +305,77 @@ test('calibration delete, Chameleon, and soil-depth set share terminal path', as
   assert.equal(raw.prepare('SELECT chameleon_enabled, soil_moisture_probe_depths_json FROM devices WHERE deveui=?').get(DEVICE).chameleon_enabled, 1);
 });
 
+test('all protected operations apply without runtime capability metadata', async (t) => {
+  const capabilityInputs = [
+    {},
+    { capabilities: [] },
+    { capabilities: { watermark_v1: false, chameleon_config_commands_v1: false, device_soil_depth_commands_v1: false } },
+    { linkedAccount: { enabled: true, capabilities: { watermark_v1: false, chameleon_config_commands_v1: false, device_soil_depth_commands_v1: false } } },
+  ];
+  const operations = [
+    ['SET_WATERMARK_CALIBRATION', CAL, (state, payload) => {
+      assert.equal(payload.ack.result, 'APPLIED', JSON.stringify(payload.ack));
+      assert.equal(state.raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version, 1);
+    }],
+    ['DELETE_WATERMARK_CALIBRATION', undefined, (state, payload) => {
+      const row = state.raw.prepare('SELECT sync_version,deleted_at FROM watermark_calibrations WHERE deveui=?').get(DEVICE);
+      assert.equal(payload.ack.result, 'APPLIED', JSON.stringify(payload.ack));
+      assert.equal(row.sync_version, 2);
+      assert.ok(row.deleted_at);
+    }],
+    ['SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, (state, payload) => {
+      assert.equal(payload.ack.result, 'APPLIED', JSON.stringify(payload.ack));
+      assert.deepEqual({ ...state.raw.prepare('SELECT chameleon_enabled,sync_version FROM devices WHERE deveui=?').get(DEVICE) }, { chameleon_enabled: 1, sync_version: 2 });
+    }],
+    ['UPSERT_DEVICE_SOIL_DEPTHS', { soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true }, (state, payload) => {
+      const row = state.raw.prepare('SELECT soil_moisture_probe_depths_json,soil_moisture_probe_depths_configured,sync_version FROM devices WHERE deveui=?').get(DEVICE);
+      assert.equal(payload.ack.result, 'APPLIED', JSON.stringify(payload.ack));
+      assert.deepEqual({ ...row, soil_moisture_probe_depths_json: JSON.parse(row.soil_moisture_probe_depths_json) }, { soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: 1, sync_version: 2 });
+    }],
+  ];
+  let id = 300;
+  for (const capabilityInput of capabilityInputs) {
+    for (const [type, values, verify] of operations) {
+      const state = fixture(t);
+      let base = type === 'SET_WATERMARK_CALIBRATION' ? 0 : 1;
+      if (type === 'DELETE_WATERMARK_CALIBRATION') {
+        await seedCalibration(state);
+        base = 1;
+      }
+      const result = await commands.applyWatermarkCommand(state.db, envelope(id++, type, values, {
+        payload: {
+          base_sync_version: base,
+          effect_key: commands.expectedEffect(type, GATEWAY, DEVICE, base),
+        },
+      }), runtimeWithoutCapabilities(capabilityInput));
+      verify(state, result);
+    }
+  }
+});
+
+test('retained scoped link and linked-account denials preserve canonical state', async (t) => {
+  const cases = [
+    { name: 'missing sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.exec("DELETE FROM sync_link_state WHERE peer_node='cloud'") },
+    { name: 'disabled sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.prepare("UPDATE sync_link_state SET linked=0 WHERE peer_node='cloud'").run() },
+    { name: 'foreign sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.prepare("UPDATE sync_link_state SET gateway_device_eui=? WHERE peer_node='cloud'").run(OTHER_GATEWAY) },
+    { name: 'linked account disabled', reason: 'gateway_account_disabled', runtime: { linkedAccount: { disabled: true } } },
+    { name: 'linked account enabled false', reason: 'gateway_account_disabled', runtime: { linkedAccount: { enabled: false } } },
+    { name: 'linked account disabled_at', reason: 'gateway_account_disabled', runtime: { linkedAccount: { disabled_at: NOW } } },
+  ];
+  for (let index = 0; index < cases.length; index += 1) {
+    const scenario = cases[index];
+    const state = fixture(t);
+    if (scenario.prepare) scenario.prepare(state);
+    const before = { ...state.raw.prepare('SELECT chameleon_enabled,sync_version FROM devices WHERE deveui=?').get(DEVICE) };
+    const result = await commands.applyWatermarkCommand(state.db, envelope(360 + index, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, {
+      payload: { effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:0` },
+    }), runtimeWithoutCapabilities(scenario.runtime));
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', scenario.name);
+    assert.equal(result.ack.reason, scenario.reason, scenario.name);
+    assert.deepEqual({ ...state.raw.prepare('SELECT chameleon_enabled,sync_version FROM devices WHERE deveui=?').get(DEVICE) }, before, scenario.name);
+  }
+});
+
 test('DEVICE exact-base conflict leaves the existing configuration untouched', async (t) => {
   const { raw, db } = fixture(t);
   const stale = await commands.applyWatermarkCommand(db, envelope(6, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, {
@@ -386,11 +461,6 @@ test('scoped assignment and account matrix is enforced for DEVICE commands', asy
   }, { payload: { actor_user_uuid: WRITER, base_sync_version: 1, effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:1` } }), runtime());
   assert.equal(applied.ack.result, 'APPLIED');
 
-  const unsupported = fixture(t);
-  const missingCapability = await commands.applyWatermarkCommand(unsupported.db, envelope(43, 'SET_CHAMELEON_CONFIG', { chameleon_enabled: true }, {
-    payload: { base_sync_version: 1, effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:1` }
-  }), runtime({ capabilities: ['watermark_v1', 'device_soil_depth_commands_v1'] }));
-  assert.equal(missingCapability.ack.result, 'REJECTED_PERMANENT');
 });
 
 test('assigned authorization validates zone existence, deletion, gateway, owner, and grant', async (t) => {
@@ -435,7 +505,6 @@ test('every protected operation traverses the independent scoped denial matrix',
     { name: 'missing actor', actor: '99999999-9999-4999-8999-999999999999' },
     { name: 'viewer', actor: VIEWER },
     { name: 'disabled account', actor: WRITER, prepare: (s) => s.raw.prepare('UPDATE users SET disabled_at=? WHERE user_uuid=?').run(NOW, WRITER) },
-    { name: 'missing capability', actor: OWNER, runtime: () => runtime({ capabilities: [] }) },
     { name: 'wrong device type', actor: OWNER, prepare: (s) => s.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('DRAGINO_SDI12', DEVICE) },
     { name: 'dangling assignment', actor: OWNER, prepare: (s) => {
       s.raw.exec('PRAGMA foreign_keys=OFF');
@@ -486,7 +555,6 @@ test('DELETE auth uses the live calibration version, reports specific denials, a
     { name: 'missing actor', actor: '99999999-9999-4999-8999-999999999999', reason: 'actor_missing_or_disabled' },
     { name: 'viewer', actor: VIEWER, reason: 'forbidden' },
     { name: 'disabled account', actor: WRITER, reason: 'actor_missing_or_disabled', prepare: (s) => s.raw.prepare('UPDATE users SET disabled_at=? WHERE user_uuid=?').run(NOW, WRITER) },
-    { name: 'missing capability', actor: OWNER, reason: 'capability_missing', runtime: () => runtime({ capabilities: [] }) },
     { name: 'wrong type', actor: OWNER, reason: 'unsupported_device_type', prepare: (s) => s.raw.prepare('UPDATE devices SET type_id=? WHERE deveui=?').run('KIWI_SENSOR', DEVICE) },
     { name: 'dangling assignment', actor: OWNER, reason: 'device_not_found', prepare: (s) => {
       s.raw.exec('PRAGMA foreign_keys=OFF');
