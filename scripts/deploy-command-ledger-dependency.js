@@ -172,6 +172,15 @@ function install(options) {
   validateOldLedgerWithCandidateBinding(liveRoot, stageDir);
   checkpoint(options, 'after-staging');
 
+  // Deploys stage the candidate while the previous payload and database are
+  // still live.  Keep the old ledger pair active until migration 0068 has
+  // committed: the new index classifies WATERMARK's legacy soil-depth shape
+  // as protected and writes 0068-only columns, while an interrupted deploy
+  // must remain restartable against the pre-0068 database and flows.
+  if (options.deferActivation === true) {
+    return { activated: false, staged: true };
+  }
+
   const rename = options.rename || defaultRename;
   const bindingFrom = filePath(stageDir, FILES.bindingCanonicalization);
   const bindingTo = filePath(liveRoot, FILES.bindingCanonicalization);

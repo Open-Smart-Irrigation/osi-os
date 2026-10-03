@@ -55,6 +55,7 @@ PAYLOAD_FLIPPED=0
 ROLLBACK_RESTORED=0
 NODE_RED_LOG_MARK=""
 DB_MIGRATION_COMMITTED=0
+COMMAND_LEDGER_ACTIVATED=0
 PREV_CAPTURED=0
 DEPLOY_HOLD_SERVICES=0
 MIGRATION_RUNNER_AVAILABLE=0
@@ -62,9 +63,9 @@ SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 SWAP_ROOT="${SWAP_ROOT:-/srv/node-red}"
 COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
 COMMAND_LEDGER_STAGE="/srv/node-red/.osi-command-ledger-stage.$$"
-COMMAND_LEDGER_HELPER_SHA256="4fd608db8c5f9f846c190220de7cdf1fab31c1b0f482473a32e7825aba29e9dd"
+COMMAND_LEDGER_HELPER_SHA256="48ae6cd244908c614d2e0f8d78a60e8a119b64853e2e49cefe5dca1f1bc0f5d8"
 COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
-COMMAND_LEDGER_INDEX_SHA256="6f3ea8e01d12157daa763a75dd9edd3bc823779f42a314b40d3c9b46c70e7856"
+COMMAND_LEDGER_INDEX_SHA256="a8c798e329e515d3d016af7d2aba347f7706dc26a8c845db756222a1b464c233"
 COMMAND_LEDGER_BINDING_SHA256="92faea11371c26290dde61bb019988449a08b2248cca564dc015fd32c8fb0708"
 export SWAP_ROOT
 
@@ -97,8 +98,8 @@ fetch_required() {
 # pinned, syntax-checked, and loaded in a fresh Node process. The helper itself
 # is fetched into the deploy-private directory and checked against an
 # independent digest before it is executed.
-install_command_ledger_dependency() {
-    echo "--- WATERMARK command-ledger dependency pair ---"
+stage_command_ledger_dependency() {
+    echo "--- WATERMARK command-ledger dependency pair (staged) ---"
     rm -rf "$COMMAND_LEDGER_STAGE"
     mkdir -m 700 -p "$COMMAND_LEDGER_STAGE"
     fetch_required "command-ledger dependency installer" \
@@ -118,10 +119,22 @@ install_command_ledger_dependency() {
     fetch_required "osi-watermark-binding canonicalization.js" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
         "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"
+    install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","deferActivation":true,"expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
+        "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
+    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    echo "OK: command-ledger dependency pair staged; activation deferred until schema migration"
+}
+
+activate_command_ledger_dependency() {
+    if [ "$COMMAND_LEDGER_ACTIVATED" = "1" ]; then
+        return 0
+    fi
+    echo "--- Activate WATERMARK command-ledger dependency pair ---"
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
     node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
-    echo "OK: command-ledger dependency pair activated"
+    COMMAND_LEDGER_ACTIVATED=1
+    echo "OK: command-ledger dependency pair activated after schema migration"
 }
 
 same_fs_or_die() {
@@ -1206,6 +1219,17 @@ process.stdout.write(String(applied.length));
         fi
         echo "OK: verify-head-cli confirmed the post-migration ledger and schema fingerprints"
 
+        # The candidate command ledger was validated and staged earlier, but
+        # must not replace the live pair until 0068 is committed.  Otherwise
+        # an interrupted deploy can restart the old flows against a pre-0068
+        # applied_commands table; legacy ACK/dedupe paths then either reference
+        # missing columns or classify the legacy soil-depth command as a
+        # protected WATERMARK command before its compatibility route runs.
+        if ! activate_command_ledger_dependency; then
+            echo "ERROR: command-ledger dependency activation failed after schema migration" >&2
+            return 1
+        fi
+
         if ! write_payload_compatibility "$DEPLOY_STAMP"; then
             echo "ERROR: could not record the new payload's schema compatibility; leaving services stopped" >&2
             node_red_restart_needed=0
@@ -1579,7 +1603,7 @@ fetch_required "osi-journal-replication canonicalization.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js" \
     "/srv/node-red/osi-journal-replication/canonicalization.js"
 
-install_command_ledger_dependency
+stage_command_ledger_dependency
 
 fetch_required "osi-zone-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/package.json" \
@@ -1963,6 +1987,7 @@ verify_native_sqlite3_after_npm || exit 1
 install_deploy_exit_trap
 quiesce_identityd_for_deploy || exit 1
 run_schema_migration || exit 1
+activate_command_ledger_dependency || exit 1
 
 fix_mosquitto_ownership() {
     echo "--- Mosquitto ownership ---"

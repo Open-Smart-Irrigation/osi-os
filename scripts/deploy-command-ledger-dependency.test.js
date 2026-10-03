@@ -67,6 +67,12 @@ function expectedHashes() {
   };
 }
 
+function indexOfDeploy(needle) {
+  const index = DEPLOY.indexOf(needle);
+  assert.notEqual(index, -1, `missing deploy.sh snippet: ${needle}`);
+  return index;
+}
+
 function probeFreshLedger(root) {
   const probe = `
     const fs = require('node:fs');
@@ -111,6 +117,107 @@ function probeFreshLedger(root) {
         payload: db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['701']).payload_json,
       };
       if (durableAfter.applied !== durableBefore.applied || durableAfter.outbox !== durableBefore.outbox || durableAfter.detail !== durableBefore.detail || durableAfter.payload !== durableBefore.payload) throw new Error('legacy replay mutated durable ledger or ACK');
+      native.close();
+    }).catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+  `;
+  execFileSync(process.execPath, ['-e', probe], { cwd: ROOT, stdio: 'pipe' });
+}
+
+function probePreMigrationLegacyFlow(root, seedOverride, expectLegacyApply = false) {
+  const base = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: ROOT, encoding: 'utf8' }).trim();
+  const preMigrationSeed = seedOverride || gitFile(base, 'database/seed-blank.sql').toString('utf8');
+  const seedFile = path.join(root, 'pre-migration-seed.sql');
+  fs.writeFileSync(seedFile, preMigrationSeed);
+  const probe = `
+    const fs = require('node:fs');
+    const assert = require('node:assert/strict');
+    const { DatabaseSync } = require('node:sqlite');
+    const ledger = require(${JSON.stringify(path.join(root, 'osi-command-ledger'))});
+    const native = new DatabaseSync(':memory:');
+    native.exec(fs.readFileSync(${JSON.stringify(seedFile)}, 'utf8'));
+    const db = {
+      get: (sql, params) => Promise.resolve(native.prepare(sql).get(...(params || []))),
+      all: (sql, params) => Promise.resolve(native.prepare(sql).all(...(params || []))),
+      run: (sql, params) => Promise.resolve(native.prepare(sql).run(...(params || []))),
+      transaction: async (fn) => { native.exec('BEGIN IMMEDIATE'); try { const result = await fn(db); native.exec('COMMIT'); return result; } catch (error) { native.exec('ROLLBACK'); throw error; } }
+    };
+    if (${expectLegacyApply ? 'true' : 'false'}) {
+      native.prepare('INSERT INTO devices(deveui,name,type_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(
+        'A84041A171000001', 'legacy-depth-probe', 'DRAGINO_LSN50', '0016C001F1000001', 0,
+        '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z'
+      );
+    }
+    const legacySoil = {
+      commandId: 17,
+      commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+      payload: {
+        deviceEui: 'A84041A171000001',
+        gatewayDeviceEui: '0016C001F1000001',
+        soilMoistureProbeDepthsJson: { probe_1: 30 },
+        soilMoistureProbeDepthsConfigured: true,
+        syncVersion: 1
+      }
+    };
+    ledger.deduplicatePendingCommand(db, legacySoil, {
+      gateway_device_eui: '0016C001F1000001'
+    }).then(async (result) => {
+      assert.equal(result.handled, ${expectLegacyApply ? 'true' : 'false'},
+        ${expectLegacyApply ? "'new ledger must atomically consume the legacy soil command'" : "'old ledger must leave the legacy soil command for its existing route'"});
+      if (${expectLegacyApply ? 'true' : 'false'}) {
+        const row = await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['17']);
+        assert.match(row.result_detail, /legacyPayloadHash/);
+        const device = await db.get('SELECT soil_moisture_probe_depths_json,sync_version FROM devices WHERE deveui=?', ['A84041A171000001']);
+        assert.equal(device.soil_moisture_probe_depths_json, JSON.stringify({ probe_1: 30 }));
+        assert.equal(device.sync_version, 1);
+      }
+      return ledger.queueCommandAck(db, {
+        commandId: 18,
+        commandType: 'CONFIG_UPDATE',
+        result: 'APPLIED',
+        deviceEui: '0016C001F1000001',
+        effectKey: 'config:0016C001F1000001:probe:1'
+      });
+    }).then(async (ack) => {
+      assert.equal(ack.result, 'APPLIED');
+      assert.equal(native.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, ${expectLegacyApply ? '2' : '1'});
+      if (${expectLegacyApply ? 'true' : 'false'}) {
+            const before = (await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['17'])).result_detail;
+        const changed = JSON.parse(JSON.stringify(legacySoil));
+        changed.payload.soilMoistureProbeDepthsJson.probe_1 = 31;
+        return ledger.deduplicatePendingCommand(db, changed, {
+          gateway_device_eui: '0016C001F1000001'
+        }).then(async (conflict) => {
+          assert.equal(conflict.handled, true);
+          assert.equal(conflict.ack.result, 'CONFLICT');
+          assert.equal((await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['17'])).result_detail, before);
+          if (native.prepare('PRAGMA table_info(applied_commands)').all().some((column) => column.name === 'binding_hash')) {
+          native.prepare(
+            'INSERT INTO applied_commands (' +
+              'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+              'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+            ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+          ).run(
+            '19', 'watermark_calibration:set:0016C001F1000001:A84041A171000001:4',
+            'A84041A171000001', 'SET_WATERMARK_CALIBRATION', 'APPLIED',
+            '2026-10-01T00:00:00.000Z', JSON.stringify({ commandId: 19, result: 'APPLIED' }), 'edge',
+            'a'.repeat(64), 'b'.repeat(64), 'WATERMARK_CALIBRATION', 'A84041A171000001',
+            '0016C001F1000001', '12345678-1234-4234-8234-123456789abc', 4, 'set'
+          );
+          const collision = await ledger.deduplicatePendingCommand(db, { ...legacySoil, commandId: 19 }, {
+            gateway_device_eui: '0016C001F1000001'
+          });
+          assert.equal(collision.handled, true);
+          assert.equal(collision.ack.result, 'CONFLICT');
+          assert.equal((await db.get('SELECT command_type,result FROM applied_commands WHERE command_id=?', ['19'])).command_type, 'SET_WATERMARK_CALIBRATION');
+          await db.run('UPDATE devices SET gateway_device_eui=? WHERE deveui=?', ['0016C001F1000002', 'A84041A171000001']);
+          const rebound = await ledger.deduplicatePendingCommand(db, legacySoil, {
+            gateway_device_eui: '0016C001F1000001'
+          });
+          assert.equal(rebound.handled, true);
+          assert.equal(rebound.ack.result, 'CONFLICT');
+          }
+        }).then(() => native.close());
+      }
       native.close();
     }).catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
   `;
@@ -224,6 +331,44 @@ test('stages and activates a new pair while retaining a runnable old pair on eve
       }
     }
   }
+});
+
+test('defers activation so pre-0068 database and legacy flows keep the old ledger', () => {
+  const { install } = require(HELPER_PATH);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-'));
+  const stage = path.join(root, '.stage');
+  try {
+    writeOldPair(root);
+    copyCandidate(stage);
+    const oldIndexHash = sha256(path.join(root, 'osi-command-ledger/index.js'));
+    const result = install(installOptions(root, stage, { deferActivation: true }));
+    assert.deepEqual(result, { activated: false, staged: true });
+    assert.equal(sha256(path.join(root, 'osi-command-ledger/index.js')), oldIndexHash,
+      'staging must not replace the old ledger before migration');
+    assert.ok(fs.existsSync(path.join(stage, 'osi-command-ledger/index.js')),
+      'candidate ledger must remain available for post-migration activation');
+    probePreMigrationLegacyFlow(root);
+
+    install(installOptions(root, stage));
+    probeFreshLedger(root);
+    const preMigrationSeed = gitFile(
+      execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: ROOT, encoding: 'utf8' }).trim(),
+      'database/seed-blank.sql'
+    ).toString('utf8');
+    probePreMigrationLegacyFlow(root, preMigrationSeed, true);
+    probePreMigrationLegacyFlow(root, fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('deploy stages the ledger pair before migration and activates it only after migration', () => {
+  const stageIdx = indexOfDeploy('stage_command_ledger_dependency');
+  const migrationIdx = indexOfDeploy('run_schema_migration || exit 1');
+  const activationIdx = DEPLOY.indexOf('activate_command_ledger_dependency || exit 1', migrationIdx);
+  assert.ok(stageIdx < migrationIdx, 'ledger candidate must be staged before schema migration');
+  assert.notEqual(activationIdx, -1, 'post-migration ledger activation must be explicit');
+  assert.ok(migrationIdx < activationIdx, 'ledger activation must follow schema migration');
 });
 
 test('an aborted local fetch leaves a partial candidate unactivated and the retained pair runnable', async () => {

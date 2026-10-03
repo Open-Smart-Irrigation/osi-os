@@ -159,6 +159,15 @@ function watermarkRuntime(context = watermarkBinding()) {
   };
 }
 
+function protectedDedupe(db, envelope, runtime) {
+  return ledger.withProtectedCommandTransaction(
+    db,
+    envelope,
+    runtime,
+    async () => ({ handled: false })
+  );
+}
+
 test('classifyAckResult maps known result/status vocabularies', () => {
   assert.equal(ledger.classifyAckResult('SUCCESS'), 'APPLIED');
   assert.equal(ledger.classifyAckResult('APPLIED'), 'APPLIED');
@@ -395,7 +404,7 @@ test('protected configuration replay checks exact command ID before effect key',
       key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), value,
     ])),
   });
-  const replay = await ledger.deduplicatePendingCommand(
+  const replay = await protectedDedupe(
     db, watermarkEnvelope(801), watermarkRuntime(context)
   );
   assert.equal(replay.handled, true);
@@ -403,11 +412,21 @@ test('protected configuration replay checks exact command ID before effect key',
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 1);
 });
 
+test('generic dedupe rejects protected commands before any ledger or outbox mutation', async () => {
+  const db = new TestDb();
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(db, watermarkEnvelope(806), watermarkRuntime()),
+    (error) => error && error.code === 'protected_command_route_required'
+  );
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
 test('protected configuration derives trusted hashes from the signed command payload when absent', async () => {
   const db = new TestDb();
   const envelope = watermarkEnvelope(807);
   delete envelope.protected_context;
-  const result = await ledger.deduplicatePendingCommand(db, envelope, {
+  const result = await protectedDedupe(db, envelope, {
     command_type_recognized: true,
     gateway_device_eui: GATEWAY_EUI,
   });
@@ -438,7 +457,7 @@ test('protected configuration verifies canonical hashes from normalized intent a
   envelope.payload.binding_hash = 'f'.repeat(64);
   envelope.payload.intent_hash = 'e'.repeat(64);
   delete envelope.protected_context;
-  const result = await ledger.deduplicatePendingCommand(db, envelope, runtime);
+  const result = await protectedDedupe(db, envelope, runtime);
   assert.equal(result.handled, false);
 });
 
@@ -452,7 +471,7 @@ test('protected configuration rejects a runtime gateway mismatch and accepts a n
     gateway_device_eui: '0016C001F1000004',
   });
   await assert.rejects(
-    ledger.deduplicatePendingCommand(db, envelope, runtime),
+    protectedDedupe(db, envelope, runtime),
     (error) => error && error.code === 'protected_command_conflict'
   );
 });
@@ -488,7 +507,7 @@ test('protected command ID replay rejects a non-protected stored row', async () 
     resultDetail: { commandId: 811, status: 'ACKED', result: 'APPLIED', duplicate: false },
   });
   await assert.rejects(
-    ledger.deduplicatePendingCommand(db, watermarkEnvelope(811), watermarkRuntime(watermarkBinding())),
+    protectedDedupe(db, watermarkEnvelope(811), watermarkRuntime(watermarkBinding())),
     (error) => error && error.code === 'protected_command_conflict'
   );
 });
@@ -530,7 +549,7 @@ test('protected exact replay derives intent from payload values, not normalized 
   const envelope = watermarkEnvelope(813);
   envelope.payload.values.worst_residual_pct = 2;
   await assert.rejects(
-    ledger.deduplicatePendingCommand(db, envelope, watermarkRuntime(context)),
+    protectedDedupe(db, envelope, watermarkRuntime(context)),
     (error) => error && error.code === 'protected_command_conflict'
   );
 });
@@ -551,7 +570,7 @@ test('protected effect replay rejects payload intent changes hidden by claims', 
   const envelope = watermarkEnvelope(815);
   envelope.payload.values.worst_residual_pct = 2;
   await assert.rejects(
-    ledger.deduplicatePendingCommand(db, envelope, watermarkRuntime(context)),
+    protectedDedupe(db, envelope, watermarkRuntime(context)),
     (error) => error && error.code === 'protected_command_conflict'
   );
 });
@@ -596,10 +615,10 @@ test('effect-key replay persists the new command ID as a trusted terminal row', 
     gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
     baseSyncVersion: context.base_sync_version, operation: context.operation,
   });
-  const replay = await ledger.deduplicatePendingCommand(db, watermarkEnvelope(812), watermarkRuntime(context));
+  const replay = await protectedDedupe(db, watermarkEnvelope(812), watermarkRuntime(context));
   assert.equal(replay.handled, true);
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['812'])).n, 1);
-  const exact = await ledger.deduplicatePendingCommand(db, watermarkEnvelope(812), watermarkRuntime(context));
+  const exact = await protectedDedupe(db, watermarkEnvelope(812), watermarkRuntime(context));
   assert.equal(exact.handled, true);
 });
 
@@ -633,7 +652,7 @@ test('protected configuration accepts a changed command ID only for the same bin
     gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
     baseSyncVersion: context.base_sync_version, operation: context.operation,
   });
-  const replay = await ledger.deduplicatePendingCommand(
+  const replay = await protectedDedupe(
     db, watermarkEnvelope(803), watermarkRuntime(context)
   );
   assert.equal(replay.handled, true);
@@ -664,7 +683,7 @@ test('protected configuration rejects every changed binding or intent without mu
       });
       const changed = Object.assign({}, stored, change);
       await assert.rejects(
-        ledger.deduplicatePendingCommand(db, watermarkEnvelope(805, changed), watermarkRuntime(changed)),
+        protectedDedupe(db, watermarkEnvelope(805, changed), watermarkRuntime(changed)),
         (error) => error && error.code === 'protected_command_conflict'
       );
       assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
@@ -736,6 +755,75 @@ test('queueCommandAck persists trusted WATERMARK terminal binding fields', async
     base_sync_version: context.base_sync_version,
     operation: context.operation,
   });
+});
+
+test('contextless retryable ACK cannot replace a protected terminal ACK', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  const original = await ledger.queueCommandAck(db, {
+    commandId: 816,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'APPLIED',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: 4,
+    operation: 'set',
+    payload: {
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: context.normalized_intent,
+    },
+    protected_context: context,
+  }, { protected_context: context, gateway_device_eui: GATEWAY_EUI });
+  const before = await db.get('SELECT result,result_detail FROM applied_commands WHERE command_id=?', ['816']);
+  const outboxBefore = await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816']);
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 816,
+      commandType: 'SET_WATERMARK_CALIBRATION',
+      result: 'FAILED_RETRYABLE',
+    }),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+  const trustedRetry = await ledger.queueCommandAck(db, {
+    commandId: 816,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'FAILED_RETRYABLE',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: 4,
+    operation: 'set',
+    payload: {
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: context.normalized_intent,
+    },
+    protected_context: context,
+  }, { protected_context: context, gateway_device_eui: GATEWAY_EUI });
+  assert.deepEqual(trustedRetry, original);
+  assert.deepEqual(JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816'])).payload_json), original);
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 816,
+      commandType: 'CONFIG_UPDATE',
+      result: 'FAILED_RETRYABLE',
+    }),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+  assert.deepEqual(await db.get('SELECT result,result_detail FROM applied_commands WHERE command_id=?', ['816']), before);
+  assert.deepEqual(await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816']), outboxBefore);
 });
 
 test('zone effect replay requires the same submitted payload hash', async () => {

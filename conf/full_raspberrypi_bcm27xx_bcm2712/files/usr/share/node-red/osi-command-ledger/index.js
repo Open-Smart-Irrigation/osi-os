@@ -533,6 +533,19 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
 }
 
 async function deduplicatePendingCommand(db, envelope, runtime) {
+  const type = commandType(envelope);
+  // A pre-WATERMARK payload used this generic node for soil-depth commands.
+  // Consume that exact legacy shape through the same binding/hash-checked
+  // transaction as the dedicated route, so a crash after the new module is
+  // activated but before the new flows switch on cannot re-run the old raw
+  // SQL path or bypass its replay protection.
+  if (isExactLegacySoilDepthsPayload(envelope, runtime || {})) {
+    return applyLegacySoilDepthsCommand(db, envelope, runtime || {});
+  }
+  if (isProtectedConfigurationCommand(type)) {
+    throw commandError('protected_command_route_required',
+      'WATERMARK protected commands must use the protected command route');
+  }
   return db.transaction((tx) => deduplicatePendingCommandInTransaction(tx, envelope, runtime));
 }
 
@@ -639,8 +652,9 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const requestedSyncVersion = Number.isSafeInteger(requestedSyncVersionNumber) && requestedSyncVersionNumber >= 0
     ? requestedSyncVersionNumber
     : appliedSyncVersion;
+  const protectedAck = isProtectedConfigurationCommand(ackType);
   let trusted = null;
-  if (terminal && isProtectedConfigurationCommand(ackType)) {
+  if (protectedAck) {
     const suppliedContext = (runtime && (runtime.protected_context || runtime.protectedContext)) || ack.protected_context || {};
     const payload = ack.payload && typeof ack.payload === 'object' ? { ...ack.payload } : {
       effect_key: ack.effectKey || ack.effect_key,
@@ -674,24 +688,28 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
     detail: errorText || ack.reason || null,
   };
   if (terminal) {
-      const existing = await tx.get(
-        'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
-        [commandId.stored]
-      );
-      if (existing) {
-        const storedProtected = isProtectedConfigurationCommand(String(existing.command_type || '').toUpperCase()) ||
-          existing.binding_hash != null || existing.intent_hash != null;
-        if ((storedProtected || trusted) && (!storedProtected || !trusted ||
-            ackType !== String(existing.command_type || '').toUpperCase() ||
-            !protectedBindingMatches(existing, trusted))) {
-          throw commandError('protected_command_conflict', 'WATERMARK terminal ACK binding conflicts with the terminal ledger');
-        }
-        // A local commandId never queues a cloud ack (see isCloudOriginatedCommandId
-        // above) -- not even on replay. replayAck() is the pure, DB-write-free half of
-        // persistReplayAck() and reproduces the exact same returned shape.
-        if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
-        return persistReplayAck(tx, existing, commandId.ack, true);
+    const existing = await tx.get(
+      'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
+      [commandId.stored]
+    );
+    const storedProtected = existing && (isProtectedConfigurationCommand(String(existing.command_type || '').toUpperCase()) ||
+      existing.binding_hash != null || existing.intent_hash != null);
+    if (existing && (storedProtected || trusted)) {
+      if (!trusted || ackType !== String(existing.command_type || '').toUpperCase() ||
+          !protectedBindingMatches(existing, trusted)) {
+        throw commandError('protected_command_conflict', 'WATERMARK terminal ACK binding conflicts with the terminal ledger');
       }
+      // A local commandId never queues a cloud ack (see isCloudOriginatedCommandId
+      // above) -- not even on replay. replayAck() is the pure, DB-write-free half of
+      // persistReplayAck() and reproduces the exact same returned shape.
+      if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
+      return persistReplayAck(tx, existing, commandId.ack, true);
+    }
+    if (existing) {
+      if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
+      return persistReplayAck(tx, existing, commandId.ack, true);
+    }
+    if (trusted) {
       await tx.run(
         'INSERT INTO applied_commands (' +
           'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
@@ -700,15 +718,42 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
         [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
           String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
           String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(initial), 'edge', trusted && trusted.binding_hash, trusted && trusted.intent_hash,
-          trusted && trusted.resource_type, trusted && trusted.resource_id,
-          trusted && trusted.gateway_device_eui, trusted && trusted.actor_user_uuid,
-          trusted && trusted.base_sync_version, trusted && trusted.operation]
+          JSON.stringify(initial), 'edge', trusted.binding_hash, trusted.intent_hash,
+          trusted.resource_type, trusted.resource_id, trusted.gateway_device_eui,
+          trusted.actor_user_uuid, trusted.base_sync_version, trusted.operation]
       );
-      const hooks = runtime && runtime.lifecycle_hooks;
-      if (hooks && typeof hooks.afterCommandLedger === 'function') {
-        await hooks.afterCommandLedger(initial);
+    } else {
+      await tx.run(
+        'INSERT INTO applied_commands (' +
+          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
+        ') VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+        [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
+          String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
+          String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
+          JSON.stringify(initial), 'edge']
+      );
+    }
+    const hooks = runtime && runtime.lifecycle_hooks;
+    if (hooks && typeof hooks.afterCommandLedger === 'function') {
+      await hooks.afterCommandLedger(initial);
+    }
+  }
+  if (protectedAck || !terminal) {
+    const existing = await tx.get(
+      'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
+      [commandId.stored]
+    );
+    const storedProtected = existing &&
+      (isProtectedConfigurationCommand(String(existing.command_type || '').toUpperCase()) ||
+       existing.binding_hash != null || existing.intent_hash != null);
+    if (existing && (storedProtected || trusted)) {
+      if (!trusted || ackType !== String(existing.command_type || '').toUpperCase() ||
+          !protectedBindingMatches(existing, trusted)) {
+        throw commandError('protected_command_conflict', 'WATERMARK ACK binding conflicts with the terminal ledger');
       }
+      if (!cloudOriginated) return replayAck(existing, commandId.ack, true);
+      return persistReplayAck(tx, existing, commandId.ack, true);
+    }
   }
   // A local action keeps its local ledger entry (the applied_commands write
     // above, when terminal) but must never produce a command_ack_outbox row:
@@ -747,7 +792,15 @@ async function withLegacySoilDepthsTransaction(db, envelope, runtime, mutation) 
         throw commandError('watermark_command_conflict', 'legacy command device binding conflicts with current edge state');
       }
       const facts = parsedResultDetail(existing);
-      if (existing.command_type !== 'UPSERT_DEVICE_SOIL_DEPTHS' || facts.legacyPayloadHash !== hash) {
+      const protectedMetadata = [
+        'binding_hash', 'intent_hash', 'resource_type', 'resource_id',
+        'actor_user_uuid', 'base_sync_version', 'operation', 'effect_key',
+      ];
+      const storedGateway = String(existing.gateway_device_eui || '').trim().toUpperCase();
+      const legacyRow = existing.command_type === 'UPSERT_DEVICE_SOIL_DEPTHS' &&
+        protectedMetadata.every((column) => existing[column] == null) &&
+        (!storedGateway || storedGateway === String(payload.gatewayDeviceEui).trim().toUpperCase());
+      if (!legacyRow || facts.legacyPayloadHash !== hash) {
         throw commandError('watermark_command_conflict', 'legacy command replay binding conflicts with the terminal ledger');
       }
       const ack = Object.assign({}, facts);
@@ -778,8 +831,8 @@ async function withLegacySoilDepthsTransaction(db, envelope, runtime, mutation) 
       };
       const initial = Object.assign({}, ack, { legacyPayloadHash: hash });
       await tx.run(
-        'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'CONFLICT', new Date().toISOString(), JSON.stringify(initial), 'edge', null, null, null, null, String(payload.gatewayDeviceEui).trim().toUpperCase(), null, null, null]
+        'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator) VALUES (?,?,?,?,?,?,?,?)',
+        [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'CONFLICT', new Date().toISOString(), JSON.stringify(initial), 'edge']
       );
       await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
         [String(deliveryId), JSON.stringify(ack), new Date().toISOString()]);
@@ -797,13 +850,65 @@ async function withLegacySoilDepthsTransaction(db, envelope, runtime, mutation) 
     }, result.ack || {});
     const initial = Object.assign({}, ack, { legacyPayloadHash: hash });
     await tx.run(
-      'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'APPLIED', new Date().toISOString(), JSON.stringify(initial), 'edge', null, null, null, null, String(payload.gatewayDeviceEui).trim().toUpperCase(), null, null, null]
+      'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator) VALUES (?,?,?,?,?,?,?,?)',
+      [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'APPLIED', new Date().toISOString(), JSON.stringify(initial), 'edge']
     );
     await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
       [String(deliveryId), JSON.stringify(ack), new Date().toISOString()]);
     return { handled: true, ack };
   });
+}
+
+async function applyLegacySoilDepthsCommand(db, envelope, runtime = {}) {
+  if (!isExactLegacySoilDepthsPayload(envelope, runtime)) return { handled: false };
+  const payload = envelope.payload;
+  const gateway = String(runtime.gateway_device_eui || '').trim().toUpperCase();
+  try {
+    return await withLegacySoilDepthsTransaction(db, envelope, runtime, async ({ tx, effectiveVersion }) => {
+      const device = await tx.get(
+        'SELECT deveui,gateway_device_eui,sync_version FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL',
+        [String(payload.deviceEui).trim().toUpperCase()]
+      );
+      if (!device || String(device.gateway_device_eui || '').trim().toUpperCase() !== gateway) {
+        throw commandError('watermark_command_conflict', 'legacy soil-depth device binding mismatch');
+      }
+      const depths = Object.keys(payload.soilMoistureProbeDepthsJson).sort().reduce((out, rawKey) => {
+        const key = String(rawKey).trim().toLowerCase();
+        const value = payload.soilMoistureProbeDepthsJson[rawKey];
+        if (!key || value === null || value === undefined || value === 0 ||
+            !Number.isInteger(value) || value < 0 || value > 1000) return out;
+        out[key] = value;
+        return out;
+      }, {});
+      await tx.run(
+        "UPDATE devices SET soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=?, sync_version=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE UPPER(deveui)=? AND UPPER(gateway_device_eui)=? AND deleted_at IS NULL",
+        [JSON.stringify(depths), payload.soilMoistureProbeDepthsConfigured ? 1 : 0, effectiveVersion,
+          String(payload.deviceEui).trim().toUpperCase(), gateway]
+      );
+      const updated = await tx.get(
+        'SELECT sync_version FROM devices WHERE UPPER(deveui)=? AND UPPER(gateway_device_eui)=? AND deleted_at IS NULL',
+        [String(payload.deviceEui).trim().toUpperCase(), gateway]
+      );
+      if (!updated || Number(updated.sync_version) !== effectiveVersion) {
+        throw commandError('watermark_command_conflict', 'legacy soil-depth update did not affect exactly one current device');
+      }
+      return { appliedSyncVersion: effectiveVersion };
+    });
+  } catch (error) {
+    if (error && error.code === 'watermark_command_conflict') {
+      return { handled: true, ack: {
+        commandId: envelope.commandId,
+        commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+        status: 'CONFLICT',
+        result: 'CONFLICT',
+        reason: 'binding_conflict',
+        detail: 'binding_conflict',
+        appliedSyncVersion: null,
+        duplicate: false,
+      } };
+    }
+    throw error;
+  }
 }
 
 // Protected semantic validation can fail before protectedContext() has enough
@@ -869,6 +974,7 @@ module.exports = {
   recordProtectedDecision,
   isExactLegacySoilDepthsPayload,
   withLegacySoilDepthsTransaction,
+  applyLegacySoilDepthsCommand,
   classifyAckResult,
   validEffectBinding,
 };
