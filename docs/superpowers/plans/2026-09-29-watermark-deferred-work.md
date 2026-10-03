@@ -1,6 +1,6 @@
 # WATERMARK on the LSN50: deferred work after Phase 1
 
-Date: 2026-09-29 · Updated: 2026-10-01 · Baseline: `origin/main`
+Date: 2026-09-29 · Updated: 2026-10-03 · Baseline: `origin/main`
 
 Phase 1 is on main. The current cloud-parity stack adds the edge-authoritative
 calibration mirror, pending-first configuration commands, contact-only FPort 11
@@ -30,6 +30,12 @@ records the implemented parity boundary and the work that remains deferred.
 - Bootstrap and force sync carry the retained calibration row or tombstone.
 - The protected command route handles calibration set/delete, Chameleon
   configuration, and generic soil-depth writes with exact-base effect keys.
+- Protected DEVICE commands use only the accepted DEVICE resource watermark as
+  their base. Missing confirmation requires reconciliation and queues nothing.
+- One protected DEVICE mutation can remain unresolved. Proven-unexposed
+  same-type edits reuse its pair; exposed or cross-type overlap is refused.
+- DEVICE desired-state convergence reads the retained canonical row, never the
+  submitted event payload alone.
 
 ## Status index
 
@@ -70,8 +76,14 @@ commands use these exact effect keys:
   `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`.
 
 Deploy cloud support before the edge release that advertises these tokens.
-Cloud writes remain pending until ACK plus authoritative mirror convergence,
-and a pre-existing calibration must bootstrap before its first cloud edit.
+Applied cloud writes remain pending until both ACK and authoritative mirror
+convergence arrive, in either order. A definitive non-application ACK settles
+without mirror convergence. A pre-existing calibration must bootstrap before
+its first cloud edit.
+Calibration may start from base zero only when neither retained calibration nor
+its resource watermark exists. Chameleon and soil-depth writes wait for a
+confirmed DEVICE watermark; bootstrap state without that confirmation does not
+authorize a guessed base.
 
 Contact and measurement time remain distinct. Contact-only FPort 11 MQTT may
 advance `lastSeen`; accepted canonical data may advance

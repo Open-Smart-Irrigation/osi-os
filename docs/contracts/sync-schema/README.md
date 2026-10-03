@@ -43,8 +43,31 @@ Four cloud-originated operations use protected pending commands:
 
 All EUI segments are uppercase 16-hex strings, and the base is an unpadded
 non-negative integer. The edge validates gateway, device, local actor, operation,
-base, and normalized intent before replay lookup or mutation. A cloud request is
-pending until the edge ACK and the authoritative mirror state converge.
+base, and normalized intent before replay lookup or mutation. An applied cloud
+request remains pending until both the edge ACK and authoritative mirror
+convergence arrive, in either order. A definitive non-application ACK settles
+without mirror convergence.
+
+Protected bases come only from confirmed edge state. Calibration uses the higher
+of the retained edge calibration version and its resource watermark; a first
+calibration starts at zero. Chameleon and soil-depth commands use the accepted
+`DEVICE` resource watermark. Cloud row edits and pending desired state never
+advance either base. If the `DEVICE` watermark is absent, issuance returns
+`409 reconciliation_required` and queues nothing.
+
+One protected DEVICE mutation may be unresolved at a time. A same-type edit may
+reuse its command-operation pair only when the base and effect binding match and
+the command is proven never exposed. That pair must also be the latest retained
+operation for the resource; shadowed or ambiguous history requires
+reconciliation. Once exposed, another same-type edit is refused. A different
+protected DEVICE mutation is refused until the earlier one resolves through
+ACK-plus-mirror convergence, authoritative non-application, or
+proven-before-delivery cancellation.
+
+DEVICE convergence is evaluated from the retained `Device` row after event or
+bootstrap application, never from the submitted payload alone. A live event that
+cannot prove the retained gateway, resource, and exact version remains retryable
+without advancing its watermark.
 
 The rollout is cloud-first. Deploy cloud schema, contract acceptance, event
 appliers, pending-command support, and capability-aware UI before an edge begins

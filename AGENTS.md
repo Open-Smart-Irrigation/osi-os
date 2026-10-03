@@ -54,9 +54,11 @@ Per-module system map (both repos, every module described with location): [docs/
 
 WATERMARK cloud parity adds four protected exact-base commands:
 `SET_WATERMARK_CALIBRATION`, `DELETE_WATERMARK_CALIBRATION`,
-`SET_CHAMELEON_CONFIG`, and `UPSERT_DEVICE_SOIL_DEPTHS`. The cloud keeps these
-writes pending until edge acknowledgement and mirror convergence; it never
-updates the confirmed edge-owned value when it queues the command.
+`SET_CHAMELEON_CONFIG`, and `UPSERT_DEVICE_SOIL_DEPTHS`. An applied write stays
+pending until both the authoritative acknowledgement and mirror convergence
+arrive, in either order. A definitive non-application acknowledgement settles
+without mirror convergence. The cloud never updates the confirmed edge-owned
+value when it queues a command.
 
 `UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
 `entity-name-command-apply-fn` and are only sent to a gateway that reported the
@@ -183,6 +185,12 @@ The four protected command effect keys are exact:
 - `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}`
 - `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}`
 - `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+
+Protected bases come only from confirmed edge state. Chameleon and soil-depth
+writes require the accepted `DEVICE` watermark; if it is absent, cloud issuance
+returns `409 reconciliation_required`. Only one protected DEVICE mutation may be
+unresolved, and DEVICE convergence is proven from the retained canonical row,
+not from a submitted event payload. See `docs/contracts/sync-schema/README.md`.
 
 Deploy the cloud contract, appliers, pending-command support, and read-only UI
 before an edge that advertises the three WATERMARK-related capabilities. After

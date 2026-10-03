@@ -80,6 +80,18 @@ non-negative decimal integer. The command carries `gateway_device_eui`,
 `delete`), and normalized `values` intent. Omitted optional metadata means
 keep the current value; explicit `null` means clear it.
 
+Calibration bases use the higher of the retained edge calibration version and
+its resource watermark, with zero reserved for first creation. Chameleon and
+soil-depth bases use only the accepted `DEVICE` resource watermark. An absent
+`DEVICE` watermark requires reconciliation; cloud row versions and pending
+desired state are not base evidence.
+
+An unresolved protected DEVICE command may be rewritten only for the same type,
+base, and effect binding while it is proven never exposed and owns the latest
+retained operation for that resource. Shadowed or ambiguous history requires
+reconciliation. Exposed same-type commands and overlapping protected DEVICE
+command types refuse replacement until the earlier operation resolves.
+
 The trusted binding hash covers command type, resource, device, gateway, local
 actor UUID, base version, operation, and normalized intent. Command-ID replay
 is checked before effect-key replay; either replay requires the stored trusted

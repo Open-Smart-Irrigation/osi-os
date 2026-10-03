@@ -284,4 +284,65 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
   return result;
 }
 
-module.exports = { COMMAND_TYPES, applyWatermarkCommand, normalizeDepths, expectedEffect };
+function isExactLegacySoilDepthsPayload(envelope, runtime = {}) {
+  return ledger.isExactLegacySoilDepthsPayload(envelope, runtime);
+}
+
+async function applyLegacySoilDepthsCommand(db, envelope, runtime = {}) {
+  if (!isExactLegacySoilDepthsPayload(envelope, runtime)) return { handled: false };
+  const payload = envelope.payload;
+  const gateway = String(runtime.gateway_device_eui || '').trim().toUpperCase();
+  try {
+    const result = await ledger.withLegacySoilDepthsTransaction(db, envelope, runtime, async ({ tx, effectiveVersion }) => {
+    const device = await tx.get(
+      'SELECT deveui,gateway_device_eui,sync_version FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL',
+      [String(payload.deviceEui).trim().toUpperCase()]
+    );
+    if (!device || String(device.gateway_device_eui || '').trim().toUpperCase() !== gateway) {
+      const error = new Error('legacy soil-depth device binding mismatch');
+      error.code = 'watermark_command_conflict';
+      throw error;
+    }
+    const depths = Object.keys(payload.soilMoistureProbeDepthsJson).sort().reduce((out, rawKey) => {
+      const key = String(rawKey).trim().toLowerCase();
+      const value = payload.soilMoistureProbeDepthsJson[rawKey];
+      if (!key || value === null || value === undefined || value === 0 ||
+          !Number.isInteger(value) || value < 0 || value > 1000) return out;
+      out[key] = value;
+      return out;
+    }, {});
+    await tx.run(
+      "UPDATE devices SET soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=?, sync_version=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE UPPER(deveui)=? AND UPPER(gateway_device_eui)=? AND deleted_at IS NULL",
+      [JSON.stringify(depths), payload.soilMoistureProbeDepthsConfigured ? 1 : 0, effectiveVersion,
+        String(payload.deviceEui).trim().toUpperCase(), gateway]
+    );
+    const updated = await tx.get('SELECT sync_version FROM devices WHERE UPPER(deveui)=? AND UPPER(gateway_device_eui)=? AND deleted_at IS NULL', [String(payload.deviceEui).trim().toUpperCase(), gateway]);
+    if (!updated || Number(updated.sync_version) !== effectiveVersion) {
+      const error = new Error('legacy soil-depth update did not affect exactly one current device');
+      error.code = 'watermark_command_conflict';
+      throw error;
+    }
+    return { appliedSyncVersion: effectiveVersion };
+    });
+    return result;
+  } catch (error) {
+    if (error && error.code === 'watermark_command_conflict') {
+      return { handled: true, ack: {
+        commandId: envelope.commandId,
+        commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+        status: 'CONFLICT',
+        result: 'CONFLICT',
+        reason: 'binding_conflict',
+        detail: 'binding_conflict',
+        appliedSyncVersion: null,
+        duplicate: false,
+      } };
+    }
+    throw error;
+  }
+}
+
+module.exports = {
+  COMMAND_TYPES, applyWatermarkCommand, applyLegacySoilDepthsCommand,
+  isExactLegacySoilDepthsPayload, normalizeDepths, expectedEffect,
+};

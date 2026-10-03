@@ -2,6 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status:** Historical execution plan. Tasks 5–7 of
+> `2026-10-02-watermark-cloud-parity-review-fix-wave.md` supersede conflicting
+> replacement, cancellation, and downgrade-fence rules here. Review-fix Task 10
+> supersedes this plan's null-bound rejection. Follow the review-fix plan and
+> the current contract before executing any remaining work here.
+
 **Goal:** Mirror edge-owned WATERMARK calibration into OSI Server, make calibration, Chameleon configuration, and generic soil-depth edits pending-first cloud commands, restore contact state for FPort 11 without syncing diagnostics, and expose confirmed versus pending state safely in the cloud GUI.
 
 **Architecture:** The edge remains authoritative. `WATERMARK_CALIBRATION` is a device-keyed sync resource with retained tombstones; the existing `DEVICE` aggregate remains authoritative for `chameleon_enabled` and soil-depth fields. OSI Server accepts and mirrors edge state, records desired state, and issues exact-base pending commands only when the gateway advertises the operation-specific capability. Edge command application uses one trusted binding, one authorization rule, and the existing local writers. FPort 11 sends a contact-only MQTT envelope; canonical values continue through `DEVICE_DATA_APPENDED`, and raw WATERMARK diagnostics never leave the edge.
@@ -28,7 +34,10 @@
 
 ## Review Focus
 
-1. A same-type desired-state edit with a changed base or effect key must issue a new command; it must not rewrite an old command while retaining its old binding.
+1. A protected same-type edit may reuse its exact command-operation pair only
+   when base and effect binding match and the command is proven never exposed.
+   Exposed same-type edits and cross-type DEVICE overlap are refused until the
+   predecessor resolves; they do not create a replacement command.
 2. Protected commands validate trusted context and semantic binding before replay lookup. After that gate, exact command-ID replay precedes effect-key replay; neither lookup may return a stored result unless the trusted binding hash matches, and a reused effect key with different normalized intent is a conflict.
 3. `irrigation_zone_id IS NULL` is the only unassigned state. A dangling, deleted, or foreign non-null assignment never receives the unassigned owner/admin exception.
 4. Bootstrap must reload retained state before `observeMirror`. A stale snapshot cannot report itself as convergence, a tombstone cannot reset the base to zero, and bootstrap cannot manufacture a missing ACK.
@@ -39,7 +48,11 @@
 
 ---
 
-### Task 1: Harden desired-state command rewriting
+### Task 1: Harden desired-state command rewriting — superseded
+
+Do not execute this task. Review-fix Task 7 replaces its “issue a new command”
+rule with one unresolved pair, proven-unexposed reuse, and exposed-edit refusal.
+The steps below remain only as historical context.
 
 **Repository:** `osi-server`
 
@@ -327,7 +340,7 @@ cd <osi-server>/.worktrees/watermark-cloud-parity/backend
 
 Expected: current endpoints mutate the cloud `Device` immediately and return 200.
 
-- [ ] Implement `DeviceConfigurationCommandService` with resource type `DEVICE`, device EUI resource ID, base from the current DEVICE mirror/resource version, and the shared authorizer. Use `chameleon_config_commands_v1` and `device_soil_depth_commands_v1` independently.
+- [ ] Implement `DeviceConfigurationCommandService` with resource type `DEVICE`, device EUI resource ID, base from the accepted DEVICE resource watermark, and the shared authorizer. A missing watermark returns `409 reconciliation_required` and queues nothing. Use `chameleon_config_commands_v1` and `device_soil_depth_commands_v1` independently.
 - [ ] Stop calling `DeviceService.setChameleonEnabled` and `setSoilMoistureProbeDepths` from cloud request handling. Keep those methods only for edge mirror/application paths that write confirmed state.
 - [ ] Desired payloads contain only the specific intended fields; response DTO exposes confirmed `Device` values and the pending operation separately.
 - [ ] Implement `GatewayCommandCapabilityPolicy` as the single command-type-to-capability map. Apply capability and fence checks after candidate row locking and before leasing in `CommandLeaseService`, and before marking legacy candidates SENT in `CommandService`. Apply the same fence in all three protected issuance services. Unknown command families retain existing delivery behavior; the four protected command types have no permissive fallback. Treat each capability and the fence as gateway hardware truth shared across every `LinkedGatewayAccount` row for that gateway.
@@ -512,6 +525,10 @@ Expected: all pass.
 ---
 
 ### Task 10: Accept trusted FPort 11 contact in cloud, then publish it from edge
+
+**Historical note:** The review-fix plan's Task 10 replaces the null-bound
+rejection below with the narrow stored-sensor-type observation rule in design
+sections 6–7. Keep the steps below only as execution history.
 
 **Repositories:** `osi-server`, then `osi-os`
 
@@ -731,10 +748,12 @@ Expected: zero slop findings and no whitespace errors.
 3. Merge the cloud commits from Tasks 3–6, the cloud half of Task 10, and Task 11. Deploy and verify cloud migrations, contract acceptance, appliers, APIs, capability-aware leasing, trusted forwarded-contact handling, DTO/timestamp semantics, capability defaults, and neutral read-only UI while all new capability booleans remain false.
 4. Merge the edge commits from Tasks 7–9, the edge half of Task 10, and the edge half of Task 12. Only this release advertises `watermark_v1`, `chameleon_config_commands_v1`, and `device_soil_depth_commands_v1` or begins publishing contact-only FPort 11 messages.
 5. Force/bootstrap-sync a non-production fixture gateway. Verify pre-existing calibration and tombstone convergence before using any cloud edit control.
-6. Confirm post-rollout evidence without production access in this plan: capability summary contains exactly the installed tokens; calibration command remains pending until ACK plus mirror; contact advances `lastSeen` only; measurement advances `currentStateRecordedAt`; no raw diagnostic field appears; scheduler exclusion tests remain green.
-7. Before a planned edge rollback, activate the protected-command delivery fence while the capability-advertising edge is still installed. Confirm the cloud has disabled all three protected edit families and both pending-command protocols. The fence may cancel never-delivered PENDING work; wait for every SENT or LEASED command to return a terminal response. If `safeToDowngrade` is false or any protected PENDING/SENT/LEASED count is nonzero, abort the rollback.
-8. Deploy the downgraded edge only after the fence status is safe. Keep the fence persisted while capability refresh is delayed; a late report that still advertises any protected token cannot clear it. Force an authenticated bootstrap/capability refresh from the downgraded edge and confirm all three tokens are absent. The cloud may clear the fence only after that reconciliation and a second zero-executable-work check; false capabilities then keep issuance and delivery closed.
-9. Treat a terminal response that races across downgrade as valid for its already-delivered command: record its ACK/mirror convergence, never re-lease it, and keep the fence until no executable protected work remains. Keep cloud event acceptance deployed while any 0068 edge may still exist because those persistent triggers can continue emitting calibration events. This plan makes no independent cloud-rollback guarantee.
+6. Confirm post-rollout evidence without production access in this plan: capability summary contains exactly the installed tokens; an applied calibration command remains pending until ACK and mirror convergence both arrive, in either order; contact advances `lastSeen` only; measurement advances `currentStateRecordedAt`; no raw diagnostic field appears; scheduler exclusion tests remain green.
+7. Before a planned edge rollback, activate the protected-command delivery fence while the capability-advertising edge is still installed. The fence may cancel never-exposed `PENDING` work. Exposed work remains eligible only for immutable REST replay while the required capability is still present; do not treat an expired lease or a lost response as proof that it cannot execute. Abort unless `safeToDowngrade` is true: the active fence must report zero unresolved protected operations and zero malformed protected deliveries.
+8. Deploy the downgraded edge only after the fence status is safe. Keep the fence persisted while capability refresh is delayed; a late report that still advertises any protected token cannot clear it. Force an authenticated bootstrap/capability refresh from the downgraded edge and confirm all three tokens are absent. The cloud may clear the fence only after that reconciliation and a second zero-unresolved-work check; false capabilities then keep new issuance and first delivery closed.
+9. Treat an ACK or mirror update that races across downgrade as valid for its already-exposed command. Applied work settles only after authoritative edge result and mirror convergence; definitive non-application may settle without mirror convergence. Keep the fence until every exposed operation reaches one of those outcomes. Keep cloud event acceptance deployed while any 0068 edge may still exist because those persistent triggers can continue emitting calibration events. This plan makes no independent cloud-rollback guarantee.
+
+The rollback target is the older `Build UPDATE SQL` path. It reads top-level `soilMoistureProbeDepthsJson` (or `{}`), ignores protected `values`, and writes the legacy configured state as enabled; an empty map can therefore clear depths. The exact-shape classifier belongs to the upgraded E2 edge and does not constrain that older firmware. The delivery fence must be safe before rollback because the two payload contracts differ.
 
 ## Definition of Done
 
@@ -746,5 +765,8 @@ Expected: zero slop findings and no whitespace errors.
 - FPort 11 contact and canonical measurement timestamps are independent and monotonic.
 - No raw WATERMARK diagnostics sync; neutral history labels and scheduler interlock remain intact.
 - Cloud deploys before capability-advertising edge code.
-- Planned downgrade uses the durable delivery fence, reaches zero executable protected work before edge replacement, and remains fenced through authenticated capability reconciliation.
+- Planned downgrade uses the durable delivery fence, reaches zero unresolved
+  protected operations and zero malformed protected deliveries before edge
+  replacement, and remains fenced through authenticated capability
+  reconciliation.
 - Full edge/cloud verification, anti-slop checks, and `git diff --check` pass on the final rebased branches.

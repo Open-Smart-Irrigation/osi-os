@@ -77,6 +77,57 @@ const PROTECTED_CONFIGURATION_COMMANDS = new Set([
   'UPSERT_DEVICE_SOIL_DEPTHS',
 ]);
 
+const LEGACY_SOIL_DEPTH_KEYS = new Set([
+  'deviceEui', 'gatewayDeviceEui', 'soilMoistureProbeDepthsJson',
+  'soilMoistureProbeDepthsConfigured', 'syncVersion', 'commandType'
+]);
+
+function canonicalLegacy(value) {
+  if (Array.isArray(value)) return value.map(canonicalLegacy);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((out, key) => {
+      out[key] = canonicalLegacy(value[key]);
+      return out;
+    }, {});
+  }
+  return value;
+}
+
+function legacyPayloadHash(payload, effectiveVersion, ackVersion) {
+  return crypto.createHash('sha256').update(JSON.stringify({ payload: canonicalLegacy(payload), effectiveVersion, ackVersion })).digest('hex');
+}
+
+function isExactLegacySoilDepthsPayload(envelope, runtime = {}) {
+  if (!envelope || String(envelope.commandType || '').trim().toUpperCase() !== 'UPSERT_DEVICE_SOIL_DEPTHS') return false;
+  if ((envelope.effectKey !== undefined && envelope.effectKey !== null && envelope.effectKey !== '') ||
+      (envelope.effect_key !== undefined && envelope.effect_key !== null && envelope.effect_key !== '') ||
+      Object.prototype.hasOwnProperty.call(envelope, 'protected_context') ||
+      Object.prototype.hasOwnProperty.call(envelope, 'protectedContext')) return false;
+  const payload = envelope.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !LEGACY_SOIL_DEPTH_KEYS.has(key)) ||
+      !['deviceEui', 'gatewayDeviceEui', 'soilMoistureProbeDepthsJson', 'soilMoistureProbeDepthsConfigured', 'syncVersion']
+        .every((key) => Object.prototype.hasOwnProperty.call(payload, key))) return false;
+  if (Object.prototype.hasOwnProperty.call(payload, 'commandType') && payload.commandType !== 'UPSERT_DEVICE_SOIL_DEPTHS') return false;
+  const gateway = String(runtime.gateway_device_eui || '').trim().toUpperCase();
+  const device = String(payload.deviceEui || '').trim().toUpperCase();
+  const payloadGateway = String(payload.gatewayDeviceEui || '').trim().toUpperCase();
+  if (!/^[0-9A-F]{16}$/.test(gateway) || payloadGateway !== gateway || !/^[0-9A-F]{16}$/.test(device)) return false;
+  if (!payload.soilMoistureProbeDepthsJson || typeof payload.soilMoistureProbeDepthsJson !== 'object' || Array.isArray(payload.soilMoistureProbeDepthsJson)) return false;
+  if (typeof payload.soilMoistureProbeDepthsConfigured !== 'boolean') return false;
+  const syncVersion = payload.syncVersion;
+  const applied = envelope.appliedSyncVersion;
+  if (!Number.isSafeInteger(syncVersion) || syncVersion < 0) return false;
+  if (applied !== undefined && applied !== null && (!Number.isSafeInteger(applied) || applied < 0)) return false;
+  return true;
+}
+
+function legacyEffectiveVersion(envelope) {
+  const payload = envelope.payload;
+  return Number(envelope.appliedSyncVersion || payload.syncVersion || 1);
+}
+
 const PROTECTED_CONFIGURATION_SPECS = {
   SET_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'set', prefix: 'watermark_calibration:set' },
   DELETE_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'delete', prefix: 'watermark_calibration:delete' },
@@ -679,6 +730,82 @@ async function queueCommandAck(db, rawAck, runtime) {
   return db.transaction((tx) => queueCommandAckInTransaction(tx, rawAck, runtime));
 }
 
+async function withLegacySoilDepthsTransaction(db, envelope, runtime, mutation) {
+  if (!isExactLegacySoilDepthsPayload(envelope, runtime)) {
+    throw commandError('legacy_command_mismatch', 'legacy soil-depth payload is not exact');
+  }
+  return db.transaction(async (tx) => {
+    const deliveryId = deliveryCommandId(envelope);
+    const payload = envelope.payload;
+    const effectiveVersion = legacyEffectiveVersion(envelope);
+    const legacyAckVersion = Number(envelope.appliedSyncVersion || payload.syncVersion || 0) || null;
+    const hash = legacyPayloadHash(payload, effectiveVersion, legacyAckVersion);
+    const existing = await tx.get('SELECT * FROM applied_commands WHERE command_id=? LIMIT 1', [String(deliveryId)]);
+    if (existing) {
+      const currentBinding = await tx.get('SELECT gateway_device_eui FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL', [String(payload.deviceEui).trim().toUpperCase()]);
+      if (!currentBinding || String(currentBinding.gateway_device_eui || '').trim().toUpperCase() !== String(payload.gatewayDeviceEui).trim().toUpperCase()) {
+        throw commandError('watermark_command_conflict', 'legacy command device binding conflicts with current edge state');
+      }
+      const facts = parsedResultDetail(existing);
+      if (existing.command_type !== 'UPSERT_DEVICE_SOIL_DEPTHS' || facts.legacyPayloadHash !== hash) {
+        throw commandError('watermark_command_conflict', 'legacy command replay binding conflicts with the terminal ledger');
+      }
+      const ack = Object.assign({}, facts);
+      delete ack.legacyPayloadHash;
+      await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [String(deliveryId)]);
+      await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+        [String(deliveryId), JSON.stringify(ack), new Date().toISOString()]);
+      return { handled: true, ack };
+    }
+    let result;
+    try {
+      const boundDevice = await tx.get('SELECT gateway_device_eui FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL', [String(payload.deviceEui).trim().toUpperCase()]);
+      if (!boundDevice || String(boundDevice.gateway_device_eui || '').trim().toUpperCase() !== String(payload.gatewayDeviceEui).trim().toUpperCase()) {
+        throw commandError('watermark_command_conflict', 'legacy command device binding conflicts with current edge state');
+      }
+      result = await mutation({ tx, payload, effectiveVersion });
+    } catch (error) {
+      if (!error || error.code !== 'watermark_command_conflict') throw error;
+      const ack = {
+        commandId: deliveryId,
+        commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+        status: 'CONFLICT',
+        result: 'CONFLICT',
+        reason: 'binding_conflict',
+        detail: 'binding_conflict',
+        appliedSyncVersion: null,
+        duplicate: false,
+      };
+      const initial = Object.assign({}, ack, { legacyPayloadHash: hash });
+      await tx.run(
+        'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'CONFLICT', new Date().toISOString(), JSON.stringify(initial), 'edge', null, null, null, null, String(payload.gatewayDeviceEui).trim().toUpperCase(), null, null, null]
+      );
+      await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+        [String(deliveryId), JSON.stringify(ack), new Date().toISOString()]);
+      return { handled: true, ack };
+    }
+    const ack = Object.assign({
+      commandId: deliveryId,
+      commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+      status: 'ACKED',
+      result: 'APPLIED',
+      reason: null,
+      detail: null,
+      appliedSyncVersion: legacyAckVersion,
+      duplicate: false,
+    }, result.ack || {});
+    const initial = Object.assign({}, ack, { legacyPayloadHash: hash });
+    await tx.run(
+      'INSERT INTO applied_commands (command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [String(deliveryId), null, String(payload.deviceEui).trim().toUpperCase(), 'UPSERT_DEVICE_SOIL_DEPTHS', 'APPLIED', new Date().toISOString(), JSON.stringify(initial), 'edge', null, null, null, null, String(payload.gatewayDeviceEui).trim().toUpperCase(), null, null, null]
+    );
+    await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      [String(deliveryId), JSON.stringify(ack), new Date().toISOString()]);
+    return { handled: true, ack };
+  });
+}
+
 // Protected semantic validation can fail before protectedContext() has enough
 // trusted material to build a binding hash. Persist that terminal conflict or
 // permanent rejection without rewriting an existing command row. The durable
@@ -740,6 +867,8 @@ module.exports = {
   withProtectedCommandTransaction,
   queueCommandAck,
   recordProtectedDecision,
+  isExactLegacySoilDepthsPayload,
+  withLegacySoilDepthsTransaction,
   classifyAckResult,
   validEffectBinding,
 };

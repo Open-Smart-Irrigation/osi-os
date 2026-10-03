@@ -39,6 +39,8 @@ assert.match(helper.func, /gateway_device_eui/);
 assert.match(helper.func, /command_type_recognized/);
 assert.match(helper.func, /return \[msg, null\]/);
 assert.match(helper.func, /return \[null, \{/);
+assert.match(helper.func, /applyLegacySoilDepthsCommand/, 'legacy soil-depth compatibility path is shipped');
+assert.match(helper.func, /isExactLegacySoilDepthsPayload/, 'legacy classifier is consulted before protected apply');
 
 const buildSql = byId['4f4a765f36cee6f3'];
 assert.ok(buildSql, 'legacy SQL builder is shipped');

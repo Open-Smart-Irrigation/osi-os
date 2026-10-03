@@ -133,8 +133,10 @@ Command handling follows this order:
 
 All cloud-originated writes follow one sequence:
 
-1. The cloud validates the actor, gateway capability, device binding, and
-   current mirrored base version.
+1. The cloud validates the actor, gateway capability, device binding, and a
+   confirmed edge base. Calibration uses the higher retained calibration or
+   resource-watermark version, with zero for first creation. Chameleon and
+   soil-depth writes require the accepted `DEVICE` resource watermark.
 2. It records desired state and queues a pending command. The API returns
    `202 Accepted` with the command state.
 3. The edge verifies the authenticated target and exact base version, applies
@@ -169,6 +171,12 @@ refresh must not make an unacknowledged value look applied.
 For every rewrite, `DesiredStateService.canRewrite` must verify the same
 persisted base version and trusted effect binding that command creation used.
 It must not authorize a rewrite from resource ID and command type alone.
+Only one protected mutation may remain unresolved for a DEVICE resource. A
+same-type request may reuse its exact pair only before exposure; an exposed
+same-type request and every overlapping protected type are refused until the
+predecessor resolves. Reuse also requires that pair to be the latest retained
+operation for the resource; shadowed or ambiguous history requires
+reconciliation.
 
 ### 5.1 Capability contract
 
@@ -198,10 +206,20 @@ loading or absent.
 Advertising a token asserts that the named exact-base applier is installed; a
 registry entry or schema enum by itself is insufficient.
 
-After an edge downgrade stops advertising a token, the cloud removes the
-related edit control and refuses new command issuance. Already queued work is
-not routed to a generic or permissive handler. It remains unsupported or is
-superseded through the desired-state ledger's explicit transition.
+Before a planned edge downgrade, the cloud activates the durable delivery
+fence. The fence blocks new issuance and first REST delivery. It may atomically
+cancel only proven-never-exposed `PENDING` work; exposed work may receive only
+immutable REST replay, and only while the gateway still advertises the required
+capability. An expired lease, retry exhaustion, or a lost response does not
+resolve exposed work. Applied work resolves after both an authoritative applied
+result and mirror convergence arrive, in either order. An authoritative
+non-application result resolves without mirror convergence.
+
+`safeToDowngrade` requires an active fence, zero unresolved protected
+operations, and zero malformed protected deliveries. After the edge downgrade,
+the fence remains active until an authenticated capability report confirms the
+three tokens are absent and a second safety check passes. Protected work never
+falls back to a generic or permissive handler.
 
 ### 5.2 Mutation authorization
 
@@ -227,13 +245,38 @@ metadata.
 - The edge rejects a command whose `gateway_device_eui` differs from its
   resolved local gateway identity or whose device is not locally owned by
   that gateway.
-- The cloud accepts an event, snapshot item, or contact observation only when
-  its gateway field matches both the authenticated connection and the current
-  device binding.
+- The cloud accepts ordinary configuration, event, and snapshot mutations only
+  when the authenticated gateway matches the device's current non-null binding.
 - A device move invalidates pending commands addressed to the previous
   gateway. They are not silently replayed on the new gateway.
 - Aggregate concurrency remains device-keyed; gateway validation prevents two
   gateways from writing the same device stream.
+
+Two observation paths have a narrower rule for an existing null-bound sensor:
+durable history and forwarded contact. The exception applies only when the
+stored device type is `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`,
+`SENSECAP_S2120`, `DRAGINO_SDI12`, or `AQUASCOPE_LORAIN`. The stored type is
+authoritative; a type supplied by the observation cannot change the row or make
+an ineligible row eligible. An authenticated observation from a gateway may
+persist the durable history row through the existing history behavior, or it
+may advance monotonic contact time, while leaving the binding null. Neither
+path binds or rebinds the device. A different non-null binding is foreign and
+the cloud rejects the observation.
+
+The observation writer locks the device row and rechecks the binding and stored
+type immediately before mutation. If an assignment to another gateway commits
+before the observation acquires that lock, the observation is rejected. If the
+observation holds the lock first, it may finish against the still-authoritative
+binding; the assignment waits and becomes authoritative afterward. A
+durable-history write may update the canonical measurement state that the
+existing history path already maintains; the forwarded-contact path cannot.
+`EdgeOwnershipService` remains strict and unchanged. Callers use this exception
+only in the two named observation paths rather than weakening ordinary ownership
+checks.
+
+The existing null-bound `STREGA_VALVE` observation and MQTT-history path remains
+separate. It keeps its current validation and mutation behavior and is not
+folded into the six-type sensor contact exception.
 
 All EUIs are canonical uppercase hexadecimal strings at the contract boundary.
 Fixtures, when needed, use the documented example range starting at
@@ -251,11 +294,17 @@ The trusted gateway identity comes from the MQTT topic and authenticated
 connection, never from a payload field. On first contact, the router calls the
 four-argument `DeviceService.upsertFromHeartbeat(deviceEui, type, null,
 gatewayEui)` with that trusted topic gateway. A new device is created with the
-binding. An existing device is updated only when its non-null binding matches.
-A different binding is foreign and rejected without refreshing contact.
+binding. For an existing device, the stored type controls eligibility. A
+matching non-null binding may advance contact; a null binding may do so only
+for one of the six sensor types listed in section 6. The update leaves a null
+binding unchanged. A different non-null binding is foreign and rejected
+without refreshing contact.
 
-An existing null binding is not repaired from MQTT. An explicit authenticated
-inventory or sync repair must establish it; MQTT never rebinds a device.
+The contact writer locks the device row and performs a final binding check
+before updating it. A concurrent assignment to another gateway therefore
+rejects the contact instead of letting the earlier null-binding check win.
+Only an explicit authenticated inventory or sync repair may establish a
+binding for an existing null-bound device; MQTT never binds or rebinds it.
 
 It must omit:
 
@@ -270,6 +319,13 @@ snapshot observation updates existing `Device.currentStateRecordedAt` /
 An accepted frame may advance the canonical snapshot time even when one or
 both channel values are null; frame acceptance and channel value availability
 are separate facts. A rejected frame updates contact only.
+
+A forwarded-contact update changes only monotonic `lastSeen`. It does not
+change canonical state, `currentStateRecordedAt`, IP address, stored device
+type, or history. Durable history remains a separate path and may update its
+canonical measurement through the existing history behavior described in
+section 6. The null-bound `STREGA_VALVE` observation and MQTT-history behavior
+also remains separate from this contact-only sensor path.
 
 The LSN50 response derives online state and contact age from `lastSeen` and
 exposes `currentStateRecordedAt` separately for measurement age.
@@ -341,6 +397,10 @@ disabled.
 
 - A stale calibration or DEVICE base version is acknowledged as a conflict;
   the cloud retains the confirmed edge state and exposes the failed intent.
+- If the accepted `DEVICE` resource watermark is absent, protected DEVICE
+  issuance returns `409 reconciliation_required` and queues nothing.
+- A same-type edit after exposure, or a different protected DEVICE edit while
+  one is unresolved, returns a conflict rather than creating a replacement.
 - A command for a foreign gateway or device is rejected without mutation.
 - An acknowledgement without the matching mirror event does not mark desired
   state applied. Reconciliation or a snapshot must close the gap.
@@ -349,6 +409,10 @@ disabled.
   matches; a same key with different intent or context is a hard conflict.
 - An event that arrives before its device is retried. An event with a mismatched
   gateway binding is quarantined rather than rebound.
+- DEVICE desired state observes the retained `Device` row after application,
+  not the submitted event payload. If its gateway, resource, or exact version
+  cannot be proven, the event remains retryable and does not advance its
+  resource watermark.
 - MQTT contact continues during calibration absence or conversion failure, but
   `currentStateRecordedAt` and history do not advance unless a canonical
   snapshot is accepted.
@@ -371,6 +435,19 @@ the new forms nor a false WATERMARK classification. During mixed-version
 rollout, unsupported commands remain unavailable rather than falling back to a
 direct cloud write.
 
+The upgraded E2 edge routes only the identified legacy soil-depth shape through
+its compatibility path. The payload requires `deviceEui`, `gatewayDeviceEui`,
+`soilMoistureProbeDepthsJson`, `soilMoistureProbeDepthsConfigured`, and
+`syncVersion`; it permits only a matching redundant `commandType` in addition.
+The path retains the transport command ID and legacy version semantics. It does
+not fabricate an actor, exact base, or protected metadata, and malformed or
+mixed protected payloads cannot fall back to it.
+
+A pre-E2 rollback target uses the older `Build UPDATE SQL` path. That code does
+not read protected `values`; given a protected payload, it sees no top-level
+depth map, writes `{}`, and defaults the configured state to enabled. The
+delivery fence must therefore reach `safeToDowngrade` before rollback.
+
 ## 12. Acceptance conditions
 
 Implementation planning must preserve these observable outcomes:
@@ -385,10 +462,17 @@ Implementation planning must preserve these observable outcomes:
 - bootstrap alone does not close a lost-acknowledgement operation; durable
   command replay or redelivery supplies the missing acknowledgement before
   ACK-plus-mirror convergence can mark it applied;
-- calibration, depth, and Chameleon cloud writes remain pending until the edge
-  acknowledges and the mirror converges;
+- successfully applied calibration, depth, and Chameleon cloud writes remain
+  pending until the edge acknowledgement and mirror convergence both arrive,
+  in either order; definitive non-application settles without mirror
+  convergence;
+- DEVICE writes cannot queue without a confirmed resource watermark;
+  calibration alone may use zero for first creation;
 - `DesiredStateService.canRewrite` refuses a changed base or trusted effect
-  binding;
+  binding, any exposed command, and every ambiguous or overlapping unresolved
+  pair;
+- DEVICE convergence uses retained canonical state and cannot be completed by
+  a submitted payload that the canonical row did not accept;
 - all three builders report identical capability sets; cloud persistence,
   controller issuance, and GUI gates use the exact token for each operation;
 - negative authorization tests cover a viewer, disabled account, foreign
@@ -402,7 +486,8 @@ Implementation planning must preserve these observable outcomes:
 - an FPort 11 contact advances `lastSeen` without advancing
   `currentStateRecordedAt`, current values, or history;
 - first contact binds a new device to the trusted topic gateway through the
-  four-argument writer; foreign and null-bound existing devices are not rebound;
+  four-argument writer; foreign devices are rejected, while eligible null-bound
+  sensors may advance contact without being rebound;
 - an accepted canonical frame can advance `currentStateRecordedAt` with null
   channel values, while a rejected frame cannot;
 - no WATERMARK raw-reading or per-reading diagnostic field appears in a sync

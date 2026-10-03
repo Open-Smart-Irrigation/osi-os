@@ -18,14 +18,15 @@ const dedupe = byName['Deduplicate Pending Command'];
 const helper = byName['Apply WATERMARK Protected Command'];
 const ackQueue = byName['Queue REST Command ACK'];
 assert.ok(dedupe && helper && ackQueue, 'protected dispatch nodes exist');
+assert.match(helper.func, /applyLegacySoilDepthsCommand/);
 
 const watermark = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js'));
 const ledger = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js'));
 const raw = new DatabaseSync(':memory:');
 raw.exec(SEED);
 
-const gateway = '0011223344556677';
-const device = 'AABBCCDDEEFF0011';
+const gateway = '0016C001F1000002';
+const device = 'A84041A171000002';
 const owner = '22222222-2222-4222-8222-222222222222';
 const now = '2026-09-30T09:00:00.000Z';
 const calibration = {
@@ -38,6 +39,8 @@ raw.prepare('INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,upd
   .run('cloud', 1, gateway, now);
 raw.prepare('INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?)')
   .run(device, 'Watermark', 'DRAGINO_LSN50', 1, null, gateway, now, now);
+raw.prepare('INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?)')
+  .run('A84041A171000001', 'Legacy depths', 'KIWI_SENSOR', 1, null, '0016C001F1000001', now, now);
 
 function scope() {
   return {
@@ -72,7 +75,8 @@ const osiLib = {
     return { ok: false, error: 'unexpected helper ' + name };
   },
 };
-const env = { get: (key) => ({ DEVICE_EUI: gateway, OSI_SCOPED_ACCESS: '1' }[key] || '') };
+let activeGateway = gateway;
+const env = { get: (key) => ({ DEVICE_EUI: activeGateway, OSI_SCOPED_ACCESS: '1' }[key] || '') };
 const nodeErrors = [];
 const node = {
   error: (...args) => { nodeErrors.push(args); },
@@ -114,6 +118,17 @@ async function dispatch(command) {
   return { applied, queued, queueErrors: nodeErrors.slice() };
 }
 
+async function dispatchLegacy(command) {
+  nodeErrors.length = 0;
+  const msg = { payload: { _pendingCommandEnvelope: command }, _commandTypeRecognized: true };
+  const deduped = await runDedupe(msg, node, env, flow, osiLib);
+  assert.deepEqual(deduped, [null, null, msg], 'legacy command must reach compatibility helper');
+  const applied = await runHelper(deduped[2], node, env, flow, osiLib);
+  assert.equal(applied[0], null);
+  assert.ok(applied[1], 'legacy helper must return an ACK message');
+  return applied[1];
+}
+
 function evidence(commandId) {
   const ledgerRow = raw.prepare('SELECT result_detail FROM applied_commands WHERE command_id=?').get(String(commandId));
   const ackRow = raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get(String(commandId));
@@ -151,6 +166,60 @@ function assertAckQueueFailsClosed(result, label) {
   assert.equal(changed.applied[1] && JSON.parse(changed.applied[1].payload).result, 'CONFLICT');
   assert.deepEqual(evidence(9201), beforeReplay, 'same-ID changed binding must preserve terminal evidence bytes');
   assert.deepEqual({ ledgerCount: evidence(9201).ledgerCount, ackCount: evidence(9201).ackCount }, { ledgerCount: 1, ackCount: 1 });
+
+  activeGateway = '0016C001F1000001';
+  const legacyPayload = {
+    deviceEui: 'A84041A171000001',
+    gatewayDeviceEui: activeGateway,
+    soilMoistureProbeDepthsJson: {},
+    soilMoistureProbeDepthsConfigured: false,
+    syncVersion: 0,
+  };
+  const legacy = await dispatchLegacy({
+    commandId: 9301,
+    commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+    payload: legacyPayload,
+  });
+  assert.equal(JSON.parse(legacy.payload).commandId, 9301);
+  assert.equal(JSON.parse(legacy.payload).appliedSyncVersion, null);
+  const legacyRow = raw.prepare('SELECT soil_moisture_probe_depths_json, soil_moisture_probe_depths_configured, sync_version FROM devices WHERE deveui=?').get('A84041A171000001');
+  assert.equal(legacyRow.soil_moisture_probe_depths_json, '{}');
+  assert.equal(legacyRow.soil_moisture_probe_depths_configured, 0);
+  assert.equal(legacyRow.sync_version, 1);
+  const configuredLegacy = await dispatchLegacy({
+    commandId: 9302,
+    commandType: 'UPSERT_DEVICE_SOIL_DEPTHS',
+    appliedSyncVersion: 7,
+    payload: { ...legacyPayload, soilMoistureProbeDepthsJson: { swt_1: 20, swt_2: 40, swt_3: -1, swt_4: 1001 }, soilMoistureProbeDepthsConfigured: true, syncVersion: 1 },
+  });
+  assert.equal(JSON.parse(configuredLegacy.payload).appliedSyncVersion, 7);
+  const configuredRow = raw.prepare('SELECT soil_moisture_probe_depths_json, soil_moisture_probe_depths_configured, sync_version FROM devices WHERE deveui=?').get('A84041A171000001');
+  assert.equal(configuredRow.soil_moisture_probe_depths_json, '{"swt_1":20,"swt_2":40}');
+  assert.equal(configuredRow.soil_moisture_probe_depths_configured, 1);
+  assert.equal(configuredRow.sync_version, 7);
+  const replayAfterLocalEdit = await dispatchLegacy({ commandId: 9301, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: legacyPayload });
+  assert.equal(replayAfterLocalEdit.payload, legacy.payload, 'legacy replay keeps original ACK after a later local edit');
+  const legacyEvidence = raw.prepare('SELECT binding_hash, intent_hash, actor_user_uuid, base_sync_version, operation FROM applied_commands WHERE command_id=?').get('9301');
+  assert.equal(legacyEvidence.binding_hash, null);
+  assert.equal(legacyEvidence.intent_hash, null);
+  assert.equal(legacyEvidence.actor_user_uuid, null);
+  assert.equal(legacyEvidence.base_sync_version, null);
+  assert.equal(legacyEvidence.operation, null);
+  const replay = await dispatchLegacy({ commandId: 9301, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: legacyPayload });
+  assert.equal(replay.payload, legacy.payload, 'legacy exact replay returns original ACK');
+  const changedLegacy = await dispatchLegacy({ commandId: 9301, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: { ...legacyPayload, soilMoistureProbeDepthsConfigured: true } });
+  assert.equal(JSON.parse(changedLegacy.payload).result, 'CONFLICT', 'legacy same-ID changed binding conflicts');
+  const foreignPayload = { ...legacyPayload, deviceEui: device };
+  const foreign = await dispatchLegacy({ commandId: 9303, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: foreignPayload });
+  assert.equal(JSON.parse(foreign.payload).result, 'CONFLICT');
+  assert.equal(raw.prepare('SELECT result FROM applied_commands WHERE command_id=?').get('9303').result, 'CONFLICT');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('9303').n, 1);
+  const foreignReplay = await dispatchLegacy({ commandId: 9303, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: foreignPayload });
+  assert.equal(foreignReplay.payload, foreign.payload, 'legacy conflict replay returns durable ACK');
+  const override = await dispatchLegacy({ commandId: 9304, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', appliedSyncVersion: 1, payload: legacyPayload });
+  assert.equal(JSON.parse(override.payload).appliedSyncVersion, 1);
+  const overrideChanged = await dispatchLegacy({ commandId: 9304, commandType: 'UPSERT_DEVICE_SOIL_DEPTHS', payload: legacyPayload });
+  assert.equal(JSON.parse(overrideChanged.payload).result, 'CONFLICT', 'ACK-version binding changes conflict even when DB version is unchanged');
   console.log('PROTECTED_COMMAND_REPLAY_CHAIN_OK');
 })().catch((error) => {
   console.error(error.stack || error);
