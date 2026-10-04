@@ -1,12 +1,13 @@
 'use strict';
 // Behavioural tests for the gateway records deploy.sh keeps outside the
 // Node-RED payload: the reported firmware version (UCI
-// osi-server.cloud.firmware_version).
+// osi-server.cloud.firmware_version) and the osi-bootstrap service that
+// provisions ChirpStack at boot.
 //
 // deploy.sh mutates real system paths from its first line, so these tests do
 // not run it whole. They extract the real shell functions and fragments
 // (between their own begin/end markers) and run them under a POSIX shell with
-// `uci`, `logread` and `sleep` stubbed on PATH. Run with a BusyBox `sh` first
+// `uci`, `logread`, `sleep` and the init script stubbed. Run with a BusyBox `sh` first
 // on PATH to check the fragments under ash.
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -351,4 +352,156 @@ test('a failed first deploy (nothing to roll back to) leaves the old version', (
   } finally {
     fs.rmSync(fx.dir, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// osi-bootstrap: enabled on a stock gateway OS install (Path B)
+// ---------------------------------------------------------------------------
+
+const BOOTSTRAP_INIT_REL = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap';
+const BOOTSTRAP_INIT = fs.readFileSync(path.join(REPO, BOOTSTRAP_INIT_REL), 'utf8');
+const PROVISIONED_ENV = 'CHIRPSTACK_API_KEY=token\nCHIRPSTACK_APP_SENSORS=0a1b2c3d-0000-4000-8000-000000000001\n';
+
+// rc.common stand-in: `enabled` tests for the rc.d link, `enable` creates it.
+function bootstrapFixture({ enabled = false, env = null, stamp = false, failEnable = false } = {}) {
+  const dir = tempDir('osi-deploy-bootstrap-');
+  const binDir = path.join(dir, 'bin');
+  fs.mkdirSync(binDir);
+  const rcLink = path.join(dir, 'S99osi-bootstrap');
+  const log = path.join(dir, 'init.log');
+  fs.writeFileSync(log, '');
+  if (enabled) fs.writeFileSync(rcLink, '');
+  const init = path.join(dir, 'osi-bootstrap');
+  writeExecutable(init, [
+    '#!/bin/sh',
+    `echo "$1" >> ${JSON.stringify(log)}`,
+    'case "$1" in',
+    `  enabled) [ -e ${JSON.stringify(rcLink)} ] ;;`,
+    `  enable) ${failEnable ? 'exit 1' : `: > ${JSON.stringify(rcLink)}`} ;;`,
+    '  *) exit 0 ;;',
+    'esac',
+  ]);
+  const envFile = path.join(dir, 'chirpstack.env');
+  if (env !== null) fs.writeFileSync(envFile, env);
+  const stampFile = path.join(dir, 'osi-bootstrap.done');
+  if (stamp) fs.writeFileSync(stampFile, '');
+  return { dir, binDir, init, rcLink, log, envFile, stampFile };
+}
+
+function initCalls(fx) {
+  return fs.readFileSync(fx.log, 'utf8').split('\n').filter(Boolean);
+}
+
+function runEnableBootstrap(fx) {
+  const script = `set -eu
+OSI_BOOTSTRAP_INIT=${JSON.stringify(fx.init)}
+OSI_BOOTSTRAP_STAMP=${JSON.stringify(fx.stampFile)}
+CHIRPSTACK_ENV_FILE=${JSON.stringify(fx.envFile)}
+${extractFunction('enable_osi_bootstrap')}
+enable_osi_bootstrap
+echo "RC=$?"
+`;
+  return runShell(script, { PATH: childPath(fx.binDir) });
+}
+
+// The init script's own stamp check, pointed at the fixture paths: returns 0
+// when the service would do nothing at boot.
+function serviceWouldBeNoOp(fx) {
+  const open = BOOTSTRAP_INIT.indexOf('stamp_valid() {');
+  const close = BOOTSTRAP_INIT.indexOf('\n}\n', open);
+  assert.ok(open >= 0 && close > open, 'osi-bootstrap must keep its stamp_valid() function');
+  const fn = BOOTSTRAP_INIT.slice(open, close + 3)
+    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
+    .split('/srv/node-red/.chirpstack.env').join(fx.envFile);
+  const r = runShell(`${fn}\nstamp_valid`, { PATH: childPath(fx.binDir) });
+  return r.status === 0;
+}
+
+test('a gateway without the service enabled gets it enabled, with no stamp when nothing is provisioned', () => {
+  const fx = bootstrapFixture();
+  try {
+    const r = runEnableBootstrap(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /RC=0/);
+    assert.ok(initCalls(fx).includes('enable'), initCalls(fx).join('\n'));
+    assert.ok(fs.existsSync(fx.rcLink));
+    assert.equal(fs.existsSync(fx.stampFile), false, 'an unprovisioned gateway must be provisioned at the next boot');
+    assert.equal(serviceWouldBeNoOp(fx), false);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('a gateway where the service is already enabled is left as it is', () => {
+  const fx = bootstrapFixture({ enabled: true, env: PROVISIONED_ENV });
+  try {
+    const r = runEnableBootstrap(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(initCalls(fx), ['enabled']);
+    assert.equal(fs.existsSync(fx.stampFile), false,
+      'an enabled service keeps its own retry: a removed stamp means a restart request is still owed');
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('running twice enables once', () => {
+  const fx = bootstrapFixture();
+  try {
+    assert.equal(runEnableBootstrap(fx).status, 0);
+    assert.equal(runEnableBootstrap(fx).status, 0);
+    assert.equal(initCalls(fx).filter((c) => c === 'enable').length, 1, initCalls(fx).join('\n'));
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('a gateway provisioned by hand gets the stamp, so the newly enabled service is a no-op', () => {
+  const fx = bootstrapFixture({ env: PROVISIONED_ENV });
+  try {
+    const r = runEnableBootstrap(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(fs.existsSync(fx.stampFile), r.stdout + r.stderr);
+    assert.equal(serviceWouldBeNoOp(fx), true, 'the init script must treat this gateway as provisioned');
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('an env file without a provisioned sensors application gets no stamp', () => {
+  const fx = bootstrapFixture({ env: 'CHIRPSTACK_API_KEY=token\nCHIRPSTACK_APP_SENSORS=\n' });
+  try {
+    assert.equal(runEnableBootstrap(fx).status, 0);
+    assert.equal(fs.existsSync(fx.stampFile), false);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed enable is logged and does not fail the deploy', () => {
+  const fx = bootstrapFixture({ failEnable: true, env: PROVISIONED_ENV });
+  try {
+    const r = runEnableBootstrap(fx);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /RC=0/);
+    assert.match(r.stderr, /could not enable osi-bootstrap/);
+    assert.equal(fs.existsSync(fx.stampFile), false);
+  } finally {
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test('deploy.sh enables the service where it installs it, with the init script\'s stamp test', () => {
+  const install = DEPLOY.indexOf('chmod 755 /etc/init.d/osi-bootstrap');
+  const call = DEPLOY.indexOf('\nenable_osi_bootstrap\n', install);
+  const nextStep = DEPLOY.indexOf('--- Remove legacy gateway GPS sidecar ---', install);
+  assert.ok(install > 0 && call > install && call < nextStep,
+    'enable_osi_bootstrap must run right after the service file is installed');
+  assert.match(DEPLOY, /^OSI_BOOTSTRAP_INIT="\/etc\/init\.d\/osi-bootstrap"$/m);
+  assert.match(DEPLOY, /^OSI_BOOTSTRAP_STAMP="\/etc\/osi-bootstrap\.done"$/m);
+  assert.match(DEPLOY, /^CHIRPSTACK_ENV_FILE="\/srv\/node-red\/\.chirpstack\.env"$/m);
+  const initPattern = /grep -q '(CHIRPSTACK_APP_SENSORS=[^']+)'/.exec(BOOTSTRAP_INIT);
+  assert.ok(initPattern, 'osi-bootstrap stamp_valid pattern not found');
+  assert.ok(extractFunction('enable_osi_bootstrap').includes(`'${initPattern[1]}'`),
+    'deploy.sh must judge "provisioned" with the same pattern as the service');
 });

@@ -46,6 +46,9 @@ DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
 GUI_ROOT="/usr/lib/node-red/gui"
 NODE_RED_INIT="/etc/init.d/node-red"
+OSI_BOOTSTRAP_INIT="/etc/init.d/osi-bootstrap"
+OSI_BOOTSTRAP_STAMP="/etc/osi-bootstrap.done"
+CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
 # Tracks whether this deploy's staged payload has already been flipped into
 # /srv/node-red/flows.json. Set by run_schema_migration() on a successful
 # migration (issue #222 / F4 — see there) and consulted by the later
@@ -265,6 +268,35 @@ record_firmware_version() {
     else
         uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
         echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${rfw_current:-unset}" >&2
+    fi
+    return 0
+}
+
+# A flashed image enables osi-bootstrap at first boot (uci-defaults
+# 95_osi_bootstrap_enable); a stock gateway OS install only gets the init file
+# from this script, so enable it here. rc.common enable is idempotent; an
+# already enabled service is left alone. A gateway provisioned by hand before
+# the service was enabled has a provisioned env file but no stamp; the service
+# would rerun chirpstack-bootstrap.js at the next boot, which mints a second
+# API key and rewrites the env file. Stamp it with the service's own test so
+# the boot run stays a no-op. Never fails the deploy.
+enable_osi_bootstrap() {
+    if "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "OK: osi-bootstrap already enabled"
+        return 0
+    fi
+    if ! "$OSI_BOOTSTRAP_INIT" enable; then
+        echo "WARN: could not enable osi-bootstrap; ChirpStack provisioning will not run at boot" >&2
+        return 0
+    fi
+    echo "OK: osi-bootstrap enabled (START=99; provisions ChirpStack at boot until stamped)"
+    if [ ! -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        if touch "$OSI_BOOTSTRAP_STAMP"; then
+            echo "OK: ChirpStack already provisioned; wrote $OSI_BOOTSTRAP_STAMP so the boot run is a no-op"
+        else
+            echo "WARN: could not write $OSI_BOOTSTRAP_STAMP; osi-bootstrap will rerun chirpstack-bootstrap.js at the next boot" >&2
+        fi
     fi
     return 0
 }
@@ -1391,6 +1423,7 @@ fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
     "/etc/init.d/osi-bootstrap"
 chmod 755 /etc/init.d/osi-bootstrap
+enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
 if [ -x /etc/init.d/osi-gateway-gps ]; then
