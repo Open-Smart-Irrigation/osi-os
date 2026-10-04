@@ -16,9 +16,11 @@ const PROFILE = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files');
 const NODE_RED = path.join(PROFILE, 'usr/share/node-red');
 const LEDGER = path.join(NODE_RED, 'osi-command-ledger');
 const BINDING = path.join(NODE_RED, 'osi-watermark-binding');
-const OLD_LEDGER_COMMIT = '15d9126e3^';
-const LEDGER_INDEX = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js';
-const LEDGER_PACKAGE = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json';
+// The ledger pair gateways run before this feature (main 90ea6e56c, see the
+// fixture README) and a main commit whose seed predates migration 0068. Both are
+// independent of the feature branch's history, so the test survives a squash merge.
+const OLD_LEDGER_FIXTURE = path.join(__dirname, 'fixtures/command-ledger-pre-watermark/osi-command-ledger');
+const PRE_0068_MAIN_COMMIT = '90ea6e56c';
 const BINDING_INDEX = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js';
 
 function sha256(file) {
@@ -27,6 +29,16 @@ function sha256(file) {
 
 function gitFile(revision, relative) {
   return execFileSync('git', ['show', `${revision}:${relative}`], { cwd: ROOT });
+}
+
+// database/seed-blank.sql at a main commit before migration 0068. The guard keeps
+// the pre-migration probes meaningful: a seed that already carries 0068 objects
+// would make them compare the new schema with itself.
+function preMigrationSeed() {
+  const seed = gitFile(PRE_0068_MAIN_COMMIT, 'database/seed-blank.sql').toString('utf8');
+  assert.doesNotMatch(seed, /binding_hash|idx_applied_commands_protected_effect|trg_watermark_calibrations_outbox/,
+    'the pre-migration seed must predate migration 0068');
+  return seed;
 }
 
 function mkdirFor(file) {
@@ -43,8 +55,8 @@ function copyCandidate(stage) {
 
 function writeOldPair(root, { withBinding = false } = {}) {
   mkdirFor(path.join(root, 'osi-command-ledger/index.js'));
-  fs.writeFileSync(path.join(root, 'osi-command-ledger/package.json'), gitFile(OLD_LEDGER_COMMIT, LEDGER_PACKAGE));
-  fs.writeFileSync(path.join(root, 'osi-command-ledger/index.js'), gitFile(OLD_LEDGER_COMMIT, LEDGER_INDEX));
+  fs.copyFileSync(path.join(OLD_LEDGER_FIXTURE, 'package.json'), path.join(root, 'osi-command-ledger/package.json'));
+  fs.copyFileSync(path.join(OLD_LEDGER_FIXTURE, 'index.js'), path.join(root, 'osi-command-ledger/index.js'));
   if (withBinding) {
     mkdirFor(path.join(root, 'osi-watermark-binding/canonicalization.js'));
     fs.copyFileSync(path.join(BINDING, 'canonicalization.js'), path.join(root, 'osi-watermark-binding/canonicalization.js'));
@@ -124,10 +136,8 @@ function probeFreshLedger(root) {
 }
 
 function probePreMigrationLegacyFlow(root, seedOverride, expectLegacyApply = false) {
-  const base = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const preMigrationSeed = seedOverride || gitFile(base, 'database/seed-blank.sql').toString('utf8');
   const seedFile = path.join(root, 'pre-migration-seed.sql');
-  fs.writeFileSync(seedFile, preMigrationSeed);
+  fs.writeFileSync(seedFile, seedOverride || preMigrationSeed());
   const probe = `
     const fs = require('node:fs');
     const assert = require('node:assert/strict');
@@ -351,11 +361,7 @@ test('defers activation so pre-0068 database and legacy flows keep the old ledge
 
     install(installOptions(root, stage));
     probeFreshLedger(root);
-    const preMigrationSeed = gitFile(
-      execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: ROOT, encoding: 'utf8' }).trim(),
-      'database/seed-blank.sql'
-    ).toString('utf8');
-    probePreMigrationLegacyFlow(root, preMigrationSeed, true);
+    probePreMigrationLegacyFlow(root, preMigrationSeed(), true);
     probePreMigrationLegacyFlow(root, fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'), true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
