@@ -214,9 +214,7 @@ dev workstation unless noted.
    complete" and exit 0. Same failure class as `git push | tail -1` hiding a failed
    push behind `tail`'s exit code (engineering playbook §1). Download-then-run makes
    `curl`'s failure set `$rc`, so a 404'd deploy fails loudly over the SSH exit code.
-   `deploy.sh`'s own header comment still shows the shorter piped form as a
-   convenience one-liner — prefer the hardened form above for anything you need to
-   trust.
+   `deploy.sh`'s own header comment shows the same download-then-run form.
 
 5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
    restarts Node-RED itself, up to twice: once around the schema-migration step

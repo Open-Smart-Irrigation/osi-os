@@ -3,8 +3,10 @@
 # Runs ON THE PI. Downloads OSI OS components from a local HTTP server
 # tunnelled through the SSH connection.
 #
-# Usage (from your dev machine):
-#   ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
+# Usage (from your dev machine), download first and then run, so a failed
+# download fails the SSH command instead of feeding an empty script to sh:
+#   ssh -R 9876:localhost:9876 root@<pi-ip> \
+#     'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 #
 # Safety invariant: this script must never overwrite /data/db/farming.db.
 # The edge database is live user data and osi-os is the operational source of
@@ -49,6 +51,11 @@ NODE_RED_INIT="/etc/init.d/node-red"
 OSI_BOOTSTRAP_INIT="/etc/init.d/osi-bootstrap"
 OSI_BOOTSTRAP_STAMP="/etc/osi-bootstrap.done"
 CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
+# The image ships the bootstrap script in /usr/share/node-red; a stock gateway
+# OS install has only the copy this script fetches. osi-bootstrap prefers the
+# first that exists, in this order.
+BOOTSTRAP_SCRIPT_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
+BOOTSTRAP_SCRIPT_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 # Tracks whether this deploy's staged payload has already been flipped into
 # /srv/node-red/flows.json. Set by run_schema_migration() on a successful
 # migration (issue #222 / F4 — see there) and consulted by the later
@@ -299,6 +306,28 @@ enable_osi_bootstrap() {
         fi
     fi
     return 0
+}
+
+# Closing-banner note on ChirpStack provisioning for the gateway this ran on.
+print_bootstrap_note() {
+    if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
+        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+    else
+        pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
+    fi
+    if [ -e "$OSI_BOOTSTRAP_STAMP" ]; then
+        echo "  NOTE: ChirpStack is already provisioned ($OSI_BOOTSTRAP_STAMP present);"
+        echo "        osi-bootstrap (START=99) rechecks it at every boot."
+    elif "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "  NOTE: ChirpStack is not provisioned yet. osi-bootstrap (START=99)"
+        echo "        provisions it at the next boot; to provision now run:"
+        echo "        /etc/init.d/osi-bootstrap start"
+    else
+        echo "  NOTE: osi-bootstrap is not enabled on this gateway; provision"
+        echo "        ChirpStack by hand with the command below."
+    fi
+    echo "        To re-provision manually run:"
+    echo "        node $pbn_script"
 }
 
 ensure_journal_media_defaults() {
@@ -2338,7 +2367,4 @@ echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health s
 echo "  UI:       http://<device-ip>:1880/gui"
 echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
-echo "  NOTE: ChirpStack provisioning runs automatically on first boot via"
-echo "        osi-bootstrap (START=99).  No manual bootstrap step needed on"
-echo "        a freshly installed gateway.  To re-provision manually run:"
-echo "        node /usr/share/node-red/chirpstack-bootstrap.js"
+print_bootstrap_note

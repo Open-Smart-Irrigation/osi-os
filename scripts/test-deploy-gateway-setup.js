@@ -505,3 +505,85 @@ test('deploy.sh enables the service where it installs it, with the init script\'
   assert.ok(extractFunction('enable_osi_bootstrap').includes(`'${initPattern[1]}'`),
     'deploy.sh must judge "provisioned" with the same pattern as the service');
 });
+
+// ---------------------------------------------------------------------------
+// Header usage line and closing banner
+// ---------------------------------------------------------------------------
+
+test('the header shows the download-then-run form, not a pipe into sh', () => {
+  const header = DEPLOY.slice(0, DEPLOY.indexOf('\nset -eu\n'));
+  assert.doesNotMatch(header, /\|\s*sh\b/, 'a pipe into sh hides a failed download behind sh\'s exit status');
+  assert.match(header, /curl -fsSL http:\/\/127\.0\.0\.1:9876\/deploy\.sh -o \/tmp\/osi-os-deploy\.sh && sh \/tmp\/osi-os-deploy\.sh; rc=\$\?; rm -f \/tmp\/osi-os-deploy\.sh; exit "\$rc"/);
+});
+
+function runBootstrapNote(fx, { rom }) {
+  const romPath = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
+  const fallbackPath = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
+  fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
+  fs.writeFileSync(fallbackPath, '');
+  if (rom) {
+    fs.mkdirSync(path.dirname(romPath), { recursive: true });
+    fs.writeFileSync(romPath, '');
+  }
+  const script = `set -eu
+OSI_BOOTSTRAP_INIT=${JSON.stringify(fx.init)}
+OSI_BOOTSTRAP_STAMP=${JSON.stringify(fx.stampFile)}
+BOOTSTRAP_SCRIPT_ROM=${JSON.stringify(romPath)}
+BOOTSTRAP_SCRIPT_FALLBACK=${JSON.stringify(fallbackPath)}
+${extractFunction('print_bootstrap_note')}
+print_bootstrap_note
+`;
+  const r = runShell(script, { PATH: childPath(fx.binDir) });
+  return { r, romPath, fallbackPath };
+}
+
+test('the banner names the bootstrap script path that exists on this gateway', () => {
+  const flashed = bootstrapFixture({ enabled: true, stamp: true });
+  try {
+    const { r, romPath, fallbackPath } = runBootstrapNote(flashed, { rom: true });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`node ${romPath}`), r.stdout);
+    assert.ok(!r.stdout.includes(fallbackPath), r.stdout);
+  } finally {
+    fs.rmSync(flashed.dir, { recursive: true, force: true });
+  }
+  const stock = bootstrapFixture({ enabled: true });
+  try {
+    const { r, romPath, fallbackPath } = runBootstrapNote(stock, { rom: false });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`node ${fallbackPath}`), r.stdout);
+    assert.ok(!r.stdout.includes(romPath), r.stdout);
+  } finally {
+    fs.rmSync(stock.dir, { recursive: true, force: true });
+  }
+});
+
+test('the banner says what provisioning still needs on this gateway', () => {
+  const cases = [
+    { opts: { enabled: true, stamp: true }, expect: /already provisioned/ },
+    { opts: { enabled: true }, expect: /next boot[\s\S]*\/etc\/init\.d\/osi-bootstrap start/ },
+    { opts: { enabled: false }, expect: /not enabled/ },
+  ];
+  for (const { opts, expect } of cases) {
+    const fx = bootstrapFixture(opts);
+    try {
+      const { r } = runBootstrapNote(fx, { rom: false });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, expect);
+      assert.doesNotMatch(r.stdout, /No manual bootstrap step needed/);
+    } finally {
+      fs.rmSync(fx.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap path', () => {
+  const banner = DEPLOY.slice(DEPLOY.indexOf('echo "=== Deploy complete. ==="'));
+  assert.ok(banner.includes('\nprint_bootstrap_note\n'), 'the banner must print the bootstrap note');
+  assert.doesNotMatch(banner, /chirpstack-bootstrap\.js/);
+  assert.match(DEPLOY, /^BOOTSTRAP_SCRIPT_ROM="\/usr\/share\/node-red\/chirpstack-bootstrap\.js"$/m);
+  assert.match(DEPLOY, /^BOOTSTRAP_SCRIPT_FALLBACK="\/srv\/node-red\/chirpstack-bootstrap\.js"$/m);
+  // Same precedence as the service itself.
+  assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_ROM="\/usr\/share\/node-red\/chirpstack-bootstrap\.js"/);
+  assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_FALLBACK="\/srv\/node-red\/chirpstack-bootstrap\.js"/);
+});
