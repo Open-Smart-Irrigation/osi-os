@@ -552,7 +552,7 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
-function activationHarness(root, inject) {
+function activationHarness(root, inject, options = {}) {
   const initPath = '/etc/init.d/node-red';
   const identity = deployFragment('# identityd deploy lifecycle begin\n', '# identityd deploy lifecycle end')
     .replace('deploy_exit_handler() {', 'deploy_exit_handler_under_test() {');
@@ -597,10 +597,20 @@ NODE_RED_LOG_MARK=""
 node_red_restart_needed=0
 mkdir -p "$TMP_DIR" "$PAYLOADS_ROOT" "$GUI_ROOT"
 
+# HARNESS_FETCH_PATH names one repo path whose download fails: "missing" is
+# a 404 (curl -f writes nothing and exits 22); "truncated" and "empty" are a
+# server that answers 200 with half of the file or with no bytes at all;
+# "unwritten" reports success but leaves no file, so the file is absent from
+# the directory although CHECKSUMS.json names it.
 fetch() {
     mkdir -p "$(dirname "$2")"
-    if [ -n "\${HARNESS_FAIL_FETCH:-}" ] && [ "$1" = "$HARNESS_FAIL_FETCH" ]; then
-        return 22
+    if [ -n "\${HARNESS_FETCH_PATH:-}" ] && [ "$1" = "$HARNESS_FETCH_PATH" ]; then
+        case "\${HARNESS_FETCH_FAULT:-missing}" in
+            missing) return 22 ;;
+            unwritten) return 0 ;;
+            empty) : > "$2"; return 0 ;;
+            truncated) head -c "$(( $(wc -c < "$REPO_ROOT/$1") / 2 ))" "$REPO_ROOT/$1" > "$2"; return 0 ;;
+        esac
     fi
     cp "$REPO_ROOT/$1" "$2"
 }
@@ -608,11 +618,18 @@ ${shellFunction('fetch_required')}
 ${shellFunction('swap_call')}
 ${shellFunction('stage_command_ledger_dependency')}
 ${shellFunction('activate_command_ledger_dependency')}
+${shellFunction('check_fetched_manifest')}
+${shellFunction('check_fetched_js_files')}
 ${identity}
 ${payload}
 ${shellFunction('checkpoint_live_db')}
 ${shellFunction('ensure_sqlite3_cli')}
 ${shellFunction('restart_node_red').replaceAll(initPath, '"$NODE_RED_INIT"')}
+${shellFunction('fetch_reconciliation_assets')}
+${options.realRunner ? shellFunction('fetch_migration_runner') : `fetch_migration_runner() {
+    migrations_dir="$REPO_ROOT/database/migrations/ordered"
+    MIGRATION_RUNNER_AVAILABLE=1
+}`}
 ${migration}
 
 deploy_exit_handler() {
@@ -620,10 +637,6 @@ deploy_exit_handler() {
     deploy_exit_handler_under_test "$1"
 }
 cleanup() { :; }
-fetch_migration_runner() {
-    migrations_dir="$REPO_ROOT/database/migrations/ordered"
-    MIGRATION_RUNNER_AVAILABLE=1
-}
 wait_for_node_red_stop() { return 0; }
 wait_for_node_red_health() { return 0; }
 identityd_service() {
@@ -645,14 +658,23 @@ NODEINIT
 chmod 755 "$NODE_RED_INIT"
 echo 1 > "$NODE_RED_STATE_FILE"
 echo 1 > "$IDENTITYD_STATE_FILE"
-sqlite3 "$DB_PATH" "CREATE TABLE schema_migrations(version INTEGER, checksum TEXT, status TEXT); INSERT INTO schema_migrations VALUES (12, 'old', 'applied');"
+if [ -n "\${HARNESS_DB_SOURCE:-}" ]; then
+    cp "$HARNESS_DB_SOURCE" "$DB_PATH"
+else
+    sqlite3 "$DB_PATH" "CREATE TABLE schema_migrations(version INTEGER, checksum TEXT, status TEXT); INSERT INTO schema_migrations VALUES (12, 'old', 'applied');"
+    if [ "\${HARNESS_FOREIGN_ROW:-0}" = 1 ]; then
+        # A ledger row above 0021 whose checksum is not main's: the probe
+        # sends the deploy into ledger numbering reconciliation.
+        sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (22, 'feedface', 'applied');"
+    fi
+fi
 for stamp in prev new; do
     mkdir -p "$ROOT_DIR/src-gui-$stamp"
     printf '%s\\n' "[{\\"id\\":\\"$stamp\\"}]" > "$ROOT_DIR/src-flows-$stamp.json"
     printf '%s\\n' "$stamp" > "$ROOT_DIR/src-gui-$stamp/index.html"
 done
 swap_call stagePayload prev "$ROOT_DIR/src-flows-prev.json" "$ROOT_DIR/src-gui-prev" >/dev/null
-swap_call writeCompatibility prev 12 12:old >/dev/null
+write_payload_compatibility prev
 swap_call flipTo prev "$GUI_ROOT" >/dev/null
 swap_call stagePayload new "$ROOT_DIR/src-flows-new.json" "$ROOT_DIR/src-gui-new" >/dev/null
 
@@ -671,6 +693,9 @@ function writeNodeShim(root) {
   const bin = path.join(root, 'bin');
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh
+if [ "\${HARNESS_REAL_MIGRATE:-0}" = 1 ]; then
+  exec ${shellQuote(process.execPath)} "$@"
+fi
 case "$1" in
   *migrate-cli.js)
     case " $* " in *" --prune-only "*) exit 0 ;; esac
@@ -688,13 +713,13 @@ esac
   return bin;
 }
 
-function runActivationHarness(root, inject, env = {}) {
+function runActivationHarness(root, inject, env = {}, options = {}) {
   writeOldPair(path.join(root, 'node-red'));
   const bin = writeNodeShim(root);
-  const result = spawnSync('sh', ['-c', activationHarness(root, inject)], {
+  const result = spawnSync('sh', ['-c', activationHarness(root, inject, options)], {
     encoding: 'utf8',
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...env },
-    timeout: 60000,
+    timeout: 120000,
   });
   const read = (name) => (fs.existsSync(path.join(root, name)) ? fs.readFileSync(path.join(root, name), 'utf8').trim() : null);
   return {
@@ -702,6 +727,7 @@ function runActivationHarness(root, inject, env = {}) {
     exitState: read('exit-state'),
     nodeRed: read('node-red.state'),
     identityd: read('identityd.state'),
+    nodeRedLog: read('node-red.log') || '',
     activeFlows: swapStamp(root),
     newPayloadKept: fs.existsSync(path.join(root, 'payloads', 'new')),
     liveLedger: Object.fromEntries(['osi-command-ledger/package.json', 'osi-command-ledger/index.js', 'osi-watermark-binding/canonicalization.js']
@@ -738,8 +764,10 @@ function withActivationRoot(fn) {
   try {
     return fn(root);
   } finally {
-    const blocked = path.join(root, 'node-red', 'osi-watermark-binding');
-    if (fs.existsSync(blocked)) fs.chmodSync(blocked, 0o755);
+    for (const dir of ['osi-watermark-binding', 'osi-command-ledger']) {
+      const blocked = path.join(root, 'node-red', dir);
+      if (fs.existsSync(blocked)) fs.chmodSync(blocked, 0o755);
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
@@ -864,5 +892,128 @@ fi
       'fetch_required must not report OK for a failed fetch');
     assert.doesNotMatch(result.stdout, /--- osi-watermark-binding canonicalization\.js ---/,
       'staging must stop at the failed fetch');
+  });
+});
+
+// --- Migration runner fetch -------------------------------------------------
+//
+// The bundled seed of a main commit before migration 0068 is a real database
+// stamped at 0067. These tests run the shipped fetch_migration_runner and the
+// real migrate-cli.js and verify-head-cli.js against a copy of it.
+
+let preMigrationDb = null;
+function preMigrationDbFile() {
+  if (!preMigrationDb) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-pre-0068-db-'));
+    preMigrationDb = path.join(dir, 'farming.db');
+    fs.writeFileSync(preMigrationDb, execFileSync('git', ['show', `${PRE_0068_MAIN_COMMIT}:conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db`],
+      { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }));
+    process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  }
+  return preMigrationDb;
+}
+
+function dbHead(root) {
+  return execFileSync('sqlite3', [path.join(root, 'farming.db'), "SELECT MAX(version) FROM schema_migrations WHERE status='applied'"], { encoding: 'utf8' }).trim();
+}
+
+const MIGRATION_NAMES = Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/CHECKSUMS.json'), 'utf8'))).sort();
+const LAST_MIGRATION = MIGRATION_NAMES[MIGRATION_NAMES.length - 1];
+const LAST_VERSION = String(Number(LAST_MIGRATION.slice(0, 4)));
+
+function runRunnerHarness(root, env = {}, inject = ':') {
+  return runActivationHarness(root, inject, { HARNESS_REAL_MIGRATE: '1', HARNESS_DB_SOURCE: preMigrationDbFile(), ...env }, { realRunner: true });
+}
+
+test('the real migration runner takes a pre-0068 database to head and activates the ledger', () => {
+  assert.equal(LAST_MIGRATION.slice(0, 4), '0068', 'these tests assume 0068 is the newest migration on this line');
+  withActivationRoot((root) => {
+    const result = runRunnerHarness(root);
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.equal(dbHead(root), LAST_VERSION);
+    assert.equal(result.exitState, 'activated=1 flipped=1 committed=1');
+    assert.equal(result.activeFlows, 'new');
+  });
+});
+
+const RUNNER_FETCH_TARGETS = [
+  [`database/migrations/ordered/${LAST_MIGRATION}`, LAST_MIGRATION],
+  ['database/migrations/ordered/CHECKSUMS.json', 'CHECKSUMS.json'],
+  ['lib/osi-migrate/runner.js', 'runner.js'],
+];
+
+for (const [target, name] of RUNNER_FETCH_TARGETS) {
+  for (const fault of ['missing', 'truncated', 'empty', 'unwritten']) {
+    test(`a ${fault} download of ${name} stops the deploy before the migration`, () => {
+      withActivationRoot((root) => {
+        const result = runRunnerHarness(root, { HARNESS_FETCH_PATH: target, HARNESS_FETCH_FAULT: fault });
+        assert.notEqual(result.status, 0, harnessOutput(result));
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        assert.match(result.stderr, new RegExp(`ERROR: [^\\n]*${escaped}`), harnessOutput(result));
+        assert.doesNotMatch(result.stdout, /\[migrate\] applied/, harnessOutput(result));
+        assert.doesNotMatch(result.stdout, /--- Stop Node-RED for schema migration ---/);
+        assert.equal(dbHead(root), '67', 'nothing may be migrated');
+        assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+        assert.equal(result.activeFlows, 'prev');
+        assert.equal(result.newPayloadKept, false);
+        // The fetch runs before Node-RED is stopped for the migration: it was
+        // never stopped and identityd is restored.
+        assert.doesNotMatch(result.nodeRedLog, /stop/);
+        assert.equal(result.nodeRed, '1');
+        assert.equal(result.identityd, '1');
+        assert.deepEqual(result.liveLedger, oldPairHashes());
+      });
+    });
+  }
+}
+
+// --- Other steps of the schema phase that ran without set -e ------------------
+
+function assertSchemaPhaseStopped(result, message, { nodeRedStopped }) {
+  assert.notEqual(result.status, 0, harnessOutput(result));
+  assert.match(result.stderr, message, harnessOutput(result));
+  assert.doesNotMatch(result.stdout, /\[migrate\] applied/, harnessOutput(result));
+  assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+  assert.equal(result.activeFlows, 'prev');
+  assert.equal(result.newPayloadKept, false);
+  assert.equal(/stop/.test(result.nodeRedLog), nodeRedStopped, harnessOutput(result));
+  // Never stopped, or restarted on the previous payload: running either way.
+  assert.equal(result.nodeRed, '1');
+  assert.equal(result.identityd, '1');
+}
+
+test('a failed fetch of the reconciliation assets stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':', {
+      HARNESS_FOREIGN_ROW: '1',
+      HARNESS_FETCH_PATH: 'scripts/reconcile-ledger-numbering.js',
+    });
+    assert.match(result.stdout, /Foreign-numbered schema_migrations ledger detected/, harnessOutput(result));
+    assertSchemaPhaseStopped(result, /ERROR: could not fetch scripts\/reconcile-ledger-numbering\.js/, { nodeRedStopped: true });
+    assert.match(result.stderr, /ERROR: could not fetch the ledger numbering reconciliation assets/);
+    assert.doesNotMatch(result.stderr, /Cannot find module/, 'the reconciliation tool must not be started');
+  });
+});
+
+test('a migration backup directory that cannot be created stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, 'printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"');
+    assertSchemaPhaseStopped(result, /ERROR: could not create the migration backup directory/, { nodeRedStopped: false });
+  });
+});
+
+test('a failed ledger read in the reconciliation probe stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root,
+      'sqlite3() { case "$*" in *"version > 21"*) return 1 ;; esac; command sqlite3 "$@"; }');
+    assertSchemaPhaseStopped(result, /ERROR: could not read the schema_migrations ledger for the reconciliation probe/, { nodeRedStopped: true });
+  });
+});
+
+test('a failed comparison in the reconciliation probe stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root,
+      'node() { case "$2" in *ledgerChecksum*) return 1 ;; esac; command node "$@"; }');
+    assertSchemaPhaseStopped(result, /ERROR: the reconciliation probe could not compare the ledger with CHECKSUMS\.json/, { nodeRedStopped: true });
   });
 });
