@@ -1,0 +1,53 @@
+name: Test Inventory
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  test-inventory:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inventory verifier and runner unit tests
+        run: node --test scripts/verify-test-inventory.test.js scripts/run-module-tests.test.js
+      # Every tracked test file must be run by a workflow step, collected by an
+      # npm script a step runs, chained by a listed runner, or excluded with a
+      # reason in scripts/verify-test-inventory.json. Test commands must name
+      # existing files: node --test passes when a pattern or path matches
+      # nothing.
+      - name: Every test file is run or excluded with a reason
+        run: node scripts/verify-test-inventory.js
+      # Tests that no workflow ran before this inventory existed. bcm2712 only:
+      # verify-profile-parity.js proves the bcm2709 copies byte-identical.
+      - name: Helper-module tests
+        run: |
+          node scripts/run-module-tests.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-uc512-normalize/index.test.js
+      - name: Script tests
+        run: |
+          node scripts/run-module-tests.js \
+            scripts/calibrate-lux-radiation.test.js \
+            scripts/deploy-local-server.test.js \
+            scripts/diagnose-sensor-history-gap.test.js \
+            scripts/fixtures/device-integration/uc512/codec.test.js \
+            scripts/test-deploy-node-red-service-state.js \
+            web/react-gui/scripts/css-rule-diff.test.mjs
+      - name: Shell tests
+        run: |
+          sh scripts/test-gateway-identity-helper.sh
+          sh scripts/test-osi-identityd.sh
+          sh scripts/deploy-bundle.test.sh
