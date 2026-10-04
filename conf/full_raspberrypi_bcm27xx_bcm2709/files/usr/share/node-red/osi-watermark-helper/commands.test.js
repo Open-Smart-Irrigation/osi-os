@@ -625,3 +625,133 @@ test('device type gates admit only the approved WATERMARK families', async (t) =
   }, { payload: { effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:0` } }), runtime());
   assert.equal(depthResult.ack.result, 'REJECTED_PERMANENT');
 });
+
+// A rejection does not change the device, so the cloud's next command has the
+// same base and therefore the same effect key.  Only an APPLIED row is
+// evidence that the key's effect happened; a rejected or conflicting row must
+// not block a successor command at that base.  Exact command-id redelivery
+// still returns the stored decision.
+function chameleonAt(id, base, values, actor) {
+  return envelope(id, 'SET_CHAMELEON_CONFIG', values, {
+    payload: {
+      actor_user_uuid: actor,
+      base_sync_version: base,
+      effect_key: `chameleon_config:set:${GATEWAY}:${DEVICE}:${base}`,
+    },
+  });
+}
+
+function deviceRow(raw) {
+  return { ...raw.prepare('SELECT chameleon_enabled,sync_version FROM devices WHERE deveui=?').get(DEVICE) };
+}
+
+test('a rejected protected command does not occupy the effect key for a successor', async (t) => {
+  const LATE_ACTOR = '55555555-5555-4555-8555-555555555555';
+  const { raw, db } = fixture(t);
+  const base = deviceRow(raw).sync_version;
+
+  const rejected = await commands.applyWatermarkCommand(db, chameleonAt(201, base, { chameleon_enabled: true }, LATE_ACTOR), runtime());
+  assert.equal(rejected.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(rejected.ack.reason, 'actor_missing_or_disabled');
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 0, sync_version: base });
+
+  // The user arrives through linked-auth sync.
+  raw.prepare('INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role) VALUES(5,?,?,?,?,?,?)')
+    .run('late', 'hash', NOW, NOW, LATE_ACTOR, 'admin');
+
+  const successor = await commands.applyWatermarkCommand(db, chameleonAt(202, base, { chameleon_enabled: true }, LATE_ACTOR), runtime());
+  assert.equal(successor.ack.result, 'APPLIED', JSON.stringify(successor.ack));
+  assert.equal(successor.ack.duplicate, false);
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 1, sync_version: base + 1 });
+
+  // Exact redelivery of the rejected command still returns its stored decision.
+  const redelivered = await commands.applyWatermarkCommand(db, chameleonAt(201, base, { chameleon_enabled: true }, LATE_ACTOR), runtime());
+  assert.equal(redelivered.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(redelivered.ack.reason, 'actor_missing_or_disabled');
+
+  // A different intent at the old base now meets an applied predecessor.
+  const stale = await commands.applyWatermarkCommand(db, chameleonAt(203, base, { chameleon_enabled: false }, OWNER), runtime());
+  assert.equal(stale.ack.result, 'CONFLICT');
+  assert.equal(stale.ack.reason, 'binding_conflict');
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 1, sync_version: base + 1 });
+
+  // The same intent at the old base replays the applied predecessor.
+  const duplicate = await commands.applyWatermarkCommand(db, chameleonAt(204, base, { chameleon_enabled: true }, LATE_ACTOR), runtime());
+  assert.equal(duplicate.ack.result, 'APPLIED');
+  assert.equal(duplicate.ack.duplicate, true);
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 1, sync_version: base + 1 });
+});
+
+test('the owning admin can apply a different value after a rejection at the same base', async (t) => {
+  const { raw, db } = fixture(t);
+  const base = deviceRow(raw).sync_version;
+  const rejected = await commands.applyWatermarkCommand(db, chameleonAt(211, base, { chameleon_enabled: true }, '55555555-5555-4555-8555-555555555555'), runtime());
+  assert.equal(rejected.ack.reason, 'actor_missing_or_disabled');
+  const applied = await commands.applyWatermarkCommand(db, chameleonAt(213, base, { chameleon_enabled: false }, OWNER), runtime());
+  assert.equal(applied.ack.result, 'APPLIED', JSON.stringify(applied.ack));
+  assert.equal(applied.ack.duplicate, false);
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 0, sync_version: base + 1 });
+});
+
+test('every non-applied decision leaves the effect key free once its cause is gone', async (t) => {
+  const ZONE = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const cases = [
+    {
+      reason: 'forbidden',
+      actor: WRITER,
+      prepare: (state) => {
+        state.raw.prepare(
+          'INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?)'
+        ).run('Block', 1, ZONE, GATEWAY, NOW, NOW);
+        state.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+      },
+      repair: (state) => state.raw.prepare(
+        'INSERT INTO user_zone_assignments(assignment_uuid,user_uuid,zone_uuid,created_at,updated_at,sync_version) VALUES(?,?,?,?,?,1)'
+      ).run('77777777-7777-4777-8777-777777777777', WRITER, ZONE, NOW, NOW),
+    },
+    {
+      reason: 'gateway_not_linked',
+      actor: OWNER,
+      prepare: (state) => state.raw.exec("DELETE FROM sync_link_state WHERE peer_node='cloud'"),
+      repair: (state) => state.raw.prepare("INSERT INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES('cloud',1,?,?)").run(GATEWAY, NOW),
+    },
+    {
+      reason: 'device_not_found',
+      actor: OWNER,
+      prepare: (state) => {
+        state.raw.prepare(
+          'INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,gateway_device_eui,sync_version,deleted_at,created_at,updated_at) VALUES(1,?,?,?,?,1,?,?,?)'
+        ).run('Block', 1, ZONE, GATEWAY, NOW, NOW, NOW);
+        state.raw.prepare('UPDATE devices SET irrigation_zone_id=1 WHERE deveui=?').run(DEVICE);
+      },
+      repair: (state) => state.raw.prepare('UPDATE irrigation_zones SET deleted_at=NULL WHERE id=1').run(),
+    },
+  ];
+  let id = 220;
+  for (const scenario of cases) {
+    const state = fixture(t);
+    scenario.prepare(state);
+    const base = deviceRow(state.raw).sync_version;
+    const rejected = await commands.applyWatermarkCommand(state.db, chameleonAt(id++, base, { chameleon_enabled: true }, scenario.actor), runtime());
+    assert.equal(rejected.ack.result, 'REJECTED_PERMANENT', scenario.reason);
+    assert.equal(rejected.ack.reason, scenario.reason, scenario.reason);
+    scenario.repair(state);
+    const applied = await commands.applyWatermarkCommand(state.db, chameleonAt(id++, base, { chameleon_enabled: true }, scenario.actor), runtime());
+    assert.equal(applied.ack.result, 'APPLIED', scenario.reason + ': ' + JSON.stringify(applied.ack));
+    assert.deepEqual(deviceRow(state.raw), { chameleon_enabled: 1, sync_version: base + 1 }, scenario.reason);
+  }
+});
+
+test('a preflight conflict recorded without a binding is not effect-key evidence', async (t) => {
+  const { raw, db } = fixture(t);
+  const base = deviceRow(raw).sync_version;
+  const conflict = await commands.applyWatermarkCommand(db, chameleonAt(231, base, { chameleon_enabled: true }, OWNER),
+    runtime({ local_actor_user_uuid: WRITER }));
+  assert.equal(conflict.ack.result, 'CONFLICT');
+  const row = raw.prepare('SELECT effect_key,binding_hash,result FROM applied_commands WHERE command_id=?').get('231');
+  assert.equal(row.effect_key, `chameleon_config:set:${GATEWAY}:${DEVICE}:${base}`);
+  assert.equal(row.binding_hash, null);
+  const applied = await commands.applyWatermarkCommand(db, chameleonAt(232, base, { chameleon_enabled: true }, OWNER), runtime());
+  assert.equal(applied.ack.result, 'APPLIED', JSON.stringify(applied.ack));
+  assert.deepEqual(deviceRow(raw), { chameleon_enabled: 1, sync_version: base + 1 });
+});

@@ -496,8 +496,13 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
         return facts && facts.payloadHash === intentHash;
       });
     } else if (protectedType) {
+      // Only an applied row proves that this exact-base effect happened. A
+      // rejection or conflict leaves the device at the same base, so the
+      // cloud's successor carries the same key and must be evaluated afresh.
+      // Exact command-id replay above still returns any stored decision.
       const candidates = await tx.all(
-        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ORDER BY applied_at,command_id',
+        "SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? AND result='APPLIED' " +
+          'ORDER BY applied_at,command_id',
         [effectKey, type]
       );
       if (candidates.length) {
