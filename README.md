@@ -274,6 +274,14 @@ rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API
 
 This reuses the existing API key, writes the stamp and requests the coordinated Node-RED restart. It rewrites `.chirpstack.env` with the `CHIRPSTACK_*` keys only.
 
+The service returns 0 even when provisioning fails; errors go to `logread`. Before you reboot, confirm the stamp is back:
+
+```bash
+ls -l /etc/osi-bootstrap.done || logread | grep -i osi-bootstrap | tail -20
+```
+
+If the stamp is missing, fix the cause and run the command again. A reboot without the stamp runs the bootstrap with no key and creates a second API key.
+
 ### Step 4 — Install Tailscale (remote access)
 
 Tailscale provides persistent SSH access to field-deployed devices without needing to know their local IP or be on the same network.
