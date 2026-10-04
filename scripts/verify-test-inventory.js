@@ -676,6 +676,11 @@ function checkRunStep(ctx, step) {
       const idx = args.findIndex((a) => !a.startsWith('-'));
       if (idx < 0) return;
       const scriptRel = resolveToken(args[idx], 'script');
+      if (scriptRel && cmd === 'sh') {
+        // sh is dash on Debian and Ubuntu runners; a bash script fails there.
+        const firstLine = fs.readFileSync(path.join(root, scriptRel), 'utf8').split('\n', 1)[0];
+        if (/^#!.*\bbash\b/.test(firstLine)) errors.push(`${where}: ${scriptRel}: a bash script (shebang ${firstLine.slice(2).trim()}) run with sh; run it with bash`);
+      }
       if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
       scriptArgs(scriptRel || args[idx], args.slice(idx + 1), lost);
       return;

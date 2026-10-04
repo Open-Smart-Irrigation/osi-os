@@ -484,6 +484,14 @@ test('a test file passed as an argument to another script is not run', () => {
   }
 });
 
+test('a bash script started with sh fails, because sh is dash on the runner', () => {
+  const extra = { 'scripts/b.test.sh': '#!/usr/bin/env bash\nset -euo pipefail\n', 'scripts/p.test.sh': '#!/bin/sh\ntrue\n' };
+  const bad = errorsOf(gatedRepo({ run: 'node --test scripts/a.test.js\nsh scripts/b.test.sh' }, extra));
+  assert.match(bad, /scripts\/b\.test\.sh: a bash script \(shebang .*bash\) run with sh/);
+  const ok = gatedRepo({ run: 'node --test scripts/a.test.js\nbash scripts/b.test.sh\nsh scripts/p.test.sh' }, extra);
+  assert.deepEqual(verify(ok).errors, []);
+});
+
 test('the runner and --no-warnings still mark tests as run', () => {
   for (const run of ['node scripts/run-module-tests.js scripts/a.test.js', 'node --no-warnings scripts/a.test.js', 'node scripts/a.test.js']) {
     assert.deepEqual(verify(gatedRepo({ run }, { 'scripts/run-module-tests.js': '' })).errors, [], run);
