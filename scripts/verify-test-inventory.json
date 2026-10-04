@@ -1,5 +1,5 @@
 {
-  "$comment": "Read by scripts/verify-test-inventory.js. 'indirect': a test that a runner script (itself run by a workflow) starts; the runner must name the file. 'excluded': a test file or pattern no workflow runs, with the reason. Entries that match nothing, or exclude a test a workflow runs, fail the verifier. Remove an exclusion when its test is wired into a workflow.",
+  "$comment": "Read by scripts/verify-test-inventory.js. 'indirect': a test that a runner script (itself run by a workflow) starts; the runner must name the file. 'excluded': a test file or pattern no workflow runs, with the reason. Entries that match nothing, or exclude a test a workflow runs, fail the verifier. Remove an exclusion when its test is wired into a workflow. Test files are those named like tests (see TEST_NAME in the verifier); verifiers such as scripts/verify-*.js are outside the inventory.",
   "indirect": [
     {
       "path": "scripts/test-sync-history-worker.js",
@@ -24,8 +24,8 @@
   ],
   "excluded": [
     {
-      "pattern": "**/node_modules/**",
-      "reason": "third-party npm packages vendored into the firmware payload; their own test files are not OSI tests"
+      "pattern": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/{node-gyp,pump,retry}/**",
+      "reason": "third-party npm packages (node-gyp, pump, retry) vendored into the firmware payload; their own test files are not OSI tests. The bcm2709 copies fall under the mirror pattern below"
     },
     {
       "pattern": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/**",
@@ -38,6 +38,10 @@
     {
       "pattern": "scripts/pipeline/tests/**",
       "reason": "pytest suite of the field-to-PR pipeline controller (python3 -m pytest scripts/pipeline/tests); CI has no Python job"
+    },
+    {
+      "pattern": "tests/*/selftest.js",
+      "reason": "offline self-test of the live-gateway harness guards (passes locally: 204 assertions); its directory carries a deployment identity that public workflow text must not repeat, so no workflow can name it. Run it by hand before a harness run"
     },
     {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.js",

@@ -28,7 +28,9 @@ jobs:
       - run: npm run test:unit
       - run: npm run demo:test
   # Upgrade lane: does the same lockfile still install on the next Node LTS
-  # (npm 11)? Informational; a failure here does not block a merge.
+  # (npm 11)? Informational: with job-level continue-on-error a failure
+  # shows this job red in the checks list while the workflow run stays
+  # green. Do not make it a required check.
   install-next-lts:
     runs-on: ubuntu-latest
     continue-on-error: true

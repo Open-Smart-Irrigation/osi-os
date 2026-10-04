@@ -117,9 +117,11 @@ test('parseYaml fails closed on constructs it does not model', () => {
   }
 });
 
-test('parseYaml agrees with PyYAML on every workflow in this repository', () => {
-  const probe = spawnSync('python3', ['-c', 'import yaml'], { encoding: 'utf8' });
-  assert.equal(probe.status, 0, 'the cross-check needs python3 with PyYAML');
+// The verifier parses workflows with its own reader (parseYaml above); this
+// cross-check needs python3 with PyYAML and is skipped, visibly, without it.
+const HAS_PYYAML = spawnSync('python3', ['-c', 'import yaml'], { encoding: 'utf8' }).status === 0;
+
+test('parseYaml agrees with PyYAML on every workflow in this repository', { skip: HAS_PYYAML ? false : 'python3 with PyYAML is not installed' }, () => {
   const normalize = [
     'import json, sys, yaml',
     'def n(v):',
@@ -169,7 +171,7 @@ test('shellCommands joins backslash-continued lines', () => {
 });
 
 test('isTestFile follows the naming rules', () => {
-  for (const f of ['scripts/a.test.js', 'scripts/test-a.js', 'x/y.spec.ts', 'x/y.test.tsx', 'scripts/a.test.sh', 'scripts/test-a.sh', 'p/tests/test_a.py', 'web/s/a.test.mjs']) {
+  for (const f of ['scripts/a.test.js', 'scripts/test-a.js', 'x/y.spec.ts', 'x/y.test.tsx', 'scripts/a.test.sh', 'scripts/test-a.sh', 'p/tests/test_a.py', 'web/s/a.test.mjs', 'tests/harness/selftest.js']) {
     assert.ok(isTestFile(f), f);
   }
   for (const f of ['scripts/testing.js', 'scripts/a.js', 'x/__tests__/helpers/h.js', 'scripts/verify-a.js']) {
@@ -423,6 +425,7 @@ test('a test in a step or job that cannot fail a pull request is not run', () =>
     [{ on: '  workflow_dispatch:', run: 'node --test scripts/a.test.js' }, /no pull_request trigger/],
     [{ on: '  push:\n    branches: [ main ]', run: 'node --test scripts/a.test.js' }, /no pull_request trigger/],
     [{ on: "  pull_request:\n    paths: [ 'web/**' ]", run: 'node --test scripts/a.test.js' }, /path filter/],
+    [{ on: '  pull_request:\n    types: [ closed ]', run: 'node --test scripts/a.test.js' }, /skips opened or synchronize/],
   ]) {
     const errors = errorsOf(gatedRepo(spec));
     assert.match(errors, NOT_RUN, JSON.stringify(spec));

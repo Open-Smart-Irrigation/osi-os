@@ -20,7 +20,12 @@
 //   - actions/setup-node pins a numeric Node version (no lts/*);
 //   - installs use `npm ci` without --legacy-peer-deps or --force.
 // An unreadable or unparsable workflow is an error, never a pass. The YAML
-// reader supports the subset the workflows use and rejects anything else.
+// reader (parseYaml, plain JavaScript, no dependency) supports the subset
+// the workflows use and rejects anything else.
+//
+// Scope: files named like tests (TEST_NAME). Verifiers such as
+// scripts/verify-*.js or scripts/check-*.sh are not tests in this sense and
+// are not inventoried.
 //
 // Usage: node scripts/verify-test-inventory.js [--root=<dir>] [--list]
 const fs = require('node:fs');
@@ -35,6 +40,7 @@ const TEST_NAME = [
   /\.(test|spec)\.(c|m)?[jt]sx?$/,
   /\.test\.sh$/,
   /^test[-_][^/]*\.((c|m)?js|ts|sh|py|R)$/,
+  /^selftest\.((c|m)?js|ts|sh)$/,
 ];
 const SCRIPT_EXT = /\.((c|m)?[jt]sx?|sh)$/;
 const GLOB_CHARS = /[*?[\]{}]/;
