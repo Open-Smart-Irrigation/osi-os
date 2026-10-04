@@ -12,7 +12,9 @@ import { useDraftsQueue, useRefreshDraftsQueue } from '../../journal/useDraftsQu
 import { useJournalPlots } from '../../journal/useJournalPlots';
 import { Login } from '../../pages/Login';
 import { journalApi } from '../../services/journalApi';
+import { api } from '../../services/api';
 import { useAuth } from '../AuthContext';
+import { useSessionFence } from '../AuthSessionDataBoundary';
 import {
   PrivateArea,
   accountOf,
@@ -123,6 +125,49 @@ describe('session data boundary (#378)', () => {
     });
 
     expect(draftsText()).toBe('ready:bob-private-draft');
+  });
+
+  it('keeps a late result of a fetcher outside the api out of the next session', async () => {
+    // Not an api request, so no abort applies: only the per-epoch cache
+    // keeps Alice's late result away from Bob.
+    const pending: Record<string, (value: string) => void> = {};
+    function LateView() {
+      const { username } = useAuth();
+      const { data } = useSWR(username ? 'late:private' : null, () => new Promise<string>((resolve) => {
+        pending[username!] = resolve;
+      }));
+      return <p data-testid="late">{data ?? 'loading'}</p>;
+    }
+    renderApp(<LateView />);
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+    await waitFor(() => expect(pending.alice).toBeTruthy());
+
+    logout(auth);
+    await loginAs(auth, 'bob');
+    await waitFor(() => expect(pending.bob).toBeTruthy());
+    await act(async () => {
+      pending.alice('alice private farm');
+    });
+
+    expect(screen.getByTestId('late').textContent).toBe('loading');
+    await act(async () => {
+      pending.bob('bob farm');
+    });
+    expect(screen.getByTestId('late').textContent).toBe('bob farm');
+  });
+
+  it('removes stored support status secrets when the session ends', async () => {
+    renderApp(<DraftsView />);
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+    localStorage.setItem('osi.support.statusSecret.request-1', 'synthetic-secret');
+    localStorage.setItem('osi.display.theme', 'dark');
+
+    logout(auth);
+
+    expect(localStorage.getItem('osi.support.statusSecret.request-1')).toBeNull();
+    expect(localStorage.getItem('osi.display.theme')).toBe('dark');
   });
 
   it('does not serve the previous account\'s cache to a hook that never revalidates', async () => {
@@ -247,6 +292,7 @@ describe('session data boundary (#378)', () => {
       </AppProviders>,
     );
 
+    const historyLength = window.history.length;
     fireEvent.change(container.querySelector('#username')!, { target: { value: 'alice' } });
     fireEvent.change(container.querySelector('#password')!, { target: { value: 'synthetic-password' } });
     await act(async () => {
@@ -256,6 +302,73 @@ describe('session data boundary (#378)', () => {
     await waitFor(() => expect(screen.getByTestId('page').textContent).toBe('dashboard'));
     expect(whoText()).toBe('alice');
     expect(window.location.hash).toBe('#/dashboard');
+    // The login form is replaced, so Back does not return to it.
+    expect(window.history.length).toBe(historyLength);
+  });
+
+  it.each([
+    ['while signed out', null],
+    ['while another account is signed in', 'carol'],
+  ])('shows a rejected password on the login page %s and keeps the form and the session', async (_label, signedIn) => {
+    const { AuthCapture, auth } = authHandle;
+    window.location.hash = '#/login';
+    const { container } = render(
+      <AppProviders>
+        <AuthCapture />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+        </Routes>
+      </AppProviders>,
+    );
+    if (signedIn) await loginAs(auth, signedIn);
+    const sessionBefore = auth().sessionSnapshot;
+    const epochBefore = auth().sessionEpoch;
+    network.on('POST', '/auth/login', () => ({ status: 401, data: { message: 'synthetic credential rejection' } }));
+
+    fireEvent.change(container.querySelector('#username')!, { target: { value: 'bob' } });
+    fireEvent.change(container.querySelector('#password')!, { target: { value: 'wrong-password' } });
+    await act(async () => {
+      fireEvent.submit(container.querySelector('form')!);
+    });
+
+    await waitFor(() => expect(screen.getByText('synthetic credential rejection')).toBeTruthy());
+    expect((container.querySelector('#username') as HTMLInputElement).value).toBe('bob');
+    expect(network.to('POST', '/auth/login').slice(-1)[0]?.authorization).toBeNull();
+    expect(auth().sessionEpoch).toBe(epochBefore);
+    expect(auth().sessionSnapshot).toBe(sessionBefore);
+    expect(localStorage.getItem('auth_token')).toBe(sessionBefore.token);
+  });
+
+  it('stops a multi-step write at its next step once its session has ended, also after an await that is not a request', async () => {
+    network.on('PUT', '/api/step-two', () => ok({}));
+    const fences: Record<string, () => void> = {};
+    function FenceHandle() {
+      const { username } = useAuth();
+      const fence = useSessionFence();
+      if (username) fences[username] = fence;
+      return null;
+    }
+    renderApp(<FenceHandle />);
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+
+    let resume: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const aliceFence = fences.alice;
+    const outcome = (async () => {
+      await gate;
+      aliceFence();
+      await api.put('/api/step-two', { owner: 'alice' });
+    })().then(() => 'sent', (error: Error) => error.name);
+
+    logout(auth);
+    await loginAs(auth, 'bob');
+    resume();
+
+    expect(await outcome).toBe('StaleSessionRequestError');
+    expect(network.to('PUT', '/api/step-two')).toHaveLength(0);
   });
 
   it('keeps the cache and the epoch across navigation within one session', async () => {

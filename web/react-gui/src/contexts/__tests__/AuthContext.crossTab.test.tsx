@@ -3,9 +3,11 @@
 // storage.clear() must start a new session epoch. Login operations are
 // fenced so a late response cannot replace a newer login or a logout.
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppProviders } from '../../AppProviders';
 import { useDraftsQueue } from '../../journal/useDraftsQueue';
+import { authAPI } from '../../services/api';
+import type { LoginResponse } from '../../types/farming';
 import {
   PrivateArea,
   accountOf,
@@ -64,6 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   restoreNetwork();
   localStorage.clear();
 });
@@ -198,5 +201,66 @@ describe('cross-tab session changes (#378)', () => {
     expect(auth().isAuthenticated).toBe(false);
     expect(localStorage.getItem('auth_token')).toBeNull();
     expect(whoText()).toBe('signed-out');
+  });
+
+  // The two cases above go through axios, whose per-epoch abort already
+  // cancels the losing request. These resolve outside axios, so only the
+  // login operation generation can stop the late response from committing.
+  describe('login operation generation, without the transport abort', () => {
+    function deferredLogins() {
+      const pending: Array<(response: LoginResponse) => void> = [];
+      vi.spyOn(authAPI, 'login').mockImplementation(() => new Promise<LoginResponse>((resolve) => {
+        pending.push(resolve);
+      }));
+      return pending;
+    }
+
+    it('lets only the latest of overlapping logins commit', async () => {
+      const pending = deferredLogins();
+      renderApp();
+      const { auth } = authHandle;
+
+      let aliceResult: Promise<void> = Promise.resolve();
+      let bobResult: Promise<void> = Promise.resolve();
+      act(() => {
+        aliceResult = auth().login({ username: 'alice', password: 'synthetic-password' });
+        bobResult = auth().login({ username: 'bob', password: 'synthetic-password' });
+      });
+      const aliceOutcome = aliceResult.then(() => 'committed', (error: Error) => error.name);
+
+      await act(async () => {
+        pending[1]({ token: 'token-bob-2' } as LoginResponse);
+        await bobResult;
+      });
+      await act(async () => {
+        pending[0]({ token: 'token-alice-1' } as LoginResponse);
+        await aliceOutcome;
+      });
+
+      expect(await aliceOutcome).toBe('AuthOperationSupersededError');
+      expect(auth().username).toBe('bob');
+      expect(localStorage.getItem('auth_token')).toBe('token-bob-2');
+    });
+
+    it('keeps a logout made while login is pending', async () => {
+      const pending = deferredLogins();
+      renderApp();
+      const { auth } = authHandle;
+
+      let result: Promise<void> = Promise.resolve();
+      act(() => {
+        result = auth().login({ username: 'alice', password: 'synthetic-password' });
+      });
+      const outcome = result.then(() => 'committed', (error: Error) => error.name);
+      logout(auth);
+      await act(async () => {
+        pending[0]({ token: 'token-alice-1' } as LoginResponse);
+        await outcome;
+      });
+
+      expect(await outcome).toBe('AuthOperationSupersededError');
+      expect(auth().isAuthenticated).toBe(false);
+      expect(localStorage.getItem('auth_token')).toBeNull();
+    });
   });
 });

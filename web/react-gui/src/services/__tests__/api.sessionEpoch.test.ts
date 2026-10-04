@@ -18,8 +18,8 @@ import {
   type FakeNetwork,
 } from '../../contexts/__tests__/sessionHarness';
 import { AUTH_EXPIRED_EVENT } from '../authEvents';
-import { api } from '../api';
-import { expireAuthSession, getAuthSession } from '../authSession';
+import { api, authAPI } from '../api';
+import { expireAuthSession, getAuthSession, type AuthSessionSnapshot } from '../authSession';
 
 const PROBE = '/api/session-probe';
 
@@ -137,7 +137,11 @@ describe('api session binding (#378)', () => {
     expect(await pending).toBe('ERR_CANCELED');
   });
 
-  it('does not send the next step of a multi-step write under the next session', async () => {
+  it.each([
+    ['a transport that cancels', true],
+    ['a transport that cannot cancel', false],
+  ])('does not send the next step of a multi-step write under the next session (%s)', async (_label, honourAbort) => {
+    network.honourAbort = honourAbort;
     network.on('PUT', '/api/step-two', () => ok({}));
     renderApp();
     const { auth } = authHandle;
@@ -193,6 +197,24 @@ describe('api session binding (#378)', () => {
     expect(expiredEvents).toBe(1);
   });
 
+  it('never ends the current session on a 401 from login or register', async () => {
+    network.on('POST', '/auth/register', () => ({ status: 401, data: {} }));
+    renderApp();
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+    const session = auth().sessionSnapshot;
+    network.on('POST', '/auth/login', () => ({ status: 401, data: {} }));
+
+    await act(async () => {
+      await authAPI.login({ username: 'bob', password: 'wrong' }).catch(() => undefined);
+      await authAPI.register({ username: 'bob', password: 'wrong' }).catch(() => undefined);
+    });
+
+    expect(auth().sessionSnapshot).toBe(session);
+    expect(localStorage.getItem('auth_token')).toBe(session.token);
+    expect(expiredEvents).toBe(0);
+  });
+
   it('does not start a new epoch for a rejected sign-in while signed out', async () => {
     network.on('POST', '/auth/login', () => ({ status: 401, data: { message: 'invalid' } }));
     renderApp();
@@ -206,5 +228,88 @@ describe('api session binding (#378)', () => {
 
     expect(auth().sessionEpoch).toBe(epoch);
     expect(expiredEvents).toBe(0);
+  });
+
+  // The per-epoch abort turns any response that settles after a session
+  // change into a cancellation before this handler runs, so the cases above
+  // cannot tell whether the handler's own checks work. These call the
+  // installed response handler directly with an already settled 401.
+  describe('401 handler, without the transport abort', () => {
+    type Handler = { rejected: (error: unknown) => Promise<unknown> };
+    const handle401 = (config: { authSession?: AuthSessionSnapshot; skipAuthExpiry?: boolean }) => {
+      const handlers = (api.interceptors.response as unknown as { handlers: Array<Handler | null> }).handlers;
+      const handler = handlers.find((candidate): candidate is Handler => Boolean(candidate?.rejected));
+      return act(async () => {
+        await handler!.rejected({ response: { status: 401 }, config }).catch(() => undefined);
+      });
+    };
+
+    it('ignores a 401 captured under the previous session', async () => {
+      renderApp();
+      const { auth } = authHandle;
+      await loginAs(auth, 'alice');
+      const alice = auth().sessionSnapshot;
+      logout(auth);
+      await loginAs(auth, 'bob');
+      const bob = auth().sessionSnapshot;
+
+      await handle401({ authSession: alice });
+
+      expect(auth().sessionSnapshot).toBe(bob);
+      expect(localStorage.getItem('auth_token')).toBe(bob.token);
+      expect(expiredEvents).toBe(0);
+    });
+
+    it('ignores a 401 for a request sent without a token', async () => {
+      renderApp();
+      const { auth } = authHandle;
+      const anonymous = auth().sessionSnapshot;
+
+      await handle401({ authSession: anonymous });
+
+      expect(auth().sessionSnapshot).toBe(anonymous);
+      expect(expiredEvents).toBe(0);
+    });
+
+    it('ignores a 401 from a credential request of the current session', async () => {
+      renderApp();
+      const { auth } = authHandle;
+      await loginAs(auth, 'alice');
+      const alice = auth().sessionSnapshot;
+
+      await handle401({ authSession: alice, skipAuthExpiry: true });
+
+      expect(auth().sessionSnapshot).toBe(alice);
+      expect(expiredEvents).toBe(0);
+    });
+
+    it('ends the session for a 401 captured under the current session', async () => {
+      renderApp();
+      const { auth } = authHandle;
+      await loginAs(auth, 'alice');
+      const alice = auth().sessionSnapshot;
+
+      await handle401({ authSession: alice });
+
+      expect(auth().isAuthenticated).toBe(false);
+      expect(auth().sessionEpoch).toBeGreaterThan(alice.sessionEpoch);
+      expect(expiredEvents).toBe(1);
+    });
+  });
+
+  it('sends login and register without the current session\'s token', async () => {
+    network.on('POST', '/auth/register', () => ok({}));
+    renderApp();
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+
+    await act(async () => {
+      await authAPI.login({ username: 'bob', password: 'synthetic-password' });
+      await authAPI.register({ username: 'carol', password: 'synthetic-password' });
+    });
+
+    const credentialRequests = [...network.to('POST', '/auth/login'), ...network.to('POST', '/auth/register')];
+    expect(credentialRequests).toHaveLength(3);
+    expect(credentialRequests.map((request) => request.authorization)).toEqual([null, null, null]);
   });
 });
