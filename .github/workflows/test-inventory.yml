@@ -30,6 +30,7 @@ jobs:
       - name: Helper-module tests
         run: |
           node scripts/run-module-tests.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/index.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lsn50-normalize/index.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js \

@@ -56,10 +56,6 @@
       "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
     },
     {
-      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-location-helper/index.test.js",
-      "reason": "fails on main in a clean checkout: Cannot find module 'sqlite3' (the native npm module is not tracked and CI installs only the sqlite3 CLI; CI-run module tests use a node:sqlite adapter instead). Wiring it is osi-os #340"
-    },
-    {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js",
       "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (the native npm module is not tracked and CI installs only the sqlite3 CLI; CI-run module tests use a node:sqlite adapter instead)"
     },

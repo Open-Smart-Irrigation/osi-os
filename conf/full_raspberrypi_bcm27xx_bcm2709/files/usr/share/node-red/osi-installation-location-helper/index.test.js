@@ -4,23 +4,27 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const sqlite3 = require('sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const helper = require('./index');
 
-function openDb() {
+// node:sqlite-backed opener with the run/get/exec/transaction/close shape the
+// helper uses, so the test runs without the native sqlite3 addon (as the
+// facade-contract tests of osi-weather-provider and osi-device-writer do).
+// Rows are copied into plain objects, as the sqlite3 module returns them.
+async function openDb() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'osi-location-')), 'farming.db');
-  return new Promise((resolve, reject) => new sqlite3.Database(file, error => {
-    if (error) return reject(error);
-    const raw = new sqlite3.Database(file);
-    const db = {
-      run(sql, params = []) { return new Promise((res, rej) => raw.run(sql, params, e => e ? rej(e) : res())); },
-      get(sql, params = []) { return new Promise((res, rej) => raw.get(sql, params, (e, row) => e ? rej(e) : res(row))); },
-      exec(sql) { return new Promise((res, rej) => raw.exec(sql, e => e ? rej(e) : res())); },
-      transaction(fn) { return this.exec('BEGIN IMMEDIATE').then(() => fn(this).then(result => this.exec('COMMIT').then(() => result), e => this.exec('ROLLBACK').then(() => { throw e; }))); },
-      close() { return new Promise(res => raw.close(res)); }
-    };
-    db.exec(fs.readFileSync(path.join(__dirname, '../../../../../../../database/migrations/ordered/0054__installation_location_revisions.sql'), 'utf8') + "CREATE TABLE devices(deveui TEXT PRIMARY KEY, gateway_device_eui TEXT, deleted_at TEXT); CREATE TABLE installation_identity(singleton_id INTEGER PRIMARY KEY, installation_uuid TEXT, recovery_state TEXT);").then(() => db.run('INSERT INTO devices VALUES (?,?,NULL)', ['0016C001F1000001', '0016C001F1000002'])).then(() => db.run('INSERT INTO installation_identity VALUES (1,?,?)', ['11111111-1111-4111-8111-111111111111', 'ACTIVE'])).then(() => resolve(db), reject);
-  }));
+  const raw = new DatabaseSync(file);
+  const db = {
+    async run(sql, params = []) { raw.prepare(sql).run(...params); },
+    async get(sql, params = []) { const row = raw.prepare(sql).get(...params); return row === undefined ? undefined : { ...row }; },
+    async exec(sql) { raw.exec(sql); },
+    transaction(fn) { return this.exec('BEGIN IMMEDIATE').then(() => fn(this).then(result => this.exec('COMMIT').then(() => result), e => this.exec('ROLLBACK').then(() => { throw e; }))); },
+    async close() { raw.close(); }
+  };
+  await db.exec(fs.readFileSync(path.join(__dirname, '../../../../../../../database/migrations/ordered/0054__installation_location_revisions.sql'), 'utf8') + "CREATE TABLE devices(deveui TEXT PRIMARY KEY, gateway_device_eui TEXT, deleted_at TEXT); CREATE TABLE installation_identity(singleton_id INTEGER PRIMARY KEY, installation_uuid TEXT, recovery_state TEXT);");
+  await db.run('INSERT INTO devices VALUES (?,?,NULL)', ['0016C001F1000001', '0016C001F1000002']);
+  await db.run('INSERT INTO installation_identity VALUES (1,?,?)', ['11111111-1111-4111-8111-111111111111', 'ACTIVE']);
+  return db;
 }
 const base = { deviceEui: '0016C001F1000001', installationUuid: '11111111-1111-4111-8111-111111111111', gatewayEui: '0016C001F1000002', actorUserUuid: '22222222-2222-4222-8222-222222222222', now: '2026-09-10T10:00:00+02:00' };
 const loc = values => Object.assign({ latitude: 47, longitude: 8, effectiveFrom: '2026-09-10T09:00:00+02:00', coordinateSource: 'manual' }, values);
