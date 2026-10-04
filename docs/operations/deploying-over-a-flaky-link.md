@@ -47,7 +47,7 @@ instead of quietly omitting the file from the bundle.
 ```bash
 # 1. Build and package the React GUI (same as the tunnel flow — not built by
 #    deploy-bundle.sh itself; frontend builds OOM this workstation)
-cd web/react-gui && npm install && npm run build && cd ../..
+cd web/react-gui && npm ci && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # 2. Build the bundle
