@@ -1,5 +1,12 @@
-import axios from 'axios';
-import { notifyAuthExpired } from './authEvents';
+import axios, { type GenericAbortSignal, type InternalAxiosRequestConfig } from 'axios';
+import {
+  StaleSessionRequestError,
+  currentSessionSignal,
+  expireAuthSession,
+  getAuthSession,
+  isCurrentAuthSession,
+  type AuthSessionSnapshot,
+} from './authSession';
 import type {
   AnalysisCatalogResponse,
   AnalysisSeriesRequest,
@@ -158,36 +165,69 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to attach Authorization token
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * The session a request belongs to (#378). Set it on work that is queued
+     * or sent later (services/authSession.ts SessionBoundRequest); the request
+     * interceptor records the current session on every other request.
+     */
+    authSession?: AuthSessionSnapshot;
+  }
+}
+
+const rejectStaleSessionRequest = (): Promise<never> =>
+  Promise.reject(new StaleSessionRequestError());
+
+function abortWithSession(own: GenericAbortSignal | undefined, session: AbortSignal): GenericAbortSignal {
+  if (!own) return session;
+  const either = new AbortController();
+  const abort = () => either.abort();
+  if (own.aborted || session.aborted) abort();
+  own.addEventListener?.('abort', abort);
+  session.addEventListener('abort', abort);
+  return either.signal;
+}
+
+// Binds each request to its session at creation. Synchronous so the session
+// is read when the caller creates the request, not a microtask later; a
+// synchronous interceptor that throws would still dispatch, so a stale
+// request is refused by replacing its adapter instead. Every request also
+// carries the epoch's abort signal: ending the session cancels it.
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      if (!config.headers) {
-        config.headers = {} as any;
-      }
-      config.headers['Authorization'] = `Bearer ${token}`;
+  (config: InternalAxiosRequestConfig) => {
+    const captured = config.authSession;
+    if (captured && !isCurrentAuthSession(captured)) {
+      config.adapter = rejectStaleSessionRequest;
+      return config;
+    }
+    const session = captured ?? getAuthSession();
+    config.signal = abortWithSession(config.signal, currentSessionSignal());
+    const bearer = session.token ? `Bearer ${session.token}` : null;
+    const explicit = config.headers.get('Authorization');
+    if (explicit) {
+      // Never replace an Authorization the caller set. Only a header that is
+      // this session's own token lets a 401 end the session.
+      config.authSession = explicit === bearer ? session : undefined;
+    } else {
+      config.authSession = session;
+      if (bearer) config.headers.set('Authorization', bearer);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  undefined,
+  { synchronous: true },
 );
 
-// Response interceptor to handle auth errors
+// A 401 ends the session only when it answers a request of the current one.
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('username');
-      notifyAuthExpired();
+    if (error?.response?.status === 401) {
+      expireAuthSession(error.config?.authSession);
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 // Auth API
