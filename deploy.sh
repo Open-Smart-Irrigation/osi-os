@@ -90,7 +90,7 @@ fetch_required() {
     src="$2"
     dest="$3"
     echo "--- $label ---"
-    fetch "$src" "$dest"
+    fetch "$src" "$dest" || return $?
     echo "OK"
 }
 
@@ -103,12 +103,12 @@ stage_command_ledger_dependency() {
     echo "--- WATERMARK command-ledger dependency pair (staged) ---"
     # A killed deploy (SIGKILL skips the EXIT trap) leaves its PID-named stage
     # directory behind; remove every earlier one before staging this run.
-    rm -rf "$COMMAND_LEDGER_STAGE_ROOT"/.osi-command-ledger-stage.*
-    rm -rf "$COMMAND_LEDGER_STAGE"
-    mkdir -m 700 -p "$COMMAND_LEDGER_STAGE"
+    rm -rf "$COMMAND_LEDGER_STAGE_ROOT"/.osi-command-ledger-stage.* || return 1
+    rm -rf "$COMMAND_LEDGER_STAGE" || return 1
+    mkdir -m 700 -p "$COMMAND_LEDGER_STAGE" || return 1
     fetch_required "command-ledger dependency installer" \
         "scripts/deploy-command-ledger-dependency.js" \
-        "$COMMAND_LEDGER_INSTALLER"
+        "$COMMAND_LEDGER_INSTALLER" || return 1
     helper_sha256="$(node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$COMMAND_LEDGER_INSTALLER")"
     [ "$helper_sha256" = "$COMMAND_LEDGER_HELPER_SHA256" ] || {
         echo "ERROR: command-ledger dependency installer SHA-256 mismatch" >&2
@@ -116,16 +116,19 @@ stage_command_ledger_dependency() {
     }
     fetch_required "osi-command-ledger package.json" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
-        "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json"
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json" || return 1
     fetch_required "osi-command-ledger index.js" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
-        "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js"
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js" || return 1
     fetch_required "osi-watermark-binding canonicalization.js" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
-        "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"
+        "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js" || return 1
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","deferActivation":true,"expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
-    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    if ! node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"; then
+        echo "ERROR: command-ledger dependency staging refused" >&2
+        return 1
+    fi
     echo "OK: command-ledger dependency pair staged; activation deferred until schema migration"
 }
 

@@ -513,6 +513,7 @@ test('staging removes stage directories left by earlier killed deploys', () => {
 
 const SWAP_JS = path.join(__dirname, 'deploy-payload-swap.js');
 const ACTIVATED_LINE = 'OK: command-ledger dependency pair activated after schema migration';
+const STAGED_LINE = 'OK: command-ledger dependency pair staged; activation deferred until schema migration';
 
 function shellFunction(name, endNeedle = '\n}\n') {
   const open = new RegExp(`^${name}\\(\\) \\{$`, 'm').exec(DEPLOY);
@@ -818,5 +819,50 @@ test('a failing activation after a committed migration holds services on the pre
     assert.equal(result.nodeRed, '0');
     assert.equal(result.identityd, '0');
     assert.deepEqual(result.liveLedger, oldPairHashes());
+  });
+});
+
+test('staging returns failure from inside a condition when a fetch fails', () => {
+  withActivationRoot((root) => {
+    const tmp = path.join(root, 'tmp');
+    const stage = path.join(root, 'node-red', '.osi-command-ledger-stage.harness');
+    fs.mkdirSync(tmp, { recursive: true });
+    const script = `set -eu
+REPO_ROOT=${shellQuote(ROOT)}
+TMP_DIR=${shellQuote(tmp)}
+NODE_RED_ROOT=${shellQuote(path.join(root, 'node-red'))}
+COMMAND_LEDGER_STAGE_ROOT="$NODE_RED_ROOT"
+COMMAND_LEDGER_STAGE=${shellQuote(stage)}
+COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
+${commandLedgerPins()}
+mkdir -p "$NODE_RED_ROOT"
+fetch() {
+    mkdir -p "$(dirname "$2")"
+    if [ "$1" = "$HARNESS_FAIL_FETCH" ]; then
+        return 22
+    fi
+    cp "$REPO_ROOT/$1" "$2"
+}
+${shellFunction('fetch_required')}
+${shellFunction('stage_command_ledger_dependency')}
+if stage_command_ledger_dependency; then
+    echo "STAGE-RC=0"
+else
+    echo "STAGE-RC=$?"
+fi
+`;
+    const result = spawnSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { ...process.env, HARNESS_FAIL_FETCH: 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js' },
+      timeout: 60000,
+    });
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.doesNotMatch(result.stdout, /STAGE-RC=0/, harnessOutput(result));
+    assert.match(result.stdout, /STAGE-RC=[1-9]/);
+    assert.doesNotMatch(result.stdout, new RegExp(STAGED_LINE));
+    assert.doesNotMatch(result.stdout, /--- osi-command-ledger index\.js ---\nOK\n/,
+      'fetch_required must not report OK for a failed fetch');
+    assert.doesNotMatch(result.stdout, /--- osi-watermark-binding canonicalization\.js ---/,
+      'staging must stop at the failed fetch');
   });
 });
