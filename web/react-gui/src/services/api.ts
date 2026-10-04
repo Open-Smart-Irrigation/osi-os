@@ -173,6 +173,13 @@ declare module 'axios' {
      * interceptor records the current session on every other request.
      */
     authSession?: AuthSessionSnapshot;
+    /**
+     * A credential request (login, register): it is sent without the
+     * session's token, and its 401 is a credential error, not the end of a
+     * session, so a wrong password neither signs out the current session nor
+     * remounts the login page.
+     */
+    skipAuthExpiry?: boolean;
   }
 }
 
@@ -201,8 +208,14 @@ api.interceptors.request.use(
       config.adapter = rejectStaleSessionRequest;
       return config;
     }
-    const session = captured ?? getAuthSession();
     config.signal = abortWithSession(config.signal, currentSessionSignal());
+    if (config.skipAuthExpiry) {
+      // A credential request (login, register) never carries a session's
+      // token: it must not present another account's bearer.
+      config.authSession = undefined;
+      return config;
+    }
+    const session = captured ?? getAuthSession();
     const bearer = session.token ? `Bearer ${session.token}` : null;
     const explicit = config.headers.get('Authorization');
     if (explicit) {
@@ -219,26 +232,29 @@ api.interceptors.request.use(
   { synchronous: true },
 );
 
-// A 401 ends the session only when it answers a request of the current one.
+// A 401 ends the session only when it answers a request sent with the
+// current session's token, and never for the credential endpoints.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error?.response?.status === 401) {
+    if (error?.response?.status === 401 && !error.config?.skipAuthExpiry) {
       expireAuthSession(error.config?.authSession);
     }
     return Promise.reject(error);
   },
 );
 
+const CREDENTIAL_REQUEST = { skipAuthExpiry: true } as const;
+
 // Auth API
 export const authAPI = {
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
-    const response = await api.post<LoginResponse>('/auth/login', credentials);
+    const response = await api.post<LoginResponse>('/auth/login', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 
   register: async (credentials: RegisterRequest): Promise<RegisterResponse> => {
-    const response = await api.post<RegisterResponse>('/auth/register', credentials);
+    const response = await api.post<RegisterResponse>('/auth/register', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 };
