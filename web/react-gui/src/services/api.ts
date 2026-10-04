@@ -188,9 +188,20 @@ const rejectStaleSessionRequest = (): Promise<never> =>
 
 function abortWithSession(own: GenericAbortSignal | undefined, session: AbortSignal): GenericAbortSignal {
   if (!own) return session;
+  if (typeof AbortSignal.any === 'function' && own instanceof AbortSignal) {
+    return AbortSignal.any([own, session]);
+  }
+  // Fallback without AbortSignal.any: the first abort removes both listeners.
   const either = new AbortController();
-  const abort = () => either.abort();
-  if (own.aborted || session.aborted) abort();
+  if (own.aborted || session.aborted) {
+    either.abort();
+    return either.signal;
+  }
+  const abort = () => {
+    own.removeEventListener?.('abort', abort);
+    session.removeEventListener('abort', abort);
+    either.abort();
+  };
   own.addEventListener?.('abort', abort);
   session.addEventListener('abort', abort);
   return either.signal;
