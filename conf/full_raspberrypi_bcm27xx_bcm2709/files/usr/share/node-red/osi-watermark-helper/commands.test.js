@@ -353,14 +353,11 @@ test('all protected operations apply without runtime capability metadata', async
   }
 });
 
-test('retained scoped link and linked-account denials preserve canonical state', async (t) => {
+test('retained scoped link denials preserve canonical state', async (t) => {
   const cases = [
     { name: 'missing sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.exec("DELETE FROM sync_link_state WHERE peer_node='cloud'") },
     { name: 'disabled sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.prepare("UPDATE sync_link_state SET linked=0 WHERE peer_node='cloud'").run() },
     { name: 'foreign sync link', reason: 'gateway_not_linked', prepare: (state) => state.raw.prepare("UPDATE sync_link_state SET gateway_device_eui=? WHERE peer_node='cloud'").run(OTHER_GATEWAY) },
-    { name: 'linked account disabled', reason: 'gateway_account_disabled', runtime: { linkedAccount: { disabled: true } } },
-    { name: 'linked account enabled false', reason: 'gateway_account_disabled', runtime: { linkedAccount: { enabled: false } } },
-    { name: 'linked account disabled_at', reason: 'gateway_account_disabled', runtime: { linkedAccount: { disabled_at: NOW } } },
   ];
   for (let index = 0; index < cases.length; index += 1) {
     const scenario = cases[index];

@@ -26,14 +26,6 @@ function error(code, message, result = 'REJECTED_PERMANENT') {
   return e;
 }
 
-function bindingConflict(cause) {
-  const e = new Error(cause && cause.message ? cause.message : 'protected command binding conflict');
-  e.code = 'watermark_command_conflict';
-  e.reason = 'binding_conflict';
-  e.commandResult = 'CONFLICT';
-  return e;
-}
-
 function str(value) { return value == null ? '' : String(value); }
 function upperEui(value) { return str(value).toUpperCase(); }
 function canonicalUuid(value) { return str(value).toLowerCase(); }
@@ -99,10 +91,6 @@ async function authorizeDevice(tx, identity, type, runtime) {
   );
   if (!linked || Number(linked.linked) !== 1 || upperEui(linked.gateway_device_eui) !== identity.gateway) {
     throw error('gateway_not_linked', 'gateway is not linked for cloud configuration');
-  }
-  const account = runtime && (runtime.linkedAccount || runtime.linked_account);
-  if (account && (account.enabled === false || account.disabled === true || account.disabled_at)) {
-    throw error('gateway_account_disabled', 'linked gateway account is disabled');
   }
   if (device.irrigation_zone_id != null) {
     if (!device.zone_id || device.zone_deleted || upperEui(device.zone_gateway) !== identity.gateway) {
