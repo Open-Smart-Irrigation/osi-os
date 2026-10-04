@@ -323,10 +323,13 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
   // so on a gateway with real history it never returns to zero on its own and
   // would permanently fail a canary built on it. sync_rejected_recent is the
   // windowed counterpart the health_state derivation below actually uses.
+  // rejected_at is an ISO-8601 string with 'T' and 'Z'; the cutoff must use
+  // the same format, or a text comparison against datetime()'s space form
+  // counts every row on the cutoff's date and the window reaches 48 hours.
   try {
     health.sync_rejected_recent = toCount(await queryGet(
       db,
-      "SELECT COUNT(*) c FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at >= datetime('now','-24 hours')"
+      "SELECT COUNT(*) c FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')"
     ));
   } catch (_) {}
 
