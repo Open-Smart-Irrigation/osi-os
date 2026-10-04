@@ -421,6 +421,23 @@ test('shouldUseHistoryRollups with scopeContext', function() {
   assert.strictEqual(HR.shouldUseHistoryRollups({ scope: 'gateway' }, '30d', 'auto'), false);
 });
 
+test('shouldUseCardRollups bypasses soil rollups only for a plain LSN50 source', function() {
+  var ctx = { scope: 'zone' };
+  var soil = { cardType: 'soil' };
+  var kiwi = { type_id: 'KIWI_SENSOR' };
+  var sdi12 = { type_id: 'DRAGINO_SDI12' };
+  var chameleon = { type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 };
+  var plain = { type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 };
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [kiwi], ctx, '30d', 'auto'), true);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [kiwi, sdi12, chameleon], ctx, 'season', 'auto'), true);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [], ctx, '30d', 'auto'), true);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [kiwi, plain], ctx, '30d', 'auto'), false);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [plain], ctx, '7d', 'daily'), false);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [kiwi], ctx, '24h', 'raw'), false);
+  assert.strictEqual(HR.shouldUseCardRollups({ cardType: 'environment' }, [plain], ctx, '30d', 'auto'), true);
+  assert.strictEqual(HR.shouldUseCardRollups(soil, [kiwi], { scope: 'gateway' }, '30d', 'auto'), false);
+});
+
 test('rowHasSoilProfileValue', function() {
   assert.strictEqual(HR.rowHasSoilProfileValue({ swt_1: 25 }), true);
   assert.strictEqual(HR.rowHasSoilProfileValue({ swt_1: null, swt_2: null, swt_3: null }), false);

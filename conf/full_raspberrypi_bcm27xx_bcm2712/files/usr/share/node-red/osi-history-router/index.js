@@ -491,6 +491,18 @@ function shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested)
   return requested === 'daily' || requested === 'weekly';
 }
 
+// Soil rollups are merged per zone card. A plain LSN50 (no Chameleon) may have
+// written a stale SWT3 into them before per-device SWT3 filtering existed, and
+// a merged bucket cannot be separated again, so a soil card with such a source
+// reads raw device_data. Every other card, and every soil card without such a
+// source, follows the range/aggregation rule above.
+function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested) {
+  if (card && card.cardType === 'soil' && (sourceDevices || []).some(function(device) {
+    return !isLsn50Swt3Eligible(device);
+  })) return false;
+  return shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested);
+}
+
 function rowHasSoilProfileValue(row) {
   return ['swt_1', 'swt_2', 'swt_3'].some(function(channelId) {
     return numberOrNull(row && row[channelId]) !== null;
@@ -612,6 +624,7 @@ module.exports = {
   normalizeWorkspaceRow,
   summaryScore,
   shouldUseHistoryRollups,
+  shouldUseCardRollups,
   rowHasSoilProfileValue,
   latestSeriesPoint,
   pointValueForCalendar,

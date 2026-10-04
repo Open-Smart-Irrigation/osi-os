@@ -87,3 +87,37 @@ test('shipped history router filters stale plain-LSN50 SWT3 per device and keeps
     fs.rmSync(fixture.dir, { recursive: true, force: true });
   }
 });
+
+// I2: the raw-path bypass exists only because a merged soil rollup can carry a
+// plain LSN50's stale SWT3. A soil card whose sources are all SWT3-eligible
+// (here a KIWI sensor beside a dendrometer LSN50 that is no soil source)
+// reads history_channel_rollups exactly as on main.
+test('shipped history router keeps soil rollups for a zone without a plain LSN50 source', async () => {
+  const dir = fs.mkdtempSync(path.join('/var/tmp', 'osi-history-soil-rollup-'));
+  const dbPath = path.join(dir, 'fixture.db');
+  try {
+    seedFixtureDb(dbPath);
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      INSERT INTO history_channel_rollups (
+        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+        min_value, max_value, mean_value, median_value, latest_value, coverage_pct, coverage_confidence, sample_count, unit)
+      VALUES (1, 'soil', 'root-zone', 'swt_1', 'daily', '2026-07-08T00:00:00.000Z', '2026-07-09T00:00:00.000Z',
+        321, 321, 321, 321, 321, 100, 'configured', 1, 'kPa');
+    `);
+    db.close();
+    const result = await runNodeForRoute(readNodeFunc(), dbPath, {
+      name: 'soil-rollup',
+      method: 'GET',
+      path: '/api/history/zones/1/cards/test-zone-uuid-1:soil:root-zone/data',
+      params: { zoneId: '1', cardId: 'test-zone-uuid-1:soil:root-zone' },
+      query: { range: '30d', aggregation: 'daily' },
+    });
+    assert.equal(result.statusCode, 200);
+    assert.match(result.payload.aggregation.source, /rollups/);
+    const swt1 = result.payload.series.find((entry) => entry.id === 'swt_1');
+    assert.ok(swt1.points.some((point) => point.mean === 321), 'the stored rollup bucket is served');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

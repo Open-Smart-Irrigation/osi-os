@@ -185,7 +185,8 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, "'Current season'", 'display-safe generated season name');
   assertContains(failures, moduleSource, 'Season range is unavailable for this zone', 'season-unavailable 400 contract');
   assertContains(failures, moduleSource, 'Season range uses zone season boundaries; use custom for explicit from/to', 'season explicit-from/to rejection');
-  assertContains(failures, adapterSource, 'HR.shouldUseHistoryRollups(scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
+  assertContains(failures, adapterSource, 'HR.shouldUseCardRollups(card, allSourceDevices, scopeContext, range.label, aggregationRequested)', 'long-range rollup gate');
+  assertContains(failures, moduleSource, 'return shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested);', 'card rollup gate delegates to the long-range rule');
   assertContains(failures, adapterSource, 'soilRowsHaveWarning(latestRows)', 'merged soil summary warning classifier');
   assertContains(failures, adapterSource, 'sourceDeviceCount: summarySourceDevices.length', 'display-safe source count in card summaries');
   assertContains(failures, adapterSource, 'sourceLabels: HR.displaySourceLabels(summarySourceDevices)', 'display-safe source labels in card summaries');
