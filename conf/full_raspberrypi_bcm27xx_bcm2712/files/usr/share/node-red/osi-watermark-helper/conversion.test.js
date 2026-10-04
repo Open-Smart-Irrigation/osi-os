@@ -127,6 +127,13 @@ describe('clip bound and rail boundaries (external review 2026-09-26)', () => {
 });
 
 describe('flags, calibration and temperature', () => {
+  it('uses the shared normal-or-zero binary64 calibration domain', () => {
+    assert.equal(c.MIN_NORMAL, 2.2250738585072014e-308);
+    assert.equal(c.channelCalibration({ pullup_1_ohm: 30000, pulldown_1_ohm: 30000, series_fwd_1_ohm: 0, series_rev_1_ohm: 10, pullup_2_ohm: 30000, pulldown_2_ohm: 30000, series_fwd_2_ohm: 10, series_rev_2_ohm: 10 }, 1).seriesFwd, 0);
+    assert.equal(c.channelCalibration({ pullup_1_ohm: 30000, pulldown_1_ohm: 30000, series_fwd_1_ohm: Number.MIN_VALUE, series_rev_1_ohm: 10, pullup_2_ohm: 30000, pulldown_2_ohm: 30000, series_fwd_2_ohm: 10, series_rev_2_ohm: 10 }, 1), null);
+    assert.equal(c.channelCalibration({ pullup_1_ohm: 30000, pulldown_1_ohm: 30000, series_fwd_1_ohm: c.MIN_NORMAL, series_rev_1_ohm: 10, pullup_2_ohm: 30000, pulldown_2_ohm: 30000, series_fwd_2_ohm: 10, series_rev_2_ohm: 10 }, 1).seriesFwd, c.MIN_NORMAL);
+  });
+
   it('untrusted flags and invalid samples', () => {
     for (const f of [0x21, 0x22, 0x28, 0x30]) {
       assert.equal(convert([800, 3291], [4093, 2], { flags1: f })[0].status, 'invalid_sample');

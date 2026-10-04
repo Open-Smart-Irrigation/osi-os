@@ -18,6 +18,8 @@
         "ZONE_IRRIGATION_CALIBRATION_UPSERTED": {"aggregate_key_path": "payload.zone_uuid", "sync_version_path": "payload.sync_version"},
         "WEATHER_STATION_ZONES_REPLACED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"},
         "ZONE_AGRONOMY_UPSERTED": {"sync_version_path": "payload.sync_version"}
+        ,"WATERMARK_CALIBRATION_UPSERTED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"}
+        ,"WATERMARK_CALIBRATION_DELETED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"}
     },
     "type": "object",
     "required": ["eventUuid", "aggregateType", "aggregateKey", "op", "syncVersion", "payload"],
@@ -59,6 +61,8 @@
                 "WEATHER_STATION_ZONES_REPLACED",
                 "WORK_REQUEST_SUBMITTED",
                 "ZONE_AGRONOMY_UPSERTED",
+                "WATERMARK_CALIBRATION_UPSERTED",
+                "WATERMARK_CALIBRATION_DELETED",
                 "ZONE_CONFIG_UPSERTED",
                 "ZONE_DELETED",
                 "ZONE_ENVIRONMENT_APPENDED",
@@ -89,6 +93,36 @@
         }
     },
     "allOf": [
+        {
+            "if": {"properties": {"op": {"const": "WATERMARK_CALIBRATION_UPSERTED"}}, "required": ["op"]},
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "WATERMARK_CALIBRATION"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Eui64"},
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/WatermarkCalibration"},
+                            {"required": ["deleted_at"], "properties": {"deleted_at": {"const": null}}}
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "if": {"properties": {"op": {"const": "WATERMARK_CALIBRATION_DELETED"}}, "required": ["op"]},
+            "then": {
+                "properties": {
+                    "aggregateType": {"const": "WATERMARK_CALIBRATION"},
+                    "aggregateKey": {"$ref": "resources.schema.json#/definitions/Eui64"},
+                    "payload": {
+                        "allOf": [
+                            {"$ref": "resources.schema.json#/definitions/WatermarkCalibration"},
+                            {"required": ["deleted_at"], "properties": {"deleted_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"}}}
+                        ]
+                    }
+                }
+            }
+        },
         {
             "if": {
                 "properties": {

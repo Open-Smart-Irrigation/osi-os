@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "fixtures": {
+    "gateway_device_eui": "A84041A171000001",
+    "device_eui": "A84041A171000002",
+    "foreign_device_eui": "A84041A171000003",
+    "actor_user_uuid": "12345678-1234-4234-8234-123456789abc"
+  },
+  "effectKeys": {
+    "set": "watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "delete": "watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "soilDepths": "device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}",
+    "chameleon": "chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}"
+  },
+  "commands": [
+    "SET_WATERMARK_CALIBRATION",
+    "DELETE_WATERMARK_CALIBRATION",
+    "UPSERT_DEVICE_SOIL_DEPTHS",
+    "SET_CHAMELEON_CONFIG"
+  ],
+  "events": [
+    "WATERMARK_CALIBRATION_UPSERTED",
+    "WATERMARK_CALIBRATION_DELETED"
+  ],
+  "replay": {
+    "trustedBindingFields": ["command_type", "resource", "device_eui", "gateway_device_eui", "actor_user_uuid", "base_sync_version", "operation", "normalized_intent"],
+    "order": ["command_id", "effect_key"],
+    "mismatch": "conflict"
+  },
+  "bindingVectors": [
+    {
+      "name": "omitted-metadata",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    },
+    {
+      "name": "explicit-null-metadata",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1,"notes":null}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"notes\":null,\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "023ba8f288496b4c6fa5d4bf4a855fa5f83193b73d6f95b6ac82937f454b4ae0"
+    },
+    {
+      "name": "numeric-one",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    },
+    {
+      "name": "numeric-one-point-zero",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1.0}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef21440c01de6de05f14c41385a3e702eea7d1947d55e6f8d8553886221357a4"
+    },
+    {
+      "name": "decimal-exponent",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"fraction":1.25,"small":1e-7,"negative_zero":-0.0}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"fraction\":1.25,\"negative_zero\":0,\"small\":0.0000001},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "aae640451c35b771b86c678337ce194c04ce2901626a0f9e70dc3e4c50da2ea0"
+    },
+    {
+      "name": "decimal-fixed-equivalent",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","normalized_intent":{"fraction":1.25,"small":0.0000001,"negative_zero":0}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"normalized_intent\":{\"fraction\":1.25,\"negative_zero\":0,\"small\":0.0000001},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "aae640451c35b771b86c678337ce194c04ce2901626a0f9e70dc3e4c50da2ea0"
+    },
+    {
+      "name": "typed-instant-and-opaque-text",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"a84041a171000002","gateway_device_eui":"a84041a171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789ABC","base_sync_version":7,"operation":"set","measured_at":"2026-08-08T10:11:12+02:00","normalized_intent":{"method":"2026-08-08T10:11:12+02:00","notes":"calibration 2026-08-08T10:11:12.123Z"}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"measured_at\":\"2026-08-08T08:11:12.000Z\",\"normalized_intent\":{\"method\":\"2026-08-08T10:11:12+02:00\",\"notes\":\"calibration 2026-08-08T10:11:12.123Z\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "f1319b3c0914de421d26c82c98a136dc50e3d4c5c7360a1a7421b762c0202069"
+    },
+    {
+      "name": "string-escaping-and-unicode",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","key\u001b":"key-control","normalized_intent":{"control":"start\u001bend","quote_backslash":"\"\\\\\n","unicode":"café 😀","surrogate":"\ud800"}},
+      "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"key\\u001b\":\"key-control\",\"normalized_intent\":{\"control\":\"start\\u001bend\",\"quote_backslash\":\"\\\"\\\\\\\\\\n\",\"surrogate\":\"\\ud800\",\"unicode\":\"café 😀\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "ef8c7d3cf133a21566a73d39f5d5280c57a83ccf7b088037d8d5aba3bf87678f"
+    }
+  ],
+  "conflictCases": {
+    "sameKeyDifferentIntent": "conflict",
+    "changedEffect": "65f373736f428238a9fc9f610cef88532d8cf57e4ccdc4b0b20c96aeb2a5a91d",
+    "changedBase": "8f7f1f37c05c8cc0ff1acfc24962af81338539f6dddcc8c4e0bac80070bfd205",
+    "changedBinding": "784f2141882aa2003b527acc983ac072576cddb88155fb61e2be019d3c38716b",
+    "changedIntent": "a8011218963f67a5dd0a0d6612bced69a932d27dc056d8524057df210512c481"
+  },
+  "calibrationNumericDomain": [
+    {"name":"zero-series","field":"series_fwd_1_ohm","value":0,"accepted":true},
+    {"name":"minimum-normal-series","field":"series_fwd_1_ohm","value":2.2250738585072014e-308,"accepted":true},
+    {"name":"representative-fraction","field":"series_fwd_1_ohm","value":0.6,"accepted":true},
+    {"name":"subnormal-series","field":"series_fwd_1_ohm","value":5e-324,"accepted":false},
+    {"name":"subnormal-residual","field":"worst_residual_pct","value":5e-324,"accepted":false}
+  ],
+  "depthVectors": [
+    {"name":"watermark-set","raw":{"swt_1":20,"swt_2":null,"probe-1":7,"Probe Key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8,"zero_probe":0},"normalized":{"swt_1":20,"probe-1":7,"probe key/with.any.symbols-and-a-very-long-name-that-exceeds-sixty-four-characters":8},"configured":true},
+    {"name":"watermark-clear","raw":{"swt_1":0,"swt_2":null},"normalized":{},"configured":true},
+    {"name":"kiwi-and-generic","raw":{"SWT_1":"25","vwc_45cm":"45","some_other_probe":"5"},"normalized":{"swt_1":25,"vwc_45cm":45,"some_other_probe":5},"configured":true},
+    {"name":"generic-sdi12","raw":{"soil_temp_1":1000,"soil_ec_1":"1"},"normalized":{"soil_temp_1":1000,"soil_ec_1":1},"configured":true}
+  ]
+}

@@ -1,60 +1,96 @@
-# WATERMARK on the LSN50: deferred work after phase 1
+# WATERMARK on the LSN50: deferred work after Phase 1
 
-Date: 2026-09-29 · Baseline: osi-os main at `ca08dcc13` (#366)
+Date: 2026-09-29 · Updated: 2026-10-01 · Baseline: `origin/main`
 
-Phase 1 is on main. It decodes, converts and displays WATERMARK readings on the
-edge, stores every profile 3 frame in `watermark_readings`, and keeps WATERMARK
-observations out of the irrigation scheduler. Everything else in the spec
-(`docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md`) is deferred. The
-table lists each deferred item, what main does today, and the document that
-owns it. None of the plans named here is executable as written.
+Phase 1 is on main. The current cloud-parity stack adds the edge-authoritative
+calibration mirror, pending-first configuration commands, contact-only FPort 11
+publishing, and Data-view source parity. It keeps every WATERMARK observation
+out of the irrigation scheduler.
 
-## Shipped baseline the rows refer to
+The approved cloud-parity architecture is
+`docs/superpowers/specs/2026-09-30-watermark-cloud-parity-design.md`. The old
+`2026-09-26-watermark-lsn50-phase2.md` and
+`2026-09-26-watermark-lsn50-phase3.md` sketches are historical inputs. They are
+not executable and must not be used to extend this implementation. This file
+records the implemented parity boundary and the work that remains deferred.
+
+## Implemented baseline
 
 - Migration `0061__watermark_lsn50.sql` creates `watermark_calibrations` and
-  `watermark_readings` with no outbox triggers. `0060` is the RAK10701
-  field-tester migration.
-- `osi-watermark-helper` (loaded through `osiLib.require('watermark-helper')`)
-  exports the conversion core (`parseProfile3`, `resistanceFromCodes`,
-  `tensionFromResistance`, `convertFrame`, `channelCalibration`), the
-  calibration store (`validateCalibrationBody`, `getCalibration`,
-  `saveCalibration`, `deleteCalibration`, `backfillBatch`, `backfillPending`)
-  and `ingestProfile3`.
-- `lsn50-decode-fn` sends FPort 11 to `watermark-ingest-fn`; `Build Telemetry`
-  (`8809bb5239dfb3d4`) returns `null` for an LSN50 FPort 11 uplink, so no
-  WATERMARK MQTT telemetry leaves the gateway.
-- `GET`, `PUT` and `DELETE /api/devices/:deveui/watermark/calibration` go to
-  `watermark-cal-fn`.
-- The scheduler query node `d0b2b1c1a937e16d` carries
-  `AND NOT EXISTS (SELECT 1 FROM watermark_readings wr WHERE wr.device_data_id = dd.id)`,
-  so automated WATERMARK irrigation stays disabled whatever the device flags say.
+  `watermark_readings`. Migration `0068__watermark_cloud_parity.sql` adds
+  calibration outbox events without syncing raw readings.
+- `osi-watermark-helper` owns profile parsing, electrical conversion,
+  calibration persistence, backfill, and ingest.
+- FPort 11 reaches local WATERMARK ingest and publishes a contact-only message.
+  The generic MQTT telemetry builder still drops its measurement payload.
+- The local calibration API supports `GET`, `PUT`, and `DELETE`.
+- The scheduler query excludes every row linked to `watermark_readings`.
+- Canonical `swt_1`, `swt_2`, and external-temperature values already travel
+  through ordinary device-data history sync.
+- Bootstrap and force sync carry the retained calibration row or tombstone.
+- The protected command route handles calibration set/delete, Chameleon
+  configuration, and generic soil-depth writes with exact-base effect keys.
 
-## Deferred items
+## Status index
 
-| Item | State on main | Owner document | Blocked by |
+| Item | Current decision | Phase | Owner |
 |---|---|---|---|
-| Cloud: calibration sync and cloud GUI | `watermark_calibrations` changes stay on the gateway. No calibration events or commands exist in `docs/contracts/sync-schema/`, and the cloud has no calibration mirror, WATERMARK card section, calibration form or "WATERMARK 1/2" history labels. Calibrated `swt_1`/`swt_2` values reach the cloud only as ordinary LSN50 `device_data` rows. | Phase 2 plan (`2026-09-26-watermark-lsn50-phase2.md`), spec §7 and §13 | Phase 2 plan rewrite; the shared `DesiredStateService` rewrite guard; the Chameleon prerequisite |
-| Cloud: MQTT liveness for WATERMARK boards | `Build Telemetry` drops FPort 11, so the cloud neither refreshes `last_seen` nor auto-creates a WATERMARK board from MQTT. | Phase 2 plan, decision P2-7 (Task E7) | Phase 2 plan rewrite |
-| Cloud: raw-reading sync | `watermark_readings` is edge-local. Status, resistance, offset and supply per reading never leave the gateway. | Phase 3 plan (`2026-09-26-watermark-lsn50-phase3.md`), OD-4, OD-5; spec §8 | Phase 2 landing; phase 3 re-plan against main |
-| Scheduler admission | No admission table, no enable writer and no D7 check against `chameleon_enabled`. The phase 1 interlock excludes every WATERMARK row. | Phase 3 plan, OD-1 to OD-3 and OD-9; spec §8 | Phase 3 re-plan against main; the dry-down bench gate below |
-| Dry-down bench gate | The offline analyzer (phase 3 Task E1) is implemented. No real run has been accepted. | Bench protocol (`2026-09-26-watermark-dry-down-bench-protocol.md`) | The identity-bound run manifest (protocol §2.3); phase 1 deployed on the bench gateway |
-| Field acceptance on a gateway | Phase 1 is on main but has not been accepted on a gateway. The checks are listed below. | This document | A gateway running main with a registered profile 3 node |
-| Chameleon desired-state prerequisite (D6) | Not implemented. osi-server main (`c06f5d8c`) still issues `SET_CHAMELEON_ENABLED` from `DeviceController`; the edge registry lists `SET_CHAMELEON_CONFIG`, but Route Command (`934bf2bc19a8ce22`) has no branch for it, and no edge advertises `chameleon_config_commands_v1`. | Chameleon plan (`2026-09-26-chameleon-enabled-command-fix.md`), marked NOT EXECUTABLE; spec §10 | Its own rewrite around the desired-state ledger; it must land before phase 2 |
+| Edge-authoritative calibration parity | Implemented: `WATERMARK_CALIBRATION`, pending-first cloud writes, snapshots, retained tombstones, and cloud mirror, gated by `watermark_v1`. | Implemented | Cloud-parity design §§4–5 |
+| Generic probe depths | Implemented on the `DEVICE` aggregate through exact-base `UPSERT_DEVICE_SOIL_DEPTHS`, gated by `device_soil_depth_commands_v1`. | Implemented | Cloud-parity design §5 |
+| Chameleon command foundation | Implemented as pending-first exact-base `SET_CHAMELEON_CONFIG`, gated by `chameleon_config_commands_v1`. | Implemented | Cloud-parity design §5 |
+| FPort 11 liveness | Implemented as contact only. `lastSeen` is contact time; `currentStateRecordedAt` is canonical measurement time. | Implemented | Cloud-parity design §7 |
+| Cloud history labels | Implemented as neutral Soil tension 1/2 labels until immutable row-level provenance exists. Current calibration does not relabel history. | Implemented | Cloud-parity design §8 |
+| Edge Data view | An assigned plain LSN50 is a soil source with SWT1/SWT2 before its first sample. Chameleon and SDI-12 keep SWT3. Unassigned devices do not enter a zone Data view. | Implemented | History helper and channel registry tests |
+| Raw diagnostic sync | Declined and enforced. `watermark_readings` and all electrical diagnostics remain edge-local. | Not planned | Cloud-parity design §§2, 7–8 |
+| Calibration-fit wizard | Useful operator aid, but not a Phase 2 release gate; equivalent manual resistor evidence remains valid. | Later UX | Cloud-parity design §13 |
+| Board diagnostics in cloud | Later UI may show status, supply, board temperature, and versions. Board temperature must never be labelled soil or ambient temperature. | Later UX | Cloud-parity design §13 |
+| Bench electrical qualification | Validate both channels and polarities, cross-channel effects, ground state, supply, and installed lead length. These checks do not establish soil-tension accuracy. | Phase 2 non-blocker | Dry-down protocol |
+| Independent-reference qualification | Compare against an independent soil-water-tension reference across the claimed range. Self-consistency is not accuracy evidence. | Phase 3 gate | Dry-down protocol; field qualification runbook |
+| Temperature representativeness | Measure per depth or prove one DS18B20 represents both probe depths within a predeclared limit. | Phase 3 gate | Field qualification runbook |
+| Validated applicability envelope | Version the accepted resistance/kPa, temperature, supply, cable, ground, channel, placement, and salinity/EC conditions. No smoothing may make an individual sample eligible. | Phase 3 gate | Cloud-parity design §9; field qualification runbook |
+| Scheduler sampling policy | Fix per-channel freshness, minimum points, hysteresis, and re-arm rules before implementation. | Phase 3 gate | Future approved admission design |
+| Calibration reacceptance | Changing any electrical coefficient revokes qualification. Fresh evidence and explicit human reacceptance are required; metadata-only edits do not revoke it. | Phase 3 gate | Cloud-parity design §9 |
+| Scheduler admission | Remains disabled. No admission table or command is authorized by the cloud-parity design. | Phase 3 gate | Future approved admission design |
+| Field records | Record reference method, conditioning/rewetting, placement, depth, cable/ground state, temperature arrangement, salinity/EC observations, monitoring, and requalification triggers. | Phase 2 non-blocker | `docs/operations/watermark-field-qualification.md` |
 
-## Field acceptance checks for phase 1
+## Implemented cloud parity contract
 
-Run these read-only on a gateway that runs main, with a profile 3 node
-registered under the OSI Dragino LSN50 profile and not assigned to any
-irrigation zone. `<device-eui>` is that node's DevEUI.
+The edge advertises `watermark_v1`, `chameleon_config_commands_v1`, and
+`device_soil_depth_commands_v1`. `WATERMARK_CALIBRATION_UPSERTED` and
+`WATERMARK_CALIBRATION_DELETED` carry the calibration mirror. Four protected
+commands use these exact effect keys:
+
+- `SET_WATERMARK_CALIBRATION`:
+  `watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}`;
+- `DELETE_WATERMARK_CALIBRATION`:
+  `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}`;
+- `SET_CHAMELEON_CONFIG`:
+  `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}`;
+- `UPSERT_DEVICE_SOIL_DEPTHS`:
+  `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`.
+
+Deploy cloud support before the edge release that advertises these tokens.
+Cloud writes remain pending until ACK plus authoritative mirror convergence,
+and a pre-existing calibration must bootstrap before its first cloud edit.
+
+Contact and measurement time remain distinct. Contact-only FPort 11 MQTT may
+advance `lastSeen`; accepted canonical data may advance
+`currentStateRecordedAt`. Raw diagnostics remain edge-local, and the scheduler
+interlock remains active.
+
+## Phase 1 field acceptance
+
+Run these read-only on a gateway running main, with a profile 3 node registered
+under the OSI Dragino LSN50 profile and unable to reach irrigation control.
 
 | Check | Pass condition |
 |---|---|
-| Two FPort 11 uplinks with an increasing frame counter | The two newest `watermark_readings` rows for `<device-eui>` are `accepted` and their `f_cnt` values increase. The F83 duplicate check in `lsn50-decode-fn` can drop an uplink that repeats a counter before ingest. |
-| Raw persistence | Each accepted row has a 54-character `payload_hex` (27 bytes, tag `a2`, profile `03`) and a non-null `device_data_id` that names a `device_data` row of the same DevEUI and `recorded_at`. |
-| Measured DS18B20 source | `soil_temp_source = 2`, and `device_data.ext_temperature_c` equals `watermark_readings.soil_temp_c` for the same observation. |
-| Calibrated display | After a calibration save through the edge GUI or `PUT /api/devices/<device-eui>/watermark/calibration`, a new uplink has channel status `ok` or `saturated` with a kPa value, and the LSN50 card shows it in the WATERMARK section. |
-| Zero scheduler eligibility | No `device_data` row that has a `watermark_readings` row passes the scheduler query of `d0b2b1c1a937e16d`, including when the device is placed in a zone and `chameleon_enabled = 1`. The phase 1 test `scripts/test-watermark-ingest-flow.js` case (f) pins the same rule offline. |
+| Two FPort 11 uplinks | The two newest accepted `watermark_readings` rows have increasing frame counters. |
+| Raw persistence | Each accepted row has a 54-character profile 3 payload and a non-null `device_data_id` naming a row for the same device and time. |
+| Measured temperature source | `soil_temp_source = 2`, and canonical external temperature equals the raw row's soil temperature. |
+| Calibrated display | After a local calibration save, a new uplink has an eligible channel status and kPa value, and the edge card shows it. |
+| Zero scheduler eligibility | No row linked to `watermark_readings` passes the scheduler query, including if legacy device flags are set. |
 
-A gateway that fails any check keeps its WATERMARK node on the bench. Record
-the result with the gateway's firmware commit, never with credentials or DB
-copies.
+A gateway that fails any check keeps the node outside irrigation control. The
+record includes software and firmware versions but no credentials, database
+copy, customer identifier, or network address.

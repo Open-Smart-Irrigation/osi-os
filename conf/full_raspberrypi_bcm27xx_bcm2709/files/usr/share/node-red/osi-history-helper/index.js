@@ -368,7 +368,7 @@ function deviceBelongsToZone(device, zone) {
 
 function isSoilSource(device) {
   const type = String(device && device.type_id || '').toUpperCase();
-  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12'].includes(type)
+  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12', 'DRAGINO_LSN50'].includes(type)
     || Number(device && device.chameleon_enabled || 0) === 1
     || hasNumber(device, ['swt_1', 'swt_2', 'swt_3', 'swt_wm1', 'swt_wm2']);
 }
@@ -408,10 +408,10 @@ function sourceDevicesForCard(card, devices) {
   return [];
 }
 
-function channelsForCard(card) {
+function channelsForCard(card, sourceDevices) {
   const cardType = normalizeCardType(card && card.cardType);
   if (cardType === 'soil') {
-    return [
+    const channels = [
       { id: 'swt_1', field: 'swt_1', fields: ['swt_1', 'swt_wm1'], unit: 'kPa', label: 'Soil tension (S1)' },
       { id: 'swt_2', field: 'swt_2', fields: ['swt_2', 'swt_wm2'], unit: 'kPa', label: 'Soil tension (S2)' },
       { id: 'swt_3', field: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)' },
@@ -443,6 +443,10 @@ function channelsForCard(card) {
       { id: 'soil_ec_7', field: 'soil_ec_7', unit: 'µS/cm', label: 'Soil EC 7' },
       { id: 'soil_ec_8', field: 'soil_ec_8', unit: 'µS/cm', label: 'Soil EC 8' },
     ];
+    const lsn50WithoutChameleon = Array.isArray(sourceDevices) && sourceDevices.length > 0
+      && sourceDevices.every((device) => String(device && device.type_id || '').toUpperCase() === 'DRAGINO_LSN50'
+        && Number(device && device.chameleon_enabled || 0) !== 1);
+    return lsn50WithoutChameleon ? channels.filter((channel) => channel.id !== 'swt_3') : channels;
   }
   if (cardType === 'environment') {
     return [
@@ -1590,11 +1594,11 @@ async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
   const devices = await dbAll(db, `SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?${zoneDeviceFilter.sql} ORDER BY deveui ASC`, [device.zone_id].concat(zoneDeviceFilter.params));
   const cards = deriveCardsForZone(zone, devices);
   for (const card of cards) {
-    const channel = channelsForCard(card).find((candidate) =>
+    const sourceDevices = sourceDevicesForCard(card, devices);
+    const channel = channelsForCard(card, [device]).find((candidate) =>
       candidate.id === rollupField || candidate.field === rollupField
     );
     if (!channel) continue;
-    const sourceDevices = sourceDevicesForCard(card, devices);
     const sourceDeveuis = uniqueDeveuis(sourceDevices);
     if (!sourceDeveuis.includes(normalizedDeveui)) continue;
     return {
@@ -2013,7 +2017,14 @@ function tidyCsvRow(input) {
 }
 
 function exportChannelsForCard(card, scope) {
-  const channels = channelsForCard(card);
+  const channels = channelsForCard(card, sourceDevicesForCard(card, scope && scope.devices));
+  return scope && scope.requestedChannelKeys
+    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : channels;
+}
+
+function exportChannelsForDevice(card, device, scope) {
+  const channels = channelsForCard(card, [device]);
   return scope && scope.requestedChannelKeys
     ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
     : channels;
@@ -2023,16 +2034,16 @@ async function rawZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = exportChannelsForCard(card, scope);
+    const cardChannels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       );
     const deveuis = uniqueDeveuis(sourceDevices);
-    if (!channels.length || !deveuis.length) continue;
+    if (!cardChannels.length || !deveuis.length) continue;
 
-    const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+    const selectedFields = Array.from(new Set(cardChannels.flatMap(channelFieldNames)));
     const placeholders = deveuis.map(() => '?').join(',');
     const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
     const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
@@ -2046,6 +2057,8 @@ async function rawZoneExportRows(db, scope) {
     }
 
     sourceDevices.forEach((device, index) => {
+      const channels = exportChannelsForDevice(card, device, scope);
+      if (!channels.length) return;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       const sourceRows = rowsByDeveui[deveui] || [];
       const sourceName = displayDeviceName(device, index);
@@ -2087,17 +2100,19 @@ async function aggregateZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
   for (const card of scope.cards) {
-    const channels = exportChannelsForCard(card, scope);
+    const cardChannels = exportChannelsForCard(card, scope);
     const sourceDevices = sourceDevicesForCard(card, scope.devices)
       .slice()
       .sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       );
-    if (!channels.length || !sourceDevices.length) continue;
+    if (!cardChannels.length || !sourceDevices.length) continue;
 
     const arrayIdByDeveui = await resolveDeviceArrayIds(db, uniqueDeveuis(sourceDevices), scope.start, scope.end);
     let index = 0;
     for (const device of sourceDevices) {
+      const channels = exportChannelsForDevice(card, device, scope);
+      if (!channels.length) continue;
       const sourceName = displayDeviceName(device, index);
       index += 1;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
@@ -2225,8 +2240,8 @@ async function runRollupJob(db, options = {}) {
       const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]);
       const cards = deriveCardsForZone(zone, devices);
       for (const card of cards) {
-        const channels = channelsForCard(card);
         const sourceDevices = sourceDevicesForCard(card, devices);
+        const channels = channelsForCard(card, sourceDevices);
         const deveuis = uniqueDeveuis(sourceDevices);
         if (!channels.length || !deveuis.length) continue;
         cardsProcessed += 1;
@@ -2284,6 +2299,10 @@ function parseDepthJson(value) {
 }
 
 function soilDepthCm(device, channelId) {
+  const deviceType = String(device && device.type_id || '').toUpperCase();
+  if (channelId === 'swt_3' && deviceType === 'DRAGINO_LSN50' && Number(device && device.chameleon_enabled || 0) !== 1) {
+    return null;
+  }
   const direct = {
     swt_1: device && device.chameleon_swt1_depth_cm,
     swt_2: device && device.chameleon_swt2_depth_cm,
@@ -2855,6 +2874,7 @@ module.exports = {
   writeZoneCsv,
   rotateZoneCsv,
   aggregateRows,
+  soilDepthCm,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,
   buildAdvancedDiagnostics,

@@ -80,4 +80,34 @@ async function ingestProfile3(db, input, deps) {
   });
 }
 
-module.exports = { ingestProfile3 };
+// Contact-only MQTT payload: this is intentionally not a measurement mirror.
+// The cloud uses the authenticated topic gateway plus these five attribution
+// facts to advance contact/last_seen while edge sync remains authoritative for
+// watermark measurements and diagnostics.
+function buildContactPayload({ gatewayDeviceEui, deveui, observedAt }) {
+  const gateway = String(gatewayDeviceEui || '').trim().toUpperCase();
+  const device = String(deveui || '').trim().toUpperCase();
+  if (!/^[0-9A-F]{16}$/.test(gateway) || !/^[0-9A-F]{16}$/.test(device)) {
+    throw new Error('WATERMARK contact identity must be a canonical 16-hex EUI');
+  }
+  if (typeof observedAt !== 'string' || !observedAt.trim()) {
+    throw new Error('WATERMARK contact timestamp must be a scalar ISO-8601 string');
+  }
+  const timestampText = String(observedAt || '');
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(timestampText)) {
+    throw new Error('WATERMARK contact timestamp is invalid');
+  }
+  const timestampMs = Date.parse(timestampText);
+  if (!Number.isFinite(timestampMs)) {
+    throw new Error('WATERMARK contact timestamp is invalid');
+  }
+  return {
+    deviceEui: device,
+    gatewayDeviceEui: gateway,
+    deviceType: 'DRAGINO_LSN50',
+    fPort: 11,
+    timestamp: new Date(timestampMs).toISOString()
+  };
+}
+
+module.exports = { ingestProfile3, buildContactPayload };

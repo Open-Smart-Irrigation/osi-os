@@ -219,7 +219,7 @@ function metadataBoolean(card: HistoryCardSummary, key: string): boolean | null 
   return typeof value === 'boolean' ? value : null;
 }
 
-function exportSourceContextForCard(
+export function exportSourceContextForCard(
   card: HistoryCardSummary,
   selectedSourceKey: string | null,
 ): ChannelSourceContext | undefined {
@@ -231,7 +231,12 @@ function exportSourceContextForCard(
 
   if (card.cardType === 'soil') {
     if (source.typeId === 'DRAGINO_SDI12') return { deviceType: source.typeId };
-    const chameleonEnabled = metadataBoolean(card, 'chameleonEnabled') ?? metadataBoolean(card, 'chameleon_enabled');
+    const chameleonEnabled = source.chameleonEnabled
+      ?? metadataBoolean(card, 'chameleonEnabled')
+      ?? metadataBoolean(card, 'chameleon_enabled');
+    if (source.typeId === 'DRAGINO_LSN50') {
+      return { deviceType: source.typeId, chameleonEnabled: chameleonEnabled === true };
+    }
     return chameleonEnabled === true ? { deviceType: source.typeId, chameleonEnabled } : undefined;
   }
 

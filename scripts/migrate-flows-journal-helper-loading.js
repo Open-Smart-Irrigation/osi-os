@@ -30,6 +30,13 @@ const dedupeSource = `return (async () => {
     node.error('Pending command has no protected delivery command type', msg);
     return [null, null];
   }
+  const protectedTypes = new Set([
+    'SET_WATERMARK_CALIBRATION',
+    'DELETE_WATERMARK_CALIBRATION',
+    'SET_CHAMELEON_CONFIG',
+    'UPSERT_DEVICE_SOIL_DEPTHS'
+  ]);
+  if (protectedTypes.has(commandType)) return [null, null, msg];
   const journalType = /(?:^|_)JOURNAL(?:_|$)/.test(commandType);
   const dbLoad = osiLib.require('osi-db-helper');
   const commandLedgerLoad = osiLib.require('osi-command-ledger');
@@ -340,8 +347,8 @@ const PRIOR_CURRENT_HELPER_SURFACES = Object.freeze({
 
 const targetSpecs = {
   'command-dedupe-dispatch': {
-    beforeNodeHash: '014ce95de868e0cdfc61db295367117d09845ab1e5afd434fb590f3e4735ab06',
-    shapeHash: 'cac813cf50ef6a3527e5e205ceb4330d4cf18cca15c79c89a86c4f63d867c609',
+    beforeNodeHash: '6d55a2671a2eea2406667ff842662218bfa05509dbfde45bc37464c364959926',
+    shapeHash: '6767ddd47edb37a533a22a875c31911df6c28084ff74a504640cc4dcba8ec705',
     func: dedupeSource,
   },
   'journal-command-apply-fn': {

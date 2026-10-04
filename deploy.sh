@@ -1278,6 +1278,11 @@ same_fs_or_die
 echo "OK"
 
 echo "--- flows.json + React GUI (staged payload; activation deferred to migration) ---"
+# The command receiver is a dependency of the capabilities advertised by the
+# staged flows. Fetch and verify it before the payload can be activated.
+fetch_required "osi-watermark-helper commands.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js" \
+    "/srv/node-red/osi-watermark-helper/commands.js"
 STAGED_FLOWS="$TMP_DIR/flows.json"
 fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json" "$STAGED_FLOWS"
 STAGED_GUI_ARCHIVE="$TMP_DIR/react_gui.tar.gz"
@@ -1542,6 +1547,10 @@ fetch_required "osi-command-ledger package.json" \
 fetch_required "osi-command-ledger index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
     "/srv/node-red/osi-command-ledger/index.js"
+
+fetch_required "osi-watermark-binding canonicalization.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
+    "/srv/node-red/osi-watermark-binding/canonicalization.js"
 
 fetch_required "osi-zone-commands package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-commands/package.json" \

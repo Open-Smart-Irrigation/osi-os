@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
+const protectedBindingCanonicalization = require('../osi-watermark-binding/canonicalization');
 // osi-command-ledger — the fleet-wide pending-command dedupe/ACK pipeline.
 //
 // Extracted from osi-journal/commands.js (2026-07-14): this pipeline (exact
@@ -69,12 +70,31 @@ function isZoneCommandType(type) {
   ].includes(type);
 }
 
+const PROTECTED_CONFIGURATION_COMMANDS = new Set([
+  'SET_WATERMARK_CALIBRATION',
+  'DELETE_WATERMARK_CALIBRATION',
+  'SET_CHAMELEON_CONFIG',
+  'UPSERT_DEVICE_SOIL_DEPTHS',
+]);
+
+const PROTECTED_CONFIGURATION_SPECS = {
+  SET_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'set', prefix: 'watermark_calibration:set' },
+  DELETE_WATERMARK_CALIBRATION: { resourceType: 'WATERMARK_CALIBRATION', operation: 'delete', prefix: 'watermark_calibration:delete' },
+  SET_CHAMELEON_CONFIG: { resourceType: 'DEVICE', operation: 'set', prefix: 'chameleon_config:set' },
+  UPSERT_DEVICE_SOIL_DEPTHS: { resourceType: 'DEVICE', operation: 'set', prefix: 'device_soil_depths:set' },
+};
+
+function isProtectedConfigurationCommand(type) {
+  return PROTECTED_CONFIGURATION_COMMANDS.has(type);
+}
+
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function replayStatus(result) {
   if (result === 'APPLIED') return 'ACKED';
+  if (result === 'CONFLICT') return 'CONFLICT';
   if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
   return 'NACKED';
 }
@@ -158,11 +178,109 @@ function canonicalIntentHash(value) {
     .digest('hex');
 }
 
+function protectedContext(envelope, runtime, type) {
+  if (!isProtectedConfigurationCommand(type)) return null;
+  const payload = envelope && envelope.payload;
+  const runtimeGateway = String(runtime && (runtime.gateway_device_eui || runtime.gatewayDeviceEui) || '');
+  if (!/^[0-9A-F]{16}$/.test(runtimeGateway)) {
+    throw commandError('protected_command_conflict', 'trusted gateway binding is required');
+  }
+  const suppliedContext = (runtime && (runtime.protected_context || runtime.protectedContext)) ||
+    (envelope && (envelope.protected_context || envelope.protectedContext));
+  const context = suppliedContext && typeof suppliedContext === 'object' && !Array.isArray(suppliedContext)
+    ? suppliedContext : {};
+  const payloadIntent = payload && payload.values && typeof payload.values === 'object' && !Array.isArray(payload.values)
+    ? payload.values : {};
+  const payloadClaim = payload && payload.normalized_intent && typeof payload.normalized_intent === 'object' &&
+    !Array.isArray(payload.normalized_intent) ? payload.normalized_intent : null;
+  const contextClaim = context.normalized_intent && typeof context.normalized_intent === 'object' &&
+    !Array.isArray(context.normalized_intent) ? context.normalized_intent
+    : (context.normalizedIntent && typeof context.normalizedIntent === 'object' &&
+      !Array.isArray(context.normalizedIntent) ? context.normalizedIntent : null);
+  if ((payloadClaim && protectedBindingCanonicalization.canonicalize(payloadIntent) !==
+      protectedBindingCanonicalization.canonicalize(payloadClaim)) ||
+      (contextClaim && protectedBindingCanonicalization.canonicalize(payloadIntent) !==
+      protectedBindingCanonicalization.canonicalize(contextClaim))) {
+    throw commandError('protected_command_conflict', 'WATERMARK command intent differs from trusted runtime context');
+  }
+  const trustedIntent = payloadIntent;
+  const spec = PROTECTED_CONFIGURATION_SPECS[type];
+  const values = {
+    resource_type: context.resource_type || context.resourceType || spec.resourceType,
+    resource_id: context.resource_id || context.resourceId || (payload && (payload.device_eui || payload.deviceEui)),
+    gateway_device_eui: context.gateway_device_eui || context.gatewayDeviceEui || (payload && (payload.gateway_device_eui || payload.gatewayDeviceEui)),
+    actor_user_uuid: context.actor_user_uuid || context.actorUserUuid || (payload && (payload.actor_user_uuid || payload.actorUserUuid)),
+    base_sync_version: context.base_sync_version == null
+      ? (context.baseSyncVersion == null ? payload && payload.base_sync_version : context.baseSyncVersion)
+      : context.base_sync_version,
+    operation: context.operation || (payload && payload.operation) || spec.operation,
+  };
+  if (values.resource_type !== spec.resourceType ||
+      !/^[0-9A-F]{16}$/.test(String(values.resource_id || '')) ||
+      !/^[0-9A-F]{16}$/.test(String(values.gateway_device_eui || '')) ||
+      values.gateway_device_eui !== runtimeGateway ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
+      !Number.isSafeInteger(values.base_sync_version) || values.base_sync_version < 0 ||
+      !['set', 'delete'].includes(values.operation) ||
+      values.operation !== spec.operation) {
+    throw commandError('protected_command_conflict', 'trusted WATERMARK command binding is invalid');
+  }
+  const effectKey = String((payload && (payload.effect_key || payload.effectKey)) || envelope.effectKey || '').trim();
+  const expectedEffect = `${spec.prefix}:${values.gateway_device_eui}:${values.resource_id}:${values.base_sync_version}`;
+  if (effectKey !== expectedEffect || !payload ||
+      String(payload.device_eui || payload.deviceEui || '').trim() !== values.resource_id ||
+      String(payload.gateway_device_eui || payload.gatewayDeviceEui || '').trim() !== values.gateway_device_eui ||
+      String(payload.actor_user_uuid || payload.actorUserUuid || '').trim() !== values.actor_user_uuid ||
+      payload.base_sync_version !== values.base_sync_version ||
+      payload.operation !== values.operation) {
+    throw commandError('protected_command_conflict', 'WATERMARK command semantic key does not match trusted binding');
+  }
+  const binding = {
+    command_type: type,
+    resource: values.resource_type,
+    device_eui: values.resource_id,
+    gateway_device_eui: values.gateway_device_eui,
+    actor_user_uuid: values.actor_user_uuid,
+    base_sync_version: values.base_sync_version,
+    operation: values.operation,
+    normalized_intent: trustedIntent,
+  };
+  values.intent_hash = protectedBindingCanonicalization.sha256(trustedIntent);
+  values.binding_hash = protectedBindingCanonicalization.sha256(binding);
+  if (context.command_type && context.command_type !== type ||
+      context.commandType && context.commandType !== type ||
+      context.resource && context.resource !== values.resource_type) {
+    throw commandError('protected_command_conflict', 'trusted WATERMARK command type or resource conflicts');
+  }
+  return values;
+}
+
+function protectedBindingMatches(row, context) {
+  return row && context &&
+    row.binding_hash === context.binding_hash &&
+    row.intent_hash === context.intent_hash &&
+    row.resource_type === context.resource_type &&
+    row.resource_id === context.resource_id &&
+    row.gateway_device_eui === context.gateway_device_eui &&
+    row.actor_user_uuid === context.actor_user_uuid &&
+    Number(row.base_sync_version) === context.base_sync_version &&
+    row.operation === context.operation;
+}
+
 function validNonJournalEffectBinding(envelope, runtime) {
   if (!runtime || runtime.command_type_recognized !== true) return false;
   const payload = envelope.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
   const effectKey = String(payload.effect_key || payload.effectKey || envelope.effectKey || '').trim();
+  const type = commandType(envelope);
+  if (isProtectedConfigurationCommand(type)) {
+    try {
+      protectedContext(envelope, runtime, type);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
   let match = /^irrigation:scheduler:(0|[1-9]\d*):(0|[1-9]\d*):(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/.exec(effectKey);
   if (match) {
     const zoneId = payload.zone_id == null ? payload.zoneId : payload.zone_id;
@@ -182,7 +300,6 @@ function validNonJournalEffectBinding(envelope, runtime) {
       .trim().toUpperCase();
     return deviceEui === match[1];
   }
-  const type = commandType(envelope);
   if (isZoneCommandType(type)) {
     const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
     const base = payload.base_sync_version;
@@ -268,19 +385,28 @@ async function validEffectBinding(envelope, opts) {
   return validNonJournalEffectBinding(envelope, opts);
 }
 
-async function deduplicatePendingCommand(db, envelope, runtime) {
+async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
   envelope = object(envelope, 'Pending command envelope');
   const deliveryId = deliveryCommandId(envelope);
   const opts = runtime || {};
-  return db.transaction(async function(tx) {
+  return (async function() {
+    const type = commandType(envelope);
+    const protectedType = isProtectedConfigurationCommand(type);
+    const trusted = protectedType ? protectedContext(envelope, opts, type) : null;
     let row = await tx.get(
       'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
       [String(deliveryId)]
     );
     if (row) {
+      const storedProtected = isProtectedConfigurationCommand(String(row.command_type || '').toUpperCase()) ||
+        row.binding_hash != null || row.intent_hash != null;
+      if ((storedProtected || protectedType) && (!storedProtected || !protectedType ||
+          row.command_type !== type || !trusted ||
+          !protectedBindingMatches(row, trusted))) {
+        throw commandError('protected_command_conflict', 'WATERMARK command replay binding conflicts with the terminal ledger');
+      }
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
-    const type = commandType(envelope);
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
@@ -318,6 +444,31 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
         const facts = parsedResultDetail(candidate);
         return facts && facts.payloadHash === intentHash;
       });
+    } else if (protectedType) {
+      const candidates = await tx.all(
+        'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ORDER BY applied_at,command_id',
+        [effectKey, type]
+      );
+      if (candidates.length) {
+        row = candidates.find((candidate) => protectedBindingMatches(candidate, trusted));
+        if (!row) {
+          throw commandError('protected_command_conflict', 'WATERMARK command effect binding conflicts with the terminal ledger');
+        }
+        const replay = replayAck(row, deliveryId, false);
+        await tx.run(
+          'INSERT INTO applied_commands (' +
+            'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+            'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+          ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+          [String(deliveryId), row.effect_key, row.device_eui, row.command_type, row.result,
+            new Date().toISOString(), JSON.stringify(replay), 'edge', trusted.binding_hash,
+            trusted.intent_hash, trusted.resource_type, trusted.resource_id,
+            trusted.gateway_device_eui, trusted.actor_user_uuid, trusted.base_sync_version,
+            trusted.operation]
+        );
+        await persistReplayAck(tx, row, deliveryId, false);
+        return { handled: true, ack: replay };
+      }
     } else {
       row = await tx.get(
         'SELECT * FROM applied_commands WHERE effect_key=? AND command_type=? ' +
@@ -327,6 +478,44 @@ async function deduplicatePendingCommand(db, envelope, runtime) {
     }
     if (!row) return { handled: false };
     return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, false) };
+  })();
+}
+
+async function deduplicatePendingCommand(db, envelope, runtime) {
+  return db.transaction((tx) => deduplicatePendingCommandInTransaction(tx, envelope, runtime));
+}
+
+async function withProtectedCommandTransaction(db, envelope, runtime, mutation) {
+  if (typeof mutation !== 'function') {
+    throw commandError('malformed_command', 'protected command mutation callback is required');
+  }
+  return db.transaction(async (tx) => {
+    const type = commandType(envelope);
+    if (!isProtectedConfigurationCommand(type)) {
+      throw commandError('malformed_command', 'protected transaction requires a WATERMARK command');
+    }
+    const context = protectedContext(envelope, runtime || {}, type);
+    const duplicate = await deduplicatePendingCommandInTransaction(tx, envelope, runtime || {});
+    if (duplicate.handled) return duplicate;
+    const scoped = {
+      tx,
+      get: tx.get && tx.get.bind(tx),
+      all: tx.all && tx.all.bind(tx),
+      run: tx.run && tx.run.bind(tx),
+      exec: tx.exec && tx.exec.bind(tx),
+      context,
+      terminalAck: (ack) => queueCommandAckInTransaction(tx, Object.assign({
+        commandType: type,
+        deviceEui: context.resource_id,
+        gatewayDeviceEui: context.gateway_device_eui,
+        actorUserUuid: context.actor_user_uuid,
+        baseSyncVersion: context.base_sync_version,
+        operation: context.operation,
+        effectKey: envelope.payload.effect_key || envelope.payload.effectKey,
+        payload: Object.assign({}, envelope.payload),
+      }, ack || {}), Object.assign({}, runtime, { protected_context: context })),
+    };
+    return mutation(scoped);
   });
 }
 
@@ -334,7 +523,7 @@ function classifyAckResult(result, errorText) {
   if (['SUCCESS', 'APPLIED', 'ACKED'].includes(result)) return 'APPLIED';
   if (result === 'EXPIRED') return 'EXPIRED';
   if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR'].includes(result)) return 'FAILED_RETRYABLE';
-  if (['REJECTED_PERMANENT', 'NACKED'].includes(result)) return result;
+  if (['REJECTED_PERMANENT', 'NACKED', 'CONFLICT'].includes(result)) return result;
   if (result === 'FAILED') {
     const detail = String(errorText || '').toLowerCase();
     if (detail.includes('invalid') || detail.includes('unsupported') ||
@@ -374,14 +563,14 @@ function isCloudOriginatedCommandId(queuedCommandId) {
   return typeof queuedCommandId.ack === 'number';
 }
 
-async function queueCommandAck(db, rawAck, runtime) {
+async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const ack = object(rawAck, 'Command ACK');
   const commandId = queueCommandId(ack);
   const cloudOriginated = isCloudOriginatedCommandId(commandId);
   const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
   const errorText = ack.error == null ? '' : String(ack.error);
   const result = classifyAckResult(incomingResult, errorText);
-  const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
+  const terminal = ['APPLIED', 'CONFLICT', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result);
   const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
   const duplicate = ack.duplicate === true || String(ack.duplicate || '').toLowerCase() === 'true';
   const syncVersionCandidate = ack.appliedSyncVersion == null
@@ -397,6 +586,26 @@ async function queueCommandAck(db, rawAck, runtime) {
   const requestedSyncVersion = Number.isSafeInteger(requestedSyncVersionNumber) && requestedSyncVersionNumber >= 0
     ? requestedSyncVersionNumber
     : appliedSyncVersion;
+  const ackType = String(ack.commandType || '').trim().toUpperCase();
+  let trusted = null;
+  if (terminal && isProtectedConfigurationCommand(ackType)) {
+    const suppliedContext = (runtime && (runtime.protected_context || runtime.protectedContext)) || ack.protected_context || {};
+    const payload = ack.payload && typeof ack.payload === 'object' ? { ...ack.payload } : {
+      effect_key: ack.effectKey || ack.effect_key,
+      device_eui: ack.deviceEui || ack.devEui,
+      gateway_device_eui: ack.gatewayDeviceEui || ack.gateway_device_eui,
+      actor_user_uuid: ack.actorUserUuid || ack.actor_user_uuid,
+      base_sync_version: ack.baseSyncVersion == null ? ack.base_sync_version : ack.baseSyncVersion,
+      operation: ack.operation,
+    };
+    trusted = protectedContext({
+      commandId: commandId.ack,
+      commandType: ackType,
+      effectKey: payload.effect_key,
+      payload,
+      protected_context: suppliedContext,
+    }, runtime || {}, ackType);
+  }
   const initial = {
     commandId: commandId.ack,
     eventUuid: ack.eventUuid == null ? null : ack.eventUuid,
@@ -412,13 +621,19 @@ async function queueCommandAck(db, rawAck, runtime) {
     reason: errorText || ack.reason || null,
     detail: errorText || ack.reason || null,
   };
-  return db.transaction(async function(tx) {
-    if (terminal) {
+  if (terminal) {
       const existing = await tx.get(
         'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
         [commandId.stored]
       );
       if (existing) {
+        const storedProtected = isProtectedConfigurationCommand(String(existing.command_type || '').toUpperCase()) ||
+          existing.binding_hash != null || existing.intent_hash != null;
+        if ((storedProtected || trusted) && (!storedProtected || !trusted ||
+            ackType !== String(existing.command_type || '').toUpperCase() ||
+            !protectedBindingMatches(existing, trusted))) {
+          throw commandError('protected_command_conflict', 'WATERMARK terminal ACK binding conflicts with the terminal ledger');
+        }
         // A local commandId never queues a cloud ack (see isCloudOriginatedCommandId
         // above) -- not even on replay. replayAck() is the pure, DB-write-free half of
         // persistReplayAck() and reproduces the exact same returned shape.
@@ -427,19 +642,23 @@ async function queueCommandAck(db, rawAck, runtime) {
       }
       await tx.run(
         'INSERT INTO applied_commands (' +
-          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator' +
-        ') VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+          'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+        ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
         [commandId.stored, String(ack.effectKey || ack.effect_key || '').trim() || null,
           String(ack.deviceEui || ack.devEui || '').trim().toUpperCase() || 'UNKNOWN',
           String(ack.commandType || '').trim().toUpperCase() || 'UNKNOWN', result, appliedAt,
-          JSON.stringify(initial), 'edge']
+          JSON.stringify(initial), 'edge', trusted && trusted.binding_hash, trusted && trusted.intent_hash,
+          trusted && trusted.resource_type, trusted && trusted.resource_id,
+          trusted && trusted.gateway_device_eui, trusted && trusted.actor_user_uuid,
+          trusted && trusted.base_sync_version, trusted && trusted.operation]
       );
       const hooks = runtime && runtime.lifecycle_hooks;
       if (hooks && typeof hooks.afterCommandLedger === 'function') {
         await hooks.afterCommandLedger(initial);
       }
-    }
-    // A local action keeps its local ledger entry (the applied_commands write
+  }
+  // A local action keeps its local ledger entry (the applied_commands write
     // above, when terminal) but must never produce a command_ack_outbox row:
     // the cloud has no way to accept a delivery whose commandId it cannot
     // parse as a Long, and queueing it anyway is exactly the F93 poison.
@@ -452,13 +671,68 @@ async function queueCommandAck(db, rawAck, runtime) {
       'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
       [commandId.stored, JSON.stringify(initial), new Date().toISOString()]
     );
-    return initial;
+  return initial;
+}
+
+async function queueCommandAck(db, rawAck, runtime) {
+  return db.transaction((tx) => queueCommandAckInTransaction(tx, rawAck, runtime));
+}
+
+// Protected semantic validation can fail before protectedContext() has enough
+// trusted material to build a binding hash. Persist that terminal conflict or
+// permanent rejection without rewriting an existing command row. The durable
+// outbox record is still required so the cloud receives the decision.
+async function recordProtectedDecision(db, envelope, result, reason) {
+  return db.transaction(async (tx) => {
+    const type = commandType(envelope);
+    if (!isProtectedConfigurationCommand(type)) {
+      throw commandError('malformed_command', 'protected decision requires a WATERMARK command');
+    }
+    const delivery = deliveryCommandId(envelope);
+    const payload = envelope && envelope.payload && typeof envelope.payload === 'object'
+      ? envelope.payload : {};
+    const commandId = delivery;
+    const storedId = String(commandId);
+    const existing = await tx.get(
+      'SELECT command_id FROM applied_commands WHERE command_id=? LIMIT 1',
+      [storedId]
+    );
+    const ack = {
+      commandId,
+      commandType: type,
+      status: result === 'CONFLICT' ? 'CONFLICT' : 'NACKED',
+      result,
+      reason: reason || (result === 'CONFLICT' ? 'binding_conflict' : 'rejected'),
+      detail: reason || (result === 'CONFLICT' ? 'binding_conflict' : 'rejected'),
+      appliedSyncVersion: null,
+      duplicate: false,
+    };
+    if (!existing) {
+      await tx.run(
+        'INSERT INTO applied_commands (' +
+          'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,' +
+          'binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation' +
+        ') VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+        [storedId, String(envelope.effectKey || payload.effect_key || payload.effectKey || '').trim() || null,
+          String(payload.device_eui || payload.deviceEui || '').trim().toUpperCase() || 'UNKNOWN',
+          type, result, new Date().toISOString(), JSON.stringify(ack), 'edge',
+          null, null, null, null, null, null, null, null]
+      );
+    }
+    await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [storedId]);
+    await tx.run(
+      'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+      [storedId, JSON.stringify(ack), new Date().toISOString()]
+    );
+    return { handled: true, ack };
   });
 }
 
 module.exports = {
   deduplicatePendingCommand,
+  withProtectedCommandTransaction,
   queueCommandAck,
+  recordProtectedDecision,
   classifyAckResult,
   validEffectBinding,
 };

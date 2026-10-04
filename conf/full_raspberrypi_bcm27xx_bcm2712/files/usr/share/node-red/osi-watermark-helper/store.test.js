@@ -169,6 +169,17 @@ describe('calibration store', () => {
   let ctx;
   beforeEach(() => { ctx = freshDb(); });
 
+  it('transaction-scoped save seam commits calibration and first backfill batch together', async () => {
+    await ingestAt(ctx.db, T1, frameB64([800, 3291], [276, 4095]));
+    const input = wm.validateCalibrationBody({ ...CAL, expected_sync_version: 0 });
+    const saved = await ctx.db.transaction((tx) => wm.saveCalibrationTx(tx, {
+      deveui: DEVEUI, userId: USER_ID, scoped: false, input
+    }));
+    assert.equal(saved.row.sync_version, 1);
+    assert.equal(saved.first.converted, 1);
+    assert.equal(ctx.native.prepare('SELECT swt_1 FROM device_data WHERE deveui=?').get(DEVEUI).swt_1, 56.4);
+  });
+
   it('first save backfills waiting readings only', async () => {
     await ingestAt(ctx.db, T1, frameB64([800, 3291], [276, 4095]));
     const saved = await wm.saveCalibration(ctx.db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 0 } });
@@ -263,6 +274,18 @@ describe('calibration metadata (external final review 2026-09-26)', () => {
     await assert.rejects(save({ ...CAL, measured_at: 'yesterday-ish', expected_sync_version: 2 }),
       (e) => e.statusCode === 400 && e.field === 'measured_at');
     assert.equal(ctx.native.prepare('SELECT sync_version FROM watermark_calibrations').get().sync_version, 2);
+  });
+
+  it('accepts zero and normal binary64 values but rejects positive subnormals', async () => {
+    const minimumNormal = Number.MIN_VALUE * 2 ** 52;
+    const zero = await save({ ...CAL, series_fwd_1_ohm: 0, worst_residual_pct: 0, expected_sync_version: 0 });
+    assert.equal(zero.calibration.series_fwd_1_ohm, 0);
+    const normal = await save({ ...CAL, series_fwd_1_ohm: minimumNormal, worst_residual_pct: minimumNormal, expected_sync_version: 1 });
+    assert.equal(normal.calibration.series_fwd_1_ohm, minimumNormal);
+    await assert.rejects(save({ ...CAL, series_fwd_1_ohm: Number.MIN_VALUE, expected_sync_version: 2 }),
+      (e) => e.statusCode === 400 && e.field === 'series_fwd_1_ohm');
+    await assert.rejects(save({ ...CAL, worst_residual_pct: Number.MIN_VALUE, expected_sync_version: 2 }),
+      (e) => e.statusCode === 400 && e.field === 'worst_residual_pct');
   });
 
   it('omitted metadata is null on a first save and after a delete', async () => {

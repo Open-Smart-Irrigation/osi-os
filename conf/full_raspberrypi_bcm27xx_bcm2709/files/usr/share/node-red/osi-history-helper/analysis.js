@@ -188,6 +188,7 @@ function cardChannelsForSource(cardType, source = null) {
   if (normalized === 'soil') {
     const deviceType = String(source.deviceType || source.typeId || source.type_id || '').trim().toUpperCase();
     if (deviceType === 'DRAGINO_SDI12') return configuredChannels(normalized, source);
+    if (deviceType === 'DRAGINO_LSN50') return filterAvailable(normalized, ['swt_1', 'swt_2']);
     if (deviceType === 'KIWI_SENSOR') return filterAvailable(normalized, ['swt_1', 'swt_2']);
     if (deviceType === 'TEKTELIC_CLOVER') return [];
   }

@@ -290,14 +290,14 @@ function fport2Uplink(bytes) {
 
 const CASES = [
   {
-    name: 'wiring: decode fans out to config query and watermark-ingest-fn; ingest node is a sink on lsn50-tab',
+    name: 'wiring: decode fans out to config query and watermark-ingest-fn; ingest publishes one contact message',
     async run() {
       assert.deepEqual(headNode('lsn50-decode-fn').wires, [['lsn50-config-query-fn', 'watermark-ingest-fn']]);
       const ingest = headNode('watermark-ingest-fn');
       assert.equal(ingest.type, 'function');
       assert.equal(ingest.z, 'lsn50-tab');
-      assert.equal(ingest.outputs, 0);
-      assert.deepEqual(ingest.wires, []);
+      assert.equal(ingest.outputs, 1);
+      assert.deepEqual(ingest.wires, [['9b38464d56b05ae0']]);
     },
   },
   {

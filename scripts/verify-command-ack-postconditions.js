@@ -135,7 +135,9 @@ function makeDb() {
     );
     CREATE TABLE applied_commands (
       command_id TEXT PRIMARY KEY, effect_key TEXT, device_eui TEXT, command_type TEXT,
-      result TEXT, applied_at TEXT, result_detail TEXT, originator TEXT
+      result TEXT, applied_at TEXT, result_detail TEXT, originator TEXT,
+      binding_hash TEXT, intent_hash TEXT, resource_type TEXT, resource_id TEXT,
+      gateway_device_eui TEXT, actor_user_uuid TEXT, base_sync_version INTEGER, operation TEXT
     );
     CREATE TABLE command_ack_outbox (
       command_id TEXT, payload_json TEXT, created_at TEXT, delivered_at TEXT
@@ -213,7 +215,7 @@ function verifyRoutingMatrix() {
   ];
   const directTypes = [
     'UPSERT_ZONE', 'DELETE_ZONE', 'UPSERT_ZONE_CONFIG', 'UPSERT_ZONE_LOCATION', 'UPSERT_DEVICE_FLAGS',
-    'UPSERT_DEVICE_SOIL_DEPTHS', 'UNCLAIM_DEVICE', 'SET_STREGA_MODEL'
+    'UNCLAIM_DEVICE', 'SET_STREGA_MODEL'
   ];
   for (const type of verifiedTypes) {
     const output = runFunction(node(ROUTER), { syncAck: { commandType: type } });

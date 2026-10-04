@@ -39,7 +39,8 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_COMMANDS below:
 // osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
 // port, so the cloud side is not required to issue them yet.
-const EXACT_EDGE_DEFERRED_COMMANDS = [];
+const EXACT_EDGE_DEFERRED_COMMANDS = [
+];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
   ...EXACT_SCOPED_ACCESS_COMMANDS,
@@ -51,7 +52,8 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
-const EXACT_EDGE_DEFERRED_OPS = [];
+const EXACT_EDGE_DEFERRED_OPS = [
+];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
@@ -88,9 +90,54 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 // sync_version/last_applied_at for weather zones) verified against the
 // exact field names this repo's triggers emit. No longer cloudDeferred.
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
-  ...EXACT_JOURNAL_EVENT_OPS,
+  ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
 ];
+// The axes are intentionally independent. This fixture is the transition that
+// cloud-first rollout permits: the edge still defers production while cloud has
+// already activated its applier, so an edge-deferred op need not be cloud-deferred.
+const EVENT_STAGE_TRANSITION_FIXTURE = {
+  edgeDeferred: ['JOURNAL_ENTRY_UPSERTED'],
+  cloudDeferred: [],
+};
+
+function validateEventStageTransition({ edgeDeferred, cloudDeferred, edgeHandlers, cloudHandlers }) {
+  const allOps = new Set([...edgeDeferred, ...cloudDeferred, ...edgeHandlers, ...cloudHandlers]);
+  for (const op of allOps) {
+    const edgeActive = !edgeDeferred.includes(op);
+    const cloudActive = !cloudDeferred.includes(op);
+    if (edgeActive && !edgeHandlers.includes(op)) {
+      throw new Error(`missing edge producer for active event op ${op}`);
+    }
+    if (cloudActive && !cloudHandlers.includes(op)) {
+      throw new Error(`missing cloud handler for active event op ${op}`);
+    }
+  }
+  return true;
+}
+
+function assertEventStageAxesAreIndependent() {
+  const op = EVENT_STAGE_TRANSITION_FIXTURE.edgeDeferred[0];
+  // Cloud-first rollout: cloud may activate its handler while edge emission is
+  // still deferred. A later both-active state is also valid. These executable
+  // cases deliberately use synthetic handler sets rather than production code.
+  validateEventStageTransition({
+    edgeDeferred: [op], cloudDeferred: [], edgeHandlers: [], cloudHandlers: [op],
+  });
+  validateEventStageTransition({
+    edgeDeferred: [], cloudDeferred: [], edgeHandlers: [op], cloudHandlers: [op],
+  });
+  for (const [name, state, message] of [
+    ['missing cloud handler', {edgeDeferred: [op], cloudDeferred: [], edgeHandlers: [], cloudHandlers: []}, 'missing cloud handler'],
+    ['missing edge producer', {edgeDeferred: [], cloudDeferred: [], edgeHandlers: [], cloudHandlers: [op]}, 'missing edge producer'],
+  ]) {
+    let failed = false;
+    try { validateEventStageTransition(state); } catch (error) {
+      failed = String(error.message).includes(message);
+    }
+    if (!failed) throw new Error(`event stage transition harness did not reject ${name}`);
+  }
+}
 // Sanctioned "server-ahead" allowance. The cloud full-parity program's mandated deploy
 // order is cloud-before-edge: osi-server lands the landing applier for a journal event op
 // before the edge activates real emission of that op. Before this allowance existed, the
@@ -190,6 +237,10 @@ const SQL_OWNED_EVENT_OPS = new Set([
   'DEVICE_RADIO_CONFIGURATION_REVISED',
   // Emitted by 0065__zone_daily_agronomy_sync.sql's trg_dp_zone_agronomy_outbox_* triggers, not by flows.json.
   'ZONE_AGRONOMY_UPSERTED',
+  // Emitted by 0068__watermark_cloud_parity.sql's retained-calibration triggers,
+  // never by raw watermark_readings.
+  'WATERMARK_CALIBRATION_UPSERTED',
+  'WATERMARK_CALIBRATION_DELETED',
 ]);
 // Ops emitted by a direct `INSERT INTO sync_outbox` inside a plain JS module -- the same
 // "audited emitter" shape osi-journal/lifecycle.js's emitJournalOutbox() uses, but living
@@ -1447,6 +1498,7 @@ function formatDiff(name, baselineName, diff) {
 }
 
 function checkSyncOpParity(options = {}) {
+  assertEventStageAxesAreIndependent();
   const root = path.resolve(options.root || REPO_ROOT);
   const schemaPath = options.schemaPath || path.join(root, 'docs/contracts/sync-schema/events.schema.json');
   const serverSource = options.serverSource || resolveDefaultServerSource(root);
@@ -1676,4 +1728,5 @@ module.exports = {
   payloadHasTopLevelContractVersion,
   resolveDefaultServerSource,
   verifyV2ContractFiles,
+  validateEventStageTransition,
 };

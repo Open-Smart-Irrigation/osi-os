@@ -2108,6 +2108,25 @@ expectIncludesForEach(
   "'zone_config_stage_started_on_v1'",
   'advertises that zone commands may carry stage_started_on'
 );
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'watermark_v1'",
+  'advertises the WATERMARK calibration capability'
+);
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'chameleon_config_commands_v1'",
+  'advertises the protected Chameleon capability'
+);
+expectIncludesForEach(
+  ['Build Cloud Bootstrap', 'Build server auth request', 'Run Force Sync'],
+  "'device_soil_depth_commands_v1'",
+  'advertises the protected soil-depth capability'
+);
+expectIncludesById('sync-bootstrap-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in bootstrap');
+expectIncludesById('sync-force-build', 'watermark_calibrations', 'includes retained WATERMARK calibration rows in force sync');
+expectExcludesById('sync-bootstrap-build', 'watermark_readings', 'does not bootstrap raw WATERMARK readings');
+expectExcludesById('sync-force-build', 'watermark_readings', 'does not force-sync raw WATERMARK readings');
 expectIncludes('Build UPDATE SQL', 'cmd.device_eui', 'accepts schema-shaped device_eui payloads for device-scoped SQL commands');
 expectLibById('4f4a765f36cee6f3', 'osiLib', 'osi-lib', 'loads the entity-name helper through the osi-lib seam');
 expectOrderedIncludesById('4f4a765f36cee6f3', [
@@ -2139,7 +2158,9 @@ expectWireById('zone-command-apply-fn', 'weather-zones-command-apply-fn', 'route
 expectWireById('zone-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted versioned zone ACKs');
 expectWireById('weather-zones-command-apply-fn', 'installation-revision-command-apply-fn', 'routes non-weather commands through installation revisions');
 expectWireById('installation-revision-command-apply-fn', 'entity-name-command-apply-fn', 'routes non-revision commands through the entity-name applier');
-expectWireById('entity-name-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('entity-name-command-apply-fn', 'watermark-config-command-apply-fn', 'routes non-name commands through the protected configuration gate');
+expectWireById('watermark-config-command-apply-fn', '934bf2bc19a8ce22', 'falls through other commands to the existing router');
+expectWireById('watermark-config-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted protected configuration ACKs');
 expectWireById('entity-name-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted entity-name ACKs');
 expectWireById('weather-zones-command-apply-fn', '9d5e3035c3d069c4', 'publishes atomically persisted weather station zones ACKs');
 expectWireById('scoped-access-command-apply-fn', '934bf2bc19a8ce22', 'falls through recognized non-access commands to the existing router');
@@ -2918,7 +2939,6 @@ expectIncludes('Route Command', "commandType === 'SET_LSN50_INTERRUPT_MODE'", 'r
 expectIncludes('Route Command', "commandType === 'SET_LSN50_5V_WARMUP'", 'routes SET_LSN50_5V_WARMUP gateway commands');
 expectIncludes('Route Command', "commandType === 'SET_KIWI_INTERVAL'", 'routes SET_KIWI_INTERVAL gateway commands');
 expectIncludes('Route Command', "commandType === 'ENABLE_KIWI_TEMP_HUMIDITY'", 'routes ENABLE_KIWI_TEMP_HUMIDITY gateway commands');
-expectIncludes('Route Command', "'UPSERT_DEVICE_SOIL_DEPTHS'", 'routes synced Kiwi soil depth commands through the shared update path');
 expectIncludes('Route Command', "commandType === 'SET_STREGA_INTERVAL'", 'routes SET_STREGA_INTERVAL gateway commands');
 expectIncludes('Route Command', "commandType === 'SET_STREGA_MODEL'", 'routes SET_STREGA_MODEL gateway commands');
 expectIncludes('Route Command', "commandType === 'SET_STREGA_TIMED_ACTION'", 'routes SET_STREGA_TIMED_ACTION gateway commands');
@@ -2936,8 +2956,7 @@ expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_INTERRUPT_MOD
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_LSN50_5V_WARMUP') {", 'accepts synced LSN50 5V warm-up commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'SET_KIWI_INTERVAL') {", 'accepts synced Kiwi interval commands on the gateway');
 expectIncludes('Build UPDATE SQL', "if (commandType === 'ENABLE_KIWI_TEMP_HUMIDITY') {", 'accepts synced Kiwi temperature and humidity enable commands on the gateway');
-expectIncludes('Build UPDATE SQL', "if (commandType === 'UPSERT_DEVICE_SOIL_DEPTHS') {", 'accepts synced Kiwi soil depth updates on the gateway');
-expectIncludes('Build UPDATE SQL', "soil_moisture_probe_depths_json", 'updates mirrored Kiwi soil depth metadata on the gateway');
+expectExcludes('Build UPDATE SQL', "if (commandType === 'UPSERT_DEVICE_SOIL_DEPTHS') {", 'does not apply protected soil depth commands through raw SQL');
 expectIncludes('Sync Init Schema + Triggers', 'trg_sync_devices_outbox_au', 'creates the device outbox trigger for mirrored device changes');
 expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.soil_moisture_probe_depths_json,'') <> COALESCE(OLD.soil_moisture_probe_depths_json,'')", 'queues device outbox events when Kiwi soil depth JSON changes locally');
 expectIncludes('Sync Init Schema + Triggers', "COALESCE(NEW.soil_moisture_probe_depths_configured,0) <> COALESCE(OLD.soil_moisture_probe_depths_configured,0)", 'queues device outbox events when Kiwi soil depth readiness changes locally');
@@ -3537,6 +3556,14 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
     `${relativeSeedPath} includes applied_commands.expires_at for WS3 expiry`,
     `${relativeSeedPath} is missing applied_commands.expires_at`
   );
+  for (const column of ['binding_hash', 'intent_hash', 'resource_type', 'resource_id',
+    'gateway_device_eui', 'actor_user_uuid', 'base_sync_version', 'operation']) {
+    expectCondition(
+      appliedCommandsColumns.has(column),
+      `${relativeSeedPath} includes applied_commands.${column} for trusted configuration binding`,
+      `${relativeSeedPath} is missing applied_commands.${column} for trusted configuration binding`
+    );
+  }
   const ackOutboxColumns = new Set(readTableColumns(seedDatabasePath, 'command_ack_outbox'));
   expectCondition(
     ackOutboxColumns.has('command_id'),

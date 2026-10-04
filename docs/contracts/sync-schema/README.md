@@ -11,6 +11,7 @@ Cross-repo contract surface between `osi-os` (edge) and `osi-server` (cloud). Fi
 | `commands.schema.json` | JSON Schema for command payloads |
 | `events.schema.json` | JSON Schema for event payloads |
 | `resources.schema.json` | JSON Schema for sync resources |
+| `watermark-cloud-parity-v1.json` | Synthetic WATERMARK/cloud parity vectors and staged mutation contract |
 
 ## Resource phasing
 
@@ -21,6 +22,51 @@ plans merged in lockstep:
 | Resource | Op | Status |
 |------|------|------|
 | `VALVE_SCHEDULE` | `VALVE_SCHEDULE_UPSERTED` | Phase A: edge tables (`valve_schedules`) and REST API (`/api/valves*`) live, edge-only. Sync triggers and the cloud mirror ship with Phase B (lockstep merge). |
+| `WATERMARK_CALIBRATION` | `WATERMARK_CALIBRATION_UPSERTED` / `WATERMARK_CALIBRATION_DELETED` | Implemented with edge outbox events, retained tombstones, bootstrap and force-sync state, a cloud mirror, and pending-first exact-base commands. |
+
+## WATERMARK cloud parity
+
+`WATERMARK_CALIBRATION` is edge-authoritative and device-keyed. Its two events
+are `WATERMARK_CALIBRATION_UPSERTED` and
+`WATERMARK_CALIBRATION_DELETED`. The edge includes retained live rows and
+tombstones in bootstrap and force-sync snapshots; the cloud applies events and
+snapshots only in the authenticated gateway context that owns the device.
+
+Four cloud-originated operations use protected pending commands:
+
+| Capability | Command | Effect key |
+|---|---|---|
+| `watermark_v1` | `SET_WATERMARK_CALIBRATION` | `watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}` |
+| `watermark_v1` | `DELETE_WATERMARK_CALIBRATION` | `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}` |
+| `chameleon_config_commands_v1` | `SET_CHAMELEON_CONFIG` | `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}` |
+| `device_soil_depth_commands_v1` | `UPSERT_DEVICE_SOIL_DEPTHS` | `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}` |
+
+All EUI segments are uppercase 16-hex strings, and the base is an unpadded
+non-negative integer. The edge validates gateway, device, local actor, operation,
+base, and normalized intent before replay lookup or mutation. A cloud request is
+pending until the edge ACK and the authoritative mirror state converge.
+
+The rollout is cloud-first. Deploy cloud schema, contract acceptance, event
+appliers, pending-command support, and capability-aware UI before an edge begins
+advertising these tokens or emitting the new events. Reconcile a pre-existing
+edge calibration through bootstrap before allowing its first cloud edit. An
+older gateway keeps ordinary device-data sync and receives none of these
+commands.
+
+FPort 11 publishes a contact-only MQTT envelope. Contact advances `lastSeen`;
+an accepted canonical snapshot advances `currentStateRecordedAt`. A rejected
+frame can advance contact without advancing measurement time, and neither
+timestamp may move backwards.
+
+Raw WATERMARK diagnostics never cross this contract. `watermark_readings`, raw
+payloads, ADC codes, flags, resistance, offset, supply, die temperature,
+per-reading calibration versions, and conversion versions are absent from
+events, snapshots, and contact messages. Canonical SWT and external-temperature
+values continue through ordinary device-data history sync.
+
+Cloud parity does not change scheduler eligibility. The edge scheduler excludes
+every `device_data` row linked to `watermark_readings`; no capability, command,
+mirror row, or qualification record overrides that interlock.
 
 ## Entity name commands (`UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`)
 
