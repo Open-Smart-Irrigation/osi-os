@@ -60,7 +60,7 @@ OSI Server  (optional cloud — remote monitoring & control)
 | -------------------- | -------------------------------------------------------------------------------------- |
 | **KIWI_SENSOR**      | Soil water tension (kPa), soil moisture                                                |
 | **TEKTELIC_CLOVER**  | Volumetric water content (%), soil moisture                                            |
-| **DRAGINO_LSN50**    | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter, Chameleon or WATERMARK soil water tension |
+| **DRAGINO_LSN50**    | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter, Chameleon or WATERMARK soil water tension (custom LSN50 firmware) |
 | **DRAGINO_SDI12**    | SDI-12 soil probes (VWC, soil temperature, EC), including Sentek EnviroSCAN and TriSCAN |
 | **SENSECAP_S2120**   | Weather station (wind, rain, UV, barometric pressure)                                  |
 | **AQUASCOPE_LORAIN** | Interval rain gauge with ambient temperature and battery                               |
@@ -163,13 +163,13 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 | ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | **When to use**    | Fastest start; no build tools needed                                                                | Latest code from this repo; or no release available for your target |
 | **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full                                          |
-| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`; ChirpStack provisioning then runs automatically    |
+| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `chirpstack-bootstrap.js` once                |
 
 ---
 
 ### Path A — Flash the OSI OS image
 
-1. Download the latest factory image from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases): `osi-os_<version>-rpi5-factory.img.gz` for a Raspberry Pi 5, `osi-os_<version>-rpi4-factory.img.gz` for a Pi 4 / 400 / 3 / 2.
+1. Download the latest factory image from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases): `osi-os_<version>-rpi5-factory.img.gz` for a Raspberry Pi 5, `osi-os_<version>-rpi4-factory.img.gz` for a Pi 4 / 400 / 3 / 2 (the 0.6.5 assets are named `osi-os_0.65-…`).
 2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
 3. Boot the Pi — OSI OS starts automatically.
 4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) and open the configuration page at 192.168.0.1
@@ -216,7 +216,7 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
-The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`) and `osi-bootstrap`, `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
+The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed, not enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
@@ -235,9 +235,9 @@ A manual file-by-file copy is not a supported install: it misses most helper mod
 
 ### Step 3 — ChirpStack auto-provision
 
-ChirpStack applications, device profiles (KIWI, LSN50, STREGA Gen1 and Gen2, S2120, LoRain, UC512, SDI-12, RAK10701), and UCI identity fields are provisioned automatically on first boot by the `osi-bootstrap` init script (`START=99`). No manual step is needed on a fresh device.
+ChirpStack applications, device profiles (KIWI, LSN50, STREGA Gen1 and Gen2, S2120, LoRain, UC512, SDI-12, RAK10701), and UCI identity fields are provisioned automatically on first boot of the OSI OS image (Path A) by the `osi-bootstrap` init script (`START=99`). `deploy.sh` installs that script but does not enable it, so after a Path B deploy run the provisioning command below once.
 
-To re-provision manually (e.g. after wiping profiles):
+To provision after a Path B deploy, or to re-provision (e.g. after wiping profiles):
 
 ```bash
 ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js && /etc/init.d/node-red restart'
@@ -293,7 +293,7 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
   'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 ```
 
-No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned or device profiles are missing.
+No need to re-run `chirpstack-bootstrap.js` after the first provisioning unless ChirpStack was re-provisioned or device profiles are missing.
 
 ---
 
