@@ -167,7 +167,7 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 | ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | **When to use**    | Fastest start; no build tools needed                                                                | Latest code from this repo; or no release available for your target |
 | **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full                                          |
-| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `chirpstack-bootstrap.js`                     |
+| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `/etc/init.d/osi-bootstrap start` (or reboot) |
 
 ---
 
@@ -264,13 +264,15 @@ scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
 
 ChirpStack applications, device profiles (KIWI, LSN50, STREGA, S2120, RAK10701), and UCI identity fields are provisioned automatically on first boot by the `osi-bootstrap` init script (`START=99`). No manual step is needed on a fresh device.
 
-To re-provision manually (e.g. after wiping profiles):
+On Path B, `deploy.sh` enables `osi-bootstrap`, which provisions ChirpStack at the next boot. To provision at once, run `ssh root@<pi-ip> '/etc/init.d/osi-bootstrap start'`. Do not run `chirpstack-bootstrap.js` directly: only the service writes the stamp `/etc/osi-bootstrap.done`, and without it the next boot runs the script again, which creates a second API key and rewrites `/srv/node-red/.chirpstack.env`.
+
+To re-provision manually (e.g. after wiping profiles), run on the gateway:
 
 ```bash
-ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js && /etc/init.d/node-red restart'
+rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
 ```
 
-The script is idempotent — safe to re-run.
+This reuses the existing API key, writes the stamp and requests the coordinated Node-RED restart. It rewrites `.chirpstack.env` with the `CHIRPSTACK_*` keys only.
 
 ### Step 4 — Install Tailscale (remote access)
 

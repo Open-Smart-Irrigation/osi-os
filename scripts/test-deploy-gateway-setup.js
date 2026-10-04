@@ -700,6 +700,7 @@ function runBootstrapNote(fx, { rom }) {
   const script = `set -eu
 OSI_BOOTSTRAP_INIT=${JSON.stringify(fx.init)}
 OSI_BOOTSTRAP_STAMP=${JSON.stringify(fx.stampFile)}
+CHIRPSTACK_ENV_FILE=${JSON.stringify(fx.envFile)}
 BOOTSTRAP_SCRIPT_ROM=${JSON.stringify(romPath)}
 BOOTSTRAP_SCRIPT_FALLBACK=${JSON.stringify(fallbackPath)}
 ${extractFunction('print_bootstrap_note')}
@@ -709,44 +710,93 @@ print_bootstrap_note
   return { r, romPath, fallbackPath };
 }
 
-test('the banner names the bootstrap script path that exists on this gateway', () => {
-  const flashed = bootstrapFixture({ enabled: true, stamp: true });
-  try {
-    const { r, romPath, fallbackPath } = runBootstrapNote(flashed, { rom: true });
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(r.stdout.includes(`node ${romPath}`), r.stdout);
-    assert.ok(!r.stdout.includes(fallbackPath), r.stdout);
-  } finally {
-    fs.rmSync(flashed.dir, { recursive: true, force: true });
-  }
+test('the banner names the bootstrap script path the service runs on this gateway', () => {
+  const flashed = bootstrapFixture({ enabled: true, stamp: true, env: PROVISIONED_ENV });
+  const { r: r1, romPath: rom1, fallbackPath: fb1 } = runBootstrapNote(flashed, { rom: true });
+  assert.equal(r1.status, 0, r1.stderr);
+  assert.ok(r1.stdout.includes(rom1), r1.stdout);
+  assert.ok(!r1.stdout.includes(fb1), r1.stdout);
   const stock = bootstrapFixture({ enabled: true });
-  try {
-    const { r, romPath, fallbackPath } = runBootstrapNote(stock, { rom: false });
+  const { r: r2, romPath: rom2, fallbackPath: fb2 } = runBootstrapNote(stock, { rom: false });
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.ok(r2.stdout.includes(fb2), r2.stdout);
+  assert.ok(!r2.stdout.includes(rom2), r2.stdout);
+});
+
+test('the banner never tells the operator to run the bootstrap script directly', () => {
+  for (const opts of [
+    { enabled: true, stamp: true, env: PROVISIONED_ENV },
+    { enabled: true },
+    { enabled: false },
+    { enabled: true, stamp: true },
+  ]) {
+    const fx = bootstrapFixture(opts);
+    const { r } = runBootstrapNote(fx, { rom: false });
     assert.equal(r.status, 0, r.stderr);
-    assert.ok(r.stdout.includes(`node ${fallbackPath}`), r.stdout);
-    assert.ok(!r.stdout.includes(romPath), r.stdout);
-  } finally {
-    fs.rmSync(stock.dir, { recursive: true, force: true });
+    assert.doesNotMatch(r.stdout, /^\s*node /m, JSON.stringify(opts));
+    assert.match(r.stdout, /osi-bootstrap start/, JSON.stringify(opts));
   }
 });
 
-test('the banner says what provisioning still needs on this gateway', () => {
+test('the banner calls a gateway provisioned only with a valid stamp and env file, like the service', () => {
   const cases = [
-    { opts: { enabled: true, stamp: true }, expect: /already provisioned/ },
-    { opts: { enabled: true }, expect: /next boot[\s\S]*\/etc\/init\.d\/osi-bootstrap start/ },
-    { opts: { enabled: false }, expect: /not enabled/ },
+    { opts: { enabled: true, stamp: true, env: PROVISIONED_ENV }, expect: /ChirpStack is provisioned/ },
+    { opts: { enabled: true, stamp: true }, expect: /not provisioned yet[\s\S]*next boot/ },
+    { opts: { enabled: true }, expect: /not provisioned yet[\s\S]*next boot/ },
+    { opts: { enabled: false }, expect: /not enabled[\s\S]*osi-bootstrap enable/ },
   ];
   for (const { opts, expect } of cases) {
     const fx = bootstrapFixture(opts);
-    try {
-      const { r } = runBootstrapNote(fx, { rom: false });
-      assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, expect);
-      assert.doesNotMatch(r.stdout, /No manual bootstrap step needed/);
-    } finally {
-      fs.rmSync(fx.dir, { recursive: true, force: true });
-    }
+    const { r } = runBootstrapNote(fx, { rom: false });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, expect, JSON.stringify(opts));
   }
+});
+
+test('the printed re-provision command reuses the API key and goes through the service', () => {
+  const fx = bootstrapFixture({ enabled: true, stamp: true, env: PROVISIONED_ENV });
+  // The init stand-in records the key the command passes to `start`.
+  writeExecutable(fx.init, [
+    '#!/bin/sh',
+    `echo "$1 key=\${CHIRPSTACK_API_KEY:-}" >> ${JSON.stringify(fx.log)}`,
+    'exit 0',
+  ]);
+  const { r } = runBootstrapNote(fx, { rom: false });
+  const cmd = r.stdout.split('\n').map((l) => l.trim()).find((l) => l.startsWith('rm -f '));
+  assert.ok(cmd, r.stdout);
+  const run = runShell(cmd, { PATH: childPath(fx.binDir) });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(fs.existsSync(fx.stampFile), false, 'the stamp is cleared so the service reruns');
+  assert.deepEqual(initCalls(fx), ['start key=token']);
+});
+
+// The init script's start(), run by hand on a not yet provisioned gateway,
+// with ChirpStack, node, logger and identityd stubbed: it must write the
+// stamp, which a bare `node chirpstack-bootstrap.js` does not.
+test('running the service by hand provisions and writes the stamp', () => {
+  const fx = bootstrapFixture({ enabled: true });
+  const script = path.join(fx.dir, 'chirpstack-bootstrap.js');
+  fs.writeFileSync(script, '');
+  writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'node'), [
+    '#!/bin/sh',
+    `printf 'CHIRPSTACK_APP_SENSORS=0a1b2c3d-0000-4000-8000-000000000001\\n' > ${JSON.stringify(fx.envFile)}`,
+  ]);
+  writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', `echo "restart-request $*" >> ${JSON.stringify(fx.log)}`]);
+  const body = BOOTSTRAP_INIT
+    .slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
+    .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
+    .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
+    .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
+  const r = runShell(`BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_FALLBACK=${JSON.stringify(script)}\n${body}\nstart`,
+    { PATH: childPath(fx.binDir) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(fs.existsSync(fx.stampFile), 'start() must write the stamp');
+  assert.equal(serviceWouldBeNoOp(fx), true);
+  assert.ok(initCalls(fx).some((c) => c.startsWith('restart-request request-restart chirpstack_bootstrap')), initCalls(fx).join('\n'));
 });
 
 test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap path', () => {

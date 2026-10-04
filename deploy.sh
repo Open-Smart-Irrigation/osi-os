@@ -282,25 +282,37 @@ enable_osi_bootstrap() {
 }
 
 # Closing-banner note on ChirpStack provisioning for the gateway this ran on.
+# It always points at the osi-bootstrap service, never at a bare
+# `node chirpstack-bootstrap.js`: a direct run writes no stamp, so the enabled
+# service would run the script again at the next boot, mint a second API key
+# and rewrite the env file. "Provisioned" uses the service's own test (stamp
+# plus a sensors application UUID in the env file).
 print_bootstrap_note() {
     if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
         pbn_script="$BOOTSTRAP_SCRIPT_ROM"
     else
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
     fi
-    if [ -e "$OSI_BOOTSTRAP_STAMP" ]; then
-        echo "  NOTE: ChirpStack is already provisioned ($OSI_BOOTSTRAP_STAMP present);"
-        echo "        osi-bootstrap (START=99) rechecks it at every boot."
+    if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
+        echo "        this at every boot. To re-provision through the service with"
+        echo "        the existing API key ($pbn_script; it rewrites"
+        echo "        $CHIRPSTACK_ENV_FILE with the CHIRPSTACK_* keys only):"
+        # shellcheck disable=SC2016 # the command is printed for the operator, not run
+        printf '        rm -f %s && CHIRPSTACK_API_KEY="$(sed -n '\''s/^CHIRPSTACK_API_KEY=//p'\'' %s | head -1)" %s start\n' \
+            "$OSI_BOOTSTRAP_STAMP" "$CHIRPSTACK_ENV_FILE" "$OSI_BOOTSTRAP_INIT"
     elif "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
         echo "  NOTE: ChirpStack is not provisioned yet. osi-bootstrap (START=99)"
-        echo "        provisions it at the next boot; to provision now run:"
-        echo "        /etc/init.d/osi-bootstrap start"
+        echo "        runs $pbn_script at the next boot; to provision now run:"
+        echo "        $OSI_BOOTSTRAP_INIT start"
+        echo "        Do not run the script directly: only the service writes"
+        echo "        $OSI_BOOTSTRAP_STAMP, and without it the next boot runs it again."
     else
-        echo "  NOTE: osi-bootstrap is not enabled on this gateway; provision"
-        echo "        ChirpStack by hand with the command below."
+        echo "  NOTE: osi-bootstrap is not enabled on this gateway. To provision"
+        echo "        ChirpStack (runs $pbn_script and writes the stamp):"
+        echo "        $OSI_BOOTSTRAP_INIT enable && $OSI_BOOTSTRAP_INIT start"
     fi
-    echo "        To re-provision manually run:"
-    echo "        node $pbn_script"
 }
 
 ensure_journal_media_defaults() {
