@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { PrivateRoute } from './components/PrivateRoute';
 import { Login } from './pages/Login';
@@ -22,7 +22,6 @@ function App() {
     <AppProviders>
         <ScopeStatusBanner />
         <GatewayRestartBanner />
-        <HashRouter>
           <Routes>
           {/* Public Routes */}
           <Route path="/login" element={<Login />} />
@@ -129,7 +128,6 @@ function App() {
           {/* Unknown routes fall back to the dashboard instead of a blank screen */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
-        </HashRouter>
     </AppProviders>
   );
 }
