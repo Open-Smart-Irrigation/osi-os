@@ -381,6 +381,13 @@ until the stack is rebased onto the current `origin/main`.
   [docs/operations/deploying-over-a-flaky-link.md](docs/operations/deploying-over-a-flaky-link.md).
   The tunnel flow below is still the default on a stable LAN.
 - **Never** overwrite `/data/db/farming.db` on a running or previously provisioned Pi. `deploy.sh` only seeds on a fresh device (target file absent and no orphaned WAL/SHM/journal sidecars). The bundled seed ships already stamped at the migration head (a full `schema_migrations` ledger plus `schema_object_fingerprints`, built by `scripts/build-seed-db.js` via `bootstrapFresh`), so the `run_schema_migration()` that follows the seed has nothing pending and finishes in seconds. A seed without that ledger sends every fresh install into `baseline-existing-db.js`'s 1..head reference-chain rebuild instead, which takes over ten minutes on a 16-core workstation and is not a viable deploy step on a Pi. `scripts/verify-seed-db-ledger.js` is the gate; regenerate with `node scripts/build-seed-db.js`, never by applying a migration to the bundled `.db` files by hand.
+- `deploy.sh` pins the command ledger (`osi-command-ledger/index.js` and
+  `package.json`), the WATERMARK binding
+  (`osi-watermark-binding/canonicalization.js`) and the staging installer
+  (`scripts/deploy-command-ledger-dependency.js`) by SHA-256
+  (`COMMAND_LEDGER_*_SHA256`). A change to any of them updates its pin in the
+  same commit; `node --test scripts/deploy-command-ledger-dependency.test.js`
+  fails otherwise, and a deploy with a stale pin aborts before activation.
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
