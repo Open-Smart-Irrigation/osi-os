@@ -218,7 +218,7 @@ describe('SupportRequests', () => {
     });
   });
 
-  it('stores the returned status secret by request id after submit', async () => {
+  it('does not keep the returned status secret after submit', async () => {
     vi.mocked(supportRequestsAPI.create).mockResolvedValue({
       request_id: 'local-secret-1',
       local_status: 'QUEUED',
@@ -232,9 +232,10 @@ describe('SupportRequests', () => {
     fireEvent.click(screen.getByLabelText('I agree this request may be shared publicly without private farm details.'));
     fireEvent.click(screen.getByRole('button', { name: 'Save request' }));
 
-    await waitFor(() => {
-      expect(window.localStorage.getItem('osi.support.statusSecret.local-secret-1')).toBe('edge-status-secret');
-    });
+    // The secret is a bearer credential for this request's cloud status; a
+    // stored copy would outlive the session and reach the next account (#378).
+    await waitFor(() => expect(supportRequestsAPI.create).toHaveBeenCalled());
+    expect(window.localStorage.getItem('osi.support.statusSecret.local-secret-1')).toBeNull();
   });
 
   it('shows queued and triaged statuses in My Requests after submit', async () => {

@@ -85,6 +85,24 @@ function writeStoredCredentials(token: string | null, username: string | null): 
   }
 }
 
+// Per-request bearer secrets for the cloud status of support requests. The
+// GUI no longer stores them; copies written by older versions belong to the
+// account that created them and must not survive its session.
+const SUPPORT_STATUS_SECRET_PREFIX = 'osi.support.statusSecret.';
+
+function removeAccountScopedStorage(): void {
+  try {
+    const keys: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(SUPPORT_STATUS_SECRET_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {
+    // Storage may be unavailable; nothing to remove then.
+  }
+}
+
 function newSnapshot(token: string | null, username: string | null): AuthSessionSnapshot {
   epochCounter += 1;
   return Object.freeze({
@@ -96,6 +114,7 @@ function newSnapshot(token: string | null, username: string | null): AuthSession
 }
 
 function publish(next: AuthSessionSnapshot): AuthSessionSnapshot {
+  removeAccountScopedStorage();
   const ending = epochRequests;
   epochRequests = new AbortController();
   current = next;
