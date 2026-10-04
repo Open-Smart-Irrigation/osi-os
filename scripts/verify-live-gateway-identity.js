@@ -1147,7 +1147,11 @@ if (sizeAllowances) {
     // carries zoneAgronomy (the last 30 days of zone_daily_agronomy per live zone with a
     // UUID, at most 1,000 rows), +1004 on top of plan E2a's +252. Re-measured fresh:
     // origin/main 44956 -> HEAD 46212 = +1256.
-    'sync-bootstrap-build': 1256,
+    // WATERMARK cloud parity: re-pinned from 1256 to +819 (the 1256 is baked into
+    // origin/main, 46212 chars). syncCapabilities gains the three WATERMARK tokens and the
+    // bootstrap carries watermark_calibrations. Re-measured fresh: origin/main 46212 ->
+    // HEAD 47031 = +819.
+    'sync-bootstrap-build': 819,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
     // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
     // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
@@ -1168,11 +1172,10 @@ if (sizeAllowances) {
     // fix wave (item B1, final-review-fable.md finding I1) -- the same change as
     // sync-bootstrap-build. The 3265 is baked into origin/main, 68992 chars. Re-measured
     // fresh: origin/main 68992 -> HEAD 69142 = +150.
-    // WATERMARK parity commands and retained calibration snapshot: the force-sync builder
-    // gains the three protected capabilities plus the retained calibration projection.
-    // Task 9 review correction adds protected semantic dispatch and the
-    // gateway-bound live/tombstone calibration projection. Re-measured
-    // against the same origin/main cut: 69244 -> HEAD 70063 = +819.
+    // WATERMARK cloud parity: re-pinned from 252 to +819 (the 252 is baked into origin/main,
+    // 69244 chars). The force-sync builder gains the three WATERMARK capability tokens and
+    // the gateway-bound live/tombstone calibration snapshot. Re-measured fresh:
+    // origin/main 69244 -> HEAD 70063 = +819.
     'sync-force-build': 819,
     'command-ack-build-batch': 975,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
@@ -1184,8 +1187,9 @@ if (sizeAllowances) {
     // Weather data view: re-pinned from 2511 to +33 (the 2511 is baked into origin/main,
     // 6709 chars); syncCapabilities gains zone_config_weather_source_v1. Re-measured fresh:
     // origin/main 6709 -> HEAD 6742 = +33.
-    // WATERMARK parity capabilities on the account-link request. Re-measured fresh against
-    // origin/main: 6709 -> HEAD 6790 = +81.
+    // WATERMARK cloud parity: re-pinned from 68 to +81 (the 68 is baked into origin/main,
+    // 6777 chars); syncCapabilities gains the three WATERMARK tokens. Re-measured fresh:
+    // origin/main 6777 -> HEAD 6858 = +81.
     'al-link-build-req': 81,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
