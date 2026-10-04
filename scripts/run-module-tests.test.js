@@ -92,3 +92,18 @@ test('a failing test propagates a nonzero exit', () => {
   assert.notEqual(r.code, 0);
   assert.match(r.out, /# fail 1/);
 });
+
+test('a listed file with no tests fails', () => {
+  // node --test reports a file without test() calls as one passing test.
+  const root = scratch({ 'a.test.js': PASSING, 'empty.test.js': '// all tests were deleted\n' });
+  const r = run(root, ['a.test.js', 'empty.test.js']);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /empty\.test\.js contains no tests/);
+});
+
+test('a run in which every test is skipped fails', () => {
+  const root = scratch({ 'a.test.js': "require('node:test')('later', { skip: true }, () => {});\n" });
+  const r = run(root, ['a.test.js']);
+  assert.notEqual(r.code, 0);
+  assert.match(r.out, /every test was skipped/);
+});
