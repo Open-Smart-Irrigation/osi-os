@@ -7,9 +7,10 @@
 // deploy.sh mutates real system paths from its first line, so these tests do
 // not run it whole. They extract the real shell functions and fragments
 // (between their own begin/end markers) and run them under a POSIX shell with
-// `uci`, `logread`, `sleep` and the init script stubbed. Run with a BusyBox `sh` first
+// `uci`, `logread`, `sleep`, the payload switch and the init scripts stubbed. Run with a BusyBox `sh` first
 // on PATH to check the fragments under ash.
 const test = require('node:test');
+const { after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -37,8 +38,17 @@ function extractBetween(beginMarker, endMarker) {
   return DEPLOY.slice(DEPLOY.indexOf('\n', begin.index) + 1, end.index);
 }
 
+// Every temporary directory is removed when the file's tests finish, even
+// when an assertion fails before a test's own cleanup.
+const TEMP_DIRS = [];
+after(() => {
+  for (const dir of TEMP_DIRS) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tempDir(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  TEMP_DIRS.push(dir);
+  return dir;
 }
 
 function writeExecutable(file, lines) {
@@ -69,6 +79,11 @@ function writeUciStub(binDir) {
     '    kv="${2#osi-server.cloud.}"',
     '    grep -v "^${kv%%=*}=" "$UCI_STATE" > "$UCI_STATE.tmp" || true',
     '    echo "$kv" >> "$UCI_STATE.tmp"',
+    '    mv "$UCI_STATE.tmp" "$UCI_STATE"',
+    '    ;;',
+    '  delete)',
+    '    key="${2#osi-server.cloud.}"',
+    '    grep -v "^${key}=" "$UCI_STATE" > "$UCI_STATE.tmp" || true',
     '    mv "$UCI_STATE.tmp" "$UCI_STATE"',
     '    ;;',
     '  commit) [ "${UCI_FAIL_COMMIT:-0}" = "1" ] && exit 1; exit 0 ;;',
@@ -172,22 +187,30 @@ test('an unreadable or implausible version source yields no version and does not
   }
 });
 
-test('deploy.sh reads the version before any gateway state changes', () => {
+test('deploy.sh reads the version and captures the previous value before any gateway state changes', () => {
   const readAt = DEPLOY.indexOf('DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"');
+  const captureAt = DEPLOY.indexOf('\ncapture_previous_firmware_version\n');
   const firstInstall = DEPLOY.indexOf('fetch_required "Node-RED settings.js"');
   assert.ok(readAt > 0, 'deploy.sh must read the release version into DEPLOY_FIRMWARE_VERSION');
-  assert.ok(readAt < firstInstall, 'the version must be read before the first file is installed');
+  assert.ok(captureAt > readAt, 'deploy.sh must capture the previous value after reading the release version');
+  assert.ok(captureAt < firstInstall, 'both must happen before the first file is installed');
 });
 
 // ---------------------------------------------------------------------------
-// record_firmware_version: tolerant writer
+// The three version helpers: capture, apply (forward flip), restore (flip back)
 // ---------------------------------------------------------------------------
 
-function runRecord(fixture, version, extraEnv = {}) {
+const FW_FUNCTIONS = () => [
+  'capture_previous_firmware_version',
+  'apply_release_firmware_version',
+  'restore_previous_firmware_version',
+].map(extractFunction).join('\n');
+
+function runFw(fixture, body, extraEnv = {}) {
   const script = `set -eu
-${extractFunction('record_firmware_version')}
-record_firmware_version ${JSON.stringify(version)}
-echo "RC=$?"
+${FW_FUNCTIONS()}
+${body}
+echo "RC=$? W=\${FW_WRITTEN:-0} PREV=[\${FW_PREV:-}] PREV_SET=\${FW_PREV_SET:-0}"
 `;
   return runShell(script, {
     PATH: childPath(fixture.binDir),
@@ -197,116 +220,157 @@ echo "RC=$?"
   });
 }
 
-test('record_firmware_version sets and commits the key', () => {
-  const fx = uciFixture({ version: '0.6.5' });
-  try {
-    writeUciStub(fx.binDir);
-    const r = runRecord(fx, '0.8.0');
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /RC=0/);
-    assert.equal(readState(fx), '0.8.0');
-    const calls = uciCalls(fx);
-    assert.ok(calls.includes('set osi-server.cloud.firmware_version=0.8.0'), calls.join('\n'));
-    assert.ok(calls.includes('commit osi-server'), calls.join('\n'));
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
+function writeCalls(fixture) {
+  return uciCalls(fixture).map((c) => c.replace(/^-q /, '')).filter((c) => /^(set|delete|commit) /.test(c));
+}
+
+test('capture records the previous value and writes nothing', () => {
+  const set = uciFixture({ version: '0.6.5' });
+  const unset = uciFixture();
+  const noUci = uciFixture({ version: '0.6.5' });
+  writeUciStub(set.binDir);
+  writeUciStub(unset.binDir);
+  let r = runFw(set, 'capture_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREV=\[0\.6\.5\] PREV_SET=1/);
+  assert.deepEqual(writeCalls(set), []);
+  r = runFw(unset, 'capture_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREV=\[\] PREV_SET=0/);
+  r = runFw(noUci, 'capture_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREV_SET=0/);
 });
 
-test('record_firmware_version leaves an equal value alone', () => {
-  const fx = uciFixture({ version: '0.8.0' });
-  try {
-    writeUciStub(fx.binDir);
-    const r = runRecord(fx, '0.8.0');
-    assert.equal(r.status, 0, r.stderr);
-    assert.ok(!uciCalls(fx).some((c) => c.startsWith('set ') || c.startsWith('commit')), uciCalls(fx).join('\n'));
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
-});
-
-test('record_firmware_version without a uci binary logs and returns 0', () => {
-  const fx = uciFixture({ version: '0.6.5' });
-  try {
-    // no stub written: uci is absent from PATH
-    const r = runRecord(fx, '0.8.0');
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /RC=0/);
-    assert.match(r.stderr, /uci not found/);
-    assert.equal(readState(fx), '0.6.5');
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
-});
-
-test('record_firmware_version with no osi-server.cloud section logs and returns 0', () => {
-  const fx = uciFixture({ section: false });
-  try {
-    writeUciStub(fx.binDir);
-    const r = runRecord(fx, '0.8.0');
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /RC=0/);
-    assert.match(r.stderr, /osi-server\.cloud is missing/);
-    assert.ok(!uciCalls(fx).some((c) => c.startsWith('set ')), uciCalls(fx).join('\n'));
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
-});
-
-test('record_firmware_version survives a failing set or commit and an unknown version', () => {
-  for (const env of [{ UCI_FAIL_SET: '1' }, { UCI_FAIL_COMMIT: '1' }]) {
-    const fx = uciFixture({ version: '0.6.5' });
-    try {
-      writeUciStub(fx.binDir);
-      const r = runRecord(fx, '0.8.0', env);
-      assert.equal(r.status, 0, r.stderr);
-      assert.match(r.stdout, /RC=0/);
-      assert.match(r.stderr, /could not write osi-server\.cloud\.firmware_version/);
-    } finally {
-      fs.rmSync(fx.dir, { recursive: true, force: true });
-    }
-  }
-  const fx = uciFixture({ version: '0.6.5' });
-  try {
-    writeUciStub(fx.binDir);
-    const r = runRecord(fx, '');
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stderr, /release version unknown/);
-    assert.deepEqual(uciCalls(fx), []);
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Placement: only after a passing self-check, never on rollback
-// ---------------------------------------------------------------------------
-
-// Runs deploy.sh's real self-check, commit-or-rollback and version-record
-// region with the payload and service helpers stubbed. `logLine` is what
-// logread shows after the restart: the completion marker (healthy) or the
-// abort line (unhealthy, rolls back).
-function runSelfCheckRegion({ logLine, prevStamp }) {
+test('apply sets and commits the key and marks it written', () => {
   const fx = uciFixture({ version: '0.6.5' });
   writeUciStub(fx.binDir);
+  const r = runFw(fx, 'capture_previous_firmware_version\napply_release_firmware_version 0.8.0');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /RC=0 W=1/);
+  assert.equal(readState(fx), '0.8.0');
+  assert.deepEqual(writeCalls(fx), ['set osi-server.cloud.firmware_version=0.8.0', 'commit osi-server']);
+});
+
+test('apply leaves an equal value alone and marks nothing to restore', () => {
+  const fx = uciFixture({ version: '0.8.0' });
+  writeUciStub(fx.binDir);
+  const r = runFw(fx, 'capture_previous_firmware_version\napply_release_firmware_version 0.8.0');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /RC=0 W=0/);
+  assert.deepEqual(writeCalls(fx), []);
+});
+
+test('apply tolerates no uci, no section, failed set or commit and an unknown version', () => {
+  const cases = [
+    { name: 'no uci', fixture: { version: '0.6.5' }, stub: false, version: '0.8.0', stderr: /uci not found/ },
+    { name: 'no section', fixture: { section: false }, version: '0.8.0', stderr: /osi-server\.cloud is missing/ },
+    { name: 'failed set', fixture: { version: '0.6.5' }, version: '0.8.0', env: { UCI_FAIL_SET: '1' }, stderr: /could not write/ },
+    { name: 'failed commit', fixture: { version: '0.6.5' }, version: '0.8.0', env: { UCI_FAIL_COMMIT: '1' }, stderr: /could not write/ },
+    { name: 'unknown version', fixture: { version: '0.6.5' }, version: '', stderr: /release version unknown/ },
+  ];
+  for (const c of cases) {
+    const fx = uciFixture(c.fixture);
+    if (c.stub !== false) writeUciStub(fx.binDir);
+    const r = runFw(fx, `apply_release_firmware_version ${JSON.stringify(c.version)}`, c.env || {});
+    assert.equal(r.status, 0, `${c.name}: ${r.stderr}`);
+    assert.match(r.stdout, /RC=0 W=0/, c.name);
+    assert.match(r.stderr, c.stderr, c.name);
+    assert.ok(!uciCalls(fx).some((x) => x === 'set osi-server.cloud.firmware_version='), `${c.name}: never an empty value`);
+  }
+});
+
+test('restore puts a previous value back, or deletes the option when it was unset', () => {
+  const set = uciFixture({ version: '0.6.5' });
+  writeUciStub(set.binDir);
+  let r = runFw(set, 'capture_previous_firmware_version\napply_release_firmware_version 0.8.0\nrestore_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /RC=0 W=0/);
+  assert.equal(readState(set), '0.6.5');
+  assert.deepEqual(writeCalls(set).slice(-2), ['set osi-server.cloud.firmware_version=0.6.5', 'commit osi-server']);
+
+  const unset = uciFixture();
+  writeUciStub(unset.binDir);
+  r = runFw(unset, 'capture_previous_firmware_version\napply_release_firmware_version 0.8.0\nrestore_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readState(unset), null);
+  assert.deepEqual(writeCalls(unset).slice(-2), ['delete osi-server.cloud.firmware_version', 'commit osi-server']);
+});
+
+test('restore without a write does nothing, and a failed restore is logged, not fatal', () => {
+  const fx = uciFixture({ version: '0.6.5' });
+  writeUciStub(fx.binDir);
+  let r = runFw(fx, 'capture_previous_firmware_version\nrestore_previous_firmware_version');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(writeCalls(fx), []);
+
+  r = runFw(fx, 'FW_WRITTEN=1\nFW_PREV=0.6.5\nFW_PREV_SET=1\nrestore_previous_firmware_version', { UCI_FAIL_COMMIT: '1' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /RC=0/);
+  assert.match(r.stderr, /could not restore/);
+});
+
+// ---------------------------------------------------------------------------
+// Placement: the version follows the payload
+// ---------------------------------------------------------------------------
+
+// Shell snippet: the firmware_version in the stub UCI state right now.
+const FW_NOW = 'fw="$(grep "^firmware_version=" "$UCI_STATE" | head -n 1)"; fw="${fw#firmware_version=}"; [ -n "$fw" ] || fw="unset"';
+
+// Stubs that log each payload switch and Node-RED restart with the UCI value
+// in force at that moment, so a test can read the order of write and restart.
+function writeEventStubs(fx) {
+  fx.events = path.join(fx.dir, 'events.log');
+  fs.writeFileSync(fx.events, '');
+  writeExecutable(path.join(fx.binDir, 'node-red-init'), [
+    '#!/bin/sh',
+    FW_NOW,
+    `echo "node-red $1 fw=$fw" >> ${JSON.stringify(fx.events)}`,
+    'exit 0',
+  ]);
   writeExecutable(path.join(fx.binDir, 'sleep'), ['#!/bin/sh', 'exit 0']);
+  return `swap_call() {
+  ${FW_NOW}
+  case "$1" in
+    flipTo|deactivate) echo "$1 $2 fw=$fw" >> ${JSON.stringify(fx.events)} ;;
+  esac
+  return 0
+}
+NODE_RED_INIT=${JSON.stringify(path.join(fx.binDir, 'node-red-init'))}
+`;
+}
+
+function events(fx) {
+  return fs.readFileSync(fx.events, 'utf8').split('\n').filter(Boolean);
+}
+
+// deploy.sh's real activation, self-check and commit-or-rollback region. The
+// restart there names /etc/init.d/node-red literally; the copy run here points
+// it at the logging stub.
+function runActivationRegion({ logLine, prevStamp, version }) {
+  const fx = uciFixture({ version });
+  writeUciStub(fx.binDir);
+  const stubs = writeEventStubs(fx);
   writeExecutable(path.join(fx.binDir, 'logread'), ['#!/bin/sh', `echo ${JSON.stringify(`gw node-red[1]: ${logLine}`)}`]);
+  const region = extractBetween('# payload activation begin', '# self-check verdict end')
+    .split('/etc/init.d/node-red restart').join('"$NODE_RED_INIT" restart');
   const script = `set -eu
-${extractFunction('record_firmware_version')}
-swap_call() { echo "swap_call $*" >> "$UCI_LOG.swap"; return 0; }
+${FW_FUNCTIONS()}
+${extractFunction('cleanup_failed_first_payload')}
+${stubs}
 wait_for_node_red_health() { probe_elapsed=1; return 0; }
 hold_node_red_stopped() { return 0; }
 verify_payload_db_compatibility() { return 0; }
-cleanup_failed_first_payload() { return 0; }
-NODE_RED_INIT=:
 NODE_RED_LOG_MARK=0
 GUI_ROOT=/nonexistent-gui
 PAYLOAD_KEEP_N=5
+PAYLOAD_FLIPPED=0
 DEPLOY_STAMP=new-stamp
 PREV_STAMP=${JSON.stringify(prevStamp || '')}
 MIGRATION_RUNNER_AVAILABLE=1
 DEPLOY_FIRMWARE_VERSION=0.8.0
-${extractBetween('# init log check begin', '# firmware version record end')}
+capture_previous_firmware_version
+${region}
 echo "REACHED_END"
 `;
   const result = runShell(script, {
@@ -318,40 +382,148 @@ echo "REACHED_END"
   return { result, fx };
 }
 
-test('a passing self-check commits the payload and then records the new version', () => {
-  const { result, fx } = runSelfCheckRegion({ logLine: 'sync-init: schema init complete', prevStamp: 'old-stamp' });
-  try {
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /REACHED_END/);
-    assert.equal(readState(fx), '0.8.0');
-    assert.ok(result.stdout.indexOf('OK: committing payload') < result.stdout.indexOf('firmware_version'),
-      'the version is written after the payload is committed');
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
+test('the new version is in UCI before the restart onto the new payload, and stays after a passing self-check', () => {
+  const { result, fx } = runActivationRegion({ logLine: 'sync-init: schema init complete', prevStamp: 'old-stamp', version: '0.6.5' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /REACHED_END/);
+  assert.deepEqual(events(fx), ['flipTo new-stamp fw=0.6.5', 'node-red restart fw=0.8.0']);
+  assert.equal(readState(fx), '0.8.0');
 });
 
-test('a rolled-back deploy leaves the old version', () => {
-  const { result, fx } = runSelfCheckRegion({ logLine: 'devices rebuild ABORTED (devices left intact): boom', prevStamp: 'old-stamp' });
-  try {
-    assert.notEqual(result.status, 0, 'a rollback must still fail the deploy');
-    assert.match(result.stderr, /ROLLED BACK/);
-    assert.equal(readState(fx), '0.6.5');
-    assert.ok(!uciCalls(fx).some((c) => c.startsWith('set ')), uciCalls(fx).join('\n'));
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
-  }
+test('a self-check rollback restores the old version before switching back', () => {
+  const { result, fx } = runActivationRegion({ logLine: 'devices rebuild ABORTED (devices left intact): boom', prevStamp: 'old-stamp', version: '0.6.5' });
+  assert.notEqual(result.status, 0, 'a rollback must still fail the deploy');
+  assert.match(result.stderr, /ROLLED BACK/);
+  assert.deepEqual(events(fx), [
+    'flipTo new-stamp fw=0.6.5',
+    'node-red restart fw=0.8.0',
+    'flipTo old-stamp fw=0.6.5',
+    'node-red restart fw=0.6.5',
+  ]);
+  assert.equal(readState(fx), '0.6.5');
 });
 
-test('a failed first deploy (nothing to roll back to) leaves the old version', () => {
-  const { result, fx } = runSelfCheckRegion({ logLine: 'devices rebuild ABORTED (devices left intact): boom', prevStamp: '' });
-  try {
-    assert.notEqual(result.status, 0);
-    assert.equal(readState(fx), '0.6.5');
-    assert.ok(!uciCalls(fx).some((c) => c.startsWith('set ')), uciCalls(fx).join('\n'));
-  } finally {
-    fs.rmSync(fx.dir, { recursive: true, force: true });
+test('a failed first deploy removes the version it wrote when there was none before', () => {
+  const { result, fx } = runActivationRegion({ logLine: 'devices rebuild ABORTED (devices left intact): boom', prevStamp: '', version: null });
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(events(fx), [
+    'flipTo new-stamp fw=unset',
+    'node-red restart fw=0.8.0',
+    'deactivate new-stamp fw=unset',
+  ]);
+  assert.equal(readState(fx), null);
+});
+
+// deploy_exit_handler with the real restart_previous_payload and
+// cleanup_failed_first_payload; identityd and service helpers stubbed.
+function runExitHandler({ version, state }) {
+  const fx = uciFixture({ version });
+  writeUciStub(fx.binDir);
+  const stubs = writeEventStubs(fx);
+  const script = `set -eu
+${FW_FUNCTIONS()}
+${extractFunction('restart_previous_payload')}
+${extractFunction('cleanup_failed_first_payload')}
+${extractFunction('deploy_exit_handler')}
+${stubs}
+wait_for_node_red_health() { probe_elapsed=1; return 0; }
+hold_node_red_stopped() { return 0; }
+hold_identityd_stopped() { return 0; }
+restore_identityd_prior_state() { return 0; }
+verify_payload_db_compatibility() { return 0; }
+restart_node_red() { ${FW_NOW}; echo "restart_node_red fw=$fw" >> "$EVENTS"; return 0; }
+cleanup() { :; }
+GUI_ROOT=/nonexistent-gui
+DEPLOY_STAMP=new-stamp
+DEPLOY_FIRMWARE_VERSION=0.8.0
+capture_previous_firmware_version
+${state}
+deploy_exit_handler 1
+`;
+  const result = runShell(script, {
+    PATH: childPath(fx.binDir),
+    UCI_LOG: fx.log,
+    UCI_STATE: fx.state,
+    EVENTS: fx.events,
+  });
+  return { result, fx };
+}
+
+test('a step failing after activation restores the old version before the exit handler restarts the previous payload', () => {
+  const { result, fx } = runExitHandler({
+    version: '0.6.5',
+    state: `swap_call flipTo new-stamp
+apply_release_firmware_version "$DEPLOY_FIRMWARE_VERSION"
+PAYLOAD_FLIPPED=1
+DB_MIGRATION_COMMITTED=1
+PREV_STAMP=old-stamp
+node_red_restart_needed=0`,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(events(fx), [
+    'flipTo new-stamp fw=0.6.5',
+    'flipTo old-stamp fw=0.6.5',
+    'node-red restart fw=0.6.5',
+  ]);
+  assert.equal(readState(fx), '0.6.5');
+});
+
+test('a first deploy failing after activation leaves the option as it was', () => {
+  const { result, fx } = runExitHandler({
+    version: null,
+    state: `swap_call flipTo new-stamp
+apply_release_firmware_version "$DEPLOY_FIRMWARE_VERSION"
+PAYLOAD_FLIPPED=1
+DB_MIGRATION_COMMITTED=1
+PREV_STAMP=
+node_red_restart_needed=1`,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.deepEqual(events(fx), ['flipTo new-stamp fw=unset', 'deactivate new-stamp fw=unset']);
+  assert.equal(readState(fx), null);
+});
+
+test('a deploy failing before the flip never touches the version', () => {
+  const { result, fx } = runExitHandler({
+    version: '0.6.5',
+    state: `PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+PREV_STAMP=old-stamp
+node_red_restart_needed=0`,
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(readState(fx), '0.6.5');
+  assert.deepEqual(writeCalls(fx), []);
+});
+
+test('every switch to the new payload is followed by the write, every switch back is preceded by the restore', () => {
+  const lines = DEPLOY.split('\n');
+  const forward = [];
+  const back = [];
+  lines.forEach((line, i) => {
+    if (/swap_call flipTo "\$DEPLOY_STAMP"/.test(line)) forward.push(i);
+    if (/swap_call flipTo "\$PREV_STAMP"|swap_call deactivate "\$DEPLOY_STAMP"/.test(line)) back.push(i);
+  });
+  assert.equal(forward.length, 2, 'two forward flip sites (migration path, activation block)');
+  assert.equal(back.length, 3, 'three switch-back sites (restart_previous_payload, self-check rollback, first-deploy cleanup)');
+  // Each forward flip is followed by the write before the next restart.
+  for (const i of forward) {
+    const rest = lines.slice(i);
+    const restartAt = rest.findIndex((l) => /restart_node_red; then|\/etc\/init\.d\/node-red restart/.test(l));
+    assert.ok(restartAt > 0, `no restart after the forward flip at line ${i + 1}`);
+    assert.match(rest.slice(0, restartAt).join('\n'), /apply_release_firmware_version "\$\{DEPLOY_FIRMWARE_VERSION:-\}"/,
+      `forward flip at line ${i + 1}`);
   }
+  for (const i of back) {
+    const before = lines.slice(Math.max(0, i - 8), i).join('\n');
+    assert.match(before, /restore_previous_firmware_version/, `switch back at line ${i + 1}`);
+  }
+  // Migration path: the write sits between its flip and its restart.
+  const mig = DEPLOY.indexOf('echo "--- Activate paired flows+GUI payload before Node-RED restart ---"');
+  const migApply = DEPLOY.indexOf('apply_release_firmware_version', mig);
+  const migRestart = DEPLOY.indexOf('if ! restart_node_red; then', mig);
+  assert.ok(mig > 0 && migApply > mig && migApply < migRestart, 'migration path writes before restart_node_red');
+  assert.equal(DEPLOY.indexOf('record_firmware_version'), -1, 'the post-commit writer is gone');
 });
 
 // ---------------------------------------------------------------------------

@@ -105,7 +105,8 @@ jobs:
             scripts/deploy-fetch-list.test.js \
             scripts/deploy-payload-lifecycle.test.js
       # Gateway records deploy.sh keeps outside the payload: the reported
-      # firmware version, written only after a passing self-check, and the
+      # firmware version, which follows the active payload through activation
+      # and every rollback, and the
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js

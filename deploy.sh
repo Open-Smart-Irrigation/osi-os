@@ -63,6 +63,12 @@ BOOTSTRAP_SCRIPT_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 # on the no-op path, still flips exactly once).
 PAYLOAD_FLIPPED=0
 ROLLBACK_RESTORED=0
+# osi-server.cloud.firmware_version follows the active payload: written after
+# each switch to the new payload, put back before each switch away from it.
+DEPLOY_FIRMWARE_VERSION=""
+FW_PREV=""
+FW_PREV_SET=0
+FW_WRITTEN=0
 NODE_RED_LOG_MARK=""
 DB_MIGRATION_COMMITTED=0
 COMMAND_LEDGER_ACTIVATED=0
@@ -244,39 +250,6 @@ read_release_firmware_version() {
         *[!0-9A-Za-z.+-]*) return 0 ;;
     esac
     printf '%s\n' "$rfv_value"
-}
-
-# Writes the deployed version to UCI. Called only after the payload flip and
-# the local self-check passed, so a rolled-back deploy keeps the old value.
-# node-red.init exports the key as FIRMWARE_VERSION when Node-RED starts; the
-# Node-RED process already running keeps its old value until its next start.
-# Never fails the deploy: no uci, no section or a failed write is logged.
-record_firmware_version() {
-    rfw_version="$1"
-    if [ -z "$rfw_version" ]; then
-        echo "WARN: release version unknown; osi-server.cloud.firmware_version left unchanged" >&2
-        return 0
-    fi
-    if ! command -v uci >/dev/null 2>&1; then
-        echo "WARN: uci not found; osi-server.cloud.firmware_version left unchanged" >&2
-        return 0
-    fi
-    if ! uci -q get osi-server.cloud >/dev/null 2>&1; then
-        echo "WARN: UCI section osi-server.cloud is missing; firmware_version left unchanged" >&2
-        return 0
-    fi
-    rfw_current="$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || true)"
-    if [ "$rfw_current" = "$rfw_version" ]; then
-        echo "OK: osi-server.cloud.firmware_version already $rfw_version"
-        return 0
-    fi
-    if uci set "osi-server.cloud.firmware_version=$rfw_version" && uci commit osi-server; then
-        echo "OK: osi-server.cloud.firmware_version ${rfw_current:-unset} -> $rfw_version (reported from the next Node-RED start)"
-    else
-        uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
-        echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${rfw_current:-unset}" >&2
-    fi
-    return 0
 }
 
 # A flashed image enables osi-bootstrap at first boot (uci-defaults
@@ -971,6 +944,75 @@ verify_payload_db_compatibility() {
     return 0
 }
 
+# osi-server.cloud.firmware_version follows the active payload. node-red.init
+# reads it when Node-RED starts and exports it as FIRMWARE_VERSION, so it is
+# written right after each switch to the new payload and before the restart
+# that starts it, and put back right before each switch to the previous payload
+# (or the removal of a failed first payload). None of these functions ever
+# fails the deploy: no uci, no osi-server.cloud section, an unknown version or
+# a failed write is logged and the deploy carries on.
+capture_previous_firmware_version() {
+    FW_PREV=""
+    FW_PREV_SET=0
+    command -v uci >/dev/null 2>&1 || return 0
+    if cpf_value="$(uci -q get osi-server.cloud.firmware_version 2>/dev/null)"; then
+        FW_PREV="$cpf_value"
+        FW_PREV_SET=1
+    fi
+    return 0
+}
+
+apply_release_firmware_version() {
+    arf_version="$1"
+    if [ -z "$arf_version" ]; then
+        echo "WARN: release version unknown; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "WARN: UCI section osi-server.cloud is missing; firmware_version left unchanged" >&2
+        return 0
+    fi
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ "$FW_PREV" = "$arf_version" ]; then
+        echo "OK: osi-server.cloud.firmware_version already $arf_version"
+        return 0
+    fi
+    if uci set "osi-server.cloud.firmware_version=$arf_version" && uci commit osi-server; then
+        FW_WRITTEN=1
+        echo "OK: osi-server.cloud.firmware_version ${FW_PREV:-unset} -> $arf_version (read by the next Node-RED start)"
+    else
+        uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+        echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${FW_PREV:-unset}" >&2
+    fi
+    return 0
+}
+
+restore_previous_firmware_version() {
+    [ "${FW_WRITTEN:-0}" = "1" ] || return 0
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; could not restore osi-server.cloud.firmware_version" >&2
+        return 0
+    fi
+    # An empty previous value is treated as unset: never write an empty value.
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ -n "$FW_PREV" ]; then
+        if uci set "osi-server.cloud.firmware_version=$FW_PREV" && uci commit osi-server; then
+            FW_WRITTEN=0
+            echo "OK: osi-server.cloud.firmware_version restored to $FW_PREV"
+            return 0
+        fi
+    elif uci -q delete osi-server.cloud.firmware_version && uci commit osi-server; then
+        FW_WRITTEN=0
+        echo "OK: osi-server.cloud.firmware_version removed again (it was unset)"
+        return 0
+    fi
+    uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+    echo "WARN: could not restore osi-server.cloud.firmware_version to ${FW_PREV:-unset}" >&2
+    return 0
+}
+
 restart_previous_payload() {
     if [ -z "${PREV_STAMP:-}" ]; then
         echo "ERROR: no previous payload is available for a safe restart" >&2
@@ -979,6 +1021,7 @@ restart_previous_payload() {
     if ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
         return 1
     fi
+    restore_previous_firmware_version
     if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
         echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
         return 1
@@ -1018,6 +1061,7 @@ cleanup_failed_first_payload() {
     else
         echo "ERROR: could not prove Node-RED stopped while cleaning up the first-deploy payload" >&2
     fi
+    restore_previous_firmware_version
     swap_call deactivate "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null || true
     swap_call discardPayload "$DEPLOY_STAMP" >/dev/null || true
     PAYLOAD_FLIPPED=0
@@ -1378,6 +1422,7 @@ process.stdout.write(String(applied.length));
             fi
             PAYLOAD_FLIPPED=1
             echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+            apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
         fi
         NODE_RED_LOG_MARK=0
         if command -v logread >/dev/null 2>&1; then
@@ -1412,8 +1457,9 @@ run_communication_preflight
 run_native_sqlite3_preflight || exit 1
 
 DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
+capture_previous_firmware_version
 if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
-    echo "Release version: $DEPLOY_FIRMWARE_VERSION (recorded in UCI after a passing self-check)"
+    echo "Release version: $DEPLOY_FIRMWARE_VERSION (written to UCI when the new payload is activated)"
 else
     echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
 fi
@@ -2173,6 +2219,7 @@ if ! write_payload_compatibility "$DEPLOY_STAMP"; then
     exit 1
 fi
 
+# payload activation begin
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
     if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
@@ -2187,6 +2234,8 @@ else
 fi
 
 if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
+    # Flipped just above: the restart below must read the new version.
+    apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
     /etc/init.d/node-red restart || true
 else
     echo "OK: Node-RED already restarted on the activated pair during migration"
@@ -2299,6 +2348,7 @@ else
             echo "ERROR: refusing rollback restart because the retained payload/database pair was not proven compatible" >&2
             exit 1
         fi
+        restore_previous_firmware_version
         if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
             echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
             node_red_restart_needed=0
@@ -2342,11 +2392,7 @@ else
     exit 1
 fi
 
-# Every failed self-check above exits, so this line runs only for a committed
-# payload.
-echo "--- Record firmware version ---"
-record_firmware_version "$DEPLOY_FIRMWARE_VERSION"
-# firmware version record end
+# self-check verdict end
 
 echo "--- Gateway identity supervisor ---"
 if ! identityd_service enable; then
