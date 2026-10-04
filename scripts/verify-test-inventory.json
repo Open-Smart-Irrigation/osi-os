@@ -61,23 +61,23 @@
     },
     {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js",
-      "reason": "fails on main in a clean checkout: Cannot find module 'sqlite3' (native npm module not tracked; CI installs only the sqlite3 CLI)"
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (the native npm module is not tracked and CI installs only the sqlite3 CLI; CI-run module tests use a node:sqlite adapter instead)"
     },
     {
       "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js",
-      "reason": "fails on main in a clean checkout: Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
     },
     {
       "path": "scripts/test-radio-store.js",
-      "reason": "fails on main in a clean checkout: Cannot find module 'sqlite3' (native npm module not tracked; CI installs only the sqlite3 CLI)"
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (native npm module not tracked; CI installs only the sqlite3 CLI)"
     },
     {
       "path": "scripts/test-radio-restore-guards.js",
-      "reason": "fails on main in a clean checkout: Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
     },
     {
       "path": "scripts/verify-scoped-access.test.js",
-      "reason": "fails on main: 3 of 6 tests fail (the mutated-fixture cases expect a ratchet message and get empty output)"
+      "reason": "fails on main (#389): 3 of 6 tests fail. verify-scoped-access.js passes a route when any node downstream of it mentions the scope helper, so removing a guard's own scope call is not detected; the mutation tests expect that failure and get empty output"
     },
     {
       "path": "scripts/test-task14-journal-preview.js",
@@ -85,19 +85,19 @@
     },
     {
       "path": "scripts/deploy-push-bundle.test.sh",
-      "reason": "fails on main under CI's /bin/sh (dash): the test starts the bash script deploy-push-bundle.sh with sh, which stops at its first array (Syntax error: \"(\" unexpected); passes only where sh is bash"
+      "reason": "fails on main under CI's /bin/sh (dash) (#390): the test starts the bash script deploy-push-bundle.sh with sh, which stops at its first array (Syntax error: \"(\" unexpected); passes only where sh is bash"
     },
     {
       "path": "scripts/deploy-offline.test.sh",
-      "reason": "needs BusyBox ash, wget and setsid as on the gateway (run it in a node:22-alpine container, see its header); fails under dash"
+      "reason": "needs BusyBox ash, wget and setsid as on the gateway (#390; run it in a node:22-alpine container, see its header); fails under dash"
     },
     {
       "path": "scripts/test-valve-schedule-timestamp-wire-format.js",
-      "reason": "passes (32/32) but took about 17 minutes locally: a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate without a decision on where it runs"
+      "reason": "slow (#391): passes (32/32) but took about 17 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
     },
     {
       "path": "scripts/test-valve-actuation-text-caps.js",
-      "reason": "passes (60/60) but took about 23 minutes locally: a full migration replay per case through the sqlite3 CLI, like the wire-format test; too slow for a per-pull-request gate without a decision on where it runs"
+      "reason": "slow (#391): passes (60/60) but took about 23 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
     }
   ]
 }
