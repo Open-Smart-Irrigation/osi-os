@@ -17,6 +17,7 @@ describe('channel registry', () => {
 
   it('cardChannelsForSource applies device-aware defaults', () => {
     expect(cardChannelsForSource('soil', { chameleonEnabled: true })).toEqual(['swt_1', 'swt_2', 'swt_3']);
+    expect(cardChannelsForSource('soil', { deviceType: 'DRAGINO_LSN50', chameleonEnabled: false })).toEqual(['swt_1', 'swt_2']);
     expect(cardChannelsForSource('environment', { deviceType: 'DRAGINO_LSN50', tempEnabled: true })).toEqual([
       'ext_temperature_c',
     ]);

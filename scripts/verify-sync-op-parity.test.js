@@ -150,6 +150,9 @@ function exactJournalStaging() {
         'JOURNAL_PLOT_UPSERTED',
         'JOURNAL_PLOT_GROUP_UPSERTED',
       ],
+      // WATERMARK calibration events are SQL-owned in the active contract; only
+      // their cloud applier is staged here while edge trigger emission remains
+      // deliberately outside this journal fixture.
       edgeDeferred: [],
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
@@ -174,7 +177,9 @@ function createStagedParityFixture(overrides) {
   fs.writeFileSync(schemaPath, JSON.stringify({
     type: 'object',
     properties: {
-      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS) },
+      op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, [
+        'WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED',
+      ]) },
       payload: {
         type: 'object',
         required: ['contract_version'],
@@ -216,6 +221,8 @@ class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
       case "DEVICE_DATA_APPENDED" -> { return true; }
+      case "WATERMARK_CALIBRATION_DELETED" -> { return true; }
+      case "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
       default -> { return false; }
     }
   }
@@ -229,7 +236,7 @@ class EdgeSyncService {
     flowSources: [{ name: 'fixture', path: flowPath }],
     sqlSources: [],
     databaseSources: [],
-    sqlOwnedEventOps: [],
+    sqlOwnedEventOps: ['WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED'],
     jsModuleOwnedEventOps: [],
     moduleSources: [
       { name: 'journal-lifecycle', path: modulePath },
@@ -813,7 +820,8 @@ test('parity accepts a cloud-deferred journal op the server implements early whe
 class EdgeSyncService {
   private boolean applyEvent(String gatewayDeviceEui, SyncEventRecord event) {
     switch (event.op()) {
-      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED" -> { return true; }
+      case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED",
+           "WATERMARK_CALIBRATION_DELETED", "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
       default -> { return false; }
     }
   }

@@ -35,6 +35,9 @@ const EXPECTED_CAPABILITIES = [
   'entity_name_commands_v1',
   'zone_config_weather_source_v1',
   'zone_config_stage_started_on_v1',
+  'watermark_v1',
+  'chameleon_config_commands_v1',
+  'device_soil_depth_commands_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -126,6 +129,7 @@ class JournalFixtureDb {
     this.catalogQueryError = settings.catalogQueryError || null;
     this.userQueryError = settings.userQueryError || null;
     this.closeError = settings.closeError || null;
+    this.tablesPresent = settings.tables !== false;
     if (settings.tables !== false) {
       const tableSql = {
         journal_catalog_state: 'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
@@ -249,6 +253,49 @@ class JournalFixtureDb {
           recovery_state: 'ACTIVE',
           recovery_operation_uuid: null,
         }];
+      } else if (/FROM watermark_calibrations/.test(sql)) {
+        rows = this.tablesPresent ? [
+          {
+            device_eui: 'AABBCCDDEEFF0011',
+            gateway_device_eui: GATEWAY_EUI,
+            pullup_1_ohm: 41670,
+            pulldown_1_ohm: 41260,
+            series_fwd_1_ohm: 130,
+            series_rev_1_ohm: 112,
+            pullup_2_ohm: 42530,
+            pulldown_2_ohm: 42070,
+            series_fwd_2_ohm: 46,
+            series_rev_2_ohm: 27,
+            measured_at: '2026-09-30T09:00:00.000Z',
+            method: 'bench',
+            worst_residual_pct: 0.7,
+            notes: 'live',
+            sync_version: 2,
+            updated_at: '2026-09-30T09:00:00.000Z',
+            deleted_at: null,
+            effective_op: 'set',
+          },
+          {
+            device_eui: 'AABBCCDDEEFF0022',
+            gateway_device_eui: GATEWAY_EUI,
+            pullup_1_ohm: 41670,
+            pulldown_1_ohm: 41260,
+            series_fwd_1_ohm: 130,
+            series_rev_1_ohm: 112,
+            pullup_2_ohm: 42530,
+            pulldown_2_ohm: 42070,
+            series_fwd_2_ohm: 46,
+            series_rev_2_ohm: 27,
+            measured_at: '2026-09-30T09:00:00.000Z',
+            method: 'bench',
+            worst_residual_pct: 0.7,
+            notes: 'tombstone',
+            sync_version: 3,
+            updated_at: '2026-09-30T09:01:00.000Z',
+            deleted_at: '2026-09-30T09:01:00.000Z',
+            effective_op: 'delete',
+          },
+        ] : [];
       } else if (/journal_catalog_state/.test(sql) && !/sqlite_master/.test(sql) && this.catalogQueryError) {
         throw this.catalogQueryError;
       } else if (/sqlite_master|journal_/.test(sql)) {
@@ -462,11 +509,17 @@ function assertReadyAdvertisement(payload) {
   });
   assert.deepEqual(payload.gatewayIdentity.previousGatewayDeviceEuis, []);
   assert.equal(payload.gatewayIdentity.edgeBuildVersion, '2026.07-test');
+  assert.equal(payload.watermark_calibrations.length, 2);
+  assert.deepEqual(payload.watermark_calibrations.map((row) => row.gateway_device_eui), [GATEWAY_EUI, GATEWAY_EUI]);
+  assert.equal(payload.watermark_calibrations[0].deleted_at, null);
+  assert.equal(payload.watermark_calibrations[0].effective_op, 'set');
+  assert.equal(payload.watermark_calibrations[1].deleted_at, '2026-09-30T09:01:00.000Z');
+  assert.equal(payload.watermark_calibrations[1].effective_op, 'delete');
 }
 
 function assertSuppressedAdvertisement(payload) {
   assert.ok(payload, 'ordinary core bootstrap must continue');
-  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 7));
+  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 10));
   for (const field of JOURNAL_FIELDS) {
     assert.equal(Object.prototype.hasOwnProperty.call(payload.gatewayIdentity, field), false, field);
   }

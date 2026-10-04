@@ -7,7 +7,12 @@ const { isDeepStrictEqual } = require('node:util');
 const SCHEMA_DIR = path.resolve(__dirname, '../docs/contracts/sync-schema');
 const STAGING_MANIFEST = path.resolve(__dirname, 'fixtures/sync-contract-staging.json');
 const JOURNAL_AGGREGATE = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate');
+const BINDING_CANONICALIZER = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization');
+const WATERMARK_CALIBRATION = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/calibration');
 const UUID = '12345678-1234-4234-8234-123456789abc';
+const WATERMARK_GATEWAY_EUI = 'A84041A171000001';
+const WATERMARK_DEVICE_EUI = 'A84041A171000002';
+const WATERMARK_FOREIGN_DEVICE_EUI = 'A84041A171000003';
 const COMPACT_UUID = '12345678123442348234123456789abc';
 const JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_ENTRY',
@@ -77,6 +82,18 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     DELETE_USER_PLOT_ASSIGNMENT: {
         effect_key: { prefix: 'scoped_plot_assignment', uuid_path: 'assignment_uuid', version_path: 'base_sync_version' },
     },
+    SET_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    DELETE_WATERMARK_CALIBRATION: {
+        effect_key: { prefix: 'watermark_calibration:delete', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    UPSERT_DEVICE_SOIL_DEPTHS: {
+        effect_key: { prefix: 'device_soil_depths:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
+    SET_CHAMELEON_CONFIG: {
+        effect_key: { prefix: 'chameleon_config:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
+    },
 };
 const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
     USER_UPSERTED: 'user_uuid',
@@ -113,6 +130,8 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     // The key is the composite zone_uuid|date, which no single payload path
     // holds, so only the version is bound (spec 2026-09-27-daily-agronomy-parity B6).
     ZONE_AGRONOMY_UPSERTED: {sync_version_path: 'payload.sync_version'},
+    WATERMARK_CALIBRATION_UPSERTED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
+    WATERMARK_CALIBRATION_DELETED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
 };
 
 function loadSchema(name) {
@@ -463,9 +482,15 @@ function semanticBindingErrors(schema, value) {
     const binding = bindings && bindings[discriminator];
     if (!binding) return errors;
     if (binding.effect_key) {
+        const gateway = binding.effect_key.gateway_path === undefined
+            ? undefined : valueAtPath(value, binding.effect_key.gateway_path);
+        const device = binding.effect_key.device_path === undefined
+            ? undefined : valueAtPath(value, binding.effect_key.device_path);
         const uuid = valueAtPath(value, binding.effect_key.uuid_path);
         const version = valueAtPath(value, binding.effect_key.version_path);
-        const expected = `${binding.effect_key.prefix}:${uuid}:${version}`;
+        const expected = gateway !== undefined && device !== undefined
+            ? `${binding.effect_key.prefix}:${gateway}:${device}:${version}`
+            : `${binding.effect_key.prefix}:${uuid}:${version}`;
         if (value.effect_key !== expected) {
             errors.push(`$.effect_key: must equal ${expected}`);
         }
@@ -927,6 +952,81 @@ reportCheck(
 
 // Contract resources must match edge runtime device and schedule enums.
 const resourcesSchema = loadSchema('resources.schema.json');
+const watermarkVector = JSON.parse(fs.readFileSync(path.join(SCHEMA_DIR, 'watermark-cloud-parity-v1.json'), 'utf8'));
+const canonicalBinding = BINDING_CANONICALIZER.canonicalize;
+function bindingHash(value) {
+    const body = canonicalBinding(value);
+    return {body, sha256: BINDING_CANONICALIZER.sha256(value)};
+}
+function replayBindingOutcome(existing, incoming) {
+    if (existing.effect_key !== incoming.effect_key) return 'new-effect';
+    return bindingHash(existing).sha256 === bindingHash(incoming).sha256 ? 'replay' : 'conflict';
+}
+const sameKeyBinding = {...watermarkVector.bindingVectors[0].input,
+    effect_key: 'watermark_calibration:set:A84041A171000001:A84041A171000002:7'};
+const differentIntentBinding = {...sameKeyBinding,
+    normalized_intent: {worst_residual_pct: 2}};
+function normalizeDepthsLikeWriters(raw) {
+    const normalized = {};
+    for (const [rawKey, rawValue] of Object.entries(raw || {})) {
+        if (rawValue === null || rawValue === undefined || rawValue === '' || Number(rawValue) === 0) continue;
+        const depthCm = Number(rawValue);
+        if (!Number.isInteger(depthCm) || depthCm < 0 || depthCm > 1000) throw new Error('invalid depth');
+        const key = String(rawKey).trim().toLowerCase();
+        if (key) normalized[key] = depthCm;
+    }
+    return normalized;
+}
+reportCheck(
+    watermarkVector.fixtures.device_eui === WATERMARK_DEVICE_EUI &&
+    watermarkVector.fixtures.gateway_device_eui === WATERMARK_GATEWAY_EUI &&
+    Array.isArray(watermarkVector.bindingVectors) && watermarkVector.bindingVectors.length >= 6 &&
+    watermarkVector.bindingVectors.every((vector) => {
+    const actual = bindingHash(vector.input);
+        return actual.body === vector.canonical_body && actual.sha256 === vector.sha256;
+    }) &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'numeric-one').sha256 ===
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'numeric-one-point-zero').sha256 &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'omitted-metadata').sha256 !==
+        watermarkVector.bindingVectors.find((vector) => vector.name === 'explicit-null-metadata').sha256 &&
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'decimal-exponent').canonical_body ===
+    watermarkVector.bindingVectors.find((vector) => vector.name === 'decimal-fixed-equivalent').canonical_body &&
+    watermarkVector.conflictCases.sameKeyDifferentIntent === 'conflict' &&
+    replayBindingOutcome(sameKeyBinding, differentIntentBinding) === 'conflict' &&
+    bindingHash({...watermarkVector.bindingVectors[0].input,
+        effect_key: 'watermark_calibration:set:A84041A171000001:A84041A171000002:8'}).sha256 ===
+        watermarkVector.conflictCases.changedEffect &&
+    watermarkVector.conflictCases.changedBase !== watermarkVector.bindingVectors[0].sha256 &&
+    watermarkVector.conflictCases.changedBinding !== watermarkVector.bindingVectors[0].sha256 &&
+    watermarkVector.conflictCases.changedIntent !== watermarkVector.bindingVectors[0].sha256 &&
+    watermarkVector.depthVectors.every((vector) =>
+        jsonValuesEqual(normalizeDepthsLikeWriters(vector.raw), vector.normalized) && vector.configured === true),
+    'WATERMARK shared vector pins normalized replay semantics',
+    'WATERMARK shared vector does not pin numeric, omission/null, or conflict semantics'
+);
+const watermarkCalibrationBase = {
+    pullup_1_ohm: 30000, pulldown_1_ohm: 30000,
+    series_fwd_1_ohm: 10, series_rev_1_ohm: 10,
+    pullup_2_ohm: 30000, pulldown_2_ohm: 30000,
+    series_fwd_2_ohm: 10, series_rev_2_ohm: 10,
+    expected_sync_version: 0
+};
+const calibrationDomainVectors = watermarkVector.calibrationNumericDomain;
+const calibrationDomainValid = Array.isArray(calibrationDomainVectors) && calibrationDomainVectors.length >= 5 &&
+    calibrationDomainVectors.every((vector) => {
+        const body = {...watermarkCalibrationBase, [vector.field]: vector.value};
+        try {
+            WATERMARK_CALIBRATION.validateCalibrationBody(body);
+            return vector.accepted === true;
+        } catch (error) {
+            return vector.accepted === false;
+        }
+    });
+reportCheck(
+    calibrationDomainValid,
+    'WATERMARK calibration numeric domain rejects positive subnormals',
+    'WATERMARK calibration numeric domain vectors are not enforced by the edge writer'
+);
 const journalV2Schema = loadSchema('journal-v2.schema.json');
 for (const [name, schema] of [
     ['commands.schema.json', cmdSchema],
@@ -988,6 +1088,8 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     ok = false;
 } else {
     staging = JSON.parse(fs.readFileSync(STAGING_MANIFEST, 'utf8'));
+    // WATERMARK parity is active now; only the still-deferred journal and
+    // scoped-access sets belong in this staging oracle.
     const exactStaging = staging && staging.version === 1 &&
         JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
@@ -1000,7 +1102,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
         ]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
-    reportCheck(exactStaging, 'staging manifest pins the exact journal sets', 'staging manifest drifted from the exact journal sets');
+    reportCheck(exactStaging, 'staging manifest pins the exact deferred journal and scoped-access sets', 'staging manifest drifted from the exact deferred journal and scoped-access sets');
 }
 
 const scopedUserCommand = {
@@ -1563,6 +1665,175 @@ for (const [fixtureIndex, payloadKey, identityPaths] of [
         }
     }
 }
+
+// WATERMARK cloud-parity contract vectors. These intentionally use synthetic EUIs
+// and exercise the trusted mutation binding independently of any runtime applier.
+const watermarkValues = {
+    pullup_1_ohm: 41670,
+    pulldown_1_ohm: 41260,
+    series_fwd_1_ohm: 130,
+    series_rev_1_ohm: 112,
+    pullup_2_ohm: 42530,
+    pulldown_2_ohm: 42070,
+    series_fwd_2_ohm: 46,
+    series_rev_2_ohm: 27,
+    measured_at: '2026-09-30T10:00:00.000Z',
+    method: 'bench-fit',
+    worst_residual_pct: 1.25,
+    notes: null,
+};
+const watermarkSetCommand = {
+    command_id: UUID,
+    command_type: 'SET_WATERMARK_CALIBRATION',
+    gateway_device_eui: WATERMARK_GATEWAY_EUI,
+    device_eui: WATERMARK_DEVICE_EUI,
+    actor_user_uuid: UUID,
+    base_sync_version: 7,
+    operation: 'set',
+    effect_key: `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:7`,
+    values: watermarkValues,
+};
+const watermarkDeleteCommand = {
+    command_id: UUID,
+    command_type: 'DELETE_WATERMARK_CALIBRATION',
+    gateway_device_eui: WATERMARK_GATEWAY_EUI,
+    device_eui: WATERMARK_DEVICE_EUI,
+    actor_user_uuid: UUID,
+    base_sync_version: 8,
+    operation: 'delete',
+    effect_key: `watermark_calibration:delete:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:8`,
+};
+expectValid('SET_WATERMARK_CALIBRATION synthetic vector', cmdSchema, watermarkSetCommand, cmdSchema);
+expectValid('DELETE_WATERMARK_CALIBRATION synthetic vector', cmdSchema, watermarkDeleteCommand, cmdSchema);
+expectValid('WATERMARK metadata null explicitly clears', cmdSchema, watermarkSetCommand, cmdSchema);
+expectInvalid(
+    'WATERMARK rejects lowercase device EUI',
+    cmdSchema,
+    {...watermarkSetCommand, device_eui: WATERMARK_DEVICE_EUI.toLowerCase()},
+    /device_eui.*pattern|effect_key.*equal/
+);
+expectInvalid(
+    'WATERMARK set rejects missing actor',
+    cmdSchema,
+    (() => { const copy = jsonClone(watermarkSetCommand); delete copy.actor_user_uuid; return copy; })(),
+    /actor_user_uuid.*required/
+);
+expectInvalid(
+    'WATERMARK delete rejects normalized intent values',
+    cmdSchema,
+    {...watermarkDeleteCommand, values: {}},
+    /forbidden|values.*required|property/
+);
+for (const [label, field, replacement] of [
+    ['wrong gateway in key', 'effect_key', `watermark_calibration:set:${WATERMARK_FOREIGN_DEVICE_EUI}:${WATERMARK_DEVICE_EUI}:7`],
+    ['wrong device in key', 'effect_key', `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_FOREIGN_DEVICE_EUI}:7`],
+    ['wrong base in key', 'effect_key', `watermark_calibration:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:8`],
+    ['malformed effect key', 'effect_key', 'watermark_calibration:set:bad'],
+]) {
+    expectInvalid(`WATERMARK rejects ${label}`, cmdSchema, {...watermarkSetCommand, [field]: replacement}, /effect_key.*(?:equal|match)/);
+}
+expectInvalid(
+    'WATERMARK rejects numeric strings instead of canonical numbers',
+    cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, pullup_1_ohm: '41670'}},
+    /pullup_1_ohm.*number/
+);
+for (const [type, operation, prefix, base] of [
+    ['UPSERT_DEVICE_SOIL_DEPTHS', 'set', 'device_soil_depths:set', 2],
+    ['SET_CHAMELEON_CONFIG', 'set', 'chameleon_config:set', 3],
+]) {
+    const values = type === 'UPSERT_DEVICE_SOIL_DEPTHS'
+        ? {soil_moisture_probe_depths_json: {swt_1: 20, swt_2: 30}, soil_moisture_probe_depths_configured: true}
+        : {chameleon_enabled: true};
+    const command = {
+        command_id: UUID,
+        command_type: type,
+        gateway_device_eui: WATERMARK_GATEWAY_EUI,
+        device_eui: WATERMARK_DEVICE_EUI,
+        actor_user_uuid: UUID,
+        base_sync_version: base,
+        operation,
+        effect_key: `${prefix}:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:${base}`,
+        values,
+    };
+    expectValid(`${type} exact-base synthetic vector`, cmdSchema, command, cmdSchema);
+    expectInvalid(`${type} rejects empty normalized intent`, cmdSchema, {...command, values: {}}, /required/);
+    expectInvalid(`${type} rejects unexpected normalized intent`, cmdSchema, {...command, values: {...values, unexpected: true}}, /property/);
+    if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
+        for (const [label, depths] of [
+            ['empty normalized key', {'': 10}],
+            ['string depth', {vwc_1: '10'}],
+            ['nested depth', {vwc_1: {cm: 10}}],
+            ['fractional depth', {vwc_1: 10.5}],
+            ['negative depth', {vwc_1: -1}],
+            ['depth above range', {vwc_1: 1001}],
+        ]) {
+            expectInvalid(`UPSERT_DEVICE_SOIL_DEPTHS rejects ${label}`, cmdSchema,
+                {...command, values: {...values, soil_moisture_probe_depths_json: depths}}, /soil_moisture_probe_depths_json|number|minimum|maximum|property/);
+        }
+    }
+}
+const depthVectorsByName = Object.fromEntries(watermarkVector.depthVectors.map((vector) => [vector.name, vector]));
+for (const vectorName of ['watermark-set', 'watermark-clear', 'kiwi-and-generic', 'generic-sdi12']) {
+    const vector = depthVectorsByName[vectorName];
+    const depthCommand = {...watermarkSetCommand,
+        command_type: 'UPSERT_DEVICE_SOIL_DEPTHS', operation: 'set', base_sync_version: 20,
+        effect_key: `device_soil_depths:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:20`,
+        values: {soil_moisture_probe_depths_json: vector.normalized, soil_moisture_probe_depths_configured: true}};
+    expectValid(`UPSERT_DEVICE_SOIL_DEPTHS ${vectorName} normalized vector`, cmdSchema, depthCommand, cmdSchema);
+}
+expectInvalid('UPSERT_DEVICE_SOIL_DEPTHS rejects configured=false', cmdSchema,
+    {...watermarkSetCommand, command_type: 'UPSERT_DEVICE_SOIL_DEPTHS', operation: 'set',
+        effect_key: `device_soil_depths:set:${WATERMARK_GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:21`,
+        values: {soil_moisture_probe_depths_json: {}, soil_moisture_probe_depths_configured: false}}, /constant|true/);
+expectInvalid('WATERMARK method over writer limit is rejected', cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, method: 'm'.repeat(65)}}, /method.*(?:longer|maxLength)/);
+expectValid('WATERMARK method at writer limit validates', cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, method: 'm'.repeat(64)}}, cmdSchema);
+expectInvalid('WATERMARK notes over writer limit is rejected', cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, notes: 'n'.repeat(501)}}, /notes.*(?:longer|maxLength)/);
+expectValid('WATERMARK notes at writer limit validates', cmdSchema,
+    {...watermarkSetCommand, values: {...watermarkValues, notes: 'n'.repeat(500)}}, cmdSchema);
+const watermarkResourceSchema = resourcesSchema.definitions.WatermarkCalibration;
+expectValid('WATERMARK resource metadata limits validate', watermarkResourceSchema, {
+    contract_version: 1,
+    gateway_device_eui: WATERMARK_GATEWAY_EUI,
+    device_eui: WATERMARK_DEVICE_EUI,
+    ...watermarkValues,
+    updated_at: '2026-09-30T10:01:00.000Z',
+    sync_version: 7,
+    deleted_at: null,
+}, resourcesSchema);
+expectInvalid('WATERMARK resource rejects method over writer limit', watermarkResourceSchema, {
+    contract_version: 1, gateway_device_eui: WATERMARK_GATEWAY_EUI, device_eui: WATERMARK_DEVICE_EUI,
+    ...watermarkValues, method: 'm'.repeat(65), updated_at: '2026-09-30T10:01:00.000Z', sync_version: 7, deleted_at: null,
+}, /method.*longer/);
+expectInvalid('WATERMARK resource rejects notes over writer limit', watermarkResourceSchema, {
+    contract_version: 1, gateway_device_eui: WATERMARK_GATEWAY_EUI, device_eui: WATERMARK_DEVICE_EUI,
+    ...watermarkValues, notes: 'n'.repeat(501), updated_at: '2026-09-30T10:01:00.000Z', sync_version: 7, deleted_at: null,
+}, /notes.*longer/);
+const watermarkEvent = {
+    eventUuid: 'watermark-fixture-1',
+    aggregateType: 'WATERMARK_CALIBRATION',
+    aggregateKey: WATERMARK_DEVICE_EUI,
+    op: 'WATERMARK_CALIBRATION_UPSERTED',
+    syncVersion: 7,
+    occurredAt: '2026-09-30T10:01:00.000Z',
+    payload: {contract_version: 1, ...watermarkValues, gateway_device_eui: WATERMARK_GATEWAY_EUI, device_eui: WATERMARK_DEVICE_EUI, sync_version: 7, updated_at: '2026-09-30T10:01:00.000Z', deleted_at: null},
+};
+expectValid('WATERMARK_CALIBRATION_UPSERTED synthetic event', eventsSchema, watermarkEvent, eventsSchema);
+expectInvalid('WATERMARK event rejects foreign aggregate key', eventsSchema, {...watermarkEvent, aggregateKey: WATERMARK_FOREIGN_DEVICE_EUI}, /aggregateKey.*equal/);
+const watermarkDeletedEvent = {...watermarkEvent,
+    eventUuid: 'watermark-fixture-delete',
+    op: 'WATERMARK_CALIBRATION_DELETED',
+    occurredAt: '2026-09-30T10:02:00.000Z',
+    payload: {...watermarkEvent.payload, deleted_at: '2026-09-30T10:02:00.000Z', updated_at: '2026-09-30T10:02:00.000Z'},
+};
+expectValid('WATERMARK_CALIBRATION_DELETED tombstone event', eventsSchema, watermarkDeletedEvent, eventsSchema);
+expectInvalid('WATERMARK upsert rejects deleted timestamp', eventsSchema,
+    {...watermarkEvent, payload: {...watermarkEvent.payload, deleted_at: '2026-09-30T10:02:00.000Z'}}, /deleted_at.*null|const/);
+expectInvalid('WATERMARK delete rejects live calibration', eventsSchema,
+    {...watermarkDeletedEvent, payload: {...watermarkDeletedEvent.payload, deleted_at: null}}, /deleted_at.*(?:required|pattern|date-time|type string)/);
 reportCheck(
     JSON.stringify(cmdSchema['x-semantic-bindings']) === JSON.stringify(EXPECTED_COMMAND_SEMANTIC_BINDINGS),
     'command schema pins exact effect-key semantic bindings',

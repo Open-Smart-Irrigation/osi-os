@@ -1,5 +1,7 @@
 'use strict';
 
+const historyHelper = require('../osi-history-helper');
+
 const LIMITS = {
   maxPointsPerSeries: 2000,
   maxEvents: 200,
@@ -242,8 +244,7 @@ function validateAggregation(value) {
 }
 
 function isSoilSource(device) {
-  const typeId = String(device && device.type_id || '').toUpperCase();
-  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || typeId === 'DRAGINO_SDI12' || Number(device && device.chameleon_enabled || 0) === 1;
+  return historyHelper.isSoilSource(device);
 }
 
 function isEnvironmentSource(device) {
@@ -259,6 +260,10 @@ function isDendroSource(device) {
   return String(device && device.type_id || '').toUpperCase() === 'DRAGINO_LSN50' && Number(device && device.dendro_enabled || 0) === 1;
 }
 
+const isLsn50Swt3Eligible = historyHelper.isLsn50Swt3Eligible;
+const normalizeDeveui = historyHelper.normalizeDeveui;
+const filterSoilChannelsForSources = historyHelper.filterSoilChannelsForSources;
+
 function pointQuality(coveragePct) {
   if (coveragePct === null || coveragePct === undefined) return 'unknown';
   if (coveragePct >= 90) return 'ok';
@@ -269,11 +274,56 @@ function pointQuality(coveragePct) {
 
 function soilChannelDepths(sourceDevices) {
   const primaryDevice = (sourceDevices || [])[0] || {};
-  return {
-    swt_1: numberOrNull(primaryDevice.chameleon_swt1_depth_cm),
-    swt_2: numberOrNull(primaryDevice.chameleon_swt2_depth_cm),
-    swt_3: numberOrNull(primaryDevice.chameleon_swt3_depth_cm)
+  let configured = null;
+  let configuredArray = null;
+  const rawConfigured = primaryDevice.soil_moisture_probe_depths_json;
+  if (Array.isArray(rawConfigured)) {
+    configuredArray = rawConfigured;
+  } else if (rawConfigured && typeof rawConfigured === 'object') {
+    configured = rawConfigured;
+  } else if (typeof rawConfigured === 'string' && rawConfigured.trim()) {
+    try {
+      const parsed = JSON.parse(rawConfigured);
+      if (Array.isArray(parsed)) configuredArray = parsed;
+      else if (parsed && typeof parsed === 'object') configured = parsed;
+    } catch (_) {
+      configured = null;
+    }
+  }
+  const configuredDepth = (channelId) => {
+    if (configuredArray) {
+      const index = { swt_1: 0, swt_2: 1, swt_3: 2, swt_wm1: 0, swt_wm2: 1 }[channelId];
+      return index === undefined ? null : numberOrNull(configuredArray[index]);
+    }
+    return configured
+      ? numberOrNull(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()])
+      : null;
   };
+  const chameleonEnabled = isLsn50Swt3Eligible(primaryDevice);
+  return {
+    swt_1: numberOrNull(primaryDevice.chameleon_swt1_depth_cm) ?? configuredDepth('swt_1'),
+    swt_2: numberOrNull(primaryDevice.chameleon_swt2_depth_cm) ?? configuredDepth('swt_2'),
+    swt_3: chameleonEnabled
+      ? numberOrNull(primaryDevice.chameleon_swt3_depth_cm) ?? configuredDepth('swt_3')
+      : null
+  };
+}
+
+function soilDepthsForAggregate(aggregate, sourceDevices) {
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  const fallback = soilChannelDepths(devices);
+  const sourceKeys = aggregate && aggregate.channelSourceKeys || {};
+  const result = {};
+  for (const channelId of ['swt_1', 'swt_2', 'swt_3']) {
+    const sourceKey = normalizeDeveui(sourceKeys[channelId]);
+    const sourceDevice = sourceKey && devices.find((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)) === sourceKey);
+    if (sourceDevice) {
+      result[channelId] = soilChannelDepths([sourceDevice])[channelId];
+    } else {
+      result[channelId] = fallback[channelId];
+    }
+  }
+  return result;
 }
 
 function seriesWithDepth(series, depths, channelId) {
@@ -283,8 +333,9 @@ function seriesWithDepth(series, depths, channelId) {
 
 function buildSeriesFromAggregate(card, aggregate, sourceDevices, opts) {
   var _statusForCardValue = opts && opts.statusForCardValue || function() { return null; };
-  const channels = CARD_CONFIG[card.cardType].channels;
-  const soilDepths = card.cardType === 'soil' ? soilChannelDepths(sourceDevices) : null;
+  const configuredChannels = CARD_CONFIG[card.cardType].channels;
+  const channels = card.cardType === 'soil' ? filterSoilChannelsForSources(configuredChannels, sourceDevices) : configuredChannels;
+  const soilDepths = card.cardType === 'soil' ? soilDepthsForAggregate(aggregate, sourceDevices) : null;
   if (!channels.length) return [];
   const result = [];
   if (aggregate.aggregation === 'raw') {
@@ -440,6 +491,18 @@ function shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested)
   return requested === 'daily' || requested === 'weekly';
 }
 
+// Soil rollups are merged per zone card. A plain LSN50 (no Chameleon) may have
+// written a stale SWT3 into them before per-device SWT3 filtering existed, and
+// a merged bucket cannot be separated again, so a soil card with such a source
+// reads raw device_data. Every other card, and every soil card without such a
+// source, follows the range/aggregation rule above.
+function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested) {
+  if (card && card.cardType === 'soil' && (sourceDevices || []).some(function(device) {
+    return !isLsn50Swt3Eligible(device);
+  })) return false;
+  return shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested);
+}
+
 function rowHasSoilProfileValue(row) {
   return ['swt_1', 'swt_2', 'swt_3'].some(function(channelId) {
     return numberOrNull(row && row[channelId]) !== null;
@@ -561,6 +624,7 @@ module.exports = {
   normalizeWorkspaceRow,
   summaryScore,
   shouldUseHistoryRollups,
+  shouldUseCardRollups,
   rowHasSoilProfileValue,
   latestSeriesPoint,
   pointValueForCalendar,

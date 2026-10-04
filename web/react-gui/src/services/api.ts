@@ -731,7 +731,7 @@ function normaliseHistoryCardMetadata(row: any): HistoryCardMetadata {
   };
 }
 
-function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
+export function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
   const cardType = String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType;
   const rawSourceDevices = Array.isArray(row?.sourceDevices ?? row?.source_devices)
     ? (row.sourceDevices ?? row.source_devices)
@@ -758,16 +758,22 @@ function normaliseHistoryCardSummary(row: any): HistoryCardSummary {
     sourceDeviceCount: Number.isFinite(sourceDeviceCount) ? sourceDeviceCount : undefined,
     sourceLabel: row?.sourceLabel ?? row?.source_label ?? null,
     sourceLabels: rawSourceLabels.map(String).filter((label: string) => label.trim().length > 0),
-    sourceDevices: rawSourceDevices.map((device: any) => ({
-      name: typeof device?.name === 'string' && device.name.trim() ? device.name.trim() : null,
-      typeId: typeof (device?.typeId ?? device?.type_id) === 'string'
-        ? String(device.typeId ?? device.type_id).trim() || null
-        : null,
-      role: typeof device?.role === 'string' && device.role.trim() ? device.role.trim() : null,
-      sourceKey: typeof (device?.sourceKey ?? device?.source_key) === 'string'
-        ? String(device.sourceKey ?? device.source_key).trim() || null
-        : null,
-    })),
+    sourceDevices: rawSourceDevices.map((device: any) => {
+      const rawChameleonEnabled = device?.chameleonEnabled ?? device?.chameleon_enabled;
+      return {
+        name: typeof device?.name === 'string' && device.name.trim() ? device.name.trim() : null,
+        typeId: typeof (device?.typeId ?? device?.type_id) === 'string'
+          ? String(device.typeId ?? device.type_id).trim() || null
+          : null,
+        role: typeof device?.role === 'string' && device.role.trim() ? device.role.trim() : null,
+        sourceKey: typeof (device?.sourceKey ?? device?.source_key) === 'string'
+          ? String(device.sourceKey ?? device.source_key).trim() || null
+          : null,
+        chameleonEnabled: rawChameleonEnabled === undefined || rawChameleonEnabled === null
+          ? undefined
+          : asBoolean(rawChameleonEnabled),
+      };
+    }),
     metadata: normaliseHistoryCardMetadata(row?.metadata ?? {}),
     availability: normaliseHistoryCardAvailability(row?.availability ?? {}),
     ordering: normaliseHistoryCardOrdering(row?.ordering ?? {}),

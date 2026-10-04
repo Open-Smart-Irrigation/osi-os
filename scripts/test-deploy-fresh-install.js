@@ -33,6 +33,7 @@
 // in milliseconds instead of hanging a CI job for ten minutes.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -78,6 +79,27 @@ function extractSchemaDecisionFragment() {
   return fragment;
 }
 
+// The four COMMAND_LEDGER_*_SHA256 pins exactly as deploy.sh declares them, so
+// the harness stages against the shipped digests rather than recomputed ones.
+function extractCommandLedgerPins() {
+  const pins = DEPLOY.match(/^COMMAND_LEDGER_(?:HELPER|PACKAGE|INDEX|BINDING)_SHA256="[0-9a-f]{64}"$/gm) || [];
+  assert.equal(pins.length, 4, 'deploy.sh must pin the installer, ledger package, ledger index and binding');
+  return pins.join('\n');
+}
+
+function sha256(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+const NODE_RED_SOURCE = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
+const LEDGER_FILES = [
+  'osi-command-ledger/package.json',
+  'osi-command-ledger/index.js',
+  'osi-watermark-binding/canonicalization.js',
+];
+const ACTIVATED_TEXT = 'OK: command-ledger dependency pair activated after schema migration';
+const activationCount = (stdout) => stdout.split(ACTIVATED_TEXT).length - 1;
+
 // --- harness ---------------------------------------------------------------
 
 const TRIPWIRE_MARKER = 'baseline-existing-db-was-called';
@@ -85,8 +107,10 @@ const TRIPWIRE_MARKER = 'baseline-existing-db-was-called';
 function buildHarness(root) {
   const dbDir = path.join(root, 'data', 'db');
   const tmpDir = path.join(root, 'tmp');
+  const nodeRedRoot = path.join(root, 'node-red');
   fs.mkdirSync(dbDir, { recursive: true });
   fs.mkdirSync(tmpDir, { recursive: true });
+  fs.mkdirSync(nodeRedRoot, { recursive: true });
 
   const script = `set -eu
 REPO_ROOT=${JSON.stringify(REPO)}
@@ -100,6 +124,15 @@ PAYLOADS_ROOT="$TMP_DIR/payloads"
 DEPLOY_STAMP="test-stamp"
 PAYLOAD_FLIPPED=0
 mkdir -p "$backup_dir" "$PAYLOADS_ROOT"
+# The real command-ledger staging and activation below run against a live
+# root inside the temporary directory. Phases are separate processes, so the
+# stage directory has a fixed name instead of deploy.sh's PID suffix.
+NODE_RED_ROOT=${JSON.stringify(nodeRedRoot)}
+COMMAND_LEDGER_STAGE_ROOT="$NODE_RED_ROOT"
+COMMAND_LEDGER_STAGE="$COMMAND_LEDGER_STAGE_ROOT/.osi-command-ledger-stage.harness"
+COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
+COMMAND_LEDGER_ACTIVATED=0
+${extractCommandLedgerPins()}
 
 # Not schema: deploy.sh curls these through the SSH reverse tunnel; here they
 # come straight off the working tree.
@@ -121,6 +154,8 @@ fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 
 ${extractFunction('checkpoint_live_db')}
 ${extractFunction('seed_db_if_missing')}
 ${extractFunction('fetch_migration_runner')}
+${extractFunction('stage_command_ledger_dependency')}
+${extractFunction('activate_command_ledger_dependency')}
 
 osi_schema_decision() {
 ${extractSchemaDecisionFragment()}
@@ -140,11 +175,29 @@ TRIPWIRE
 case "$1" in
     seed) seed_db_if_missing ;;
     prepare) fetch_migration_runner >/dev/null; install_tripwire ;;
+    stage) stage_command_ledger_dependency ;;
     migrate) mkdir -p "$PAYLOADS_ROOT/$DEPLOY_STAMP"; migrations_dir="$TMP_DIR/database/migrations/ordered"; osi_schema_decision ;;
     *) echo "unknown phase: $1" >&2; exit 64 ;;
 esac
 `;
-  return { script, dbDir, tmpDir, dbPath: path.join(dbDir, 'farming.db') };
+  return { script, dbDir, tmpDir, nodeRedRoot, dbPath: path.join(dbDir, 'farming.db') };
+}
+
+function assertLedgerPairLive(harness) {
+  for (const file of LEDGER_FILES) {
+    const live = path.join(harness.nodeRedRoot, file);
+    assert.ok(fs.existsSync(live), `activation did not install ${file}`);
+    assert.equal(sha256(live), sha256(path.join(NODE_RED_SOURCE, file)), `the activated ${file} is not the shipped file`);
+  }
+}
+
+function assertLedgerPairStagedOnly(harness, staged) {
+  assertPhaseOk(staged, 'stage_command_ledger_dependency', null);
+  assert.match(staged.stdout, /OK: command-ledger dependency pair staged; activation deferred until schema migration/);
+  for (const file of LEDGER_FILES) {
+    assert.ok(fs.existsSync(path.join(harness.nodeRedRoot, '.osi-command-ledger-stage.harness', file)),
+      `staging did not leave ${file} in the stage directory`);
+  }
 }
 
 function runPhase(harness, phase, tripwireFile) {
@@ -169,7 +222,7 @@ function withHarness(fn) {
 }
 
 function assertPhaseOk(result, phase, tripwireFile) {
-  if (fs.existsSync(tripwireFile)) {
+  if (tripwireFile && fs.existsSync(tripwireFile)) {
     assert.fail(`deploy.sh's ${phase} phase invoked baseline-existing-db.js - the fresh-install path fell back to the Stage 0 pre-ledger branch (>10 minutes on-device). Rebuild the bundled seed with 'node scripts/build-seed-db.js'.`);
   }
   assert.equal(result.status, 0,
@@ -215,8 +268,21 @@ test('the fresh-install deploy path reaches head without the Stage 0 baseline, a
     assertPhaseOk(runPhase(harness, 'seed', tripwireFile), 'seed_db_if_missing', tripwireFile);
     assertPhaseOk(runPhase(harness, 'prepare', tripwireFile), 'fetch_migration_runner', tripwireFile);
 
+    // deploy.sh stages the command-ledger pair with the other fetches and
+    // activates it inside the schema phase, after the migration.
+    assertLedgerPairStagedOnly(harness, runPhase(harness, 'stage', tripwireFile));
+    for (const file of LEDGER_FILES) {
+      assert.equal(fs.existsSync(path.join(harness.nodeRedRoot, file)), false,
+        `staging must not install ${file} before the migration`);
+    }
+
     const first = runPhase(harness, 'migrate', tripwireFile);
     assertPhaseOk(first, 'run_schema_migration', tripwireFile);
+    assert.equal(activationCount(first.stdout), 1,
+      'the schema phase must activate the staged command ledger exactly once');
+    assert.ok(first.stdout.indexOf('OK: verify-head-cli confirmed') < first.stdout.indexOf(ACTIVATED_TEXT),
+      'the command ledger must be activated after the migration is verified');
+    assertLedgerPairLive(harness);
     assert.match(first.stdout, /SKIP: schema_migrations ledger already has rows/,
       'the fresh-install path did not take the ledger branch');
     // A seed stamped from main's own CHECKSUMS.json cannot look foreign-numbered,
@@ -241,8 +307,12 @@ test('the fresh-install deploy path reaches head without the Stage 0 baseline, a
     assertPhaseOk(reseed, 'seed_db_if_missing (second run)', tripwireFile);
     assert.match(reseed.stdout, /SKIP: existing live database preserved/);
 
+    assertLedgerPairStagedOnly(harness, runPhase(harness, 'stage', tripwireFile));
     const second = runPhase(harness, 'migrate', tripwireFile);
     assertPhaseOk(second, 'run_schema_migration (second run)', tripwireFile);
+    assert.equal(activationCount(second.stdout), 1,
+      'the second schema phase must activate the restaged command ledger exactly once');
+    assertLedgerPairLive(harness);
     assert.match(second.stdout, /SKIP: schema_migrations ledger already has rows/);
     assert.match(second.stdout, /OK: verify-head-cli confirmed the post-migration ledger and schema fingerprints/);
     assert.equal(
@@ -259,9 +329,15 @@ test('the tripwire itself fires when the Stage 0 branch is taken', () => {
     assertPhaseOk(runPhase(harness, 'seed', tripwireFile), 'seed_db_if_missing', tripwireFile);
     assertPhaseOk(runPhase(harness, 'prepare', tripwireFile), 'fetch_migration_runner', tripwireFile);
     execFileSync('sqlite3', [harness.dbPath, 'DROP TABLE schema_migrations;']);
+    assertLedgerPairStagedOnly(harness, runPhase(harness, 'stage', tripwireFile));
 
     const result = runPhase(harness, 'migrate', tripwireFile);
     assert.notEqual(result.status, 0, 'a ledger-less database must not sail through the schema decision');
+    assert.equal(activationCount(result.stdout), 0, 'a failed schema phase must not activate the command ledger');
+    for (const file of LEDGER_FILES) {
+      assert.equal(fs.existsSync(path.join(harness.nodeRedRoot, file)), false,
+        `a failed schema phase installed ${file}`);
+    }
     assert.equal(fs.readFileSync(tripwireFile, 'utf8'), TRIPWIRE_MARKER,
       'the ledger-less database did not reach baseline-existing-db.js, so the tripwire proves nothing');
   });

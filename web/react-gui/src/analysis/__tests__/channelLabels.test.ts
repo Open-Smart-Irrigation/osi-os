@@ -55,7 +55,7 @@ import { axisQuantityLabel } from '../channelLabels';
 
 describe('axisQuantityLabel', () => {
   it('uses registry displayName with stripped per-sensor suffix + pretty unit', () => {
-    expect(axisQuantityLabel('swt_1', 'kPa')).toBe('Soil water tension (kPa)');
+    expect(axisQuantityLabel('swt_1', 'kPa')).toBe('Soil tension 1 (kPa)');
     expect(axisQuantityLabel('ambient_temperature', 'C')).toBe('Ambient temperature (°C)');
     expect(axisQuantityLabel('dendro_stem_change_um', 'um')).toBe('Stem diameter change (µm)');
   });

@@ -56,6 +56,41 @@ Uppercase, no separators. Example: `0016C001F11715E2`. EUI-48 input is expanded 
 ### Booleans
 `true` and `false` lowercase, as standard JSON.
 
+### Protected device mutations
+
+`WATERMARK_CALIBRATION`, `DEVICE` soil-depth, and `DEVICE` Chameleon intents
+are normalized before hashing and effect-key generation. EUIs are uppercase,
+numeric coefficients and versions are finite JSON numbers/integers (never
+numeric strings or padded integers), and absent optional calibration metadata
+is distinct from explicit `null`. The trusted binding hash includes the
+command type, resource, device EUI, gateway EUI, local actor UUID, exact base
+version, operation, and this normalized intent.
+
+Calibration `method` is at most 64 characters and `notes` is at most 500
+characters, matching the phase-1 edge writer. A missing metadata member means
+keep; a present `null` means clear.
+
+Protected bindings use the scoped edge
+`osi-watermark-binding/canonicalization.js` seam and cloud
+`ProtectedBindingCanonicalizer`, not a global sync/journal hash. Both provide
+sorted compact JSON, fixed-point finite number rendering (including `-0` as
+`0`), deterministic arrays/nulls, and SHA-256 over UTF-8 bytes. Only explicitly
+typed EUI, UUID, and instant fields are normalized; free-text fields such as
+`method` and `notes` are opaque, even when their contents look like timestamps.
+For WATERMARK calibration numeric fields whose contract minimum is zero,
+positive values must be IEEE-754 normal numbers (at least
+`2.2250738585072014e-308`); zero remains valid and positive subnormals are
+rejected before canonicalization. The shared parity fixture's
+`calibrationNumericDomain` vectors are executable on both runtimes.
+The WATERMARK parity vectors include exponent/fraction inputs such as `1e-7`
+and `0.0000001`, which must produce identical protected bytes and hashes.
+Protected string/key escaping is explicit: quote and backslash use `\\\"` and
+`\\\\`; backspace, tab, newline, formfeed, and carriage return use `\\b`,
+`\\t`, `\\n`, `\\f`, and `\\r`; remaining U+0000..U+001F code units use
+lowercase four-hex `\\u00xx`. Valid surrogate pairs remain UTF-8 Unicode, while
+lone surrogates use lowercase four-hex escapes. This spelling is shared by both
+scoped seams and is independent of global canonicalizer behavior.
+
 ## Test Vectors
 
 The following pairs are normative. A runtime is conformant if its hash matches the expected value for every input.

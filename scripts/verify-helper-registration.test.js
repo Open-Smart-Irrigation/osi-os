@@ -98,3 +98,65 @@ test('inspectModuleDir warns on malformed package metadata while preserving fall
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// osi-command-ledger reaches a gateway only through deploy.sh's pinned staging
+// path (fetch into a private stage directory, digest check, deferred
+// activation after the schema migration), never through a direct fetch into
+// /srv/node-red. The verifier accepts that path for that module only, and
+// asserts every part of it so the check cannot go blind.
+function stagedLedgerDeploy(omit = []) {
+  const lines = {
+    packageFetch: '    "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json"',
+    indexFetch: '    "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js"',
+    packagePin: 'COMMAND_LEDGER_PACKAGE_SHA256="' + 'a'.repeat(64) + '"',
+    indexPin: 'COMMAND_LEDGER_INDEX_SHA256="' + 'b'.repeat(64) + '"',
+    stageDef: 'stage_command_ledger_dependency() {\n}',
+    activateDef: 'activate_command_ledger_dependency() {\n}',
+    stageCall: 'stage_command_ledger_dependency',
+    activateCall: 'activate_command_ledger_dependency || exit 1',
+  };
+  return Object.entries(lines).filter(([key]) => !omit.includes(key)).map(([, line]) => line).join('\n');
+}
+
+function ledgerFixtures(deploySource) {
+  const name = 'osi-command-ledger';
+  return fixtures({
+    name,
+    packageJson: { dependencies: { [name]: 'file:' + name } },
+    packageLock: { packages: {
+      '': { dependencies: { [name]: 'file:' + name } },
+      ['node_modules/' + name]: { resolved: name, link: true },
+      [name]: { version: '1.0.0' },
+    } },
+    seedSource: 'for module in osi-db-helper ' + name + ' osi-lib; do\n',
+    deploySource,
+  });
+}
+
+test('checkSurfaces: the command ledger may be delivered by the pinned staging path', () => {
+  assert.deepEqual(checkSurfaces(ledgerFixtures(stagedLedgerDeploy())), []);
+});
+
+test('checkSurfaces: the command ledger delivered by neither path fails', () => {
+  const issues = checkSurfaces(ledgerFixtures('')).join(' ');
+  assert.match(issues, /osi-command-ledger: missing package\.json fetch_required in deploy\.sh/);
+  assert.match(issues, /osi-command-ledger: missing index\.js fetch_required in deploy\.sh/);
+});
+
+test('checkSurfaces: every part of the staged ledger path is asserted', () => {
+  for (const part of ['packageFetch', 'indexFetch', 'packagePin', 'indexPin', 'stageDef', 'activateDef', 'stageCall', 'activateCall']) {
+    const issues = checkSurfaces(ledgerFixtures(stagedLedgerDeploy([part])));
+    assert.ok(issues.length > 0, 'missing ' + part + ' must be reported');
+    assert.match(issues.join(' '), /osi-command-ledger/, part);
+  }
+});
+
+test('checkSurfaces: the staged path is accepted only for the module it delivers', () => {
+  const staged = stagedLedgerDeploy().replace(/osi-command-ledger/g, 'osi-history-sync-helper');
+  assert.match(checkSurfaces(fixtures({ deploySource: staged })).join(' '), /fetch_required in deploy\.sh/);
+});
+
+test('the shipped deploy.sh delivers the command ledger through the staged path', () => {
+  const deploySource = fs.readFileSync(path.join(__dirname, '..', 'deploy.sh'), 'utf8');
+  assert.deepEqual(checkSurfaces(ledgerFixtures(deploySource)), []);
+});

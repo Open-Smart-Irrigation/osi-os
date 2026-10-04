@@ -234,6 +234,12 @@ const schemaContract = {
     'updated_at',
     'deleted_at',
   ],
+  applied_commands: [
+    'command_id', 'device_eui', 'command_type', 'effect_key', 'applied_at', 'result',
+    'result_detail', 'originator', 'attempt_count', 'last_error', 'last_ack_attempt_at',
+    'expires_at', 'binding_hash', 'intent_hash', 'resource_type', 'resource_id',
+    'gateway_device_eui', 'actor_user_uuid', 'base_sync_version', 'operation',
+  ],
   watermark_readings: [
     'id',
     'deveui',

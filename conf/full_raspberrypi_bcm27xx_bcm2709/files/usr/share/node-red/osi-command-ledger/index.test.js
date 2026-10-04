@@ -17,6 +17,7 @@ const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 
 const ledger = require('./index');
+const protectedBinding = require('../osi-watermark-binding/canonicalization');
 
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
@@ -87,13 +88,83 @@ class TestDb {
 }
 
 function insertAppliedCommand(db, row) {
-  db.native.prepare(
-    'INSERT INTO applied_commands (' +
-      'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
-    ') VALUES (?,?,?,?,?,?,?,?)'
-  ).run(
-    row.commandId, row.deviceEui, row.commandType, row.effectKey,
-    row.appliedAt, row.result, JSON.stringify(row.resultDetail), row.originator || 'edge'
+  const columns = [
+    'command_id', 'device_eui', 'command_type', 'effect_key', 'applied_at', 'result',
+    'result_detail', 'originator', 'binding_hash', 'intent_hash', 'resource_type',
+    'resource_id', 'gateway_device_eui', 'actor_user_uuid', 'base_sync_version', 'operation',
+  ];
+  const values = [
+    row.commandId, row.deviceEui, row.commandType, row.effectKey, row.appliedAt,
+    row.result, JSON.stringify(row.resultDetail), row.originator || 'edge',
+    row.bindingHash || null, row.intentHash || null, row.resourceType || null,
+    row.resourceId || null, row.gatewayDeviceEui || null, row.actorUserUuid || null,
+    row.baseSyncVersion == null ? null : row.baseSyncVersion, row.operation || null,
+  ];
+  db.native.prepare(`INSERT INTO applied_commands (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`).run(...values);
+}
+
+const WATERMARK_DEVICE_EUI = 'A84041A171000002';
+const WATERMARK_EFFECT_KEY = `watermark_calibration:set:${GATEWAY_EUI}:${WATERMARK_DEVICE_EUI}:4`;
+const WATERMARK_ACTOR = '12345678-1234-4234-8234-123456789abc';
+
+function watermarkBinding(overrides = {}) {
+  const context = Object.assign({
+    resource_type: 'WATERMARK_CALIBRATION',
+    resource_id: WATERMARK_DEVICE_EUI,
+    gateway_device_eui: GATEWAY_EUI,
+    actor_user_uuid: WATERMARK_ACTOR,
+    base_sync_version: 4,
+    operation: 'set',
+    normalized_intent: { worst_residual_pct: 1 },
+  }, overrides);
+  const binding = {
+    command_type: context.command_type || 'SET_WATERMARK_CALIBRATION',
+    resource: context.resource || context.resource_type,
+    device_eui: context.resource_id,
+    gateway_device_eui: context.gateway_device_eui,
+    actor_user_uuid: context.actor_user_uuid,
+    base_sync_version: context.base_sync_version,
+    operation: context.operation,
+    normalized_intent: context.normalized_intent,
+  };
+  context.intent_hash = protectedBinding.sha256(context.normalized_intent);
+  context.binding_hash = protectedBinding.sha256(binding);
+  return context;
+}
+
+function watermarkEnvelope(commandId, overrides = {}) {
+  const context = watermarkBinding(overrides);
+  return {
+    commandId,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    payload: {
+      command_type: 'SET_WATERMARK_CALIBRATION',
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: { worst_residual_pct: 1 },
+    },
+    protected_context: context,
+  };
+}
+
+function watermarkRuntime(context = watermarkBinding()) {
+  return {
+    command_type_recognized: true,
+    gateway_device_eui: GATEWAY_EUI,
+    protected_context: context,
+  };
+}
+
+function protectedDedupe(db, envelope, runtime) {
+  return ledger.withProtectedCommandTransaction(
+    db,
+    envelope,
+    runtime,
+    async () => ({ handled: false })
   );
 }
 
@@ -106,6 +177,13 @@ test('classifyAckResult maps known result/status vocabularies', () => {
   assert.equal(ledger.classifyAckResult('FAILED', 'missing valve devEui'), 'REJECTED_PERMANENT');
   assert.equal(ledger.classifyAckResult('FAILED', 'timeout talking to gateway'), 'FAILED_RETRYABLE');
   assert.equal(ledger.classifyAckResult('SOMETHING_UNKNOWN'), 'FAILED_RETRYABLE');
+  // CONFLICT is a terminal wire result only for the four protected exact-base
+  // commands; every other command type keeps main's retryable mapping.
+  assert.equal(ledger.classifyAckResult('CONFLICT'), 'FAILED_RETRYABLE');
+  assert.equal(ledger.classifyAckResult('CONFLICT', '', 'CONFIG_UPDATE'), 'FAILED_RETRYABLE');
+  for (const type of ['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'UPSERT_DEVICE_SOIL_DEPTHS']) {
+    assert.equal(ledger.classifyAckResult('CONFLICT', '', type), 'CONFLICT', type);
+  }
 });
 
 test('validEffectBinding recognizes the built-in non-journal grammar', async () => {
@@ -321,6 +399,440 @@ test('deduplicatePendingCommand finds a non-journal duplicate by effect key + co
   assert.equal(replay.ack.duplicate, true);
 });
 
+test('protected configuration replay checks exact command ID before effect key', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '801', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 801, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    ...Object.fromEntries(Object.entries(context).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), value,
+    ])),
+  });
+  const replay = await protectedDedupe(
+    db, watermarkEnvelope(801), watermarkRuntime(context)
+  );
+  assert.equal(replay.handled, true);
+  assert.equal(replay.ack.commandId, 801);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 1);
+});
+
+test('generic dedupe rejects protected commands before any ledger or outbox mutation', async () => {
+  const db = new TestDb();
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(db, watermarkEnvelope(806), watermarkRuntime()),
+    (error) => error && error.code === 'protected_command_route_required'
+  );
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+test('protected configuration derives trusted hashes from the signed command payload when absent', async () => {
+  const db = new TestDb();
+  const envelope = watermarkEnvelope(807);
+  delete envelope.protected_context;
+  const result = await protectedDedupe(db, envelope, {
+    command_type_recognized: true,
+    gateway_device_eui: GATEWAY_EUI,
+  });
+  assert.equal(result.handled, false);
+});
+
+test('protected configuration verifies canonical hashes from normalized intent and trusted runtime context', async () => {
+  const db = new TestDb();
+  const intent = { worst_residual_pct: 1 };
+  const binding = {
+    command_type: 'SET_WATERMARK_CALIBRATION',
+    resource: 'WATERMARK_CALIBRATION',
+    device_eui: WATERMARK_DEVICE_EUI,
+    gateway_device_eui: GATEWAY_EUI,
+    actor_user_uuid: '12345678-1234-1234-1234-123456789abc',
+    base_sync_version: 4,
+    operation: 'set',
+    normalized_intent: intent,
+  };
+  const runtime = {
+    command_type_recognized: true,
+    gateway_device_eui: GATEWAY_EUI,
+    protected_context: { ...binding },
+  };
+  const envelope = watermarkEnvelope(808);
+  envelope.payload.actor_user_uuid = binding.actor_user_uuid;
+  envelope.payload.normalized_intent = intent;
+  envelope.payload.binding_hash = 'f'.repeat(64);
+  envelope.payload.intent_hash = 'e'.repeat(64);
+  delete envelope.protected_context;
+  const result = await protectedDedupe(db, envelope, runtime);
+  assert.equal(result.handled, false);
+});
+
+test('protected configuration rejects a runtime gateway mismatch and accepts a non-v4 UUID', async () => {
+  const db = new TestDb();
+  const envelope = watermarkEnvelope(809);
+  envelope.payload.actor_user_uuid = '12345678-1234-1234-1234-123456789abc';
+  const runtime = watermarkRuntime({
+    ...watermarkBinding(),
+    actor_user_uuid: envelope.payload.actor_user_uuid,
+    gateway_device_eui: '0016C001F1000004',
+  });
+  await assert.rejects(
+    protectedDedupe(db, envelope, runtime),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('protected command ID replay rejects a protected row delivered as another command type', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '810', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 810, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(db, {
+      commandId: 810, commandType: 'REBOOT', payload: { effect_key: WATERMARK_EFFECT_KEY },
+    }, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+test('protected command ID replay rejects a non-protected stored row', async () => {
+  const db = new TestDb();
+  insertAppliedCommand(db, {
+    commandId: '811', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'REBOOT', effectKey: 'reboot:001',
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 811, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  await assert.rejects(
+    protectedDedupe(db, watermarkEnvelope(811), watermarkRuntime(watermarkBinding())),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('protected terminal ACK rejects a non-protected stored row', async () => {
+  const db = new TestDb();
+  insertAppliedCommand(db, {
+    commandId: '812', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'REBOOT', effectKey: 'reboot:002',
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 812, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  const context = watermarkBinding();
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 812, commandType: 'SET_WATERMARK_CALIBRATION', result: 'APPLIED',
+      effectKey: WATERMARK_EFFECT_KEY, deviceEui: WATERMARK_DEVICE_EUI,
+      gatewayDeviceEui: GATEWAY_EUI, actorUserUuid: context.actor_user_uuid,
+      baseSyncVersion: context.base_sync_version, operation: context.operation,
+      payload: watermarkEnvelope(812).payload,
+    }, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('protected exact replay derives intent from payload values, not normalized claims', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '813', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 813, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  const envelope = watermarkEnvelope(813);
+  envelope.payload.values.worst_residual_pct = 2;
+  await assert.rejects(
+    protectedDedupe(db, envelope, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('protected effect replay rejects payload intent changes hidden by claims', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '814', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 814, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  const envelope = watermarkEnvelope(815);
+  envelope.payload.values.worst_residual_pct = 2;
+  await assert.rejects(
+    protectedDedupe(db, envelope, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('protected terminal ACK validates delivered values against stored intent', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '816', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 816, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  const payload = watermarkEnvelope(816).payload;
+  payload.values.worst_residual_pct = 2;
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 816, commandType: 'SET_WATERMARK_CALIBRATION', result: 'APPLIED',
+      effectKey: WATERMARK_EFFECT_KEY, deviceEui: WATERMARK_DEVICE_EUI,
+      gatewayDeviceEui: GATEWAY_EUI, actorUserUuid: context.actor_user_uuid,
+      baseSyncVersion: context.base_sync_version, operation: context.operation,
+      payload,
+    }, watermarkRuntime(context)),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+});
+
+test('effect-key replay persists the new command ID as a trusted terminal row', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '811', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 811, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  const replay = await protectedDedupe(db, watermarkEnvelope(812), watermarkRuntime(context));
+  assert.equal(replay.handled, true);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['812'])).n, 1);
+  const exact = await protectedDedupe(db, watermarkEnvelope(812), watermarkRuntime(context));
+  assert.equal(exact.handled, true);
+});
+
+test('protected transaction primitive rolls back mutation, ledger, and ACK together', async () => {
+  const db = new TestDb();
+  await assert.rejects(
+    ledger.withProtectedCommandTransaction(db, watermarkEnvelope(813), watermarkRuntime(), async ({ tx, terminalAck }) => {
+      await tx.run('INSERT INTO devices(deveui,name,type_id,created_at,updated_at) VALUES (?,?,?,?,?)', [
+        'A84041A171000099', 'rollback', 'DRAGINO_LSN50', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z',
+      ]);
+      await terminalAck({ commandId: 813, commandType: 'SET_WATERMARK_CALIBRATION', result: 'APPLIED', effectKey: WATERMARK_EFFECT_KEY, deviceEui: WATERMARK_DEVICE_EUI });
+      throw new Error('mutation failed');
+    }),
+    /mutation failed/
+  );
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM devices WHERE deveui=?', ['A84041A171000099'])).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['813'])).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['813'])).n, 0);
+});
+
+test('protected configuration accepts a changed command ID only for the same binding and intent', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  insertAppliedCommand(db, {
+    commandId: '802', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 802, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    bindingHash: context.binding_hash, intentHash: context.intent_hash,
+    resourceType: context.resource_type, resourceId: context.resource_id,
+    gatewayDeviceEui: context.gateway_device_eui, actorUserUuid: context.actor_user_uuid,
+    baseSyncVersion: context.base_sync_version, operation: context.operation,
+  });
+  const replay = await protectedDedupe(
+    db, watermarkEnvelope(803), watermarkRuntime(context)
+  );
+  assert.equal(replay.handled, true);
+  assert.equal(replay.ack.commandId, 803);
+});
+
+test('protected configuration rejects every changed binding or intent without mutation', async (t) => {
+  for (const [name, change] of [
+    ['actor', { actor_user_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }],
+    ['gateway', { gateway_device_eui: '0016C001F1000004' }],
+    ['device', { resource_id: 'A84041A171000003' }],
+    ['base', { base_sync_version: 5 }],
+    ['operation', { operation: 'delete' }],
+    ['intent', { normalized_intent: { worst_residual_pct: 2 } }],
+  ]) {
+    await t.test(name, async () => {
+      const db = new TestDb();
+      const stored = watermarkBinding();
+      insertAppliedCommand(db, {
+        commandId: '804', deviceEui: WATERMARK_DEVICE_EUI,
+        commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+        appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+        resultDetail: { commandId: 804, status: 'ACKED', result: 'APPLIED', duplicate: false },
+        bindingHash: stored.binding_hash, intentHash: stored.intent_hash,
+        resourceType: stored.resource_type, resourceId: stored.resource_id,
+        gatewayDeviceEui: stored.gateway_device_eui, actorUserUuid: stored.actor_user_uuid,
+        baseSyncVersion: stored.base_sync_version, operation: stored.operation,
+      });
+      const changed = Object.assign({}, stored, change);
+      await assert.rejects(
+        protectedDedupe(db, watermarkEnvelope(805, changed), watermarkRuntime(changed)),
+        (error) => error && error.code === 'protected_command_conflict'
+      );
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+    });
+  }
+});
+
+test('recordProtectedDecision preserves terminal evidence for a changed binding', async () => {
+  const db = new TestDb();
+  const stored = watermarkBinding();
+  const originalDetail = {
+    commandId: 804, commandType: 'SET_WATERMARK_CALIBRATION',
+    status: 'ACKED', result: 'APPLIED', duplicate: false,
+  };
+  insertAppliedCommand(db, {
+    commandId: '804', deviceEui: WATERMARK_DEVICE_EUI,
+    commandType: 'SET_WATERMARK_CALIBRATION', effectKey: WATERMARK_EFFECT_KEY,
+    appliedAt: '2026-10-01T05:00:00.000Z', result: 'APPLIED',
+    resultDetail: originalDetail,
+    bindingHash: stored.binding_hash, intentHash: stored.intent_hash,
+    resourceType: stored.resource_type, resourceId: stored.resource_id,
+    gatewayDeviceEui: stored.gateway_device_eui, actorUserUuid: stored.actor_user_uuid,
+    baseSyncVersion: stored.base_sync_version, operation: stored.operation,
+  });
+  const originalAck = JSON.stringify({ commandId: 804, result: 'APPLIED', status: 'ACKED' });
+  db.native.prepare('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES(?,?,?)')
+    .run('804', originalAck, '2026-10-01T05:00:00.000Z');
+
+  const decision = await ledger.recordProtectedDecision(db, watermarkEnvelope(804), 'CONFLICT', 'binding_conflict');
+  assert.equal(decision.ack.result, 'CONFLICT');
+  assert.equal((await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['804'])).result, 'APPLIED');
+  assert.equal((await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['804'])).result_detail, JSON.stringify(originalDetail));
+  assert.equal((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['804'])).payload_json, originalAck);
+});
+
+test('queueCommandAck persists trusted WATERMARK terminal binding fields', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  const queued = await ledger.queueCommandAck(db, {
+    commandId: 806,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'APPLIED',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: 4,
+    operation: 'set',
+    payload: {
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: context.normalized_intent,
+    },
+    protected_context: context,
+  }, { protected_context: context, gateway_device_eui: GATEWAY_EUI });
+  assert.equal(queued.result, 'APPLIED');
+  const row = await db.get('SELECT binding_hash,intent_hash,resource_type,resource_id,gateway_device_eui,actor_user_uuid,base_sync_version,operation FROM applied_commands WHERE command_id=?', ['806']);
+  assert.deepEqual({ ...row }, {
+    binding_hash: context.binding_hash,
+    intent_hash: context.intent_hash,
+    resource_type: context.resource_type,
+    resource_id: context.resource_id,
+    gateway_device_eui: context.gateway_device_eui,
+    actor_user_uuid: context.actor_user_uuid,
+    base_sync_version: context.base_sync_version,
+    operation: context.operation,
+  });
+});
+
+test('contextless retryable ACK cannot replace a protected terminal ACK', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  const original = await ledger.queueCommandAck(db, {
+    commandId: 816,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'APPLIED',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: 4,
+    operation: 'set',
+    payload: {
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: context.normalized_intent,
+    },
+    protected_context: context,
+  }, { protected_context: context, gateway_device_eui: GATEWAY_EUI });
+  const before = await db.get('SELECT result,result_detail FROM applied_commands WHERE command_id=?', ['816']);
+  const outboxBefore = await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816']);
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 816,
+      commandType: 'SET_WATERMARK_CALIBRATION',
+      result: 'FAILED_RETRYABLE',
+    }),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+  const trustedRetry = await ledger.queueCommandAck(db, {
+    commandId: 816,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'FAILED_RETRYABLE',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: 4,
+    operation: 'set',
+    payload: {
+      effect_key: WATERMARK_EFFECT_KEY,
+      device_eui: WATERMARK_DEVICE_EUI,
+      gateway_device_eui: GATEWAY_EUI,
+      actor_user_uuid: WATERMARK_ACTOR,
+      base_sync_version: 4,
+      operation: 'set',
+      values: context.normalized_intent,
+    },
+    protected_context: context,
+  }, { protected_context: context, gateway_device_eui: GATEWAY_EUI });
+  assert.deepEqual(trustedRetry, original);
+  assert.deepEqual(JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816'])).payload_json), original);
+  await assert.rejects(
+    ledger.queueCommandAck(db, {
+      commandId: 816,
+      commandType: 'CONFIG_UPDATE',
+      result: 'FAILED_RETRYABLE',
+    }),
+    (error) => error && error.code === 'protected_command_conflict'
+  );
+  assert.deepEqual(await db.get('SELECT result,result_detail FROM applied_commands WHERE command_id=?', ['816']), before);
+  assert.deepEqual(await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['816']), outboxBefore);
+});
+
 test('zone effect replay requires the same submitted payload hash', async () => {
   const db = new TestDb();
   const payload = {
@@ -515,6 +1027,56 @@ test('queueCommandAck writes the ledger + outbox atomically and fires the lifecy
   assert.equal(
     (await db.get('SELECT result FROM applied_commands WHERE command_id=?', ['800'])).result,
     'APPLIED'
+  );
+});
+
+test('queueCommandAck treats CONFLICT as terminal only for protected exact-base commands', async () => {
+  const db = new TestDb();
+  const context = watermarkBinding();
+  const protectedAck = await ledger.queueCommandAck(db, {
+    commandId: 817,
+    commandType: 'SET_WATERMARK_CALIBRATION',
+    result: 'CONFLICT',
+    effectKey: WATERMARK_EFFECT_KEY,
+    deviceEui: WATERMARK_DEVICE_EUI,
+    gatewayDeviceEui: GATEWAY_EUI,
+    actorUserUuid: WATERMARK_ACTOR,
+    baseSyncVersion: context.base_sync_version,
+    operation: context.operation,
+    payload: watermarkEnvelope(817).payload,
+    protected_context: context,
+  }, watermarkRuntime(context));
+  assert.equal(protectedAck.result, 'CONFLICT');
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['817'])).n,
+    1,
+    'protected exact-base conflicts remain terminal ledger evidence'
+  );
+
+  const legacyAck = await ledger.queueCommandAck(db, {
+    commandId: 818,
+    commandType: 'CONFIG_UPDATE',
+    effectKey: 'config:' + GATEWAY_EUI + ':irrigation_interval:1',
+    deviceEui: GATEWAY_EUI,
+    result: 'CONFLICT',
+    reason: 'stale_base',
+  });
+  assert.equal(legacyAck.result, 'FAILED_RETRYABLE');
+  assert.equal(legacyAck.status, 'FAILED_RETRYABLE');
+  assert.equal(
+    JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['818'])).payload_json).result,
+    'FAILED_RETRYABLE',
+    'the queued wire result for a non-protected conflict stays retryable'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['818'])).n,
+    0,
+    'legacy conflicts remain retryable and do not become terminal ledger evidence'
+  );
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['818'])).n,
+    1,
+    'legacy conflicts still queue their ACK for retry'
   );
 });
 

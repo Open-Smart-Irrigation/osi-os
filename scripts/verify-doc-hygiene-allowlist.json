@@ -127,6 +127,12 @@
       "issue": 384
     },
     {
+      "path": "docs/contracts/sync-schema/watermark-cloud-parity-v1.json",
+      "max": 35,
+      "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
+      "issue": 384
+    },
+    {
       "path": "docs/hardware/chameleon-reference.md",
       "max": 1,
       "reason": "hex value that is part of a worked example; not an identifier",
@@ -223,8 +229,8 @@
       "issue": 384
     },
     {
-      "path": "docs/superpowers/plans/2026-09-29-watermark-deferred-work.md",
-      "max": 4,
+      "path": "docs/superpowers/plans/2026-10-02-watermark-cloud-parity-review-fix-wave.md",
+      "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
     },

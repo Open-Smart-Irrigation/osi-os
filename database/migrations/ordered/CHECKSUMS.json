@@ -65,5 +65,6 @@
   "0064__fao56_stage_keys.sql": "d72cb602556bfd94dd497c8cfd179ba414bfe2b0305f73fb8cd3dbd6c409749f",
   "0065__zone_weather_source_sync.sql": "29049551aee6b77a0d34b5d090a22bd93593f481f80f7f66353a786fb5310ba7",
   "0066__stage_started_on.sql": "d477953100ff661316e359c8c4a58eb3ef375acf57fcd7f4cd1e76749dd953b4",
-  "0067__zone_daily_agronomy_sync.sql": "f007051f72dd0ba5f8e967625b21c39293b271902a77817a9940095932f4c610"
+  "0067__zone_daily_agronomy_sync.sql": "f007051f72dd0ba5f8e967625b21c39293b271902a77817a9940095932f4c610",
+  "0068__watermark_cloud_parity.sql": "f029ee2ef4f672532aa2ab758743ea3e249a1fd83bff7b481655880fd60d9778"
 }

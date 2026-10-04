@@ -70,6 +70,55 @@ test('computeFetchList includes known always-fetched files', () => {
   }
 });
 
+test('computeFetchList includes the WATERMARK binding dependency', () => {
+  const list = computeFetchList(REPO_ROOT);
+  assert.ok(list.includes(
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js'
+  ));
+});
+
+test('computeFetchList includes every staged command-ledger dependency artifact', () => {
+  const list = computeFetchList(REPO_ROOT);
+  for (const artifact of [
+    'scripts/deploy-command-ledger-dependency.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js',
+  ]) {
+    assert.ok(list.includes(artifact), `expected ${artifact} in fetch list`);
+  }
+});
+
+test('computeFetchList includes the WATERMARK command receiver', () => {
+  const list = computeFetchList(REPO_ROOT);
+  assert.ok(list.includes(
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.js'
+  ));
+});
+
+test('deployed Node-RED layout loads the command ledger with its binding dependency', () => {
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-deployed-layout-'));
+  try {
+    const ledgerDir = path.join(root, 'osi-command-ledger');
+    const bindingDir = path.join(root, 'osi-watermark-binding');
+    fs.mkdirSync(ledgerDir, { recursive: true });
+    fs.mkdirSync(bindingDir, { recursive: true });
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js'),
+      path.join(ledgerDir, 'index.js')
+    );
+    fs.copyFileSync(
+      path.join(REPO_ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js'),
+      path.join(bindingDir, 'canonicalization.js')
+    );
+    const loaded = require(path.join(ledgerDir, 'index.js'));
+    assert.equal(typeof loaded.deduplicatePendingCommand, 'function');
+    assert.equal(typeof loaded.queueCommandAck, 'function');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('computeFetchList never returns a variable-shaped (unexpanded) path', () => {
   const list = computeFetchList(REPO_ROOT);
   for (const p of list) {

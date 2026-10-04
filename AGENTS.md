@@ -52,6 +52,14 @@ Per-module system map (both repos, every module described with location): [docs/
 **Cloud → edge command types** (via pending-commands):
 `UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`, `UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`.
 
+WATERMARK cloud parity adds four protected exact-base commands:
+`SET_WATERMARK_CALIBRATION`, `DELETE_WATERMARK_CALIBRATION`,
+`SET_CHAMELEON_CONFIG`, and `UPSERT_DEVICE_SOIL_DEPTHS`. An applied write stays
+pending until both the authoritative acknowledgement and mirror convergence
+arrive, in either order. A definitive non-application acknowledgement settles
+without mirror convergence. The cloud never updates the confirmed edge-owned
+value when it queues a command.
+
 `UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
 `entity-name-command-apply-fn` and are only sent to a gateway that reported the
 `entity_name_commands_v1` sync capability.
@@ -73,8 +81,12 @@ per call.
 `al-link-build-req` and `sync-force-build`): `linked_auth_sync_v1`,
 `force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
 `entity_name_commands_v1`, `zone_config_weather_source_v1`,
-`zone_config_stage_started_on_v1`, and `field_journal_v1` when the journal is
-enabled. The cloud reads the list as `gatewayIdentity.syncCapabilities()` and sends
+`zone_config_stage_started_on_v1`, `watermark_v1`,
+`chameleon_config_commands_v1`, `device_soil_depth_commands_v1`, and
+`field_journal_v1` when the journal is enabled. `watermark_v1` covers the
+calibration resource, its set/delete commands, snapshots, and events. The other
+two tokens independently gate their named exact-base device commands. The cloud
+reads the list as `gatewayIdentity.syncCapabilities()` and sends
 a name command only to a gateway that reported `entity_name_commands_v1`. From
 sub-project 4 on it will put each zone field into `UPSERT_ZONE` and
 `UPSERT_ZONE_CONFIG` only for a gateway that reported that field's capability:
@@ -159,6 +171,65 @@ rehearsal.
 - **Release script:** `OSI_ADMIN_TOKEN=… node scripts/refresh-chameleon-calibrations.js` before cutting a release.
 - Apply the generated release seed with `node scripts/apply-chameleon-calibration-seed.js`; it updates every bundled DB copy and fails on an empty calibration snapshot.
 
+### WATERMARK cloud parity
+
+`WATERMARK_CALIBRATION` is an edge-authoritative resource keyed by uppercase
+device EUI. Migration `0068__watermark_cloud_parity.sql` emits
+`WATERMARK_CALIBRATION_UPSERTED` and `WATERMARK_CALIBRATION_DELETED`; bootstrap
+and force sync carry the retained live row or tombstone. The cloud mirror changes
+only after an event or snapshot arrives.
+
+The four protected command effect keys are exact:
+
+- `watermark_calibration:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `watermark_calibration:delete:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `chameleon_config:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+- `device_soil_depths:set:{gateway_eui}:{device_eui}:{base_sync_version}`
+
+Protected bases come only from confirmed edge state. Chameleon and soil-depth
+writes require the accepted `DEVICE` watermark; if it is absent, cloud issuance
+returns `409 reconciliation_required`. Only one protected DEVICE mutation may be
+unresolved, and DEVICE convergence is proven from the retained canonical row,
+not from a submitted event payload. See `docs/contracts/sync-schema/README.md`.
+
+Deploy the cloud contract, appliers, pending-command support, and read-only UI
+before an edge that advertises the three WATERMARK-related capabilities. After
+the edge deploy, write controls remain capability-gated, and a pre-existing
+calibration must reach the cloud through bootstrap before its first cloud edit.
+
+FPort 11 MQTT reports contact only. It advances cloud `lastSeen`; an accepted
+canonical snapshot advances `currentStateRecordedAt`, even when a channel value
+is null. Both timestamps are monotonic. `watermark_readings`, payload bytes, ADC
+codes, channel flags, resistance, offset, supply, die temperature, and conversion
+diagnostics stay on the edge. Canonical `device_data` history continues through
+the ordinary history contract.
+
+The scheduler interlock still rejects every `device_data` row linked to
+`watermark_readings`, regardless of legacy device flags. Cloud parity and field
+qualification records do not lift it.
+
+In the edge Data view, a `DRAGINO_LSN50` becomes a soil source only after it is
+assigned to a zone. A plain LSN50 then exposes SWT1 and SWT2 before its first
+sample. Chameleon-enabled LSN50 and `DRAGINO_SDI12` sources retain SWT3; mixed
+zones filter SWT3 per device so a plain LSN50 cannot inherit another source's
+third channel.
+
+An assigned LSN50 is a soil source when it is a Chameleon device, or a WATERMARK
+node, or none of `dendro_enabled`, `temp_enabled`, `rain_gauge_enabled` and
+`flow_meter_enabled` is set. A WATERMARK node is an LSN50 with WATERMARK
+evidence: a retained (not deleted) `watermark_calibrations` row or at least one
+`watermark_readings` row. A WATERMARK frame always carries a temperature, so
+`temp_enabled` does not remove the node from the Soil card; with that flag it
+also feeds the Environment card. `dendro_enabled`, `rain_gauge_enabled` and
+`flow_meter_enabled` still exclude it, because those modes use the same inputs.
+Its soil channels are SWT1 and SWT2. `isSoilSource` in `osi-history-helper` is
+the one implementation (the history router delegates to it), and the device
+rows carry the evidence from one query per load (`annotateWatermarkEvidence`).
+The cloud history view applies the same rule. A soil card reads raw
+`device_data` instead of `history_channel_rollups` only when one of its sources
+is an LSN50 without Chameleon, because a merged rollup may hold that device's
+stale SWT3.
+
 ### Live gateway identity convergence
 
 `osi-identityd` is the procd-supervised owner of live gateway identity after
@@ -226,7 +297,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 |--------|----------------|---------|---------|
 | KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
 | TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
-| DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow) |
+| DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow), WATERMARK or Chameleon SWT |
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
 | AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |
@@ -310,6 +381,13 @@ until the stack is rebased onto the current `origin/main`.
   [docs/operations/deploying-over-a-flaky-link.md](docs/operations/deploying-over-a-flaky-link.md).
   The tunnel flow below is still the default on a stable LAN.
 - **Never** overwrite `/data/db/farming.db` on a running or previously provisioned Pi. `deploy.sh` only seeds on a fresh device (target file absent and no orphaned WAL/SHM/journal sidecars). The bundled seed ships already stamped at the migration head (a full `schema_migrations` ledger plus `schema_object_fingerprints`, built by `scripts/build-seed-db.js` via `bootstrapFresh`), so the `run_schema_migration()` that follows the seed has nothing pending and finishes in seconds. A seed without that ledger sends every fresh install into `baseline-existing-db.js`'s 1..head reference-chain rebuild instead, which takes over ten minutes on a 16-core workstation and is not a viable deploy step on a Pi. `scripts/verify-seed-db-ledger.js` is the gate; regenerate with `node scripts/build-seed-db.js`, never by applying a migration to the bundled `.db` files by hand.
+- `deploy.sh` pins the command ledger (`osi-command-ledger/index.js` and
+  `package.json`), the WATERMARK binding
+  (`osi-watermark-binding/canonicalization.js`) and the staging installer
+  (`scripts/deploy-command-ledger-dependency.js`) by SHA-256
+  (`COMMAND_LEDGER_*_SHA256`). A change to any of them updates its pin in the
+  same commit; `node --test scripts/deploy-command-ledger-dependency.test.js`
+  fails otherwise, and a deploy with a stale pin aborts before activation.
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.

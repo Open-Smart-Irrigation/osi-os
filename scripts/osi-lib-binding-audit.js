@@ -27,7 +27,7 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
     bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING, SCOPE_BINDING]),
   }),
   'command-dedupe-dispatch': Object.freeze({
-    funcSha256: '70a8766e6a01346d248fb1a4244910ab86b1659f3840aed48298dc986af1e0c7',
+    funcSha256: '2eb3841c0c2769e5745af445779a2181a15f74ddc7055cc87da3b2261aa04b23',
     bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING, LEDGER_BINDING]),
   }),
   'journal-command-apply-fn': Object.freeze({

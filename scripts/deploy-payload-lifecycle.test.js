@@ -33,6 +33,74 @@ function nodePathForShell() {
   return process.execPath.replace(/'/g, "'\\''");
 }
 
+function watermarkReceiverHarness(root, source, incomingFlows, incomingGui, receiverSource, receiverTarget, setup = '') {
+  const fetchStart = DEPLOY.indexOf('fetch() {');
+  const fetchEnd = DEPLOY.indexOf('\n}\n\nfetch_required', fetchStart) + 3;
+  const requiredStart = DEPLOY.indexOf('fetch_required() {');
+  const requiredEnd = DEPLOY.indexOf('\n}\n\nsame_fs_or_die', requiredStart) + 3;
+  const fetchFunctions = DEPLOY.slice(fetchStart, fetchEnd) + '\n' + DEPLOY.slice(requiredStart, requiredEnd);
+  return `set -eu
+BASE=file://${source}
+SWAP_ROOT=${JSON.stringify(root)}
+SWAP_JS=${JSON.stringify(SWAP_JS)}
+export BASE SWAP_ROOT SWAP_JS
+${fetchFunctions}
+${swapCallFunction()}
+${setup}
+fetch_required "osi-watermark-helper commands.js" "commands.js" ${JSON.stringify(receiverTarget)}
+cmp ${JSON.stringify(receiverSource)} ${JSON.stringify(receiverTarget)}
+swap_call stagePayload incoming ${JSON.stringify(incomingFlows)} ${JSON.stringify(incomingGui)} >/dev/null
+swap_call flipTo incoming ${JSON.stringify(path.join(root, 'gui'))} >/dev/null
+printf '%s\\n' activated > ${JSON.stringify(path.join(root, 'activation-marker'))}
+`;
+}
+
+test('the same receiver fetch/stage/flip harness handles present and missing input', () => {
+  const runCase = (present) => {
+    const root = fakeRoot();
+    const source = path.join(root, 'source');
+    const sourceGui = path.join(root, 'source-gui');
+    const guiRoot = path.join(root, 'gui');
+    const receiverSource = path.join(source, 'commands.js');
+    const receiverTarget = path.join(root, 'osi-watermark-helper', 'commands.js');
+    const incomingFlows = path.join(root, 'incoming-flows.json');
+    fs.mkdirSync(source, { recursive: true });
+    fs.mkdirSync(sourceGui, { recursive: true });
+    fs.writeFileSync(path.join(sourceGui, 'index.html'), `<title>${present ? 'incoming' : 'unused'}</title>\n`);
+    fs.writeFileSync(incomingFlows, JSON.stringify([{ id: 'incoming-activation' }]) + '\n');
+    if (present) fs.writeFileSync(receiverSource, 'required receiver bytes\n');
+    if (!present) {
+      fs.writeFileSync(path.join(root, 'previous-flows.json'), JSON.stringify([{ id: 'previous-active' }]) + '\n');
+      fs.mkdirSync(path.join(root, 'previous-gui'));
+      fs.writeFileSync(path.join(root, 'previous-gui', 'index.html'), '<title>previous-active</title>\n');
+    }
+    const setup = !present ? `
+swap_call stagePayload previous ${JSON.stringify(path.join(root, 'previous-flows.json'))} ${JSON.stringify(path.join(root, 'previous-gui'))} >/dev/null
+swap_call flipTo previous ${JSON.stringify(guiRoot)} >/dev/null
+cp ${JSON.stringify(path.join(root, 'flows.json'))} ${JSON.stringify(path.join(root, 'previous-flows.copy'))}
+cp ${JSON.stringify(path.join(guiRoot, 'index.html'))} ${JSON.stringify(path.join(root, 'previous-gui.copy'))}
+` : '';
+    const script = watermarkReceiverHarness(root, source, incomingFlows, sourceGui, receiverSource, receiverTarget, setup);
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8' });
+    try {
+      if (present) {
+        assert.equal(result.status, 0, result.stderr || result.stdout);
+        assert.equal(fs.readFileSync(path.join(root, 'activation-marker'), 'utf8'), 'activated\n');
+        assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'flows.json'), 'utf8')), [{ id: 'incoming-activation' }]);
+      } else {
+        assert.notEqual(result.status, 0, 'missing receiver must stop the identical harness before activation');
+        assert.equal(fs.existsSync(path.join(root, 'activation-marker')), false);
+        assert.equal(fs.readFileSync(path.join(root, 'flows.json'), 'utf8'), fs.readFileSync(path.join(root, 'previous-flows.copy'), 'utf8'));
+        assert.equal(fs.readFileSync(path.join(guiRoot, 'index.html'), 'utf8'), fs.readFileSync(path.join(root, 'previous-gui.copy'), 'utf8'));
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  };
+  runCase(true);
+  runCase(false);
+});
+
 function runSwap(root, command) {
   const script = `set -eu\nSWAP_ROOT=${JSON.stringify(root)}\nSWAP_JS=${JSON.stringify(SWAP_JS)}\nexport SWAP_ROOT SWAP_JS\n${swapCallFunction()}\n${command}\n`;
   return spawnSync('sh', ['-c', script], { encoding: 'utf8' });

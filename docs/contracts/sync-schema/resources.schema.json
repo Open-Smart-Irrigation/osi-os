@@ -117,6 +117,39 @@
                 "deleted_at": {"type": ["string", "null"], "format": "date-time"}
             }
         },
+        "WatermarkCalibration": {
+            "type": "object",
+            "additionalProperties": false,
+            "x-aggregate-type": "WATERMARK_CALIBRATION",
+            "x-watermark-key": "device_eui",
+            "required": [
+                "contract_version", "gateway_device_eui", "device_eui",
+                "pullup_1_ohm", "pulldown_1_ohm", "series_fwd_1_ohm", "series_rev_1_ohm",
+                "pullup_2_ohm", "pulldown_2_ohm", "series_fwd_2_ohm", "series_rev_2_ohm",
+                "measured_at", "method", "worst_residual_pct", "notes",
+                "sync_version", "updated_at", "deleted_at"
+            ],
+            "properties": {
+                "contract_version": {"type": "integer", "const": 1},
+                "gateway_device_eui": {"$ref": "#/definitions/Eui64"},
+                "device_eui": {"$ref": "#/definitions/Eui64"},
+                "pullup_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                "pulldown_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                "series_fwd_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                "series_rev_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                "pullup_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                "pulldown_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
+                "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
+                "measured_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
+                "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "x-positive-minimum": 2.2250738585072014e-308},
+                "notes": {"type": ["string", "null"], "maxLength": 500},
+                "sync_version": {"type": "integer", "minimum": 0},
+                "updated_at": {"$ref": "#/definitions/CanonicalUtcTimestamp"},
+                "deleted_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+            }
+        },
         "Schedule": {
             "type": "object",
             "required": ["zone_id", "trigger_metric"],

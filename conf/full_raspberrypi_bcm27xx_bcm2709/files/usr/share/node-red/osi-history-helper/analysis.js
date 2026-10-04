@@ -4,8 +4,8 @@ const crypto = require('crypto');
 const { SOURCE_KINDS, providerSourceName, createWeatherSources } = require('./analysis-sources');
 
 const CHANNELS = [
-  { key: 'swt_1', unit: 'kPa', label: 'Soil tension (S1)', cardType: 'soil', edgeField: 'swt_1', exportable: true, deprecated: false },
-  { key: 'swt_2', unit: 'kPa', label: 'Soil tension (S2)', cardType: 'soil', edgeField: 'swt_2', exportable: true, deprecated: false },
+  { key: 'swt_1', unit: 'kPa', label: 'Soil tension 1', cardType: 'soil', edgeField: 'swt_1', exportable: true, deprecated: false },
+  { key: 'swt_2', unit: 'kPa', label: 'Soil tension 2', cardType: 'soil', edgeField: 'swt_2', exportable: true, deprecated: false },
   { key: 'swt_3', unit: 'kPa', label: 'Soil tension (S3)', cardType: 'soil', edgeField: 'swt_3', exportable: true, deprecated: false },
   { key: 'vwc_1', unit: '%', label: 'VWC 1', cardType: 'soil', edgeField: 'vwc_1', exportable: true, deprecated: false },
   { key: 'vwc_2', unit: '%', label: 'VWC 2', cardType: 'soil', edgeField: 'vwc_2', exportable: true, deprecated: false },
@@ -188,6 +188,7 @@ function cardChannelsForSource(cardType, source = null) {
   if (normalized === 'soil') {
     const deviceType = String(source.deviceType || source.typeId || source.type_id || '').trim().toUpperCase();
     if (deviceType === 'DRAGINO_SDI12') return configuredChannels(normalized, source);
+    if (deviceType === 'DRAGINO_LSN50') return filterAvailable(normalized, ['swt_1', 'swt_2']);
     if (deviceType === 'KIWI_SENSOR') return filterAvailable(normalized, ['swt_1', 'swt_2']);
     if (deviceType === 'TEKTELIC_CLOVER') return [];
   }
@@ -413,6 +414,7 @@ function displaySafeDeviceContext(device) {
 function createAnalysis(deps) {
   const {
     aggregateRows,
+    annotateWatermarkEvidence,
     dbAll,
     deriveCardsForZone,
     displayDeviceName,
@@ -483,7 +485,9 @@ function createAnalysis(deps) {
 
     for (const zone of zones) {
       const timezone = normalizeTimezone(zone.timezone);
-      const devices = zoneUuids === null
+      // Production wiring (osi-history-helper index.js) always injects the
+      // annotator; structural tests that omit it see the raw rows.
+      const loadedDevices = zoneUuids === null
         ? await dbAll(
           db,
           'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? AND user_id = ? ORDER BY deveui ASC',
@@ -494,6 +498,9 @@ function createAnalysis(deps) {
           'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC',
           [zone.id]
         );
+      const devices = typeof annotateWatermarkEvidence === 'function'
+        ? await annotateWatermarkEvidence(db, loadedDevices)
+        : loadedDevices;
       const cards = deriveCardsForZone(zone, devices);
       for (const card of cards) {
         const sourceDevices = sourceDevicesForCard(card, devices)

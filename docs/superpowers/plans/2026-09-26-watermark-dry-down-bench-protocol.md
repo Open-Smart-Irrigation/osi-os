@@ -1,33 +1,36 @@
-# WATERMARK dry-down bench protocol (phase 3 gate)
+# WATERMARK dry-down bench protocol
 
-Date: 2026-09-26 · Status: raw observation allowed; gate acceptance pending the manifest (phase 1 is on main as `ca08dcc13`; the Task E1 analyzer is implemented) · Owner of the run: the bench operator
+Date: 2026-09-26 · Status: historical Phase 1 baseline plus current qualification policy; raw observation allowed; scheduler admission disabled · Owner of the run: the bench operator
 
-> **Separate capture from acceptance.** The offline Task E1 analyzer is
+> **Separate circuit diagnostics from accuracy qualification.** The offline Task E1 analyzer is
 > implemented. The isolated node may also collect raw observations before Phase 1
 > is deployed on the bench gateway, provided it is unassigned and cannot reach irrigation
 > control. No real PASS, FAIL, or INCONCLUSIVE result is accepted until §2.3
 > turns the identity history into a complete manifest and the rewritten Task E1
-> analyzer is green. The current EUI alone is not calibration provenance.
+> analyzer is green. Even then, P1–P6 establish electrical and temporal
+> self-consistency only. They do not establish soil-tension accuracy and cannot
+> enable scheduler admission without independent-reference and field evidence.
+> The current EUI alone is not calibration provenance.
 
-This protocol is the bench gate in spec §8
-(`docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md`): no WATERMARK
-probe on an LSN50 drives irrigation in the field until a real-probe dry-down
-through 2–15 kΩ has passed it. The run answers three questions:
+This protocol is one input to the Phase 3 gate in spec §8
+(`docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md`). Passing its
+self-consistency criteria is necessary but not sufficient for irrigation. The
+run answers three diagnostic questions:
 
 1. Does the §5.1 joint solve stay consistent across the irrigation band? The
    check is that the electrode offset it recovers is stable and the resistance
    curve is smooth.
 2. How often does the firmware set the unsettled flag (`0x04`) in that band?
-3. When `0x04` is set, how far can the late sample be trusted? The answer is
-   the **unsettled acceptance envelope**, a relative early/late resistance
-   drift below which an unsettled reading still gets kPa.
+3. When `0x04` is set, how far does the late sample agree with the dry-down
+   trend? The result is a candidate diagnostic envelope, not authority to make
+   an unsettled sample scheduler-eligible.
 
-The 2–15 kΩ band is where irrigation decisions sit. With the 200SS relation at
-20 °C, 2 kΩ is about 14 kPa and 15 kΩ about 88 kPa. Below 2 kΩ the probe is
-wet enough that the phase 1 clip rules (`saturated`, `wet_offset_clipped`)
-already decide. Above 15 kΩ the soil is past every threshold in use.
+This bench study uses the 2–15 kΩ band because it spans its intended decision
+range. With the 200SS relation at 20 °C, 2 kΩ is about 14 kPa and 15 kΩ about
+88 kPa. This does not establish universal crop, soil, or irrigation thresholds.
+Claims outside the tested band need separate evidence.
 
-An accepted result needs the Phase 3 analysis script
+An accepted self-consistency result needs the Phase 3 analysis script
 (`scripts/watermark-drydown-analysis.js`, Phase 3 plan Task E1) and the §2.3
 software state. Raw radio logging is a separate observational path and may
 predate the phase 1 deployment on the bench gateway.
@@ -37,9 +40,9 @@ predate the phase 1 deployment on the bench gateway.
 No LoRaWAN keys (AppKey, NwkSKey, AppSKey), no ChirpStack API tokens, no
 passwords. Where a step needs one, it names the Vaultwarden entry or the
 provisioning record, never the value. The run record (§7) follows the same
-rule. The historical calibration record at
-`<bench-records>/<previous-device-eui>/` is local-only and stays
-that way. It is calibration provenance, not proof of the current radio identity.
+rule. Historical calibration evidence is referenced by a stable record ID and
+SHA-256, not by a workstation path. It is calibration provenance, not proof of
+the current radio identity.
 
 ## 2. Setup
 
@@ -50,14 +53,18 @@ that way. It is calibration provenance, not proof of the current radio identity.
 | Node | Dragino LSN50v2, current DevEUI `<device-eui>`, explicitly reprogrammed from `<previous-device-eui>` on this same physical measurement circuit. Firmware is `feature/watermark-profile3-temperature` at the commit and image SHA-256 recorded by §2.3. |
 | Probes | Two IRROMETER WATERMARK 200SS. WM1 on T2 PA0 + T20 PB12, WM2 on T3 PA1 + T21 PB13 (bench record wiring) |
 | Soil thermometer | DS18B20: red to T1 VDD, black to T12 GND, data to T8 PB3 (board R7 4.7 kΩ pull-up) |
-| Reference thermometer | Any probe thermometer readable to 0.1 °C, placed at probe depth |
+| Reference thermometer | A traceable probe thermometer readable to 0.1 °C, placed at each represented probe depth |
+| Independent tension reference | A separately calibrated soil-water-tension instrument or method with its range and uncertainty recorded before capture |
 | Reference resistors | Four metal-film resistors near 2.2 kΩ, 4.7 kΩ, 10 kΩ and 15 kΩ, each measured with the bench multimeter (record the measured value, not the marking) |
 | Medium | A pot of at least 5 L of the target soil (or a sandy loam), sieved, no stones against the probes |
 | Gateway | the Pi 4 bench gateway (unlinked). It must stay unlinked for the whole run |
 | Power | Node on its battery, console cable disconnected during buried measurements (the firmware README warns that a grounded console adds a current path) |
 
 Both probes go in the same pot at the same depth (about 15 cm), 10 cm apart,
-with the DS18B20 between them at the same depth.
+with the DS18B20 between them at the same depth. A later field installation at
+different depths needs one temperature measurement per depth, or a recorded
+comparison proving that the shared DS18B20 represents both depths within the
+predeclared limit.
 
 ### 2.2 Probe conditioning
 
@@ -83,13 +90,15 @@ green analyzer apply before acceptance.
    `AT+DEUI?` result; firmware commit, build ID and image SHA-256; the DevEUI on
    a fresh ChirpStack uplink produced while only this node is powered; the
    matching `devices` row on the bench gateway; circuit revision; both probe
-   IDs; and the historical calibration-record path. UART, ChirpStack and edge
+   IDs; and the historical calibration record ID and SHA-256. UART, ChirpStack and edge
    must all say `<device-eui>`. The calibration provenance remains tied to
-   the physical board, circuit revision and old record path, not solely to the
+   the physical board, circuit revision and source record, not solely to the
    new EUI. If any binding cannot be recorded, the capture remains
    observational; recalibrate before accepting it as gate evidence.
-2. Phase 1 (on main since `ca08dcc13`, migration `0061__watermark_lsn50.sql`)
-   is deployed on the bench gateway, with a pre-deploy backup. The spec §12
+2. Phase 1 migration `0061__watermark_lsn50.sql` is deployed on the bench
+   gateway, with a pre-deploy backup. Historical commit `ca08dcc13` was the
+   baseline when this protocol was first written; it is not the deployment
+   target. The spec §12
    cleanup of the old misread rows is done first, also with a backup.
 3. The node is registered in ChirpStack on that gateway as
    `<device-eui>`, with the OSI Dragino LSN50 profile and shared codec
@@ -147,6 +156,11 @@ no fake soil reading reaches `device_data`.
    slowly between uplinks.
 4. If a probe reaches 15 kΩ in under 24 h, the run is too fast. Rewet and
    repeat with a larger pot or a finer soil.
+5. At predeclared points across the claimed kPa range, record the independent
+   tension reference at the same depth and time as each probe observation.
+   Preserve the reference's own resolution, range, uncertainty, and status.
+   Do not interpolate a missing reference value or smooth either series for an
+   acceptance comparison.
 
 ### 3.4 Resistor check after the run (P1, second half)
 
@@ -205,7 +219,7 @@ each radio record rather than injecting one constant after capture. Assign a
 stable unique ID from the immutable source record. Mark a row `accepted` only
 when the source contains a complete profile-3 payload and the shipped parser
 accepts it; otherwise retain it as `frame_rejected` with the reason. Record the
-conversion command and tool version, original JSON path and SHA-256, and
+conversion command and tool version, original source record ID and SHA-256, and
 derived CSV SHA-256 in `run-metadata.json`. The analyzer rejects a missing or
 mixed row EUI. Raw JSON collection is observational until §2.3 and all
 remaining protocol evidence are complete.
@@ -216,6 +230,7 @@ remaining protocol evidence are complete.
 |---|---|
 | `resistor-check-before.csv`, `resistor-check-after.csv` | `resistor_id,nominal_band,channel,repeat,meter_ohm,fwd_early,fwd_late,rev_early,rev_late,supply_mv` |
 | `reference-temperature.csv` | `reference_id,recorded_at,reference_c` |
+| `reference-tension.csv` | `reference_id,recorded_at,channel,reference_kpa,method,uncertainty_kpa,status` |
 | `run-metadata.json` | §2.3 identity, firmware, circuit, probe and calibration-record fields using Task E1's schema |
 | `calibration.json` | the eight values from §2.3 step 6 plus `sync_version` and Task E1's physical-board/circuit/source-record provenance object |
 
@@ -231,6 +246,12 @@ assumption.
 Give every thermometer observation a unique `reference_id`. Do not omit an
 observation because there is no nearby uplink: the analyzer must report that
 row as unmatched.
+
+Give every independent tension observation a unique `reference_id` and bind it
+to one channel. Record unavailable or out-of-range observations with a status;
+do not replace them with an interpolated value. The current Task E1 analyzer
+does not evaluate `reference-tension.csv`, so a run remains
+`qualification_pending` until a reviewed analyzer version does.
 
 ## 5. Analysis
 
@@ -259,6 +280,10 @@ final P5 counts; and all thermometer matches or unmatched rows). The script uses
 `tensionFromResistance`, so the bench judges the code that runs on the
 gateway.
 
+The current command evaluates self-consistency only. It does not consume
+`reference-tension.csv`, and its PASS result must not be presented as an
+independent accuracy result.
+
 ### 5.1 Per-channel metrics
 
 For each accepted frame and each channel with trusted flags (no `0x01`,
@@ -283,6 +308,11 @@ run tests it over time: for settled in-band readings, compare each offset
 with the rolling median of the six readings around it. At 2 kΩ and about
 75 µA drive, a 10 mV offset change inside one frame moves the solved
 resistance by about 130 Ω, about 0.6 kPa. That bounds the criterion in §6.
+
+This temporal rolling check can detect drift between frames. It cannot prove
+within-frame offset stability across forward and reverse timing. Separate
+polarity and timing experiments are required before the applicability envelope
+may claim that property.
 
 The naive single-direction resistances (`r_fwd`, `r_rev`) are reported but
 not judged. With the 170 mV wet offset seen on WM1 they disagree by more than
@@ -318,10 +348,12 @@ supported by its own grid interval, not extrapolated from lower drift. Choose
 the largest qualifying candidate per probe. Five passing observations at
 `rho = 0.025` qualify 0.03, but not 0.02, 0.05, or 0.08.
 
-The single envelope that could be deployed is the smaller of the two
-per-probe envelopes when both are non-null; otherwise it is null and the phase
-1 rule stands (unsettled above 550 Ω gets no kPa). P5 is evaluated only after
-this global value is selected, and both probes are reevaluated under it.
+The smaller of the two per-probe results is the candidate diagnostic envelope
+when both are non-null. Otherwise it is null and the Phase 1 rule stands
+(unsettled above 550 Ω gets no kPa). P5 is evaluated only after this global
+value is selected, and both probes are reevaluated under it. The candidate does
+not change production eligibility without an independently referenced,
+versioned Phase 3 policy.
 
 3 kPa is this protocol's tolerance for a trustworthy reading. It is an owner
 decision (phase 3 plan OD-6), not a general accuracy claim for WATERMARK or
@@ -337,10 +369,12 @@ in §6.
 | P2 | Coverage per probe: accepted, trusted, unclipped in-band readings with DS18B20 temperature | ≥ 30 total and ≥ 5 in each sub-band | INCONCLUSIVE |
 | P3 | Offset stability per probe: p95 of \|offset − rolling median\| over settled in-band readings | ≤ 10 mV | INCONCLUSIVE with no usable deviations; FAIL above the limit |
 | P4 | Method noise floor per probe: p95 of leave-one-out ε over settled in-band readings | ≤ 3 kPa | INCONCLUSIVE |
-| P5 | Unusable share per probe after selecting the one global deployed `E`: in-band readings that are unsettled and rejected under that global value, over all in-band readings | ≤ 20 % | FAIL |
+| P5 | Unusable share per probe after selecting the one global candidate `E`: in-band readings that are unsettled and rejected under that candidate, over all in-band readings | ≤ 20 % | FAIL |
 | P6 | DS18B20 against every reference-thermometer row, nearest valid frame within ±30 min | Every row matched and \|Δ\| ≤ 1.0 °C | INCONCLUSIVE for no/unmatched data; FAIL for a matched excessive delta |
+| P7 | Pointwise agreement with an independent soil-water-tension reference, without smoothing or interpolation | A future Phase 3 design must fix the range, tolerance, sample count, and reference uncertainty before capture | `qualification_pending` until those limits and analyzer support are approved |
 
-The gate **passes** when P1 to P6 all pass. It is **inconclusive** when there is
+The self-consistency portion **passes** when P1 to P6 all pass. It is
+**inconclusive** when there is
 no actual failure but P1 lacks a complete matrix, P2 lacks coverage, P3 has no
 usable settled deviations, P4 lacks a usable continuity reference, or P6 has
 no data or any unmatched row. An
@@ -351,34 +385,46 @@ missing—when P3 or P5 fails, or when a matched P6 row exceeds 1.0 °C.
 If P6 has both an unmatched row and a matched excessive delta, the established
 temperature failure wins and the overall result is FAIL.
 
-P5 carries the irrigation consequence. The scheduler averages the last hour
-and acts on the 06:00 run. If most in-band readings carry no kPa, a zone
-gets no decision exactly when the soil is drying. A 20 % unusable share at a
-15 min field interval still leaves about 3 points per hour on average.
+No P1–P6 outcome is a Phase 3 scheduler-admission PASS. P7 and the field
+qualification record are mandatory, and their limits may not be chosen after
+the data is seen. Until those limits exist, the overall qualification status is
+`qualification_pending` and scheduler admission remains disabled.
 
-## 7. How the result feeds the phase 3 code
+P5 measures a future scheduling risk. If most in-band readings carry no kPa, a
+future sampling policy could lose coverage while the soil is drying. Its exact
+freshness, minimum-point, hysteresis, and re-arm rules remain unapproved.
+
+## 7. How the diagnostic result feeds later work
 
 | Outcome | Code consequence |
 |---|---|
-| PASS, `E` null (no unsettled readings in band, or none trustworthy) | No conversion change. `conversion_version` stays `wm-lsn50-p3-v1`. Phase 3 plan Task E10 is skipped; the ruling is recorded in the execution ledger with the `summary.json` hash. |
-| PASS, `E` = number | Phase 3 plan Task E10: `UNSETTLED_MAX_REL_DRIFT = E` in `osi-watermark-helper/conversion.js`, the unsettled rule accepts `rho` ≤ E, and `conversion_version` becomes `wm-lsn50-p3-v2`. Stored readings are not rewritten. Three dry-down frames (one accepted unsettled, one rejected unsettled, one settled) become golden fixtures. |
+| PASS, `E` null (no unsettled readings in band, or none trustworthy) | No conversion change. Record the ruling and `summary.json` hash as diagnostic evidence. Scheduler admission stays disabled. |
+| PASS, `E` = number | Treat `E` as a candidate for a future conversion and qualification design. Do not change eligibility from this result alone. Any later formula change bumps `conversion_version` and requires new golden fixtures and requalification. |
 | INCONCLUSIVE | Repeat or extend the evidence as §6 directs. Isolated observational capture may continue, but there is no irrigation-control use. |
-| FAIL | Do not enable irrigation control for this circuit. Isolated diagnostic capture may continue. Phase 3 code may still merge because admission is explicit. File a firmware issue on the LoRa_STM32 fork naming the failed criterion (a P5 failure points at the 20/60 µs sample timing in `wm_core.c`; P1 or P3 at the circuit). |
+| FAIL | Do not enable irrigation control for this circuit. Isolated diagnostic capture may continue. File a firmware issue on the LoRa_STM32 fork naming the failed criterion (a P5 failure points at the 20/60 µs sample timing in `wm_core.c`; P1 or P3 at the circuit). |
 
-The run record goes to
-`<bench-records>/<device-eui>/<date>-watermark-drydown.md`
-with: firmware commit and image hash, calibration values, uplink interval,
+The run record has a stable record ID and content hash. It includes the
+firmware commit and image hash, calibration values, uplink interval,
 previous and current DevEUIs, physical-board statement, circuit revision,
-probe IDs, calibration-record path, pot and soil description, start and end
+probe IDs, calibration-record ID, pot and soil description, start and end
 times, the `summary.json` verdict table and hash, the envelope, and anything
 that deviated from this protocol. The record carries no keys and no DB copies.
 
-## 8. What this gate does not cover
+## 8. Applicability envelope and exclusions
 
-- Long cables. The run uses the probes' stock leads. A field install with a
-  longer cable adds capacitance and has to be rechecked against P5.
-- Temperature and VDDA drift of the pulls. Die temperature and VDDA are in
-  every frame and the analysis reports them, but no criterion uses them.
-- Agreement with a KIWI node or a handheld WATERMARK meter. If one is
-  available, read it at the same times as the reference thermometer and add
-  the values to the run record as information.
+The record states the tested resistance and kPa range, soil-temperature range,
+VDDA range, board-temperature range, cable type and length, ground state,
+channel and polarity matrix, cross-channel loading, medium, placement, and
+salinity or EC observations. Claims outside that versioned envelope are
+unqualified. A longer cable, changed ground path, circuit revision, material
+calibration change, different temperature arrangement, or unexplained salinity
+shift triggers requalification.
+
+Board temperature and VDDA are diagnostic covariates. Board temperature is not
+soil or ambient temperature, and an invalid firmware status means unavailable.
+If the run does not span enough of either variable to establish stability, the
+envelope records that limitation instead of inferring coverage.
+
+Rolling medians and interpolation remain useful for self-consistency analysis.
+They must not fill missing independent-reference observations, hide a failed
+sample, or make an individual reading eligible for scheduler use.

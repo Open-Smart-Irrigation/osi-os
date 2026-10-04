@@ -1838,6 +1838,50 @@ test('legacySensorHistory returns raw 24h points and aggregated long-range point
   }
 });
 
+test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,zone_uuid,timezone,created_at,updated_at) VALUES(7,'Mixed Zone',1,'mixed-zone','UTC','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,created_at,updated_at)
+        VALUES
+          ('A84041A171000001','Watermark','DRAGINO_LSN50',1,7,0,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z'),
+          ('A84041A171000002','Chameleon','DRAGINO_LSN50',1,7,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z'),
+          ('A84041A171000003','SDI12','DRAGINO_SDI12',1,7,0,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO device_data(deveui,recorded_at,swt_1,swt_2,swt_3) VALUES
+        ('A84041A171000001','2026-06-02T09:00:00.000Z',10,20,30),
+        ('A84041A171000002','2026-06-02T09:00:00.000Z',11,21,31),
+        ('A84041A171000003','2026-06-02T09:00:00.000Z',12,22,41);
+    `);
+
+    const options = {
+      zoneId: 7,
+      from: '2026-06-02',
+      to: '2026-06-02',
+      channels: 'swt_1,swt_3',
+      nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+    };
+    const raw = await helper.buildZoneExportCsv(db, { ...options, granularity: 'raw' });
+    const hourly = await helper.buildZoneExportCsv(db, { ...options, granularity: 'hourly' });
+    const assertSwt3Isolation = (result) => {
+      const swt3 = result.rows.filter((row) => row.channel_key === 'swt_3');
+      assert.deepStrictEqual(swt3.map((row) => [row.source_key, row.value]), [
+        ['soil-src-0c689a161d62', 41],
+        ['soil-src-8b90b370f237', 31],
+      ]);
+    };
+    assertSwt3Isolation(raw);
+    assertSwt3Isolation(hourly);
+
+    assert.strictEqual(await helper.resolveDeviceFieldRollupKey(db, 'A84041A171000001', 'swt_3'), null);
+    assert.strictEqual((await helper.resolveDeviceFieldRollupKey(db, 'A84041A171000002', 'swt_3')).channelId, 'swt_3');
+    assert.strictEqual((await helper.resolveDeviceFieldRollupKey(db, 'A84041A171000003', 'swt_3')).channelId, 'swt_3');
+  } finally {
+    db.close();
+  }
+});
+
 test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', async () => {
   const db = createCliSqliteDb();
   try {

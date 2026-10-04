@@ -73,6 +73,12 @@ export function createChannelRegistry(channels: ChannelManifestEntry[]): Channel
         return cardChannelsForCard(cardType);
       }
 
+      const deviceType = String(source.deviceType || '').trim().toUpperCase();
+
+      if (cardType === 'soil' && deviceType === 'DRAGINO_LSN50') {
+        return source.chameleonEnabled ? filterAvailable(cardType, ['swt_1', 'swt_2', 'swt_3']) : filterAvailable(cardType, ['swt_1', 'swt_2']);
+      }
+
       if (cardType === 'soil' && source.chameleonEnabled) {
         return filterAvailable(cardType, ['swt_1', 'swt_2', 'swt_3']);
       }
