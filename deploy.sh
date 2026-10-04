@@ -215,6 +215,60 @@ run_communication_preflight() {
     echo "OK"
 }
 
+# The version of the tree this deploy installs. It is read from the first-boot
+# script that sets osi-server.cloud.firmware_version on a flashed image, so a
+# release bump there reaches deployed gateways too. Prints the version, or
+# nothing when the file cannot be fetched or holds no plain version string.
+# Never fails: a missing version only skips the record step.
+read_release_firmware_version() {
+    rfv_file="$TMP_DIR/release-version/96_osi_server_config"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "$rfv_file" 2>/dev/null; then
+        return 0
+    fi
+    rfv_value="$(sed -n 's/^[[:space:]]*set osi-server\.cloud\.firmware_version=//p' "$rfv_file" 2>/dev/null | head -n 1 | tr -d '\r')"
+    case "$rfv_value" in
+        [0-9]*.[0-9]*) ;;
+        *) return 0 ;;
+    esac
+    case "$rfv_value" in
+        *[!0-9A-Za-z.+-]*) return 0 ;;
+    esac
+    printf '%s\n' "$rfv_value"
+}
+
+# Writes the deployed version to UCI. Called only after the payload flip and
+# the local self-check passed, so a rolled-back deploy keeps the old value.
+# node-red.init exports the key as FIRMWARE_VERSION when Node-RED starts; the
+# Node-RED process already running keeps its old value until its next start.
+# Never fails the deploy: no uci, no section or a failed write is logged.
+record_firmware_version() {
+    rfw_version="$1"
+    if [ -z "$rfw_version" ]; then
+        echo "WARN: release version unknown; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "WARN: UCI section osi-server.cloud is missing; firmware_version left unchanged" >&2
+        return 0
+    fi
+    rfw_current="$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || true)"
+    if [ "$rfw_current" = "$rfw_version" ]; then
+        echo "OK: osi-server.cloud.firmware_version already $rfw_version"
+        return 0
+    fi
+    if uci set "osi-server.cloud.firmware_version=$rfw_version" && uci commit osi-server; then
+        echo "OK: osi-server.cloud.firmware_version ${rfw_current:-unset} -> $rfw_version (reported from the next Node-RED start)"
+    else
+        uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+        echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${rfw_current:-unset}" >&2
+    fi
+    return 0
+}
+
 ensure_journal_media_defaults() {
     echo "--- Journal media configuration ---"
     uci -q get osi-server.cloud.journal_photo_cache_bytes >/dev/null 2>&1 || \
@@ -1296,6 +1350,13 @@ echo "Source: $BASE"
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1
 
+DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
+if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
+    echo "Release version: $DEPLOY_FIRMWARE_VERSION (recorded in UCI after a passing self-check)"
+else
+    echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
+fi
+
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
     "/srv/node-red/settings.js"
@@ -2218,6 +2279,12 @@ else
     echo "ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped." >&2
     exit 1
 fi
+
+# Every failed self-check above exits, so this line runs only for a committed
+# payload.
+echo "--- Record firmware version ---"
+record_firmware_version "$DEPLOY_FIRMWARE_VERSION"
+# firmware version record end
 
 echo "--- Gateway identity supervisor ---"
 if ! identityd_service enable; then
