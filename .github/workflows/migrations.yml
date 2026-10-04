@@ -66,6 +66,9 @@ jobs:
       # The bundled seed must ship stamped at head, or every fresh install
       # falls into baseline-existing-db's reference-chain rebuild on the Pi.
       - run: node scripts/verify-seed-db-ledger.js
+      # The calibration seed must reach every bundled image (on copies; the
+      # tracked databases are only read).
+      - run: node --test scripts/test-apply-chameleon-calibration-seed.js
       # Replays migrations/seed/boot DDL/bundled DBs with sqlite3's function_arg limit
       # pinned to the gateway's 127. CI's sqlite3 and node:sqlite both allow 1000, which
       # is how migration 0046's 150-arg json_object reached a live Pi (2026-08-14).

@@ -5,14 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const repoRoot = path.resolve(__dirname, '..');
+const { REPO_ROOT: repoRoot, SEED_DB_RELATIVE_PATHS } = require('./seed-db-paths');
+
 const seedPath = path.join(repoRoot, 'database/seeds/chameleon-calibrations.sql');
-const dbPaths = [
-  'database/farming.db',
-  'web/react-gui/farming.db',
-  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db',
-  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db',
-];
+// Every bundled seed image: they must stay byte-identical, so a calibration
+// snapshot goes into all of them or none.
+const dbPaths = SEED_DB_RELATIVE_PATHS;
 const requireRows = process.argv.includes('--require-rows') || process.env.REQUIRE_CHAMELEON_CALIBRATION_ROWS === '1';
 
 function sqlite(dbPath, sql) {
@@ -36,8 +34,11 @@ if (insertCount === 0 && requireRows) {
 }
 
 for (const rel of dbPaths) {
+  if (!fs.existsSync(path.join(repoRoot, rel))) fail(`missing database: ${rel}`);
+}
+
+for (const rel of dbPaths) {
   const dbPath = path.join(repoRoot, rel);
-  if (!fs.existsSync(dbPath)) fail(`missing database: ${rel}`);
   execFileSync('sqlite3', [dbPath], { input: seed, encoding: 'utf8', stdio: ['pipe', 'inherit', 'inherit'] });
   const rows = Number(sqlite(dbPath, 'SELECT COUNT(*) FROM chameleon_calibrations;'));
   console.log(`${rel}: ${rows} chameleon calibration row(s)`);
