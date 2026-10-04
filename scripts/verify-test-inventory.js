@@ -30,6 +30,7 @@ const { execFileSync } = require('node:child_process');
 const INVENTORY_FILE = 'scripts/verify-test-inventory.json';
 const WORKFLOW_DIR = '.github/workflows';
 const TSX_RUNNER = 'scripts/run-tsx-tests.mjs';
+const RUN_MODULE_TESTS = 'scripts/run-module-tests.js';
 const TEST_NAME = [
   /\.(test|spec)\.(c|m)?[jt]sx?$/,
   /\.test\.sh$/,
@@ -40,6 +41,8 @@ const GLOB_CHARS = /[*?[\]{}]/;
 const VITEST_INCLUDE = /\.(test|spec)\.(c|m)?[jt]sx?$/;
 const SHELL_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', 'time']);
 const MIN_REASON = 10;
+// Exclusion reasons that start like this name a defect or a cost someone must pick up.
+const ISSUE_CLASS = /^(fails on main|slow)\b/i;
 
 // ------------------------------------------------------------- YAML subset
 
@@ -223,9 +226,11 @@ function parseYaml(text, file) {
 
 // ------------------------------------------------------------- shell words
 
-// Splits a run script into commands (word lists) on newlines, ;, &, &&, ||
-// and |, honouring quotes. GitHub expressions become a placeholder word.
-function shellCommands(script) {
+// Splits a run script into commands on newlines, ;, &, &&, || and |,
+// honouring quotes. Each command records the operator that ends it ('\n',
+// ';', '&', '&&', '||', '|' or 'end'). GitHub expressions become a
+// placeholder word.
+function shellScript(script) {
   const src = script.replace(/\$\{\{[\s\S]*?\}\}/g, '__EXPR__');
   if (/<<-?\s*['"]?\w/.test(src)) throw new Error('here-documents are not supported in workflow run scripts');
   const commands = [];
@@ -235,9 +240,12 @@ function shellCommands(script) {
     if (word !== null) words.push(word);
     word = null;
   };
-  const endCommand = () => {
+  const endCommand = (sep) => {
     endWord();
-    if (words.length) commands.push(words);
+    if (words.length) commands.push({ words, sep });
+    else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
+      throw new Error(`a line starts with "${sep}"; continuation lines are not supported`);
+    }
     words = [];
   };
   for (let j = 0; j < src.length; j += 1) {
@@ -264,7 +272,7 @@ function shellCommands(script) {
     }
     if (c === '#' && word === null) {
       while (j < src.length && src[j] !== '\n') j += 1;
-      endCommand();
+      endCommand('\n');
       continue;
     }
     if (c === '>' || c === '<') {
@@ -283,12 +291,20 @@ function shellCommands(script) {
       j = k - 1;
       continue;
     }
-    if (c === '\n' || c === ';' || c === '&' || c === '|') { endCommand(); continue; }
+    if (c === '&' || c === '|') {
+      if (src[j + 1] === c) { endCommand(c + c); j += 1; } else endCommand(c);
+      continue;
+    }
+    if (c === '\n' || c === ';') { endCommand(c); continue; }
     if (c === ' ' || c === '\t' || c === '(' || c === ')') { endWord(); continue; }
     word = (word ?? '') + c;
   }
-  endCommand();
+  endCommand('end');
   return commands;
+}
+
+function shellCommands(script) {
+  return shellScript(script).map((c) => c.words);
 }
 
 // ------------------------------------------------------------- repository
@@ -346,6 +362,44 @@ function loadInventory(root, errors) {
 
 // ------------------------------------------------------------- workflows
 
+// Conditions known to be true on a pull request in this repository.
+const PR_CONDITIONS = new Set([
+  'true',
+  'success()',
+  "github.event_name == 'pull_request'",
+  "github.repository == 'Open-Smart-Irrigation/osi-os'",
+]);
+
+// Why a workflow does not run on every pull request, or null.
+function pullRequestGap(on) {
+  const missing = 'the workflow has no pull_request trigger';
+  if (typeof on === 'string') return on === 'pull_request' ? null : missing;
+  if (Array.isArray(on)) return on.includes('pull_request') ? null : missing;
+  if (!on || typeof on !== 'object' || !Object.prototype.hasOwnProperty.call(on, 'pull_request')) return missing;
+  const pr = on.pull_request;
+  if (pr && typeof pr === 'object') {
+    if (pr.paths !== undefined || pr['paths-ignore'] !== undefined) return 'its pull_request trigger has a path filter';
+    if (pr.types !== undefined) {
+      const types = Array.isArray(pr.types) ? pr.types : [pr.types];
+      if (!types.includes('opened') || !types.includes('synchronize')) return 'its pull_request trigger skips opened or synchronize';
+    }
+  }
+  return null;
+}
+
+function judgeIf(value, gate) {
+  if (value === undefined || value === null) return;
+  const expr = String(value).trim().replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, '$1').trim();
+  if (expr === 'false') gate.blocked = gate.blocked || 'if: false';
+  else if (!PR_CONDITIONS.has(expr)) gate.undecidable.push(`cannot decide whether if: ${expr} runs on a pull request`);
+}
+
+function judgeContinueOnError(value, gate) {
+  if (value === undefined || value === null || String(value) === 'false') return;
+  if (String(value) === 'true') gate.blocked = gate.blocked || 'continue-on-error: true';
+  else gate.undecidable.push(`cannot decide whether continue-on-error: ${value} is false`);
+}
+
 function loadWorkflows(root, errors) {
   const dir = path.join(root, WORKFLOW_DIR);
   let names;
@@ -374,11 +428,14 @@ function loadWorkflows(root, errors) {
       continue;
     }
     const wfDir = doc.defaults && doc.defaults.run && doc.defaults.run['working-directory'];
+    const wfShell = doc.defaults && doc.defaults.run && doc.defaults.run.shell;
+    const prGap = pullRequestGap(doc.on);
     for (const [jobName, job] of Object.entries(doc.jobs)) {
       if (!job || typeof job !== 'object' || Array.isArray(job)) { where(`job ${jobName} is not a mapping`); continue; }
       if (job.uses && !job.steps) continue; // reusable workflow call
       if (!Array.isArray(job.steps) || !job.steps.length) { where(`job ${jobName} has no steps`); continue; }
       const jobDir = job.defaults && job.defaults.run && job.defaults.run['working-directory'];
+      const jobShell = job.defaults && job.defaults.run && job.defaults.run.shell;
       job.steps.forEach((step, idx) => {
         const label = `job ${jobName} step ${idx + 1}`;
         if (!step || typeof step !== 'object' || Array.isArray(step)) { where(`${label} is not a mapping`); return; }
@@ -388,6 +445,15 @@ function loadWorkflows(root, errors) {
           where(hasRun ? `${label} has both run and uses` : `${label} has neither run nor uses`);
           return;
         }
+        // gate.blocked: why the step cannot fail a pull request;
+        // gate.undecidable: what the verifier cannot judge.
+        const gate = { blocked: prGap, undecidable: [] };
+        judgeIf(job.if, gate);
+        judgeContinueOnError(job['continue-on-error'], gate);
+        judgeIf(step.if, gate);
+        judgeContinueOnError(step['continue-on-error'], gate);
+        const shell = step.shell || jobShell || wfShell;
+        if (shell !== undefined && shell !== null && shell !== 'bash' && shell !== 'sh') gate.undecidable.push(`shell ${shell} is not modelled`);
         steps.push({
           file: name,
           label,
@@ -395,6 +461,8 @@ function loadWorkflows(root, errors) {
           with: step.with || {},
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
+          pipefail: shell === 'bash',
+          gate,
         });
       });
     }
@@ -404,7 +472,7 @@ function loadWorkflows(root, errors) {
 
 // ------------------------------------------------------------- npm scripts
 
-function npmCollection(ctx, pkgDir, scriptName, where, stack = []) {
+function npmCollection(ctx, pkgDir, scriptName, where, add, stack = []) {
   const { root, tracked, errors } = ctx;
   const pkgRel = relPath(root, '.', path.join(pkgDir, 'package.json'));
   if (stack.includes(scriptName)) { errors.push(`${where}: npm script "${scriptName}" calls itself`); return; }
@@ -433,7 +501,7 @@ function npmCollection(ctx, pkgDir, scriptName, where, stack = []) {
   for (const words of commands) {
     const w = words.filter((x, idx) => !(idx === 0 && /^\w+=/.test(x)));
     if (w[0] === 'npm' && (w[1] === 'run' || w[1] === 'run-script')) {
-      npmCollection(ctx, pkgDir, w[2], where, [...stack, scriptName]);
+      npmCollection(ctx, pkgDir, w[2], where, add, [...stack, scriptName]);
     } else if (w[0] === 'vitest' || (w[0] === 'npx' && w[1] === 'vitest')) {
       const args = w.slice(w[0] === 'npx' ? 2 : 1);
       if (args[0] !== 'run') { errors.push(`${here}: vitest without "run" watches instead of exiting`); continue; }
@@ -451,14 +519,14 @@ function npmCollection(ctx, pkgDir, scriptName, where, stack = []) {
       }
       const candidates = pkgFiles.filter((f) => VITEST_INCLUDE.test(f) && !/(^|\/)node_modules\//.test(f));
       if (!filters.length) {
-        candidates.forEach((f) => ctx.mark(f, `${here} vitest`));
+        candidates.forEach((f) => add(f, `${here} vitest`));
         continue;
       }
       for (const filter of filters) {
         const needle = filter.toLowerCase();
         const hits = candidates.filter((f) => inPkg(f).toLowerCase().includes(needle));
         if (!hits.length) errors.push(`${here}: vitest filter ${filter} matches no test file`);
-        hits.forEach((f) => ctx.mark(f, `${here} vitest`));
+        hits.forEach((f) => add(f, `${here} vitest`));
       }
     } else if (w[0] === 'node' && w[1] === TSX_RUNNER) {
       if (!tracked.has(fromPkg(TSX_RUNNER))) errors.push(`${here}: ${TSX_RUNNER} is not a tracked file`);
@@ -467,7 +535,7 @@ function npmCollection(ctx, pkgDir, scriptName, where, stack = []) {
       for (const g of globs) {
         const hits = pkgFiles.filter((f) => matchesGlob(inPkg(f), g));
         if (!hits.length) errors.push(`${here}: ${g} matches no tracked file`);
-        hits.forEach((f) => ctx.mark(f, `${here} ${TSX_RUNNER}`));
+        hits.forEach((f) => add(f, `${here} ${TSX_RUNNER}`));
       }
     } else if (w[0] === 'tsx' || (w[0] === 'node' && w.includes('--test'))) {
       errors.push(`${here}: ${w[0]} --test: collect tests through ${TSX_RUNNER}, which fails on a pattern that matches nothing`);
@@ -477,65 +545,148 @@ function npmCollection(ctx, pkgDir, scriptName, where, stack = []) {
 
 // ------------------------------------------------------------- checks
 
+const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '-h', '--help']);
+const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
+const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
+const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
+
+// Why a failing command would not fail the step under bash -e, or null.
+function exitStatusLost(commands, i, pipefail) {
+  const { sep } = commands[i];
+  if (sep === '||') return 'its exit status is discarded (||)';
+  if (sep === '&') return 'it runs in the background (&)';
+  if (sep === '|' && !pipefail) return 'it feeds a pipe without pipefail';
+  if (sep === '&&') {
+    // bash -e ignores a failure inside an && list unless the list ends the script.
+    let k = i;
+    while (k < commands.length - 1 && (commands[k].sep === '&&' || commands[k].sep === '|')) k += 1;
+    const tail = commands[k].sep;
+    if (tail === '||') return 'its exit status is discarded (||)';
+    if (tail === '&') return 'it runs in the background (&)';
+    if (k < commands.length - 1) return 'it is followed by && and is not the last command of the script, so bash -e ignores its failure';
+  }
+  return null;
+}
+
 function checkRunStep(ctx, step) {
   const { root, tracked, errors } = ctx;
   const where = `${step.file}: ${step.label}`;
   let commands;
   try {
-    commands = shellCommands(step.run);
+    commands = shellScript(step.run);
   } catch (err) {
     errors.push(`${where}: ${err.message}`);
     return;
   }
-  const checkPath = (token, mode) => {
-    if (token.includes('$') || token.includes('__EXPR__') || token.startsWith('/')) return;
+  const hits = []; // { file, via, lost }
+  const resolveToken = (token, mode) => {
+    if (token.includes('$') || token.includes('__EXPR__') || token.startsWith('/')) return null;
     if (!SCRIPT_EXT.test(token)) {
       if (mode === 'test') errors.push(`${where}: node --test argument ${token} is not a test file path`);
-      return;
+      return null;
     }
     if (GLOB_CHARS.test(token)) {
       errors.push(`${where}: ${token}: glob in a test command; list each file`);
-      return;
+      return null;
     }
     const rel = relPath(root, step.dir, token);
     if (!tracked.has(rel)) {
       errors.push(`${where}: ${rel}: not a tracked file`);
+      return null;
+    }
+    return rel;
+  };
+  // Arguments after a script: a test file there is data for that script.
+  const scriptArgs = (scriptRel, args, lost) => {
+    for (const a of args) {
+      if (a.startsWith('-')) continue;
+      const rel = resolveToken(a, 'arg');
+      if (!rel) continue;
+      if (scriptRel === RUN_MODULE_TESTS) hits.push({ file: rel, via: where, lost });
+      else if (isTestFile(rel)) hits.push({ file: rel, via: where, lost: lost || `it is passed as an argument to ${scriptRel}, which is not a test runner` });
+    }
+  };
+  let pipefail = step.pipefail;
+  let errexitOff = false;
+  commands.forEach((command, i) => {
+    let words = command.words;
+    let lost = null;
+    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]))) {
+      if (CONDITION_WORDS.has(words[0])) lost = lost || `its exit status is the condition of ${words[0]}`;
+      words = words.slice(1);
+    }
+    if (!words.length) return;
+    lost = lost || exitStatusLost(commands, i, pipefail);
+    const [cmd, ...args] = words;
+    if (cmd === 'set') {
+      for (let k = 0; k < args.length; k += 1) {
+        const a = args[k];
+        if (/^\+[a-z]*e/.test(a) || (a.startsWith('+') && args[k + 1] === 'errexit')) errexitOff = true;
+        if (/^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
+        if (/^\+[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = false;
+      }
       return;
     }
-    ctx.reference(rel, where);
-  };
-  for (let words of commands) {
-    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]))) words = words.slice(1);
-    if (!words.length) continue;
-    const [cmd, ...args] = words;
+    if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
     if (cmd === 'npm') {
       const sub = args.find((a) => !a.startsWith('-'));
       if (['install', 'i', 'add', 'update', 'upgrade', 'isntall', 'in'].includes(sub)) errors.push(`${where}: npm ${sub}: use npm ci so the lockfile decides`);
       if (args.includes('--legacy-peer-deps')) errors.push(`${where}: --legacy-peer-deps is not allowed`);
       if (args.includes('--force')) errors.push(`${where}: --force is not allowed`);
-      if (sub === 'run' || sub === 'run-script') {
-        const name = args[args.indexOf(sub) + 1];
-        npmCollection(ctx, step.dir, name, where);
-      } else if (sub === 'test' || sub === 't') {
-        npmCollection(ctx, step.dir, 'test', where);
-      }
-      continue;
+      const add = (file, via) => hits.push({ file, via, lost });
+      if (sub === 'run' || sub === 'run-script') npmCollection(ctx, step.dir, args[args.indexOf(sub) + 1], where, add);
+      else if (sub === 'test' || sub === 't') npmCollection(ctx, step.dir, 'test', where, add);
+      return;
     }
     if (cmd === 'node') {
-      if (args.some((a) => ['-e', '--eval', '-p', '--print'].includes(a))) continue;
-      const testMode = args.includes('--test');
-      const paths = args.filter((a) => !a.startsWith('-'));
-      if (testMode && !paths.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
-      paths.forEach((p, idx) => checkPath(p, testMode || idx > 0 ? (testMode ? 'test' : 'arg') : 'script'));
-      continue;
+      if (args.some((a) => NODE_SKIP.has(a))) return;
+      let k = 0;
+      const options = [];
+      while (k < args.length && args[k].startsWith('-')) options.push(args[k++]);
+      const rest = args.slice(k);
+      let partial = null;
+      for (const o of options) {
+        if (NODE_PARTIAL_OPTIONS.test(o)) partial = partial || `node option ${o.split('=')[0]} does not run every test in the file`;
+        else if (!NODE_RUN_OPTIONS.test(o)) errors.push(`${where}: node option ${o} is not modelled by this verifier`);
+      }
+      const itemLost = lost || partial;
+      if (options.includes('--test')) {
+        if (!rest.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
+        for (const a of rest) {
+          if (a.startsWith('-')) { errors.push(`${where}: node option ${a} after the test files is not modelled`); continue; }
+          const rel = resolveToken(a, 'test');
+          if (rel) hits.push({ file: rel, via: where, lost: itemLost });
+        }
+        return;
+      }
+      if (!rest.length) return;
+      const scriptRel = resolveToken(rest[0], 'script');
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost: itemLost });
+      scriptArgs(scriptRel || rest[0], rest.slice(1), itemLost);
+      return;
     }
     if (cmd === 'sh' || cmd === 'bash') {
-      if (args.includes('-c')) { errors.push(`${where}: ${cmd} -c is not supported; call a script file`); continue; }
-      const script = args.find((a) => !a.startsWith('-'));
-      if (script) checkPath(script, 'script');
-      continue;
+      if (args.includes('-c')) { errors.push(`${where}: ${cmd} -c is not supported; call a script file`); return; }
+      const idx = args.findIndex((a) => !a.startsWith('-'));
+      if (idx < 0) return;
+      const scriptRel = resolveToken(args[idx], 'script');
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
+      scriptArgs(scriptRel || args[idx], args.slice(idx + 1), lost);
+      return;
     }
-    if (SCRIPT_EXT.test(cmd) && cmd.includes('/')) checkPath(cmd, 'script');
+    if (SCRIPT_EXT.test(cmd) && cmd.includes('/')) {
+      const scriptRel = resolveToken(cmd, 'script');
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
+      scriptArgs(scriptRel || cmd, args, lost);
+    }
+  });
+  if (hits.length && step.gate.undecidable.length) {
+    for (const msg of step.gate.undecidable) errors.push(`${where}: ${msg}`);
+  }
+  for (const h of hits) {
+    const reason = step.gate.blocked || (step.gate.undecidable.length ? step.gate.undecidable[0] : null) || h.lost;
+    if (reason) ctx.notRun(h.file, h.via, reason);
+    else ctx.reference(h.file, h.via);
   }
 }
 
@@ -566,7 +717,8 @@ function verify(root) {
   const discovered = [...tracked].filter(isTestFile).sort();
   const discoveredSet = new Set(discovered);
   const status = new Map(); // test file -> { kind, via }
-  const referenced = new Set(); // any tracked script named by a workflow
+  const referenced = new Set(); // any tracked script a blocking step runs
+  const notRun = new Map(); // file -> where it is named without being able to fail a pull request
   const ctx = {
     root,
     tracked,
@@ -577,6 +729,10 @@ function verify(root) {
     reference(file, via) {
       referenced.add(file);
       this.mark(file, via);
+    },
+    notRun(file, via, reason) {
+      if (!notRun.has(file)) notRun.set(file, []);
+      notRun.get(file).push(`${via}: ${reason}`);
     },
   };
   for (const step of steps) {
@@ -619,6 +775,7 @@ function verify(root) {
       const label = hasPath ? entry.path : hasPattern ? entry.pattern : JSON.stringify(entry);
       if (hasPath === hasPattern) { errors.push(`${INVENTORY_FILE}: ${label}: exclusion needs exactly one of path or pattern`); continue; }
       if (typeof entry.reason !== 'string' || entry.reason.trim().length < MIN_REASON) { errors.push(`${label}: exclusion needs a reason`); continue; }
+      if (ISSUE_CLASS.test(entry.reason.trim()) && !/#\d+/.test(entry.reason)) errors.push(`${label}: a "fails on main" or "slow" exclusion needs an issue reference (#NNN) in its reason`);
       if (hasPath) {
         if (!discoveredSet.has(entry.path)) { errors.push(`${entry.path}: exclusion names no test file`); continue; }
         if (status.has(entry.path)) { errors.push(`${entry.path}: excluded but a workflow runs it`); continue; }
@@ -631,7 +788,9 @@ function verify(root) {
     }
   }
   for (const f of discovered) {
-    if (!status.has(f)) errors.push(`${f}: no workflow runs this test; run it in a workflow or add it to ${INVENTORY_FILE} with a reason`);
+    if (status.has(f)) continue;
+    const named = notRun.has(f) ? `; it is named in ${notRun.get(f).join('; ')}, so it cannot fail a pull request` : '';
+    errors.push(`${f}: no workflow runs this test${named}; run it in a workflow or add it to ${INVENTORY_FILE} with a reason`);
   }
   for (const s of status.values()) {
     if (s.kind === 'run') stats.run += 1;

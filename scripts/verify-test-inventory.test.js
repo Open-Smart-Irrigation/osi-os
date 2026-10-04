@@ -379,6 +379,161 @@ test('npm scripts: a missing script fails', () => {
   assert.match(errorsOf(root), /npm script "nope" not found/);
 });
 
+// ------------------------------------------- steps that cannot fail a pull request
+
+function gated({ on = '  pull_request:\n    branches: [ main ]', job = '', step = '', run, shell = '' }) {
+  return [
+    'name: Gated',
+    'on:',
+    on,
+    'jobs:',
+    '  check:',
+    '    runs-on: ubuntu-latest',
+    job,
+    '    steps:',
+    '      - uses: actions/checkout@v4',
+    '      - name: the step under test',
+    step,
+    shell,
+    '        run: |',
+    ...run.split('\n').map((l) => `          ${l}`),
+    '',
+  ].filter((l) => l !== '').join('\n');
+}
+
+function gatedRepo(spec, extra = {}) {
+  return repo({
+    '.github/workflows/ci.yml': gated(spec),
+    'scripts/a.test.js': PASSING,
+    'scripts/other.js': '// a script that takes file arguments\n',
+    [INVENTORY]: EMPTY_INVENTORY,
+    ...extra,
+  });
+}
+
+const NOT_RUN = /scripts\/a\.test\.js: no workflow runs this test/;
+
+test('a test in a step or job that cannot fail a pull request is not run', () => {
+  for (const [spec, reason] of [
+    [{ step: '        if: false', run: 'node --test scripts/a.test.js' }, /if: false/],
+    [{ step: "        if: ${{ false }}", run: 'node --test scripts/a.test.js' }, /if: false/],
+    [{ step: '        continue-on-error: true', run: 'node --test scripts/a.test.js' }, /continue-on-error/],
+    [{ job: '    if: false', run: 'node --test scripts/a.test.js' }, /if: false/],
+    [{ job: '    continue-on-error: true', run: 'node --test scripts/a.test.js' }, /continue-on-error/],
+    [{ on: '  workflow_dispatch:', run: 'node --test scripts/a.test.js' }, /no pull_request trigger/],
+    [{ on: '  push:\n    branches: [ main ]', run: 'node --test scripts/a.test.js' }, /no pull_request trigger/],
+    [{ on: "  pull_request:\n    paths: [ 'web/**' ]", run: 'node --test scripts/a.test.js' }, /path filter/],
+  ]) {
+    const errors = errorsOf(gatedRepo(spec));
+    assert.match(errors, NOT_RUN, JSON.stringify(spec));
+    assert.match(errors, reason, JSON.stringify(spec));
+  }
+});
+
+test('a test command whose exit status is discarded is not run', () => {
+  for (const [run, reason] of [
+    ['node --test scripts/a.test.js || true', /exit status is discarded \(\|\|\)/],
+    ['node --test scripts/a.test.js | tee out.txt', /pipe without pipefail/],
+    ['node scripts/a.test.js 2>&1 | tee out.txt && grep -q OK out.txt', /pipe without pipefail/],
+    ['node --test scripts/a.test.js &', /background/],
+    ['node --test scripts/a.test.js && echo done\necho next', /not the last command/],
+    ['if node --test scripts/a.test.js; then echo ok; fi', /condition of if/],
+    ['! node --test scripts/a.test.js', /condition of !/],
+  ]) {
+    const errors = errorsOf(gatedRepo({ run }));
+    assert.match(errors, NOT_RUN, run);
+    assert.match(errors, reason, run);
+  }
+});
+
+test('pipefail, shell: bash and a final && list keep the exit status', () => {
+  for (const spec of [
+    { run: 'set -o pipefail\nnode --test scripts/a.test.js | tee out.txt' },
+    { run: 'set -euo pipefail\nnode --test scripts/a.test.js 2>&1 | tee out.txt' },
+    { shell: '        shell: bash', run: 'node --test scripts/a.test.js | tee out.txt' },
+    { run: 'echo start\nnode --test scripts/a.test.js && echo done' },
+    { run: 'false || node --test scripts/a.test.js' },
+    { run: 'echo x | node --test scripts/a.test.js' },
+  ]) {
+    assert.deepEqual(verify(gatedRepo(spec)).errors, [], JSON.stringify(spec));
+  }
+});
+
+test('non-executing and filtering node options do not run the test', () => {
+  for (const [run, reason] of [
+    ['node --check scripts/a.test.js', /--check/],
+    ['node -c scripts/a.test.js', /-c/],
+    ['node --test --test-name-pattern=nothing scripts/a.test.js', /--test-name-pattern/],
+    ['node --test --test-skip-pattern=x scripts/a.test.js', /--test-skip-pattern/],
+    ['node --test --test-only scripts/a.test.js', /--test-only/],
+  ]) {
+    const errors = errorsOf(gatedRepo({ run }));
+    assert.match(errors, NOT_RUN, run);
+    assert.match(errors, reason, run);
+  }
+});
+
+test('a test file passed as an argument to another script is not run', () => {
+  for (const run of ['node scripts/other.js scripts/a.test.js', 'sh scripts/other.sh scripts/a.test.js']) {
+    const errors = errorsOf(gatedRepo({ run }, { 'scripts/other.sh': 'true\n' }));
+    assert.match(errors, NOT_RUN, run);
+    assert.match(errors, /passed as an argument to scripts\/other\.(js|sh)/, run);
+  }
+});
+
+test('the runner and --no-warnings still mark tests as run', () => {
+  for (const run of ['node scripts/run-module-tests.js scripts/a.test.js', 'node --no-warnings scripts/a.test.js', 'node scripts/a.test.js']) {
+    assert.deepEqual(verify(gatedRepo({ run }, { 'scripts/run-module-tests.js': '' })).errors, [], run);
+  }
+});
+
+test('the two pull-request conditions in use count as running', () => {
+  const spec = {
+    job: "    if: github.repository == 'Open-Smart-Irrigation/osi-os'",
+    step: "        if: github.event_name == 'pull_request'",
+    run: 'node --test scripts/a.test.js',
+  };
+  assert.deepEqual(verify(gatedRepo(spec)).errors, []);
+});
+
+test('conditions and shells the verifier cannot judge fail closed and name the step', () => {
+  for (const [spec, re] of [
+    [{ step: "        if: github.ref == 'refs/heads/main'", run: 'node --test scripts/a.test.js' }, /ci\.yml: job check step 2: cannot decide whether if: github\.ref/],
+    [{ job: '    if: always()', run: 'node --test scripts/a.test.js' }, /job check step 2: cannot decide whether if: always\(\)/],
+    [{ step: '        continue-on-error: ${{ matrix.experimental }}', run: 'node --test scripts/a.test.js' }, /cannot decide whether continue-on-error/],
+    [{ shell: '        shell: pwsh', run: 'node --test scripts/a.test.js' }, /shell pwsh is not modelled/],
+    [{ run: 'set +e\nnode --test scripts/a.test.js' }, /set \+e/],
+    [{ run: 'node --require ./hook.js scripts/a.test.js' }, /node option --require is not modelled/],
+  ]) {
+    assert.match(errorsOf(gatedRepo(spec)), re, JSON.stringify(spec));
+  }
+});
+
+test('a runner named only in a step that cannot fail does not count for indirect tests', () => {
+  const root = gatedRepo({ step: '        continue-on-error: true', run: 'node scripts/umbrella.js' }, {
+    'scripts/umbrella.js': '// runs test-chained.js\n',
+    'scripts/test-chained.js': PASSING,
+    [INVENTORY]: JSON.stringify({ excluded: [{ path: 'scripts/a.test.js', reason: 'not wired in this fixture' }], indirect: [{ path: 'scripts/test-chained.js', runner: 'scripts/umbrella.js' }] }),
+  });
+  assert.match(errorsOf(root), /scripts\/test-chained\.js: runner scripts\/umbrella\.js is not run by any workflow/);
+});
+
+test('exclusions of failing or slow tests must cite an issue', () => {
+  const files = { '.github/workflows/ci.yml': workflow(['node --test scripts/a.test.js']), 'scripts/a.test.js': PASSING, 'scripts/b.test.js': PASSING, 'scripts/c.test.js': PASSING };
+  const bad = repo({ ...files, [INVENTORY]: JSON.stringify({ indirect: [], excluded: [
+    { path: 'scripts/b.test.js', reason: 'fails on main: something is broken' },
+    { path: 'scripts/c.test.js', reason: 'slow: takes twenty minutes' },
+  ] }) });
+  const errors = errorsOf(bad);
+  assert.match(errors, /scripts\/b\.test\.js: a "fails on main" or "slow" exclusion needs an issue reference/);
+  assert.match(errors, /scripts\/c\.test\.js: a "fails on main" or "slow" exclusion needs an issue reference/);
+  const ok = repo({ ...files, [INVENTORY]: JSON.stringify({ indirect: [], excluded: [
+    { path: 'scripts/b.test.js', reason: 'fails on main: something is broken (#12)' },
+    { path: 'scripts/c.test.js', reason: 'slow: takes twenty minutes, see #34' },
+  ] }) });
+  assert.deepEqual(verify(ok).errors, []);
+});
+
 test('a workflow that cannot be parsed or has an unusable step fails closed', () => {
   const bad = repo({
     '.github/workflows/ci.yml': 'jobs:\n  a:\n    steps:\n      - name: nothing to do\n',
