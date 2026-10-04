@@ -13,6 +13,8 @@ jobs:
   # drop entries npm 10 needs, and npm ci here fails on it.
   typecheck:
     runs-on: ubuntu-latest
+    # A hung node:test file would otherwise hold the job for six hours.
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -33,6 +35,7 @@ jobs:
   # green. Do not make it a required check.
   install-next-lts:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     continue-on-error: true
     permissions:
       contents: read
