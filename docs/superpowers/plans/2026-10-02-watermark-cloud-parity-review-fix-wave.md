@@ -13,7 +13,7 @@ This plan fixes the 16 review findings on the two integration branches. Execute 
 - Preserve `DEVICE_DATA` ingestion/history projections, v1/v2 canonicalization, and raw diagnostic storage. This wave must not change those paths.
 - Keep edge migration `0068` and Flyway migration `V2026_09_30_001`. If a migration or seed input changes, run `node scripts/build-seed-db.js`; do not trust merged `farming.db`, `CHECKSUMS.json`, or size-allowance files.
 - Keep both edge `flows.json` files byte-identical. After a flow change, remeasure the size ratchet by the documented recipe. Scheduler node `d0b2b1c1a937e16d` must remain byte-identical to `main`.
-- Use only fixtures in the `A84041A171000001` and `0016C001F10000xx` ranges. Do not add customer, farm, gateway, tailnet, or developer-local identifiers.
+- Use only fixtures in the documented `A840410000000001` and `0016C001F1000001` ranges. Do not add customer, farm, gateway, tailnet, or developer-local identifiers.
 - Use a private directory below `/var/tmp` for temporary files and remove only that directory. Never run two frontend builds concurrently.
 - Gateways missing the new capability tokens still receive “not supported” for the Chameleon toggle and KIWI/Clover depth edits. Document that `SET_CHAMELEON_CONFIG` changes `chameleon_enabled`, which controls scheduler eligibility, while WATERMARK rows remain excluded.
 - Keep neutral channel labels. Retain the edge helper's legacy `(S1)/(S2)` export labels unless an existing contract test proves that changing them is safe.
