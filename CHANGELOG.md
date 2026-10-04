@@ -79,8 +79,8 @@ every 0.7.0 entry below.
   `device_data`. Calibration routes (GET, PUT, DELETE), probe display,
   calibration and depth settings on the LSN50 card. The node needs custom
   LSN50 firmware that is not shipped in this repository. WATERMARK values are
-  recorded and displayed only and do not drive automated irrigation: the scheduler skips every `device_data` row
-  linked to `watermark_readings`.
+  recorded and displayed only and do not drive automated irrigation: the
+  scheduler skips every `device_data` row linked to `watermark_readings`.
 - **RAK10701 field tester** (`RAK10701_FIELD_TESTER`,
   `0060__add_rak10701_field_tester_type.sql`): its own ChirpStack
   application; the gateway answers the tester's fPort 1 frame with the
@@ -266,8 +266,9 @@ every 0.7.0 entry below.
   before the cloud rejects them;
   `valve_schedules.deleted_at` ships as UTC ISO; zone time zone and location
   edits bump `sync_version`.
-- Zone-daily outbox triggers key a zone without a UUID as `zone-id:<id>`
-  instead of an empty string that collided across zones
+- The migration-owned copies of the zone-daily outbox triggers key a zone
+  without a UUID as `zone-id:<id>` instead of an empty string that collided
+  across zones, as the boot-time triggers already did
   (`0017__zone_key_fallback_parity.sql`); bootstrap and force sync send
   `sync_version` for dendrometer daily, zone recommendation and zone
   environment rows; the dendrometer node's fallback table DDL includes
