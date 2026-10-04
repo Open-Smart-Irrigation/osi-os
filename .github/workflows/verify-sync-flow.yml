@@ -56,6 +56,8 @@ jobs:
           node scripts/test-installation-revision-command.js
           node scripts/test-migration-helpers.js
           node scripts/test-node-red-admin-root-off.js
+          node scripts/test-protected-command-replay-chain.js
+          node scripts/test-protected-config-command-dispatch.js
           node scripts/test-radio-chirpstack.js
           node scripts/test-radio-flow.js
           node scripts/test-radio-history-flow-integration.js
@@ -69,12 +71,46 @@ jobs:
           node scripts/test-sync-history-durable-integration.js
           node scripts/test-sync-token-refresh-window.js
           node scripts/test-verify-flows-output-arity.js
+          node scripts/test-watermark-calibration-bootstrap.js
+          node scripts/test-watermark-cloud-command-auth.js
+          node scripts/test-watermark-cloud-command-path.js
+          node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
           node scripts/test-zone-timezone-route.js
           node scripts/verify-chameleon-calibration.js
           node scripts/verify-lsn50-chameleon-persistence.js
           node scripts/verify-module-file-deploy-coverage.js
           node scripts/verify-s2120-gust-fix.js
+      # WATERMARK protected configuration commands (SET/DELETE_WATERMARK_CALIBRATION,
+      # SET_CHAMELEON_CONFIG, UPSERT_DEVICE_SOIL_DEPTHS): the receiver and the command
+      # ledger on the seed schema, including a rejected or conflicting command that
+      # must not block a successor at the same base, and the dispatch timeouts.
+      # bcm2712 only: verify-profile-parity.js above proves the mirror byte-identical.
+      - name: WATERMARK protected command receiver and ledger
+        run: |
+          node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/commands.test.js \
+            scripts/test-protected-config-command-dispatch-timeouts.test.js
+      # Soil history through the shipped History API Router: per-device SWT3
+      # filtering for a plain LSN50, soil rollups kept for zones without one, and a
+      # temperature-enabled WATERMARK node kept as a soil source (cards, series, CSV).
+      - name: Soil history source and rollup rule
+        run: node --test scripts/test-history-router-soil-projection.js
+      # The staged, digest-pinned command-ledger install in deploy.sh (activation
+      # after the schema migration, stale stage cleanup), the fetch list and the
+      # payload lifecycle. The pin check fails when a ledger, binding or installer
+      # change does not update its COMMAND_LEDGER_*_SHA256 in deploy.sh.
+      - name: Staged command-ledger deploy
+        run: |
+          node --test scripts/deploy-command-ledger-dependency.test.js \
+            scripts/deploy-fetch-list.test.js \
+            scripts/deploy-payload-lifecycle.test.js
+      # Migration 0068 rehearsal (bound applied-command columns, calibration-only
+      # outbox triggers, live and tombstone events, readings stay local) and the
+      # journal v2 replication flows migration this branch touches.
+      - name: WATERMARK migration rehearsal and flows migration
+        run: |
+          node --test scripts/rehearse-watermark-cloud-parity-migration.test.js \
+            scripts/migrate-flows-journal-v2-replication.test.js
       # RAK10701 field-tester downlink encoder (fPort 2, six-byte reply): sequence
       # id modulo, both RSSI clamps, the 250 m/32 km distance quantisation, and
       # both directions of position-unknown degradation. This is a node:test file
