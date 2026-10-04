@@ -177,6 +177,13 @@ test('classifyAckResult maps known result/status vocabularies', () => {
   assert.equal(ledger.classifyAckResult('FAILED', 'missing valve devEui'), 'REJECTED_PERMANENT');
   assert.equal(ledger.classifyAckResult('FAILED', 'timeout talking to gateway'), 'FAILED_RETRYABLE');
   assert.equal(ledger.classifyAckResult('SOMETHING_UNKNOWN'), 'FAILED_RETRYABLE');
+  // CONFLICT is a terminal wire result only for the four protected exact-base
+  // commands; every other command type keeps main's retryable mapping.
+  assert.equal(ledger.classifyAckResult('CONFLICT'), 'FAILED_RETRYABLE');
+  assert.equal(ledger.classifyAckResult('CONFLICT', '', 'CONFIG_UPDATE'), 'FAILED_RETRYABLE');
+  for (const type of ['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'UPSERT_DEVICE_SOIL_DEPTHS']) {
+    assert.equal(ledger.classifyAckResult('CONFLICT', '', type), 'CONFLICT', type);
+  }
 });
 
 test('validEffectBinding recognizes the built-in non-journal grammar', async () => {
@@ -1054,7 +1061,13 @@ test('queueCommandAck treats CONFLICT as terminal only for protected exact-base 
     result: 'CONFLICT',
     reason: 'stale_base',
   });
-  assert.equal(legacyAck.result, 'CONFLICT');
+  assert.equal(legacyAck.result, 'FAILED_RETRYABLE');
+  assert.equal(legacyAck.status, 'FAILED_RETRYABLE');
+  assert.equal(
+    JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['818'])).payload_json).result,
+    'FAILED_RETRYABLE',
+    'the queued wire result for a non-protected conflict stays retryable'
+  );
   assert.equal(
     (await db.get('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?', ['818'])).n,
     0,

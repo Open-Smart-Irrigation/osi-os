@@ -588,11 +588,17 @@ async function withProtectedCommandTransaction(db, envelope, runtime, mutation) 
   });
 }
 
-function classifyAckResult(result, errorText) {
+// CONFLICT is a terminal wire result only for the four protected exact-base
+// commands. Every other command type keeps main's mapping to
+// FAILED_RETRYABLE, which the cloud treats as retryable.
+function classifyAckResult(result, errorText, commandType) {
   if (['SUCCESS', 'APPLIED', 'ACKED'].includes(result)) return 'APPLIED';
   if (result === 'EXPIRED') return 'EXPIRED';
   if (['FAILED_RETRYABLE', 'RETRYABLE_ERROR'].includes(result)) return 'FAILED_RETRYABLE';
-  if (['REJECTED_PERMANENT', 'NACKED', 'CONFLICT'].includes(result)) return result;
+  if (['REJECTED_PERMANENT', 'NACKED'].includes(result)) return result;
+  if (result === 'CONFLICT' && isProtectedConfigurationCommand(String(commandType || '').trim().toUpperCase())) {
+    return 'CONFLICT';
+  }
   if (result === 'FAILED') {
     const detail = String(errorText || '').toLowerCase();
     if (detail.includes('invalid') || detail.includes('unsupported') ||
@@ -638,8 +644,8 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
   const cloudOriginated = isCloudOriginatedCommandId(commandId);
   const incomingResult = String(ack.result || ack.status || '').trim().toUpperCase();
   const errorText = ack.error == null ? '' : String(ack.error);
-  const result = classifyAckResult(incomingResult, errorText);
   const ackType = String(ack.commandType || '').trim().toUpperCase();
+  const result = classifyAckResult(incomingResult, errorText, ackType);
   const terminal = ['APPLIED', 'REJECTED_PERMANENT', 'NACKED', 'EXPIRED'].includes(result) ||
     (result === 'CONFLICT' && isProtectedConfigurationCommand(ackType));
   const appliedAt = String(ack.timestamp || ack.appliedAt || new Date().toISOString());
