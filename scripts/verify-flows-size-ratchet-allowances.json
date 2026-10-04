@@ -338,12 +338,12 @@
       "reason": "Supersedes the previous entry (1145). port/wave3-auth-flaggate (fix(auth): flag-gate the shared scope resolver across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit 2c4fa9a5f): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 8456 -> HEAD 10419 = +1963. getAuthSecret() previously called osiLib.require('scope') unconditionally, violating the default-off contract (a lost osi-lib helper file would 500 every auth endpoint on a flag-off gateway). Fixed per the history-api-router-fn/zone-env-fn reference pattern: getAuthSecret() now checks a freshly-recomputed OSI_SCOPED_ACCESS flag first (recomputed locally rather than closing over any outer scopedOn, avoiding TDZ risk uniformly across every node regardless of its own structure) and only resolves osiLib inside the flag-on branch; the flag-off branch inlines the exact pre-refactor secret-resolution logic (same file paths, same ENOENT-quiet read/generate/write behavior), byte-equivalent to the pre-port route."
     },
     "83bb4a452dd9ae37": {
-      "delta": 2423,
-      "reason": "origin/main -> HEAD delta 2423. Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Supersedes prior entry: Wave 3 scoped-access port (AgroLink 832d48ef, feat(api): enforce fresh scope on valve effects): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 5883 -> HEAD 8291 = +2408. This is the STREGA/valve command boundary node (Auth + Validate + Normalize): when OSI_SCOPED_ACCESS=1, resolves the caller's own user_uuid and calls osi-scope-helper's assertFreshDeviceAccess against the target deveui (rejecting a viewer role with 403), stamping msg.actor_user_uuid for the downstream write; verifyBearer tags msg._osiAuthFailure on each 401 path; two secret read/write catches converted to visible node.warn."
+      "delta": 138,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 9593 -> HEAD 9731 = +138. Auth + Validate + Normalize the route refuses a request without a Node-RED _msgid (500) and builds the msg.osi.request envelope (v, kind valve_command, requestId, actorId, targetEui, action, durationMinutes) in place of five flow.set(valve_cmd_*) calls. Replaces the prior entry (+2423), whose growth is part of origin/main's measured size."
     },
     "dde8e1ef265e96d7": {
-      "delta": 121,
-      "reason": "Wave 3 scoped-access port (AgroLink 832d48ef, feat(api): enforce fresh scope on valve effects), auto-merged cleanly: measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3531 -> HEAD 3652 = +121. Build actuator_command + DB writes threads the upstream actor_user_uuid through to the command-ledger write."
+      "delta": 139,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 3652 -> HEAD 3791 = +139. Build actuator_command + DB writes reads actor, action and duration from msg.osi.request instead of flow.get(valve_cmd_*) and throws when the envelope is missing or names a different valve than the device row it is about to command. Replaces the prior entry (+121), whose growth is part of origin/main's measured size."
     },
     "cancel-strega-actuation-fn": {
       "delta": 1971,
@@ -354,8 +354,8 @@
       "reason": "origin/main -> HEAD delta 2894. Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Supersedes prior entry: Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 2981 -> HEAD 5860 = +2879. Schedule-mutation boundary node (Decode Token): when OSI_SCOPED_ACCESS=1, resolves the target zone by id, asserts fresh zone access via osi-scope-helper (403 on a viewer role), and stamps msg.actor_user_uuid; verifyBearer tags msg._osiAuthFailure on each 401 path; two secret read/write catches converted to visible node.warn."
     },
     "22cc64fa2a899cea": {
-      "delta": 103,
-      "reason": "Wave 3 scoped-access port (AgroLink a6289e96, feat(api): enforce schedule scope and authority), auto-merged cleanly: measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 4256 -> HEAD 4359 = +103. Verify Zone Ownership threads the upstream actor_user_uuid through."
+      "delta": 216,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 4359 -> HEAD 4575 = +216. Verify Zone Ownership refuses a request without a Node-RED _msgid (500) and builds the msg.osi.request envelope (v, kind zone_schedule_put, requestId, actorId, zoneId, validatedPatch) in place of seven flow.set(sched_*) calls. Replaces the prior entry (+103), whose growth is part of origin/main's measured size."
     },
     "settings-disable-schedules-fn": {
       "delta": 2992,
@@ -640,6 +640,18 @@
     "watermark-ingest-fn": {
       "delta": 1386,
       "reason": "WATERMARK Task 10 contact publication (commits 6ec405735 and 61044f89), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 1517 -> HEAD 2903 = +1386. Adds the minimal FPort 11 contact-only envelope plus strict attributable timestamp, gateway, and device validation; raw calibration diagnostics remain excluded."
+    },
+    "9ad895844533fb35": {
+      "delta": 49,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 470 -> HEAD 519 = +49. Check device ownership + type reads the target from msg.osi.request (throwing to the tab catch when the envelope is missing) instead of flow.get(valve_cmd_deveui), and no longer writes valve_cmd_user_id."
+    },
+    "d7e5c762c820aa16": {
+      "delta": 71,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 1979 -> HEAD 2050 = +71. Build UPSERT reads the validated patch from msg.osi.request, checks the selected zone row is the request zone, and keeps the applied row values on msg.osi.applied instead of flow.set(sched_*)."
+    },
+    "636ed15f34fa99c4": {
+      "delta": 122,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 657 -> HEAD 779 = +122. Format Response builds the response from msg.osi.request and msg.osi.applied instead of ten flow.get(sched_*) reads, and throws when either is missing."
     }
   },
   "total_allowance": {

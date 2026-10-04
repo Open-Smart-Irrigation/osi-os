@@ -22,6 +22,9 @@ const ENV = {
 
 function valveRequest(userId, username, deveui = 'VALVE1') {
   return {
+    // Node-RED's http in node always sets _msgid; the valve route refuses a
+    // request without one (osi-os #377).
+    _msgid: 'scoped-valve-request',
     req: {
       headers: {
         authorization: makeAuthHeader({
