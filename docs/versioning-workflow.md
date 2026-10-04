@@ -28,7 +28,7 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
 ## Pre-flight
 
 - [ ] All feature branches merged to `main` in both `osi-os` and `osi-server`.
-- [ ] `osi-server` VPS is up to date and healthy (`docker compose ps` — all services Up/healthy).
+- [ ] `osi-server` VPS is healthy (`docker compose ps` — all services Up/healthy).
 - [ ] No uncommitted changes: `git status --short` is clean.
 - [ ] Every CI workflow is green on the `main` commit you are releasing. There
       are nine: Codec Verifiers, Doc Hygiene, Field Journal Tests, History
@@ -44,9 +44,19 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
       git diff --stat v<OLD>..origin/main -- docs/contracts/
       ```
       Any change there (new event, command, resource or capability) means
-      the matching `osi-server` release must be deployed before any linked
-      gateway gets this edge (Step 8 before Step 9). A cloud without the new
-      appliers rejects the new events terminally.
+      a matching `osi-server` revision must be deployed and verified before
+      the release is published and before any linked gateway gets this edge
+      (Step 6 before Steps 7 and 9). A cloud without the new appliers rejects
+      the new events terminally.
+- [ ] Identify a matching `osi-server` revision. Check it out (or the
+      revision a cloud already runs, from its `BACKEND_IMAGE_TAG=sha-<short>`)
+      and run the event-op parity check against it:
+      ```bash
+      OSI_SERVER_EDGE_SYNC_SERVICE=<osi-server checkout>/backend/src/main/java/org/osi/server/sync/EdgeSyncService.java \
+        node scripts/verify-sync-op-parity.js
+      ```
+      `verify-sync-op-parity: OK` means that revision has an applier for
+      every event op this edge emits; `FAIL` lists the ops it is missing.
 - [ ] Maintainers: the doc-hygiene pre-push guard is installed in this clone
       (see AGENTS.md, "No deployment identities in public text"). It scans the
       release commit and its message before the push.
@@ -103,38 +113,19 @@ node scripts/verify-flows-fn-parse.js
 a flashed image boots for the first time. `deploy.sh` never writes that key,
 so a gateway upgraded with `deploy.sh` keeps reporting the version of the
 image it was flashed with (a gateway flashed from the 0.6.5 image reports
-`0.6.5` however often it is upgraded). Step 9 sets the key on every gateway
-you upgrade.
+`0.6.5` however often it is upgraded). A gateway installed with `deploy.sh`
+on stock ChirpStack Gateway OS has no such key and reports the
+`node-red.init` fallback, which is the deployed version. Step 9 sets the key
+on every gateway you upgrade.
 
-### Step 1a — Refresh Chameleon calibrations
+### Step 1a — Chameleon calibrations (not bundled)
 
-Run before cutting a full image release to bundle known calibrations into the
-firmware seed DB. The script reads from
-`https://server.opensmartirrigation.org` unless `OSI_SERVER_BASE_URL` is set.
-
-```bash
-OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js
-node scripts/apply-chameleon-calibration-seed.js --require-rows
-```
-
-Review the diff in `database/seeds/chameleon-calibrations.sql` and the
-seeded DB copies, then commit them as part of the release PR. The apply
-script updates `database/farming.db`, `web/react-gui/farming.db`, and both
-Raspberry Pi profile DBs. Without `--require-rows` it accepts an empty
-snapshot and the image relies on runtime calibration sync from OSI Server;
-pass `--require-rows` for a release image so an empty snapshot fails. A
-development image may skip this gate only when that decision is explicit in
-the build notes.
-
-Then rerun the seed verifiers, because the script touches four of the seven
-bundled database copies:
-
-```bash
-node scripts/verify-chameleon-calibration.js
-node scripts/verify-seed-db-ledger.js
-node scripts/verify-db-schema-consistency.js
-node scripts/verify-profile-parity.js
-```
+The release image does not bundle Chameleon calibrations; gateways fetch
+them from OSI Server at runtime. Do not run
+`scripts/apply-chameleon-calibration-seed.js` for a release: it writes only
+four of the seven seed images listed in `scripts/seed-db-paths.js`, so
+`node scripts/verify-seed-db-ledger.js` and the Edge Migrations workflow fail
+afterwards.
 
 ---
 
@@ -178,7 +169,7 @@ node scripts/verify-doc-hygiene.js
 ## Step 3 — Rebuild the React GUI
 
 ```bash
-cd web/react-gui && npm install && npm run test:unit && npm run build
+cd web/react-gui && npm ci && npm run test:unit && npm run build
 cd ../..
 tar -czf react_gui.tar.gz -C web/react-gui/build .
 ```
@@ -205,9 +196,10 @@ grep -rl "OSI OS v<NEW>" feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/a
 
 ## Step 4 — Commit, merge and tag
 
-Commit the version bump, CHANGELOG and calibration seed on a release branch
-and merge it through a pull request, so the CI workflows from the pre-flight
-run on the release commit:
+Commit the version bump, the CHANGELOG and the refreshed feed GUI on a
+release branch and merge it through a pull request, so the CI workflows from
+the pre-flight run on the release commit. The feed GUI is tracked in git;
+`git add -A` on its directory also stages the deleted old hashed assets:
 
 ```bash
 git switch -c release/v<NEW>
@@ -221,6 +213,8 @@ git add web/react-gui/src/pages/Login.tsx \
         .claude/skills/osi-config-and-flags/SKILL.md \
         README.md \
         CHANGELOG.md
+git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
+git status --short    # nothing left unstaged
 git commit -m "release: OSI OS v<NEW>"
 git push origin release/v<NEW>
 gh pr create --title "release: OSI OS v<NEW>" --body "Version bump and changelog for v<NEW>."
@@ -244,9 +238,9 @@ reach the public repository (AGENTS.md, "Branch and tag visibility").
 
 ## Step 5 — Build the factory images
 
-Build both release images from the tagged commit with the feed GUI from
-Step 3, following [docs/build/rpi5-full-osi-image.md](build/rpi5-full-osi-image.md)
-from "Pre-Build Verification" through "Build Pi 4 / 400 / 3 / 2":
+Build both release images from the tagged commit with a clean
+`git status` (the feed GUI from Step 3 is part of that commit), following
+[docs/build/rpi5-full-osi-image.md](build/rpi5-full-osi-image.md) from "Pre-Build Verification" through "Build Pi 4 / 400 / 3 / 2":
 
 - Raspberry Pi 5: `make switch-env ENV=full_raspberrypi_bcm27xx_bcm2712`
 - Raspberry Pi 4 / 400 / 3 / 2: `make switch-env ENV=full_raspberrypi_bcm27xx_bcm2709`
@@ -275,47 +269,13 @@ print `<NEW>`.
 
 ---
 
-## Step 6 — GitHub Release
+## Step 6 — Deploy osi-server (if changed)
 
-Extract the release section into a file, check it, then create the release
-with both images and the checksum file:
-
-```bash
-awk '/^## \[<NEW>\]/{on=1; print; next} on && /^## \[/{exit} on && !/^---$/' CHANGELOG.md \
-  > tmp/release-notes-<NEW>.md
-node scripts/verify-doc-hygiene.js --stdin < tmp/release-notes-<NEW>.md
-
-gh release create v<NEW> \
-  --title "OSI OS v<NEW>" \
-  --notes-file tmp/release-notes-<NEW>.md \
-  --latest \
-  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi5-factory.img.gz \
-  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi4-factory.img.gz \
-  tmp/release-assets/osi-os_<NEW>/SHA256SUMS
-```
-
-When the previous GitHub release with images is older than the previous
-CHANGELOG version (for example 0.6.5 images, then a 0.7.0 that shipped no
-image), image users skip the versions in between: append those CHANGELOG
-sections to the notes file before creating the release.
-
-Add a short image section to the notes: which file is for which Pi, and the
-SHA-256 values from `SHA256SUMS`, so operators can verify downloads.
-
----
-
-## Step 7 — Prepare deployment
-
-Build the release payload and hand it to the deployment procedure for the target gateway. The stable-link path can serve `deploy.sh` from a local HTTP server; the flaky-link path uses the self-contained bundle scripts described in [Deploying over a flaky link](operations/deploying-over-a-flaky-link.md).
-
-`deploy.sh` owns payload promotion, schema work, and the Node-RED restart. Read its verdict and the deployment runbook's post-deploy checks; do not add a separate manual restart after a green deploy.
-
----
-
-## Step 8 — Deploy osi-server (if changed)
-
-Do this before Step 9 whenever the pre-flight found a sync contract change,
-and before any gateway linked to that cloud is upgraded.
+When the pre-flight found a sync contract change, this step is mandatory
+and must be complete before the release is published (Step 7) and before
+any linked gateway is upgraded (Step 9). Deploy the `osi-server` revision
+that passed `verify-sync-op-parity.js` in the pre-flight, to every cloud
+that has linked gateways.
 
 Cloud environments:
 
@@ -337,17 +297,67 @@ image is built in CI and pulled. Record the current `BACKEND_IMAGE_TAG` in
 `scripts/verify-flyway-target.sh` against the target database before
 pulling, then pull and recreate only the backend.
 
+The cloud is verified when the backend is healthy after the restart
+(`docker compose ps`, `docker logs osi-backend` shows `Started`) and the
+`sha-<short>` now in its `BACKEND_IMAGE_TAG` is the revision that passed the
+parity check (rerun the check against that revision if in doubt).
+
 > **Never** run `docker compose up -d --build` (builds all services, overwhelms the VPS). Production has no from-source build path; do not run `docker compose build` there either.
 > **Flyway ordering**: if a new migration uses date-based versioning (`V2026_05_16_*`), verify it sorts *after* the highest existing applied version. Check with:
 > `docker exec osi-postgres psql -U osiserver -d osiserver -c "SELECT version FROM flyway_schema_history ORDER BY installed_rank DESC LIMIT 5;"`
 
 ---
 
+## Step 7 — GitHub Release
+
+Publish only after Step 6 is verified when the sync contract changed.
+
+Extract the release section into a notes file:
+
+```bash
+awk '/^## \[<NEW>\]/{on=1; print; next} on && /^## \[/{exit} on && !/^---$/' CHANGELOG.md \
+  > tmp/release-notes-<NEW>.md
+```
+
+When the previous GitHub release with images is older than the previous
+CHANGELOG version (for example 0.6.5 images, then a 0.7.0 that shipped no
+image), image users skip the versions in between: append those CHANGELOG
+sections to the notes file.
+
+Add a short image section to the notes: which file is for which Pi, and the
+SHA-256 values from `SHA256SUMS`, so operators can verify downloads.
+
+Check the finished notes file, then create the release with both images and
+the checksum file:
+
+```bash
+node scripts/verify-doc-hygiene.js --stdin < tmp/release-notes-<NEW>.md
+
+gh release create v<NEW> \
+  --title "OSI OS v<NEW>" \
+  --notes-file tmp/release-notes-<NEW>.md \
+  --latest \
+  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi5-factory.img.gz \
+  tmp/release-assets/osi-os_<NEW>/osi-os_<NEW>-rpi4-factory.img.gz \
+  tmp/release-assets/osi-os_<NEW>/SHA256SUMS
+```
+
+---
+
+## Step 8 — Prepare deployment
+
+Build the release payload and hand it to the deployment procedure for the target gateway. The stable-link path can serve `deploy.sh` from a local HTTP server; the flaky-link path uses the self-contained bundle scripts described in [Deploying over a flaky link](operations/deploying-over-a-flaky-link.md).
+
+`deploy.sh` owns payload promotion, schema work, and the Node-RED restart. Read its verdict and the deployment runbook's post-deploy checks; do not add a separate manual restart after a green deploy.
+
+---
+
 ## Step 9 — Deploy to the gateways and smoke test
 
 Deploy to a test gateway first, then to the others, with the procedure from
-Step 7. After each green deploy verdict, record the release version on the
-gateway; `deploy.sh` does not do it (see Step 1):
+Step 8, and only after Step 6 when the sync contract changed. After each
+green deploy verdict, record the release version on the gateway;
+`deploy.sh` does not do it (see Step 1):
 
 ```bash
 ssh root@<pi-ip> 'uci set osi-server.cloud.firmware_version=<NEW> && uci commit osi-server'
@@ -358,7 +368,8 @@ so the heartbeat reports it from the next Node-RED start.
 
 On each Pi after the deploy:
 
-- [ ] `uci get osi-server.cloud.firmware_version` → `<NEW>`
+- [ ] `uci get osi-server.cloud.firmware_version` → `<NEW>` (the heartbeat
+      and the cloud show `<NEW>` only after the next Node-RED start)
 - [ ] Login screen in browser shows `OSI OS v<NEW> (Alpha)`
 - [ ] Dashboard loads without console errors
 - [ ] Latest heartbeat visible in osi-server cloud (within 90 s)
@@ -374,15 +385,16 @@ On each Pi after the deploy:
 ## Checklist summary
 
 ```
-[ ] Pre-flight — mains merged, CI green (9 workflows), contract change decided
+[ ] Pre-flight — mains merged, CI green (9 workflows), contract change decided,
+                 matching osi-server revision found with verify-sync-op-parity
 [ ] Step 1  — Bump every version location; run the verifiers
-[ ] Step 1a — Refresh Chameleon calibrations; rerun the seed verifiers
+[ ] Step 1a — Do not bundle Chameleon calibrations
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
-[ ] Step 4  — Release PR, merge, CI green, tag v<NEW>, push only the tag
+[ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, tag v<NEW>, push only the tag
 [ ] Step 5  — Build both factory images, rename, SHA256SUMS, first-boot check
-[ ] Step 6  — GitHub Release (notes checked, images + SHA256SUMS attached)
-[ ] Step 7  — Prepare deployment payload
-[ ] Step 8  — Deploy osi-server first if the sync contract changed
+[ ] Step 6  — Deploy and verify osi-server (required first if the contract changed)
+[ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
+[ ] Step 8  — Prepare deployment payload
 [ ] Step 9  — Deploy to Pis (test gateway first), set firmware_version, smoke test
 ```
