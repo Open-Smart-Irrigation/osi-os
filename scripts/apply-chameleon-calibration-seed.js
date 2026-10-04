@@ -8,8 +8,9 @@ const { execFileSync } = require('child_process');
 const { REPO_ROOT: repoRoot, SEED_DB_RELATIVE_PATHS } = require('./seed-db-paths');
 
 const seedPath = path.join(repoRoot, 'database/seeds/chameleon-calibrations.sql');
-// Every bundled seed image: they must stay byte-identical, so a calibration
-// snapshot goes into all of them or none.
+// Every bundled seed image. They must stay byte-identical, so the snapshot is
+// applied to a copy of each image first; the copies replace the images only
+// after all of them succeeded, and any failure leaves every image unchanged.
 const dbPaths = SEED_DB_RELATIVE_PATHS;
 const requireRows = process.argv.includes('--require-rows') || process.env.REQUIRE_CHAMELEON_CALIBRATION_ROWS === '1';
 
@@ -37,12 +38,33 @@ for (const rel of dbPaths) {
   if (!fs.existsSync(path.join(repoRoot, rel))) fail(`missing database: ${rel}`);
 }
 
-for (const rel of dbPaths) {
-  const dbPath = path.join(repoRoot, rel);
-  execFileSync('sqlite3', [dbPath], { input: seed, encoding: 'utf8', stdio: ['pipe', 'inherit', 'inherit'] });
-  const rows = Number(sqlite(dbPath, 'SELECT COUNT(*) FROM chameleon_calibrations;'));
-  console.log(`${rel}: ${rows} chameleon calibration row(s)`);
+const staged = [];
+function discardStaged() {
+  for (const { tmpPath } of staged) fs.rmSync(tmpPath, { force: true });
 }
+
+try {
+  for (const rel of dbPaths) {
+    const dbPath = path.join(repoRoot, rel);
+    const tmpPath = `${dbPath}.calibration-tmp`;
+    staged.push({ rel, dbPath, tmpPath });
+    fs.copyFileSync(dbPath, tmpPath);
+    // -bail stops at the first failing statement; the transaction keeps a
+    // partly applied seed out of the copy.
+    execFileSync('sqlite3', ['-bail', tmpPath], {
+      input: `BEGIN;\n${seed}\nCOMMIT;\n`,
+      encoding: 'utf8',
+      stdio: ['pipe', 'inherit', 'inherit'],
+    });
+    const rows = Number(sqlite(tmpPath, 'SELECT COUNT(*) FROM chameleon_calibrations;'));
+    console.log(`${rel}: ${rows} chameleon calibration row(s)`);
+  }
+} catch (error) {
+  discardStaged();
+  fail(`calibration seed not applied, all images left unchanged: ${error.message}`);
+}
+
+for (const { dbPath, tmpPath } of staged) fs.renameSync(tmpPath, dbPath);
 
 if (insertCount === 0) {
   console.log('No bundled Chameleon calibration rows found; image will rely on runtime OSI Server calibration sync.');

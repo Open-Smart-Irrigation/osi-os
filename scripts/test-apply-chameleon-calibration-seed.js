@@ -115,3 +115,23 @@ test('--require-rows refuses an empty seed and writes nothing', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a failure in one image leaves all seven unchanged and no temporary files', () => {
+  const root = sandbox({ seedSql: SYNTHETIC_SEED });
+  try {
+    const broken = SEED_DB_RELATIVE_PATHS[SEED_DB_RELATIVE_PATHS.length - 1];
+    execFileSync('sqlite3', [path.join(root, broken), 'DROP TABLE chameleon_calibrations;']);
+    const before = SEED_DB_RELATIVE_PATHS.map((rel) => sha256(path.join(root, rel)));
+    const r = runApply(root);
+    assert.notEqual(r.status, 0, 'the run must fail');
+    assert.deepEqual(SEED_DB_RELATIVE_PATHS.map((rel) => sha256(path.join(root, rel))), before,
+      'no image may change when one of them fails');
+    for (const rel of SEED_DB_RELATIVE_PATHS) {
+      const dir = path.dirname(path.join(root, rel));
+      const strays = fs.readdirSync(dir).filter((f) => f !== 'farming.db' && f.startsWith('farming.db'));
+      assert.deepEqual(strays, [], `${rel}: temporary files left behind`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
