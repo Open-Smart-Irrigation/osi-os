@@ -618,6 +618,8 @@ ${shellFunction('fetch_required')}
 ${shellFunction('swap_call')}
 ${shellFunction('stage_command_ledger_dependency')}
 ${shellFunction('activate_command_ledger_dependency')}
+${shellFunction('command_ledger_live_hashes')}
+${shellFunction('report_command_ledger_activation_failure')}
 ${shellFunction('check_fetched_manifest')}
 ${shellFunction('check_fetched_js_files')}
 ${identity}
@@ -792,28 +794,36 @@ test('the activation harness completes a deploy when nothing fails', () => {
 // Each step that can fail during activation, injected after a successful
 // staging run. The live ledger files each scenario must leave behind: before
 // any rename the previous pair; the post-activation check runs after all three
-// renames, and the installer does not undo them.
+// renames, and the installer does not undo them. With the candidate pair in
+// place but failing its load, the previous payload must not be restarted
+// beside it: Node-RED and identityd stay stopped and the error says so.
+// The pre-WATERMARK package.json is byte-identical to the candidate's, so it
+// reads as the previous file whether or not it was moved.
+const PREVIOUS_FILES = [/osi-command-ledger\/package\.json: previous/, /osi-command-ledger\/index\.js: previous$/m, /osi-watermark-binding\/canonicalization\.js: absent/];
+const CANDIDATE_FILES = [/osi-command-ledger\/package\.json: (candidate|previous, identical to the candidate)$/m, /osi-command-ledger\/index\.js: candidate$/m, /osi-watermark-binding\/canonicalization\.js: candidate$/m];
 const ACTIVATION_FAILURES = [
-  ['digest verification', 'printf "\\n" >> "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"', {}, oldPairHashes],
-  ['the installer', 'printf "%s\\n" "console.error(\\"injected installer failure\\"); process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"', {}, oldPairHashes],
-  ['the move into place', 'mkdir -p "$NODE_RED_ROOT/osi-watermark-binding" && chmod 555 "$NODE_RED_ROOT/osi-watermark-binding"', { skipAsRoot: true }, oldPairHashes],
-  ['the post-activation check', 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS', { preload: true }, candidateHashes],
+  ['digest verification', 'printf "\\n" >> "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"', {}, oldPairHashes, PREVIOUS_FILES],
+  ['the installer', 'printf "%s\\n" "console.error(\\"injected installer failure\\"); process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"', {}, oldPairHashes, PREVIOUS_FILES],
+  ['the move into place', 'mkdir -p "$NODE_RED_ROOT/osi-watermark-binding" && chmod 555 "$NODE_RED_ROOT/osi-watermark-binding"', { skipAsRoot: true }, oldPairHashes, PREVIOUS_FILES],
+  ['the post-activation check', 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS', { preload: true, held: true }, candidateHashes, CANDIDATE_FILES],
 ];
 
-for (const [step, inject, options, expectedLedger] of ACTIVATION_FAILURES) {
+function writeLiveLoadFailure(root) {
+  // Fails only the installer's fresh-process load of the LIVE ledger, which it
+  // runs after moving the candidate into place.
+  fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'),
+    `if (process.argv.includes(${JSON.stringify(path.join(root, 'node-red', 'osi-command-ledger'))})) {\n` +
+    "  console.error('injected post-activation load failure');\n  process.exit(42);\n}\n");
+}
+
+for (const [step, inject, options, expectedLedger, expectedFileLines] of ACTIVATION_FAILURES) {
   test(`a failing activation step (${step}) aborts the deploy before the payload flip`, (t) => {
     if (options.skipAsRoot && typeof process.getuid === 'function' && process.getuid() === 0) {
       t.skip('root ignores directory permissions');
       return;
     }
     withActivationRoot((root) => {
-      if (options.preload) {
-        // Fails only the installer's fresh-process load of the LIVE ledger,
-        // which it runs after moving the candidate into place.
-        fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'),
-          `if (process.argv.includes(${JSON.stringify(path.join(root, 'node-red', 'osi-command-ledger'))})) {\n` +
-          "  console.error('injected post-activation load failure');\n  process.exit(42);\n}\n");
-      }
+      if (options.preload) writeLiveLoadFailure(root);
       const result = runActivationHarness(root, inject);
       assert.notEqual(result.status, 0, `deploy must fail when ${step} fails\n${harnessOutput(result)}`);
       assert.doesNotMatch(result.stdout, new RegExp(ACTIVATED_LINE), harnessOutput(result));
@@ -821,12 +831,19 @@ for (const [step, inject, options, expectedLedger] of ACTIVATION_FAILURES) {
       assert.doesNotMatch(result.stdout, /OK: activated flows\+GUI payloads\/new/);
       assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
       // The existing failure path of the schema phase: the staged payload is
-      // discarded and the previous, schema-compatible payload restarted.
+      // discarded and the previous, schema-compatible payload restarted, or
+      // held stopped when the candidate pair is in place but failed to load.
       assert.equal(result.activeFlows, 'prev');
       assert.equal(result.newPayloadKept, false);
-      assert.equal(result.nodeRed, '1', 'the previous payload must be running again');
-      assert.equal(result.identityd, '1', 'identityd must be restored');
+      assert.equal(result.nodeRed, options.held ? '0' : '1', harnessOutput(result));
+      assert.equal(result.identityd, options.held ? '0' : '1', harnessOutput(result));
       assert.deepEqual(result.liveLedger, expectedLedger());
+      for (const line of expectedFileLines) assert.match(result.stderr, line, harnessOutput(result));
+      if (options.held) {
+        assert.match(result.stderr, /the previous payload is held stopped/, harnessOutput(result));
+      } else {
+        assert.doesNotMatch(result.stderr, /held stopped/);
+      }
     });
   });
 }
@@ -892,6 +909,45 @@ fi
       'fetch_required must not report OK for a failed fetch');
     assert.doesNotMatch(result.stdout, /--- osi-watermark-binding canonicalization\.js ---/,
       'staging must stop at the failed fetch');
+  });
+});
+
+test('a post-activation load failure after a committed migration also reports the files and holds services', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root, 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS',
+      { HARNESS_MIGRATION_COMMITS: '1' });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=1', harnessOutput(result));
+    for (const line of CANDIDATE_FILES) assert.match(result.stderr, line, harnessOutput(result));
+    assert.match(result.stderr, /the previous payload is held stopped/);
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '0');
+    assert.equal(result.identityd, '0');
+    assert.deepEqual(result.liveLedger, candidateHashes());
+  });
+});
+
+test('an activation that stops between renames reports the mixed ledger files', (t) => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('root ignores directory permissions');
+    return;
+  }
+  withActivationRoot((root) => {
+    // The binding is renamed into place first; the ledger directory then
+    // refuses the package.json rename.
+    const result = runActivationHarness(root, 'chmod 555 "$NODE_RED_ROOT/osi-command-ledger"');
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+    assert.match(result.stderr, /osi-watermark-binding\/canonicalization\.js: candidate/, harnessOutput(result));
+    assert.match(result.stderr, /osi-command-ledger\/package\.json: previous/);
+    assert.match(result.stderr, /osi-command-ledger\/index\.js: previous/);
+    assert.match(result.stderr, /stopped part-way/);
+    // The installer proved this mix loads before it moved anything, so the
+    // existing failure path restarts the previous payload on it.
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1');
+    assert.equal(result.identityd, '1');
   });
 });
 

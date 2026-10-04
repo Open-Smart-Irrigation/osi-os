@@ -143,16 +143,93 @@ activate_command_ledger_dependency() {
     echo "--- Activate WATERMARK command-ledger dependency pair ---"
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
+    if ! command_ledger_before="$(command_ledger_live_hashes)"; then
+        echo "ERROR: could not read the live command-ledger files before activation; the pair was not activated" >&2
+        return 1
+    fi
     # The installer re-verifies the digests, moves the pair into place and
     # loads it in a fresh process; it exits non-zero when any of these fails.
     # This function runs inside "if !" and "|| exit 1", where the shell does
     # not apply set -e, so the status is checked here.
     if ! node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"; then
-        echo "ERROR: command-ledger dependency activation failed; the pair was not activated" >&2
+        echo "ERROR: command-ledger dependency activation failed" >&2
+        report_command_ledger_activation_failure "$command_ledger_before"
         return 1
     fi
     COMMAND_LEDGER_ACTIVATED=1
     echo "OK: command-ledger dependency pair activated after schema migration"
+}
+
+# One "<file> <sha256|absent>" line per live command-ledger file.
+command_ledger_live_hashes() {
+    node -e '
+        const crypto = require("crypto");
+        const fs = require("fs");
+        const path = require("path");
+        for (const file of ["osi-command-ledger/package.json", "osi-command-ledger/index.js", "osi-watermark-binding/canonicalization.js"]) {
+            let hash = "absent";
+            try {
+                hash = crypto.createHash("sha256").update(fs.readFileSync(path.join(process.argv[1], file))).digest("hex");
+            } catch (error) {
+                if (error.code !== "ENOENT") throw error;
+            }
+            console.log(file + " " + hash);
+        }
+    ' "$NODE_RED_ROOT"
+}
+
+# After a failed activation, names each live ledger file as the previous one,
+# the candidate, absent or unknown. The installer does not move files back,
+# so when the candidate pair is in place but failed its load check the
+# previous payload is not restarted beside it: Node-RED and identityd are held
+# stopped, as after a failed backup restore.
+report_command_ledger_activation_failure() {
+    ledger_state_rc=0
+    command_ledger_live_hashes | node -e '
+        const fs = require("fs");
+        const [before, packageSha, indexSha, bindingSha] = process.argv.slice(1);
+        const candidate = {
+            "osi-command-ledger/package.json": packageSha,
+            "osi-command-ledger/index.js": indexSha,
+            "osi-watermark-binding/canonicalization.js": bindingSha,
+        };
+        const parse = (text) => Object.fromEntries(text.split("\n").filter(Boolean).map((line) => line.split(" ")));
+        const was = parse(before);
+        const now = parse(fs.readFileSync(0, "utf8"));
+        let moved = false;
+        let allCandidate = true;
+        for (const file of Object.keys(candidate)) {
+            if (now[file] !== was[file]) moved = true;
+            if (now[file] !== candidate[file]) allCandidate = false;
+            const state = now[file] === "absent" ? "absent"
+                : now[file] === was[file] ? (now[file] === candidate[file] ? "previous, identical to the candidate" : "previous")
+                    : now[file] === candidate[file] ? "candidate" : "unknown";
+            console.error("ERROR: live command-ledger file " + file + ": " + state);
+        }
+        process.exit(!moved ? 0 : (allCandidate ? 3 : 2));
+    ' "$1" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256" || ledger_state_rc=$?
+    case "$ledger_state_rc" in
+        0)
+            echo "ERROR: the previous command-ledger files are still in place" >&2
+            ;;
+        2)
+            echo "ERROR: the activation stopped part-way; the files above are a mix the installer proved loadable before it moved any of them" >&2
+            ;;
+        *)
+            if [ "$ledger_state_rc" = "3" ]; then
+                echo "ERROR: the candidate command-ledger pair is in place but failed its load check" >&2
+            else
+                echo "ERROR: could not determine which command-ledger files are in place" >&2
+            fi
+            if [ "$node_red_restart_needed" = "1" ]; then
+                node_red_restart_needed=0
+                identityd_deploy_state="fatal_hold"
+                echo "ERROR: the previous payload is held stopped (Node-RED and identityd stay stopped); repair or restore $NODE_RED_ROOT/osi-command-ledger and $NODE_RED_ROOT/osi-watermark-binding before restarting Node-RED" >&2
+            else
+                echo "ERROR: this deploy did not stop Node-RED, which still runs the ledger it loaded at its last start; repair or restore $NODE_RED_ROOT/osi-command-ledger and $NODE_RED_ROOT/osi-watermark-binding before restarting it" >&2
+            fi
+            ;;
+    esac
 }
 
 same_fs_or_die() {

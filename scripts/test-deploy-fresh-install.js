@@ -156,6 +156,8 @@ ${extractFunction('seed_db_if_missing')}
 ${extractFunction('fetch_migration_runner')}
 ${extractFunction('stage_command_ledger_dependency')}
 ${extractFunction('activate_command_ledger_dependency')}
+${extractFunction('command_ledger_live_hashes')}
+${extractFunction('report_command_ledger_activation_failure')}
 ${extractFunction('check_fetched_manifest')}
 ${extractFunction('check_fetched_js_files')}
 
