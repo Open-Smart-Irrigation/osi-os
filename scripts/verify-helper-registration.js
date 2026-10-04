@@ -34,6 +34,48 @@ function checkRegistryParity(canonicalNameToPath, profileNameToPath) {
     : ['osi-lib NAME_TO_PATH differs from the canonical bcm2712 registry'];
 }
 
+// Helpers that deploy.sh delivers through a pinned staging path instead of a
+// direct fetch_required into /srv/node-red. osi-command-ledger has a top-level
+// require() on the WATERMARK binding, so deploy.sh fetches the pair into a
+// private stage directory, checks each file against a committed SHA-256 pin,
+// and activates it only after the schema migration. Each part of that path is
+// asserted, so a module delivered by neither path still fails.
+const STAGED_DELIVERY = {
+  'osi-command-ledger': {
+    stageDir: '$COMMAND_LEDGER_STAGE',
+    pins: { 'package.json': 'COMMAND_LEDGER_PACKAGE_SHA256', 'index.js': 'COMMAND_LEDGER_INDEX_SHA256' },
+    stageFn: 'stage_command_ledger_dependency',
+    activateFn: 'activate_command_ledger_dependency',
+  },
+};
+
+function shellFunctionDefined(source, fn) {
+  return new RegExp('^' + fn + '\\(\\)\\s*\\{', 'm').test(source);
+}
+
+function shellFunctionCalled(source, fn) {
+  return new RegExp('^\\s*(?:if\\s+!\\s+)?' + fn + '(?:\\s*(?:\\|\\||;|$))', 'm').test(source);
+}
+
+function stagedDeliveryIssues(name, deploySource) {
+  const spec = STAGED_DELIVERY[name];
+  if (!spec) return null;
+  const issues = [];
+  for (const [file, pinVar] of Object.entries(spec.pins)) {
+    if (!deploySource.includes('"' + spec.stageDir + '/' + name + '/' + file + '"')) {
+      issues.push(name + ': missing staged ' + file + ' fetch into ' + spec.stageDir + ' in deploy.sh');
+    }
+    if (!new RegExp('^' + pinVar + '="[0-9a-f]{64}"$', 'm').test(deploySource)) {
+      issues.push(name + ': missing ' + pinVar + ' digest pin in deploy.sh');
+    }
+  }
+  for (const fn of [spec.stageFn, spec.activateFn]) {
+    if (!shellFunctionDefined(deploySource, fn)) issues.push(name + ': deploy.sh does not define ' + fn);
+    if (!shellFunctionCalled(deploySource, fn)) issues.push(name + ': deploy.sh never calls ' + fn);
+  }
+  return issues;
+}
+
 function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySource, moduleDir }) {
   const issues = [];
   if ((packageJson.dependencies || {})[name] !== 'file:' + name) {
@@ -53,11 +95,15 @@ function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySourc
   if (!loop || !loop[1].split(/\s+/).includes(name)) {
     issues.push(name + ': missing from 98_osi_node_red_seed module-copy loop');
   }
-  if (!deploySource.includes('/srv/node-red/' + name + '/package.json')) {
-    issues.push(name + ': missing package.json fetch_required in deploy.sh');
-  }
-  if (!deploySource.includes('/srv/node-red/' + name + '/index.js')) {
-    issues.push(name + ': missing index.js fetch_required in deploy.sh');
+  const direct = ['package.json', 'index.js'].filter((file) => deploySource.includes('/srv/node-red/' + name + '/' + file));
+  const staged = direct.length === 2 ? null : stagedDeliveryIssues(name, deploySource);
+  const stagedReferenced = staged && Object.keys(STAGED_DELIVERY[name].pins)
+    .some((file) => deploySource.includes(STAGED_DELIVERY[name].stageDir + '/' + name + '/' + file));
+  if (stagedReferenced) {
+    issues.push(...staged);
+  } else {
+    if (!direct.includes('package.json')) issues.push(name + ': missing package.json fetch_required in deploy.sh');
+    if (!direct.includes('index.js')) issues.push(name + ': missing index.js fetch_required in deploy.sh');
   }
   if (!moduleDir.hasDir) {
     issues.push(name + ': module directory missing');
@@ -133,4 +179,4 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir };
+module.exports = { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, STAGED_DELIVERY };
