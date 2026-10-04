@@ -7,7 +7,181 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+Ordered schema migrations `0017__zone_key_fallback_parity.sql` to
+`0068__watermark_cloud_parity.sql` (52 migrations) are new since 0.7.0. Two
+new device types: `DRAGINO_SDI12` and `RAK10701_FIELD_TESTER`. The last
+pre-built image was 0.6.5, so a gateway upgraded from that image also takes
+every 0.7.0 entry below.
+
+### Upgrade notes
+- **Cloud before edge.** This edge emits sync events that an OSI Server
+  without the matching appliers rejects terminally: `VALVE_SCHEDULE_UPSERTED`,
+  `VALVE_SETTINGS_UPSERTED`, `VALVE_RUNTIME_CHANGED`,
+  `VALVE_ACTUATION_ARCHIVED`, `ZONE_IRRIGATION_CALIBRATION_UPSERTED`,
+  `WEATHER_STATION_ZONES_REPLACED`, `DEVICE_INSTALLATION_LOCATION_REVISED`,
+  `DEVICE_RADIO_CONFIGURATION_REVISED`, `ZONE_AGRONOMY_UPSERTED`,
+  `WATERMARK_CALIBRATION_UPSERTED` and `WATERMARK_CALIBRATION_DELETED`.
+  Deploy the OSI Server release that carries this contract before upgrading a
+  linked gateway. A rejected event stays rejected; recovery is the manual
+  path under Fixed below. Gateways that are not linked to a cloud are not
+  affected.
+- **Upgrade with `deploy.sh`, not by copying files.** The script now stages
+  `flows.json` and the GUI as one payload, stops Node-RED (and
+  `osi-identityd`) before migrating, applies pending migrations with
+  `scripts/migrate-cli.js` after a backup, and activates the new payload
+  before Node-RED starts again. Three migrations in the range are
+  `destructive` (`0027` and `0060` rebuild the `devices` type list, `0058`
+  recreates the gateway-attribution triggers) and need the writers-stopped
+  state that only the deploy provides.
+- A gateway whose database has no `schema_migrations` ledger (installed from
+  the 0.6.5 image and never upgraded since) takes the pre-ledger path on its
+  first deploy: `repair-sync-outbox-v2.js`, then `baseline-existing-db.js`,
+  then the migrations. For a gateway that is far behind, follow
+  [docs/operations/uganda-catchup-runbook.md](docs/operations/uganda-catchup-runbook.md).
+- The migration step now refuses to start, before stopping Node-RED, unless
+  the backup directory has free space of twice the database size plus 128 MB
+  (`MIGRATE_MIN_FREE_MARGIN_MB`). Pre-migration backups are pruned to the
+  newest three (`MIGRATE_BACKUP_KEEP`).
+- A gateway that once ran a private product line, and whose ledger numbers
+  collide with main's, is reconciled automatically by
+  `scripts/reconcile-ledger-numbering.js` during the deploy; the deploy
+  aborts before the payload flip when a row cannot be proven equivalent.
+- `deploy.sh` reports its own verdict and restarts Node-RED itself. A manual
+  restart after a green deploy is not needed.
+- On a flaky link, use the offline bundle path (`scripts/deploy-bundle.sh`,
+  `scripts/deploy-push-bundle.sh`, `scripts/deploy-offline.sh`) described in
+  [docs/operations/deploying-over-a-flaky-link.md](docs/operations/deploying-over-a-flaky-link.md).
+- The Node-RED editor is closed (see Security). Field repair that needs it
+  means editing `/srv/node-red/settings.js` on the gateway and restarting
+  Node-RED.
+- `firmware_version` is written only by the first-boot
+  `96_osi_server_config`; `deploy.sh` does not change it. A gateway flashed
+  from an older image keeps reporting that image's version after an upgrade.
+- On upgrade the Network tab disappears on a gateway with no registered
+  RAK10701 field tester unless the Network module is switched on in
+  Settings.
+
 ### Added
+- **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
+  `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
+  and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
+  registry that includes Sentek EnviroSCAN and TriSCAN (scaled frequency to
+  VWC), multi-segment uplink reassembly with a durable quarantine, per-depth
+  VWC, VIC, soil temperature and EC channels, a commissioning state machine
+  and Sentek acquisition-recipe deployment. Cloud `SET_SDI12_IDENTIFY`
+  commands dispatch to the identify path.
+- **WATERMARK soil tension on the Dragino LSN50**
+  (`0061__watermark_lsn50.sql`): FPort 11 profile 3 frames are validated
+  (anything else on that port is rejected with a raw row), resistance is
+  converted to temperature-compensated kPa, raw readings stay in the
+  edge-local `watermark_readings` table and canonical kPa lands in
+  `device_data`. Calibration routes (GET, PUT, DELETE), probe display,
+  calibration and depth settings on the LSN50 card. WATERMARK values do not
+  drive automated irrigation: the scheduler skips every `device_data` row
+  linked to `watermark_readings`.
+- **RAK10701 field tester** (`RAK10701_FIELD_TESTER`,
+  `0060__add_rak10701_field_tester_type.sql`): its own ChirpStack
+  application; the gateway answers the tester's fPort 1 frame with the
+  six-byte coverage reply, and the Network page shows the measured track with
+  GeoJSON and CSV export. Reply and capture run only with radio capture
+  switched on (`osi-server.cloud.radio_capture_enabled=1`), which is off by
+  default.
+- **STREGA valve control** (`0022__valve_control.sql` to
+  `0025__valve_settings_sync_triggers.sql`): a valve panel across zones;
+  weekly schedules compiled into the valve's own scheduler (Gen1 FPort 14 to
+  20, Gen2 FPort 25 day mask, up to four windows per weekday) and pushed only
+  on a user change or an explicit re-send; one-time opens from a 60 s tick,
+  skipped once more than 10 minutes overdue; the gateway keeps the valve clock
+  in sync every 10 minutes, including DST changes; push acknowledgements in
+  `valve_schedule_pushes`; a gateway time zone in `app_settings`; enclosure
+  temperature and humidity telemetry. The threshold scheduler is now labelled
+  "Trigger-based irrigation"; its behaviour is unchanged.
+- **Provider weather and daily agronomy** (`0062__weather_provider_store.sql`
+  to `0067__zone_daily_agronomy_sync.sql`): hourly Open-Meteo or MeteoSwiss
+  weather per farm location (`osi-server.cloud.weather_provider_default`,
+  default `open_meteo`, overridable per zone with `weather_source`), a FAO-56
+  catalogue of 136 crops, daily ET0 and crop demand per zone in
+  `zone_daily_agronomy`, a Water tab with seven days of demand, and provider,
+  station and agronomy series in the Data view. A SenseCAP S2120 assigned to a
+  zone supplies hourly station inputs.
+- **Valve sync contract**: resources `VALVE_SCHEDULE`, `VALVE_SETTINGS`,
+  `VALVE_RUNTIME` and `VALVE_ACTUATION`, and cloud commands
+  `UPSERT_VALVE_SCHEDULE`, `DELETE_VALVE_SCHEDULE`, `UPSERT_VALVE_SETTINGS`,
+  `SET_VALVE_SCHEDULER_STATUS`, `RESEND_VALVE_PLAN` and
+  `CANCEL_VALVE_ACTUATION` (which fails closed when ChirpStack is
+  unavailable).
+- **WATERMARK cloud parity** (`0068__watermark_cloud_parity.sql`): calibration
+  rows sync as events and in bootstrap and force-sync snapshots. The edge
+  accepts four protected cloud commands (`SET_WATERMARK_CALIBRATION`,
+  `DELETE_WATERMARK_CALIBRATION`, `SET_CHAMELEON_CONFIG`,
+  `UPSERT_DEVICE_SOIL_DEPTHS`) through `osi-command-ledger` with an exact-base
+  check, command-id and effect-key dedupe, and one transaction per command,
+  behind the capabilities `watermark_v1`, `chameleon_config_commands_v1` and
+  `device_soil_depth_commands_v1`.
+- **Versioned zone sync** (`0046__zone_insert_outbox.sql` to
+  `0050__weather_station_zone_backfill.sql`): a zone insert emits
+  `ZONE_UPSERTED`; versioned `UPSERT_ZONE`, `DELETE_ZONE` and
+  `UPSERT_ZONE_LOCATION` commands; irrigation calibration and weather-station
+  zone assignments carry a `sync_version` and sync.
+- **Zone and device rename**: `PUT /api/irrigation-zones/:id/name` and
+  `PUT /api/devices/:deveui/name`, cloud commands `UPSERT_ZONE_NAME` and
+  `UPSERT_DEVICE_NAME` behind `entity_name_commands_v1`, one name rule in
+  `osi-entity-name` for every write path, the ChirpStack device name updated
+  best effort, and an inline name editor on eight cards.
+- **Field Journal** (`0018__field_journal.sql` to
+  `0021__journal_plot_lookup_indexes.sql`, `0031__journal_catalog_v2.sql` to
+  `0043__journal_v2_media.sql`): typed field activities against plots and
+  zones, catalog v10, plot context and crop cycles, capture and desktop GUI,
+  exports, and cloud-primary replication over its own channel
+  (`osi-journal-replication`) with media caching under
+  `osi-server.cloud.journal_media_root`.
+- **Scoped multi-user access** (`0044__scoped_access_schema.sql`,
+  `0045__scoped_access_backfill.sql`): account-wide reads, grant-gated writes,
+  admin screens for users and grants. Off by default
+  (`osi-server.cloud.scoped_access_enabled=0`); with it off, auth routes do
+  not load the scope helper.
+- Durable history batches (`0051__durable_history_batch.sql`), installation
+  identity with a v2 offline verifier keyed on the installation UUID
+  (`0052`, `0053`), and per-device installation-location and
+  radio-configuration revisions synced as protected events (`0054` to
+  `0056`).
+- Terra zone-selection commands apply atomically and acknowledge with the
+  full correlation envelope the cloud expects.
+- Repairable sync rejections (`0059__sync_rejection_recovery.sql`): rejected
+  outbox rows keep a fixed code and class; an audited exact-UUID route
+  (`POST /api/sync/outbox/recover`, admin) and a dry-run-by-default CLI
+  re-queue a row once, given a complete cloud replay receipt. Force Sync
+  reports applied, duplicate, retryable, rejected, protocol-error and pending
+  counts.
+- Per-event exponential backoff for retryable outbox failures (30 s doubling
+  to a 1 h cap) instead of a resend every cycle.
+- VIA-style water-status pill (Wet, Moist, Dry) on current SWT readings on
+  the KIWI, SDI-12, LSN50 Chameleon and zone water cards; no status for
+  missing, stale, faulted or out-of-range readings.
+- Settings → Modules: Data view, Network, Gateway hub and Field Journal can
+  be switched off per gateway (`app_settings`), with defaults from
+  `osi-module-defaults`.
+- The cloud MQTT broker URL is configurable with
+  `osi-server.cloud.mqtt_broker_url`.
+- Persistent system log: `node-red.init` points syslog at
+  `/data/log/osi-system.log` (two files of 2 MiB), so boot-node failures
+  survive a power cycle.
+- Operator tools: `scripts/reconcile-ledger-numbering.js`,
+  `scripts/restamp-fingerprints.js --report`,
+  `scripts/requeue-rejected-outbox.js` (dry run by default), the
+  `osi-sync-protocol-state` CLI, and the offline deploy bundle scripts.
+- CI and developer tooling: workflows for doc hygiene, Field Journal, journal
+  catalog parity and ui-core vendor parity; new verifiers including
+  `verify-seed-db-ledger.js`, `verify-trigger-body-parity.js`,
+  `verify-rename-swap-fence.js`, `verify-flows-output-arity.js`,
+  `verify-module-file-deploy-coverage.js`, `verify-auth-flag-off-hermetic.js`,
+  `verify-init-log-capture.js`, `verify-live-gateway-identity.js`,
+  `verify-sdi12-codec.js`, `verify-lsn50-watermark-codec.js` and
+  `verify-doc-hygiene.js` with a pre-push guard; sync triggers generated
+  from one canonical source (`scripts/generate-sync-trigger-source.js`);
+  vendored ui-core GUI primitives; an offline WATERMARK dry-down analyzer; a
+  standalone presentation simulator (`npm run demo:build`) that is not part
+  of the gateway GUI.
 - Live gateway identity convergence: `osi-identityd` reconciles provisional
   boot identity to concentratord's authoritative EUI, persists it through the
   shared helper, warns operators for 60 seconds, and restarts Node-RED once so
@@ -18,14 +192,104 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   in-progress message before the daemon restarts Node-RED.
 
 ### Changed
+- An assigned LSN50 counts as a soil source when it is a Chameleon node, a
+  WATERMARK node, or has none of the dendrometer, temperature, rain-gauge and
+  flow-meter modes; a plain LSN50's third SWT channel is no longer shown.
+- The Network module defaults to automatic: shown only when a RAK10701 field
+  tester is registered, unless set explicitly.
+- Module switches are gateway-level settings shared by every user, replacing
+  the per-browser preferences of the first version.
+- `deploy.sh`: flows and GUI deploy and roll back as one pair; readiness is
+  checked through the named procd service within a 30 s window; Node-RED stays
+  stopped when a migration committed and no compatible payload exists; a fresh
+  install seeds a database already stamped at the migration head; the firmware
+  `sqlite3` module survives `npm install` on armv7l and musl; the command
+  ledger and the WATERMARK binding install from SHA-256-pinned copies after
+  the migration.
+- The migration runner skips an `ADD COLUMN` whose column already exists with
+  a matching definition, and its fingerprints ignore the gateway EUI literal
+  in trigger fallbacks (normalizer v3).
+- The cloud sync token is refreshed once less than half its lifetime remains,
+  instead of only in its last 24 h.
+- The heartbeat carries `sync_rejected_recent`, and `health_state` uses the
+  24 h rejection count instead of the all-time one.
+- Rejected outbox rows are pruned after 14 days.
+- Every ChirpStack gRPC call carries a deadline: 20 s by default,
+  `OSI_CHIRPSTACK_GRPC_DEADLINE_MS` to override.
+- A local zone create or delete, or an applied cloud zone command, flushes the
+  outbox at once instead of waiting for the 30 s tick; only one flush runs at a
+  time.
+- Cloud command registration also maps `MILESIGHT_UC512`.
 - `osi-bootstrap`, account link, and account unlink publish restart requests
   for `osi-identityd` instead of starting their own Node-RED restart paths.
 
 ### Fixed
+- Deploy: Node-RED is never restarted on the old payload after a migration
+  has run, which had let the previous boot node rebuild `devices` against the
+  migrated schema and cascade-delete `device_data`. The boot node's `devices`
+  rebuild now follows the seed's column order and copies by live column name.
+- Deploy: a no-op migration no longer marks the database as migrated; after
+  a later failure the deploy restores the retained flows and GUI pair when the
+  schema is still compatible with it; the ledger reconciliation probe
+  compares every applied row, not only the lowest.
+- UC512 and SDI-12 uplinks wrote no `device_data` row because the writer
+  called `db.prepare` on a database facade that has none.
+- SenseCAP S2120 wind gust read the wrong measurement; STREGA Gen2 battery
+  percent was derived from a raw voltage. Missing STREGA climate and battery
+  values stay null instead of becoming 0.
+- A republished ChirpStack uplink no longer creates a second `device_data`
+  row (bounded in-memory dedup on `deduplicationId`).
+- A ChirpStack 4.12 unset key read back as 32 zeros is treated as unset.
+- Valves: the card shows the state the valve reported, not the commanded
+  target; deleting a valve clears its on-valve plan; cloud schedule commands
+  are keyed by schedule UUID and valve; a soft-deleted schedule revives on a
+  matching upsert; a one-time open keeps its dispatch intent across a restart
+  and is never sent twice (`0057__valve_once_dispatch_intents.sql`); archived
+  actuation events have stable IDs; push state breaks timestamp ties by row
+  id; a cloud STREGA command runs the expectation writer once.
+- Sync: rejected events no longer count as delivery successes, and the
+  account-link page shows rejected events and the re-authentication path when
+  the token has expired; the outbox marker treats a missing result or status
+  0 as retryable; command ACKs are marked delivered per entry; a local command
+  id no longer poisons the ACK queue; schedule and device-zone commands are
+  acknowledged only after the database shows the change; replayed
+  work-request status commands return the original ACK; free-text fields are
+  capped at 255 characters before the cloud rejects them;
+  `valve_schedules.deleted_at` ships as UTC ISO; zone time zone and location
+  edits bump `sync_version`.
+- Gateway attribution triggers fall back to the persisted link identifier,
+  and linking commits account state and blank gateway identifiers in one
+  transaction (`0058__gateway_eui_fallback.sql`).
+- Account link works against a cloud that predates installation identity.
+- Journal replication and the SDI-12 recipe poll stay quiet on gateways and
+  clouds without those capabilities.
+- API: assigning an unknown DevEUI to a zone answered nothing (the client
+  hung); deleting an unknown device answers 404; zone time zones are
+  validated.
+- GUI: the zone ✕ unassigns a device instead of unlinking it from the
+  account; the water card shows no invented numbers for a zone without data
+  and no English prose from the cloud bundle; the Network nav label is
+  translated; water-chart bars carry the right day west of UTC; the system
+  card, grants page, dendrometer calibration, schedule titles, LSN50 mode
+  captions, account-link sync screens and valve clocks are localized; zone
+  card links follow the module switches; analysis charts load lazily and show
+  only the soil channels a device has.
 - Fresh flashes with concentratord enabled no longer stay stuck on a
   MAC-derived provisional gateway identity until an operator restarts Node-RED.
   Link and sync builders fail closed while an identity transition is healing or
   waiting for the warned restart.
+
+### Removed
+- The legacy boot-DDL nodes that altered `users` on every start; their
+  columns are in the seed and `0001__baseline.sql`.
+
+### Security
+- The Node-RED editor and admin API are closed by default
+  (`httpAdminRoot: false`); `/gui` and the product routes are unchanged.
+- `GET /api/system/stats` and `GET /download-fieldtest` require a bearer
+  token; in 0.7.0 both answered without one.
+- `PUT /api/irrigation-zones/:zone_id/timezone` changes only a zone the
+  caller owns; in 0.7.0 any signed-in user could change any zone.
 
 ---
 
