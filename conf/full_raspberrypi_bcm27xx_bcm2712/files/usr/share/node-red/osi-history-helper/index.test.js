@@ -252,6 +252,50 @@ test('deriveCardsForZone treats a plain LSN50 as a soil source before samples ar
   assert.equal(cards[0].sourceDeviceCount, 1);
 });
 
+test('annotateWatermarkEvidence marks LSN50 rows from retained calibrations and stored readings in one query', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const { DatabaseSync } = require('node:sqlite');
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(fs.readFileSync(path.resolve(__dirname, '../../../../../../../database/seed-blank.sql'), 'utf8'));
+  const now = '2026-09-30T09:00:00.000Z';
+  const device = (eui, type, flags = {}) => raw.prepare(
+    'INSERT INTO devices(deveui,name,type_id,temp_enabled,dendro_enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)'
+  ).run(eui, eui, type, flags.temp || 0, flags.dendro || 0, now, now);
+  const calibration = (eui, deletedAt = null) => raw.prepare(
+    'INSERT INTO watermark_calibrations(deveui,pullup_1_ohm,pulldown_1_ohm,series_fwd_1_ohm,series_rev_1_ohm,' +
+    'pullup_2_ohm,pulldown_2_ohm,series_fwd_2_ohm,series_rev_2_ohm,deleted_at) VALUES(?,41670,41260,130,112,42530,42070,46,27,?)'
+  ).run(eui, deletedAt);
+  device('A840410000000001', 'DRAGINO_LSN50', { temp: 1 });
+  device('A840410000000002', 'DRAGINO_LSN50', { temp: 1 });
+  device('A840410000000003', 'DRAGINO_LSN50', { temp: 1 });
+  device('A840410000000004', 'DRAGINO_LSN50', { dendro: 1 });
+  device('A840410000000005', 'KIWI_SENSOR');
+  calibration('A840410000000001');
+  raw.prepare(
+    "INSERT INTO watermark_readings(deveui,recorded_at,payload_hex,frame_status,conversion_version) VALUES(?,?,?,?,?)"
+  ).run('A840410000000002', now, 'a2', 'accepted', 'wm-lsn50-p3-v1');
+  calibration('A840410000000003', now);
+  calibration('A840410000000004');
+  const queries = [];
+  const db = { all: (sql, params) => { queries.push(sql); return raw.prepare(sql).all(...params); } };
+  const rows = raw.prepare('SELECT * FROM devices ORDER BY deveui').all().map((row) => ({ ...row, deveui: row.deveui.toLowerCase() }));
+  const annotated = await hh.annotateWatermarkEvidence(db, rows);
+  assert.equal(queries.length, 1, 'one query for the whole device list');
+  const byEui = Object.fromEntries(annotated.map((row) => [row.deveui.toUpperCase(), row]));
+  assert.equal(byEui.A840410000000001.watermark_evidence, 1, 'retained calibration');
+  assert.equal(byEui.A840410000000002.watermark_evidence, 1, 'stored reading');
+  assert.equal(byEui.A840410000000003.watermark_evidence, 0, 'a deleted calibration is no evidence');
+  assert.equal(byEui.A840410000000004.watermark_evidence, 1, 'dendrometer with an old calibration row');
+  assert.equal(Object.prototype.hasOwnProperty.call(byEui.A840410000000005, 'watermark_evidence'), false);
+  assert.deepEqual(annotated.filter(hh.isSoilSource).map((row) => row.deveui.toUpperCase()),
+    ['A840410000000001', 'A840410000000002', 'A840410000000005']);
+  queries.length = 0;
+  assert.deepEqual(await hh.annotateWatermarkEvidence(db, [byEui.A840410000000005]), [byEui.A840410000000005]);
+  assert.equal(queries.length, 0, 'no query without an LSN50');
+  raw.close();
+});
+
 test('aggregateRows filters non-Chameleon LSN50 SWT3 before aggregation and cadence', () => {
   const rows = [
     { deveui: 'A84041A171000001', recorded_at: '2026-07-10T00:00:00.000Z', swt_1: 10, swt_3: 90 },

@@ -121,3 +121,70 @@ test('shipped history router keeps soil rollups for a zone without a plain LSN50
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Owner rule: an LSN50 with WATERMARK evidence (a retained calibration or any
+// stored reading) is a soil source whatever its temperature flag says, and is
+// also an Environment source when temp_enabled is set. A temperature-only
+// LSN50 without evidence, and a dendrometer LSN50 with an old calibration row,
+// stay out of the Soil card.
+test('shipped history router keeps a temperature-enabled WATERMARK node as a soil source', async () => {
+  const dir = fs.mkdtempSync(path.join('/var/tmp', 'osi-history-soil-watermark-'));
+  const dbPath = path.join(dir, 'fixture.db');
+  try {
+    seedFixtureDb(dbPath);
+    const db = new DatabaseSync(dbPath);
+    db.exec('DELETE FROM device_data; DELETE FROM devices;');
+    db.exec(`
+      INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at, irrigation_zone_id,
+        dendro_enabled, temp_enabled, rain_gauge_enabled, flow_meter_enabled, chameleon_enabled, gateway_device_eui)
+      VALUES
+        ('A840410000000011', 'Watermark LSN50', 'DRAGINO_LSN50', 1, '2026-07-10T00:00:00.000Z', '2026-07-10T00:00:00.000Z', 1, 0, 1, 0, 0, 0, '0016C001F1000001'),
+        ('A840410000000012', 'Temperature LSN50', 'DRAGINO_LSN50', 1, '2026-07-10T00:00:00.000Z', '2026-07-10T00:00:00.000Z', 1, 0, 1, 0, 0, 0, '0016C001F1000001'),
+        ('A840410000000013', 'Dendro LSN50', 'DRAGINO_LSN50', 1, '2026-07-10T00:00:00.000Z', '2026-07-10T00:00:00.000Z', 1, 1, 0, 0, 0, 0, '0016C001F1000001');
+      INSERT INTO watermark_calibrations (deveui, pullup_1_ohm, pulldown_1_ohm, series_fwd_1_ohm, series_rev_1_ohm,
+        pullup_2_ohm, pulldown_2_ohm, series_fwd_2_ohm, series_rev_2_ohm)
+      VALUES
+        ('A840410000000011', 41670, 41260, 130, 112, 42530, 42070, 46, 27),
+        ('A840410000000013', 41670, 41260, 130, 112, 42530, 42070, 46, 27);
+      INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2, ext_temperature_c)
+      VALUES
+        ('A840410000000011', '2026-07-10T11:00:00.000Z', 25, 35, 18.5),
+        ('A840410000000012', '2026-07-10T11:00:00.000Z', 999, 998, 19.5),
+        ('A840410000000013', '2026-07-10T11:00:00.000Z', 888, 887, NULL);
+    `);
+    db.close();
+
+    const cards = await runNodeForRoute(readNodeFunc(), dbPath, {
+      name: 'watermark-cards', method: 'GET', path: '/api/history/zones/1/cards',
+      params: { zoneId: '1' }, query: {},
+    });
+    assert.equal(cards.statusCode, 200);
+    const byType = Object.fromEntries(cards.payload.cards.map((card) => [card.cardType, card]));
+    assert.deepEqual(byType.soil.sourceDevices.map((device) => device.name), ['Watermark LSN50']);
+    assert.deepEqual(byType.environment.sourceDevices.map((device) => device.name).sort(),
+      ['Temperature LSN50', 'Watermark LSN50']);
+
+    const data = await runNodeForRoute(readNodeFunc(), dbPath, {
+      name: 'watermark-soil', method: 'GET',
+      path: '/api/history/zones/1/cards/test-zone-uuid-1:soil:root-zone/data',
+      params: { zoneId: '1', cardId: 'test-zone-uuid-1:soil:root-zone' },
+      query: { range: '24h', aggregation: 'hourly' },
+    });
+    assert.equal(data.statusCode, 200);
+    const series = Object.fromEntries(data.payload.series.map((entry) => [entry.id, entry]));
+    assert.deepEqual(series.swt_1.points.map((point) => point.mean), [25]);
+    assert.deepEqual(series.swt_2.points.map((point) => point.mean), [35]);
+    assert.equal(series.swt_3, undefined, 'a non-Chameleon LSN50 exposes no SWT3');
+
+    const csv = await runNodeForRoute(readNodeFunc(), dbPath, {
+      name: 'watermark-export', method: 'GET', path: '/api/history/zones/1/export.csv',
+      params: { zoneId: '1' }, query: { granularity: 'raw', from: '2026-07-10', to: '2026-07-10' },
+    });
+    assert.equal(csv.statusCode, 200);
+    const soilLines = String(csv.payload).split('\n').filter((line) => line.includes(',soil,'));
+    assert.ok(soilLines.some((line) => line.includes('Watermark LSN50') && line.includes(',swt_1,') && line.endsWith(',25')));
+    assert.ok(!soilLines.some((line) => /Temperature LSN50|Dendro LSN50/.test(line)));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

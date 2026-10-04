@@ -432,16 +432,53 @@ function deviceBelongsToZone(device, zone) {
   return !!zoneUuid && !!deviceZoneUuid && zoneUuid === deviceZoneUuid;
 }
 
+// A WATERMARK node is a DRAGINO_LSN50 with positive WATERMARK evidence: a
+// retained (not deleted) watermark_calibrations row or at least one
+// watermark_readings row. The device row carries that evidence as
+// watermark_evidence, set by annotateWatermarkEvidence where the rows are
+// loaded; a row without it is not a WATERMARK node.
+function isWatermarkNode(device) {
+  return deviceTypeId(device) === 'DRAGINO_LSN50' && flagEnabled(device, 'watermark_evidence');
+}
+
+// An LSN50 is a soil source when it is a Chameleon device, or a WATERMARK node,
+// or none of dendro/temp/rain/flow is set. A WATERMARK frame always carries a
+// temperature, so temp_enabled does not hide its SWT1/SWT2; dendro, rain gauge
+// and flow meter use the same inputs and still exclude it.
 function isSoilSource(device) {
   const type = deviceTypeId(device);
   if (type === 'DRAGINO_LSN50') {
     if (isChameleonDevice(device)) return true;
-    return !['dendro_enabled', 'temp_enabled', 'rain_gauge_enabled', 'flow_meter_enabled']
-      .some((flag) => flagEnabled(device, flag));
+    if (['dendro_enabled', 'rain_gauge_enabled', 'flow_meter_enabled'].some((flag) => flagEnabled(device, flag))) {
+      return false;
+    }
+    return isWatermarkNode(device) || !flagEnabled(device, 'temp_enabled');
   }
   return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12'].includes(type)
     || isChameleonDevice(device)
     || hasNumber(device, ['swt_1', 'swt_2', 'swt_3', 'swt_wm1', 'swt_wm2']);
+}
+
+// Adds watermark_evidence (1 or 0) to every DRAGINO_LSN50 row, with one query
+// for the whole list. Other rows are returned unchanged.
+async function annotateWatermarkEvidence(db, devices) {
+  const rows = Array.isArray(devices) ? devices : [];
+  const lsn50Euis = Array.from(new Set(rows
+    .filter((device) => deviceTypeId(device) === 'DRAGINO_LSN50')
+    .map((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)))
+    .filter(Boolean)));
+  if (!lsn50Euis.length) return rows;
+  const found = await dbAll(db,
+    'WITH ids(eui) AS (VALUES ' + lsn50Euis.map(() => '(?)').join(',') + ') ' +
+    'SELECT eui FROM ids WHERE EXISTS (SELECT 1 FROM watermark_calibrations c WHERE c.deveui = ids.eui AND c.deleted_at IS NULL) ' +
+    'OR EXISTS (SELECT 1 FROM watermark_readings r WHERE r.deveui = ids.eui)',
+    lsn50Euis);
+  const evidence = new Set(found.map((row) => normalizeDeveui(row && row.eui)).filter(Boolean));
+  return rows.map((device) => {
+    if (deviceTypeId(device) !== 'DRAGINO_LSN50') return device;
+    const eui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    return { ...device, watermark_evidence: eui && evidence.has(eui) ? 1 : 0 };
+  });
 }
 
 function isEnvironmentSource(device) {
@@ -1682,7 +1719,7 @@ async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
     timezone: device.zone_timezone || 'UTC',
   };
   const zoneDeviceFilter = optionalUserFilter(options, 'devices');
-  const devices = await dbAll(db, `SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?${zoneDeviceFilter.sql} ORDER BY deveui ASC`, [device.zone_id].concat(zoneDeviceFilter.params));
+  const devices = await annotateWatermarkEvidence(db, await dbAll(db, `SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?${zoneDeviceFilter.sql} ORDER BY deveui ASC`, [device.zone_id].concat(zoneDeviceFilter.params)));
   const cards = deriveCardsForZone(zone, devices);
   for (const card of cards) {
     const sourceDevices = sourceDevicesForCard(card, devices);
@@ -2074,7 +2111,7 @@ async function resolveZoneExportScope(db, options = {}) {
 
   const start = zoneDateStartIso(from, timezone);
   const end = zoneDateStartIso(addIsoDays(to, 1), timezone);
-  const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]);
+  const devices = await annotateWatermarkEvidence(db, await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC', [zoneId]));
   const cards = deriveCardsForZone(zone, devices).filter((card) => normalizeCardType(card.cardType) !== 'gateway');
   const site = String(options.site || process.env.DEVICE_EUI || process.env.GATEWAY_DEVICE_EUI || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
   return { zone, timezone, from, to, start, end, devices, cards, site, requestedChannelKeys: normalizeExportChannels(options.channels), granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
@@ -2328,7 +2365,7 @@ async function runRollupJob(db, options = {}) {
 
   for (const zone of zones) {
     try {
-      const devices = await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]);
+      const devices = await annotateWatermarkEvidence(db, await dbAll(db, 'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ?', [zone.id]));
       const cards = deriveCardsForZone(zone, devices);
       for (const card of cards) {
         const sourceDevices = sourceDevicesForCard(card, devices);
@@ -2916,6 +2953,7 @@ function buildAdvancedMetadataPlaceholder(input = {}) {
 
 const analysis = createAnalysis({
   aggregateRows,
+  annotateWatermarkEvidence,
   dbAll,
   deriveCardsForZone,
   displayDeviceName,
@@ -2969,6 +3007,8 @@ module.exports = {
   filterSoilChannelsForSources,
   filterSoilRowsForSources,
   isSoilSource,
+  isWatermarkNode,
+  annotateWatermarkEvidence,
   isLsn50Swt3Eligible,
   aggregateDeviceData,
   buildAdvancedMetadataPlaceholder,

@@ -414,6 +414,7 @@ function displaySafeDeviceContext(device) {
 function createAnalysis(deps) {
   const {
     aggregateRows,
+    annotateWatermarkEvidence,
     dbAll,
     deriveCardsForZone,
     displayDeviceName,
@@ -484,7 +485,9 @@ function createAnalysis(deps) {
 
     for (const zone of zones) {
       const timezone = normalizeTimezone(zone.timezone);
-      const devices = zoneUuids === null
+      // Production wiring (osi-history-helper index.js) always injects the
+      // annotator; structural tests that omit it see the raw rows.
+      const loadedDevices = zoneUuids === null
         ? await dbAll(
           db,
           'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? AND user_id = ? ORDER BY deveui ASC',
@@ -495,6 +498,9 @@ function createAnalysis(deps) {
           'SELECT * FROM devices WHERE deleted_at IS NULL AND irrigation_zone_id = ? ORDER BY deveui ASC',
           [zone.id]
         );
+      const devices = typeof annotateWatermarkEvidence === 'function'
+        ? await annotateWatermarkEvidence(db, loadedDevices)
+        : loadedDevices;
       const cards = deriveCardsForZone(zone, devices);
       for (const card of cards) {
         const sourceDevices = sourceDevicesForCard(card, devices)

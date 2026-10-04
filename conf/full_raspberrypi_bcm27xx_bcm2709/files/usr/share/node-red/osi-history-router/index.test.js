@@ -138,6 +138,14 @@ test('isSoilSource', function() {
     assert.strictEqual(HR.isSoilSource({ type: 'dragino_lsn50', [canonical]: 0, [alias]: 1 }), true);
   }
   assert.strictEqual(HR.isSoilSource({ type_id: 'STREGA_VALVE' }), false);
+  // A WATERMARK node (positive evidence carried as watermark_evidence) stays a
+  // soil source with temp_enabled; dendro, rain gauge and flow meter still exclude it.
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', temp_enabled: 1, watermark_evidence: 1 }), true);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', temp_enabled: 1, watermark_evidence: 0 }), false);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', dendro_enabled: 1, watermark_evidence: 1 }), false);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', rain_gauge_enabled: 1, watermark_evidence: 1 }), false);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'DRAGINO_LSN50', flow_meter_enabled: 1, temp_enabled: 1, watermark_evidence: 1 }), false);
+  assert.strictEqual(HR.isSoilSource({ type_id: 'KIWI_SENSOR', watermark_evidence: 0 }), true);
   assert.strictEqual(HR.isSoilSource(null), false);
 });
 

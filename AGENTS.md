@@ -214,6 +214,22 @@ sample. Chameleon-enabled LSN50 and `DRAGINO_SDI12` sources retain SWT3; mixed
 zones filter SWT3 per device so a plain LSN50 cannot inherit another source's
 third channel.
 
+An assigned LSN50 is a soil source when it is a Chameleon device, or a WATERMARK
+node, or none of `dendro_enabled`, `temp_enabled`, `rain_gauge_enabled` and
+`flow_meter_enabled` is set. A WATERMARK node is an LSN50 with WATERMARK
+evidence: a retained (not deleted) `watermark_calibrations` row or at least one
+`watermark_readings` row. A WATERMARK frame always carries a temperature, so
+`temp_enabled` does not remove the node from the Soil card; with that flag it
+also feeds the Environment card. `dendro_enabled`, `rain_gauge_enabled` and
+`flow_meter_enabled` still exclude it, because those modes use the same inputs.
+Its soil channels are SWT1 and SWT2. `isSoilSource` in `osi-history-helper` is
+the one implementation (the history router delegates to it), and the device
+rows carry the evidence from one query per load (`annotateWatermarkEvidence`).
+The cloud history view applies the same rule. A soil card reads raw
+`device_data` instead of `history_channel_rollups` only when one of its sources
+is an LSN50 without Chameleon, because a merged rollup may hold that device's
+stale SWT3.
+
 ### Live gateway identity convergence
 
 `osi-identityd` is the procd-supervised owner of live gateway identity after
