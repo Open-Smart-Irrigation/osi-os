@@ -456,3 +456,36 @@ test('validates old-ledger plus candidate-binding compatibility and preserves it
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A killed deploy (SIGKILL skips the EXIT trap) leaves its PID-named stage
+// directory behind, and the next deploy has another PID. Staging starts by
+// removing every earlier stage directory, so they do not accumulate.
+test('staging removes stage directories left by earlier killed deploys', () => {
+  const match = /^stage_command_ledger_dependency\(\) \{\n[\s\S]*?\n\}\n/m.exec(DEPLOY);
+  assert.ok(match, 'stage_command_ledger_dependency must be defined in deploy.sh');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-stage-root-'));
+  try {
+    for (const leftover of ['.osi-command-ledger-stage.111', '.osi-command-ledger-stage.222']) {
+      fs.mkdirSync(path.join(root, leftover, 'osi-command-ledger'), { recursive: true });
+      fs.writeFileSync(path.join(root, leftover, 'osi-command-ledger', 'index.js'), 'stale');
+    }
+    fs.mkdirSync(path.join(root, 'osi-command-ledger'));
+    fs.writeFileSync(path.join(root, '.osi-command-ledger-stage-notes'), 'not a stage directory');
+    const script = [
+      'set -e',
+      `COMMAND_LEDGER_STAGE_ROOT='${root}'`,
+      `COMMAND_LEDGER_STAGE='${root}/.osi-command-ledger-stage.333'`,
+      `COMMAND_LEDGER_INSTALLER='${root}/installer.js'`,
+      `COMMAND_LEDGER_HELPER_SHA256='${'c'.repeat(64)}'`,
+      'fetch_required() { :; }',
+      'node() { printf %s "$COMMAND_LEDGER_HELPER_SHA256"; }',
+      match[0],
+      'stage_command_ledger_dependency',
+    ].join('\n');
+    execFileSync('sh', ['-c', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const entries = fs.readdirSync(root).sort();
+    assert.deepEqual(entries, ['.osi-command-ledger-stage-notes', '.osi-command-ledger-stage.333', 'osi-command-ledger']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

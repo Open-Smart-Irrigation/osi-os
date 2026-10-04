@@ -62,7 +62,8 @@ MIGRATION_RUNNER_AVAILABLE=0
 SWAP_JS="$TMP_DIR/deploy-payload-swap.js"
 SWAP_ROOT="${SWAP_ROOT:-/srv/node-red}"
 COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
-COMMAND_LEDGER_STAGE="/srv/node-red/.osi-command-ledger-stage.$$"
+COMMAND_LEDGER_STAGE_ROOT="/srv/node-red"
+COMMAND_LEDGER_STAGE="$COMMAND_LEDGER_STAGE_ROOT/.osi-command-ledger-stage.$$"
 COMMAND_LEDGER_HELPER_SHA256="48ae6cd244908c614d2e0f8d78a60e8a119b64853e2e49cefe5dca1f1bc0f5d8"
 COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
 COMMAND_LEDGER_INDEX_SHA256="6fcffe1a0cafdddee37fda5606ff984af0a5141d93e251a4c0586b2542252d91"
@@ -100,6 +101,9 @@ fetch_required() {
 # independent digest before it is executed.
 stage_command_ledger_dependency() {
     echo "--- WATERMARK command-ledger dependency pair (staged) ---"
+    # A killed deploy (SIGKILL skips the EXIT trap) leaves its PID-named stage
+    # directory behind; remove every earlier one before staging this run.
+    rm -rf "$COMMAND_LEDGER_STAGE_ROOT"/.osi-command-ledger-stage.*
     rm -rf "$COMMAND_LEDGER_STAGE"
     mkdir -m 700 -p "$COMMAND_LEDGER_STAGE"
     fetch_required "command-ledger dependency installer" \
