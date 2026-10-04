@@ -26,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:unit
+      - run: npm run demo:test
   # Upgrade lane: does the same lockfile still install on the next Node LTS
   # (npm 11)? Informational; a failure here does not block a merge.
   install-next-lts:
