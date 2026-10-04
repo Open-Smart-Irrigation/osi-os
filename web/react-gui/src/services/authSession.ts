@@ -113,12 +113,20 @@ function newSnapshot(token: string | null, username: string | null): AuthSession
   });
 }
 
-function publish(next: AuthSessionSnapshot): AuthSessionSnapshot {
+/**
+ * `supersedeLogin: false` is for an involuntary expiry (a 401 of the ending
+ * session): it must not cancel a sign-in the user has already started. A
+ * logout, a newer login and a cross-tab change still supersede it.
+ */
+function publish(
+  next: AuthSessionSnapshot,
+  { supersedeLogin = true }: { supersedeLogin?: boolean } = {},
+): AuthSessionSnapshot {
   removeAccountScopedStorage();
   const ending = epochRequests;
   epochRequests = new AbortController();
   current = next;
-  operationGeneration += 1;
+  if (supersedeLogin) operationGeneration += 1;
   ending.abort();
   resetAuthExpiredSignal();
   for (const listener of [...listeners]) listener();
@@ -154,9 +162,9 @@ export function beginAuthSession(token: string, username: string): AuthSessionSn
 }
 
 /** Logout or expiry: a new, anonymous epoch. */
-export function endAuthSession(): AuthSessionSnapshot {
+export function endAuthSession(options?: { supersedeLogin?: boolean }): AuthSessionSnapshot {
   writeStoredCredentials(null, null);
-  return publish(newSnapshot(null, null));
+  return publish(newSnapshot(null, null), options);
 }
 
 /**
@@ -187,7 +195,7 @@ export function isCurrentAuthSession(snapshot: AuthSessionSnapshot | null | unde
  */
 export function expireAuthSession(captured: AuthSessionSnapshot | null | undefined): boolean {
   if (!captured?.token || !isCurrentAuthSession(captured)) return false;
-  endAuthSession();
+  endAuthSession({ supersedeLogin: false });
   notifyAuthExpired();
   return true;
 }

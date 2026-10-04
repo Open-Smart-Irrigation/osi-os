@@ -219,13 +219,15 @@ api.interceptors.request.use(
       config.adapter = rejectStaleSessionRequest;
       return config;
     }
-    config.signal = abortWithSession(config.signal, currentSessionSignal());
     if (config.skipAuthExpiry) {
-      // A credential request (login, register) never carries a session's
-      // token: it must not present another account's bearer.
+      // A credential request (login, register) belongs to no session: it
+      // carries no session's token, and a session ending while it is in
+      // flight does not cancel it (the login operation fence decides
+      // whether its result may commit).
       config.authSession = undefined;
       return config;
     }
+    config.signal = abortWithSession(config.signal, currentSessionSignal());
     const session = captured ?? getAuthSession();
     const bearer = session.token ? `Bearer ${session.token}` : null;
     const explicit = config.headers.get('Authorization');

@@ -197,6 +197,42 @@ describe('api session binding (#378)', () => {
     expect(expiredEvents).toBe(1);
   });
 
+  it('lets a sign-in in progress finish when a late 401 ends the previous session', async () => {
+    renderApp();
+    const { auth } = authHandle;
+    await loginAs(auth, 'alice');
+    const aliceRequest = api.get(PROBE).catch(() => undefined);
+    await waitFor(() => expect(network.to('GET', PROBE)).toHaveLength(1));
+    const logins: Array<{ respond(data: unknown): void }> = [];
+    network.on('POST', '/auth/login', (request) => {
+      logins.push(request);
+      return 'defer';
+    });
+
+    let bobLogin: Promise<void> = Promise.resolve();
+    act(() => {
+      bobLogin = auth().login({ username: 'bob', password: 'synthetic-password' });
+    });
+    const outcome = bobLogin.then(() => 'committed', (error: { name?: string; code?: string }) => error.code ?? error.name);
+    await waitFor(() => expect(logins).toHaveLength(1));
+
+    await act(async () => {
+      network.to('GET', PROBE)[0].fail(401);
+      await aliceRequest;
+    });
+    expect(auth().isAuthenticated).toBe(false);
+
+    await act(async () => {
+      logins[0].respond({ token: 'token-bob-5' });
+      await outcome;
+    });
+
+    expect(await outcome).toBe('committed');
+    expect(auth().username).toBe('bob');
+    expect(auth().token).toBe('token-bob-5');
+    expect(localStorage.getItem('auth_token')).toBe('token-bob-5');
+  });
+
   it('never ends the current session on a 401 from login or register', async () => {
     network.on('POST', '/auth/register', () => ({ status: 401, data: {} }));
     renderApp();
