@@ -652,6 +652,10 @@
     "636ed15f34fa99c4": {
       "delta": 122,
       "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 657 -> HEAD 779 = +122. Format Response builds the response from msg.osi.request and msg.osi.applied instead of ten flow.get(sched_*) reads, and throws when either is missing."
+    },
+    "c8628cffe45f64f7": {
+      "delta": 90,
+      "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 1499 -> HEAD 1589 = +90. Build Status + ACK drops the flow.get(lastCommandId) fallback and emits the command ACK only when its own _log_ctx carries a command id; a manual or scheduler open has none and used to acknowledge the last routed cloud command."
     }
   },
   "total_allowance": {

@@ -617,6 +617,93 @@ test('valve open and cancel interleaved on different valves', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// STREGA status ACK: a local (manual) open must not acknowledge a cloud command.
+// ---------------------------------------------------------------------------
+function cloudOpen(commandId, eui, minutes) {
+  return {
+    payload: {
+      commandType: 'OPEN_FOR_DURATION',
+      commandId,
+      deviceEui: eui,
+      durationMinutes: minutes,
+      eventUuid: '00000000-0000-4000-8000-0000000000' + String(commandId).padStart(2, '0').slice(-2),
+      aggregateType: 'DEVICE',
+      aggregateKey: eui,
+      appliedSyncVersion: 9,
+      gatewayDeviceEui: GATEWAY_EUI,
+    },
+  };
+}
+
+function commandAcks(rt, name) {
+  return rt.lane(name).published
+    .filter((entry) => entry.node === ID.commandAckMqtt)
+    .map((entry) => JSON.parse(entry.payload));
+}
+
+for (const order of ['cloud first', 'cloud paused']) {
+  test(`STREGA ACK: manual open next to a cloud open (${order})`, async () => {
+    const follow = [ID.toActuator, ID.routeToActuator, ID.toStatusAck];
+    await withRuntime({ scoped: false, follow }, async (rt) => {
+      rt.inject('cloud', ID.routeCommand, cloudOpen(501, VALVE_B, 5));
+      rt.inject('manual', ID.valveHttp, valveMsg('manual', { eui: VALVE_A, minutes: 12 }));
+      if (order === 'cloud first') {
+        await rt.run('cloud');
+        await rt.run('manual');
+      } else {
+        await rt.runUntil('cloud', ID.actuatorLogDb);
+        await rt.run('manual');
+        await rt.run('cloud');
+      }
+      assertValveAccepted(rt, 'manual', { eui: VALVE_A, minutes: 12 });
+      const manualAcks = commandAcks(rt, 'manual');
+      assert.deepEqual(
+        manualAcks.filter((ack) => String(ack.commandId) === '501'),
+        [],
+        'a manual open must not acknowledge cloud command 501: ' + JSON.stringify(manualAcks)
+      );
+      const status = rt.lane('manual').published.filter((entry) => entry.node === ID.statusMqtt);
+      assert.equal(status.length, 1, 'manual open still reports valve status');
+      assert.equal(JSON.parse(status[0].payload).deviceEui, VALVE_A);
+
+      const cloudAcks = commandAcks(rt, 'cloud');
+      assert.equal(cloudAcks.length, 1, 'cloud open acknowledged once: ' + JSON.stringify(cloudAcks));
+      assert.equal(String(cloudAcks[0].commandId), '501');
+    });
+  });
+}
+
+// Generic cloud ACK (Build Schedule ACK): a command routed without its own id must
+// not borrow the id of another command routed after it.
+test('cloud command ACK: a command without commandId does not borrow a later command id', async () => {
+  await withRuntime({ scoped: false }, async (rt) => {
+    const zone = (uuid, name, commandId) => ({
+      payload: Object.assign({
+        commandType: 'UPSERT_ZONE',
+        zoneUuid: uuid,
+        name,
+        appliedSyncVersion: 7,
+        aggregateType: 'ZONE',
+        aggregateKey: uuid,
+      }, commandId === undefined ? {} : { commandId }),
+    });
+    rt.inject('A', ID.routeCommand, zone('z-cloud-a', 'Cloud A'));
+    rt.inject('B', ID.routeCommand, zone('z-cloud-b', 'Cloud B', 77));
+    await rt.runUntil('A', ID.cloudUpdateDb);
+    await rt.run('B');
+    await rt.run('A');
+    const ack = (name) => rt.lane(name).published
+      .filter((entry) => entry.node === ID.scheduleAckMqtt)
+      .map((entry) => JSON.parse(entry.payload));
+    assert.equal(ack('B').length, 1);
+    assert.equal(ack('B')[0].commandId, 77);
+    assert.equal(ack('A').length, 1);
+    assert.equal(ack('A')[0].commandId, null, 'A must not carry B\'s command id');
+    assert.equal(ack('A')[0].aggregateKey, 'z-cloud-a');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Zone schedule PUT: two requests from the same user for different zones.
 // ---------------------------------------------------------------------------
 const SCHEDULE = {

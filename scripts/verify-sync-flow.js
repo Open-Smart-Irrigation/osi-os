@@ -3166,9 +3166,6 @@ pendingChecks.push((async () => {
     env: {
       DEVICE_EUI: gatewayEui,
     },
-    flowState: {
-      lastCommandId: fixture.commandId,
-    },
   });
   const ackMsg = Array.isArray(statusResult) ? statusResult[1] : null;
   const ackPayload = ackMsg && typeof ackMsg.payload === 'string' ? JSON.parse(ackMsg.payload) : null;
