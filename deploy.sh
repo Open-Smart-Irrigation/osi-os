@@ -136,7 +136,14 @@ activate_command_ledger_dependency() {
     echo "--- Activate WATERMARK command-ledger dependency pair ---"
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
-    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    # The installer re-verifies the digests, moves the pair into place and
+    # loads it in a fresh process; it exits non-zero when any of these fails.
+    # This function runs inside "if !" and "|| exit 1", where the shell does
+    # not apply set -e, so the status is checked here.
+    if ! node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"; then
+        echo "ERROR: command-ledger dependency activation failed; the pair was not activated" >&2
+        return 1
+    fi
     COMMAND_LEDGER_ACTIVATED=1
     echo "OK: command-ledger dependency pair activated after schema migration"
 }
