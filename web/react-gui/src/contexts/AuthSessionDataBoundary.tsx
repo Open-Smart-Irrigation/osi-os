@@ -1,6 +1,8 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, type ReactNode } from 'react';
 import { SWRConfig, type SWRConfiguration } from 'swr';
 import {
+  StaleSessionRequestError,
+  isCurrentAuthSession,
   serializeSessionIdentity,
   type AuthSessionSnapshot,
   type SessionBoundRequest,
@@ -58,4 +60,19 @@ export function useSessionRequestSnapshot(): AuthSessionSnapshot | null {
 /** Axios config fragment binding a request to the caller's session. */
 export function sessionBoundRequest(snapshot: AuthSessionSnapshot | null): SessionBoundRequest | undefined {
   return snapshot ? { authSession: snapshot } : undefined;
+}
+
+/**
+ * For a multi-step write: returns a check that throws StaleSessionRequestError
+ * once the session the caller was mounted for has ended. Call it immediately
+ * before each step that follows an await, so the rest of the flow stops
+ * instead of sending this session's data with the next session's token. It
+ * also covers awaits that are not api requests, which the epoch abort signal
+ * cannot cancel. A no-op outside a boundary.
+ */
+export function useSessionFence(): () => void {
+  const snapshot = useSessionRequestSnapshot();
+  return useCallback(() => {
+    if (snapshot && !isCurrentAuthSession(snapshot)) throw new StaleSessionRequestError();
+  }, [snapshot]);
 }

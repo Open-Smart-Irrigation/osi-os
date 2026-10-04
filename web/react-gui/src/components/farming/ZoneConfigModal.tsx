@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { IrrigationZone } from '../../types/farming';
 import { irrigationZonesAPI } from '../../services/api';
+import { useSessionFence } from '../../contexts/AuthSessionDataBoundary';
 import {
   getDeviceLocationErrorMessage,
   getDeviceLocationSupport,
@@ -106,6 +107,9 @@ function optionLabel(t: Translate, option: Option): string {
 export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSaved }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
+  // #378: the save is up to three writes in a row; stop it if the session
+  // ends between them.
+  const sessionFence = useSessionFence();
   // One id prefix per mounted modal, so a dashboard with several zone cards
   // open does not produce duplicate control ids.
   const dateFormat = useDateFormat();
@@ -296,9 +300,11 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
         await irrigationZonesAPI.updateConfig(zone.id, configPayload);
       }
       if (calibrationPayload) {
+        sessionFence();
         await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
       }
       if (locationChanged) {
+        sessionFence();
         await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
       }
       onSaved();
