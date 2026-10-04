@@ -71,7 +71,7 @@ deployed backend.
 **Data-model changes.** None.
 
 **Hardware dependencies.** Two 868 MHz SKU units (supply is intermittent; order first),
-one USB-C power profiler or inline current meter, access to a bench gateway (kaba100 or
+one USB-C power profiler or inline current meter, access to a bench gateway (the demo gateway or
 a lab ChirpStack), optionally an SDR for band confirmation.
 
 **External dependencies.** Arduino-ESP32 (pinned), LilyGoLib 0.2.x, RadioLib 7.7.x.

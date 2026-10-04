@@ -739,8 +739,8 @@ Example uplink event (abbreviated to relevant fields):
   "deviceInfo": {"devEui": "70b3d5…", "deviceProfileId": "<SURVEYOR>"},
   "fCnt": 42, "fPort": 10, "dr": 3, "data": "Ee++BwAJqD89HEDIFgWYAQYJVwM=",
   "rxInfo": [
-    {"gatewayId": "0016c001f11766e7", "rssi": -80, "snr": 5.0, "channel": 2},
-    {"gatewayId": "0016c001f11715e2", "rssi": -112, "snr": -9.5, "channel": 2}
+    {"gatewayId": "0016c001f1000001", "rssi": -80, "snr": 5.0, "channel": 2},
+    {"gatewayId": "0016c001f1000002", "rssi": -112, "snr": -9.5, "channel": 2}
   ],
   "txInfo": {"frequency": 868300000}
 }
@@ -952,7 +952,7 @@ Screens (`ui/` module, one LVGL screen each):
 HOME                          STATUS                        WALK SURVEY (running)
 ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────────────┐
 │ OSI Surveyor    87%▮ │      │ RADIO  SX1262 868MHz │      │ ▲12dB  GW:2   #047   │
-│ Hub: kaba100  EU868  │      │  switch: BUILT-IN ✓  │      │                      │
+│ Hub: demo-gw  EU868  │      │  switch: BUILT-IN ✓  │      │                      │
 │                      │      │ SESSION joined       │      │  UP ███████████░ 45/47│
 │  ► Quick probe       │      │  fcnt 1042  DR3      │      │  DL ██░ 2/3 sampled  │
 │  ► Point test        │      │ GNSS 9 sats  3.2m    │      │                      │
@@ -963,8 +963,8 @@ HOME                          STATUS                        WALK SURVEY (running
 
 POINT TEST (running)          SESSION SUMMARY               SYNC
 ┌──────────────────────┐      ┌──────────────────────┐      ┌──────────────────────┐
-│ sample 18/30   #B2F1 │      │ point  #B2F1  ✓done  │      │ Wi-Fi: OSI-OS-66E7 ✓ │
-│                      │      │ UP  sent 30          │      │ hub kaba100          │
+│ sample 18/30   #B2F1 │      │ point  #B2F1  ✓done  │      │ Wi-Fi: OSI-OS-0001 ✓ │
+│                      │      │ UP  sent 30          │      │ hub demo-gw          │
 │   margin  11 dB      │      │     heard*  n/a→sync │      │ 3 sessions to send   │
 │   gateways  2        │      │ LC  margin med 11dB  │      │ ▸ B2F1 sending 62%   │
 │   DL 2/2 received    │      │ DL  2/2              │      │ ▸ 9A03 waiting       │

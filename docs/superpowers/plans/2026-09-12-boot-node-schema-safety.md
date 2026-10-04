@@ -4,11 +4,11 @@
 
 **Goal:** Close the P0 cluster left by the 2026-09-11/12 Uganda incident so that a Node-RED boot can no longer drop, block, or silently diverge the `devices` table, and so the next such failure is visible in logs and caught in CI.
 
-**Architecture:** The frozen `sync-init-fn` boot node keeps its one sanctioned job, converging the `devices.type_id` CHECK, but stops carrying a hand-written column list. The DDL and the copy statement are both built from one `DEVICES_COLUMNS` table in seed order, the copy reads the live column set inside the rebuild transaction and refuses to run when the live table carries a column the payload does not know, and CI asserts the table matches `seed-blank.sql` and covers every migration-added column. The Silvan EUI literal is retired by one new ordered migration plus a boot-node change that makes both sides emit byte-identical trigger text.
+**Architecture:** The frozen `sync-init-fn` boot node keeps its one sanctioned job, converging the `devices.type_id` CHECK, but stops carrying a hand-written column list. The DDL and the copy statement are both built from one `DEVICES_COLUMNS` table in seed order, the copy reads the live column set inside the rebuild transaction and refuses to run when the live table carries a column the payload does not know, and CI asserts the table matches `seed-blank.sql` and covers every migration-added column. The customer test gateway EUI literal is retired by one new ordered migration plus a boot-node change that makes both sides emit byte-identical trigger text.
 
 **Tech Stack:** Node.js 20 (`node:test`, `node:sqlite`), SQLite 3 (`sqlite3` CLI on device), Node-RED function nodes inside `flows.json`, OpenWrt procd init scripts, `lib/osi-migrate` ordered-migration runner.
 
-**Spec:** `docs/superpowers/specs/2026-09-12-boot-node-schema-safety-brief.md` (verified P0 brief, 2026-09-12) and its adversarial review `docs/superpowers/specs/2026-09-13-boot-node-schema-safety-review.md` (2026-09-13), plus GitHub issues osi-os #219, #220, #221, #224, #223, #173, #157, #153, #93, #87, #222.
+**Spec:** `docs/superpowers/specs/2026-09-12-boot-node-schema-safety-brief.md` (archived; verified P0 brief, 2026-09-12) and its adversarial review `docs/superpowers/specs/2026-09-13-boot-node-schema-safety-review.md` (archived; 2026-09-13), plus GitHub issues osi-os #219, #220, #221, #224, #223, #173, #157, #153, #93, #87, #222.
 
 ## Execution status / review decisions (2026-09-13)
 
@@ -27,7 +27,7 @@ Wave 1 and Wave 2 are merged on edge `main` at `df5fcabe9`. No fleet deploy of t
 
 Rehearsal is 8 of the 9 `rehearse-devices-rebuild.test.js` cases; case 9 is tracked in #238, not yet closed.
 
-Wave 3 (Tasks 5-6, the Silvan EUI literal and the catalog healer) remains deferred, per the decision above, to its own program. The Rollout section below — Stage 0 rehearsal through Stage 3 Uganda — remains pending; no stage of it has started.
+Wave 3 (Tasks 5-6, the customer test gateway EUI literal and the catalog healer) remains deferred, per the decision above, to its own program. The Rollout section below — Stage 0 rehearsal through Stage 3 Uganda — remains pending; no stage of it has started.
 
 Task 7 (this wave):
 - [x] Step 1: read the current runbook against origin/main.
@@ -46,7 +46,7 @@ Task 7 (this wave):
 - `database/seed-blank.sql` and all 7 bundled `farming.db` copies regenerate in the same commit as any schema change.
 - Any change to `lib/osi-migrate/fingerprints.js` normalisation rules bumps `NORMALIZER_VERSION` (currently 3) and sets `PREVIOUS_NORMALIZER_VERSION` to the old value. No task here needs that bump; if one turns out to, stop and re-plan, because a bump invalidates every stamped baseline in the fleet.
 - Every new test file is added to `.github/workflows/migrations.yml`'s `node --test` list in the same commit. A test that is written but never run is worse than no test (osi-os#182).
-- No task in this plan writes to a live gateway. Live-Pi steps are read-only probes, and every probe on kaba100 or Uganda needs the user's explicit go in the turn it happens; production (`osicloud.ch`, Uganda) is never touched on a standing assumption.
+- No task in this plan writes to a live gateway. Live-Pi steps are read-only probes, and every probe on the demo gateway or Uganda needs the user's explicit go in the turn it happens; production (`osicloud.ch`, Uganda) is never touched on a standing assumption.
 - Prose deliverables (the runbook edit in Wave 4, PR bodies) run `node .claude/skills/anti-slop-writing/slop-check.js <file>`.
 
 ---
@@ -55,7 +55,7 @@ Task 7 (this wave):
 
 1. **Wave 1 — the boot node and its CI gates (#173, #219, #220, #224, #223).** Tasks 1-3. No migration, no seed change, no fingerprint impact, and it removes every mechanism by which a boot can damage `devices`. Task 1 merges what were three separate fixes because they are one edit: the seed and the boot DDL disagree on column *order* as well as nullability, so changing the DDL without simultaneously replacing the positional copy statement would write integer flags into REAL columns.
 2. **Wave 2 — characterise the residual drift (#221).** Task 4. Deliberately a characterisation task, not a code task: the comparator never emits the `table|devices` diff shape the issue assumes, and Task 1 removes both real components of Uganda's refusal. It runs before Wave 3 because Wave 3 rewrites 12 trigger bodies, which changes the drift picture; any residual diff must be named and fixed against today's schema first.
-3. **Wave 3 — retire the Silvan EUI literal (#157) and the catalog healer (#93).** Tasks 5-6. Largest surface: 12 seed triggers, 21 literal sites, a new migration, all 7 bundled DBs, and a runtime semantics change that needs its own tests.
+3. **Wave 3 — retire the customer test gateway EUI literal (#157) and the catalog healer (#93).** Tasks 5-6. Largest surface: 12 seed triggers, 21 literal sites, a new migration, all 7 bundled DBs, and a runtime semantics change that needs its own tests.
 4. **Wave 4 — documentation and close-out (#87, #222).** Task 7. No code; needs the evidence Waves 1-3 produce.
 
 #88 (cut the 93 inline `ADD COLUMN`s over to the runner) stays out of scope. Task 1's `DEVICES_COLUMNS` table is deliberately shaped so #88 can delete it wholesale rather than untangle it.
@@ -615,7 +615,7 @@ git commit -m "test(migrate): pin that a boot-node devices rebuild no longer blo
 
 ---
 
-## Wave 3 — retire the Silvan EUI literal and the catalog healer
+## Wave 3 — retire the customer test gateway EUI literal and the catalog healer
 
 ### Task 5: Data-driven gateway-EUI fallback (#157)
 
@@ -627,7 +627,7 @@ git commit -m "test(migrate): pin that a boot-node devices rebuild no longer blo
 - Modify: `lib/osi-migrate/__tests__/fingerprints-gateway-eui.test.js`
 - Test: `lib/osi-migrate/__tests__/fingerprints-boot-rewrite-rehearsal.test.js`, plus a new runtime-semantics test
 
-**What the boot node produces today versus what the migration must produce.** `sync-init-fn` computes `gatewaySql` from `env DEVICE_EUI` (`'0016C001F151B1D6'` on Uganda, the bare string `NULL` when the variable is absent or malformed) and interpolates it at 22 sites across 12 trigger bodies, always as the last argument of a `COALESCE(<…gateway_device_eui…>, <literal>)`. The seed and migrations `0001/0003/0010/0015/0016/0017/0027/0028` bake `'0016C001F11715E2'` into the same slot. `fingerprints.js`'s v3 `canonicalizeGatewayEuiCoalesce` rewrites exactly that slot to `'<gateway_eui>'` when the final argument is `null` or a 16-hex literal, which is why the drift is survivable today.
+**What the boot node produces today versus what the migration must produce.** `sync-init-fn` computes `gatewaySql` from `env DEVICE_EUI` (Uganda's own EUI on Uganda, the bare string `NULL` when the variable is absent or malformed) and interpolates it at 22 sites across 12 trigger bodies, always as the last argument of a `COALESCE(<…gateway_device_eui…>, <literal>)`. The seed and migrations `0001/0003/0010/0015/0016/0017/0027/0028` bake `'0016C001F11715E2'` into the same slot. `fingerprints.js`'s v3 `canonicalizeGatewayEuiCoalesce` rewrites exactly that slot to `'<gateway_eui>'` when the final argument is `null` or a 16-hex literal, which is why the drift is survivable today.
 
 That last clause is the trap. Suppose the migration replaced the literal with a subquery while the boot node kept interpolating a literal: the canonicaliser's `/(^|,)(null|'[0-9a-f]{16}')$/i` test only fires on a literal tail, so the reference's subquery tail and the live literal would hash differently, and a new permanent drift class would replace the one being retired. The migration and the boot node must therefore emit the same text, and `gatewaySql` must stop appearing in trigger bodies.
 
@@ -670,8 +670,8 @@ test('post-migration trigger bodies are identical between migration and boot nod
   for (const name of GATEWAY_EUI_TRIGGERS) {   // the 12 names, listed explicitly
     const live = await triggerSql(liveRunner, name);
     const ref = await triggerSql(refRunner, name);
-    assert.ok(!/0016C001F11715E2/.test(live), `${name}: Silvan literal still live`);
-    assert.ok(!/0016C001F11715E2/.test(ref), `${name}: Silvan literal still in the reference`);
+    assert.ok(!/0016C001F11715E2/.test(live), `${name}: the customer test gateway literal still live`);
+    assert.ok(!/0016C001F11715E2/.test(ref), `${name}: the customer test gateway literal still in the reference`);
     assert.strictEqual(normalizeSqlV3(live), normalizeSqlV3(ref), `${name}: bodies differ`);
   }
 });
@@ -695,7 +695,7 @@ test('link finalize backfills devices and irrigation_zones, and emits one ZONE_U
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `node --test lib/osi-migrate/__tests__/fingerprints-boot-rewrite-rehearsal.test.js scripts/test-gateway-eui-attribution.js`
-Expected: FAIL — 21 Silvan literal sites in the seed, the migration does not exist, and the link backfill is not implemented.
+Expected: FAIL — 21 customer-test-gateway literal sites in the seed, the migration does not exist, and the link backfill is not implemented.
 
 - [ ] **Step 3: Write the migration**
 
@@ -703,7 +703,7 @@ Confirm the next free version (`ls database/migrations/ordered/`), then:
 
 ```sql
 -- risk: destructive
--- NNNN: retire the Silvan gateway EUI literal (osi-os#157, root cause of #153).
+-- NNNN: retire the customer test gateway EUI literal (osi-os#157, root cause of #153).
 -- Recreates the 12 sync/outbox triggers that baked '0016C001F11715E2' as their
 -- gateway_device_eui fallback, replacing it with the sync_link_state lookup the
 -- boot node now emits byte-identically. DROP + CREATE of triggers only: no table
@@ -770,9 +770,9 @@ node scripts/verify-sync-flow.js
 
 Expected: all exit 0; `verify-seed-replay: OK`, `DB schema consistency verification passed`, `verify-trigger-body-parity: OK`, `All parity checks passed.`
 
-- [ ] **Step 9: Non-Silvan rehearsal**
+- [ ] **Step 9: Non-customer-test-gateway rehearsal**
 
-Run the boot-rewrite rehearsal at Uganda's EUI (`0016C001F151B1D6`), at AgroLink's (`0016C001F116EBF2`), and with `DEVICE_EUI` unset. This is the check that would have caught `0046`/`0047`; a rehearsal only at Silvan's EUI proves nothing.
+Run the boot-rewrite rehearsal at Uganda's EUI, at the second customer test gateway's (`0016C001F1000003`), and with `DEVICE_EUI` unset. This is the check that would have caught `0046`/`0047`; a rehearsal only at the customer test gateway's EUI proves nothing.
 
 - [ ] **Step 10: Commit**
 
@@ -785,7 +785,7 @@ git add database/migrations/ordered/NNNN__gateway_eui_fallback.sql \
   lib/osi-migrate/__tests__/fingerprints-gateway-eui.test.js \
   lib/osi-migrate/__tests__/fingerprints-boot-rewrite-rehearsal.test.js \
   .github/workflows/migrations.yml
-git commit -m "fix(schema): replace the Silvan EUI literal with a sync_link_state fallback in seed, migration and boot node (#157)"
+git commit -m "fix(schema): replace the customer test gateway EUI literal with a sync_link_state fallback in seed, migration and boot node (#157)"
 ```
 
 ---
@@ -798,7 +798,7 @@ git commit -m "fix(schema): replace the Silvan EUI literal with a sync_link_stat
 
 - [ ] **Step 1: Probe the fleet, read-only, with consent**
 
-Ask the user for explicit go before touching kaba100 or Uganda in the turn the probe runs. Never during a deploy window; the 2026-09-13 deploy train must be reported finished on each host before any probe. On Silvan, kaba100, Uganda and agrolink-test-01:
+Ask the user for explicit go before touching the demo gateway or Uganda in the turn the probe runs. Never during a deploy window; the 2026-09-13 deploy train must be reported finished on each host before any probe. On the customer test gateway, the demo gateway, Uganda and the second customer test gateway:
 
 ```sh
 sqlite3 /data/db/farming.db "SELECT name FROM sqlite_master WHERE type='table' AND sql LIKE '%devices_old%';"
@@ -891,15 +891,15 @@ git commit -m "docs(ops): reconcile the Uganda catch-up runbook with the recover
 
 No task above writes to a live gateway. Rollout happens once Waves 1-3 are merged, by an operator following `osi-live-ops-runbook`, with the user's explicit go for each gateway.
 
-**Stage 0 — rehearsal on fresh byte copies.** Take a current `sqlite3 /data/db/farming.db ".backup /tmp/rehearsal.db"` from kaba100 and from Uganda and `scp` the copy off; never `cp` a live file, and never rehearse on `farming.db.bak-2026-09-11T22-4*`, which are mid-incident snapshots from before the repair rather than the recovered head-56 schema. Uganda is production: ask in the turn.
+**Stage 0 — rehearsal on fresh byte copies.** Take a current `sqlite3 /data/db/farming.db ".backup /tmp/rehearsal.db"` from the demo gateway and from Uganda and `scp` the copy off; never `cp` a live file, and never rehearse on `farming.db.bak-2026-09-11T22-4*`, which are mid-incident snapshots from before the repair rather than the recovered head-56 schema. Uganda is production: ask in the turn.
 
 Off-device, against each copy: run `scripts/migrate-cli.js` to head with `--backup-dir /tmp/rehearsal-backups`, then replay the shipped `sync-init-fn` text at that gateway's real `DEVICE_EUI` through the rehearsal harness, then `node scripts/verify-head-cli.js`. Record `PRAGMA integrity_check`, `PRAGMA foreign_key_check`, the `devices` column list, `SELECT COUNT(*) FROM device_data`, the post-boot drift-gate result, and the `gateway_device_eui` attribution of a row inserted during the replay. A rehearsal that needs `restamp-fingerprints.js` is a failed rehearsal.
 
 **Disk preflight before any live deploy.** Task 5's migration is `destructive`, so `backupDb` writes a full byte copy under `/data/backups/migrate` on top of the pre-deploy backup. Check free space against twice the current `farming.db` size plus headroom (`df -h /data`, `ls -l /data/db/farming.db`) before starting, and prune old `/data/backups/migrate` copies if short. Uganda has repeatedly run close on disk.
 
-**Stage 1 — Silvan.** Demo gateway, and the only one whose EUI is the retired literal, so a mistake in Task 5 would look like success there and nowhere else. After deploy confirm: `logread` shows Node-RED output; `schema_migrations` is at the new head; no trigger body contains `0016C001F11715E2`; `device_data` count unchanged across the deploy; a second `/etc/init.d/node-red restart` followed by `verify-head-cli.js` passes with no restamp. Then run the attribution check end to end — unlink, add a device, relink, and confirm the device's `gateway_device_eui` and its outbox rows carry the link EUI.
+**Stage 1 — the customer test gateway.** Test gateway, and the only one whose EUI is the retired literal, so a mistake in Task 5 would look like success there and nowhere else. After deploy confirm: `logread` shows Node-RED output; `schema_migrations` is at the new head; no trigger body contains `0016C001F11715E2`; `device_data` count unchanged across the deploy; a second `/etc/init.d/node-red restart` followed by `verify-head-cli.js` passes with no restamp. Then run the attribution check end to end — unlink, add a device, relink, and confirm the device's `gateway_device_eui` and its outbox rows carry the link EUI.
 
-**Stage 2 — kaba100.** Same checks. kaba100 produced the #212 drift-after-restart case, so its second-restart check is the real test of Wave 2's conclusion.
+**Stage 2 — the demo gateway.** Same checks. The demo gateway produced the #212 drift-after-restart case, so its second-restart check is the real test of Wave 2's conclusion.
 
 **Stage 3 — Uganda.** Production, and the incident gateway. Take and verify a fresh backup (`PRAGMA integrity_check` returns `ok`) before deploy starts. Same checks plus: `device_data` count before and after (monotonic increase from live ingest, never a decrease); the five `sdi12_*` columns still present; one real uplink landing a row after the deploy.
 

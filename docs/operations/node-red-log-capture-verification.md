@@ -34,8 +34,8 @@ Node-RED, and a restart in the middle of a payload swap corrupts the evidence
 and possibly the deploy.
 
 Uganda is production and was offline as of 2026-09-14. It needs Phil's explicit
-go in the turn the probe runs, same as every other read against it. Silvan
-first, then kaba100, then Uganda — the order the plan's rollout section sets.
+go in the turn the probe runs, same as every other read against it. The customer test gateway
+first, then the demo gateway, then Uganda — the order the plan's rollout section sets.
 
 ## The recipe
 
@@ -124,7 +124,7 @@ or more files, or one file past 2048 KiB, means the cap is not being applied
 and the worst-case disk figure in this document is wrong — stop and report it
 before the next gateway.
 
-Run this on Silvan only. It writes about 40 k syslog lines, which on a
+Run this on the customer test gateway only. It writes about 40 k syslog lines, which on a
 production gateway pushes real history out of both the ring and the file.
 
 ### 6. The ring is not being flooded
@@ -144,8 +144,8 @@ capture.
 
 | Gateway | Date | Steps 1-2 | Step 3 restart | Step 4 reboot | Step 5 rotation | Step 6 growth | Operator |
 |---|---|---|---|---|---|---|---|
-| Silvan | | | | | | | |
-| kaba100 | | | | | n/a | | |
+| Customer test gateway | | | | | | | |
+| Demo gateway | | | | | n/a | | |
 | Uganda | | | | | n/a | | |
 
 Paste the verbatim command output into the PR that closes #223, not only the

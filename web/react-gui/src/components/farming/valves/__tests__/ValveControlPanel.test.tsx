@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { ComponentProps } from 'react';
 
@@ -12,8 +12,8 @@ import type { ValveSummary } from '../../../../types/farming';
 const { translateForTest } = vi.hoisted(() => {
   const table: Record<string, string> = {
     title: 'Valve control',
-    help: 'All zones. Weekly schedules run on each valve.',
-    helpLabel: 'About valve control',
+    scheduleHelp: 'Weekly schedules run on each valve.',
+    scheduleHelpLabel: 'About weekly schedules',
     empty: 'No STREGA valves registered yet.',
     actionFailed: 'The action could not be completed.',
     loadFailed: 'Could not load valves.',
@@ -134,9 +134,9 @@ describe('ValveControlPanel', () => {
     render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
     expect(screen.queryByText('All valves, all zones. Weekly plans run on the valve itself.')).not.toBeInTheDocument();
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
-    const help=screen.getByRole('button',{name:'About valve control'});
+    const help=screen.getByRole('button',{name:'About weekly schedules'});
     fireEvent.mouseEnter(help.parentElement!);
-    expect(screen.getByRole('tooltip')).toHaveTextContent('All zones. Weekly schedules run on each valve.');
+    expect(screen.getByRole('tooltip')).toHaveTextContent(/^Weekly schedules run on each valve\.$/);
     fireEvent.mouseLeave(help.parentElement!);
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     fireEvent.focus(help);
@@ -149,6 +149,89 @@ describe('ValveControlPanel', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
     fireEvent.blur(help);
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  describe('schedule help', () => {
+    const renderReadOnly = () => {
+      vi.mocked(valvesAPI.list).mockResolvedValue([]);
+      render(<ValveControlPanel onUpdate={vi.fn()} canWrite={false} />);
+      return screen.getByRole('button', { name: 'About weekly schedules' });
+    };
+
+    it('opens on the first tap even when focus fires before click, and issues no valve command', () => {
+      const help = renderReadOnly();
+      expect(help).toHaveAttribute('type', 'button');
+      fireEvent.pointerDown(help);
+      fireEvent.focus(help);
+      fireEvent.click(help);
+      expect(screen.getByRole('tooltip')).toHaveTextContent('Weekly schedules run on each valve.');
+      for (const call of [devicesAPI.controlValve, devicesAPI.cancelIrrigation, devicesAPI.rename,
+        valvesAPI.updateSettings, valvesAPI.setSchedulerStatus, valvesAPI.resendPlan]) {
+        expect(call).not.toHaveBeenCalled();
+      }
+    });
+
+    it('ties the tooltip to the button only while it is open', () => {
+      const help = renderReadOnly();
+      expect(help).not.toHaveAttribute('aria-describedby');
+      // A dangling IDREF while closed: the tooltip element does not exist then.
+      expect(help).not.toHaveAttribute('aria-controls');
+      fireEvent.focus(help);
+      const tooltip = screen.getByRole('tooltip');
+      expect(help).toHaveAttribute('aria-describedby', tooltip.id);
+      expect(tooltip).not.toHaveAttribute('aria-live');
+      expect(tooltip.querySelector('button, a, input, select, textarea, [tabindex]')).toBeNull();
+      fireEvent.blur(help);
+      expect(help).not.toHaveAttribute('aria-describedby');
+    });
+
+    it('dismisses on Escape while focus stays on the button', () => {
+      const help = renderReadOnly();
+      act(() => help.focus());
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      fireEvent.keyDown(help, { key: 'Escape' });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(help).toHaveFocus();
+    });
+
+    it('dismisses hover-opened help on Escape although the button has no focus', () => {
+      const help = renderReadOnly();
+      fireEvent.mouseEnter(help.parentElement!);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('dismisses on a tap outside, also on a non-focusable element', () => {
+      const help = renderReadOnly();
+      fireEvent.click(help);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      fireEvent.pointerDown(screen.getByRole('heading', { name: 'Valve control' }));
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      fireEvent.click(help);
+      fireEvent.pointerDown(document.body);
+      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    });
+
+    it('stays open when the pointer leaves while the button keeps focus', () => {
+      const help = renderReadOnly();
+      fireEvent.focus(help);
+      fireEvent.mouseEnter(help.parentElement!);
+      fireEvent.mouseLeave(help.parentElement!);
+      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+    });
+
+    it('keeps a 48 px target and wraps narrow translated text inside the card', () => {
+      const help = renderReadOnly();
+      expect(help.className).toMatch(/\bmin-h-12\b/);
+      expect(help.className).toMatch(/\bmin-w-12\b/);
+      expect(help.className).toContain('focus-visible:ring-[var(--focus)]');
+      fireEvent.focus(help);
+      const tooltip = screen.getByRole('tooltip');
+      for (const cls of ['absolute', 'right-0', 'top-full', 'w-56', 'max-w-[calc(100vw-4rem)]', 'whitespace-normal', 'break-words']) {
+        expect(tooltip.className.split(/\s+/)).toContain(cls);
+      }
+    });
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {

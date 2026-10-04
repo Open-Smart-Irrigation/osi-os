@@ -89,7 +89,7 @@ Above `function rollupRowsToResult(...)` add the contract, and the guard as its 
 /**
  * Builds an aggregate result from history_channel_rollups rows.
  *
- * CONTRACT (verified live on kaba100, 2026-07-11):
+ * CONTRACT (verified live on the demo gateway, 2026-07-11):
  * - Input rows MUST all belong to ONE logical_source_key. Merged cards
  *   (soil='root-zone', environment='microclimate') store ONE combined-
  *   aggregate row per bucket/channel — computeRollupBuckets aggregates the
@@ -338,7 +338,7 @@ git commit -m "fix(history-api): coverage denominators clamp at now; retire inte
 
 ### Task 4: Expose the data-path `source` on the card-data payload
 
-`aggregateDeviceData` already computes `source: 'history_channel_rollups' | 'device_data' | 'rollups+live'` but the router drops it. Exposing it ends a whole class of "which path served this data" diagnosis (it cost real time in both the 2026-06-07 and 2026-07-11 investigations; noted as a follow-up in the kaba100 issues doc since 2026-06-02 and never picked up).
+`aggregateDeviceData` already computes `source: 'history_channel_rollups' | 'device_data' | 'rollups+live'` but the router drops it. Exposing it ends a whole class of "which path served this data" diagnosis (it cost real time in both the 2026-06-07 and 2026-07-11 investigations; noted as a follow-up in the demo gateway issues doc since 2026-06-02 and never picked up).
 
 **Prerequisite: load the `osi-flows-json-editing` skill. Sequencing: must land before 4.2's golden-vector capture — this changes the response payload shape.**
 
@@ -382,7 +382,7 @@ No UI consumes it yet — this is a diagnostic field (Advanced View can render i
 Run: `node scripts/verify-sync-flow.js && node scripts/verify-profile-parity.js && cd web/react-gui && npx tsc --noEmit 2>/dev/null || npm run build`
 Expected: all pass.
 
-Live check (kaba100, after this plan's deploy — can ride the mobile plan's Task 13 deploy): authenticated
+Live check (the demo gateway, after this plan's deploy — can ride the mobile plan's Task 13 deploy): authenticated
 `GET /api/history/zones/3/cards/<cardId>/data?range=30d&…` must return `aggregation.source` ∈ {`history_channel_rollups`, `rollups+live`} and `range=24h` must return `device_data`.
 
 - [ ] **Step 5: Commit**
@@ -411,7 +411,7 @@ Append under a new section (adjust the heading style to match the doc's existing
 ### P1 — Per-source rollup key scheme (prerequisite for the environment per-source series split)
 
 The merged environment series interleaves two sensors ~2.5 °C apart into a false sawtooth
-(kaba100, Temp1 + Dendro1, verified 2026-07-11). Fixing it requires per-source series, which
+(the demo gateway, Temp1 + Dendro1, verified 2026-07-11). Fixing it requires per-source series, which
 requires per-source rollups for 30d/season. Proposal: write per-source rollup rows ALONGSIDE
 the existing merged row, reusing the dendro pattern (`dendro-src-<hash>`) via the router's
 existing `sourceKeyForDevice` tokens (e.g. `env-src-<hash>`, `soil-src-<hash>`). Additive:
@@ -424,7 +424,7 @@ Decide BEFORE the per-source split spec is written — it determines whether tha
 
 ### P2 — 1.A3 residue: dual helper test suites
 
-1.A3's plan (`docs/superpowers/plans/2026-07-08-osi-history-helper-tests.md`) defines
+1.A3's plan (`docs/superpowers/plans/2026-07-08-osi-history-helper-tests.md`, archived) defines
 relocating the full 2,141-line `scripts/test-history-helper.js` suite to co-located
 `index.test.js` and retiring the scripts copy. What landed: a 446-line co-located suite
 PLUS the un-retired scripts suite, both CI-wired (`migrations.yml:56` and `:74`). The

@@ -24,12 +24,12 @@ closed-loop + RDI hold the tree at target with less water than the open-loop rul
 
 | Decision | Choice |
 |---|---|
-| Paradigm | Closed-loop **PI** (P + I, no D — signal too noisy for D; Agroscope drops it too), daily cadence. |
+| Paradigm | Closed-loop **PI** (P + I, no D — signal too noisy for D; the partner institute drops it too), daily cadence. |
 | Signal | v6's existing per-tree relative deficit `TWD_rel` (`twdDay/mdsMaxReferenceUm`), aggregated at the 75th percentile across the MAD-filtered non-ref trees. Note: v6 today computes its zone p75 over **µm `TWD_day`**, not `TWD_rel` — this adds a p75 over the existing per-tree `twdRel` (same trees/filter), so the observed signal shares the setpoint's dimensionless scale. No new *sensor* signal. |
 | Comparison | **2-way shadow:** current open-loop v6 vs new v6-closed-loop-RDI, both on `TWD_rel`. Compute-only; no actuation, no edge changes. |
 | Output | A continuous recommended water-volume adjustment (the smooth analogue of v6's `increase_X% / decrease_X%`). |
 | RDI setpoint | **Hybrid:** default derived from v6's per-crop DB calibration + phenology (target the *mild* deficit band); optional per-zone `rdi_target_override`. |
-| Controller correctness | The **corrected** controller — bake in the fixes the Agroscope analysis found (see §"Control law"). |
+| Controller correctness | The **corrected** controller — bake in the fixes the partner-institute analysis found (see §"Control law"). |
 | Placement | Cloud-side (v6 is server-side); additive; opt-in per zone via a flag. |
 
 ## Where it plugs into v6
@@ -57,8 +57,8 @@ Daily, per opted-in zone:
   integral update) and recommend no increase.
 - **Two-phase next-day feedback:** propose today → next day observe whether `TWD_rel` moved toward the
   setpoint → update the integral. This is the closed loop.
-- **Corrected against Agroscope's PID defects** (from the assessment [P6]):
-  - integrate the **first** error (Agroscope skipped it);
+- **Corrected against the partner institute's PID defects** (from the assessment [P6]):
+  - integrate the **first** error (the partner institute skipped it);
   - **no double-integration** — the integral advances exactly once per closed cycle; only a *prior-day*
     pending cycle closes (`pendingDate < today`), so a same-day recompute never re-integrates;
   - **never integrate a frozen cycle** — a proposal made under forecast-rain freeze is marked `frozen` and its
@@ -68,7 +68,7 @@ Daily, per opted-in zone:
     `lowConfidence`); never treat non-adjacent days as adjacent;
   - **explicit gain precedence** — config/DB gains, never silently DB-overrides-config;
   - **surfaced (not swallowed) errors** on persistence;
-  - keep the one thing Agroscope got right — **warm-restart** (a pending row carries pre-update state, a
+  - keep the one thing the partner institute got right — **warm-restart** (a pending row carries pre-update state, a
     closed row post-update).
 
 Gains (`Kp`, `Ki`, `maxAdj`, rain-skip threshold) are global defaults (env/DB, mirroring v6's calibration
@@ -112,7 +112,7 @@ that persists the base/running volume (or v6's fractional-from-nominal). Do not 
 ## Testing
 
 - **PI math** unit tests: first-error integration, no double-integration, anti-windup at saturation,
-  gap/low-confidence integration scaling/skip, clamp — the exact things Agroscope got wrong.
+  gap/low-confidence integration scaling/skip, clamp — the exact things the partner institute got wrong.
 - **Setpoint** derivation (per-crop/phenology) + override precedence.
 - **Warm-restart** round-trip (state persisted/reloaded across runs).
 - **Isolation guard:** the shadow path does NOT change v6's `ActionResult` / persisted `irrigationAction` /
@@ -121,7 +121,7 @@ that persists the base/running volume (or v6's fractional-from-nominal). Do not 
 
 ## Out of scope
 
-Actuating on the shadow (a later, opt-in phase); edge changes; the full Agroscope global-cummax signal
+Actuating on the shadow (a later, opt-in phase); edge changes; the full partner-institute global-cummax signal
 (3-way comparison — deferred); rich comparison dashboards; per-crop gain tuning.
 
 ## Affected components (cloud)

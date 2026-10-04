@@ -29,7 +29,7 @@ Evaluated from `lsn50_shadow_diff` (the 3.3 shadow table) and `ingest_quarantine
 - [ ] **Zero row diffs:** `SELECT COUNT(*) FROM lsn50_shadow_diff WHERE diff_kind != 'zero_diff'` returns **0**. Any non-zero-diff row is a discrepancy between the old path and the writer — the cutover is BLOCKED until it is root-caused (usually a missing manifest row, per spec §D — which means item 3.3 was incomplete and must be fixed and re-shadowed, not worked around here).
 - [ ] **Zero dead-letters:** `SELECT COUNT(*) FROM ingest_quarantine WHERE deveui IN (<the gateway's LSN50 EUIs>) AND received_at >= <shadow window start>` returns **0**. Any LSN50 dead-letter during shadow means the writer would have quarantined a real reading — BLOCKED until resolved.
 
-**Order:** demos (kaba100, Silvan) must each clear the bar and be cut over and observed healthy **before** production (Uganda) is even evaluated. Rest of fleet: convert-on-touch only (next time a gateway is deployed for another reason), two writers coexisting is acceptable (DD7).
+**Order:** demos (the demo gateway, the customer test gateway) must each clear the bar and be cut over and observed healthy **before** production (Uganda) is even evaluated. Rest of fleet: convert-on-touch only (next time a gateway is deployed for another reason), two writers coexisting is acceptable (DD7).
 
 **If the bar is not met, STOP.** This is not a judgment call — a non-zero diff or dead-letter count is a hard block. Escalate a persistent diff to a code fix in 3.3's normalizer/manifest, re-shadow, re-measure. Do not hand-edit `lsn50_shadow_diff` to pass the bar.
 
@@ -43,7 +43,7 @@ Evaluated from `lsn50_shadow_diff` (the 3.3 shadow table) and `ingest_quarantine
 
 ## 4. Cutover procedure (per gateway, demos first)
 
-Run per `osi-live-ops-runbook` (SSH safety, backup, never reseed the DB). For each gateway in order [kaba100, Silvan, … Uganda last]:
+Run per `osi-live-ops-runbook` (SSH safety, backup, never reseed the DB). For each gateway in order [demo gateway, customer test gateway, … Uganda last]:
 
 - [ ] **4.1** Confirm §2's bar is met on THIS gateway (re-query `lsn50_shadow_diff` + `ingest_quarantine` live; do not trust a stale check).
 - [ ] **4.2** Take the pre-cutover backup (§1 last bullet) if not already fresh.
@@ -79,4 +79,4 @@ Because rollback is a UCI flip (no redeploy, no schema change, no data migration
 ## Honest caveats
 
 - **This runbook cannot be validated end-to-end from documents** — its correctness depends on the 3.1/3.3 code shipping the kill-switch, the writer-live node, and the shadow table as specified. If those diverge from the spec at implementation time, this runbook's step 4.3/5.1 UCI names and node references must be reconciled to what actually shipped before first live use. Treat the UCI key name and node wiring as the intended contract, subject to a one-time reconciliation against the merged 3.1/3.3 PRs.
-- **The bar is per-gateway and non-transferable:** a clean shadow window on kaba100 says nothing about Uganda's LSN50 payload variants. Each gateway clears §2 on its own evidence.
+- **The bar is per-gateway and non-transferable:** a clean shadow window on the demo gateway says nothing about Uganda's LSN50 payload variants. Each gateway clears §2 on its own evidence.

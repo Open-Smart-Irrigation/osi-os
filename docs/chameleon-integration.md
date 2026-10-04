@@ -18,7 +18,7 @@ LSN50 firmware (STM32)
 LSN50 LoRaWAN uplink (FPort 2, V2 payload)
   │
   ▼
-ChirpStack (kaba100)
+ChirpStack (demo gateway)
   │  MQTT application/+/device/+/event/up
   ▼
 Node-RED LSN50 decoder
@@ -66,7 +66,7 @@ The custom firmware (`feature/chameleon-i2c-reader` in `Project-OSI/LoRa_STM32`)
 | `Chameleon_TempC` | float | DS18B20 temperature (°C) |
 | `Chameleon_R1_Ohm_Comp` / `R2` / `R3` | int | Temperature-compensated resistance (Ω) |
 | `Chameleon_R1_Ohm_Raw` / `R2` / `R3` | int | Uncompensated resistance (Ω) |
-| `Chameleon_Array_ID` | string | DS18B20 ROM code, 16-char hex, e.g. `28F8B2B40F0000C1` |
+| `Chameleon_Array_ID` | string | DS18B20 ROM code, 16-char hex, e.g. `28F80000000000C1` |
 
 `comp_pending` (status bit 0x80) is set by the firmware when it has raw readings but hasn't yet applied its internal temperature correction. The edge decoder stores this flag in `chameleon_readings.comp_pending`.
 
@@ -160,7 +160,7 @@ If non-empty, `calibration-batch-fetch` POSTs to osi-server:
 
 ```
 POST /api/v1/sync/chameleon/calibrations/lookup
-{ "array_ids": ["28DE7EC80B0000E2", ...] }
+{ "array_ids": ["28DE0000000000E2", ...] }
 → { "calibrations": [...], "not_found": [...], "errors": [] }
 ```
 
@@ -251,7 +251,7 @@ If the seed is empty (as it currently is), devices rely entirely on the runtime 
 1. Insert a test device:
 ```sql
 INSERT INTO devices (name, deveui, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
-  SELECT 'Test', 'A84041CAFECAFE01', 'DRAGINO_LSN50', id, 3, 1, datetime('now'), datetime('now')
+  SELECT 'Test', 'A840410000000001', 'DRAGINO_LSN50', id, 3, 1, datetime('now'), datetime('now')
   FROM users WHERE username='admin' LIMIT 1;
 ```
 
@@ -259,7 +259,7 @@ INSERT INTO devices (name, deveui, type_id, user_id, irrigation_zone_id, chamele
 ```json
 {
   "deviceInfo": {
-    "devEui": "a84041cafecafe01",
+    "devEui": "a840410000000001",
     "deviceProfileName": "OSI DRAGINO LSN50",
     "applicationId": "..."
   },
@@ -276,7 +276,7 @@ INSERT INTO devices (name, deveui, type_id, user_id, irrigation_zone_id, chamele
     "Chameleon_TempC": 24.5,
     "Chameleon_R1_Ohm_Comp": 85000, "Chameleon_R2_Ohm_Comp": 91000, "Chameleon_R3_Ohm_Comp": 79000,
     "Chameleon_R1_Ohm_Raw": 87000, "Chameleon_R2_Ohm_Raw": 93000, "Chameleon_R3_Ohm_Raw": 81000,
-    "Chameleon_Array_ID": "28F8B2B40F0000C1",
+    "Chameleon_Array_ID": "28F80000000000C1",
     "BatV": 3.6, "TempC1": 24.5, "ADC_CH0V": 0.0
   },
   "time": "2026-05-21T12:00:00.000Z"
@@ -285,11 +285,11 @@ INSERT INTO devices (name, deveui, type_id, user_id, irrigation_zone_id, chamele
 
 3. Check results:
 ```sql
-SELECT swt_1, swt_2, swt_3, recorded_at FROM device_data WHERE deveui='A84041CAFECAFE01';
-SELECT array_id, calibration_status, r1_ohm_comp FROM chameleon_readings WHERE deveui='A84041CAFECAFE01';
+SELECT swt_1, swt_2, swt_3, recorded_at FROM device_data WHERE deveui='A840410000000001';
+SELECT array_id, calibration_status, r1_ohm_comp FROM chameleon_readings WHERE deveui='A840410000000001';
 ```
 
-4. Clean up: `DELETE FROM devices/device_data/chameleon_readings WHERE deveui='A84041CAFECAFE01'`
+4. Clean up: `DELETE FROM devices/device_data/chameleon_readings WHERE deveui='A840410000000001'`
 
 ### Check calibration state
 
@@ -310,7 +310,7 @@ SELECT array_id, last_tried, reason FROM chameleon_calibration_misses;
 -- On osi-server Postgres
 SELECT d.device_eui, cr.array_id, cr.swt_1, cr.swt_2, cr.swt_3, cr.calibration_status, cr.recorded_at
 FROM chameleon_readings cr JOIN devices d ON d.id = cr.device_id
-WHERE d.gateway_device_eui = '0016C001F11766E7'
+WHERE d.gateway_device_eui = '0016C001F1000001'
 ORDER BY cr.recorded_at DESC LIMIT 10;
 ```
 
@@ -323,12 +323,12 @@ const kpa = a * Math.log(r_kohm) + b * r_kohm + c;
 
 ---
 
-## 11. Live Devices (kaba100)
+## 11. Live Devices (demo gateway, example values)
 
 | Device | EUI | Array ID | Sensor ID | Status |
 |---|---|---|---|---|
-| Chameleon 1 | `A84041A75D5E7CFB` | `28DE7EC80B0000E2` | DEE2 | calibrated |
-| Chameleon 2 | `A84041CE3F5ECF52` | `28F8B2B40F0000C1` | F8C1 | calibrated |
+| Chameleon 1 | `A840410000000002` | `28DE0000000000E2` | DEE2 | calibrated |
+| Chameleon 2 | `A840410000000003` | `28F80000000000C1` | F8C1 | calibrated |
 
 Both devices uplink every ~5 minutes. kPa values appear in the GUI under the device's Chameleon section. Both are synced to osi-server and visible in the server's `chameleon_readings` table.
 

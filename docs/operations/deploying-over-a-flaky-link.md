@@ -34,7 +34,7 @@ dropping.
 `scripts/deploy-fetch-list.js` derives the file list by parsing `deploy.sh`'s
 own `fetch()`/`fetch_required()` call sites — including the ones computed in
 loops (the migration corpus from `database/migrations/ordered/CHECKSUMS.json`,
-the AgroLink/Bovey ledger-reconciliation lineage fixtures, the seed DB for
+the foreign-numbered ledger-reconciliation lineage fixtures, the seed DB for
 all three Pi hardware profiles) — rather than hand-maintaining a list that
 can silently drift out of sync with `deploy.sh`. `scripts/deploy-fetch-list.test.js`
 and `scripts/deploy-bundle.test.sh` both assert the derived list, and the

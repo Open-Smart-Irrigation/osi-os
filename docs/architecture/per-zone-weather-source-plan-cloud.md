@@ -799,7 +799,7 @@ record.
 - **Open-Meteo** → keep native et0 (tier 1); no change.
 - **MeteoSwiss** (built in Task 5): also fetch global radiation (`gre000h0`), wind (`fu3010h0`), and relative
   humidity (`ure200h0`) and populate the E3 fields, so a MeteoSwiss zone reaches tier-2 PM (the
-  Agroscope-alignment case). Missing humidity → tier-3 Hargreaves.
+  partner-institute-alignment case). Missing humidity → tier-3 Hargreaves.
 - **OpenAgri / AgroMonitoring** → populate whichever of RH/wind/radiation their API exposes; radiation absent
   (likely) → tier-3 Hargreaves. Verify each API's fields in its mapping.
 - **Elevation** optional (FAO sea-level pressure default when unknown); a later enhancement can store zone

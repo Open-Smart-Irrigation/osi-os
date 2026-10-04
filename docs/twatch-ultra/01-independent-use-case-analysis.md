@@ -190,8 +190,8 @@ already contains several of.
 
 ### UC3: sensor trench verification before backfill
 
-Buried sensors punish wiring mistakes with excavation. The kaba100 Chameleon outage
-(documented in `docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md`)
+Buried sensors punish wiring mistakes with excavation. A field Chameleon outage
+(documented in the field incident analysis in `docs/hardware/chameleon-reference.md`)
 came down to a powering detail on the I2C reader, and the current LSN50 v1.7 bench
 work is again about which pins and which rail; a miswired array reads `no_device`
 after the trench is closed and the site visit is already spent. The check that
@@ -316,7 +316,7 @@ sessions must be short-lived by design. Effort: moderate.
 
 Researchers and super-users generate ground truth that the sensor network cannot:
 crop stage, visible stress, pest presence, "the farmer irrigated by hand this
-morning". Agroscope's trial methodology and the AquaMind data partnership both gain
+morning". The partner institute's trial methodology and the AquaMind data partnership both gain
 from labelled observations attached to time and place, and the current capture path
 is paper or a phone form filled in later, with the losses later entry implies. The
 watch can capture a structured observation in four taps (zone, category, severity,
@@ -519,7 +519,7 @@ described, never as a platform.
   summary (extracted text, 2026).
 - `AGENTS.md`, this repo: architecture, sync endpoints, device catalog, valve rules,
   gateway health, live-deploy guardrails.
-- `docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md`: buried-array
+- Field incident analysis in `docs/hardware/chameleon-reference.md`: buried-array
   failure precedent.
 - T-Watch Ultra launch coverage: [CNX Software](https://www.cnx-software.com/2026/04/20/lilygo-t-watch-ultra-an-ip65-rated-esp32-s3-smartwatch-with-2-01-inch-amoled-lora-and-gnss/),
   [LinuxGizmos](https://linuxgizmos.com/lilygo-t-watch-ultra-features-esp32-s3-amoled-display-gnss-and-lora-connectivity/)

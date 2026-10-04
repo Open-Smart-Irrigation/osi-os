@@ -1,6 +1,6 @@
-{ "helpLabel": "Informazioni sul controllo valvole", "overview": {"title": "Piano di irrigazione — tutte le valvole", "loading": "Caricamento…", "off": "disattivato"},
+{ "scheduleHelpLabel": "Informazioni sui programmi settimanali", "overview": {"title": "Piano di irrigazione — tutte le valvole", "loading": "Caricamento…", "off": "disattivato"},
   "title": "Controllo valvole",
-  "help": "Tutte le zone. I programmi settimanali vengono eseguiti sulle valvole.",
+  "scheduleHelp": "I programmi settimanali vengono eseguiti su ogni valvola.",
   "empty": "Nessuna valvola STREGA registrata.",
   "unassignedZone": "Non assegnata",
   "open": "Apri",

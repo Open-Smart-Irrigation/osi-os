@@ -42,7 +42,7 @@ The pipeline must preserve three boundaries:
    useful for farm mirroring, commands, and normal sync, but it is not required
    for feature/bug feedback.
 2. **Linked sync remains supported for compatibility.** Existing and pending
-   `WORK_REQUEST_SUBMITTED` outbox events, including Kaba100's pending event,
+   `WORK_REQUEST_SUBMITTED` outbox events, including the demo gateway's pending event,
    must still ingest through `/api/v1/sync/edge/events` once server support is
    implemented. Server-side idempotency by `request_uuid` makes dual delivery
    harmless.
@@ -250,7 +250,7 @@ Required payload fields:
   "severity": "idea",
   "consent_public": true,
   "consent_diagnostics": true,
-  "gateway_device_eui": "0016C001F11766E7",
+  "gateway_device_eui": "0016C001F1000001",
   "diagnostics": {},
   "gui_user": {
     "local_user_id": 7
@@ -478,7 +478,7 @@ When the dedicated VPS is provisioned, `forge-runner` gets its own Docker
 socket and the sudo/deploy-svc indirection is removed. The wrapper scripts
 themselves are reusable.
 
-The first edge target should be a disposable/demo Pi if available. Kaba100
+The first edge target should be a disposable/demo Pi if available. The demo gateway
 should not become an automated runner target unless explicitly approved as part
 of the automation lab.
 
@@ -659,9 +659,9 @@ trips, add duplicate clustering, and decide whether some class-0 jobs can
 start without per-request human dispatch. Human merge and production deploy
 remain mandatory.
 
-## Kaba100 Pending Event Risk Assessment
+## Demo Gateway Pending Event Risk Assessment
 
-The existing Kaba100 pending event should be safe to ingest after server support
+The existing demo-gateway pending event should be safe to ingest after server support
 exists if the handler is idempotent and treats the request as untrusted input.
 It should not be manually replayed before the server has:
 

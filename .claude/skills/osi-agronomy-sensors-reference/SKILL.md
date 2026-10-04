@@ -49,7 +49,7 @@ Do NOT use this skill for (route instead):
 
 File locations for all OSI-authored decoders:
 `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/` (list with `ls` there; as of 2026-09-14: aquascope_lorain, dragino_lsn50, milesight_uc512, sensecap_s2120, strega_gen1, strega_gen2).
-The same directory also holds `agroscope_uplink_transform.js`, the edge→Agroscope IoT forwarding transform (osi-os PR #110) — it is not a device decoder.
+The same directory also holds `agroscope_uplink_transform.js`, the edge→partner-institute IoT forwarding transform (osi-os PR #110) — it is not a device decoder.
 KIWI/CLOVER have no file here — their payload arrives already decoded (vendor/ChirpStack-side codec), which is why the table above says "No".
 
 **VWC note (not implemented on the edge):** `web/react-gui/src/types/farming.ts` types a
@@ -228,13 +228,13 @@ variants are mutually exclusive on one board. Before troubleshooting SWT on a
 `DRAGINO_LSN50` as a Chameleon I2C fault, check whether the device is a
 WATERMARK node instead.
 
-**Wiring rule (one line; full analysis lives elsewhere):** power the VIA
+**Wiring rule (one line; the field incident summary lives elsewhere):** power the VIA
 Chameleon I2C reader from the LSN50's own `VDD` rail (3.3-3.6 V) when SDA/SCL
 are wired directly to the LSN50 STM32 I2C pins. Do not power it from switched
 5 V without a proper bidirectional I2C level shifter plus power isolation —
 the reader's pull-ups follow VCC and a switched-off 5 V rail can back-power
-the board through SDA/SCL. Full field diagnosis:
-`docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md`; for
+the board through SDA/SCL. Field incident summary:
+`docs/hardware/chameleon-reference.md` (section "Field incident: reader powered from a different rail than the bus"); for
 troubleshooting a live `i2c_missing` symptom, use **osi-debugging-playbook**
 instead of re-deriving this here.
 
@@ -283,7 +283,7 @@ ownership, do not conflate them:
 The private controller design begins "**Status:** Draft design, not shipped
 behavior." It describes a future opt-in
 `controller_mode='dendrometer'` architecture that would compare against
-Agroscope's `Tree_HSMM`/`Tree_irrigator` reference logic. Treat it purely as
+the partner institute's `Tree_HSMM`/`Tree_irrigator` reference logic. Treat it purely as
 a design reference, not current runtime behavior, and do not cite it as if
 MDS/TWD already work this way.
 
@@ -563,7 +563,7 @@ on Gen2" for a payload that cannot carry it.
 - Assuming `TWD_rel` is available on the edge dashboard — it's cloud-only
   (v6, osi-server); the edge still runs its own absolute-µm v5 TWD/MDS.
   Don't conflate the two TWD implementations.
-- Treating the Agroscope dendrometer controller doc as shipped behavior —
+- Treating the partner institute dendrometer controller doc as shipped behavior —
   it explicitly says "Draft design, not shipped behavior."
 - Assuming `TEKTELIC_CLOVER` reports VWC today — it's typed for a future
   channel but has no populated edge field (`edgeField: null` in the channel

@@ -162,7 +162,7 @@ rehearsal.
 - `chameleon_calibrations` — keyed by `array_id` (uppercase 16-char hex). Source via.farm; bundled into firmware seed before release.
 - `chameleon_calibration_misses` — negative cache (24h TTL) for unknown array_ids.
 - `chameleon_readings.calibration_status` — `'calibrated'`, `'pending'`, or `'unknown'`.
-- **LSN50 Chameleon wiring:** when SDA/SCL are connected directly to the LSN50 STM32 I2C pins, power the VIA Chameleon I2C reader from LSN50 `VDD` (same 3.3-3.6 V rail as the bus). Do **not** power it from switched 5 V unless a proper bidirectional I2C level shifter and power isolation are added; the reader pull-ups follow VCC and switched-off 5 V can leave the board back-powered through SDA/SCL. See [docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md](docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md).
+- **LSN50 Chameleon wiring:** when SDA/SCL are connected directly to the LSN50 STM32 I2C pins, power the VIA Chameleon I2C reader from LSN50 `VDD` (same 3.3-3.6 V rail as the bus). Do **not** power it from switched 5 V unless a proper bidirectional I2C level shifter and power isolation are added; the reader pull-ups follow VCC and switched-off 5 V can leave the board back-powered through SDA/SCL. See the field incident analysis in [docs/hardware/chameleon-reference.md](docs/hardware/chameleon-reference.md#field-incident-reader-powered-from-a-different-rail-than-the-bus).
 - **Edge endpoints:** `POST /api/devices/:deveui/chameleon/refresh-calibration` (sync worker fetches from cloud), `PUT /api/devices/:deveui/chameleon/depth` (depth-only save, replaces old chameleon-config).
 - **Node-RED sync worker** queries missing calibrations every 30s alongside pending commands, fetches from `/api/v1/sync/chameleon/calibrations/lookup`, persists locally, and runs local backfill.
 - **Removed:** `PUT /api/devices/:deveui/chameleon-config` endpoint and the 9 per-device coefficient columns (`chameleon_swt[123]_[abc]`). Depth columns (`chameleon_swt[123]_depth_cm`) stay.
@@ -311,6 +311,7 @@ node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
+node scripts/verify-doc-hygiene.js            # no deployment identities in docs, guidance, skills
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
@@ -367,7 +368,7 @@ until the stack is rebased onto the current `origin/main`.
 - Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
-- **Foreign-numbered ledger recovery:** a gateway that ran the AgroLink or Bovey/Valve-focused line has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on AgroLink, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
+- **Foreign-numbered ledger recovery:** a gateway that ran one of the two customer lines (one valve-focused, one not) has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer line, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
   artifacts. Current `node-red.init` does not read identity from that file, and
   `settings.js` protects identity keys, but operators should still remove stale
@@ -403,6 +404,23 @@ until the stack is rebased onto the current `origin/main`.
 - Empty `catch` blocks in `flows.json`: `scripts/verify-no-new-silent-catch.js` ratchets the maintained-profile baseline. When touching any function node, convert empty `catch(_){}` / `catch(e){}` / `catch {}` blocks in that node to a visible warning such as `catch (e) { node.warn('<node/context>: ' + (e && e.message ? e.message : e)); }`; new function code must not swallow errors silently. Load in-repo helper modules via `osiLib.require('<name>')` with `{"var": "osiLib", "module": "osi-lib"}` declared in the node's `libs` (bare `require()` of a non-builtin fails CI via the ratchet in `scripts/verify-sync-flow.js`); beyond such declared helpers, keep function-node `libs` minimal.
 - Error-counter heartbeat fields: maintained profiles now have catch nodes wired to `Record Error` (`global.error_counts`). Do not add heartbeat `errors_total` / `errors_last_at` fields until the flow has a `Gather Edge Health` node; that node is absent in the current maintained-profile baseline, so heartbeat surfacing is intentionally skipped.
 - `MqttPublisherService` on the cloud is deprecated (kept for potential future use); all cloud→edge commands are REST.
+- **No deployment identities in public text.** Documents, guidance files,
+  skills, commit messages, issues and pull requests do not name customers,
+  farms or individual gateways, and carry no real EUI or tailnet address.
+  Write "the customer test gateway", "the demo gateway", "a customer
+  gateway", "a customer cloud instance", "the partner institute". The
+  production site in Uganda is named as such; that is allowed. Example
+  values: gateway EUI `0016C001F1000001`, device EUI `A840410000000001`,
+  address `100.x.y.z`. A 16-digit hex value that is not an identifier,
+  such as a Node-RED node id, needs an entry in
+  `scripts/verify-doc-hygiene-allowlist.json` with a reason.
+  `node scripts/verify-doc-hygiene.js` enforces this in CI for files,
+  pull-request text and commit messages; maintainers hold the name list.
+  Maintainers install the matching pre-push guard once per clone:
+  `cp scripts/hooks/pre-push-doc-hygiene.sh "$(git rev-parse --git-path hooks/pre-push)" && chmod +x "$(git rev-parse --git-path hooks/pre-push)"`,
+  then `git config osi.docHygieneTermsFile <path to the name list>`.
+  Reinstall the copy when the script changes. It scans the pushed commits
+  and their messages before anything reaches the public repository.
 
 ---
 

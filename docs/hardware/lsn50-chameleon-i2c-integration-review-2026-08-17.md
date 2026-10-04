@@ -4,7 +4,7 @@
 **Status:** Analysis only. No firmware or hardware changes are authorized by this document.
 **Scope:** Root-cause the three fielded topologies, audit every exposed LSN50 v2.3(a) pin/net, evaluate candidate architectures, and define the recommended design, firmware contract, test plan, and go/no-go gates.
 **Supersedes:** `docs/hardware/lsn50-chameleon-i2c-architecture-analysis.md` (untracked draft from 2026-08-15; contains unsourced claims and wrong document numbers — do not cite it).
-**Extends:** `docs/operations/kaba100-chameleon1-i2c-outage-analysis-2026-06-28.md` (field data used here as evidence).
+**Extends:** the field incident analysis in `docs/hardware/chameleon-reference.md` (field data used here as evidence).
 
 Every statement is tagged: **[F]** fact verified against a primary source or repo code, **[I]** inference from tagged facts, **[U]** unknown / not yet measured. Citations use the short names in the source table.
 
@@ -26,7 +26,7 @@ Every statement is tagged: **[F]** fact verified against a primary source or rep
 | FW-v1 | `LoRa_STM32-claude` branch `feature/chameleon-i2c-reader` | n/a |
 | FW-v1.5 | same repo, `feature/chameleon-v1.5` | — |
 | FW-v1.6 | same repo, `feature/chameleon-v1.6-switched-i2c2` incl. `README-chameleon-v1.6-switched-power.md` and `docs/superpowers/specs/2026-08-09-lsn50-chameleon-dual-power-design.md` | — |
-| FIELD | Kaba100 outage analysis + its underlying DB extracts (2026-06-28) | n/a |
+| FIELD | the field incident analysis (summarised in `docs/hardware/chameleon-reference.md`, section 'Field incident: reader powered from a different rail than the bus') (2026-06-28) | n/a |
 
 ---
 

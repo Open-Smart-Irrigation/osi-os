@@ -1,0 +1,57 @@
+name: Doc Hygiene
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [ main ]
+jobs:
+  doc-hygiene:
+    # The private repository merges public main and holds the names by
+    # design; the scan only makes sense in the public repository.
+    if: github.repository == 'Open-Smart-Irrigation/osi-os'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # full history: the commit-message scan walks base..HEAD
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Scanner unit tests
+        run: node --test scripts/verify-doc-hygiene.test.js scripts/hooks/pre-push-doc-hygiene.test.js
+      # The name list is a secret. Fork pull requests do not receive it; they
+      # run the built-in patterns on files, pull-request text and commit
+      # messages. The name list runs on same-repository pull requests and on
+      # pushes to main (files only on a push).
+      - name: Scan documentation, guidance and skills
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
+        run: node scripts/verify-doc-hygiene.js ${{ (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && '--require-terms' || '' }}
+      # Two steps, so that a stdin:N finding points into one text.
+      - name: Scan pull request title and body
+        if: github.event_name == 'pull_request'
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && '--require-terms' || '' }}
+        run: |
+          set -euo pipefail
+          # REQUIRE_TERMS is unquoted on purpose: an empty value adds no argument.
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" \
+            | node scripts/verify-doc-hygiene.js --stdin $REQUIRE_TERMS
+      - name: Scan pull request commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          OSI_DOC_HYGIENE_TERMS: ${{ secrets.OSI_DOC_HYGIENE_TERMS }}
+          REQUIRE_TERMS: ${{ github.event.pull_request.head.repo.full_name == github.repository && '--require-terms' || '' }}
+        run: |
+          set -euo pipefail
+          # REQUIRE_TERMS is unquoted on purpose: an empty value adds no argument.
+          git log --format=%B "origin/${GITHUB_BASE_REF}..HEAD" \
+            | node scripts/verify-doc-hygiene.js --stdin $REQUIRE_TERMS
