@@ -470,6 +470,7 @@ test('staging removes stage directories left by earlier killed deploys', () => {
   const match = /^stage_command_ledger_dependency\(\) \{\n[\s\S]*?\n\}\n/m.exec(DEPLOY);
   assert.ok(match, 'stage_command_ledger_dependency must be defined in deploy.sh');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-stage-root-'));
+  const liveRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-root-'));
   try {
     for (const leftover of ['.osi-command-ledger-stage.111', '.osi-command-ledger-stage.222']) {
       fs.mkdirSync(path.join(root, leftover, 'osi-command-ledger'), { recursive: true });
@@ -483,8 +484,11 @@ test('staging removes stage directories left by earlier killed deploys', () => {
       `COMMAND_LEDGER_STAGE='${root}/.osi-command-ledger-stage.333'`,
       `COMMAND_LEDGER_INSTALLER='${root}/installer.js'`,
       `COMMAND_LEDGER_HELPER_SHA256='${'c'.repeat(64)}'`,
+      `NODE_RED_ROOT='${liveRoot}'`,
+      'DEPLOY_STAMP=333',
       'fetch_required() { :; }',
       'node() { printf %s "$COMMAND_LEDGER_HELPER_SHA256"; }',
+      optionalShellFunction('keep_command_ledger_copy'),
       match[0],
       'stage_command_ledger_dependency',
     ].join('\n');
@@ -493,6 +497,7 @@ test('staging removes stage directories left by earlier killed deploys', () => {
     assert.deepEqual(entries, ['.osi-command-ledger-stage-notes', '.osi-command-ledger-stage.333', 'osi-command-ledger']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(liveRoot, { recursive: true, force: true });
   }
 });
 
@@ -627,7 +632,8 @@ ${shellFunction('stage_command_ledger_dependency')}
 ${shellFunction('activate_command_ledger_dependency')}
 ${['command_ledger_live_hashes', 'report_command_ledger_activation_failure', 'keep_command_ledger_copy',
   'restore_command_ledger_copy', 'command_ledger_live_pair_loads', 'release_command_ledger_boot_hold',
-  'hold_for_unloadable_command_ledger'].map(optionalShellFunction).join('\n')}
+  'hold_for_unloadable_command_ledger', 'clear_command_ledger_hold', 'check_command_ledger_hold',
+  'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
 ${shellFunction('check_fetched_manifest')}
 ${shellFunction('check_fetched_js_files')}
 ${identity}
@@ -696,6 +702,12 @@ swap_call flipTo prev "$GUI_ROOT" >/dev/null
 fi
 swap_call stagePayload new "$ROOT_DIR/src-flows-new.json" "$ROOT_DIR/src-gui-new" >/dev/null
 
+# --- injected before staging ---
+${options.preStage || ':'}
+# deploy.sh checks for an earlier command-ledger hold before its first fetch.
+if command -v check_command_ledger_hold >/dev/null 2>&1; then
+    check_command_ledger_hold
+fi
 stage_command_ledger_dependency
 # --- injected failure ---
 ${inject}
@@ -734,7 +746,8 @@ esac
 function runActivationHarness(root, inject, env = {}, options = {}) {
   let bin = path.join(root, 'bin');
   if (!options.rerun) {
-    writeOldPair(path.join(root, 'node-red'));
+    if (options.noLedger) fs.mkdirSync(path.join(root, 'node-red'), { recursive: true });
+    else writeOldPair(path.join(root, 'node-red'));
     bin = writeNodeShim(root);
   }
   const result = spawnSync('sh', ['-c', activationHarness(root, inject, options)], {
@@ -751,6 +764,11 @@ function runActivationHarness(root, inject, env = {}, options = {}) {
     nodeRedLog: read('node-red.log') || '',
     nodeRedBoot: read('node-red.boot'),
     bootHold: fs.existsSync(path.join(root, 'node-red', '.osi-command-ledger-boot-hold')),
+    holdMarker: read('node-red/.osi-command-ledger-hold'),
+    restoreLeftovers: ['osi-command-ledger', 'osi-watermark-binding'].flatMap((dir) => {
+      const full = path.join(root, 'node-red', dir);
+      return fs.existsSync(full) ? fs.readdirSync(full).filter((name) => name.endsWith('.osi-restore')) : [];
+    }),
     ledgerCopies: fs.readdirSync(path.join(root, 'node-red')).filter((name) => name.startsWith('.osi-command-ledger-previous.')),
     activeFlows: swapStamp(root),
     newPayloadKept: fs.existsSync(path.join(root, 'payloads', 'new')),
@@ -812,6 +830,7 @@ test('the activation harness completes a deploy when nothing fails', () => {
     assert.equal(result.identityd, '1');
     assert.deepEqual(result.ledgerCopies, [], 'a successful deploy removes the copy of the previous ledger files');
     assert.equal(result.nodeRedBoot, null, 'a successful deploy does not change Node-RED start at boot');
+    assert.equal(result.holdMarker, null);
   });
 });
 
@@ -859,10 +878,19 @@ function writeTransientLoadFailure(root) {
 
 const LIVE_LOAD_FAILURE = 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS';
 
-// The previous index.js and package.json restored from the kept copy, beside
-// the candidate binding: the previous gateway had no binding to restore.
+// The state restored from the kept copy: the previous index.js and
+// package.json, and no binding, because the previous gateway had none.
 function restoredHashes() {
-  return { ...oldPairHashes(), 'osi-watermark-binding/canonicalization.js': candidateHashes()['osi-watermark-binding/canonicalization.js'] };
+  return oldPairHashes();
+}
+
+function assertHeldWithoutDisable(result) {
+  assert.match(result.stderr, /the previous payload is held stopped/, harnessOutput(result));
+  assert.match(result.stderr, /re-run the deploy/);
+  assert.equal(result.nodeRed, '0', harnessOutput(result));
+  assert.equal(result.nodeRedBoot, null, 'a hold must not change Node-RED start at boot');
+  assert.doesNotMatch(result.nodeRedLog, /disable/);
+  assert.match(result.holdMarker || '', /^reason=.+\ntime=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/m, 'the hold marker records its reason and time');
 }
 
 for (const [step, inject, options, expectedLedger, expectedFileLines] of ACTIVATION_FAILURES) {
@@ -889,15 +917,13 @@ for (const [step, inject, options, expectedLedger, expectedFileLines] of ACTIVAT
       assert.deepEqual(result.liveLedger, expectedLedger());
       for (const line of expectedFileLines) assert.match(result.stderr, line, harnessOutput(result));
       if (options.held) {
-        assert.match(result.stderr, /restored the files from before this activation from \S*\.osi-command-ledger-previous\.new; they do not load either/, harnessOutput(result));
-        assert.match(result.stderr, /the previous payload is held stopped/, harnessOutput(result));
-        assert.match(result.stderr, /re-run the deploy/);
-        assert.equal(result.nodeRedBoot, '0', 'a held gateway must not start Node-RED at boot');
-        assert.equal(result.bootHold, true);
+        assert.match(result.stderr, /restored the state from before this activation from \S*\.osi-command-ledger-previous\.new; it does not load either/, harnessOutput(result));
+        assertHeldWithoutDisable(result);
       } else {
         assert.doesNotMatch(result.stderr, /held stopped/);
         assert.match(result.stderr, /the live command-ledger files load in a fresh process/, harnessOutput(result));
         assert.equal(result.nodeRedBoot, null);
+        assert.equal(result.holdMarker, null);
       }
       assert.deepEqual(result.ledgerCopies, ['.osi-command-ledger-previous.new'], 'a failed deploy keeps the copy');
     });
@@ -979,7 +1005,7 @@ test('a post-activation load failure after a committed migration also reports th
     assert.equal(result.activeFlows, 'prev');
     assert.equal(result.nodeRed, '0');
     assert.equal(result.identityd, '0');
-    assert.equal(result.nodeRedBoot, '0');
+    assertHeldWithoutDisable(result);
     assert.deepEqual(result.liveLedger, restoredHashes());
   });
 });
@@ -1139,7 +1165,8 @@ test('a candidate pair that does not load is replaced by the kept previous files
     const result = runActivationHarness(root, LIVE_LOAD_FAILURE);
     assert.notEqual(result.status, 0, harnessOutput(result));
     assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
-    assert.match(result.stderr, /restored the files from before this activation from \S*\.osi-command-ledger-previous\.new, and they load/, harnessOutput(result));
+    assert.match(result.stderr, /restored the state from before this activation from \S*\.osi-command-ledger-previous\.new, and it loads/, harnessOutput(result));
+    assert.equal(result.holdMarker, null);
     assert.doesNotMatch(result.stderr, /held stopped/);
     assert.deepEqual(result.liveLedger, restoredHashes());
     assert.equal(result.activeFlows, 'prev');
@@ -1170,26 +1197,27 @@ test('a re-run after a hold holds again while the live pair does not load, and a
   withActivationRoot((root) => {
     writeLiveLoadFailure(root);
     const first = runActivationHarness(root, LIVE_LOAD_FAILURE);
-    assert.match(first.stderr, /the previous payload is held stopped/, harnessOutput(first));
-    assert.equal(first.nodeRedBoot, '0');
+    assertHeldWithoutDisable(first);
 
-    const second = runActivationHarness(root, LIVE_LOAD_FAILURE, {}, { rerun: true });
+    // The fault persists, so it is present from the start of the re-run.
+    const second = runActivationHarness(root, LIVE_LOAD_FAILURE, {}, { rerun: true, preStage: LIVE_LOAD_FAILURE });
     assert.notEqual(second.status, 0, harnessOutput(second));
-    assert.match(second.stderr, /the previous payload is held stopped/, harnessOutput(second));
+    assert.match(second.stderr, /WARNING: this gateway has been in a command-ledger hold since \S+ \(.+\); the live pair still does not load/, harnessOutput(second));
     assert.doesNotMatch(second.stderr, /load in a fresh process/);
     assert.equal(second.activeFlows, 'prev');
     assert.equal(second.nodeRed, '0', 'a re-run must not restart the previous payload beside a ledger that does not load');
-    assert.equal(second.nodeRedBoot, '0');
-    assert.equal(second.bootHold, true);
+    assertHeldWithoutDisable(second);
 
     fs.rmSync(path.join(root, 'fail-live-ledger-load.js'));
     fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'), '');
     const third = runActivationHarness(root, ':', {}, { rerun: true });
     assert.equal(third.status, 0, harnessOutput(third));
-    assert.match(third.stdout, /Node-RED start at boot re-enabled/, harnessOutput(third));
+    // The early check finds the restored pair loading and clears the hold
+    // before staging.
+    assert.match(third.stdout, /OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at/, harnessOutput(third));
     assert.equal(third.exitState, 'activated=1 flipped=1 committed=0');
-    assert.equal(third.nodeRedBoot, '1');
-    assert.equal(third.bootHold, false);
+    assert.equal(third.nodeRedBoot, null);
+    assert.equal(third.holdMarker, null);
     assert.deepEqual(third.ledgerCopies, []);
     assert.deepEqual(third.liveLedger, candidateHashes());
   });
@@ -1211,7 +1239,8 @@ node_red_restart_needed=0
 identityd_deploy_state=restore_running
 ${commandLedgerPins()}
 ${['report_command_ledger_activation_failure', 'command_ledger_live_pair_loads', 'restore_command_ledger_copy',
-  'release_command_ledger_boot_hold', 'hold_for_unloadable_command_ledger'].map(optionalShellFunction).join('\n')}
+  'release_command_ledger_boot_hold', 'hold_for_unloadable_command_ledger', 'clear_command_ledger_hold',
+  'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
 # The producer reads package.json, then fails on index.js (EACCES, EIO).
 command_ledger_live_hashes() {
     printf 'osi-command-ledger/package.json %s\\n' "$COMMAND_LEDGER_PACKAGE_SHA256"
@@ -1242,3 +1271,97 @@ for (const [label, inject] of [
     });
   });
 }
+
+// --- Fix round 2: stop-only hold, marker checked by every deploy -------------
+
+test('a gateway without a command ledger whose installer fails is left as it was, without a hold', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, 'printf "%s\\n" "process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"', {}, { noLedger: true });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /no command-ledger files are in place, as before this activation/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.equal(result.holdMarker, null);
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1', 'the previous payload, which ran without a ledger, must be restarted');
+    assert.equal(result.identityd, '1');
+    assert.equal(result.nodeRedBoot, null);
+    assert.deepEqual(Object.values(result.liveLedger), [null, null, null]);
+  });
+});
+
+test('a gateway without a command ledger gets its absence back when the activated pair does not load', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE, {}, { noLedger: true });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /no command-ledger files are in place, as before this activation/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.equal(result.holdMarker, null);
+    assert.deepEqual(Object.values(result.liveLedger), [null, null, null], 'the candidate files must be moved out of the live tree');
+    assert.ok(fs.existsSync(path.join(root, 'node-red', '.osi-command-ledger-previous.new', 'failed', 'osi-command-ledger', 'index.js')),
+      'the moved candidate files are kept beside the copy');
+    assert.equal(result.nodeRed, '1');
+    assert.equal(result.nodeRedBoot, null);
+  });
+});
+
+test('a deploy that fails before activation reports and clears an earlier hold once the pair loads', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    assertHeldWithoutDisable(runActivationHarness(root, LIVE_LOAD_FAILURE));
+    fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'), '');
+    const later = runActivationHarness(root, 'printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"', {}, { rerun: true });
+    assert.notEqual(later.status, 0, harnessOutput(later));
+    assert.match(later.stdout, /OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at \d{4}-/, harnessOutput(later));
+    assert.match(later.stderr, /could not create the migration backup directory/);
+    assert.equal(later.holdMarker, null);
+    assert.equal(later.nodeRedBoot, null);
+  });
+});
+
+test('a deploy that fails before activation reports a hold that still applies', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    assertHeldWithoutDisable(runActivationHarness(root, LIVE_LOAD_FAILURE));
+    const later = runActivationHarness(root, `${LIVE_LOAD_FAILURE}; printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"`, {},
+      { rerun: true, preStage: LIVE_LOAD_FAILURE });
+    assert.notEqual(later.status, 0, harnessOutput(later));
+    assert.match(later.stderr, /WARNING: this gateway has been in a command-ledger hold since \S+ \(.+\); the live pair still does not load; the deploy continues/, harnessOutput(later));
+    assert.match(later.holdMarker || '', /^reason=/m, 'the marker stays until a pair loads');
+  });
+});
+
+test('the copy of the previous ledger files is taken at staging, before anything is stopped', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':', {}, {
+      preStage: 'cp() { case "$*" in *.osi-command-ledger-previous*) return 1 ;; esac; command cp "$@"; }',
+    });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /could not copy the live command-ledger files to \S*\.osi-command-ledger-previous\.new/, harnessOutput(result));
+    assert.doesNotMatch(result.stdout, /Stop Node-RED for schema migration/);
+    assert.doesNotMatch(result.nodeRedLog, /stop/);
+    assert.deepEqual(result.ledgerCopies, [], 'a partial copy is removed');
+    assert.equal(result.activeFlows, 'prev');
+    assert.deepEqual(result.liveLedger, oldPairHashes());
+  });
+});
+
+test('a failed restore leaves no temporary file beside the live ledger', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root,
+      `${LIVE_LOAD_FAILURE}; mv() { case "$*" in *.osi-restore*) return 1 ;; esac; command mv "$@"; }`);
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /restoring the state from before this activation from \S* failed/, harnessOutput(result));
+    assert.deepEqual(result.restoreLeftovers, []);
+    assertHeldWithoutDisable(result);
+  });
+});
+
+test('deploy.sh checks for a command-ledger hold before its first fetch and never disables a service at boot', () => {
+  const check = DEPLOY.indexOf('\ncheck_command_ledger_hold\n');
+  const firstFetch = DEPLOY.indexOf('\nrun_communication_preflight\n');
+  assert.ok(check > 0 && check < firstFetch, 'check_command_ledger_hold must run before run_communication_preflight');
+  assert.doesNotMatch(DEPLOY, /node-red"?\s+disable|NODE_RED_INIT"?\s+disable/, 'deploy.sh must not disable Node-RED at boot');
+  assert.doesNotMatch(DEPLOY, /\$NODE_RED_INIT"? enable/, 'with nothing disabled there is nothing to re-enable');
+});

@@ -133,6 +133,14 @@ stage_command_ledger_dependency() {
         echo "ERROR: command-ledger dependency staging refused" >&2
         return 1
     fi
+    # The installer renames the candidate over the live files and keeps no
+    # copy. Taken here, before anything is stopped, this one is the restore
+    # source if the activated pair does not load; a deploy that succeeds
+    # removes it.
+    if ! keep_command_ledger_copy "$NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP"; then
+        echo "ERROR: could not copy the live command-ledger files to $NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP; refusing the deploy before anything is stopped" >&2
+        return 1
+    fi
     echo "OK: command-ledger dependency pair staged; activation deferred until schema migration"
 }
 
@@ -147,14 +155,8 @@ activate_command_ledger_dependency() {
         echo "ERROR: could not read the live command-ledger files before activation; the pair was not activated" >&2
         return 1
     fi
-    # The installer renames the candidate over the live files and keeps no
-    # copy. This one stays until a deploy succeeds, and is the restore source
-    # when the activated pair does not load.
+    # The state from before this activation was copied at staging.
     command_ledger_previous="$NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP"
-    if ! keep_command_ledger_copy "$command_ledger_previous"; then
-        echo "ERROR: could not copy the live command-ledger files to $command_ledger_previous; the pair was not activated" >&2
-        return 1
-    fi
     # The installer re-verifies the digests, moves the pair into place and
     # loads it in a fresh process; it exits non-zero when any of these fails.
     # This function runs inside "if !" and "|| exit 1", where the shell does
@@ -164,7 +166,7 @@ activate_command_ledger_dependency() {
         report_command_ledger_activation_failure "$command_ledger_before" "$command_ledger_previous"
         return 1
     fi
-    release_command_ledger_boot_hold
+    clear_command_ledger_hold
     COMMAND_LEDGER_ACTIVATED=1
     echo "OK: command-ledger dependency pair activated after schema migration"
 }
@@ -187,28 +189,51 @@ command_ledger_live_hashes() {
     ' "$NODE_RED_ROOT"
 }
 
-# Copies the live command-ledger files that exist to directory $1.
+# Copies the live command-ledger files to directory $1 and lists the ones
+# that do not exist in $1/absent, so a restore can put back their absence. A
+# copy that fails part-way is removed.
 keep_command_ledger_copy() {
-    rm -rf "$1" || return 1
+    if ! { rm -rf "${1:?}" && mkdir -p "$1" && : > "$1/absent"; }; then
+        rm -rf "${1:?}"
+        return 1
+    fi
     for ledger_file in osi-command-ledger/package.json osi-command-ledger/index.js osi-watermark-binding/canonicalization.js; do
         if [ -e "$NODE_RED_ROOT/$ledger_file" ]; then
-            mkdir -p "$1/${ledger_file%/*}" || return 1
-            cp -p "$NODE_RED_ROOT/$ledger_file" "$1/$ledger_file" || return 1
+            if ! { mkdir -p "$1/${ledger_file%/*}" && cp -p "$NODE_RED_ROOT/$ledger_file" "$1/$ledger_file"; }; then
+                rm -rf "${1:?}"
+                return 1
+            fi
+        elif ! printf '%s\n' "$ledger_file" >> "$1/absent"; then
+            rm -rf "${1:?}"
+            return 1
         fi
     done
 }
 
-# Puts the files kept in $1 back, each through a same-directory rename. A
-# file the copy lacks (the binding, on a gateway that had none) stays as it
-# is: the old ledger with the candidate binding is the pairing the installer
-# proves loadable before it moves anything.
+# Puts back the state kept in $1: each kept file through a same-directory
+# rename, and the absence of each file listed in $1/absent by moving the live
+# file into $1/failed. A temporary file left by a failed copy is removed.
 restore_command_ledger_copy() {
     for ledger_file in osi-command-ledger/index.js osi-command-ledger/package.json osi-watermark-binding/canonicalization.js; do
         if [ -f "$1/$ledger_file" ]; then
-            cp -p "$1/$ledger_file" "$NODE_RED_ROOT/$ledger_file.osi-restore" || return 1
-            mv -f "$NODE_RED_ROOT/$ledger_file.osi-restore" "$NODE_RED_ROOT/$ledger_file" || return 1
+            if ! { cp -p "$1/$ledger_file" "${NODE_RED_ROOT:?}/$ledger_file.osi-restore" &&
+                mv -f "${NODE_RED_ROOT:?}/$ledger_file.osi-restore" "$NODE_RED_ROOT/$ledger_file"; }; then
+                rm -f "${NODE_RED_ROOT:?}/$ledger_file.osi-restore"
+                return 1
+            fi
+        elif [ -e "$NODE_RED_ROOT/$ledger_file" ] && grep -qx "$ledger_file" "$1/absent" 2>/dev/null; then
+            if ! { mkdir -p "$1/failed/${ledger_file%/*}" && mv -f "$NODE_RED_ROOT/$ledger_file" "$1/failed/$ledger_file"; }; then
+                return 1
+            fi
         fi
     done
+}
+
+# True when none of the three command-ledger files exists in the live tree.
+command_ledger_none_live() {
+    [ ! -e "$NODE_RED_ROOT/osi-command-ledger/package.json" ] &&
+        [ ! -e "$NODE_RED_ROOT/osi-command-ledger/index.js" ] &&
+        [ ! -e "$NODE_RED_ROOT/osi-watermark-binding/canonicalization.js" ]
 }
 
 # Loads the live ledger in a fresh process with the installer's contract.
@@ -219,40 +244,62 @@ command_ledger_live_pair_loads() {
     ' "$NODE_RED_ROOT/osi-command-ledger"
 }
 
-# Re-enables Node-RED at boot once the live pair loads again after a hold.
-release_command_ledger_boot_hold() {
-    [ -e "$NODE_RED_ROOT/.osi-command-ledger-boot-hold" ] || return 0
-    if ! "$NODE_RED_INIT" enable; then
-        echo "ERROR: the command-ledger pair loads again, but Node-RED start at boot could not be re-enabled; run: $NODE_RED_INIT enable" >&2
-        return 1
+# Removes the command-ledger hold marker once a live pair loads.
+clear_command_ledger_hold() {
+    [ -e "$NODE_RED_ROOT/.osi-command-ledger-hold" ] || return 0
+    if rm -f "${NODE_RED_ROOT:?}/.osi-command-ledger-hold"; then
+        echo "OK: the command-ledger pair loads; cleared the command-ledger hold"
+    else
+        echo "WARNING: the command-ledger pair loads, but $NODE_RED_ROOT/.osi-command-ledger-hold could not be removed" >&2
     fi
-    rm -f "$NODE_RED_ROOT/.osi-command-ledger-boot-hold"
-    echo "OK: the command-ledger pair loads again; Node-RED start at boot re-enabled"
 }
 
-# The live pair does not load: never start the previous payload beside it,
-# now or at the next boot.
-hold_for_unloadable_command_ledger() {
-    if : > "$NODE_RED_ROOT/.osi-command-ledger-boot-hold" && "$NODE_RED_INIT" disable; then
-        boot_note="Node-RED start at boot is disabled until a deploy activates a pair that loads"
+# Run by every deploy before its first fetch: clears an earlier hold whose
+# live pair now loads, or says that the gateway is still in it. Never stops
+# the deploy.
+check_command_ledger_hold() {
+    [ -e "$NODE_RED_ROOT/.osi-command-ledger-hold" ] || return 0
+    hold_since="$(sed -n 's/^time=//p' "$NODE_RED_ROOT/.osi-command-ledger-hold" 2>/dev/null)"
+    hold_reason="$(sed -n 's/^reason=//p' "$NODE_RED_ROOT/.osi-command-ledger-hold" 2>/dev/null)"
+    if command_ledger_live_pair_loads >/dev/null 2>&1; then
+        if rm -f "${NODE_RED_ROOT:?}/.osi-command-ledger-hold"; then
+            echo "OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at ${hold_since:-an unknown time}"
+        else
+            echo "WARNING: the live command-ledger pair loads again, but $NODE_RED_ROOT/.osi-command-ledger-hold could not be removed" >&2
+        fi
     else
-        boot_note="Node-RED start at boot could NOT be disabled, so a reboot starts the previous payload beside these files"
+        echo "WARNING: this gateway has been in a command-ledger hold since ${hold_since:-an unknown time} (${hold_reason:-no reason recorded}); the live pair still does not load; the deploy continues, and an activation whose pair loads clears the hold" >&2
+    fi
+    return 0
+}
+
+# The live pair does not load and the state from before this activation
+# could not be brought back: stop only, as the other holds in this script do.
+# Nothing is disabled at boot; the marker records the hold for the next
+# deploy and for the operator.
+hold_for_unloadable_command_ledger() {
+    if printf 'reason=%s\ntime=%s\ndeploy=%s\ncopy=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DEPLOY_STAMP:-unknown}" "$2" \
+        > "$NODE_RED_ROOT/.osi-command-ledger-hold"; then
+        hold_note="recorded in $NODE_RED_ROOT/.osi-command-ledger-hold"
+    else
+        hold_note="NOT recorded: $NODE_RED_ROOT/.osi-command-ledger-hold could not be written"
     fi
     if [ "$node_red_restart_needed" = "1" ]; then
         node_red_restart_needed=0
         identityd_deploy_state="fatal_hold"
-        echo "ERROR: the previous payload is held stopped (Node-RED and identityd stay stopped); $boot_note" >&2
+        echo "ERROR: the previous payload is held stopped (Node-RED and identityd stay stopped; nothing is disabled, so a reboot or a manual start runs the previous payload beside these files); the hold is $hold_note" >&2
     else
-        echo "ERROR: this deploy did not stop Node-RED, which still runs the ledger it loaded at its last start; do not restart it before the pair loads; $boot_note" >&2
+        echo "ERROR: this deploy did not stop Node-RED, which still runs the ledger it loaded at its last start; a restart or reboot loads these files; the hold is $hold_note" >&2
     fi
-    echo "ERROR: way out: re-run the deploy; the migration is then a no-op, staging re-validates the pair and the activation retries, and an activation that loads re-enables Node-RED at boot. If it fails again, the load error printed above names the cause. After a manual repair: $NODE_RED_INIT enable && $NODE_RED_INIT start" >&2
+    echo "ERROR: way out: re-run the deploy; the migration is then a no-op, staging re-validates the pair, the activation retries, and an activation whose pair loads clears the hold. If it fails again, the load error printed above names the cause." >&2
 }
 
 # After a failed activation: names each live ledger file, then decides by
-# loading the live pair in a fresh process. A pair that loads is left for the
-# deploy's existing failure path, which restarts the previous payload when
-# the database allows it. A pair that does not load is replaced by the copy
-# kept before the activation ($2) and loaded again; only when that fails too
+# loading the live pair in a fresh process. With no ledger files in place, as
+# before this activation, or with a live pair that loads, the deploy's
+# existing failure path runs (it restarts the previous payload when the
+# database allows it). Otherwise the state kept at staging ($2) is restored,
+# absent files included, and checked the same way; only when that fails too
 # is the previous payload held stopped.
 report_command_ledger_activation_failure() {
     ledger_state_rc=0
@@ -290,23 +337,30 @@ report_command_ledger_activation_failure() {
         3) echo "ERROR: the candidate command-ledger pair is in place" >&2 ;;
         *) echo "ERROR: could not determine which command-ledger files are in place" >&2 ;;
     esac
+    if command_ledger_none_live; then
+        echo "ERROR: no command-ledger files are in place, as before this activation; nothing to restore; the deploy's failure path restarts the previous payload when the database allows it" >&2
+        return 0
+    fi
     if command_ledger_live_pair_loads; then
-        echo "ERROR: the live command-ledger files load in a fresh process; the deploy's failure path restarts the previous payload on them when the database allows it; the files from before this activation are kept in $2" >&2
-        release_command_ledger_boot_hold || true
+        echo "ERROR: the live command-ledger files load in a fresh process; the deploy's failure path restarts the previous payload on them when the database allows it; the state from before this activation is kept in $2" >&2
+        clear_command_ledger_hold
         return 0
     fi
     if [ ! -d "$2" ]; then
-        echo "ERROR: the live command-ledger files do not load, and there were no command-ledger files before this activation to restore" >&2
+        echo "ERROR: the live command-ledger files do not load, and no copy of the state from before this activation exists at $2" >&2
     elif ! restore_command_ledger_copy "$2"; then
-        echo "ERROR: the live command-ledger files do not load, and restoring the files from before this activation from $2 failed; the copy stays there" >&2
+        echo "ERROR: the live command-ledger files do not load, and restoring the state from before this activation from $2 failed; the copy stays there" >&2
+    elif command_ledger_none_live; then
+        echo "ERROR: the live command-ledger files did not load; no command-ledger files are in place, as before this activation (the candidate files were moved to $2/failed); the deploy's failure path restarts the previous payload when the database allows it" >&2
+        return 0
     elif command_ledger_live_pair_loads; then
-        echo "ERROR: the live command-ledger files did not load; restored the files from before this activation from $2, and they load; the deploy's failure path restarts the previous payload on them when the database allows it" >&2
-        release_command_ledger_boot_hold || true
+        echo "ERROR: the live command-ledger files did not load; restored the state from before this activation from $2, and it loads; the deploy's failure path restarts the previous payload on it when the database allows it" >&2
+        clear_command_ledger_hold
         return 0
     else
-        echo "ERROR: the live command-ledger files did not load; restored the files from before this activation from $2; they do not load either; the copy stays there" >&2
+        echo "ERROR: the live command-ledger files did not load; restored the state from before this activation from $2; it does not load either; the copy stays there" >&2
     fi
-    hold_for_unloadable_command_ledger
+    hold_for_unloadable_command_ledger "the live command-ledger pair does not load after a failed activation" "$2"
 }
 
 same_fs_or_die() {
@@ -1602,6 +1656,7 @@ process.stdout.write(String(applied.length));
 
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
+check_command_ledger_hold
 
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1

@@ -161,7 +161,9 @@ ${extractFunction('report_command_ledger_activation_failure')}
 ${extractFunction('keep_command_ledger_copy')}
 ${extractFunction('restore_command_ledger_copy')}
 ${extractFunction('command_ledger_live_pair_loads')}
-${extractFunction('release_command_ledger_boot_hold')}
+${extractFunction('clear_command_ledger_hold')}
+${extractFunction('check_command_ledger_hold')}
+${extractFunction('command_ledger_none_live')}
 ${extractFunction('hold_for_unloadable_command_ledger')}
 ${extractFunction('check_fetched_manifest')}
 ${extractFunction('check_fetched_js_files')}
