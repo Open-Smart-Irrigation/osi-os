@@ -20,9 +20,12 @@ const TARGETS = {
   UPSERT_DEVICE_NAME: 'device',
   UPSERT_ZONE_NAME: 'zone',
 };
-// command_id and actor_user_uuid are minted by the cloud and are always
-// hyphenated.
+// command_id is minted by the cloud and is always hyphenated.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// actor_user_uuid is the acting user's gateway-local users.user_uuid as stored.
+// The first admin and backfilled users hold 32 lower-case hex digits
+// (lower(hex(randomblob(16)))); that form is accepted and used unchanged.
+const LOCAL_HEX_USER_UUID = /^[0-9a-f]{32}$/;
 // zone_uuid is not. A zone created on the gateway gets 32 hex digits without
 // dashes -- from the seed trigger trg_sync_zones_defaults_ai
 // (lower(hex(randomblob(16)))) on the flag-off path, and from
@@ -80,9 +83,11 @@ function parsePayload(type, payload, runtime) {
   if (!UUID.test(canonicalUuid(payload.command_id))) {
     throw rejection('malformed_command', 'command_id must be a canonical UUID');
   }
-  const actor = canonicalUuid(payload.actor_user_uuid);
-  if (!UUID.test(actor)) {
-    throw rejection('malformed_command', 'actor_user_uuid must be a canonical UUID');
+  const rawActor = payload.actor_user_uuid;
+  const hexActor = typeof rawActor === 'string' && LOCAL_HEX_USER_UUID.test(rawActor);
+  const actor = hexActor ? rawActor : canonicalUuid(rawActor);
+  if (!hexActor && !UUID.test(actor)) {
+    throw rejection('malformed_command', 'actor_user_uuid must be a canonical UUID or 32 lower-case hex digits');
   }
   const gateway = canonicalEui(payload.gateway_device_eui);
   if (!EUI.test(gateway)) {
