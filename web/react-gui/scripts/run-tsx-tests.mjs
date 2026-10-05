@@ -4,6 +4,12 @@
 // matches no file. `tsx --test 'tests/**/*.test.ts'` on its own exits 0 with
 // zero tests once the directory moves.
 //
+// Each file gets a time limit (default 120 s; RUN_TSX_TESTS_TIMEOUT_MS to
+// change it). A file that runs past it is stopped and reported as failed under
+// its own name with "test timed out", so a hang fails the run instead of
+// holding it until the CI job limit (#393). The same limit applies to each
+// single test inside the files.
+//
 // Usage: node scripts/run-tsx-tests.mjs '<pattern>' ['<pattern>' ...]
 // Quote the patterns so the shell does not expand them.
 // scripts/verify-test-inventory.js at the repository root reads the patterns
@@ -13,9 +19,18 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 const patterns = process.argv.slice(2);
 if (!patterns.length) {
   console.error('run-tsx-tests: no patterns given');
+  process.exit(2);
+}
+
+const timeoutSetting = process.env.RUN_TSX_TESTS_TIMEOUT_MS;
+const timeoutMs = timeoutSetting === undefined || timeoutSetting === '' ? DEFAULT_TIMEOUT_MS : Number(timeoutSetting);
+if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+  console.error(`run-tsx-tests: RUN_TSX_TESTS_TIMEOUT_MS must be a positive whole number of milliseconds, got '${timeoutSetting}'`);
   process.exit(2);
 }
 
@@ -36,13 +51,13 @@ if (problems.length) {
   process.exit(2);
 }
 
-console.log(`run-tsx-tests: ${files.size} test files`);
+console.log(`run-tsx-tests: ${files.size} test files, time limit ${timeoutMs} ms per file`);
 const tsx = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '.bin', 'tsx');
 // Started from inside another node:test run, `node --test` sees
 // NODE_TEST_CONTEXT, skips every file and exits 0.
 const env = { ...process.env };
 delete env.NODE_TEST_CONTEXT;
-const r = spawnSync(tsx, ['--test', ...files], { stdio: 'inherit', env });
+const r = spawnSync(tsx, ['--test', `--test-timeout=${timeoutMs}`, ...files], { stdio: 'inherit', env });
 if (r.error) {
   console.error(`run-tsx-tests: could not start tsx: ${r.error.message}`);
   process.exit(1);
