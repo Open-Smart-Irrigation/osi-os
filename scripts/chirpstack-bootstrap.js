@@ -561,9 +561,11 @@ function parseRepairArgs(argv) {
       options.repair = true;
     } else if (arg === REPOINT_FLAG || arg.startsWith(`${REPOINT_FLAG}=`)) {
       const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[(i += 1)];
-      for (const part of String(value || '').split(',')) {
-        if (part.trim()) options.repointDevEuis.push(part.trim());
+      const parts = String(value === undefined ? '' : value).split(',').map((part) => part.trim()).filter(Boolean);
+      if (!parts.length || parts.some((part) => part.startsWith('--'))) {
+        throw new Error(`${REPOINT_FLAG} needs a DevEUI, e.g. ${REPOINT_FLAG}=<DevEUI>`);
       }
+      options.repointDevEuis.push(...parts);
       options.repair = true;
     } else {
       throw new Error(`Unknown option: ${arg}`);

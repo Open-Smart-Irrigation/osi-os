@@ -624,3 +624,18 @@ test('an unknown option (also the unreleased --repair-clover-profile) fails inst
   assert.deepEqual(world.writes, []);
   assert.equal(world.files.get(ENV_FILE), gw.envText);
 });
+
+test('--repoint-clover-device without a DevEUI fails instead of being ignored', async () => {
+  for (const args of [
+    ['--repair-soil-profiles', '--repoint-clover-device'],
+    ['--repoint-clover-device', '--repair-soil-profiles'],
+    ['--repair-soil-profiles', '--repoint-clover-device='],
+  ]) {
+    const gw = provisionedGatewaySeed();
+    const world = makeWorld(gw.seed);
+    await runBootstrap(world, { args });
+    assert.equal(world.exitCode, 1, args.join(' '));
+    assert.deepEqual(world.writes, [], args.join(' '));
+    assert.equal(world.files.get(ENV_FILE), gw.envText, args.join(' '));
+  }
+});
