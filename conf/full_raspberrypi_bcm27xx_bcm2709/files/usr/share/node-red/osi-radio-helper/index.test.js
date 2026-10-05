@@ -87,18 +87,14 @@ test('decodes the tester position from a gateway-realistic environment', () => {
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
     txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
   };
-  // The gateway exports CHIRPSTACK_PROFILE_RAK10701, never CHIRPSTACK_PROFILE_FIELD_TESTER.
-  const byId = fromChirpStack(frame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
-  assert.equal(byId.metadata.reported_position.latitude, 46.4999993);
-  assert.equal(byId.metadata.reported_position.longitude, 6.4999982);
+  // Identity is the OSI device type decided by the caller, never the ChirpStack profile.
+  const typed = fromChirpStack(frame, { gatewayPositions: {}, isFieldTester: true });
+  assert.equal(typed.metadata.reported_position.latitude, 46.4999993);
+  assert.equal(typed.metadata.reported_position.longitude, 6.4999982);
+  assert.equal(typed.metadata.reported_position.satellites, 8);
 
-  // Name fallback must match the provisioned name, which is not equal to 'Field Tester'.
-  const byName = fromChirpStack(frame, { gatewayPositions: {}, testerProfileNamePattern: 'field tester' });
-  assert.equal(byName.metadata.reported_position.satellites, 8);
-
-  // A non-tester profile must still decode nothing.
-  const other = fromChirpStack({ ...frame, deviceInfo: { ...frame.deviceInfo, deviceProfileId: 'other', deviceProfileName: 'OSI KIWI Sensor' } },
-    { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  // A device that is not typed as a tester decodes nothing, even on the tester profile.
+  const other = fromChirpStack(frame, { gatewayPositions: {}, isFieldTester: false });
   assert.equal(other.metadata.reported_position, null);
 });
 
@@ -115,7 +111,7 @@ test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position,
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
     txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
   };
-  const row = fromChirpStack(zeroFrame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  const row = fromChirpStack(zeroFrame, { gatewayPositions: {}, isFieldTester: true });
   assert.equal(row.metadata.reported_position, null);
   // RSSI and receivers must still be captured -- only the position is dropped,
   // exactly as for any non-tester uplink.
