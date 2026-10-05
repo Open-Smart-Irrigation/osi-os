@@ -686,10 +686,33 @@ async function portableAssertEnabledAccount(db, scope, auth) {
   await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });
 }
 
+// One all-zones export at a time per Node-RED process: an export near its row
+// bound holds about 100-140 MB of heap and seconds of event-loop time, and
+// its queries queue on the shared database connection ahead of ingest. The
+// slot is released when the export finishes, whatever the outcome; a client
+// that disconnects early frees it when the build it started completes.
+let portableExportInFlight = false;
+
 async function portableAllZonesExport(request, history, db, auth, scope) {
   const query = request.query || {};
   if (scope) await portableAssertEnabledAccount(db, scope, auth);
   if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
+  if (portableExportInFlight) {
+    const busy = new Error('export already running');
+    busy.statusCode = 429;
+    busy.suggestion = 'try again when the current export finishes';
+    busy.headers = { 'Retry-After': '30' };
+    throw busy;
+  }
+  portableExportInFlight = true;
+  try {
+    return await portableBuildAllZonesExport(request, history, db, auth, scope, query);
+  } finally {
+    portableExportInFlight = false;
+  }
+}
+
+async function portableBuildAllZonesExport(request, history, db, auth, scope, query) {
   // Scoped mode, write-only scoping (W1): zone history is account-wide for
   // every enabled account, as on the per-zone history routes. Flag off: the
   // caller's own zones, as the per-zone routes resolve them.
@@ -761,7 +784,7 @@ async function handlePortableHistoryRequest(request = {}) {
     if (error && error.suggestion) payload.suggestion = error.suggestion;
     return {
       statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
-      headers: PORTABLE_RESPONSE_HEADERS,
+      headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
       payload: payload
     };
   }

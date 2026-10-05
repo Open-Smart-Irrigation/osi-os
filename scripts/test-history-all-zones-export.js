@@ -466,6 +466,59 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${label}: route: one export at a time; a second one answers 429 and the slot is always released`, async () => {
+    const raw = seedDb();
+    try {
+      const facade = facadeDb(raw);
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      let held = false;
+      // The first export waits on its first history read until the test lets it go.
+      const slowDb = {
+        ...facade,
+        all(sql, params, callback) {
+          if (!held && /FROM device_data/.test(sql)) {
+            held = true;
+            gate.then(() => facade.all(sql, params, callback));
+            return undefined;
+          }
+          return facade.all(sql, params, callback);
+        },
+      };
+      const first = router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { db: slowDb }));
+      for (let turn = 0; turn < 50 && !held; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+      assert.ok(held, 'the first export reached its history read');
+
+      const second = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one'));
+      assert.equal(second.statusCode, 429);
+      assert.equal(second.headers['Retry-After'], '30');
+      assert.match(second.payload.error, /already running/);
+      assert.ok(second.payload.suggestion);
+      // The delete is not an export and is not held up.
+      const notAnExport = await router.handlePortableHistoryRequest(deleteRequest(raw, 1, 'owner-one', 99));
+      assert.equal(notAnExport.statusCode, 404);
+
+      release();
+      assert.equal((await first).statusCode, 200);
+      assert.equal((await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one'))).statusCode, 200);
+
+      // Released after a refusal (413) and after a database error too.
+      const tooLarge = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', {
+        query: { scope: 'allZones', from: '2026-01-01', to: '2026-07-01', granularity: 'raw' },
+      }));
+      assert.equal(tooLarge.statusCode, 413);
+      const broken = { ...facade, all(sql, params, callback) {
+        if (/FROM device_data/.test(sql)) { callback(new Error('disk I/O error')); return undefined; }
+        return facade.all(sql, params, callback);
+      } };
+      const failed = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { db: broken }));
+      assert.equal(failed.statusCode, 500);
+      assert.equal((await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one'))).statusCode, 200);
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${label}: route: anything else is 404 and flag-off never uses the scope helper`, async () => {
     const raw = seedDb();
     try {
