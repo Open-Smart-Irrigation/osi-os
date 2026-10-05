@@ -170,6 +170,15 @@ const RECENT_OBSERVATIONS_LIMIT = 20;
 // "Radio configuration" panels describe a mast, not a unit someone is
 // carrying, so they are hidden rather than shown empty.
 const FIELD_TESTER_TYPE_ID = 'RAK10701_FIELD_TESTER';
+// Field-tester uplinks (fPort 1) with and without a GPS fix. Reads only the
+// uplink's own reported_position: parseObservation().device also falls back to
+// the installed device_location, which says nothing about this uplink's fix.
+const testerUplinkPosition = (observation: NetworkObservation, testerEuis: Set<string>): { isUplink: boolean; position: Position | null } => {
+  if (!testerEuis.has(String(observation.deveui ?? '').toUpperCase())) return { isUplink: false, position: null };
+  try { const metadata = JSON.parse(observation.metadata_json ?? '{}'); return { isUplink: Number(metadata?.radio?.f_port) === 1, position: parsePosition(metadata?.reported_position) }; } catch { return { isUplink: false, position: null }; }
+};
+export const isNoFixTesterRow = (observation: NetworkObservation, testerEuis: Set<string>): boolean => { const r = testerUplinkPosition(observation, testerEuis); return r.isUplink && r.position === null; };
+export const isTesterFixRow = (observation: NetworkObservation, testerEuis: Set<string>): boolean => { const r = testerUplinkPosition(observation, testerEuis); return r.isUplink && r.position !== null; };
 // Coverage walk (2026-09-25): the map must fill in as the operator walks, but
 // the gateway answering these requests is a Raspberry Pi 4. Each tick asks for
 // only the newest handful of rows, not the 500-row page the initial load and
@@ -244,6 +253,10 @@ export function NetworkPage() {
   const loadMore = async () => { if (nextOffset === null || loadingMore) return; setLoadingMore(true); try { const page = await networkAPI.observations(Math.min(500, 5000 - observations.length), nextOffset, windowBounds); setObservations(rows => [...rows, ...page.rows]); setNextOffset(observations.length + page.rows.length >= 5000 ? null : page.nextOffset); } catch (e: any) { setError(t('network.unavailable', fallback('unavailable', 'Network data temporarily unavailable'))); } finally { setLoadingMore(false); } };
   const saveLocation = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!selected) return; const data = new FormData(event.currentTarget); try { const value = await networkAPI.saveLocation(selected, { revision_uuid: crypto.randomUUID(), base_revision_uuid: location?.revisionUuid ?? null, values: { latitude: Number(data.get('latitude')), longitude: Number(data.get('longitude')), effectiveFrom: new Date().toISOString(), coordinateSource: 'manual' } }); setLocation(value); setError(null); } catch (e: any) { setError(e?.response?.status === 409 ? t('network.conflict', fallback('conflict', 'This record changed. Reload before saving.')) : t('network.saveError', fallback('saveError', 'Could not save'))); } };
   const saveRadio = async (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!selected) return; const data = new FormData(event.currentTarget); try { const value = await networkAPI.saveRadio(selected, { revision_uuid: crypto.randomUUID(), base_revision_uuid: radio?.revisionUuid ?? null, values: { txPowerDbm: data.get('txPowerDbm') === '' ? null : Number(data.get('txPowerDbm')), antennaGainDbi: data.get('antennaGainDbi') === '' ? null : Number(data.get('antennaGainDbi')), feederLossDb: data.get('feederLossDb') === '' ? null : Number(data.get('feederLossDb')), effectiveFrom: new Date().toISOString(), configurationSource: 'manual' } }); setRadio(value); setError(null); } catch (e: any) { setError(e?.response?.status === 409 ? t('network.conflict', fallback('conflict', 'This record changed. Reload before saving.')) : t('network.saveError', fallback('saveError', 'Could not save'))); } };
+  const testerEuis = new Set(devices.filter(d => d.type_id === FIELD_TESTER_TYPE_ID).map(d => d.deveui.toUpperCase()));
+  // Newest tester uplink decides the hint (the list is newest first); fPort-0 MAC frames and other devices never do.
+  const newestTesterRow = observations.find(o => isNoFixTesterRow(o, testerEuis) || isTesterFixRow(o, testerEuis));
+  const showNoGpsFixHint = !captureOff && !error && !devicesLoading && !observationsLoading && !!newestTesterRow && isNoFixTesterRow(newestTesterRow, testerEuis);
   const parsed = observations.map(parseObservation); const snapshots = parsed.flatMap(item => item.device ? [{ ...item.device, label: item.observation.deveui }] : []); const known = [...(location ? [{ lat: location.latitude, lon: location.longitude, label: selected }] : []), ...snapshots];
   // The walk in the order it was walked; the endpoint answers newest first.
   const track = [...parsed].sort((a, b) => Date.parse(a.observation.recorded_at) - Date.parse(b.observation.recorded_at)).flatMap(item => { if (!item.device) return []; const rssi = observationRssi(item.observation); return [{ ...item.device, observation: item.observation, rssi, band: rssiBand(rssi) }]; });
@@ -311,6 +324,7 @@ export function NetworkPage() {
     {/* Legend swatch colours are the RdYlBu RSSI ramp (RSSI_BANDS/RSSI_BAND_UNKNOWN above) and encode data -- left exactly as they are, not restyled to a var(). */}
     <ul aria-labelledby="coverage-legend" className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">{legendBands.map(band => <li key={band.id} data-testid={`coverage-band-${band.id}`} title={bandCountLabel(band)} className="flex items-center gap-2"><span aria-hidden="true" className="inline-block shrink-0 rounded-full border border-current" style={{ width: band.radius * 2, height: band.radius * 2, backgroundColor: band.color }} /><span>{band.id === 'unknown' ? t('network.unknown', fallback('unknown', 'Unknown')) : band.range}</span>{band.id === 'strong' && <span>{t('network.coverage.legendStrong', fallback('coverage.legendStrong', 'Strong'))}</span>}{band.id === 'marginal' && <span>{t('network.coverage.legendWeak', fallback('coverage.legendWeak', 'Weak'))}</span>}<span className="tabular-nums">· {bandCounts.get(band.id) ?? 0}</span></li>)}</ul>
     {captureOff && <p className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-sm text-[var(--text-secondary)]">{t('network.coverage.captureOff', fallback('coverage.captureOff', 'Radio capture is switched off on this gateway, so no coverage points are being recorded.'))}</p>}
+    {showNoGpsFixHint && <p role="status" className="mt-2 text-sm text-[var(--text-secondary)]">{t('network.coverage.noGpsFixHint', fallback('coverage.noGpsFixHint', 'The field tester has no GPS fix yet, so its uplinks are not drawn. Take it outdoors with a clear view of the sky and wait until it shows satellites. Points appear once fixes arrive.'))}</p>}
     {!captureOff && !devicesLoading && !observationsLoading && track.length > 0 && gateways.length === 0 && <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('network.coverage.noPosition', fallback('coverage.noPosition', 'No gateway position is recorded, so the walk is drawn without a reference marker.'))}</p>}
     {/* `!error` matters: a failed fetch read no window at all, so claiming its
         observations carry no position would state a fact the page does not have,
@@ -324,6 +338,7 @@ export function NetworkPage() {
         <span className="flex items-center gap-2 truncate">
           <span aria-hidden="true" className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-current align-middle" style={{ backgroundColor: rssiBand(rssi).color }} />
           <span className="truncate">{nameOf(o.deveui)}</span>
+          {isNoFixTesterRow(o, testerEuis) && <span className="shrink-0 text-[var(--text-secondary)]">{t('network.coverage.noGpsFix', fallback('coverage.noGpsFix', 'No GPS fix'))}</span>}
           <span className="text-[var(--text-secondary)]">·</span>
           <span>{fmt.dateTime(o.recorded_at) ?? o.recorded_at}</span>
         </span>
