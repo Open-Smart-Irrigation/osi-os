@@ -2029,14 +2029,21 @@ function exportSpanDays(from, to) {
   return Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
 }
 
+// Longest daily export: ten years. Daily aggregation builds a bucket for every
+// day of the range per source, so an unbounded range (from=1900-01-01) could
+// exhaust the gateway's heap before any row budget sees a row.
+const DAILY_EXPORT_MAX_DAYS = 3660;
+
 function assertExportRangeAllowed(scope) {
   const days = exportSpanDays(scope.from, scope.to);
-  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : null);
-  if (maxDays !== null && days > maxDays) {
+  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : DAILY_EXPORT_MAX_DAYS);
+  if (days > maxDays) {
     const error = new Error('range too large for this granularity');
     error.code = 'RANGE_TOO_LARGE';
     error.statusCode = 413;
-    error.suggestion = 'choose a coarser granularity';
+    error.suggestion = scope.granularity === 'raw' || scope.granularity === 'hourly'
+      ? 'choose a coarser granularity'
+      : `choose a shorter range (at most ${DAILY_EXPORT_MAX_DAYS} days)`;
     throw error;
   }
 }

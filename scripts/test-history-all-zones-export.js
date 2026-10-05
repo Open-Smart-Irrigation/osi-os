@@ -212,6 +212,32 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${label}: a daily export is bounded too, before any history is read, on both export routes`, async () => {
+    const raw = seedDb();
+    try {
+      const facade = facadeDb(raw);
+      const reads = [];
+      const recording = { ...facade, all(sql, params, callback) { reads.push(sql); return facade.all(sql, params, callback); } };
+      const tooLong = { from: '1900-01-01', to: '2026-07-01', granularity: 'daily', nowMs: NOW_MS };
+      await assert.rejects(helper.buildAllZonesExportCsv(recording, { ...tooLong, zoneIds: [12, 13] }),
+        { statusCode: 413, code: 'RANGE_TOO_LARGE' });
+      assert.deepEqual(reads, [], 'the all-zones export refuses before any query');
+      await assert.rejects(helper.buildZoneExportCsv(recording, { ...tooLong, zoneId: 12 }),
+        { statusCode: 413, code: 'RANGE_TOO_LARGE' });
+      assert.ok(!reads.some((sql) => /device_data/.test(sql)), 'the per-zone export reads no history either');
+      // Ten years of daily rows still pass: 2016-07-02 .. 2026-07-01 is 3652 days.
+      const tenYears = await helper.buildAllZonesExportCsv(facade, {
+        zoneIds: [13], from: '2016-07-02', to: '2026-07-01', granularity: 'daily', nowMs: NOW_MS,
+      });
+      assert.ok(tenYears.rowCount > 0);
+      await assert.rejects(helper.buildAllZonesExportCsv(facade, {
+        zoneIds: [13], from: '2016-07-02', to: '2026-07-01', granularity: 'hourly', nowMs: NOW_MS,
+      }), { statusCode: 413, code: 'RANGE_TOO_LARGE' });
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${label}: "today" in the zone furthest ahead is not refused because another zone is still on the day before`, async () => {
     const raw = seedDb();
     try {
