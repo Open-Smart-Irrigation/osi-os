@@ -322,9 +322,13 @@ Reading straight through the script, in order:
    schema, not seed-plus-migrations). Otherwise it ensures the `sqlite3` CLI is
    present (attempting `opkg install sqlite3-cli` if missing); fetches
    `database/migrations/ordered/CHECKSUMS.json`, every ordered migration file
-   it names, the Stage 0 helper scripts (`repair-sync-outbox-v2.js`,
-   `baseline-existing-db.js`, `migrate-cli.js`, `semantic-schema-compare.js`),
-   and the `lib/osi-migrate` runner modules; stops Node-RED and waits up to 30s
+   it names, the helper scripts (`baseline-existing-db.js`,
+   `repair-sync-outbox-v2.js`, `migrate-cli.js`, `semantic-schema-compare.js`,
+   `restamp-fingerprints.js`, `verify-head-cli.js`,
+   `verify-runtime-schema-parity.js`) and the `lib/osi-migrate` runner
+   modules, then refuses, before Node-RED is touched, unless every migration
+   matches its `CHECKSUMS.json` SHA-256, no unnamed `.sql` sits beside them,
+   and every runner file is non-empty and parses; stops Node-RED and waits up to 30s
    for the process to exit, refusing to proceed if it doesn't; WAL-checkpoints
    the DB and runs `PRAGMA integrity_check`; if the `schema_migrations` ledger
    has zero rows, runs the sync-outbox v2 repair then `baseline-existing-db.js`
@@ -367,10 +371,33 @@ sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and n
 installable via `opkg`; Node-RED failing to stop within 30s before a migration;
 a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
 is restarted before the script exits — except `migrate-cli.js` exit code 3, a
-backup-restore integrity failure, which leaves Node-RED stopped); and a failed
-post-flip self-check, which either auto-rolls back and exits 1, or — when there is
-no previous payload — exits 1 with an `ERROR` and leaves the new payload live. All
-of these are hard aborts (`exit 1`), not partial continues.
+backup-restore integrity failure, which leaves Node-RED stopped); a failed
+download or verification of the migration runner, an uncreatable migration
+backup directory, or an unreadable database size (refused before Node-RED is
+stopped); a failed ledger-reconciliation download or probe (the previous
+payload is restarted); a failed command-ledger staging run (before anything is
+stopped); a failed command-ledger activation after the migration (see below);
+and a failed post-flip self-check, which either auto-rolls back and exits 1, or
+— when there is no previous payload — exits 1 with an `ERROR` and leaves the new
+payload live. All of these are hard aborts (`exit 1`), not partial continues.
+
+**Failed command-ledger activation.** Before activating, `deploy.sh` copies
+the live `osi-command-ledger/{package.json,index.js}` and
+`osi-watermark-binding/canonicalization.js` to
+`/srv/node-red/.osi-command-ledger-previous.<stamp>`. A successful deploy removes
+that copy; a failed one keeps it. On failure the script lists each live file as
+previous, candidate, absent or unknown, then loads the live pair in a fresh
+process:
+- it loads: the deploy's usual failure path runs (previous payload restarted
+  when the database allows it);
+- it does not load: the copy is restored and loaded again; if that loads, the
+  same failure path runs;
+- neither loads: Node-RED and identityd are held stopped, Node-RED start at boot
+  is disabled (marker `/srv/node-red/.osi-command-ledger-boot-hold`), and the
+  message says so. Way out: re-run the deploy; an activation whose pair loads
+  re-enables Node-RED at boot. After a manual repair instead:
+  `/etc/init.d/node-red enable && /etc/init.d/node-red start`, then delete the
+  marker.
 
 ### Private branch deployments
 
