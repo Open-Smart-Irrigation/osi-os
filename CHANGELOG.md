@@ -27,6 +27,13 @@ every 0.7.0 entry below.
   `51de5829` passes. A rejected event stays rejected; recovery is the manual
   path under Fixed below. Gateways that are not linked to a cloud are not
   affected.
+- **Gateways before the cloud for the 32-hex actor id.** The contract now
+  lets `actor_user_uuid` take 32 hex digits (see Changed). Deploy gateways
+  before the cloud that sends that form: a new edge with an old cloud is
+  harmless, but an old edge refuses a command with a 32-hex actor as
+  malformed. 0.7.0 has no command or resource that carries
+  `actor_user_uuid`, so the order matters only for gateways on main builds
+  made before this change.
 - **Upgrade with `deploy.sh`, not by copying files.** The script now stages
   `flows.json` and the GUI as one payload, stops Node-RED (and
   `osi-identityd`) before migrating, applies pending migrations with
@@ -62,9 +69,10 @@ every 0.7.0 entry below.
   0.6.5 image stops reporting 0.6.5 after its first deploy. A missing `uci`
   or `osi-server.cloud` section is logged as a `WARN` and does not fail the
   deploy.
-- `deploy.sh` now refuses, before it stops Node-RED, when a migration file,
+- `deploy.sh` now refuses, before it stops Node-RED, when a migration file is
+  missing or does not match its SHA-256 in `CHECKSUMS.json`, or when
   `CHECKSUMS.json` or a migration-runner module is missing, empty or does not
-  match the manifest, and it fails instead of reporting success when a
+  parse, and it fails instead of reporting success when a
   command-ledger staging or activation step fails.
 - After a failed command-ledger activation whose previous files also fail to
   load, Node-RED and `osi-identityd` stay stopped and
@@ -235,6 +243,12 @@ every 0.7.0 entry below.
   in-progress message before the daemon restarts Node-RED.
 
 ### Changed
+- Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
+  both revision resources in `resources.schema.json`
+  (`DeviceInstallationLocationRevision`, `DeviceRadioConfigurationRevision`)
+  accept 32 lower-case hex digits as well as the hyphenated UUID, matched
+  exactly and never converted; `watermark-cloud-parity-v1.json` gains the
+  `gateway-local-hex-actor` binding vector and a list of rejected actor forms.
 - An assigned LSN50 counts as a soil source when it is a Chameleon node, a
   WATERMARK node, or has none of the dendrometer, temperature, rain-gauge and
   flow-meter modes; a plain LSN50's third SWT channel is no longer shown.
@@ -324,9 +338,11 @@ every 0.7.0 entry below.
   request values now travel on the message. A manual or scheduled valve open
   no longer acknowledges the last unrelated cloud command as applied.
 - Protected cloud commands (WATERMARK calibration, Chameleon configuration,
-  soil depths) and local installation-location and radio edits accept the
-  32-hex form of a gateway-local user id; before, they were refused for a
-  gateway's first admin (local edits with a 400).
+  soil depths), rename commands, the Terra owner check and local
+  installation-location and radio edits accept the 32-hex form of a
+  gateway-local user id, which a gateway gives its first admin and backfilled
+  users; before, such a user's commands were refused and its local edits
+  failed with a 400.
 - Gateway attribution triggers fall back to the persisted link identifier,
   and linking commits account state and blank gateway identifiers in one
   transaction (`0058__gateway_eui_fallback.sql`).
