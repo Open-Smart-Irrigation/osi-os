@@ -94,19 +94,19 @@ const PHASE_C_PENDING = new Set([
 // decision that has to be there, found when this verifier learned to see the
 // decision itself (#389). Each is a real gap, tracked as its own change; the
 // entry leaves this list when its guard lands (the stale check enforces it).
-// Placeholder until the tracking issue exists: #TBD-389-gaps.
+// Placeholder until the tracking issue exists: #400.
 const KNOWN_GAPS = new Map([
   [
     'improvement-requests-post-http',
     'POST /api/improvement-requests stores a request and its gateway diagnostics ' +
       'for any token holder, a disabled account included; it needs an enabled-account ' +
-      'decision before it reads the diagnostics (#TBD-389-gaps)',
+      'decision before it reads the diagnostics (#400)',
   ],
   [
     'journal-catalog-get-http',
     'GET /api/journal/catalog without a plot or zone filter answers a disabled ' +
       'account with the catalog and the custom terms of its own account; it needs the ' +
-      'enabled-account decision the other journal reads make (#TBD-389-gaps)',
+      'enabled-account decision the other journal reads make (#400)',
   ],
 ]);
 
