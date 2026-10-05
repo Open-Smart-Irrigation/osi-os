@@ -2,6 +2,10 @@
 const scope = require('../osi-scope-helper');
 const TYPES = {UPSERT_DEVICE_INSTALLATION_LOCATION:'saveLocation',UPSERT_DEVICE_RADIO_CONFIGURATION:'saveRadioConfiguration'};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+// actor_user_uuid is the acting user's gateway-local users.user_uuid as stored:
+// the hyphenated form, or 32 lower-case hex digits (first admin and backfilled
+// users). Looked up unchanged.
+const LOCAL_HEX_USER_UUID = /^[0-9a-f]{32}$/;
 function invalid(message) { const error = new Error(message); error.code='invalid_revision_command'; return error; }
 async function queueAck(tx, ack) {
   await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',[String(ack.commandId)]);
@@ -18,7 +22,7 @@ async function applyCommand(db,envelope,runtime={}) {
     let result='APPLIED',reason=null,revision;
     try {
       if(p.command_type!==type||!UUID.test(p.command_id||'')||!UUID.test(p.revision_uuid||'')||!UUID.test(p.installation_uuid||''))throw invalid('invalid revision command identity');
-      if(!/^[0-9A-F]{16}$/.test(p.device_eui||'')||!UUID.test(p.actor_user_uuid||''))throw invalid('invalid device or actor identity');
+      if(!/^[0-9A-F]{16}$/.test(p.device_eui||'')||!(UUID.test(p.actor_user_uuid||'')||LOCAL_HEX_USER_UUID.test(p.actor_user_uuid||'')))throw invalid('invalid device or actor identity');
       if(p.base_revision_uuid!==null&&!UUID.test(p.base_revision_uuid||''))throw invalid('base_revision_uuid must be present');
       const prefix=type==='UPSERT_DEVICE_INSTALLATION_LOCATION'?'device_installation_location':'device_radio_configuration';
       if(p.effect_key!==prefix+':'+p.revision_uuid+':'+(p.base_revision_uuid||'initial'))throw invalid('revision effect binding mismatch');

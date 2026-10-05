@@ -22,13 +22,13 @@ vi.mock('../../../../journal/useJournalEntries', () => ({
   useJournalEntries: mocks.useJournalEntries,
 }));
 
-// DraftsQueue itself renders for real in these tests (see below) — only
-// refreshDraftsQueue is swapped for a spy, so JournalWorkspace's P2-d
-// cross-component cache invalidation can be asserted without depending on
-// swr's global cache/module internals.
+// DraftsQueue itself renders for real in these tests (see below) — only the
+// refresh returned by useRefreshDraftsQueue is swapped for a spy, so
+// JournalWorkspace's P2-d cross-component cache invalidation can be asserted
+// without depending on swr's cache/module internals.
 vi.mock('../../../../journal/useDraftsQueue', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../../journal/useDraftsQueue')>();
-  return { ...actual, refreshDraftsQueue: mocks.refreshDraftsQueue };
+  return { ...actual, useRefreshDraftsQueue: () => mocks.refreshDraftsQueue };
 });
 
 vi.mock('../ScopeRail', async () => {

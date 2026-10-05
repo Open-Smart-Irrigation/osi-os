@@ -759,7 +759,9 @@
                     "$ref": "#/definitions/CanonicalUtcTimestamp"
                 },
                 "actor_user_uuid": {
-                    "$ref": "#/definitions/NullableCanonicalUuid"
+                    "type": ["string", "null"],
+                    "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+                    "description": "The acting user's gateway-local users.user_uuid exactly as stored: the lower-case hyphenated form, or 32 lower-case hex digits (first admin and backfilled users)."
                 },
                 "supersedes_revision_uuid": {
                     "$ref": "#/definitions/NullableCanonicalUuid"
@@ -868,7 +870,9 @@
                     "$ref": "#/definitions/CanonicalUtcTimestamp"
                 },
                 "actor_user_uuid": {
-                    "$ref": "#/definitions/NullableCanonicalUuid"
+                    "type": ["string", "null"],
+                    "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+                    "description": "The acting user's gateway-local users.user_uuid exactly as stored: the lower-case hyphenated form, or 32 lower-case hex digits (first admin and backfilled users)."
                 },
                 "supersedes_revision_uuid": {
                     "$ref": "#/definitions/NullableCanonicalUuid"

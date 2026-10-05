@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import {
+  sessionBoundRequest,
+  useSessionRequestSnapshot,
+} from '../contexts/AuthSessionDataBoundary';
+import type { SessionBoundRequest } from '../services/authSession';
 import { journalApi } from '../services/journalApi';
 import { randomUuid } from '../utils/uuid';
 import type {
@@ -70,6 +75,16 @@ export function useCaptureDraft(options: UseCaptureDraftOptions = {}): UseCaptur
   const preEditError = preflightErrorFor(enabled, preflight);
   const canEdit = preEditError == null;
   const uuidRef = useRef<string | null>(null);
+  // #378: every write this hook queues is bound to the session it was
+  // mounted in, so a draft that drains after a sign-out or an account switch
+  // is refused before it reaches the network instead of being sent with the
+  // next session's token.
+  const sessionRequest = sessionBoundRequest(useSessionRequestSnapshot());
+  const sessionRequestRef = useRef(sessionRequest);
+  sessionRequestRef.current = sessionRequest;
+  // Outside a boundary (isolated tests) the calls keep their old arity.
+  const sessionArgs = (): [] | [SessionBoundRequest] =>
+    (sessionRequestRef.current ? [sessionRequestRef.current] : []);
 
   const [entryUuid, setEntryUuid] = useState<string | null>(null);
   const [status, setStatus] = useState<CaptureSaveState>('not-saved');
@@ -133,8 +148,8 @@ export function useCaptureDraft(options: UseCaptureDraftOptions = {}): UseCaptur
 
     try {
       const receipt = await enqueueRequest(() => createdRef.current
-        ? journalApi.updateEntry(uuid, next as UpdateEntryPayload)
-        : journalApi.createEntry(next));
+        ? journalApi.updateEntry(uuid, next as UpdateEntryPayload, ...sessionArgs())
+        : journalApi.createEntry(next, ...sessionArgs()));
       createdRef.current = true;
       lastFailureRef.current = null;
       if (mountedRef.current) {
@@ -249,7 +264,7 @@ export function useCaptureDraft(options: UseCaptureDraftOptions = {}): UseCaptur
         if (!mountedRef.current) throw new Error('Journal capture was unmounted');
         setStatus('saving');
         const receipt = await enqueueRequest(() =>
-          journalApi.updateEntry(uuid, final as UpdateEntryPayload));
+          journalApi.updateEntry(uuid, final as UpdateEntryPayload, ...sessionArgs()));
         if (!('outbox_event_uuid' in receipt) || !receipt.outbox_event_uuid) {
           throw new Error('Final journal receipt did not include an outbox event');
         }

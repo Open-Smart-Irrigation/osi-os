@@ -66,6 +66,17 @@ is distinct from explicit `null`. The trusted binding hash includes the
 command type, resource, device EUI, gateway EUI, local actor UUID, exact base
 version, operation, and this normalized intent.
 
+The local actor UUID is the acting user's gateway-local `users.user_uuid`
+exactly as the gateway stores it. It takes one of two forms: the hyphenated
+UUID form, or 32 lower-case hex digits without hyphens, which the gateway gives
+its first admin and every backfilled user. The cloud sends the stored value as
+`actor_user_uuid`, and the edge looks it up by exact match, so neither runtime
+converts one form into the other. In the binding, a 32-hex actor is kept
+unchanged and the hyphenated form is normalized as before. A value in neither
+form is refused: 31 or 33 hex digits, upper-case hex without hyphens, a non-hex
+digit, or a misplaced hyphen. The `gateway-local-hex-actor` vector and the
+`rejectedActorVectors` list in `watermark-cloud-parity-v1.json` pin this.
+
 Calibration `method` is at most 64 characters and `notes` is at most 500
 characters, matching the phase-1 edge writer. A missing metadata member means
 keep; a present `null` means clear.

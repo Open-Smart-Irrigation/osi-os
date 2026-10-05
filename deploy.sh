@@ -3,8 +3,10 @@
 # Runs ON THE PI. Downloads OSI OS components from a local HTTP server
 # tunnelled through the SSH connection.
 #
-# Usage (from your dev machine):
-#   ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
+# Usage (from your dev machine), download first and then run, so a failed
+# download fails the SSH command instead of feeding an empty script to sh:
+#   ssh -R 9876:localhost:9876 root@<pi-ip> \
+#     'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 #
 # Safety invariant: this script must never overwrite /data/db/farming.db.
 # The edge database is live user data and osi-os is the operational source of
@@ -46,6 +48,14 @@ DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
 GUI_ROOT="/usr/lib/node-red/gui"
 NODE_RED_INIT="/etc/init.d/node-red"
+OSI_BOOTSTRAP_INIT="/etc/init.d/osi-bootstrap"
+OSI_BOOTSTRAP_STAMP="/etc/osi-bootstrap.done"
+CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
+# The image ships the bootstrap script in /usr/share/node-red; a stock gateway
+# OS install has only the copy this script fetches. osi-bootstrap prefers the
+# first that exists, in this order.
+BOOTSTRAP_SCRIPT_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
+BOOTSTRAP_SCRIPT_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 # Tracks whether this deploy's staged payload has already been flipped into
 # /srv/node-red/flows.json. Set by run_schema_migration() on a successful
 # migration (issue #222 / F4 — see there) and consulted by the later
@@ -53,6 +63,12 @@ NODE_RED_INIT="/etc/init.d/node-red"
 # on the no-op path, still flips exactly once).
 PAYLOAD_FLIPPED=0
 ROLLBACK_RESTORED=0
+# osi-server.cloud.firmware_version follows the active payload: written after
+# each switch to the new payload, put back before each switch away from it.
+DEPLOY_FIRMWARE_VERSION=""
+FW_PREV=""
+FW_PREV_SET=0
+FW_WRITTEN=0
 NODE_RED_LOG_MARK=""
 DB_MIGRATION_COMMITTED=0
 COMMAND_LEDGER_ACTIVATED=0
@@ -66,8 +82,8 @@ COMMAND_LEDGER_STAGE_ROOT="/srv/node-red"
 COMMAND_LEDGER_STAGE="$COMMAND_LEDGER_STAGE_ROOT/.osi-command-ledger-stage.$$"
 COMMAND_LEDGER_HELPER_SHA256="48ae6cd244908c614d2e0f8d78a60e8a119b64853e2e49cefe5dca1f1bc0f5d8"
 COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
-COMMAND_LEDGER_INDEX_SHA256="6fcffe1a0cafdddee37fda5606ff984af0a5141d93e251a4c0586b2542252d91"
-COMMAND_LEDGER_BINDING_SHA256="92faea11371c26290dde61bb019988449a08b2248cca564dc015fd32c8fb0708"
+COMMAND_LEDGER_INDEX_SHA256="e097f080983b5fc7e0fb02faf8256d667e40ed7103adc77df7b5db068d290926"
+COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 export SWAP_ROOT
 
 cleanup() {
@@ -90,7 +106,11 @@ fetch_required() {
     src="$2"
     dest="$3"
     echo "--- $label ---"
-    fetch "$src" "$dest"
+    fetch "$src" "$dest" || {
+        fetch_rc=$?
+        echo "ERROR: could not fetch $src (exit $fetch_rc)" >&2
+        return "$fetch_rc"
+    }
     echo "OK"
 }
 
@@ -103,12 +123,12 @@ stage_command_ledger_dependency() {
     echo "--- WATERMARK command-ledger dependency pair (staged) ---"
     # A killed deploy (SIGKILL skips the EXIT trap) leaves its PID-named stage
     # directory behind; remove every earlier one before staging this run.
-    rm -rf "$COMMAND_LEDGER_STAGE_ROOT"/.osi-command-ledger-stage.*
-    rm -rf "$COMMAND_LEDGER_STAGE"
-    mkdir -m 700 -p "$COMMAND_LEDGER_STAGE"
+    rm -rf "$COMMAND_LEDGER_STAGE_ROOT"/.osi-command-ledger-stage.* || return 1
+    rm -rf "$COMMAND_LEDGER_STAGE" || return 1
+    mkdir -m 700 -p "$COMMAND_LEDGER_STAGE" || return 1
     fetch_required "command-ledger dependency installer" \
         "scripts/deploy-command-ledger-dependency.js" \
-        "$COMMAND_LEDGER_INSTALLER"
+        "$COMMAND_LEDGER_INSTALLER" || return 1
     helper_sha256="$(node -e 'const c=require("node:crypto"),f=require("node:fs"); process.stdout.write(c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"));' "$COMMAND_LEDGER_INSTALLER")"
     [ "$helper_sha256" = "$COMMAND_LEDGER_HELPER_SHA256" ] || {
         echo "ERROR: command-ledger dependency installer SHA-256 mismatch" >&2
@@ -116,16 +136,27 @@ stage_command_ledger_dependency() {
     }
     fetch_required "osi-command-ledger package.json" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json" \
-        "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json"
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/package.json" || return 1
     fetch_required "osi-command-ledger index.js" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js" \
-        "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js"
+        "$COMMAND_LEDGER_STAGE/osi-command-ledger/index.js" || return 1
     fetch_required "osi-watermark-binding canonicalization.js" \
         "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js" \
-        "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"
+        "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js" || return 1
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","deferActivation":true,"expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
-    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    if ! node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"; then
+        echo "ERROR: command-ledger dependency staging refused" >&2
+        return 1
+    fi
+    # The installer renames the candidate over the live files and keeps no
+    # copy. Taken here, before anything is stopped, this one is the restore
+    # source if the activated pair does not load; a deploy that succeeds
+    # removes it.
+    if ! keep_command_ledger_copy "$NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP"; then
+        echo "ERROR: could not copy the live command-ledger files to $NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP; refusing the deploy before anything is stopped" >&2
+        return 1
+    fi
     echo "OK: command-ledger dependency pair staged; activation deferred until schema migration"
 }
 
@@ -136,9 +167,216 @@ activate_command_ledger_dependency() {
     echo "--- Activate WATERMARK command-ledger dependency pair ---"
     install_json="$(printf '{"stageDir":"%s","liveRoot":"%s","expectedHashes":{"packageJson":"%s","ledgerIndex":"%s","bindingCanonicalization":"%s"}}' \
         "$COMMAND_LEDGER_STAGE" "$NODE_RED_ROOT" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256")"
-    node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"
+    if ! command_ledger_before="$(command_ledger_live_hashes)"; then
+        echo "ERROR: could not read the live command-ledger files before activation; the pair was not activated" >&2
+        return 1
+    fi
+    # The state from before this activation was copied at staging.
+    command_ledger_previous="$NODE_RED_ROOT/.osi-command-ledger-previous.$DEPLOY_STAMP"
+    # The installer re-verifies the digests, moves the pair into place and
+    # loads it in a fresh process; it exits non-zero when any of these fails.
+    # This function runs inside "if !" and "|| exit 1", where the shell does
+    # not apply set -e, so the status is checked here.
+    if ! node "$COMMAND_LEDGER_INSTALLER" --install "$install_json"; then
+        echo "ERROR: command-ledger dependency activation failed" >&2
+        report_command_ledger_activation_failure "$command_ledger_before" "$command_ledger_previous"
+        return 1
+    fi
+    clear_command_ledger_hold
     COMMAND_LEDGER_ACTIVATED=1
     echo "OK: command-ledger dependency pair activated after schema migration"
+}
+
+# One "<file> <sha256|absent>" line per live command-ledger file.
+command_ledger_live_hashes() {
+    node -e '
+        const crypto = require("crypto");
+        const fs = require("fs");
+        const path = require("path");
+        for (const file of ["osi-command-ledger/package.json", "osi-command-ledger/index.js", "osi-watermark-binding/canonicalization.js"]) {
+            let hash = "absent";
+            try {
+                hash = crypto.createHash("sha256").update(fs.readFileSync(path.join(process.argv[1], file))).digest("hex");
+            } catch (error) {
+                if (error.code !== "ENOENT") throw error;
+            }
+            console.log(file + " " + hash);
+        }
+    ' "$NODE_RED_ROOT"
+}
+
+# Copies the live command-ledger files to directory $1 and lists the ones
+# that do not exist in $1/absent, so a restore can put back their absence. A
+# copy that fails part-way is removed.
+keep_command_ledger_copy() {
+    if ! { rm -rf "${1:?}" && mkdir -p "$1" && : > "$1/absent"; }; then
+        rm -rf "${1:?}"
+        return 1
+    fi
+    for ledger_file in osi-command-ledger/package.json osi-command-ledger/index.js osi-watermark-binding/canonicalization.js; do
+        if [ -e "$NODE_RED_ROOT/$ledger_file" ]; then
+            if ! { mkdir -p "$1/${ledger_file%/*}" && cp -p "$NODE_RED_ROOT/$ledger_file" "$1/$ledger_file"; }; then
+                rm -rf "${1:?}"
+                return 1
+            fi
+        elif ! printf '%s\n' "$ledger_file" >> "$1/absent"; then
+            rm -rf "${1:?}"
+            return 1
+        fi
+    done
+}
+
+# Puts back the state kept in $1: each kept file through a same-directory
+# rename, and the absence of each file listed in $1/absent by moving the live
+# file into $1/failed. A temporary file left by a failed copy is removed.
+restore_command_ledger_copy() {
+    for ledger_file in osi-command-ledger/index.js osi-command-ledger/package.json osi-watermark-binding/canonicalization.js; do
+        if [ -f "$1/$ledger_file" ]; then
+            if ! { cp -p "$1/$ledger_file" "${NODE_RED_ROOT:?}/$ledger_file.osi-restore" &&
+                mv -f "${NODE_RED_ROOT:?}/$ledger_file.osi-restore" "$NODE_RED_ROOT/$ledger_file"; }; then
+                rm -f "${NODE_RED_ROOT:?}/$ledger_file.osi-restore"
+                return 1
+            fi
+        elif [ -e "$NODE_RED_ROOT/$ledger_file" ] && grep -qx "$ledger_file" "$1/absent" 2>/dev/null; then
+            if ! { mkdir -p "$1/failed/${ledger_file%/*}" && mv -f "$NODE_RED_ROOT/$ledger_file" "$1/failed/$ledger_file"; }; then
+                return 1
+            fi
+        fi
+    done
+}
+
+# True when none of the three command-ledger files exists in the live tree.
+command_ledger_none_live() {
+    [ ! -e "$NODE_RED_ROOT/osi-command-ledger/package.json" ] &&
+        [ ! -e "$NODE_RED_ROOT/osi-command-ledger/index.js" ] &&
+        [ ! -e "$NODE_RED_ROOT/osi-watermark-binding/canonicalization.js" ]
+}
+
+# Loads the live ledger in a fresh process with the installer's contract.
+command_ledger_live_pair_loads() {
+    node -e '
+        const ledger = require(process.argv[1]);
+        if (!ledger || typeof ledger.deduplicatePendingCommand !== "function" || typeof ledger.queueCommandAck !== "function") process.exit(42);
+    ' "$NODE_RED_ROOT/osi-command-ledger"
+}
+
+# Removes the command-ledger hold marker once a live pair loads.
+clear_command_ledger_hold() {
+    [ -e "$NODE_RED_ROOT/.osi-command-ledger-hold" ] || return 0
+    if rm -f "${NODE_RED_ROOT:?}/.osi-command-ledger-hold"; then
+        echo "OK: the command-ledger pair loads; cleared the command-ledger hold"
+    else
+        echo "WARNING: the command-ledger pair loads, but $NODE_RED_ROOT/.osi-command-ledger-hold could not be removed" >&2
+    fi
+}
+
+# Run by every deploy before its first fetch: clears an earlier hold whose
+# live pair now loads, or says that the gateway is still in it. Never stops
+# the deploy.
+check_command_ledger_hold() {
+    [ -e "$NODE_RED_ROOT/.osi-command-ledger-hold" ] || return 0
+    hold_since="$(sed -n 's/^time=//p' "$NODE_RED_ROOT/.osi-command-ledger-hold" 2>/dev/null)"
+    hold_reason="$(sed -n 's/^reason=//p' "$NODE_RED_ROOT/.osi-command-ledger-hold" 2>/dev/null)"
+    if command_ledger_live_pair_loads >/dev/null 2>&1; then
+        if rm -f "${NODE_RED_ROOT:?}/.osi-command-ledger-hold"; then
+            echo "OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at ${hold_since:-an unknown time}"
+        else
+            echo "WARNING: the live command-ledger pair loads again, but $NODE_RED_ROOT/.osi-command-ledger-hold could not be removed" >&2
+        fi
+    else
+        echo "WARNING: this gateway has been in a command-ledger hold since ${hold_since:-an unknown time} (${hold_reason:-no reason recorded}); the live pair still does not load; the deploy continues, and an activation whose pair loads clears the hold" >&2
+    fi
+    return 0
+}
+
+# The live pair does not load and the state from before this activation
+# could not be brought back: stop only, as the other holds in this script do.
+# Nothing is disabled at boot; the marker records the hold for the next
+# deploy and for the operator.
+hold_for_unloadable_command_ledger() {
+    if printf 'reason=%s\ntime=%s\ndeploy=%s\ncopy=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${DEPLOY_STAMP:-unknown}" "$2" \
+        > "$NODE_RED_ROOT/.osi-command-ledger-hold"; then
+        hold_note="recorded in $NODE_RED_ROOT/.osi-command-ledger-hold"
+    else
+        hold_note="NOT recorded: $NODE_RED_ROOT/.osi-command-ledger-hold could not be written"
+    fi
+    if [ "$node_red_restart_needed" = "1" ]; then
+        node_red_restart_needed=0
+        identityd_deploy_state="fatal_hold"
+        echo "ERROR: the previous payload is held stopped (Node-RED and identityd stay stopped; nothing is disabled, so a reboot or a manual start runs the previous payload beside these files); the hold is $hold_note" >&2
+    else
+        echo "ERROR: this deploy did not stop Node-RED, which still runs the ledger it loaded at its last start; a restart or reboot loads these files; the hold is $hold_note" >&2
+    fi
+    echo "ERROR: way out: re-run the deploy; the migration is then a no-op, staging re-validates the pair, the activation retries, and an activation whose pair loads clears the hold. If it fails again, the load error printed above names the cause." >&2
+}
+
+# After a failed activation: names each live ledger file, then decides by
+# loading the live pair in a fresh process. With no ledger files in place, as
+# before this activation, or with a live pair that loads, the deploy's
+# existing failure path runs (it restarts the previous payload when the
+# database allows it). Otherwise the state kept at staging ($2) is restored,
+# absent files included, and checked the same way; only when that fails too
+# is the previous payload held stopped.
+report_command_ledger_activation_failure() {
+    ledger_state_rc=0
+    if ! command_ledger_after="$(command_ledger_live_hashes)"; then
+        echo "ERROR: could not read every live command-ledger file" >&2
+    fi
+    node -e '
+        const [before, after, packageSha, indexSha, bindingSha] = process.argv.slice(1);
+        const candidate = {
+            "osi-command-ledger/package.json": packageSha,
+            "osi-command-ledger/index.js": indexSha,
+            "osi-watermark-binding/canonicalization.js": bindingSha,
+        };
+        const parse = (text) => Object.fromEntries(text.split("\n").filter(Boolean).map((line) => line.split(" ")));
+        const was = parse(before);
+        const now = parse(after);
+        let moved = false;
+        let allCandidate = true;
+        let unreadable = false;
+        for (const file of Object.keys(candidate)) {
+            if (now[file] === undefined) unreadable = true;
+            if (now[file] !== was[file]) moved = true;
+            if (now[file] !== candidate[file]) allCandidate = false;
+            const state = now[file] === undefined ? "unknown (could not be read)"
+                : now[file] === "absent" ? "absent"
+                    : now[file] === was[file] ? (now[file] === candidate[file] ? "previous, identical to the candidate" : "previous")
+                        : now[file] === candidate[file] ? "candidate" : "unknown";
+            console.error("ERROR: live command-ledger file " + file + ": " + state);
+        }
+        process.exit(unreadable ? 1 : !moved ? 0 : (allCandidate ? 3 : 2));
+    ' "$1" "$command_ledger_after" "$COMMAND_LEDGER_PACKAGE_SHA256" "$COMMAND_LEDGER_INDEX_SHA256" "$COMMAND_LEDGER_BINDING_SHA256" || ledger_state_rc=$?
+    case "$ledger_state_rc" in
+        0) echo "ERROR: the previous command-ledger files are still in place" >&2 ;;
+        2) echo "ERROR: the activation stopped part-way: the old ledger index with the candidate binding, which the installer proved loadable before moving anything" >&2 ;;
+        3) echo "ERROR: the candidate command-ledger pair is in place" >&2 ;;
+        *) echo "ERROR: could not determine which command-ledger files are in place" >&2 ;;
+    esac
+    if command_ledger_none_live; then
+        echo "ERROR: no command-ledger files are in place, as before this activation; nothing to restore; the deploy's failure path restarts the previous payload when the database allows it" >&2
+        return 0
+    fi
+    if command_ledger_live_pair_loads; then
+        echo "ERROR: the live command-ledger files load in a fresh process; the deploy's failure path restarts the previous payload on them when the database allows it; the state from before this activation is kept in $2" >&2
+        clear_command_ledger_hold
+        return 0
+    fi
+    if [ ! -d "$2" ]; then
+        echo "ERROR: the live command-ledger files do not load, and no copy of the state from before this activation exists at $2" >&2
+    elif ! restore_command_ledger_copy "$2"; then
+        echo "ERROR: the live command-ledger files do not load, and restoring the state from before this activation from $2 failed; the copy stays there" >&2
+    elif command_ledger_none_live; then
+        echo "ERROR: the live command-ledger files did not load; no command-ledger files are in place, as before this activation (the candidate files were moved to $2/failed); the deploy's failure path restarts the previous payload when the database allows it" >&2
+        return 0
+    elif command_ledger_live_pair_loads; then
+        echo "ERROR: the live command-ledger files did not load; restored the state from before this activation from $2, and it loads; the deploy's failure path restarts the previous payload on it when the database allows it" >&2
+        clear_command_ledger_hold
+        return 0
+    else
+        echo "ERROR: the live command-ledger files did not load; restored the state from before this activation from $2; it does not load either; the copy stays there" >&2
+    fi
+    hold_for_unloadable_command_ledger "the live command-ledger pair does not load after a failed activation" "$2"
 }
 
 same_fs_or_die() {
@@ -213,6 +451,90 @@ run_communication_preflight() {
         REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
     echo "OK"
+}
+
+# The version of the tree this deploy installs. It is read from the first-boot
+# script that sets osi-server.cloud.firmware_version on a flashed image, so a
+# release bump there reaches deployed gateways too. Prints the version, or
+# nothing when the file cannot be fetched or holds no plain version string.
+# Never fails: a missing version only skips the record step.
+read_release_firmware_version() {
+    rfv_file="$TMP_DIR/release-version/96_osi_server_config"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "$rfv_file" 2>/dev/null; then
+        return 0
+    fi
+    rfv_value="$(sed -n 's/^[[:space:]]*set osi-server\.cloud\.firmware_version=//p' "$rfv_file" 2>/dev/null | head -n 1 | tr -d '\r')"
+    case "$rfv_value" in
+        [0-9]*.[0-9]*) ;;
+        *) return 0 ;;
+    esac
+    case "$rfv_value" in
+        *[!0-9A-Za-z.+-]*) return 0 ;;
+    esac
+    printf '%s\n' "$rfv_value"
+}
+
+# A flashed image enables osi-bootstrap at first boot (uci-defaults
+# 95_osi_bootstrap_enable); a stock gateway OS install only gets the init file
+# from this script, so enable it here. rc.common enable is idempotent; an
+# already enabled service is left alone. A gateway provisioned by hand before
+# the service was enabled has a provisioned env file but no stamp; the service
+# would rerun chirpstack-bootstrap.js at the next boot, which mints a second
+# API key and rewrites the env file. Stamp it with the service's own test so
+# the boot run stays a no-op. Never fails the deploy.
+enable_osi_bootstrap() {
+    if "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "OK: osi-bootstrap already enabled"
+        return 0
+    fi
+    if ! "$OSI_BOOTSTRAP_INIT" enable; then
+        echo "WARN: could not enable osi-bootstrap; ChirpStack provisioning will not run at boot" >&2
+        return 0
+    fi
+    echo "OK: osi-bootstrap enabled (START=99; provisions ChirpStack at boot until stamped)"
+    if [ ! -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        if touch "$OSI_BOOTSTRAP_STAMP"; then
+            echo "OK: ChirpStack already provisioned; wrote $OSI_BOOTSTRAP_STAMP so the boot run is a no-op"
+        else
+            echo "WARN: could not write $OSI_BOOTSTRAP_STAMP; osi-bootstrap will rerun chirpstack-bootstrap.js at the next boot" >&2
+        fi
+    fi
+    return 0
+}
+
+# Closing-banner note on ChirpStack provisioning for the gateway this ran on.
+# It always points at the osi-bootstrap service, never at a bare
+# `node chirpstack-bootstrap.js`: a direct run writes no stamp, so the enabled
+# service would run the script again at the next boot, mint a second API key
+# and rewrite the env file. "Provisioned" uses the service's own test (stamp
+# plus a sensors application UUID in the env file).
+print_bootstrap_note() {
+    if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
+        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+    else
+        pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
+    fi
+    if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
+        echo "        this at every boot. To re-provision through the service with"
+        echo "        the existing API key ($pbn_script; it rewrites"
+        echo "        $CHIRPSTACK_ENV_FILE with the CHIRPSTACK_* keys only):"
+        # shellcheck disable=SC2016 # the command is printed for the operator, not run
+        printf '        rm -f %s && CHIRPSTACK_API_KEY="$(sed -n '\''s/^CHIRPSTACK_API_KEY=//p'\'' %s | head -1)" %s start\n' \
+            "$OSI_BOOTSTRAP_STAMP" "$CHIRPSTACK_ENV_FILE" "$OSI_BOOTSTRAP_INIT"
+    elif "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "  NOTE: ChirpStack is not provisioned yet. osi-bootstrap (START=99)"
+        echo "        runs $pbn_script at the next boot; to provision now run:"
+        echo "        $OSI_BOOTSTRAP_INIT start"
+        echo "        Do not run the script directly: only the service writes"
+        echo "        $OSI_BOOTSTRAP_STAMP, and without it the next boot runs it again."
+    else
+        echo "  NOTE: osi-bootstrap is not enabled on this gateway. To provision"
+        echo "        ChirpStack (runs $pbn_script and writes the stamp):"
+        echo "        $OSI_BOOTSTRAP_INIT enable && $OSI_BOOTSTRAP_INIT start"
+    fi
 }
 
 ensure_journal_media_defaults() {
@@ -331,8 +653,14 @@ run_native_sqlite3_preflight() {
         return 0
     fi
     nsp_lock="$TMP_DIR/preflight-package-lock.json"
-    fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" "$nsp_lock"
-    nsp_locked="$(node -p 'const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = (l.packages && l.packages["node_modules/sqlite3"]) || {}; p.version || ""' "$nsp_lock" 2>/dev/null || true)"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" "$nsp_lock"; then
+        echo "ERROR: could not fetch the shipped package-lock.json for the sqlite3 preflight; refusing to start the deploy; nothing has been changed" >&2
+        return 1
+    fi
+    if ! nsp_locked="$(node -p 'const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = (l.packages && l.packages["node_modules/sqlite3"]) || {}; p.version || ""' "$nsp_lock" 2>/dev/null)"; then
+        echo "ERROR: the shipped package-lock.json is not valid JSON; refusing to start the deploy; nothing has been changed" >&2
+        return 1
+    fi
     nsp_have="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$nsp_pkg" 2>/dev/null || true)"
     if [ -z "$nsp_locked" ]; then
         echo "WARN: the shipped package-lock.json pins no sqlite3 version; skipping the preflight"
@@ -670,6 +998,11 @@ deploy_exit_handler() {
     if [ "${DEPLOY_HOLD_SERVICES:-0}" != "1" ] && ! restore_identityd_prior_state; then
         [ "$exit_status" -ne 0 ] || exit_status=1
     fi
+    # The copy of the previous command-ledger files is kept until a deploy
+    # succeeds; a failed one leaves it for the operator.
+    if [ "$exit_status" -eq 0 ]; then
+        rm -rf "${NODE_RED_ROOT:-/srv/node-red}"/.osi-command-ledger-previous.*
+    fi
     cleanup
     exit "$exit_status"
 }
@@ -856,6 +1189,75 @@ verify_payload_db_compatibility() {
     return 0
 }
 
+# osi-server.cloud.firmware_version follows the active payload. node-red.init
+# reads it when Node-RED starts and exports it as FIRMWARE_VERSION, so it is
+# written right after each switch to the new payload and before the restart
+# that starts it, and put back right before each switch to the previous payload
+# (or the removal of a failed first payload). None of these functions ever
+# fails the deploy: no uci, no osi-server.cloud section, an unknown version or
+# a failed write is logged and the deploy carries on.
+capture_previous_firmware_version() {
+    FW_PREV=""
+    FW_PREV_SET=0
+    command -v uci >/dev/null 2>&1 || return 0
+    if cpf_value="$(uci -q get osi-server.cloud.firmware_version 2>/dev/null)"; then
+        FW_PREV="$cpf_value"
+        FW_PREV_SET=1
+    fi
+    return 0
+}
+
+apply_release_firmware_version() {
+    arf_version="$1"
+    if [ -z "$arf_version" ]; then
+        echo "WARN: release version unknown; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "WARN: UCI section osi-server.cloud is missing; firmware_version left unchanged" >&2
+        return 0
+    fi
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ "$FW_PREV" = "$arf_version" ]; then
+        echo "OK: osi-server.cloud.firmware_version already $arf_version"
+        return 0
+    fi
+    if uci set "osi-server.cloud.firmware_version=$arf_version" && uci commit osi-server; then
+        FW_WRITTEN=1
+        echo "OK: osi-server.cloud.firmware_version ${FW_PREV:-unset} -> $arf_version (read by the next Node-RED start)"
+    else
+        uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+        echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${FW_PREV:-unset}" >&2
+    fi
+    return 0
+}
+
+restore_previous_firmware_version() {
+    [ "${FW_WRITTEN:-0}" = "1" ] || return 0
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; could not restore osi-server.cloud.firmware_version" >&2
+        return 0
+    fi
+    # An empty previous value is treated as unset: never write an empty value.
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ -n "$FW_PREV" ]; then
+        if uci set "osi-server.cloud.firmware_version=$FW_PREV" && uci commit osi-server; then
+            FW_WRITTEN=0
+            echo "OK: osi-server.cloud.firmware_version restored to $FW_PREV"
+            return 0
+        fi
+    elif uci -q delete osi-server.cloud.firmware_version && uci commit osi-server; then
+        FW_WRITTEN=0
+        echo "OK: osi-server.cloud.firmware_version removed again (it was unset)"
+        return 0
+    fi
+    uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+    echo "WARN: could not restore osi-server.cloud.firmware_version to ${FW_PREV:-unset}" >&2
+    return 0
+}
+
 restart_previous_payload() {
     if [ -z "${PREV_STAMP:-}" ]; then
         echo "ERROR: no previous payload is available for a safe restart" >&2
@@ -864,6 +1266,7 @@ restart_previous_payload() {
     if ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
         return 1
     fi
+    restore_previous_firmware_version
     if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
         echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
         return 1
@@ -903,6 +1306,7 @@ cleanup_failed_first_payload() {
     else
         echo "ERROR: could not prove Node-RED stopped while cleaning up the first-deploy payload" >&2
     fi
+    restore_previous_firmware_version
     swap_call deactivate "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null || true
     swap_call discardPayload "$DEPLOY_STAMP" >/dev/null || true
     PAYLOAD_FLIPPED=0
@@ -942,20 +1346,112 @@ ensure_sqlite3_cli() {
     return 1
 }
 
+# Checks a fetched CHECKSUMS.json ($1 = manifest) or the files it names
+# ($1 = files: each one present with its SHA-256, no unnamed .sql beside
+# them) in directory $2; $3 is the repo path printed in each ERROR line.
+check_fetched_manifest() {
+    node -e '
+        const crypto = require("crypto");
+        const fs = require("fs");
+        const path = require("path");
+        const [mode, dir, label] = process.argv.slice(1);
+        let manifest;
+        try {
+            manifest = JSON.parse(fs.readFileSync(path.join(dir, "CHECKSUMS.json"), "utf8"));
+        } catch (error) {
+            console.error("ERROR: " + label + "/CHECKSUMS.json is missing, empty or not valid JSON: " + error.message);
+            process.exit(1);
+        }
+        const names = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? Object.keys(manifest).sort() : [];
+        const malformed = names.filter((name) => name.includes("/") || !/^[0-9a-f]{64}$/.test(String(manifest[name])));
+        if (names.length === 0 || malformed.length > 0) {
+            console.error("ERROR: " + label + "/CHECKSUMS.json names no files or has malformed entries " + malformed.join(" "));
+            process.exit(1);
+        }
+        if (mode !== "files") process.exit(0);
+        let failed = false;
+        for (const name of names) {
+            let actual;
+            try {
+                actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, name))).digest("hex");
+            } catch (error) {
+                console.error("ERROR: " + label + "/" + name + " is named in CHECKSUMS.json but missing (" + (error.code || error.message) + ")");
+                failed = true;
+                continue;
+            }
+            if (actual !== manifest[name]) {
+                console.error("ERROR: " + label + "/" + name + " does not match its SHA-256 in CHECKSUMS.json (truncated or altered download)");
+                failed = true;
+            }
+        }
+        for (const name of fs.readdirSync(dir)) {
+            if (name.endsWith(".sql") && !Object.prototype.hasOwnProperty.call(manifest, name)) {
+                console.error("ERROR: " + label + "/" + name + " is not named in CHECKSUMS.json");
+                failed = true;
+            }
+        }
+        process.exit(failed ? 1 : 0);
+    ' "$1" "$2" "$3"
+}
+
+# Fails, naming the file, when a fetched JavaScript file is missing, empty or
+# does not parse as a CommonJS module (a truncated download usually does not).
+check_fetched_js_files() {
+    node -e '
+        const fs = require("fs");
+        const vm = require("vm");
+        let failed = false;
+        for (const file of process.argv.slice(1)) {
+            let source;
+            try {
+                source = fs.readFileSync(file, "utf8");
+            } catch (error) {
+                console.error("ERROR: " + file + " is missing (" + (error.code || error.message) + ")");
+                failed = true;
+                continue;
+            }
+            if (source.trim() === "") {
+                console.error("ERROR: " + file + " is empty");
+                failed = true;
+                continue;
+            }
+            try {
+                new vm.Script("(function (exports, require, module, __filename, __dirname) {" + source.replace(/^#!.*/, "") + "\n})", { filename: file });
+            } catch (error) {
+                console.error("ERROR: " + file + " does not parse (truncated or altered download): " + error.message);
+                failed = true;
+            }
+        }
+        process.exit(failed ? 1 : 0);
+    ' "$@"
+}
+
 fetch_migration_runner() {
     migrations_dir="$TMP_DIR/database/migrations/ordered"
-    mkdir -p "$migrations_dir" "$TMP_DIR/scripts" "$TMP_DIR/lib/osi-migrate"
+    if ! mkdir -p "$migrations_dir" "$TMP_DIR/scripts" "$TMP_DIR/lib/osi-migrate"; then
+        echo "ERROR: could not create the migration runner directories under $TMP_DIR" >&2
+        return 1
+    fi
 
     fetch_required "Migration checksum manifest" \
         "database/migrations/ordered/CHECKSUMS.json" \
-        "$migrations_dir/CHECKSUMS.json"
+        "$migrations_dir/CHECKSUMS.json" || return 1
+    check_fetched_manifest manifest "$migrations_dir" database/migrations/ordered || return 1
 
     for migration in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$migrations_dir/CHECKSUMS.json"); do
         fetch_required "Migration $migration" \
             "database/migrations/ordered/$migration" \
-            "$migrations_dir/$migration"
+            "$migrations_dir/$migration" || return 1
     done
+    # migrate-cli.js and verify-head-cli.js read this directory, not
+    # CHECKSUMS.json: a migration missing here would be skipped without an
+    # error, so the fetched set must be exactly the manifest's.
+    check_fetched_manifest files "$migrations_dir" database/migrations/ordered || return 1
 
+    # The positional parameters collect every fetched runner file for the
+    # parse check below, so a file that is absent after a reported download
+    # is named too.
+    set --
     for script in \
         baseline-existing-db.js \
         repair-sync-outbox-v2.js \
@@ -965,7 +1461,8 @@ fetch_migration_runner() {
         verify-head-cli.js \
         verify-runtime-schema-parity.js
     do
-        fetch_required "Migration script $script" "scripts/$script" "$TMP_DIR/scripts/$script"
+        fetch_required "Migration script $script" "scripts/$script" "$TMP_DIR/scripts/$script" || return 1
+        set -- "$@" "$TMP_DIR/scripts/$script"
     done
 
     for module in \
@@ -979,8 +1476,10 @@ fetch_migration_runner() {
         runner.js \
         sql-normalize.js
     do
-        fetch_required "Migration runner module $module" "lib/osi-migrate/$module" "$TMP_DIR/lib/osi-migrate/$module"
+        fetch_required "Migration runner module $module" "lib/osi-migrate/$module" "$TMP_DIR/lib/osi-migrate/$module" || return 1
+        set -- "$@" "$TMP_DIR/lib/osi-migrate/$module"
     done
+    check_fetched_js_files "$@" || return 1
     MIGRATION_RUNNER_AVAILABLE=1
 }
 
@@ -992,20 +1491,22 @@ fetch_migration_runner() {
 fetch_reconciliation_assets() {
     fetch_required "Ledger numbering reconciliation tool" \
         "scripts/reconcile-ledger-numbering.js" \
-        "$TMP_DIR/scripts/reconcile-ledger-numbering.js"
+        "$TMP_DIR/scripts/reconcile-ledger-numbering.js" || return 1
 
     lineage_fixtures_dir="$TMP_DIR/scripts/fixtures/lineages"
-    mkdir -p "$lineage_fixtures_dir"
+    mkdir -p "$lineage_fixtures_dir" || return 1
     for lineage in agrolink bovey; do
-        mkdir -p "$lineage_fixtures_dir/$lineage"
+        mkdir -p "$lineage_fixtures_dir/$lineage" || return 1
         fetch_required "Lineage fixture manifest ($lineage)" \
             "scripts/fixtures/lineages/$lineage/CHECKSUMS.json" \
-            "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"
+            "$lineage_fixtures_dir/$lineage/CHECKSUMS.json" || return 1
+        check_fetched_manifest manifest "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage" || return 1
         for fixture in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"); do
             fetch_required "Lineage fixture $lineage/$fixture" \
                 "scripts/fixtures/lineages/$lineage/$fixture" \
-                "$lineage_fixtures_dir/$lineage/$fixture"
+                "$lineage_fixtures_dir/$lineage/$fixture" || return 1
         done
+        check_fetched_manifest files "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage" || return 1
     done
 }
 
@@ -1023,10 +1524,16 @@ run_schema_migration() {
         return 1
     fi
 
-    fetch_migration_runner
+    if ! fetch_migration_runner; then
+        echo "ERROR: the migration runner could not be fetched and verified; refusing schema migration (Node-RED was not stopped)" >&2
+        return 1
+    fi
 
     backup_dir="${MIGRATE_BACKUP_DIR:-/data/backups/migrate}"
-    mkdir -p "$backup_dir"
+    if ! mkdir -p "$backup_dir"; then
+        echo "ERROR: could not create the migration backup directory $backup_dir; refusing schema migration (Node-RED was not stopped)" >&2
+        return 1
+    fi
 
     # Best-effort self-heal prune BEFORE the disk gate below: an already-full
     # machine may have accumulated .premigrate- backups from prior deploys.
@@ -1040,8 +1547,22 @@ run_schema_migration() {
     # for lack of free space. BusyBox has no `stat`; use O(1) `ls -ln` for
     # size instead of `wc -c`.
     db_bytes=$(ls -ln "$DB_PATH" | awk '{print $5}')
+    # An empty value reads as 0 in shell arithmetic and would quietly shrink
+    # the gate to its margin.
+    case "$db_bytes" in
+        ''|*[!0-9]*)
+            echo "ERROR: could not read the size of $DB_PATH for the disk preflight; refusing schema migration (Node-RED was not stopped)" >&2
+            return 1
+            ;;
+    esac
     if [ -e "$DB_PATH-wal" ]; then
         wal_bytes=$(ls -ln "$DB_PATH-wal" | awk '{print $5}')
+        case "$wal_bytes" in
+            ''|*[!0-9]*)
+                echo "ERROR: could not read the size of $DB_PATH-wal for the disk preflight; refusing schema migration (Node-RED was not stopped)" >&2
+                return 1
+                ;;
+        esac
         db_bytes=$((db_bytes + wal_bytes))
     fi
     # BusyBox `df` wraps long device names onto their own line, pushing every
@@ -1152,12 +1673,26 @@ run_schema_migration() {
         # node invocation that loads the manifest once and returns as soon
         # as it finds a mismatch (empty output = none found).
         # reconcile probe begin
-        recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")"
-        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(padded + '__')); const mainChecksum=name ? manifest[name] : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$migrations_dir/CHECKSUMS.json")"
+        recon_probe_failed=""
+        recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")" || recon_probe_failed="ledger"
+        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(padded + '__')); const mainChecksum=name ? manifest[name] : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$migrations_dir/CHECKSUMS.json")" || recon_probe_failed="${recon_probe_failed:-compare}"
         # reconcile probe end
+        case "$recon_probe_failed" in
+            ledger)
+                echo "ERROR: could not read the schema_migrations ledger for the reconciliation probe; aborting schema migration" >&2
+                return 1
+                ;;
+            compare)
+                echo "ERROR: the reconciliation probe could not compare the ledger with CHECKSUMS.json; aborting schema migration" >&2
+                return 1
+                ;;
+        esac
         if [ -n "$recon_probe_version" ]; then
             echo "--- Foreign-numbered schema_migrations ledger detected (v$recon_probe_version checksum mismatch vs main); running ledger numbering reconciliation ---"
-            fetch_reconciliation_assets
+            if ! fetch_reconciliation_assets; then
+                echo "ERROR: could not fetch the ledger numbering reconciliation assets; aborting schema migration" >&2
+                return 1
+            fi
             if ! node "$TMP_DIR/scripts/reconcile-ledger-numbering.js" "$DB_PATH" \
                 --migrations-dir "$migrations_dir" \
                 --fixtures-dir "$TMP_DIR/scripts/fixtures/lineages" \
@@ -1263,6 +1798,7 @@ process.stdout.write(String(applied.length));
             fi
             PAYLOAD_FLIPPED=1
             echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+            apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
         fi
         NODE_RED_LOG_MARK=0
         if command -v logread >/dev/null 2>&1; then
@@ -1292,9 +1828,18 @@ process.stdout.write(String(applied.length));
 
 echo "=== OSI OS Deploy ==="
 echo "Source: $BASE"
+check_command_ledger_hold
 
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1
+
+DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
+capture_previous_firmware_version
+if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
+    echo "Release version: $DEPLOY_FIRMWARE_VERSION (written to UCI when the new payload is activated)"
+else
+    echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
+fi
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
@@ -1330,6 +1875,7 @@ fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
     "/etc/init.d/osi-bootstrap"
 chmod 755 /etc/init.d/osi-bootstrap
+enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
 if [ -x /etc/init.d/osi-gateway-gps ]; then
@@ -2050,6 +2596,7 @@ if ! write_payload_compatibility "$DEPLOY_STAMP"; then
     exit 1
 fi
 
+# payload activation begin
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
     if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
@@ -2064,6 +2611,8 @@ else
 fi
 
 if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
+    # Flipped just above: the restart below must read the new version.
+    apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
     /etc/init.d/node-red restart || true
 else
     echo "OK: Node-RED already restarted on the activated pair during migration"
@@ -2176,6 +2725,7 @@ else
             echo "ERROR: refusing rollback restart because the retained payload/database pair was not proven compatible" >&2
             exit 1
         fi
+        restore_previous_firmware_version
         if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
             echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
             node_red_restart_needed=0
@@ -2219,6 +2769,8 @@ else
     exit 1
 fi
 
+# self-check verdict end
+
 echo "--- Gateway identity supervisor ---"
 if ! identityd_service enable; then
     echo "ERROR: failed to enable identityd" >&2
@@ -2238,7 +2790,4 @@ echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health s
 echo "  UI:       http://<device-ip>:1880/gui"
 echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
-echo "  NOTE: ChirpStack provisioning runs automatically on first boot via"
-echo "        osi-bootstrap (START=99).  No manual bootstrap step needed on"
-echo "        a freshly installed gateway.  To re-provision manually run:"
-echo "        node /usr/share/node-red/chirpstack-bootstrap.js"
+print_bootstrap_note

@@ -3,6 +3,9 @@
 const crypto = require('node:crypto');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// A gateway-local actor may also be 32 lower-case hex digits (users.user_uuid
+// of the first admin and backfilled users); that form is kept unchanged.
+const LOCAL_HEX_ACTOR = /^[0-9a-f]{32}$/;
 const EUI = /^[0-9a-f]{16}$/i;
 const ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})$/;
 const EUI_FIELDS = new Set(['device_eui', 'gateway_device_eui']);
@@ -51,6 +54,7 @@ function typedString(value, field) {
     if (!EUI.test(value)) throw new TypeError(`protected binding ${field} must be an EUI64`);
     return value.toUpperCase();
   }
+  if (field === 'actor_user_uuid' && LOCAL_HEX_ACTOR.test(value)) return value;
   if (UUID_FIELDS.has(field)) {
     if (!UUID.test(value)) throw new TypeError(`protected binding ${field} must be a UUID`);
     return value.toLowerCase();
