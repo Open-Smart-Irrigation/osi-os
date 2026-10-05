@@ -194,3 +194,54 @@ test('a key re-queued between the row lookup and the drop is not dropped', async
   assert.equal(row(42).status, 'dropped');
   assert.ok(h.warnings.some((w) => /dropped 1 queued device_data key\(s\)/.test(w)), h.warnings.join('\n'));
 });
+
+test('a row-level permanent rejection sets that key aside and does not block the table', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+  for (const id of [11, 12, 13]) insert.run(id, SENSOR, `2026-08-13T00:${id}:00.000Z`);
+  cursor.run('device_data', '13', null, '13', null);
+  link(db);
+  for (const id of [11, 12, 13]) dirty(db, 'device_data', key(id), 'correction', '2026-10-05T09:00:00.000Z');
+  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { hashMismatch: new Set([key(12)]) } });
+  await h.tick();
+  assert.deepEqual(statusCounts(db, 'device_data'), { done: 1, pending: 2 });
+  const aside = db.prepare('SELECT status, attempts, last_error, next_attempt_at FROM sync_history_dirty_keys WHERE row_key=?').get(key(12));
+  assert.equal(aside.last_error, 'permanent: hash_mismatch');
+  assert.equal(aside.attempts, 1);
+  assert.ok(Date.parse(aside.next_attempt_at) > h.now(), 'the rejected key waits');
+  const cur = db.prepare("SELECT next_attempt_at, retry_count FROM sync_history_cursors WHERE table_name='device_data'").get();
+  assert.ok(cur.next_attempt_at === null || cur.next_attempt_at < '9999', 'the table is not parked: ' + cur.next_attempt_at);
+  assert.equal(cur.retry_count, 0);
+  // Next visit sends the key behind it.
+  h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+  const next = await h.invoke('sync-history-build', {});
+  assert.deepEqual(Array.from(next.payload.rows, (row) => Number(row.payload.id)), [13]);
+  // After three permanent rejections the key is terminal and counted.
+  h.memory.set('history_sync_last_table', 'irrigation_events');
+  for (let i = 0; i < 80 && db.prepare("SELECT status FROM sync_history_dirty_keys WHERE row_key=?").get(key(12)).status === 'pending'; i += 1) await h.tick();
+  const final = db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(12));
+  assert.deepEqual([final.status, final.attempts, final.last_error], ['rejected', 3, 'permanent: hash_mismatch']);
+  assert.deepEqual(statusCounts(db, 'device_data'), { done: 2, rejected: 1 });
+  assert.ok(h.warnings.some((w) => /device_data key .*12 rejected permanently \(hash_mismatch\)/.test(w)), h.warnings.join('\n'));
+});
+
+test('a systemic rejection keeps the table backed off and sets no key aside', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(21,?,?,21)').run(SENSOR, '2026-08-13T00:00:00.000Z');
+  cursor.run('device_data', '21', null, '21', null);
+  link(db);
+  dirty(db, 'device_data', key(21), 'correction', '2026-10-05T09:00:00.000Z');
+  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { systemicReason: 'unsupported_protocol_version' } });
+  const sentAt = h.now();
+  await h.tick();
+  const row = db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(21));
+  assert.deepEqual([row.status, row.attempts, row.last_error], ['pending', 0, null]);
+  const cur = db.prepare("SELECT next_attempt_at, retry_count, last_error FROM sync_history_cursors WHERE table_name='device_data'").get();
+  assert.equal(cur.retry_count, 1);
+  assert.ok(Date.parse(cur.next_attempt_at) > sentAt, 'the table is backed off');
+  assert.equal(cur.last_error, 'permanent: unsupported_protocol_version');
+});

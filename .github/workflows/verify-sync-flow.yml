@@ -102,7 +102,8 @@ jobs:
       # History correction queue (shipped Build / POST / Mark History Batch and
       # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
       # the cloud's ordering, hash, row-index and manifest rules): batches go out
-      # in ascending key order and a key whose row is gone is dropped.
+      # in ascending key order, a key whose row is gone is dropped, and a
+      # row-level permanent rejection sets one key aside.
       - name: History correction queue drain
         run: node --test scripts/test-sync-history-queue-drain.js
       # The staged, digest-pinned command-ledger install in deploy.sh (activation

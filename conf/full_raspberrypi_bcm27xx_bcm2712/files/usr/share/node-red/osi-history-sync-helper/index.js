@@ -339,6 +339,18 @@ function cursorPatchFromResponse(response) {
   return patch;
 }
 
+// Cloud reasons that condemn one submitted row, not the protocol, table or
+// phase. Only these may set a dirty key aside; any other permanent answer
+// keeps the table backed off.
+const ROW_REJECTION_REASONS = new Set(['hash_mismatch', 'out_of_order_history_key']);
+
+function rowRejection(response) {
+  const results = response && Array.isArray(response.results) ? response.results : [];
+  const permanent = results.find((result) => result && result.status === 'REJECTED_PERMANENT');
+  if (!permanent || !ROW_REJECTION_REASONS.has(String(permanent.reason || ''))) return null;
+  return { historyKey: String(permanent.historyKey || ''), reason: String(permanent.reason) };
+}
+
 function isBackfillComplete(cursor) {
   if (!cursor || cursor.snapshot_high_id == null) return false;
   return BigInt(encodeInteger(cursor.last_acked_id || 0)) >= BigInt(encodeInteger(cursor.snapshot_high_id));
@@ -543,6 +555,7 @@ module.exports = {
   cursorValue,
   nextRawQuery,
   cursorPatchFromResponse,
+  rowRejection,
   isBackfillComplete,
   isCursorComplete,
   batchPhase,
