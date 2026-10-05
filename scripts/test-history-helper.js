@@ -462,6 +462,11 @@ test('toCsv neutralizes spreadsheet formulas in text cells', () => {
   assert.strictEqual(csv, "zone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
 });
 
+test('toCsv also neutralizes text cells that start with a tab or a carriage return', () => {
+  const csv = helper.toCsv(['zone', 'source', 'value'], [{ zone: '\tZone', source: '\r=cmd', value: -3 }]);
+  assert.strictEqual(csv, "zone,source,value\n'\tZone,\"'\r=cmd\",-3\n");
+});
+
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {
   assert.strictEqual(helper.classifySoilStatus({ value: 10 }).status, 'wet_excess');
   assert.strictEqual(helper.classifySoilStatus({ value: 22 }).status, 'optimal');

@@ -1982,7 +1982,9 @@ async function legacyRainDailyHistory(db, options = {}) {
 
 function csvCell(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = typeof value !== 'number' && /^[=+\-@]/.test(String(value)) ? `'${String(value)}` : String(value);
+  // A text cell a spreadsheet would run as a formula (=, +, -, @, tab, CR)
+  // gets a leading apostrophe; numbers stay numbers.
+  const stringValue = typeof value !== 'number' && /^[=+\-@\t\r]/.test(String(value)) ? `'${String(value)}` : String(value);
   return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
 }
 
