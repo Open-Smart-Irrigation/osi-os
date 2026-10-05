@@ -649,8 +649,43 @@ async function testBuildBatchDeadLettersConflictAtCap() {
   db.close();
 }
 
+// ===========================================================================
+// 8. command-ack-mark-delivered: two answers for one commandId are ambiguous.
+//    The batch sends each commandId once, so a second answer means the
+//    response cannot be matched to the row. Neither answer may decide the row:
+//    it stays pending (bounded by RETRY_CAP) in either order.
+// ===========================================================================
+async function testDoubleAnswerStaysPending() {
+  for (const order of [['ACKED', 'LEASE_MISMATCH'], ['LEASE_MISMATCH', 'ACKED'], ['ACKED', 'ACKED']]) {
+    const db = freshDb();
+    seedAck(db, 701, 'cmd-701');
+    seedAck(db, 702, 'cmd-702');
+    const { resultPromise } = execute(nodeById('command-ack-mark-delivered'), {
+      statusCode: 200,
+      _commandAckIds: [701, 702],
+      _localAckCorrelation: { 'cmd-701': [701], 'cmd-702': [702] },
+      payload: {
+        results: [
+          { commandId: 'cmd-701', status: order[0], terminal: order[0] === 'ACKED' },
+          { commandId: 'cmd-702', status: 'ACKED', terminal: true },
+          { commandId: 'cmd-701', status: order[1], terminal: order[1] === 'ACKED' },
+        ],
+      },
+    }, db, { flowState: {} });
+    await resultPromise;
+    const rows = rowsById(db);
+    assert.equal(rows[701].delivered_at, null,
+      'answers ' + order.join('+') + ' for one commandId must not deliver the row: neither answer can be trusted');
+    assert.equal(rows[701].retry_count, 1, 'the ambiguous answer counts toward the retry cap');
+    assert.match(rows[701].last_error || '', /AMBIGUOUS_RESULT/);
+    assert.ok(rows[702].delivered_at, 'a single, unambiguous answer in the same batch still delivers');
+    db.close();
+  }
+}
+
 (async () => {
   await checkAsync('command-ack-build-batch sets msg._localAckCorrelation from command_id', testBuildBatchCorrelation);
+  await checkAsync('command-ack-mark-delivered: two answers for one commandId keep the row pending', testDoubleAnswerStaysPending);
   await checkAsync('command-ack-build-batch: identical rows for one commandId go out as one entry', testBuildBatchCollapsesIdenticalRows);
   await checkAsync('command-ack-build-batch: rows that disagree about one commandId are withheld and counted', testBuildBatchWithholdsConflictingRows);
   await checkAsync('command-ack-build-batch: a withheld conflict dead-letters at the retry cap', testBuildBatchDeadLettersConflictAtCap);
