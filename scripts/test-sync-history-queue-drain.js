@@ -336,3 +336,87 @@ test('the manifest keeps a pending key in place and does not revive a rejected k
   assert.equal(row(second).attempts, 3);
   assert.deepEqual([row(third).status, row(third).changed_at], ['pending', '2026-10-06T08:00:00.000Z'], 'a done key in a mismatching segment is queued again, dated now');
 });
+
+// A dirty key is stored in the form the trigger or the manifest wrote it: under
+// the gateway EUI of that moment, or with the device EUI as stored. The batch
+// submits the key computed from the current row, so the ACK must complete the
+// stored key through the submitted one, and two stored keys of one row must put
+// the row in the batch once.
+test('a key stored under an old gateway EUI completes, and a row queued under both EUIs goes out once', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+  for (const id of [51, 52, 53]) insert.run(id, SENSOR, `2026-08-13T00:${id}:00.000Z`);
+  cursor.run('device_data', '53', null, '53', null);
+  link(db);
+  dirty(db, 'device_data', `DEVICE_DATA|${OLD_GATEWAY}|51`, 'correction', '2026-10-05T09:00:00.000Z');
+  dirty(db, 'device_data', key(52), 'correction', '2026-10-05T09:00:01.000Z');
+  dirty(db, 'device_data', `DEVICE_DATA|${OLD_GATEWAY}|52`, 'correction', '2026-10-05T09:00:02.000Z');
+  dirty(db, 'device_data', key(53), 'correction', '2026-10-05T09:00:03.000Z');
+  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+  await h.tick();
+  assert.deepEqual(h.cloud.batches.map((b) => [b.keys, b.rejected]), [[[key(51), key(52), key(53)], null]]);
+  assert.deepEqual(statusCounts(db, 'device_data'), { done: 4 });
+});
+
+test('a daily key stored with a lower-case device EUI completes and the batch stays in submitted-key order', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  const daily = db.prepare('INSERT INTO dendrometer_daily(deveui,date,mds_um,twd_um,stress_level,computed_at) VALUES(?,?,30.5,12.25,?,?)');
+  daily.run(DENDROS[1], '2026-07-14', 'low', '2026-07-14T23:00:00.000Z');
+  daily.run(DENDROS[2], '2026-07-13', 'low', '2026-07-13T23:00:00.000Z');
+  cursor.run('dendrometer_daily', null, `${DENDROS[2]}|2026-07-14`, null, `${DENDROS[2]}|2026-07-14`);
+  link(db);
+  // Upper-case keys sort before lower-case ones, so the stored order differs
+  // from the order of the keys the batch submits.
+  dirty(db, 'dendrometer_daily', `DENDRO_DAILY|${DENDROS[1].toLowerCase()}|2026-07-14`, 'upsert', '2026-10-05T09:00:00.000Z');
+  dirty(db, 'dendrometer_daily', `DENDRO_DAILY|${DENDROS[2]}|2026-07-13`, 'upsert', '2026-10-05T09:00:01.000Z');
+  const h = createHarness({ db, lastTable: 'dendrometer_readings', env: { DEVICE_EUI: GATEWAY } });
+  await h.tick();
+  assert.deepEqual(h.cloud.batches.map((b) => [b.tableName, b.keys, b.rejected]), [
+    ['dendrometer_daily', [`DENDRO_DAILY|${DENDROS[1]}|2026-07-14`, `DENDRO_DAILY|${DENDROS[2]}|2026-07-13`], null]
+  ]);
+  assert.deepEqual(statusCounts(db, 'dendrometer_daily'), { done: 2 });
+});
+
+// Radio history reads its rows from the radio store, not farming.db, and a
+// radio key completes only while the bridge generation matches the row's.
+test('radio_uplinks: dead keys are dropped, a rejected key is set aside, an old-EUI key completes', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  const radio = new DatabaseSync(':memory:');
+  t.after(() => { db.close(); radio.close(); });
+  seed(db);
+  const installation = '00000000-0000-4000-8000-000000000001';
+  db.prepare("INSERT INTO installation_identity(singleton_id,installation_uuid,current_gateway_device_eui,recovery_state,created_at,updated_at) VALUES(1,?,?,'ACTIVE','2026-09-10','2026-09-10')").run(installation, GATEWAY);
+  db.prepare("INSERT INTO sync_history_cursors(peer_node,table_name,state,shadow_completed_at,durable_enabled_at,backfill_completed_at,snapshot_high_id,last_acked_id) VALUES('cloud','radio_uplinks','tail','2026-09-10','2026-09-10','2026-09-10','10','10')").run();
+  link(db);
+  radio.exec('CREATE TABLE radio_uplinks(id INTEGER PRIMARY KEY,installation_uuid TEXT,deveui TEXT,recorded_at TEXT,deduplication_id TEXT,metadata_json TEXT,dirty_generation INTEGER)');
+  const uplink = radio.prepare('INSERT INTO radio_uplinks VALUES(?,?,?,?,?,?,1)');
+  for (const id of [1, 2, 3, 4, 10]) uplink.run(id, installation, SENSOR, `2026-09-10T10:${String(id).padStart(2, '0')}:00.000Z`, `native-${id}`, JSON.stringify({ version: 1, receivers: [] }));
+  const radioKey = (id, gateway = GATEWAY) => `RADIO_UPLINK|${gateway}|${id}`;
+  const queued = [[radioKey(5), '2026-09-10T11:00:00.000Z'], [radioKey(6), '2026-09-10T11:00:00.000Z'],
+    [radioKey(1), '2026-09-10T11:01:00.000Z'], [radioKey(2), '2026-09-10T11:01:01.000Z'], [radioKey(3), '2026-09-10T11:01:02.000Z'],
+    [radioKey(4, OLD_GATEWAY), '2026-09-10T11:01:03.000Z'], [radioKey(10), '2026-09-10T11:01:04.000Z']];
+  for (const [rowKey, changedAt] of queued) {
+    dirty(db, 'radio_uplinks', rowKey, 'correction', changedAt);
+    db.prepare("INSERT INTO radio_history_bridge(history_key,generation,status) VALUES(?,1,'transferred')").run(rowKey);
+  }
+  const h = createHarness({ db, radio, env: { DEVICE_EUI: GATEWAY, OSI_RADIO_CAPTURE_ENABLED: '1' }, cloud: { hashMismatch: new Set([radioKey(3)]) } });
+  for (let i = 0; i < 12 && db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='radio_uplinks' AND status='pending'").get().n; i += 1) {
+    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    await h.tick();
+    h.advance(300000);
+  }
+  const status = (rowKey) => db.prepare('SELECT status FROM sync_history_dirty_keys WHERE row_key=?').get(rowKey).status;
+  assert.deepEqual(queued.map(([rowKey]) => status(rowKey)), ['dropped', 'dropped', 'done', 'done', 'rejected', 'done', 'done']);
+  for (const batch of h.cloud.batches) {
+    assert.equal(batch.tableName, 'radio_uplinks');
+    assert.deepEqual(batch.keys, batch.keys.slice().sort((a, b) => h.helper.compareHistoryKeys('radio_uplinks', a, b)));
+    assert.ok(!batch.rejected || batch.rejected === 'hash_mismatch', 'only the set-aside row is rejected: ' + batch.rejected);
+  }
+  const cur = db.prepare("SELECT next_attempt_at, retry_count FROM sync_history_cursors WHERE table_name='radio_uplinks'").get();
+  assert.ok(!cur.next_attempt_at || cur.next_attempt_at < '9999', 'radio history is not parked');
+  assert.ok(h.warnings.some((w) => /dropped 2 queued radio_uplinks key\(s\): source row missing/.test(w)), h.warnings.join('\n'));
+});
