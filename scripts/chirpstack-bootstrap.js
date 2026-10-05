@@ -631,9 +631,9 @@ async function repairCloverProfile(client, envText, envValues, codecScript) {
   const uciClover = readUciValue(CLOVER_ENV_KEY);
   const envClover = String(envValues[CLOVER_ENV_KEY] || '').trim();
   const usable = (value) => Boolean(value) && !(rak10701ProfileId && value === rak10701ProfileId);
-  // node-red.init resolves UCI first and falls back to the env file.
-  const effectiveClover = uciClover || envClover;
-  let cloverProfileId = usable(effectiveClover) ? effectiveClover : '';
+  // node-red.init resolves UCI first; a distinct id in either store is a
+  // deliberate choice and is kept, also when the other store holds the alias.
+  let cloverProfileId = usable(uciClover) ? uciClover : (usable(envClover) ? envClover : '');
   // A distinct id alone is not proof: the profile must exist and run a codec.
   if (cloverProfileId && (await ensureProfileCodec(client, cloverProfileId, 'Clover', codecScript)) === 'missing') {
     console.log(`  ⚠ configured Clover profile ${cloverProfileId} not found in ChirpStack; using "${CFG.profileCloverName}"`);

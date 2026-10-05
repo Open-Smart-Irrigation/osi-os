@@ -525,6 +525,19 @@ test('--repair-soil-profiles replaces a configured Clover id whose profile no lo
   assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_PROFILE_CLOVER, clover.id);
 });
 
+test('--repair-soil-profiles keeps a distinct env id when only UCI holds the alias', async () => {
+  const gw = provisionedGatewaySeed({ kiwiCodec: 'function decodeUplink(){return {data:{}};}' });
+  const world = makeWorld(gw.seed);
+  const chosen = nextUuid();
+  world.profiles.push({ id: chosen, name: 'Clover chosen by hand', tenantId: gw.ids.tenantId, runtime: JS_RUNTIME, script: tektelicCodec(), autoDetect: true });
+  world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_PROFILE_CLOVER=${gw.ids.rak}`, `CHIRPSTACK_PROFILE_CLOVER=${chosen}`));
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.uci.get('osi-server.cloud.chirpstack_profile_clover'), chosen);
+  assert.equal(profileByName(world, 'OSI CLOVER Sensor'), null, 'no second Clover profile');
+  assert.deepEqual(world.writes, []);
+});
+
 test('--repair-soil-profiles never falls through to a full provisioning pass when the repair fails', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
