@@ -413,6 +413,23 @@ describe('summarizeZoneSoil WATERMARK channels', () => {
     expect(status.invalid).toBe(false);
   });
 
+  it('counts an unsettled WATERMARK value like any other: the flag is not a fault (#415)', () => {
+    const zone = [device({
+      type_id: 'DRAGINO_LSN50',
+      chameleon_enabled: 0,
+      last_seen: FRESH,
+      latest_data: {
+        swt_1: 26.8,
+        swt_2: 54.7,
+        watermark: watermarkLatest({ status: 'unsettled', kpa: 26.8 }, { status: 'ok', kpa: 54.7 }),
+      },
+    })];
+    const status = summarizeZoneSoil(zone, NOW);
+    // The default selection is channel 1, the flagged one.
+    expect(status.value).toBe(26.8);
+    expect(status.invalid).toBe(false);
+  });
+
   it('flags every-channel-faulted WATERMARK as invalid, as an all-open Chameleon device is', () => {
     const zone = [device({
       type_id: 'DRAGINO_LSN50',

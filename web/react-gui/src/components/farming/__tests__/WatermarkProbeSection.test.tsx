@@ -65,6 +65,15 @@ describe('WatermarkProbeSection', () => {
     expect(screen.getByText(/watermark\.status\.calibration_required/)).toBeInTheDocument();
   });
 
+  it('shows the value of an unsettled reading and keeps its status visible (#415)', () => {
+    render(<WatermarkProbeSection {...base} probes={[
+      { key: 'swt_1', label: 'Probe 1', depthLabel: '20 cm', channel: ch({ status: 'unsettled', kpa: 26.8, r_solved: 4953, offset_mv: 70 }) },
+    ]} />);
+    expect(screen.getByText('26.8 kPa')).toBeInTheDocument();
+    expect(screen.getByText(/watermark\.status\.unsettled/)).toBeInTheDocument();
+    expect(screen.getByText('Moist')).toBeInTheDocument();
+  });
+
   it('says supply, never battery', () => {
     render(<WatermarkProbeSection {...base} probes={[]} />);
     expect(screen.getByText(/watermark\.supply/)).toBeInTheDocument();
