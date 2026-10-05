@@ -32,6 +32,9 @@ const SCRIPT = process.env.OSI_BOOTSTRAP_UNDER_TEST
   ? path.resolve(process.env.OSI_BOOTSTRAP_UNDER_TEST)
   : path.join(ROOT, 'scripts', 'chirpstack-bootstrap.js');
 const CODEC_DIR = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs');
+// The DevEUI normalisation is the real helper's, so the tests pin production
+// validation; only the ChirpStack client is faked.
+const { normalizeDevEui } = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'));
 const TEKTELIC_CODEC = path.join(CODEC_DIR, 'tektelic_agriculture_decoder.js');
 const ENV_FILE = '/srv/node-red/.chirpstack.env';
 const API_KEY = 'synthetic-api-key-0001';
@@ -148,7 +151,7 @@ function makeChirpStack(world) {
   return {
     createClient: () => client,
     listItemToObject: (item) => item,
-    normalizeDevEui: (value) => String(value || '').trim().replace(/[^0-9a-fA-F]/g, '').toUpperCase(),
+    normalizeDevEui,
   };
 }
 
@@ -599,7 +602,7 @@ test('--repoint-clover-device moves a Clover off the field-tester profile and re
   world.devices.set('A840410000000001', { profileId: gw.ids.rak });
   world.devices.set('A840410000000002', { profileId: otherProfile });
   await runBootstrap(world, {
-    args: ['--repair-soil-profiles', '--repoint-clover-device=a840410000000001', '--repoint-clover-device=A840410000000002', '--repoint-clover-device=A840410000000003'],
+    args: ['--repair-soil-profiles', '--repoint-clover-device=a840410000000001', '--repoint-clover-device=A840410000000002', '--repoint-clover-device=A840410000000003', '--repoint-clover-device=A8-40-41-00-00-00-00-01'],
   });
   const clover = profileByName(world, 'OSI CLOVER Sensor');
   assert.equal(world.devices.get('A840410000000001').profileId, clover.id, 'Clover on the field-tester profile is repointed');
@@ -607,6 +610,7 @@ test('--repoint-clover-device moves a Clover off the field-tester profile and re
   assert.equal(world.exitCode, 1, 'a refused or unknown device makes the run fail visibly');
   assert.ok(world.logs.some((l) => /A840410000000002/.test(l)), 'the refused device is named');
   assert.ok(world.logs.some((l) => /A840410000000003/.test(l)), 'the unknown device is named');
+  assert.ok(world.logs.some((l) => /A8-40-41-00-00-00-00-01: not a 16-hex DevEUI/.test(l)), 'a DevEUI with separators is refused, as production does');
 
   // Second run with only the repointed device: unchanged, success.
   world.exitCode = null;
