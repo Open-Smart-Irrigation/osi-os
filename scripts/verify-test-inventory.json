@@ -1,0 +1,103 @@
+{
+  "$comment": "Read by scripts/verify-test-inventory.js. 'indirect': a test that a runner script (itself run by a workflow) starts; the runner must name the file. 'excluded': a test file or pattern no workflow runs, with the reason. Entries that match nothing, or exclude a test a workflow runs, fail the verifier. Remove an exclusion when its test is wired into a workflow. Test files are those named like tests (see TEST_NAME in the verifier); verifiers such as scripts/verify-*.js are outside the inventory.",
+  "indirect": [
+    {
+      "path": "scripts/test-sync-history-worker.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "scripts/verify-history-api-contract.test.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "scripts/migrate-flows-journal-generators.test.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "scripts/verify-live-gateway-identity.js",
+      "runner": "scripts/verify-sync-flow.js"
+    },
+    {
+      "path": "scripts/test-identityd-service-lifecycle.sh",
+      "runner": "scripts/verify-live-gateway-identity.js"
+    }
+  ],
+  "excluded": [
+    {
+      "pattern": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/{node-gyp,pump,retry}/**",
+      "reason": "third-party npm packages (node-gyp, pump, retry) vendored into the firmware payload; their own test files are not OSI tests. The bcm2709 copies fall under the mirror pattern below"
+    },
+    {
+      "pattern": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/**",
+      "reason": "byte-identical mirror of the bcm2712 node-red tree: scripts/verify-profile-parity.js hashes the whole tree (run by codecs.yml, field-journal.yml and verify-sync-flow.js), and CI runs both profiles on the same Node, so a second run tests the same bytes. Mirror copies run only where a test reads sibling packages of its own profile (osi-module-defaults, migrations.yml) or already ran before this inventory (osi-journal, field-journal.yml)"
+    },
+    {
+      "pattern": "scripts/ops/**",
+      "reason": "one-off operations tools for a single deployment, run by hand together with the tool; their file names carry a deployment identity that public workflow text must not repeat"
+    },
+    {
+      "pattern": "scripts/pipeline/tests/**",
+      "reason": "pytest suite of the field-to-PR pipeline controller (python3 -m pytest scripts/pipeline/tests); CI has no Python job"
+    },
+    {
+      "pattern": "tests/*/selftest.js",
+      "reason": "offline self-test of the live-gateway harness guards (passes locally: 204 assertions); its directory carries a deployment identity that public workflow text must not repeat, so no workflow can name it. Run it by hand before a harness run"
+    },
+    {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.js",
+      "reason": "shared fixtures for the osi-valve-control tests (its own tests are test-helpers.test.js), not a test file; named like one"
+    },
+    {
+      "path": "analysis/farming-db/test-load-device-data.R",
+      "reason": "R analysis package; needs R and renv, run by scripts/verify-farming-db-r-workflow.sh by hand"
+    },
+    {
+      "path": "web/react-gui/demo/tests/browser.spec.ts",
+      "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
+    },
+    {
+      "path": "web/react-gui/demo/tests/polish.spec.ts",
+      "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
+    },
+    {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js",
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (the native npm module is not tracked and CI installs only the sqlite3 CLI; CI-run module tests use a node:sqlite adapter instead)"
+    },
+    {
+      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js",
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
+    },
+    {
+      "path": "scripts/test-radio-store.js",
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (native npm module not tracked; CI installs only the sqlite3 CLI)"
+    },
+    {
+      "path": "scripts/test-radio-restore-guards.js",
+      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
+    },
+    {
+      "path": "scripts/verify-scoped-access.test.js",
+      "reason": "fails on main (#389): 3 of 6 tests fail. verify-scoped-access.js passes a route when any node downstream of it mentions the scope helper, so removing a guard's own scope call is not detected; the mutation tests expect that failure and get empty output"
+    },
+    {
+      "path": "scripts/test-task14-journal-preview.js",
+      "reason": "needs a production GUI build (web/react-gui/build/index.html); all 16 tests fail without one, and CI builds no GUI"
+    },
+    {
+      "path": "scripts/deploy-push-bundle.test.sh",
+      "reason": "fails on main under CI's /bin/sh (dash) (#390): the test starts the bash script deploy-push-bundle.sh with sh, which stops at its first array (Syntax error: \"(\" unexpected); passes only where sh is bash"
+    },
+    {
+      "path": "scripts/deploy-offline.test.sh",
+      "reason": "needs BusyBox ash, wget and setsid as on the gateway (#390; run it in a node:22-alpine container, see its header); fails under dash"
+    },
+    {
+      "path": "scripts/test-valve-schedule-timestamp-wire-format.js",
+      "reason": "slow (#391): passes (32/32) but took about 17 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
+    },
+    {
+      "path": "scripts/test-valve-actuation-text-caps.js",
+      "reason": "slow (#391): passes (60/60) but took about 23 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
+    }
+  ]
+}
