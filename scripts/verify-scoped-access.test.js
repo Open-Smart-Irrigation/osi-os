@@ -32,8 +32,9 @@ function failuresFor(flows, ids, allowlist = ALLOWLIST) {
 }
 
 // A synthetic guarded route: http in -> guard -> worker -> response. The guard
-// resolves the caller like the shipped guards do, then runs `decision`; the
-// worker writes to the device row. Each bypass test swaps one piece.
+// resolves the caller like the shipped guards do, then runs `decision` (by
+// default the shipped order: role, write role, device); the worker writes to
+// the device row. Each bypass test swaps one piece.
 const RESOLVE_CALLER = `
 const scope = osiLib.require('scope').value;
 const db = new (osiLib.require('osi-db-helper').value.Database)('/data/db/farming.db');
@@ -44,6 +45,13 @@ const deveui = msg.req.params.deveui;
 
 const DECIDE = `
 await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+`;
+
+// The order the shipped write guards decide in: the caller's role, whether
+// that role may write, then the addressed object.
+const ROLE_CHECKS = `
+const actorScope = await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true });
+if (!scope.canMutate(actorScope.role)) throw Object.assign(new Error('insufficient role'), { statusCode: 403 });
 `;
 
 const WRITE_DEVICE = `
@@ -88,7 +96,7 @@ function addRoute(flows, id, options = {}) {
     {
       id: `${id}-guard`,
       type: 'function',
-      func: options.guardFunc || guardBody(options.decision === undefined ? DECIDE : options.decision),
+      func: options.guardFunc || guardBody(options.decision === undefined ? ROLE_CHECKS + DECIDE : options.decision),
       libs: OSI_LIB,
       outputs: 2,
       wires: [[`${id}-worker`], [`${id}-response`]],
@@ -196,7 +204,7 @@ test('umbrella verifier and workflow pin the scoped-access command and its tests
 // Bypasses: each one removes, hides or misplaces the decision of a guard that
 // is otherwise shaped like the shipped ones.
 
-test('a synthetic guard that decides before the write passes', async () => {
+test('a synthetic guard that checks role, write role and device before the write passes', async () => {
   const flows = addRoute(loadFlows(), 'probe-good-http');
   assert.equal(await failuresFor(flows, ['probe-good-http']), '');
 });
@@ -380,5 +388,234 @@ test('an inline account check that stops refusing a disabled account fails', asy
   assert.match(
     await failuresFor(flows, ['history-zone-cards-http']),
     /history-zone-cards-http.*does not refuse a disabled account/
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Several decisions in sequence: each one must be made and honoured, and a
+// write must be preceded by a write-role decision and a decision on the object
+// it addresses (#389 fix round 1).
+
+test('a device check removed from behind the role checks fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-no-object-http', { decision: ROLE_CHECKS });
+  assert.match(
+    await failuresFor(flows, ['probe-seq-no-object-http']),
+    /probe-seq-no-object-http.*makes no scope decision on the device it addresses before it writes/
+  );
+});
+
+test('a device check on another device fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-other-object-http', {
+    decision: ROLE_CHECKS + `
+await scope.assertFreshDeviceAccess(db, actor.user_uuid, '00000000000000FF', { scopedMode: true });
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-seq-other-object-http']),
+    /probe-seq-other-object-http.*makes no scope decision on the device it addresses before it writes/
+  );
+});
+
+test('a swallowed device check behind the role checks fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-swallowed-http', {
+    decision: ROLE_CHECKS + `
+try {
+  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+} catch (ignored) {}
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-seq-swallowed-http']),
+    /probe-seq-swallowed-http.*goes on after its scope decision said no.*UPDATE devices/
+  );
+});
+
+test('a device check placed after the write, behind the role checks, fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-late-http', {
+    decision: ROLE_CHECKS + `
+await db.run('UPDATE devices SET name = ? WHERE deveui = ?', ['early', deveui]);
+` + DECIDE,
+  });
+  const text = await failuresFor(flows, ['probe-seq-late-http']);
+  assert.match(text, /probe-seq-late-http.*writes before its scope decision 3 \(assertFreshDeviceAccess\) said no.*UPDATE devices/);
+  assert.match(text, /probe-seq-late-http.*makes no scope decision on the device it addresses before it writes/);
+});
+
+test('a write-role check removed from the sequence fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-no-mutate-http', {
+    decision: `
+await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true });
+` + DECIDE,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-seq-no-mutate-http']),
+    /probe-seq-no-mutate-http.*makes no write-role decision before it writes/
+  );
+});
+
+test('a write-role check whose answer is ignored fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-seq-ignored-mutate-http', {
+    decision: `
+const actorScope = await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true });
+scope.canMutate(actorScope.role);
+` + DECIDE,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-seq-ignored-mutate-http']),
+    /probe-seq-ignored-mutate-http.*goes on after its scope decision said no/
+  );
+});
+
+test('a decision skipped when a query field is set fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-skip-query-http', {
+    decision: ROLE_CHECKS + `
+if (!msg.req.query.all) {
+  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+}
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-skip-query-http']),
+    /probe-skip-query-http.*skips or ignores its scope decision when the request sets a field/
+  );
+});
+
+test('a decision skipped when a body flag is set fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-skip-body-http', {
+    decision: ROLE_CHECKS + `
+if (msg.payload.force !== true) {
+  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+}
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-skip-body-http']),
+    /probe-skip-body-http.*skips or ignores its scope decision when the request sets a field/
+  );
+});
+
+test('rows of a refused request returned in its answer fail', async () => {
+  const flows = addRoute(loadFlows(), 'probe-leaky-denial-http', {
+    method: 'get',
+    guardFunc: `
+return (async () => {
+${RESOLVE_CALLER}
+const rows = await db.all('SELECT * FROM devices');
+try {
+  await scope.assertEnabledAccount(db, actor.user_uuid, { scopedMode: true });
+} catch (error) {
+  msg.statusCode = 403;
+  msg.payload = { message: 'denied', rows };
+  return [null, msg];
+}
+return [msg, null];
+})();
+`,
+    workerFunc: 'msg.statusCode = 200; msg.payload = {}; return msg;',
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-leaky-denial-http']),
+    /probe-leaky-denial-http.*answers 403 with fixture data/
+  );
+});
+
+test('a read after the denial fails even on a resolution table', async () => {
+  const flows = addRoute(loadFlows(), 'probe-read-after-denial-http', {
+    method: 'get',
+    guardFunc: `
+return (async () => {
+${RESOLVE_CALLER}
+try {
+  await scope.assertEnabledAccount(db, actor.user_uuid, { scopedMode: true });
+} catch (error) {
+  await db.all('SELECT name FROM devices');
+  msg.statusCode = 403;
+  msg.payload = { message: 'denied' };
+  return [null, msg];
+}
+return [msg, null];
+})();
+`,
+    workerFunc: 'msg.statusCode = 200; msg.payload = {}; return msg;',
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-read-after-denial-http']),
+    /probe-read-after-denial-http.*goes on after its scope decision said no.*SELECT name FROM devices/
+  );
+});
+
+test('the per-device filter of network observations is exercised', async () => {
+  const flows = loadFlows();
+  const handler = flows.find((node) => node.id === 'network-api-handler');
+  const pass = 'scope:scopeHelper,';
+  assert.ok(handler.func.includes(pass), 'handler hands the helper to the module');
+  // Ignore the per-device answer: a denied device is treated as visible.
+  handler.func = handler.func.replace(
+    pass,
+    'scope:scopeHelper && Object.assign({}, scopeHelper, { assertFreshDeviceAccess: async function() { ' +
+      'try { return await scopeHelper.assertFreshDeviceAccess.apply(null, arguments); } ' +
+      "catch (ignored) { return { role: 'researcher' }; } } }),"
+  );
+  assert.match(
+    await failuresFor(flows, ['network-api-http-0']),
+    /network-api-http-0.*goes on after its scope decision said no.*radio_uplinks/
+  );
+});
+
+test('a CORS preflight route that reads data fails', async () => {
+  const flows = loadFlows();
+  const preflight = flows.find((node) => node.id === 'device-options-http');
+  preflight.wires = [['probe-preflight-reader']];
+  flows.push({
+    id: 'probe-preflight-reader',
+    type: 'function',
+    libs: OSI_LIB,
+    outputs: 1,
+    func: `
+return (async () => {
+  const db = new (osiLib.require('osi-db-helper').value.Database)('/data/db/farming.db');
+  msg.payload = await db.all('SELECT * FROM device_data');
+  return msg;
+})();
+`,
+    wires: [['device-options-response']],
+  });
+  assert.match(
+    await failuresFor(flows, ['device-options-http']),
+    /device-options-http.*is listed as a CORS preflight, yet it goes on.*device_data/
+  );
+});
+
+test('an OPTIONS route that is not listed is probed like any other entry', async () => {
+  const flows = loadFlows();
+  flows.push(
+    { id: 'probe-options-http', type: 'http in', method: 'options', url: '/api/probe-options', wires: [['probe-options-fn']] },
+    { id: 'probe-options-fn', type: 'function', func: 'return msg;', wires: [[]] }
+  );
+  assert.match(
+    await failuresFor(flows, ['probe-options-http']),
+    /probe-options-http.*has no scope call/
+  );
+});
+
+test('a node type the ratchet does not know fails closed', async () => {
+  const flows = loadFlows();
+  flows.push({ id: 'probe-websocket-in', type: 'websocket in', wires: [[]] });
+  assert.match(
+    await failuresFor(flows, []),
+    /node type websocket in \(probe-websocket-in\) is neither an entry the ratchet probes nor a type it knows/
+  );
+});
+
+test('an unawaited first decision is not hidden by a later write-role check', async () => {
+  const flows = addRoute(loadFlows(), 'probe-masked-first-http', {
+    decision: `
+scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+if (!scope.canMutate(actor.role)) throw Object.assign(new Error('insufficient role'), { statusCode: 403 });
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-masked-first-http']),
+    /probe-masked-first-http.*goes on after its scope decision said no/
   );
 });

@@ -3,9 +3,10 @@
 // Scope-guard probe for scripts/verify-scoped-access.js.
 //
 // Drives one `http in` entry of a flows.json through the function nodes it is
-// wired to, in scoped mode (OSI_SCOPED_ACCESS=1), with every decision function
-// of the scope helper forced to say "no". It records, in order, which node made
-// a scope decision and every read or write of data on the way. The verifier
+// wired to, in scoped mode (OSI_SCOPED_ACCESS=1), with each decision function of
+// the scope helper forced to say "no" or "yes" as the caller asks (all denied,
+// all allowed, or one denied). It records, in order, which node made which
+// scope decision and every read or write of data on the way. The verifier
 // turns that record into its verdict; this module only observes.
 //
 // Why a probe and not a text search: the old ratchet passed a route when the
@@ -24,9 +25,12 @@
 // - the profile's own seam modules (osi-journal, osi-network-api, ...) loaded
 //   for real, so a decision a module makes through the helper it is handed is
 //   recorded too;
-// - recording stand-ins for the filesystem, child_process, network clients and
-//   ChirpStack, so a probe never touches the host and every such call counts as
-//   an effect;
+// - recording stand-ins for what the flows reach through `global` (fs, cp) and
+//   through their `libs` (network clients, ChirpStack), so those calls never
+//   touch the host and each counts as an effect. A seam module loaded for real
+//   keeps its own require('fs'); none of them reaches the host on a probed
+//   path today, since AUTH_TOKEN_SECRET is set. Every database a handler opens
+//   (whatever its file name) is served from the one probe database;
 // - Node-RED semantics for function nodes (return value or node.send, one
 //   array slot per output), link out/link in, http response and debug nodes.
 //   Any other node type on the path is something the probe cannot simulate,
@@ -43,6 +47,8 @@ const SEED_SQL_PATH = path.join(ROOT, 'database/seed-blank.sql');
 const PROBE_SECRET = 'scope-guard-probe-secret';
 const PROBE_GATEWAY_EUI = '00000000000000A1';
 const PROBE_DEVEUI = '00000000000000D1';
+const PROBE_ZONE_UUID = 'z-probe';
+const PROBE_PLOT_UUID = '00000000-0000-4000-8000-0000000000b1';
 const NODE_TIMEOUT_MS = 3000;
 const MAX_STEPS = 60;
 
@@ -104,8 +110,7 @@ function seedSql() {
   return seedSqlCache;
 }
 
-function createProbeDatabase() {
-  const db = new DatabaseSync(':memory:');
+function seedProbeDatabase(db) {
   db.exec(seedSql());
   db.exec(`
     INSERT INTO users (id, username, password_hash, created_at, user_uuid, role, sync_version)
@@ -120,11 +125,51 @@ function createProbeDatabase() {
       1, '00000000-0000-4000-8000-0000000000c1', '${PROBE_GATEWAY_EUI}', '2026-01-01', '2026-01-01'
     );
     INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
-    VALUES (1, 'Probe zone', 1, 'z-probe', 'UTC', 'local');
+    VALUES (1, 'Probe zone', 1, '${PROBE_ZONE_UUID}', 'UTC', 'local');
+    INSERT INTO journal_plots (plot_uuid, plot_code, name, zone_uuid, gateway_device_eui, owner_user_uuid)
+    VALUES ('${PROBE_PLOT_UUID}', 'PROBE1', 'Probe plot', '${PROBE_ZONE_UUID}', '${PROBE_GATEWAY_EUI}', 'u-probe-admin');
     INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
     VALUES ('${PROBE_DEVEUI}', 'Probe device', 'DRAGINO_LSN50', 1, 1, '2026-01-01', '2026-01-01');
   `);
-  return db;
+}
+
+// Building the database from seed-blank.sql takes ~30 ms; a probe run needs a
+// fresh one each time. The seeded fixture is built once per process into a
+// template file in a private temporary directory, and each probe opens its own
+// copy, removed again when the probe ends.
+let templateDir = null;
+let templatePath = null;
+let copyCount = 0;
+function probeTemplate() {
+  if (templatePath) return templatePath;
+  templateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-scope-probe-'));
+  templatePath = path.join(templateDir, 'template.db');
+  const db = new DatabaseSync(':memory:');
+  try {
+    seedProbeDatabase(db);
+    db.exec(`VACUUM INTO '${templatePath.replace(/'/g, "''")}'`);
+  } finally {
+    db.close();
+  }
+  process.once('exit', () => {
+    try { fs.rmSync(templateDir, { recursive: true, force: true }); } catch (_) { /* best effort */ }
+  });
+  return templatePath;
+}
+
+function createProbeDatabase() {
+  const template = probeTemplate();
+  const copy = path.join(templateDir, `probe-${++copyCount}.db`);
+  fs.copyFileSync(template, copy);
+  const db = new DatabaseSync(copy);
+  db.exec('PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF;');
+  return {
+    db,
+    dispose() {
+      try { db.close(); } catch (_) { /* already closed */ }
+      try { fs.rmSync(copy, { force: true }); } catch (_) { /* best effort */ }
+    },
+  };
 }
 
 function makeAuthorization(userId, username) {
@@ -148,13 +193,14 @@ function stripSqlComments(sql) {
   return String(sql || '').replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
 }
 
-const ENSURE_RE = /^\s*CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\s+IF\s+NOT\s+EXISTS\b/i;
+const ENSURE_RE = /^\s*(?:CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\s+IF\s+NOT\s+EXISTS\b|ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN\b)/i;
 
 function classifySql(sql) {
   const text = stripSqlComments(sql);
   if (CONTROL_RE.test(text)) return { access: false, kind: 'control', tables: [] };
-  // Idempotent schema upkeep (CREATE ... IF NOT EXISTS) touches no rows; some
-  // handlers run it before they decide. Every statement in the text must be one.
+  // Schema upkeep (CREATE ... IF NOT EXISTS, ALTER TABLE ... ADD COLUMN, which
+  // the handlers run and tolerate failing) touches no rows; some handlers run
+  // it before they decide. Every statement in the text must be one.
   const statements = text.split(';').filter((part) => part.trim());
   if (statements.length && statements.every((part) => ENSURE_RE.test(part))) {
     return { access: false, kind: 'schema-ensure', tables: [] };
@@ -300,49 +346,100 @@ function httpError(status, message) {
   return error;
 }
 
-// mode 'deny' (the verifier): every deciding function says no.
-// mode 'real': deciding functions run for real against the probe database, so a
-// probe shows what a given caller can actually do (used for investigations).
-function makeDenyingScopeHelper(realHelper, recorder, mode = 'deny') {
+// What a decision is about: the level the verifier reasons with, and for an
+// object-level decision the object it names.
+function decisionDetail(name, args) {
+  switch (name) {
+    case 'assertFreshZoneAccess': return { level: 'object', object: 'zone', target: args[2] };
+    case 'assertFreshPlotAccess': return { level: 'object', object: 'plot', target: args[2] };
+    case 'assertFreshDeviceAccess': return { level: 'object', object: 'device', target: args[2] };
+    case 'assertRole':
+    case 'assertFreshRole':
+    case 'assertAuthenticatedRole':
+      return { level: args[2] === 'admin' ? 'admin' : 'role', role: args[2] };
+    case 'authorizeAdminRead':
+    case 'isAdmin':
+      return { level: 'admin' };
+    case 'canMutate':
+      return { level: 'mutate' };
+    default:
+      return { level: 'account' };
+  }
+}
+
+// The scope an allowed decision hands back: an enabled researcher whose scope
+// holds the fixture zone and plot.
+function allowedScope(role) {
+  return {
+    role: role || 'researcher',
+    username: 'probe-user',
+    disabled: false,
+    wildcard: false,
+    zoneUuids: new Set([PROBE_ZONE_UUID]),
+    plotUuids: new Set([PROBE_PLOT_UUID]),
+  };
+}
+
+function allowedResult(name, args) {
+  switch (name) {
+    case 'isAdmin':
+    case 'canMutate':
+      return name === 'canMutate' ? true : Promise.resolve(true);
+    case 'authorizeAdminRead':
+      return Promise.resolve(allowedScope('admin'));
+    case 'assertRole':
+    case 'assertFreshRole':
+    case 'assertAuthenticatedRole':
+      return Promise.resolve(allowedScope(typeof args[2] === 'string' ? args[2] : 'researcher'));
+    default:
+      return Promise.resolve(allowedScope('researcher'));
+  }
+}
+
+function deniedResult(name) {
+  switch (DENIED_DECISIONS[name]) {
+    case 'reject404': return Promise.reject(httpError(404, 'not found'));
+    case 'reject403': return Promise.reject(httpError(403, 'forbidden by probe'));
+    case 'resolveFalse': return Promise.resolve(false);
+    case 'returnFalse': return false;
+    default:
+      return Promise.resolve({
+        role: 'viewer',
+        username: 'probe-user',
+        disabled: true,
+        wildcard: false,
+        zoneUuids: new Set(),
+        plotUuids: new Set(),
+      });
+  }
+}
+
+// Wraps the real helper. `policy(name)` numbers each decision in the order the
+// chain makes it and says what to do with it:
+// - 'deny': the decision says no (404/403 rejection, false, or a disabled scope);
+// - 'allow': the decision says yes (an enabled researcher with the fixture zone
+//   and plot in scope; canMutate and isAdmin answer true);
+// - 'real': the real function runs against the probe database (investigations).
+function makeProbeScopeHelper(realHelper, recorder, policy) {
   const wrapped = {};
   for (const [name, value] of Object.entries(realHelper)) {
-    if (typeof value !== 'function') {
+    if (typeof value !== 'function' || !DENIED_DECISIONS[name]) {
       wrapped[name] = value;
       continue;
     }
-    if (!DENIED_DECISIONS[name]) {
-      wrapped[name] = value;
-      continue;
-    }
-    wrapped[name] = function deniedDecision(...args) {
-      recorder.events.push({ kind: 'decision', name });
+    wrapped[name] = function probedDecision(...args) {
+      const { index, action } = policy(name);
+      recorder.events.push({ kind: 'decision', name, index, action, ...decisionDetail(name, args) });
       // A guard may fire a decision without awaiting it. Node-RED logs the
       // unhandled rejection and carries on, and so must the probe, so each
       // returned promise gets a no-op handler; a caller that awaits it still
       // sees the rejection.
-      const quiet = (promise) => {
-        promise.catch(() => {});
-        return promise;
-      };
-      if (mode === 'real') {
-        const result = value.apply(realHelper, args);
-        return result && typeof result.catch === 'function' ? quiet(result) : result;
-      }
-      switch (DENIED_DECISIONS[name]) {
-        case 'reject404': return quiet(Promise.reject(httpError(404, 'not found')));
-        case 'reject403': return quiet(Promise.reject(httpError(403, 'forbidden by probe')));
-        case 'resolveFalse': return Promise.resolve(false);
-        case 'returnFalse': return false;
-        default:
-          return Promise.resolve({
-            role: 'viewer',
-            username: 'probe-user',
-            disabled: true,
-            wildcard: false,
-            zoneUuids: new Set(),
-            plotUuids: new Set(),
-          });
-      }
+      let result;
+      if (action === 'real') result = value.apply(realHelper, args);
+      else if (action === 'allow') result = allowedResult(name, args);
+      else result = deniedResult(name);
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+      return result;
     };
   }
   // A probe runs in scoped mode whatever the process environment says.
@@ -474,6 +571,7 @@ const ACTORS = {
   disabled: { userId: 3, username: 'probe-disabled' },
 };
 
+// writes(chunk) receives every chunk the handler streams to the caller.
 function makeStreamStub(writes) {
   return {
     statusCode: 200,
@@ -481,8 +579,8 @@ function makeStreamStub(writes) {
     setHeader() {},
     getHeader() { return undefined; },
     writeHead(status) { this.statusCode = status; this.headersSent = true; },
-    write(chunk) { this.headersSent = true; writes.push(String(chunk).slice(0, 60)); return true; },
-    end(chunk) { if (chunk !== undefined) writes.push(String(chunk).slice(0, 60)); this.headersSent = true; },
+    write(chunk) { this.headersSent = true; writes(String(chunk).slice(0, 60)); return true; },
+    end(chunk) { if (chunk !== undefined) writes(String(chunk).slice(0, 60)); this.headersSent = true; },
     destroy() {},
     on() { return this; },
     once() { return this; },
@@ -490,7 +588,20 @@ function makeStreamStub(writes) {
   };
 }
 
-function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWrites = []) {
+// The 'truthy' variant: every query or body field the request does not set
+// reads as set ('1' in the query, true in the body), so a guard that skips its
+// decision when some flag is present takes that branch under the probe.
+const TRUTHY_PASSTHROUGH = new Set(['then', 'toJSON', 'constructor', 'length', 'inspect', 'valueOf', 'toString']);
+function truthyRecord(base, value) {
+  return new Proxy(base, {
+    get(target, prop) {
+      if (typeof prop !== 'string' || prop in target || TRUTHY_PASSTHROUGH.has(prop)) return target[prop];
+      return value;
+    },
+  });
+}
+
+function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWrites = () => {}, variant) {
   const actor = ACTORS[actorName] || ACTORS.researcher;
   const params = {};
   const url = String(entry.url || '');
@@ -499,11 +610,17 @@ function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWr
     params[name] = value;
     return encodeURIComponent(value);
   });
-  const body = fixture.body ? JSON.parse(JSON.stringify(fixture.body)) : {};
-  const query = fixture.query ? { ...fixture.query } : {};
+  let body = fixture.body ? JSON.parse(JSON.stringify(fixture.body)) : {};
+  let query = fixture.query ? { ...fixture.query } : {};
   const queryString = Object.keys(query).length
     ? '?' + new URLSearchParams(query).toString()
     : '';
+  let payload = Array.isArray(fixture.body) ? JSON.parse(JSON.stringify(fixture.body)) : { ...body };
+  if (variant === 'truthy') {
+    query = truthyRecord(query, '1');
+    if (!Array.isArray(body)) body = truthyRecord(body, true);
+    if (!Array.isArray(payload)) payload = truthyRecord(payload, true);
+  }
   return {
     _msgid: 'scope-guard-probe',
     req: {
@@ -525,7 +642,7 @@ function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWr
       ip: '127.0.0.1',
     },
     res: { _res: makeStreamStub(streamWrites) },
-    payload: Array.isArray(fixture.body) ? JSON.parse(JSON.stringify(fixture.body)) : { ...body },
+    payload,
   };
 }
 
@@ -561,6 +678,8 @@ function libValue(lib, ctx, recorder) {
 
 async function runFunctionNode(node, msg, ctx) {
   const recorder = { events: [], sent: [] };
+  // Chunks streamed to the caller are attributed to the node that runs.
+  ctx.activeRecorder = recorder;
   const names = [...RESERVED];
   const values = [
     msg,
@@ -590,7 +709,7 @@ async function runFunctionNode(node, msg, ctx) {
     },
     ctx.env,
     makeEffectStub('RED', recorder),
-    (fn, ms, ...args) => setTimeout(fn, Math.min(Number(ms) || 0, 5), ...args),
+    (fn, ms, ...args) => setTimeout(fn, Math.min(Number(ms) || 0, 1), ...args),
     clearTimeout,
     () => 0,
     () => {},
@@ -628,7 +747,7 @@ async function runFunctionNode(node, msg, ctx) {
   }
   // Let callbacks and short timers the node scheduled run, so late node.send
   // calls and effects are attributed to this node.
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setTimeout(resolve, 4));
   const outputs = [];
   const collect = (value) => {
     if (value === undefined || value === null) return;
@@ -648,9 +767,36 @@ async function runFunctionNode(node, msg, ctx) {
 // ---------------------------------------------------------------------------
 // Chain simulation
 
-function isAccessEvent(event) {
-  if (event.kind === 'sql') return event.access;
-  return event.kind === 'effect' || event.kind === 'file-read';
+// Sorts a recorded event against the decisions made so far on its path.
+// Returns null when the event is not an access worth judging, else
+// { phase, write, what }:
+// - phase 'before': no decision yet on the path. Any read outside the
+//   resolution tables, any write and any effect counts.
+// - phase 'between': decisions made and all allowed. Reads are fine (reads are
+//   account-wide, W1); a write or an effect is recorded, and the verifier
+//   counts it when a decision on the same run says no after it.
+// - phase 'after': a decision on the path said no. Every statement counts,
+//   resolution reads included, and every effect.
+function classifyAccess(event, state) {
+  let write;
+  let resolution = false;
+  if (event.kind === 'sql') {
+    if (event.sqlKind === 'control' || event.sqlKind === 'schema-ensure') return null;
+    resolution = event.sqlKind === 'resolution-read';
+    write = event.sqlKind === 'write';
+  } else if (event.kind === 'effect') {
+    write = true;
+  } else if (event.kind === 'file-read' || event.kind === 'stream') {
+    write = false;
+  } else {
+    return null;
+  }
+  const what = describeEvent(event);
+  const tables = event.tables || [];
+  if (state.denied) return { phase: 'after', write, what, tables };
+  if (resolution) return null;
+  if (!state.decided) return { phase: 'before', write, what, tables };
+  return write ? { phase: 'between', write, what, tables } : null;
 }
 
 function describeEvent(event) {
@@ -660,22 +806,42 @@ function describeEvent(event) {
 
 // Returns a trace:
 // {
-//   steps: [{ node, type, decidedOnEntry, events, threw, timedOut }],
-//   decisions: [{ node, name }],             in path order
-//   accesses: [{ node, before, what }],      before: no decision yet on that path
-//   responses: [{ node, status, decided, payload }],
+//   steps: [{ node, type, events, threw, timedOut }],
+//   decisions: [{ node, seq, index, name, action, level, object, target, role }],
+//   accesses: [{ node, seq, phase, write, what, tables }],   see classifyAccess
+//   responses: [{ node, seq, status, decided, denied, payload }],
 //   unanalysable: [reason],
+//   streamed: true when the handler streamed an answer to the caller,
 // }
+// seq orders every decision, access and answer of the run.
 // options: modulesRoot (required), byId, terminalLinkIns, fixture
-// ({ params, query, body, env, flow }), actor ('researcher' | 'disabled'),
-// decisions ('deny' | 'real'). The before/after reading of accesses assumes
-// 'deny'.
+// ({ params, query, body, env, flow, setupSql, radioStore }), actor
+// ('researcher' | 'disabled'), denyAt (1 = deny every decision, k = allow the
+// first k-1, Infinity = allow all), denyOnly (deny decision k alone),
+// decisions ('real' for investigations),
+// variant ('truthy': unknown query and body fields read as set).
 async function probeEntry(flows, entry, options = {}) {
   const modulesRoot = options.modulesRoot;
   const byId = options.byId || new Map(flows.map((n) => [n.id, n]));
   const terminalLinkIns = options.terminalLinkIns || new Set();
   const fixture = options.fixture || {};
-  const sqlite = createProbeDatabase();
+  const probeDb = createProbeDatabase();
+  const sqlite = probeDb.db;
+  if (fixture.setupSql) sqlite.exec(fixture.setupSql);
+  // Decisions are numbered in the order the chain makes them. denyOnly = k
+  // denies decision k and allows every other one; without it, denyAt = k
+  // allows decisions 1..k-1 and denies the rest (default 1: deny all;
+  // Infinity: allow all). decisions: 'real' runs them for real.
+  const denyAt = options.denyAt === undefined ? 1 : options.denyAt;
+  let decisionCount = 0;
+  const policy = () => {
+    decisionCount += 1;
+    if (options.decisions === 'real') return { index: decisionCount, action: 'real' };
+    if (options.denyOnly !== undefined) {
+      return { index: decisionCount, action: decisionCount === options.denyOnly ? 'deny' : 'allow' };
+    }
+    return { index: decisionCount, action: decisionCount < denyAt ? 'allow' : 'deny' };
+  };
   const registry = readOsiLibRegistry(modulesRoot);
   const realScope = loadRealModule(modulesRoot, registry.scope || 'osi-scope-helper');
   const unclassified = Object.keys(realScope).filter((name) =>
@@ -695,7 +861,15 @@ async function probeEntry(flows, entry, options = {}) {
       return {
         require(name) {
           if (name === 'scope') {
-            return { ok: true, value: makeDenyingScopeHelper(realScope, recorder, options.decisions || 'deny') };
+            return { ok: true, value: makeProbeScopeHelper(realScope, recorder, policy) };
+          }
+          if (name === 'radio' && fixture.radioStore) {
+            // The radio observation store is a second database on the gateway;
+            // the probe serves it from the probe database, recorded like the rest.
+            return {
+              ok: true,
+              value: { getSharedStore: async () => new (makeRecordingDatabaseModule(sqlite, recorder).Database)('/data/db/radio.db') },
+            };
           }
           if (name === 'osi-db-helper') return { ok: true, value: makeRecordingDatabaseModule(sqlite, recorder) };
           const relative = registry[name];
@@ -718,14 +892,27 @@ async function probeEntry(flows, entry, options = {}) {
     );
   }
   const actorName = options.actor || 'researcher';
-  const streamWrites = [];
+  const streamWrites = (chunk) => {
+    trace.streamed = true;
+    if (ctx.activeRecorder) ctx.activeRecorder.events.push({ kind: 'stream', what: `streams to the caller: ${chunk}` });
+  };
+  let seq = 0;
   const queue = [];
   for (const output of entry.wires || []) {
     for (const target of output) {
-      queue.push({ id: target, msg: buildRequestMsg(entry, fixture, actorName, streamWrites), decided: false });
+      queue.push({
+        id: target,
+        msg: buildRequestMsg(entry, fixture, actorName, streamWrites, options.variant),
+        decided: false,
+        denied: false,
+      });
     }
   }
   if (!queue.length) trace.unanalysable.push('the entry is wired to nothing');
+  const noteAccess = (nodeId, event, state) => {
+    const access = classifyAccess(event, state);
+    if (access) trace.accesses.push({ node: nodeId, seq: ++seq, ...access });
+  };
   let steps = 0;
   try {
     while (queue.length) {
@@ -739,24 +926,27 @@ async function probeEntry(flows, entry, options = {}) {
         trace.unanalysable.push(`wired to a missing node ${item.id}`);
         continue;
       }
-      const forward = (port, msg, decided) => {
+      const forward = (port, msg, state) => {
         const targets = (node.wires || [])[port] || [];
         for (const target of targets) {
-          queue.push({ id: target, msg: targets.length > 1 ? { ...msg } : msg, decided });
+          queue.push({ id: target, msg: targets.length > 1 ? { ...msg } : msg, ...state });
         }
       };
+      const passOn = { decided: item.decided, denied: item.denied };
       switch (node.type) {
         case 'function': {
           const run = await runFunctionNode(node, item.msg, ctx);
-          let decided = item.decided;
-          const step = { node: node.id, type: node.type, decidedOnEntry: item.decided, events: run.recorder.events, threw: run.threw, timedOut: run.timedOut };
-          trace.steps.push(step);
+          const state = { decided: item.decided, denied: item.denied };
+          trace.steps.push({ node: node.id, type: node.type, events: run.recorder.events, threw: run.threw, timedOut: run.timedOut });
           for (const event of run.recorder.events) {
             if (event.kind === 'decision') {
-              decided = true;
-              trace.decisions.push({ node: node.id, name: event.name });
-            } else if (isAccessEvent(event)) {
-              trace.accesses.push({ node: node.id, before: !decided, what: describeEvent(event) });
+              state.decided = true;
+              if (event.action === 'deny') state.denied = true;
+              const { kind, ...detail } = event;
+              void kind;
+              trace.decisions.push({ node: node.id, seq: ++seq, ...detail });
+            } else {
+              noteAccess(node.id, event, state);
             }
           }
           if (run.unparseable) {
@@ -769,18 +959,20 @@ async function probeEntry(flows, entry, options = {}) {
           if (run.threw) {
             if (run.threw instanceof ReferenceError) {
               trace.unanalysable.push(`function node ${node.id} uses something the probe does not provide: ${run.threw.message}`);
-            } else if (!decided) {
+            } else if (!state.decided) {
               trace.unanalysable.push(`function node ${node.id} threw before any scope decision: ${run.threw.message}`);
             }
           }
-          for (const { port, msg } of run.outputs) forward(port, msg, decided);
+          for (const { port, msg } of run.outputs) forward(port, msg, state);
           break;
         }
         case 'http response':
           trace.responses.push({
             node: node.id,
+            seq: ++seq,
             status: Number(item.msg && item.msg.statusCode) || Number(node.statusCode) || 200,
             decided: item.decided,
+            denied: item.denied,
             payload: item.msg ? item.msg.payload : undefined,
           });
           break;
@@ -792,11 +984,11 @@ async function probeEntry(flows, entry, options = {}) {
             trace.unanalysable.push(`link out ${node.id} in mode ${node.mode}`);
             break;
           }
-          for (const target of node.links || []) queue.push({ id: target, msg: item.msg, decided: item.decided });
+          for (const target of node.links || []) queue.push({ id: target, msg: item.msg, ...passOn });
           break;
         case 'link in':
           if (terminalLinkIns.has(node.id)) break;
-          forward(0, item.msg, item.decided);
+          forward(0, item.msg, passOn);
           break;
         case 'sqlite': {
           // node-red-node-sqlite: the statement comes from msg.topic unless the
@@ -806,11 +998,9 @@ async function probeEntry(flows, entry, options = {}) {
             : item.msg && item.msg.topic;
           const verdict = classifySql(sql);
           const event = { kind: 'sql', sql: shortSql(sql), access: verdict.access, sqlKind: verdict.kind, tables: verdict.tables };
-          trace.steps.push({ node: node.id, type: node.type, decidedOnEntry: item.decided, events: [event] });
-          if (event.access) {
-            trace.accesses.push({ node: node.id, before: !item.decided, what: describeEvent(event) });
-            break;
-          }
+          trace.steps.push({ node: node.id, type: node.type, events: [event] });
+          noteAccess(node.id, event, passOn);
+          if (passOn.denied) break;
           let rows;
           try {
             const params = node.sqlquery === 'prepared' ? (item.msg && item.msg.params) || {} : [];
@@ -821,7 +1011,7 @@ async function probeEntry(flows, entry, options = {}) {
             break;
           }
           item.msg.payload = rows;
-          forward(0, item.msg, item.decided);
+          forward(0, item.msg, passOn);
           break;
         }
         case 'mqtt out':
@@ -832,22 +1022,14 @@ async function probeEntry(flows, entry, options = {}) {
         case 'tcp out':
         case 'udp out':
         case 'websocket out':
-          trace.accesses.push({ node: node.id, before: !item.decided, what: `${node.type} node` });
+          noteAccess(node.id, { kind: 'effect', what: `${node.type} node` }, passOn);
           break;
         default:
           trace.unanalysable.push(`reaches a ${node.type} node (${node.id}) the probe cannot simulate`);
       }
     }
   } finally {
-    sqlite.close();
-  }
-  if (streamWrites.length) {
-    trace.responses.push({
-      node: 'streamed response',
-      status: 200,
-      decided: trace.decisions.length > 0,
-      payload: streamWrites.join(''),
-    });
+    probeDb.dispose();
   }
   return trace;
 }
@@ -859,6 +1041,8 @@ module.exports = {
   PARAM_DEFAULTS,
   PROBE_DEVEUI,
   PROBE_GATEWAY_EUI,
+  PROBE_PLOT_UUID,
+  PROBE_ZONE_UUID,
   SCOPE_RESOLUTION_TABLES,
   buildRequestMsg,
   classifySql,
