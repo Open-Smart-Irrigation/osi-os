@@ -187,6 +187,8 @@ export function CrossZoneAnalysisPage() {
               }}
               onLoad={loadView}
               onDelete={(id) => {
+                const name = views.find((view) => view.id === id)?.name ?? '';
+                if (!window.confirm(t('analysis.views.confirmDelete', { name }))) return;
                 setViewSaveError(null);
                 void deleteView(id).catch(setViewSaveError);
               }}

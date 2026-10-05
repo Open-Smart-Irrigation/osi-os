@@ -296,13 +296,28 @@ describe('CrossZoneAnalysisPage', () => {
     }));
   });
 
-  it('offers the saved-view delete and deletes the chosen view', () => {
+  it('asks before deleting a saved view and deletes it once confirmed', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     catalogState = loadedCatalogState();
     render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByTestId('delete-view'));
 
+    expect(confirm).toHaveBeenCalledWith('analysis.views.confirmDelete');
     expect(deleteViewMock).toHaveBeenCalledWith(9);
+    confirm.mockRestore();
+  });
+
+  it('keeps the saved view when the delete is cancelled', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    catalogState = loadedCatalogState();
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByTestId('delete-view'));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(deleteViewMock).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 
   it('hydrates saved custom range values into the page controls', () => {

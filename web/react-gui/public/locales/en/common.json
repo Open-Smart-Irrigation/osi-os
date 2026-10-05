@@ -92,7 +92,8 @@
       "save": "Save view",
       "namePlaceholder": "Name this view",
       "delete": "Delete view",
-      "empty": "No saved views yet."
+      "empty": "No saved views yet.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series could not be loaded",
     "correlation": {

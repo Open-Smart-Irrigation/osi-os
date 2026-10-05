@@ -92,7 +92,8 @@
       "save": "Tereka endaba",
       "namePlaceholder": "Tuuma endaba eno erinnya",
       "delete": "Sangula endaba",
-      "empty": "Tewali ndaba ziterekeddwa."
+      "empty": "Tewali ndaba ziterekeddwa.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series tezaasobola kusomebwa",
     "correlation": {

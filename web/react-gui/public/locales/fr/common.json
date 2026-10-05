@@ -92,7 +92,8 @@
       "save": "Enregistrer la vue",
       "namePlaceholder": "Nommer cette vue",
       "delete": "Supprimer la vue",
-      "empty": "Aucune vue enregistrée pour le moment."
+      "empty": "Aucune vue enregistrée pour le moment.",
+      "confirmDelete": "Supprimer la vue enregistrée « {{name}} » ?"
     },
     "droppedNotice": "{{count}} séries n'ont pas pu être chargées",
     "correlation": {

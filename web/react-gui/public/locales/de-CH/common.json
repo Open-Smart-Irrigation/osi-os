@@ -92,7 +92,8 @@
       "save": "Ansicht speichern",
       "namePlaceholder": "Diese Ansicht benennen",
       "delete": "Ansicht löschen",
-      "empty": "Noch keine gespeicherten Ansichten."
+      "empty": "Noch keine gespeicherten Ansichten.",
+      "confirmDelete": "Gespeicherte Ansicht «{{name}}» löschen?"
     },
     "droppedNotice": "{{count}} Serien konnten nicht geladen werden",
     "correlation": {

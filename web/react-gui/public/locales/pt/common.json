@@ -92,7 +92,8 @@
       "save": "Guardar vista",
       "namePlaceholder": "Dê um nome a esta vista",
       "delete": "Eliminar vista",
-      "empty": "Ainda não há vistas guardadas."
+      "empty": "Ainda não há vistas guardadas.",
+      "confirmDelete": "Eliminar a vista guardada «{{name}}»?"
     },
     "droppedNotice": "{{count}} séries não puderam ser carregadas",
     "correlation": {
