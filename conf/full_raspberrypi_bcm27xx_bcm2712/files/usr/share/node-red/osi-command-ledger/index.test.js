@@ -1709,3 +1709,33 @@ test('a stop command is dispatched and acknowledged with the gateway clock 10 mi
   assert.equal(open.handled, true, 'the same skew still refuses an open');
   assert.equal(open.ack.result, 'EXPIRED');
 });
+
+test('an elapsed delivery of an effect that already ran replays the stored answer', async () => {
+  const db = new TestDb();
+  const first = valveEnvelope(900, 'VALVE_COMMAND', '2026-07-29T09:58:00.000Z', { action: 'OPEN_FOR_DURATION' });
+  insertAppliedCommand(db, {
+    commandId: '900', deviceEui: FENCE_VALVE_EUI, commandType: 'VALVE_COMMAND',
+    effectKey: first.payload.effect_key, appliedAt: '2026-07-29T09:55:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 900, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  const second = valveEnvelope(901, 'VALVE_COMMAND', '2026-07-29T09:58:00.000Z', { action: 'OPEN_FOR_DURATION' });
+  second.payload.effect_key = first.payload.effect_key;
+  second.effectKey = first.payload.effect_key;
+
+  const replay = await ledger.deduplicatePendingCommand(db, second, fenceRuntime());
+
+  assert.equal(replay.handled, true);
+  assert.equal(replay.ack.commandId, 901);
+  assert.equal(replay.ack.result, 'APPLIED', 'the valve did run under this effect key, so the answer is APPLIED, not EXPIRED');
+  assert.equal(replay.ack.duplicate, true);
+});
+
+test('expiry fence still answers an elapsed action whose effect key this ledger does not bind', async () => {
+  const db = new TestDb();
+  const envelope = valveEnvelope(905, 'SET_STREGA_TIMED_ACTION', '2026-07-29T09:59:00.000Z');
+  envelope.payload.effect_key = 'action:' + FENCE_VALVE_EUI + ':timed_action:44444444-4444-4444-8444-000000000905';
+  envelope.effectKey = envelope.payload.effect_key;
+  const result = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
+  assert.equal(result.handled, true);
+  assert.equal(result.ack.result, 'EXPIRED');
+});

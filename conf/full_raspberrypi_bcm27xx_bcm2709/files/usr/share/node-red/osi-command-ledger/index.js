@@ -567,24 +567,22 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
       }
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
-    // After exact replay (a command that already ran keeps its answer) and
-    // before any dispatch decision.
+    // The expiry check answers in place of every dispatch below, after both
+    // replay lookups: a command, or an effect, that already ran keeps its
+    // stored answer.
     const expiry = valveCommandExpiry(envelope, type, opts);
-    if (expiry && expiry.terminal) {
-      return {
-        handled: true,
-        ack: await persistPreDispatchTerminalAck(tx, envelope, opts, type, expiry),
-      };
-    }
+    const notHandled = async () => (expiry && expiry.terminal
+      ? { handled: true, ack: await persistPreDispatchTerminalAck(tx, envelope, opts, type, expiry) }
+      : { handled: false });
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
     if (!validEffect) {
-      return { handled: false };
+      return notHandled();
     }
     if (!envelope.payload || typeof envelope.payload !== 'object' ||
         Array.isArray(envelope.payload)) {
-      return { handled: false };
+      return notHandled();
     }
     const effectKey = String(
       envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || ''
@@ -650,7 +648,7 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
         [effectKey, type]
       );
     }
-    if (!row) return { handled: false };
+    if (!row) return notHandled();
     return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, false) };
   })();
 }

@@ -125,8 +125,8 @@ dispatch. The stop commands `CLOSE` and `CANCEL_VALVE_ACTUATION` are never
 refused on their expiry: a gateway clock that runs ahead must not leave a
 valve open. For the checked commands:
 
-- Exact `command_id` replay is checked first, so a command that already ran
-  keeps its stored answer.
+- Exact `command_id` replay and effect-key replay are checked first, so a
+  command or an effect that already ran keeps its stored answer.
 - An elapsed command is answered `EXPIRED` (reason `effect_expired`) and never
   dispatched.
 - An unreadable expiry, or two expiry fields that disagree, is answered
