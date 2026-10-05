@@ -2284,6 +2284,29 @@ expectInvalid(
     cmdSchema
 );
 
+// The legacy device-command route's VALVE_COMMAND reaches the edge router with
+// its action verbatim; the edge registry requires a duration for the whole type
+// and the STREGA builder turns OPEN_FOR_DURATION into a timed open. The action
+// enum must accept that timed action.
+const timedValveCommand = {
+    command_id: UUID,
+    command_type: 'VALVE_COMMAND',
+    device_eui: 'A840410000000001',
+    gateway_device_eui: '0016C001F1000001',
+    action: 'OPEN_FOR_DURATION',
+    duration_minutes: 10,
+    effect_key: 'irrigation:manual:A840410000000001:cloud:' + UUID,
+    expires_at: '2026-07-29T10:05:00.000Z',
+};
+expectValid('VALVE_COMMAND with the timed OPEN_FOR_DURATION action', cmdSchema, timedValveCommand, cmdSchema);
+expectInvalid(
+    'VALVE_COMMAND with an action outside the enum',
+    cmdSchema,
+    { ...timedValveCommand, action: 'OPEN_INDEFINITELY' },
+    /action/,
+    cmdSchema
+);
+
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',
