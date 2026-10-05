@@ -2112,7 +2112,7 @@ async function resolveZoneExportScope(db, options = {}) {
     throw error;
   }
   const today = localDateKey(options.nowMs ?? Date.now(), timezone);
-  if ((today && from > today) || (today && to > today)) {
+  if (!options.allowFutureDays && ((today && from > today) || (today && to > today))) {
     const error = new Error('date range cannot include future days');
     error.statusCode = 400;
     throw error;
@@ -2223,6 +2223,7 @@ async function rawZoneExportRows(db, scope) {
             if (pfRow) rows.push(pfRow);
           }
         }
+        assertExportRowBudget(rows, scope);
       }
     });
   }
@@ -2271,6 +2272,7 @@ async function aggregateZoneExportRows(db, scope) {
         site: scope.site,
         zone: zoneName,
       }));
+      assertExportRowBudget(rows, scope);
     }
   }
   rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
@@ -2287,6 +2289,87 @@ async function buildZoneExportCsv(db, options = {}) {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
   return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
+}
+
+// Upper bound on the rows of one all-zones CSV answer. Node-RED's http response
+// sends a whole string, so the answer is built in memory: at most this many
+// lines of text (about 130 bytes each, so about 26 MB) plus the row objects of
+// the one zone being built, which the same budget caps. Past it the export
+// stops and answers 413 instead of growing without limit on the gateway.
+const ALL_ZONES_EXPORT_MAX_ROWS = 200000;
+
+function exportTooLarge(maxRows) {
+  const error = new Error(`export exceeds ${maxRows} rows`);
+  error.code = 'EXPORT_TOO_LARGE';
+  error.statusCode = 413;
+  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
+  return error;
+}
+
+function assertExportRowBudget(rows, scope) {
+  if (scope && Number.isFinite(scope.rowBudget) && rows.length > scope.rowBudget) {
+    throw exportTooLarge(scope.maxRows);
+  }
+}
+
+// One tidy CSV over several zones (the caller passes the zones it may read).
+// Each zone keeps its own local-day boundaries and its own per-source channels,
+// as in the per-zone export; rows are grouped by zone (zone id order) and
+// sorted within a zone as the per-zone export sorts them. Zones are built one
+// at a time and turned into text at once, so only one zone's row objects are
+// alive at any moment.
+async function buildAllZonesExportCsv(db, options = {}) {
+  const maxRows = Number.isSafeInteger(options.maxRows) && options.maxRows > 0
+    ? options.maxRows
+    : ALL_ZONES_EXPORT_MAX_ROWS;
+  const granularity = normalizeExportGranularity(options.granularity || 'daily');
+  const from = normalizeExportDate(options.from, 'from');
+  const to = normalizeExportDate(options.to || options.from, 'to');
+  if (from > to) {
+    const error = new Error('from must be before or equal to to');
+    error.statusCode = 400;
+    throw error;
+  }
+  assertExportRangeAllowed({ from, to, granularity });
+  normalizeExportChannels(options.channels);
+  const zoneIds = Array.from(new Set((Array.isArray(options.zoneIds) ? options.zoneIds : [])
+    .map(Number)
+    .filter((zoneId) => Number.isSafeInteger(zoneId) && zoneId > 0)))
+    .sort((left, right) => left - right);
+  const nowMs = options.nowMs ?? Date.now();
+  const zones = zoneIds.length
+    ? await dbAll(db, `SELECT id, timezone FROM irrigation_zones WHERE deleted_at IS NULL AND id IN (${zoneIds.map(() => '?').join(',')}) ORDER BY id ASC`, zoneIds)
+    : [];
+  // A day is in the future only when it is in the future for every zone; a
+  // zone still on the day before simply has no rows for it yet.
+  const latestToday = zones.reduce((latest, zone) => {
+    const key = localDateKey(nowMs, normalizeTimezone(zone.timezone));
+    return key && (!latest || key > latest) ? key : latest;
+  }, null) || localDateKey(nowMs, 'UTC');
+  if (latestToday && (from > latestToday || to > latestToday)) {
+    const error = new Error('date range cannot include future days');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const chunks = [RAW_CSV_COLUMNS.join(',') + '\n'];
+  let rowCount = 0;
+  for (const zone of zones) {
+    const scope = await resolveZoneExportScope(db, {
+      ...options, zoneId: zone.id, from, to, granularity, nowMs, allowFutureDays: true,
+    });
+    scope.maxRows = maxRows;
+    scope.rowBudget = maxRows - rowCount;
+    const rows = granularity === 'raw'
+      ? await rawZoneExportRows(db, scope)
+      : await aggregateZoneExportRows(db, scope);
+    assertExportRowBudget(rows, scope);
+    if (rows.length) {
+      chunks.push(rows.map((row) => RAW_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')).join('\n') + '\n');
+    }
+    rowCount += rows.length;
+  }
+  return { columns: RAW_CSV_COLUMNS, csv: chunks.join(''), rowCount, zoneCount: zones.length };
 }
 
 async function writeZoneCsv(options = {}) {
@@ -2985,6 +3068,7 @@ module.exports = {
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   saveAnalysisView: analysis.saveAnalysisView,
+  deleteAnalysisView: analysis.deleteAnalysisView,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
@@ -3006,6 +3090,8 @@ module.exports = {
   rollupRowsToResult,
   startOfLocalDayMs,
   buildZoneExportCsv,
+  buildAllZonesExportCsv,
+  ALL_ZONES_EXPORT_MAX_ROWS,
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,
   toCsv,
