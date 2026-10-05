@@ -131,12 +131,9 @@ const PUBLIC_ALLOWLIST = new Set([
 // removes each id as its scope guard lands; any newly-added route still fails,
 // and an id whose guard has landed fails as stale until it is removed here.
 // (sys-reboot-in and sys-fan-in left this list once each made its own admin
-// decision before the effect.)
+// decision before the effect; the account-link, force-sync and rollup-run
+// entries left it when their admin guards landed.)
 const PHASE_C_PENDING = new Set([
-  'al-link-in',
-  'al-unlink-in',
-  'sync-force-http',
-  'history-rollups-run-http',
   // Wave 3 scoped-access port: these routes don't exist anywhere in AgroLink's
   // scope arc (valve-control and SDI-12 landed on main after AgroLink's fork;
   // AgroLink itself never scoped them). Tracked debt, same discipline as the
@@ -427,6 +424,22 @@ const REQUEST_FIXTURES = {
   'journal-entry-void-post-http': {
     params: { uuid: FOREIGN_ENTRY_UUID },
     body: { entry_uuid: FOREIGN_ENTRY_UUID, base_sync_version: 1, reason: 'probe' },
+  },
+  // A reading of the probe device from yesterday (rollups end at the start of
+  // today), so the run upserts a bucket, its write, when every decision says yes.
+  'history-rollups-run-http': {
+    setupSql: "INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES ('" + PROBE_DEVEUI + "', " +
+      "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', 'start of day', '-12 hours'), 25);",
+  },
+  // The caller as a linked cloud account, so the forced sync gets past its
+  // link check to its writes when every decision says yes.
+  'sync-force-http': {
+    setupSql: "UPDATE users SET auth_mode = 'server', server_url = 'https://cloud.example.invalid', " +
+      "server_sync_token = 'probe-sync-token', server_sync_token_expires_at = '2099-01-01T00:00:00Z' WHERE id = 2;",
+  },
+  // A complete link request, so the link goes on past its own validation.
+  'al-link-in': {
+    body: { serverUrl: 'https://cloud.example.invalid', action: 'login', username: 'probe', password: 'probe-pass-1' },
   },
   'improvement-requests-post-http': {
     body: {
