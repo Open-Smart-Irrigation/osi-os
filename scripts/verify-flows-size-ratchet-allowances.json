@@ -190,8 +190,8 @@
       "reason": "WATERMARK cloud parity, measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 6664 -> HEAD 6688 = +24. WATERMARK_CALIBRATION joins the protected aggregate types that the row-count cap never evicts. Replaces the outbox pruning overhaul entry (1.A5, +3000), whose growth is part of origin/main's measured size."
     },
     "command-ack-mark-delivered": {
-      "delta": 2725,
-      "reason": "F93 fix items 2+3 (2026-09-17 overnight T13k, docs/overnight/2026-09-17/evidence/prompts/T13k-command-ack-poison.md). Item 2 (prior commit): classify a permanent 4xx client error (400/404/409/413/415/422) as a whole-batch dead-letter after one attempt instead of folding it into the uncapped transportReasons bucket; 401/403/429 stay transport retries. Item 3 (this commit): surface a dead-letter (both the new batch-level case and the pre-existing per-entry CORRELATION_MISMATCH/UNKNOWN_RESULT case) on sync_state.lastError (source commandAck, the existing #262 GET /api/sync/state field) plus a 5-minute rate-limited node.warn. Measured with verify-flows-size-ratchet nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 6150 -> HEAD 8875 = +2725 (item 2 alone measured +1329 in the prior commit; item 3 adds +1396 on top). Supersedes the prior PR-G/Codex-P1-follow-up entry (delta 4939, reason text described an origin/main baseline of 1211 chars; that PR is already merged and its delta is fully absorbed into the committed origin/main baseline of 6150 chars, so the historical figure is no longer separately trackable -- re-measuring fresh here per F16, stale consumed node_allowances entries grant free headroom to later PRs, rather than silently riding the leftover headroom)."
+      "delta": 649,
+      "reason": "Two answers for one commandId in a 2xx command-ACK response are ambiguous: the row is retried (bounded by RETRY_CAP 20) instead of taking whichever answer came last. Measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 8875 -> HEAD 9524 = +649. Supersedes the F93 fix items 2+3 entry (+2725), whose growth is part of the origin/main baseline of 8875 chars."
     },
     "history-api-router-fn": {
       "delta": 1723,
@@ -242,8 +242,8 @@
       "reason": "wave3-tail-fixes idempotent work-request-status-apply on command replay (adapted from AgroLink ccb39eb2b): on entry, look up the commandId in the shipped applied_commands ledger (command_id TEXT PRIMARY KEY); if a row exists, rebuild and return the original terminal ACK verbatim (using the stored applied_at instead of call-time now) without re-UPDATE-ing improvement_requests. A first-time APPLIED result also INSERTs an applied_commands row using the exact 'initial' shape osi-command-ledger.queueCommandAck writes, so the downstream command-ack-queue-rest call reproduces the identical command_ack_outbox row via its persistReplayAck branch on a replay. Re-measured with verify-flows-size-ratchet nodeSizes (func.length) against actual origin/main: 2990 -> 5079 = +2089 (new entry; node had no prior node_allowances pin)."
     },
     "command-ack-build-batch": {
-      "delta": 975,
-      "reason": "MERGE 2026-08-31 (main only, carried as-is): live identity restart sentinel (Option C Slice 1)"
+      "delta": 2235,
+      "reason": "Command ACK batch grouped by commandId: byte-identical queued rows for one commandId go out as one entry correlated to every row; rows that disagree are withheld, counted toward the retry cap of 20 and dead-lettered there, with the dead letter surfaced on sync_state.lastError (source commandAck). Measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 4071 -> HEAD 6306 = +2235. Supersedes the live identity restart sentinel (Option C Slice 1) entry (+975), whose growth is part of the origin/main baseline of 4071 chars."
     },
     "sync-state-build": {
       "delta": 1144,
