@@ -200,16 +200,26 @@ describe('Sdi12SoilCard', () => {
     expect(screen.queryByText('Dry')).not.toBeInTheDocument();
   });
 
-  it('renders zero once as kPa in pF mode and marks it Wet', () => {
+  // Before the pF floor rule a zero showed kPa only, without its pF.
+  it('renders zero as kPa with the 0 pF floor and marks it Wet', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'pF');
     render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'TENSIOMARK',
       last_seen: FRESH,
       latest: { swt_1: 0 },
     })} />);
-    expect(screen.getAllByText('0.0 kPa')).toHaveLength(1);
-    expect(screen.queryByText('0.00 pF')).not.toBeInTheDocument();
+    expect(screen.getByText('0.0 kPa · 0.00 pF')).toBeInTheDocument();
     expect(screen.getByText('Wet')).toBeInTheDocument();
+  });
+
+  it('never shows a negative pF for tension between 0 and 0.1 kPa', () => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: 0.05 },
+    })} />);
+    expect(screen.getByText('0.1 kPa · 0.00 pF')).toBeInTheDocument();
+    expect(screen.queryByText(/-0\.30 pF/)).not.toBeInTheDocument();
   });
 
 });
