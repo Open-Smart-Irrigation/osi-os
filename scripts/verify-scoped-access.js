@@ -986,8 +986,61 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
 // Result cache. A pull request runs the ratchet up to three times on the same
 // tree (its workflow step, scripts/verify-sync-flow.js and the full-tree test).
 // The verdict depends only on the files hashed below and the Node version, so
-// the first run stores it under that digest in the temporary directory and the
-// others reuse it. OSI_SCOPED_ACCESS_RATCHET_CACHE=0 turns the cache off.
+// the first run stores it under that digest and the others reuse it. The cache
+// lives in RUNNER_TEMP on CI (private to the job) and otherwise in a per-user
+// directory under the system temporary directory; that directory must be ours,
+// not a symlink, and closed to others, and so must each cache file, or the
+// cache is not used. Files are written under a random name and renamed into
+// place. OSI_SCOPED_ACCESS_RATCHET_CACHE=0 turns the cache off.
+function ownedPrivately(stat) {
+  if (typeof process.getuid !== 'function') return true;
+  return stat.uid === process.getuid() && (stat.mode & 0o077) === 0;
+}
+
+function cacheDirectory() {
+  const base = process.env.RUNNER_TEMP
+    ? path.join(process.env.RUNNER_TEMP, 'osi-scoped-access-ratchet')
+    : path.join(os.tmpdir(), `osi-scoped-access-ratchet-${typeof process.getuid === 'function' ? process.getuid() : 'user'}`);
+  try {
+    fs.mkdirSync(base, { recursive: true, mode: 0o700 });
+    const stat = fs.lstatSync(base);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !ownedPrivately(stat)) return null;
+    return base;
+  } catch (error) {
+    return null;
+  }
+}
+
+function readCachedVerdict(file) {
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || !ownedPrivately(stat)) return null;
+    const cached = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return Array.isArray(cached.failures) ? cached.failures : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeCachedVerdict(file, failures) {
+  const temporary = `${file}.${crypto.randomBytes(8).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ failures }), { mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    try { fs.rmSync(temporary, { force: true }); } catch (_) { /* best effort */ }
+  }
+}
+
+// The cache file for a verifyProfiles call, or null when the call must not use
+// the cache (mutated flows, a subset of entries, or the cache turned off).
+function cacheFileFor(profiles, options = {}) {
+  if (options.load || options.only) return null;
+  if (process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE === '0') return null;
+  const directory = cacheDirectory();
+  return directory ? path.join(directory, `${inputDigest(profiles)}.json`) : null;
+}
+
 function listFiles(directory) {
   const files = [];
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -1021,17 +1074,10 @@ function inputDigest(profiles) {
 // options.only: forwarded to findFailures.
 // Neither given: the tracked tree, and the cached verdict may be used.
 async function verifyProfiles(profiles = PROFILES, options = {}) {
-  const tracked = !options.load && !options.only;
-  const useCache = tracked && process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE !== '0';
-  let cachePath = null;
-  if (useCache) {
-    cachePath = path.join(os.tmpdir(), `osi-scoped-access-ratchet-${inputDigest(profiles)}.json`);
-    try {
-      const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-      if (Array.isArray(cached.failures)) return cached.failures;
-    } catch (error) {
-      // No usable cached verdict: compute it.
-    }
+  const cacheFile = cacheFileFor(profiles, options);
+  if (cacheFile) {
+    const cached = readCachedVerdict(cacheFile);
+    if (cached) return cached;
   }
   const load = options.load || ((relativePath) =>
     JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8')));
@@ -1041,13 +1087,7 @@ async function verifyProfiles(profiles = PROFILES, options = {}) {
     failures.push(...await findFailures(flows, relativePath, ALLOWLIST, { only: options.only }));
     failures.push(...findReadFilterRegressions(flows, relativePath));
   }
-  if (cachePath) {
-    try {
-      fs.writeFileSync(cachePath, JSON.stringify({ failures }));
-    } catch (error) {
-      // A cache that cannot be written only costs a rerun.
-    }
-  }
+  if (cacheFile) writeCachedVerdict(cacheFile, failures);
   return failures;
 }
 
@@ -1092,6 +1132,7 @@ module.exports = {
   RETIRED_READ_FILTERS,
   TERMINAL_LINK_INS,
   WRITE_TARGETS,
+  cacheFileFor,
   checkEntry,
   findFailures,
   findReadFilterRegressions,

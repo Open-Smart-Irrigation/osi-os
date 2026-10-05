@@ -10,6 +10,7 @@ const {
   INLINE_ACCOUNT_CHECKS,
   PHASE_C_PENDING,
   PROFILES,
+  cacheFileFor,
   findFailures,
   isDenialRecord,
   verifyProfiles,
@@ -760,4 +761,17 @@ test('a denial record admits only the rejection write', () => {
   assert.equal(isDenialRecord({ ...base, write: true, detail: '["x","scope_denied"]' }), true);
   assert.equal(isDenialRecord({ ...base, write: true, detail: '["x","SUCCESS"]' }), false);
   assert.equal(isDenialRecord({ ...base, tables: ['applied_commands', 'devices'], write: false }), false);
+});
+
+test('mutated flows and subsets never use the cached verdict', () => {
+  assert.equal(cacheFileFor(PROFILES, { load: () => [] }), null);
+  assert.equal(cacheFileFor(PROFILES, { only: new Set(['x']) }), null);
+  const saved = process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE;
+  process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE = '0';
+  try {
+    assert.equal(cacheFileFor(PROFILES, {}), null);
+  } finally {
+    if (saved === undefined) delete process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE;
+    else process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE = saved;
+  }
 });
