@@ -2468,6 +2468,39 @@ expectValid('a ZONE_AGRONOMY_UPSERTED event with a composite key', eventsSchema,
 expectInvalid('a ZONE_AGRONOMY_UPSERTED event whose version differs from its payload', eventsSchema,
     { ...zoneAgronomyEvent, syncVersion: 3 }, /syncVersion: must equal payload\.sync_version/, eventsSchema);
 
+// The acting user on rename and revision commands, and on the revision
+// resources the edge emits, is the gateway-local users.user_uuid as stored:
+// hyphenated, or 32 lower-case hex digits for the first admin and backfilled
+// users.
+{
+    const hexActor = '0123456789abcdef0123456789abcdef';
+    expectValid('UPSERT_DEVICE_NAME accepts a 32-hex gateway-local actor', cmdSchema, {...validDeviceName, actor_user_uuid: hexActor});
+    expectValid('UPSERT_ZONE_NAME accepts a 32-hex gateway-local actor', cmdSchema, {...validZoneName, actor_user_uuid: hexActor});
+    const revisionCommon = {
+        contract_version: 1, revision_uuid: UUID, device_eui: 'A840410000000001',
+        installation_uuid: '22222222-2222-4222-8222-222222222222', source_gateway_device_eui: '0016C001F1000001',
+        base_revision_uuid: null, revision_no: 1, effective_from: '2026-09-10T08:00:00.000Z',
+        recorded_at: '2026-09-10T08:00:00.000Z', actor_user_uuid: UUID, supersedes_revision_uuid: null,
+        sync_version: 1, created_at: '2026-09-10T08:00:00.000Z',
+    };
+    const revisions = [
+        ['DeviceInstallationLocationRevision', {...revisionCommon, latitude: 47, longitude: 8, altitude_m: null,
+            vertical_reference: null, accuracy_m: null, antenna_height_agl_m: null, coordinate_source: 'manual'}],
+        ['DeviceRadioConfigurationRevision', {...revisionCommon, tx_power_dbm: 14, antenna_gain_dbi: 2,
+            feeder_loss_db: 0, configuration_source: 'manual'}],
+    ];
+    for (const [name, revision] of revisions) {
+        const schema = resourcesSchema.definitions[name];
+        expectValid(`${name} with a hyphenated actor`, schema, revision, resourcesSchema);
+        expectValid(`${name} with a 32-hex gateway-local actor`, schema, {...revision, actor_user_uuid: hexActor}, resourcesSchema);
+        expectValid(`${name} without an actor`, schema, {...revision, actor_user_uuid: null}, resourcesSchema);
+        for (const vector of watermarkVector.rejectedActorVectors) {
+            expectInvalid(`${name} rejects actor ${vector.name}`, schema,
+                {...revision, actor_user_uuid: vector.actor_user_uuid}, /actor_user_uuid.*does not match/, resourcesSchema);
+        }
+    }
+}
+
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');
 
