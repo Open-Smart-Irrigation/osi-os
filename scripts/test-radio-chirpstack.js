@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');const assert=require('node:assert/strict');
 const {fromChirpStack}=require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/chirpstack');
-const event={deviceInfo:{devEui:'a84041cafecafe01'},deduplicationId:'abc',time:'2026-09-10T10:00:00Z',data:'AAAAAAAAAAAAAA==',fPort:1,txInfo:{frequency:868100000,modulation:{lora:{spreadingFactor:12,bandwidth:125000}}},rxInfo:[{gatewayId:'0016c001f11715e2',rssi:-91,snr:4}]};
+const event={deviceInfo:{devEui:'a84041cafecafe01'},deduplicationId:'abc',time:'2026-09-10T10:00:00Z',data:'AAAAAAAAAAAAAA==',fPort:1,txInfo:{frequency:868100000,modulation:{lora:{spreadingFactor:12,bandwidth:125000}}},rxInfo:[{gatewayId:'0016c001f1000001',rssi:-91,snr:4}]};
 const testerFrame={deviceInfo:{devEui:'a840410000000001',deviceProfileId:'9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',deviceProfileName:'OSI RAK Field Tester',applicationId:'app-field-tester'},time:'2026-09-22T15:36:28.199Z',fPort:1,fCnt:4,data:'INlJhJz1BdwMCA==',rxInfo:[{gatewayId:'0016C001F1000002',rssi:-93,snr:7.75}],txInfo:{frequency:868100000,modulation:{lora:{spreadingFactor:12,bandwidth:125000,codeRate:'CR_4_5'}}}};
 test('extracts common rxInfo without decoding arbitrary sensor payload as GPS',()=>{const row=fromChirpStack(event);assert.equal(row.deveui,'A84041CAFECAFE01');assert.equal(row.metadata.reported_position,null);assert.equal(row.metadata.receivers[0].rssi_dbm,-91);assert.equal(row.metadata.radio.bandwidth_hz,125000);assert.equal(JSON.stringify(row).includes(event.data),false);});
 test('known tester uses existing GPS codec only at supported port',()=>{
@@ -14,7 +14,7 @@ test('known tester uses existing GPS codec only at supported port',()=>{
  assert.ok(row.metadata.reported_position);
  assert.equal(fromChirpStack({...event,fPort:2},{isFieldTester:false}).metadata.reported_position,null);
 });
-test('gateway snapshot cannot attach a future/current fix to delayed uplink',()=>{const gateway={latitude:46,longitude:6,last_good_fix_at:'2026-09-10T12:00:00Z',status:'fixed',sync_version:2};assert.equal(fromChirpStack(event,{gatewayPositions:{'0016C001F11715E2':gateway}}).metadata.receivers[0].position,null);});
+test('gateway snapshot cannot attach a future/current fix to delayed uplink',()=>{const gateway={latitude:46,longitude:6,last_good_fix_at:'2026-09-10T12:00:00Z',status:'fixed',sync_version:2};assert.equal(fromChirpStack(event,{gatewayPositions:{'0016C001F1000001':gateway}}).metadata.receivers[0].position,null);});
 // Consultant Finding 3: a genuine all-zero ten-byte frame (cold GPS, hdop=0
 // satellites=0) must decode to no position, not the ~5.3e-6/1.07e-5 point off
 // the African coast the un-gated arithmetic would otherwise produce. RAK's own
@@ -38,4 +38,14 @@ test('a frame with a good quality byte but zero coordinate bits is no position',
   const data=Buffer.from([0,0,0,0,0,0,0x03,0xE8,0x0A,0x08]).toString('base64'); // HDOP 1.0, 8 sats, lat/lon bits 0
   const event=envelope({fPort:1,data});
   assert.equal(fromChirpStack(event,{isFieldTester:true}).metadata.reported_position,null);
+});
+test('a field tester frame on fPort 2 carries no reported position even with a valid fix payload',()=>{
+  const event=envelope({fPort:2,data:VALID_FIX_B64});
+  assert.equal(fromChirpStack(event,{isFieldTester:true}).metadata.reported_position,null);
+});
+test('a frame with zero latitude bits but non-zero longitude bits still decodes',()=>{
+  const data=Buffer.from([0,0,0,0,0,0x01,0x03,0xE8,0x0A,0x08]).toString('base64'); // HDOP 1.0, 8 sats, lat bits 0, lon bits 1
+  const pos=fromChirpStack(envelope({fPort:1,data}),{isFieldTester:true}).metadata.reported_position;
+  assert.ok(pos);
+  assert.ok(pos.longitude>0);
 });

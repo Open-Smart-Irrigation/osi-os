@@ -1589,8 +1589,8 @@ if (sizeAllowances) {
   // Measured on the merged tree, verify-flows-size-ratchet totalChars in each byte-identical
   // profile: origin/main 1598196 -> HEAD 1616019 = +17823 (the stack's nodes; main's and the
   // stack's flow changes touch disjoint nodes except sync-init-fn, whose two changes sit on
-  // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc is
-  // re-written from the same tree (1616019).
+  // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc now
+  // records 1625717 per profile (refreshed 2026-10-05 on feat/coverage-finalize; the merged-tree figure was 1616019).
   expectCondition(sizeAllowances.total_allowance?.delta === 35601,
     'size total allowance: exact cumulative delta 35601',
     'size total allowance: expected exact cumulative delta 35601');

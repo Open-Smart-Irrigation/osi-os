@@ -155,9 +155,11 @@ test('Process STREGA: an unset CHIRPSTACK_APP_FIELD_TESTER fences nothing',async
 // downlink through the chirpstack lib BEFORE store.capture runs, and before the
 // recovery-state gate -- not after, and with no queue flush first. RAK's own
 // reference server (field-tester-server/server/server.js) never flushes either:
-// a Class A device drains one queue item per uplink so staleness cannot build
-// up, and every bootstrapped profile sets flush_queue_on_activate so a rejoin
-// clears leftovers anyway. A flush ahead of a late enqueue could otherwise
+// a Class A device drains one queue item per uplink, and every reply carries an
+// expiry (700 ms, see the expiry test below) so ChirpStack drops a reply that
+// missed its window instead of letting it go stale; one cached client serves
+// all replies. Every bootstrapped profile also sets flush_queue_on_activate so
+// a rejoin clears leftovers anyway. A flush ahead of a late enqueue could otherwise
 // delete the pending reply outright inside ChirpStack's own ~100ms queue-read
 // window. The mock chirpstack client below does not even expose
 // flushDeviceQueue, so a regression that reintroduces the call would surface as

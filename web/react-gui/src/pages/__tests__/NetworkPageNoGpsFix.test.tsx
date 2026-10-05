@@ -54,14 +54,14 @@ describe('No GPS fix on the Network page', () => {
       row({ deveui: TESTER, f_port: 1, reported_position: null, recorded_at: '2026-10-05T10:00:00Z' }),
     ]);
     renderPage();
-    await screen.findAllByText(/Tester/);
+    await screen.findAllByText('-90 dBm', { exact: false });
     expect(screen.queryByText(/has no GPS fix yet/)).toBeNull();
   });
   it('never marks a non-tester row', async () => {
     mocks.getAll.mockResolvedValue([{ deveui: 'A84041000000000A', name: 'Soil', type_id: 'KIWI_SENSOR' }]);
     mockObservations([row({ deveui: 'A84041000000000A', f_port: 1, reported_position: null })]);
     renderPage();
-    await screen.findAllByText(/Soil/);
+    await screen.findAllByText('-90 dBm', { exact: false });
     expect(screen.queryByText('No GPS fix')).toBeNull();
     expect(screen.queryByText(/has no GPS fix yet/)).toBeNull();
   });

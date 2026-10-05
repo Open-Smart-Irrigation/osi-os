@@ -50,7 +50,7 @@
       "noPoints": "Aucune observation de cette période n’est géolocalisée.",
       "captureOff": "La capture radio est désactivée sur cette passerelle ; aucun point de couverture n’est enregistré.",
       "noGpsFix": "Pas de position GPS",
-      "noGpsFixHint": "Le testeur de terrain n'a pas encore de position GPS, ses uplinks ne sont donc pas affichés. Emportez-le à l'extérieur, ciel dégagé, et attendez qu'il affiche des satellites. Les points apparaissent dès que des positions arrivent."
+      "noGpsFixHint": "Le testeur de terrain n’a pas encore de position GPS, ses uplinks ne sont donc pas affichés. Emportez-le à l’extérieur, ciel dégagé, et attendez qu’il affiche des satellites. Les points apparaissent dès que des positions arrivent."
     }
   }
 }

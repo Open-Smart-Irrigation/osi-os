@@ -50,7 +50,7 @@
       "noPoints": "Nessuna osservazione di questo intervallo riporta una posizione.",
       "captureOff": "L’acquisizione radio è disattivata su questo gateway; non viene registrato alcun punto di copertura.",
       "noGpsFix": "Nessun fix GPS",
-      "noGpsFixHint": "Il tester da campo non ha ancora un fix GPS, quindi i suoi uplink non vengono disegnati. Portalo all'aperto con il cielo libero e attendi che mostri i satelliti. I punti compaiono appena arrivano i fix."
+      "noGpsFixHint": "Il tester da campo non ha ancora un fix GPS, quindi i suoi uplink non vengono disegnati. Portalo all’aperto con il cielo libero e attendi che mostri i satelliti. I punti compaiono appena arrivano i fix."
     }
   }
 }

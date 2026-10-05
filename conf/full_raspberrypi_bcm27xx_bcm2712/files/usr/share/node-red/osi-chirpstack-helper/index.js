@@ -12,7 +12,6 @@ const profilePb = require('@chirpstack/chirpstack-api/api/device_profile_pb');
 const gatewayGrpc = require('@chirpstack/chirpstack-api/api/gateway_grpc_pb');
 const gatewayPb = require('@chirpstack/chirpstack-api/api/gateway_pb');
 const commonPb = require('@chirpstack/chirpstack-api/common/common_pb');
-const timestampPb = require('google-protobuf/google/protobuf/timestamp_pb');
 
 const DEFAULT_PAGE_SIZE = 100;
 
@@ -657,6 +656,8 @@ class ChirpStackClient {
       if (Object.prototype.toString.call(expiresAt) !== '[object Date]' || !Number.isFinite(expiresAt.getTime())) {
         throw annotateError(new Error('expiresAt must be a valid Date'), 'enqueueDownlink');
       }
+      // Lazy: resolves through @chirpstack/chirpstack-api's hoisted google-protobuf, so a failed load only affects a reply with an expiry.
+      const timestampPb = require('google-protobuf/google/protobuf/timestamp_pb');
       const ts = new timestampPb.Timestamp();
       ts.fromDate(expiresAt);
       queueItem.setExpiresAt(ts);

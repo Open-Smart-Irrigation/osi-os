@@ -256,7 +256,7 @@ export function NetworkPage() {
   const testerEuis = new Set(devices.filter(d => d.type_id === FIELD_TESTER_TYPE_ID).map(d => d.deveui.toUpperCase()));
   // Newest tester uplink decides the hint (the list is newest first); fPort-0 MAC frames and other devices never do.
   const newestTesterRow = observations.find(o => isNoFixTesterRow(o, testerEuis) || isTesterFixRow(o, testerEuis));
-  const showNoGpsFixHint = !captureOff && !error && !devicesLoading && !observationsLoading && !!newestTesterRow && isNoFixTesterRow(newestTesterRow, testerEuis);
+  const showNoGpsFixHint = !captureOff && !devicesLoading && !observationsLoading && !!newestTesterRow && isNoFixTesterRow(newestTesterRow, testerEuis);
   const parsed = observations.map(parseObservation); const snapshots = parsed.flatMap(item => item.device ? [{ ...item.device, label: item.observation.deveui }] : []); const known = [...(location ? [{ lat: location.latitude, lon: location.longitude, label: selected }] : []), ...snapshots];
   // The walk in the order it was walked; the endpoint answers newest first.
   const track = [...parsed].sort((a, b) => Date.parse(a.observation.recorded_at) - Date.parse(b.observation.recorded_at)).flatMap(item => { if (!item.device) return []; const rssi = observationRssi(item.observation); return [{ ...item.device, observation: item.observation, rssi, band: rssiBand(rssi) }]; });
