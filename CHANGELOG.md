@@ -241,6 +241,18 @@ every 0.7.0 entry below.
 - Global GUI restart banner: `/api/system/stats` now exposes a filtered
   `restartPending` object and the React GUI shows a localized countdown or
   in-progress message before the daemon restarts Node-RED.
+- **All-zones history export and saved-view delete.**
+  `GET /api/history/export.csv?scope=allZones` returns one CSV over every
+  zone the caller may read: their own zones, or every zone with scoped access
+  on. Units and columns are the same as the per-zone export. The export is
+  bounded to 200,000 rows and to the per-granularity ranges, and only one
+  runs at a time (otherwise 413 or 429 with a suggestion).
+  `DELETE /api/analysis/views/:id` deletes one of the caller's saved views.
+  The analysis page gets an "Export all zones CSV" action with a busy state
+  and error messages, and a confirmed delete for saved views. Daily CSV
+  exports, the per-zone one included, are now limited to 3,660 days, and CSV
+  text cells that start with a tab or a carriage return are neutralised like
+  formula prefixes.
 
 ### Changed
 - Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
