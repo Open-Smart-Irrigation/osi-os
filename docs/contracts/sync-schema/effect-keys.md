@@ -113,6 +113,28 @@ binding to match, and a reused key with different intent is a conflict.
 - Two non-journal commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
 
+## Expiry of valve commands
+
+The cloud gives every command that can move a valve a short `expires_at`
+(five minutes): `VALVE_COMMAND`, `OPEN_FOR_DURATION`,
+`UC512_OPEN_FOR_DURATION`, `CLOSE`, `CANCEL_VALVE_ACTUATION`,
+`SET_STREGA_TIMED_ACTION`, `SET_STREGA_PARTIAL_OPENING` and
+`SET_STREGA_FLUSHING`. The cloud stops handing such a command out once that
+instant has passed, and the edge ledger checks the same instant before
+dispatch:
+
+- Exact `command_id` replay is checked first, so a command that already ran
+  keeps its stored answer.
+- An elapsed command is answered `EXPIRED` (reason `effect_expired`) and never
+  dispatched.
+- An unreadable expiry, or two expiry fields that disagree, is answered
+  `REJECTED_PERMANENT` (reason `invalid_expires_at`) and never dispatched.
+- A command with no expiry comes from an issuer that predates the field and is
+  dispatched as before.
+
+The answer is stored in the terminal ledger and queued as an ACK in the same
+transaction, so a later delivery of the same `command_id` replays it.
+
 Journal effect-key replay also requires an exact `submittedIntentHash` match. The
 edge hashes the pre-normalization logical mutation, command type, owner, author
 principal, author label, and entry duplicate-guard acknowledgement. Delivery

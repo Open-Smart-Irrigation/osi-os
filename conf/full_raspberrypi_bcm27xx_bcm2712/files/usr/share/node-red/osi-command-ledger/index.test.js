@@ -1494,3 +1494,184 @@ test('the ledger binding refuses malformed actor forms', async () => {
     assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0, bad);
   }
 });
+
+// Pre-dispatch expiry fence for commands that move a valve. The cloud gives
+// these commands a short expires_at (five minutes) and stops handing them out
+// once it has passed; the edge enforces the same instant before dispatch, so
+// a command that reaches it late is answered EXPIRED instead of moving the
+// valve. A command with no expiry comes from an issuer that predates the
+// field and is dispatched as before.
+const FENCE_GATEWAY_EUI = '0016C001F1000001';
+const FENCE_VALVE_EUI = 'A840410000000001';
+const FENCE_NOW = '2026-07-29T10:00:00.000Z';
+
+function fenceRuntime(now = FENCE_NOW) {
+  return { gateway_device_eui: FENCE_GATEWAY_EUI, command_type_recognized: true, now };
+}
+
+function valveEnvelope(commandId, commandType, expiresAt, extraPayload = {}) {
+  const payload = Object.assign({
+    effect_key: 'irrigation:manual:' + FENCE_VALVE_EUI + ':cloud:11111111-1111-4111-8111-' +
+      String(commandId).padStart(12, '0'),
+    deviceEui: FENCE_VALVE_EUI,
+    devEui: FENCE_VALVE_EUI,
+    gatewayDeviceEui: FENCE_GATEWAY_EUI,
+    duration_minutes: 10,
+  }, extraPayload);
+  if (expiresAt !== undefined) payload.expires_at = expiresAt;
+  return {
+    commandId,
+    commandType,
+    eventUuid: '33333333-3333-4333-8333-' + String(commandId).padStart(12, '0'),
+    aggregateType: 'DEVICE',
+    aggregateKey: FENCE_VALVE_EUI,
+    effectKey: payload.effect_key,
+    payload,
+  };
+}
+
+test('expiry fence answers an elapsed VALVE_COMMAND EXPIRED before dispatch and replays that answer', async () => {
+  const db = new TestDb();
+  const envelope = valveEnvelope(810, 'VALVE_COMMAND', FENCE_NOW, { action: 'OPEN_FOR_DURATION' });
+
+  const result = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
+
+  assert.equal(result.handled, true, 'an elapsed valve command must not reach dispatch');
+  assert.equal(result.ack.commandId, 810);
+  assert.equal(result.ack.result, 'EXPIRED');
+  assert.equal(result.ack.status, 'NACKED');
+  assert.equal(result.ack.reason, 'effect_expired');
+  assert.equal(result.ack.duplicate, false);
+  assert.equal(result.ack.eventUuid, envelope.eventUuid);
+  assert.equal(result.ack.aggregateType, 'DEVICE');
+  assert.equal(result.ack.aggregateKey, FENCE_VALVE_EUI);
+  const stored = await db.get('SELECT * FROM applied_commands WHERE command_id=?', ['810']);
+  assert.equal(stored.result, 'EXPIRED');
+  assert.equal(stored.device_eui, FENCE_VALVE_EUI);
+  assert.equal(stored.expires_at, FENCE_NOW);
+  assert.deepEqual(
+    JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['810'])).payload_json),
+    result.ack
+  );
+
+  const replay = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime('2026-07-29T10:30:00.000Z'));
+  assert.deepEqual(replay, { handled: true, ack: result.ack });
+  assert.equal(
+    (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['810'])).n,
+    1,
+    'a replay replaces the undelivered ACK row and dispatches nothing'
+  );
+});
+
+test('expiry fence covers every command type the cloud gives a valve expiry', async () => {
+  const types = [
+    'VALVE_COMMAND', 'OPEN_FOR_DURATION', 'UC512_OPEN_FOR_DURATION', 'CLOSE',
+    'CANCEL_VALVE_ACTUATION', 'SET_STREGA_TIMED_ACTION', 'SET_STREGA_PARTIAL_OPENING',
+    'SET_STREGA_FLUSHING',
+  ];
+  let commandId = 820;
+  for (const type of types) {
+    const db = new TestDb();
+    commandId += 1;
+    const result = await ledger.deduplicatePendingCommand(
+      db, valveEnvelope(commandId, type, '2026-07-29T09:59:59.999Z'), fenceRuntime());
+    assert.equal(result.handled, true, type + ' past its expiry must not reach dispatch');
+    assert.equal(result.ack.result, 'EXPIRED', type);
+  }
+});
+
+test('expiry fence leaves other command types alone', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db,
+    {
+      commandId: 830,
+      commandType: 'SET_LSN50_INTERVAL',
+      payload: {
+        effect_key: 'config:' + FENCE_VALVE_EUI + ':uplink_interval:1',
+        device_eui: FENCE_VALVE_EUI,
+        expires_at: '2026-07-29T09:00:00.000Z',
+      },
+    },
+    fenceRuntime()
+  );
+  assert.deepEqual(result, { handled: false });
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+});
+
+test('expiry fence dispatches a valve command whose expiry is still ahead', async () => {
+  const db = new TestDb();
+  for (const expiresAt of ['2026-07-29T10:00:00.001Z', '2026-07-29T10:04:59.123456789Z']) {
+    const result = await ledger.deduplicatePendingCommand(
+      db, valveEnvelope(840, 'VALVE_COMMAND', expiresAt, { action: 'OPEN_FOR_DURATION' }), fenceRuntime());
+    assert.deepEqual(result, { handled: false }, expiresAt + ' is still ahead');
+  }
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+test('expiry fence reads a nanosecond Instant as the cloud writes it', async () => {
+  const db = new TestDb();
+  const result = await ledger.deduplicatePendingCommand(
+    db, valveEnvelope(845, 'OPEN_FOR_DURATION', '2026-07-29T09:59:59.999999999Z'), fenceRuntime());
+  assert.equal(result.handled, true);
+  assert.equal(result.ack.result, 'EXPIRED');
+});
+
+test('expiry fence treats a missing expiry as an older issuer and dispatches', async () => {
+  const db = new TestDb();
+  for (const [commandId, expiresAt] of [[850, undefined], [851, null], [852, '']]) {
+    const result = await ledger.deduplicatePendingCommand(
+      db, valveEnvelope(commandId, 'VALVE_COMMAND', expiresAt, { action: 'OPEN_FOR_DURATION' }), fenceRuntime());
+    assert.deepEqual(result, { handled: false }, 'expires_at ' + JSON.stringify(expiresAt));
+  }
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+test('expiry fence rejects an unreadable or contradictory expiry without dispatch', async () => {
+  const cases = [
+    [860, valveEnvelope(860, 'SET_STREGA_PARTIAL_OPENING', 'not-an-instant')],
+    [861, valveEnvelope(861, 'OPEN_FOR_DURATION', '2026-07-29T10:05:00.000Z', { expiresAt: '2026-07-29T10:09:00.000Z' })],
+    [862, Object.assign(valveEnvelope(862, 'VALVE_COMMAND', '2026-07-29T10:05:00.000Z'), { expiresAt: '2026-07-29T10:06:00.000Z' })],
+  ];
+  for (const [commandId, envelope] of cases) {
+    const db = new TestDb();
+    const result = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
+    assert.equal(result.handled, true, commandId + ' must not reach dispatch');
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', String(commandId));
+    assert.equal(result.ack.reason, 'invalid_expires_at', String(commandId));
+    assert.equal(
+      (await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [String(commandId)])).n, 1);
+  }
+});
+
+test('expiry fence replays the stored outcome of a command that ran before its expiry', async () => {
+  const db = new TestDb();
+  const storedFacts = { commandId: 870, status: 'ACKED', result: 'APPLIED', duplicate: false };
+  insertAppliedCommand(db, {
+    commandId: '870', deviceEui: FENCE_VALVE_EUI, commandType: 'VALVE_COMMAND',
+    effectKey: null, appliedAt: '2026-07-29T09:58:00.000Z', result: 'APPLIED', resultDetail: storedFacts,
+  });
+  const replay = await ledger.deduplicatePendingCommand(
+    db, valveEnvelope(870, 'VALVE_COMMAND', '2026-07-29T09:59:00.000Z'), fenceRuntime());
+  assert.deepEqual(replay, { handled: true, ack: storedFacts },
+    'exact command-ID replay comes first: the valve did move, so the answer stays APPLIED');
+});
+
+test('expiry fence rolls back the ledger row when the ACK cannot be queued', async () => {
+  const db = new TestDb();
+  db.native.exec(`
+    CREATE TRIGGER fail_expired_command_ack
+    BEFORE INSERT ON command_ack_outbox
+    BEGIN
+      SELECT RAISE(ABORT, 'simulated ACK persistence failure');
+    END;
+  `);
+  await assert.rejects(
+    ledger.deduplicatePendingCommand(db, valveEnvelope(880, 'OPEN_FOR_DURATION', FENCE_NOW), fenceRuntime()),
+    /simulated ACK persistence failure/
+  );
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
