@@ -45,11 +45,13 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
       ```bash
       git diff --stat v<OLD>..origin/main -- docs/contracts/
       ```
-      Any change there (new event, command, resource or capability) means
-      a matching `osi-server` revision must be deployed and verified before
-      the release is published and before any linked gateway gets this edge
-      (Step 6 before Steps 7 and 9). A cloud without the new appliers rejects
-      the new events terminally.
+      Decide the order per change, by which side must accept the new form
+      first. A change that widens what the edge sends (a new event,
+      resource field or value) needs the cloud first: Step 6 before Steps 7
+      and 9, because a cloud without the new appliers rejects the new events
+      terminally. A change that widens what the cloud sends (a new or wider
+      command field) needs the gateways first: an old edge refuses the new
+      form. The CHANGELOG upgrade notes name the order for each such change.
 - [ ] Identify a matching `osi-server` revision. Check it out (or the
       revision a cloud already runs, from its `BACKEND_IMAGE_TAG=sha-<short>`)
       and run the event-op parity check against it:
@@ -121,33 +123,16 @@ missing `uci`, a missing `osi-server.cloud` section or a failed commit is
 logged as a `WARN` and does not fail the deploy; the gateway then reports the
 `node-red.init` fallback or the old value.
 
-### Step 1a — Bundle Chameleon calibrations
+### Step 1a — Chameleon calibrations (not bundled)
 
-Bundle the known calibrations into every seed image, so a fresh gateway has
-them before it reaches OSI Server. The refresh reads from
-`https://server.opensmartirrigation.org` unless `OSI_SERVER_BASE_URL` is set;
-without an admin token, skip it and apply the committed snapshot.
-
-```bash
-OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js
-node scripts/apply-chameleon-calibration-seed.js --require-rows
-```
-
-The apply script writes all seven seed images listed in
-`scripts/seed-db-paths.js`, or none of them when any write fails, and leaves
-them byte-identical. `--require-rows` makes an empty snapshot fail. Review the
-diff of `database/seeds/chameleon-calibrations.sql`, then confirm the seed
-gates still pass:
-
-```bash
-node scripts/verify-seed-db-ledger.js
-node scripts/verify-db-schema-consistency.js
-node scripts/verify-profile-parity.js
-node --test scripts/test-apply-chameleon-calibration-seed.js
-```
-
-Rebuilding the seed images later with `node scripts/build-seed-db.js` drops
-the bundled rows; run this step again after any such rebuild.
+The 0.8.0 image does not bundle Chameleon calibrations; gateways fetch them
+from OSI Server at runtime. Do not run
+`scripts/apply-chameleon-calibration-seed.js` for the release:
+the script now writes all seven seed images, but its test
+(`scripts/test-apply-chameleon-calibration-seed.js`, a step in the Edge
+Migrations workflow) expects exactly the rows of its own synthetic seed and
+fails once the tracked images hold rows, so it must first count relative to
+the starting state.
 
 ---
 
@@ -218,8 +203,8 @@ grep -rl "OSI OS v<NEW>" feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/a
 
 ## Step 4 — Commit, merge and tag
 
-Commit the version bump, the CHANGELOG, the calibration snapshot with the
-seven seed images, and the refreshed feed GUI on a release branch and merge it through a pull request, so the CI workflows from
+Commit the version bump, the CHANGELOG and the refreshed feed GUI on a
+release branch and merge it through a pull request, so the CI workflows from
 the pre-flight run on the release commit. The feed GUI is tracked in git;
 `git add -A` on its directory also stages the deleted old hashed assets:
 
@@ -235,8 +220,6 @@ git add web/react-gui/src/pages/Login.tsx \
         .claude/skills/osi-config-and-flags/SKILL.md \
         README.md \
         CHANGELOG.md
-git add database/seeds/chameleon-calibrations.sql \
-        $(node -p "require('./scripts/seed-db-paths').SEED_DB_RELATIVE_PATHS.join(' ')")
 git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
 git status --short    # nothing left unstaged
 git commit -m "release: OSI OS v<NEW>"
@@ -295,9 +278,11 @@ print `<NEW>`.
 
 ## Step 6 — Deploy osi-server (if changed)
 
-When the pre-flight found a sync contract change, this step is mandatory
-and must be complete before the release is published (Step 7) and before
-any linked gateway is upgraded (Step 9). Deploy the `osi-server` revision
+When the pre-flight found a change that needs the cloud first, this step
+is mandatory and must be complete before the release is published (Step 7)
+and before any linked gateway is upgraded (Step 9). A change that needs the
+gateways first waits instead until Step 9 has reached the gateways that
+receive the new form. Deploy the `osi-server` revision
 that passed `verify-sync-op-parity.js` in the pre-flight, to every cloud
 that has linked gateways.
 
@@ -334,7 +319,7 @@ parity check (rerun the check against that revision if in doubt).
 
 ## Step 7 — GitHub Release
 
-Publish only after Step 6 is verified when the sync contract changed.
+Publish only after Step 6 is verified when a contract change needs the cloud first.
 
 Extract the release section into a notes file:
 
@@ -379,7 +364,7 @@ Build the release payload and hand it to the deployment procedure for the target
 ## Step 9 — Deploy to the gateways and smoke test
 
 Deploy to a test gateway first, then to the others, with the procedure from
-Step 8, and only after Step 6 when the sync contract changed. `deploy.sh`
+Step 8, and only after Step 6 when a contract change needs the cloud first. `deploy.sh`
 writes the firmware version itself (see Step 1): its output shows
 `OK: osi-server.cloud.firmware_version <previous> -> <NEW>` or `already
 <NEW>`. A `WARN` line there means the key was not written.
@@ -415,12 +400,12 @@ On each Pi after the deploy:
 [ ] Pre-flight — mains merged, CI green (all workflows), contract change decided,
                  matching osi-server revision found with verify-sync-op-parity
 [ ] Step 1  — Bump every version location; run the verifiers
-[ ] Step 1a — Bundle Chameleon calibrations into all seven seed images; seed gates green
+[ ] Step 1a — Do not bundle Chameleon calibrations
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
-[ ] Step 4  — Release PR (incl. seed images and feed GUI), merge, CI green, tag v<NEW>, push only the tag
+[ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, tag v<NEW>, push only the tag
 [ ] Step 5  — Build both factory images, rename, SHA256SUMS, first-boot check
-[ ] Step 6  — Deploy and verify osi-server (required first if the contract changed)
+[ ] Step 6  — Deploy and verify osi-server (first when a contract change needs the cloud first)
 [ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
 [ ] Step 8  — Prepare deployment payload
 [ ] Step 9  — Deploy to Pis (test gateway first), check version line and hold marker, smoke test
