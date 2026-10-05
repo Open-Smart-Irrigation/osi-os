@@ -639,3 +639,13 @@ test('--repoint-clover-device without a DevEUI fails instead of being ignored', 
     assert.equal(world.files.get(ENV_FILE), gw.envText, args.join(' '));
   }
 });
+
+test('--repair-soil-profiles flushes the new env file to disk before it replaces the old one', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.fsyncs, 1, 'the temp env file is fsynced once');
+  assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file keeps its mode');
+  assert.ok(![...world.files.keys()].some((f) => f.endsWith('.tmp')), 'no temp file left behind');
+});

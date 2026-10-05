@@ -536,10 +536,19 @@ function setEnvLine(text, key, value) {
   return out.join('\n');
 }
 
+// The env file holds the API key: write a temp file, flush it to disk, then
+// rename it over the old one, so a power cut leaves either file, never an
+// empty one.
 function writeEnvFileAtomic(text) {
   const mode = fs.statSync(CFG.envFile).mode & 0o777;
   const tmp = `${CFG.envFile}.soil-repair.tmp`;
-  fs.writeFileSync(tmp, text, { encoding: 'utf8', mode });
+  const fd = fs.openSync(tmp, 'w', mode);
+  try {
+    fs.writeSync(fd, text);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tmp, CFG.envFile);
 }
 
