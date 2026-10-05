@@ -162,7 +162,7 @@ async function runFallbackRejected(formattedData, label) {
   await runReal(native, frameB64(), 'accepted with calibration');
   row = native.prepare('SELECT frame_status, ch1_status, conversion_version FROM watermark_readings').get();
   assert.equal(row.frame_status, 'accepted');
-  assert.equal(row.conversion_version, 'wm-lsn50-p3-v1');
+  assert.equal(row.conversion_version, 'wm-lsn50-p3-v2');
   assert.equal(native.prepare('SELECT swt_1 FROM device_data').get().swt_1, 56.4);
   native.close();
 

@@ -5,7 +5,8 @@
 //  - LSN50 profile 3 front end: parseProfile3, resistanceFromCodes, convertFrame
 // Spec: docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md sections 4-5.
 
-var CONVERSION_VERSION = 'wm-lsn50-p3-v1';
+// v2 (#415): an unsettled reading keeps its 'unsettled' status and gets kPa.
+var CONVERSION_VERSION = 'wm-lsn50-p3-v2';
 var FRAME_BYTES = 27;
 var FRAME_TAG = 0xA2;
 var FRAME_PROFILE = 3;
@@ -184,12 +185,14 @@ function convertChannel(probe, cal, temperature, supplyMv) {
   } else {
     out.r_solved = roundTo(solved.r, 0);
     if (solved.r < SHORT_BELOW_OHM) { out.status = 'short'; return out; }
-    if ((probe.flags & FLAG_UNSETTLED) && solved.r > SATURATED_MAX_OHM) { out.status = 'unsettled'; return out; }
   }
   if (temperature.value === null) { out.status = temperature.status; return out; }
   var t = tensionFromResistance(clipped ? SATURATED_MAX_OHM : solved.r, temperature.value);
   out.status = t.status;
   out.kpa = t.kpa;
+  // Unsettled (firmware flag 0x04) alone is not a fault: the value is kept and
+  // the status says it was flagged (#415). Any other status above wins.
+  if ((probe.flags & FLAG_UNSETTLED) && t.status === 'ok') out.status = 'unsettled';
   return out;
 }
 
