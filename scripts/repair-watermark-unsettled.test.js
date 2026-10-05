@@ -58,6 +58,10 @@ function seedRows(db) {
   rows.untrusted = reading(db, { at: '2026-10-01T00:15:00.000Z', ch1: { ...UNSETTLED(4953), flags: 0x25 }, ch2: OK(10500, 54.7), swt1: null, swt2: 54.7 });
   rows.unlinked = reading(db, { at: '2026-10-01T00:20:00.000Z', ch1: UNSETTLED(4953), ch2: OK(10500, 54.7), swt1: null, swt2: 54.7, link: false });
   rows.ddHasValue = reading(db, { at: '2026-10-01T00:25:00.000Z', ch1: UNSETTLED(4953), ch2: OK(10500, 54.7), swt1: 26.9, swt2: 54.7 });
+  rows.hot = reading(db, { at: '2026-10-01T00:30:00.000Z', ch1: UNSETTLED(4953), ch2: OK(10500, null), swt1: null, swt2: null, temp: 55 });
+  rows.saturated = reading(db, { at: '2026-10-01T00:35:00.000Z', ch1: UNSETTLED(500), ch2: OK(10500, 54.7), swt1: null, swt2: 54.7 });
+  // Filled, but its stored resistance sits on the 1000 ohm formula edge.
+  rows.edge = reading(db, { at: '2026-10-02T00:00:00.000Z', ch1: UNSETTLED(1000), ch2: OK(10500, 54.7), swt1: null, swt2: 54.7 });
   return rows;
 }
 
@@ -76,8 +80,18 @@ function setup({ linked }) {
     db.prepare("INSERT INTO sync_link_state (peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, ?, ?)").run(GATEWAY, now);
   }
   const rows = seedRows(db);
+  // The append events the INSERT trigger queued on a linked gateway: delivered,
+  // as on a gateway whose outbox has drained.
+  db.exec("UPDATE sync_outbox SET delivered_at = occurred_at WHERE delivered_at IS NULL");
   db.close();
   return rows;
+}
+
+// A DEVICE_DATA_APPENDED event for one reading's device_data row, as the
+// INSERT trigger writes it; delivered: whether the cloud already took it.
+function outboxEvent(db, deveui, at, { delivered = false } = {}) {
+  db.prepare("INSERT INTO sync_outbox (event_uuid, aggregate_type, aggregate_key, op, payload_json, occurred_at, delivered_at) VALUES (?, 'DEVICE_DATA', ?, 'DEVICE_DATA_APPENDED', '{}', ?, ?)")
+    .run('ev-' + deveui + at, deveui + '|' + at, at, delivered ? at : null);
 }
 
 function snapshot() {
@@ -106,17 +120,23 @@ describe('repair-watermark-unsettled', () => {
       const lines = [];
       const result = await repair.run(dbPath, { apply: false, log: (l) => lines.push(l) });
       assert.deepEqual(snapshot(), before);
-      assert.deepEqual(result.fill, { [DEVEUI + ' ch1']: 3, [OTHER + ' ch2']: 1 });
+      assert.deepEqual(result.fill, { [DEVEUI + ' ch1']: 4, [OTHER + ' ch2']: 1 });
       assert.deepEqual(result.skipped, {
         [DEVEUI + ' ch1']: {
-          temperature_missing: 2, outside_200ss_range: 1, invalid_sample: 1,
-          no_device_data_row: 1, device_data_has_value: 1
+          temperature_missing: 2, temperature_out_of_range: 1, outside_200ss_range: 1, saturated: 1,
+          invalid_sample: 1, no_device_data_row: 1, device_data_has_value: 1
         }
       });
+      assert.equal(result.boundary, 1);
+      assert.deepEqual(result.backlog, {});
+      assert.equal(result.oldest, '2026-09-30T17:39:41.000Z');
       assert.equal(result.applied, false);
       const text = lines.join('\n');
       assert.match(text, /dry run/);
-      assert.match(text, new RegExp(DEVEUI + ' ch1: fill 3'));
+      assert.match(text, new RegExp(DEVEUI + ' ch1: fill 4'));
+      assert.match(text, /on a formula edge .*: 1\n/);
+      assert.match(text, /outbox backlog .*: 0/);
+      assert.match(text, /oldest value to fill: 2026-09-30T17:39:41.000Z/);
       assert.match(text, new RegExp(OTHER + ' ch2: fill 1'));
     });
 
@@ -128,7 +148,8 @@ describe('repair-watermark-unsettled', () => {
       const dd = Object.fromEntries(after.dd.map((r) => [r.id, r]));
       const wr = Object.fromEntries(after.wr.map((r) => [r.id, r]));
 
-      for (const [key, r] of [['a', 2438], ['b', 4953], ['c', 6043]]) {
+      assert.equal(result.filled, 5);
+      for (const [key, r] of [['a', 2438], ['b', 4953], ['c', 6043], ['edge', 1000]]) {
         assert.equal(dd[rows[key].ddId].swt_1, kpaAt(r), key + ' device_data');
         assert.equal(wr[rows[key].wrId].ch1_kpa, kpaAt(r), key + ' readings');
         assert.equal(wr[rows[key].wrId].ch1_status, 'unsettled', key + ' keeps its flag');
@@ -146,14 +167,14 @@ describe('repair-watermark-unsettled', () => {
       // and a device_data cell that already has a value.
       const beforeDd = Object.fromEntries(before.dd.map((r) => [r.id, r]));
       const beforeWr = Object.fromEntries(before.wr.map((r) => [r.id, r]));
-      for (const key of ['ok', 'noTemp', 'failedProbe', 'beyond', 'untrusted', 'unlinked', 'ddHasValue']) {
+      for (const key of ['ok', 'noTemp', 'failedProbe', 'beyond', 'untrusted', 'unlinked', 'ddHasValue', 'hot', 'saturated']) {
         assert.deepEqual(dd[rows[key].ddId], beforeDd[rows[key].ddId], key + ' device_data untouched');
         assert.deepEqual(wr[rows[key].wrId], beforeWr[rows[key].wrId], key + ' readings untouched');
       }
 
       // The dirty-history trigger carries each corrected row to the cloud once;
       // no hand-made DEVICE_DATA_APPENDED event.
-      const filledIds = ['a', 'b', 'c', 'other'].map((k) => rows[k].ddId).sort((x, y) => x - y);
+      const filledIds = ['a', 'b', 'c', 'edge', 'other'].map((k) => rows[k].ddId).sort((x, y) => x - y);
       assert.deepEqual(after.dirty.map((d) => d.source_row_id).sort((x, y) => x - y), filledIds);
       assert.ok(after.dirty.every((d) => d.status === 'pending' && d.row_key.startsWith('DEVICE_DATA|' + GATEWAY + '|')));
       assert.equal(after.outbox, before.outbox);
@@ -164,16 +185,73 @@ describe('repair-watermark-unsettled', () => {
       const first = snapshot();
       const second = await repair.run(dbPath, { apply: true, log: () => {} });
       assert.deepEqual(second.fill, {});
+      assert.equal(second.filled, 0);
       assert.deepEqual(snapshot(), first);
     });
+  });
+
+  describe('with unsent DEVICE_DATA events for rows it would fill', () => {
+    beforeEach(() => {
+      setup({ linked: true });
+      const db = open();
+      outboxEvent(db, DEVEUI, '2026-09-30T17:39:41.000Z');
+      outboxEvent(db, DEVEUI, '2026-10-03T12:29:42.000Z');
+      outboxEvent(db, DEVEUI, '2026-10-05T05:04:43.000Z', { delivered: true });
+      outboxEvent(db, DEVEUI, '2026-10-03T12:24:42.000Z'); // a settled row: not affected
+      db.close();
+    });
+
+    it('the dry run reports the backlog per device', async () => {
+      const lines = [];
+      const result = await repair.run(dbPath, { apply: false, log: (l) => lines.push(l) });
+      assert.deepEqual(result.backlog, { [DEVEUI]: 2 });
+      assert.match(lines.join('\n'), new RegExp('outbox backlog .*: 2 \\(' + DEVEUI + ' 2\\)'));
+    });
+
+    it('apply refuses and writes nothing', async () => {
+      const before = snapshot();
+      await assert.rejects(repair.run(dbPath, { apply: true, log: () => {} }), /wait for the outbox to drain/);
+      assert.deepEqual(snapshot(), before);
+    });
+
+    it('apply proceeds with the explicit override', async () => {
+      const result = await repair.run(dbPath, { apply: true, ignoreOutboxBacklog: true, log: () => {} });
+      assert.equal(result.filled, 5);
+    });
+  });
+
+  it('a failure inside the write transaction commits nothing', async () => {
+    const rows = setup({ linked: true });
+    const db = open();
+    db.exec('CREATE TRIGGER test_fail_bu BEFORE UPDATE OF swt_1 ON device_data WHEN NEW.id = ' + rows.b.ddId +
+      " BEGIN SELECT RAISE(ABORT, 'test failure'); END;");
+    db.close();
+    const before = snapshot();
+    await assert.rejects(repair.run(dbPath, { apply: true, log: () => {} }), /test failure/);
+    assert.deepEqual(snapshot(), before);
+  });
+
+  it('says whether the oldest value is still inside each rollup window', async () => {
+    setup({ linked: true });
+    const inside = await repair.run(dbPath, { apply: false, nowMs: Date.parse('2026-10-06T00:00:00Z'), log: () => {} });
+    assert.deepEqual(inside.windows, { gateway_hourly: true, gateway_daily: true, cloud_hourly: true, cloud_daily: true });
+    const lines = [];
+    const later = await repair.run(dbPath, { apply: false, nowMs: Date.parse('2026-10-08T00:00:00Z'), log: (l) => lines.push(l) });
+    assert.deepEqual(later.windows, { gateway_hourly: true, gateway_daily: true, cloud_hourly: false, cloud_daily: true });
+    assert.match(lines.join('\n'), /cloud hourly 7 d: outside/);
   });
 
   it('on an unlinked gateway it fills the values and queues no correction', async () => {
     setup({ linked: false });
     const result = await repair.run(dbPath, { apply: true, log: () => {} });
     assert.equal(result.linked, false);
-    assert.deepEqual(result.fill, { [DEVEUI + ' ch1']: 3, [OTHER + ' ch2']: 1 });
+    assert.deepEqual(result.fill, { [DEVEUI + ' ch1']: 4, [OTHER + ' ch2']: 1 });
     assert.equal(snapshot().dirty.length, 0);
+  });
+
+  it('parses the override flag', () => {
+    assert.equal(repair.parseArgs(['x.db', '--apply', '--ignore-outbox-backlog']).ignoreOutboxBacklog, true);
+    assert.equal(repair.parseArgs(['x.db']).apply, false);
   });
 
   it('refuses a missing database file', async () => {
