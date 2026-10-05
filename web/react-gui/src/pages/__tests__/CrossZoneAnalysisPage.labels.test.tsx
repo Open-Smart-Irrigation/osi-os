@@ -10,7 +10,7 @@ vi.mock('../../analysis/useAnalysisCatalog', () => ({
   useAnalysisCatalog: () => ({ catalog: { channels: [] }, isLoading: false, error: undefined }),
 }));
 vi.mock('../../analysis/useAnalysisViews', () => ({
-  useAnalysisViews: () => ({ views: [], saveView: vi.fn() }),
+  useAnalysisViews: () => ({ views: [], saveView: vi.fn(), deleteView: vi.fn() }),
 }));
 
 const seriesFixture = [{

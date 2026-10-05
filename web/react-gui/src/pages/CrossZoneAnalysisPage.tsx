@@ -24,6 +24,7 @@ import {
 } from '../analysis/workspaceModel';
 import type { AnalysisRange, AnalysisSeriesRequest } from '../analysis/types';
 import { canonicalize } from '../channels/registry';
+import type { HistoryExportGranularity } from '../services/api';
 import { AnalysisSeriesTray } from '../components/analysis/AnalysisSeriesTray';
 import { AnalysisControls } from '../components/analysis/AnalysisControls';
 import { AnalysisChartPanel } from '../components/analysis/AnalysisChartPanel';
@@ -42,6 +43,17 @@ function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   return { selectors: ws.selectors, range: ws.range, aggregation: 'auto' };
 }
 
+function isoDate(value: string | null | undefined): string | null {
+  const parsed = Date.parse(value ?? '');
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null;
+}
+
+function exportGranularity(applied: string | undefined): HistoryExportGranularity {
+  return applied === 'raw' || applied === 'hourly' || applied === 'daily'
+    ? applied
+    : 'daily';
+}
+
 export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
@@ -50,7 +62,7 @@ export function CrossZoneAnalysisPage() {
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useAnalysisCatalog();
-  const { views, saveView, error: viewsError } = useAnalysisViews();
+  const { views, saveView, deleteView, error: viewsError } = useAnalysisViews();
 
   const activeWorkspace = useMemo(
     () => (catalog ? migrateWorkspaceSeriesIds(workspace, catalog.channels) : workspace),
@@ -83,6 +95,11 @@ export function CrossZoneAnalysisPage() {
     () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
     [activeWorkspace.labelOverrides, data],
   );
+  const resolvedExportRange = useMemo(() => {
+    const from = isoDate(data?.range?.from);
+    const to = isoDate(data?.range?.to);
+    return from && to ? { from, to } : null;
+  }, [data?.range?.from, data?.range?.to]);
   const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
     setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
   };
@@ -181,6 +198,10 @@ export function CrossZoneAnalysisPage() {
                 void saveCurrentView(name);
               }}
               onLoad={loadView}
+              onDelete={(id) => {
+                setViewSaveError(null);
+                void deleteView(id).catch(setViewSaveError);
+              }}
             />
           </div>
         </aside>
@@ -228,6 +249,8 @@ export function CrossZoneAnalysisPage() {
               catalogById={catalogById}
               chartRef={chartRef}
               username={username}
+              exportRange={resolvedExportRange}
+              exportGranularity={exportGranularity(data?.aggregation.applied)}
             />
           </div>
           {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}
