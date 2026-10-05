@@ -298,6 +298,31 @@ test('a row-level permanent rejection sets that key aside and does not block the
   assert.ok(h.warnings.some((w) => /device_data key .*12 rejected permanently \(hash_mismatch\)/.test(w)), h.warnings.join('\n'));
 });
 
+test('a retryable answer mid-batch completes the rows before it and leaves the rest queued', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+  for (const id of [31, 32, 33]) insert.run(id, SENSOR, `2026-08-13T00:${id}:00.000Z`);
+  cursor.run('device_data', '33', null, '33', null);
+  link(db);
+  for (const id of [31, 32, 33]) dirty(db, 'device_data', key(id), 'correction', '2026-10-05T09:00:00.000Z');
+  const retryable = new Set([key(32)]);
+  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { retryable } });
+  await h.tick();
+  const row = (id) => db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
+  assert.equal(row(31).status, 'done');
+  for (const id of [32, 33]) assert.deepEqual([row(id).status, row(id).attempts, row(id).last_error], ['pending', 0, null], `key ${id} stays queued`);
+  const cur = db.prepare("SELECT next_attempt_at, retry_count, last_error FROM sync_history_cursors WHERE table_name='device_data'").get();
+  assert.deepEqual([cur.next_attempt_at, cur.retry_count, cur.last_error], [null, 0, null], 'the table is not backed off or parked');
+  // The cloud recovers: the next visit sends the two keys and both complete.
+  retryable.clear();
+  h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+  await h.tick();
+  assert.deepEqual(h.cloud.batches.map((b) => b.keys), [[key(31), key(32), key(33)], [key(32), key(33)]]);
+  assert.deepEqual(statusCounts(db, 'device_data'), { done: 3 });
+});
+
 test('a systemic rejection keeps the table backed off and sets no key aside', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

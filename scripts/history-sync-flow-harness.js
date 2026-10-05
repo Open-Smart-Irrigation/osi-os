@@ -50,6 +50,8 @@ function firstOutOfOrderRow(rows) {
 function createFakeCloud(helper, options = {}) {
   const index = new Map();
   const hashMismatch = options.hashMismatch || new Set();
+  // Keys whose write fails without being exhausted yet: RETRYABLE_ERROR and stop.
+  const retryable = options.retryable || new Set();
   // A zone the cloud cannot resolve ('zone-id:N', the edge's placeholder for a
   // zone without uuid) ends in QUARANTINED, as resolveZone throws there.
   const quarantines = options.quarantineRow || ((tableName, payload) => /^zone-id:/.test(String(payload.zone_uuid || '')) && tableName.startsWith('zone_'));
@@ -89,6 +91,10 @@ function createFakeCloud(helper, options = {}) {
       if (computed !== row.payloadHash || hashMismatch.has(row.historyKey)) {
         record.rejected = 'hash_mismatch';
         results.push({ historyKey: row.historyKey, status: 'REJECTED_PERMANENT', reason: 'hash_mismatch' });
+        break;
+      }
+      if (retryable.has(row.historyKey)) {
+        results.push({ historyKey: row.historyKey, status: 'RETRYABLE_ERROR', reason: 'TransientDataAccessException' });
         break;
       }
       const indexKey = request.tableName + '\u0000' + row.historyKey;
