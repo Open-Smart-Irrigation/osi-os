@@ -775,3 +775,49 @@ test('mutated flows and subsets never use the cached verdict', () => {
     else process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE = saved;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Body fields the fixture sets are also pointed at foreign objects
+// (#389 re-review 2). Each test removes the check on the body-named object.
+
+// Hands the journal module a helper whose zone and plot decisions always say
+// yes: the module's own zone or plot check is gone.
+function journalWithoutObjectChecks(flows) {
+  const router = flows.find((node) => node.id === 'journal-api-router-fn');
+  const pass = 'scope: scopeLoad.value,';
+  assert.ok(router.func.includes(pass), 'journal router hands the helper to the module');
+  router.func = router.func.replace(pass,
+    'scope: scopeLoad.value && Object.assign({}, scopeLoad.value, { ' +
+    'assertFreshZoneAccess: async function() { return { role: \'researcher\' }; }, ' +
+    'assertFreshPlotAccess: async function() { return { role: \'researcher\' }; } }),');
+  return flows;
+}
+
+test('a device claim into a zone named in the body is checked against foreign zones', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-device-claim-router');
+  const check = /\n\s*await scope\.assertFreshZoneAccess\(\s*db,\s*actor\.user_uuid,\s*targetZoneUuid,\s*\{ scopedMode: true \}\s*\);/;
+  assert.match(router.func, check);
+  router.func = router.func.replace(check, '');
+  assert.match(
+    await failuresFor(flows, ['post-devices-http']),
+    /post-devices-http.*changes a row outside the caller's scope \(body .*devices row added/
+  );
+});
+
+test('a plot created or moved into a zone named in the body is checked against foreign zones', async () => {
+  const flows = journalWithoutObjectChecks(loadFlows());
+  const text = await failuresFor(flows, ['journal-plots-post-http', 'journal-plot-put-http']);
+  assert.match(text, /journal-plots-post-http.*changes a row outside the caller's scope \(body .*journal_plots row added/);
+  assert.match(text, /journal-plot-put-http.*changes a row outside the caller's scope \(body .*journal_plots row added/);
+});
+
+test('plot-group members named in the body are checked against foreign plots', async () => {
+  const flows = journalWithoutObjectChecks(loadFlows());
+  const text = await failuresFor(flows, ['journal-plot-groups-post-http', 'journal-plot-group-put-http']);
+  assert.match(text, /journal-plot-groups-post-http.*changes a row outside the caller's scope \(body .*journal_plot_group_members row added/);
+  // The PUT gets the same foreign body, but even without the plot check it
+  // cannot write: the member check makes the plot's owner the acting owner,
+  // so the caller's own group is no longer found (404) and no row changes.
+  assert.doesNotMatch(text, /journal-plot-group-put-http.*changes a row outside/);
+});

@@ -22,8 +22,10 @@
 //      object outside that scope (zone 2 and its device, valve, plot, schedule,
 //      plot group and journal entry, the shared weather station's zone-2
 //      assignment, the admin's account and rows) and sends no command naming
-//      one, however the request names it: by URL, by body field, in bulk or as
-//      a set replacement.
+//      one by its uuid or EUI. The runs name foreign objects by URL parameter,
+//      by every body or query field the fixture leaves unset, and by the body
+//      fields of the fixture's foreignBodies; bulk writes and set replacements
+//      are judged by the same comparison.
 // A scope decision is a call to a deciding function of osi-scope-helper
 // (assertFresh*Access, assertRole, assertFreshRole, assertEnabledAccount,
 // assertAuthenticatedRole, authorizeAdminRead, isAdmin, canMutate,
@@ -48,21 +50,36 @@
 // wholesale; KNOWN_OUTCOME_GAPS tolerates one named change only.
 //
 // Limits. This is a ratchet; the behavioural suites (scripts/test-scoped-access-
-// *.js and the per-route tests) remain the correctness gate. What it does not
-// see, as shown by the defeat attempts in the #389 reports:
-//   - a skip keyed on stored state the seed does not have: the probe seeds an
-//     LSN50 device, a valve and a weather station, so a skip keyed on those
-//     types is caught by the outcome runs, but one keyed on another type, a
-//     status or an owner the seed lacks is not;
-//   - a skip keyed on an exact request value (`body.mode === 'admin'`): the
-//     truthy request sets unset fields to '1' or true and the foreign runs to
-//     ids; a skip keyed on a header is caught only when the header is read as
-//     a plain property;
-//   - writes and effects outside the probe database: a seam module keeps its
-//     own require('fs'), so a host file it writes is neither stubbed nor seen;
-//     commands are judged by the ids in their arguments;
+// *.js and the per-route tests) remain the correctness gate. It does not see:
+//   - a body id the fixture sets and no foreignBodies entry replaces with a
+//     foreign id (foreignBodies exist for the device claim, both plot routes,
+//     both plot-group routes and the weather station zone set);
+//   - rows of accounts other than the seeded admin (another researcher's
+//     views, workspaces, grants): only the admin's rows are foreign;
+//   - rows the caller owns inside a foreign zone: the seed has none;
+//   - foreign rows of kinds the seed lacks, when a write updates or deletes
+//     them: valve schedules, plans and actuation expectations; device
+//     calibrations (watermark, chameleon); zone configuration, calibration,
+//     seasons and recommendations; other users' grants and custom terms;
+//     history workspaces and preferences; analysis views; devices of types
+//     other than the three seeded (LSN50, STREGA valve, S2120 weather station).
+//     An inserted row that carries a foreign id is still seen;
+//   - foreign links the markers do not read: numeric foreign keys other than
+//     zone and user ids (a schedule id, an integer entry id), a zone id stored
+//     as text, free-text columns, and a command that names a zone by number;
+//   - a skip keyed on stored state the seed lacks (another device type, a
+//     status, an owner); skips keyed on the three seeded types are caught;
+//   - a skip keyed on an exact request value (`body.mode === 'admin'`); a skip
+//     keyed on a header is caught only when the header is read as a plain
+//     property;
+//   - host files written through a seam module's own require('fs'): neither
+//     stubbed nor seen;
+//   - rule 4 on exempt entries: the 10 INLINE_ACCOUNT_CHECKS history routes
+//     (workspace and preference writes included), KNOWN_GAPS, Phase C and
+//     public entries are not outcome-checked;
 //   - routes in UNREACHED_WRITES: their write is never reached, so rules 1 and
-//     4 see only what happens before it.
+//     4 see only what happens before it, and a listed route that becomes
+//     reachable does not fail as stale.
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -253,6 +270,10 @@ const REQUEST_FIXTURES = {
       plot_code: 'PROBE1', name: 'Probe plot renamed', zone_uuid: PROBE_ZONE_UUID,
       layout_code: 'open_field', base_sync_version: 0,
     },
+    foreignBodies: [{
+      plot_code: 'PROBE1', name: 'Probe plot renamed', zone_uuid: FOREIGN_ZONE_UUID,
+      layout_code: 'open_field', base_sync_version: 0,
+    }],
   },
   's2120-zones-put-http': {
     params: { deveui: WEATHER_DEVEUI },
@@ -281,6 +302,10 @@ const REQUEST_FIXTURES = {
       deveui: '00000000000000F1', name: 'Probe new device', type_id: 'DRAGINO_LSN50', zone_id: 1,
       appkey: '00112233445566778899AABBCCDDEEFF',
     },
+    foreignBodies: [{
+      deveui: '00000000000000F2', name: 'Probe new device', type_id: 'DRAGINO_LSN50', zone_id: FOREIGN_ZONE_ID,
+      appkey: '00112233445566778899AABBCCDDEEFF',
+    }],
   },
   'dendro-location-http': { body: { latitude: 46.5, longitude: 7.5 } },
   'zone-config-http': { body: { cropType: 'probe-crop' } },
@@ -330,6 +355,7 @@ const REQUEST_FIXTURES = {
   'journal-plot-group-put-http': {
     params: { uuid: PROBE_GROUP_UUID },
     body: { label: 'Probe group', resolved: false, base_sync_version: 0, members: [PROBE_PLOT_UUID] },
+    foreignBodies: [{ label: 'Probe group', resolved: false, base_sync_version: 0, members: [FOREIGN_PLOT_UUID] }],
     setupSql: PROBE_GROUP_SQL,
   },
   'journal-plot-groups-post-http': {
@@ -337,15 +363,27 @@ const REQUEST_FIXTURES = {
       group_uuid: '00000000-0000-4000-8000-00000000d004', label: 'Probe new group', resolved: false,
       base_sync_version: 0, members: [PROBE_PLOT_UUID],
     },
+    foreignBodies: [{
+      group_uuid: '00000000-0000-4000-8000-00000000d004', label: 'Probe new group', resolved: false,
+      base_sync_version: 0, members: [FOREIGN_PLOT_UUID],
+    }],
   },
   'journal-plots-post-http': {
-    // A second zone of the caller's, without a plot yet.
+    // A second zone of the caller's, without a plot yet; and the foreign zone's
+    // plot retired, so a plot created there would be a new foreign row (the
+    // route answers with an existing zone plot instead of creating one).
     setupSql: "INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode) VALUES " +
-      "(3, 'Probe zone two', 2, '" + PROBE_ZONE2_UUID + "', 'UTC', 'local');",
+      "(3, 'Probe zone two', 2, '" + PROBE_ZONE2_UUID + "', 'UTC', 'local');" +
+      "UPDATE journal_plots SET deleted_at = '2026-01-02T00:00:00Z', active = 0 WHERE plot_uuid = '" +
+      FOREIGN_PLOT_UUID + "';",
     body: {
       plot_uuid: '00000000-0000-4000-8000-00000000d005', plot_code: 'PROBE2', name: 'Probe new plot',
       zone_uuid: PROBE_ZONE2_UUID, layout_code: 'open_field', base_sync_version: 0,
     },
+    foreignBodies: [{
+      plot_uuid: '00000000-0000-4000-8000-00000000d006', plot_code: 'PROBE3', name: 'Probe new plot',
+      zone_uuid: FOREIGN_ZONE_UUID, layout_code: 'open_field', base_sync_version: 0,
+    }],
   },
   'analysis-views-post-http': { body: { view: { name: 'Probe view' } } },
   'sdi12-identify-http': { setupSql: probeDeviceType('DRAGINO_SDI12') },
