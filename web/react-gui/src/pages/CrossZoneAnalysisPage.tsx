@@ -24,7 +24,7 @@ import {
 } from '../analysis/workspaceModel';
 import type { AnalysisRange, AnalysisSeriesRequest } from '../analysis/types';
 import { canonicalize } from '../channels/registry';
-import type { HistoryExportGranularity } from '../services/api';
+import { exportGranularity, exportRangeFor } from '../analysis/exportRange';
 import { AnalysisSeriesTray } from '../components/analysis/AnalysisSeriesTray';
 import { AnalysisControls } from '../components/analysis/AnalysisControls';
 import { AnalysisChartPanel } from '../components/analysis/AnalysisChartPanel';
@@ -41,17 +41,6 @@ import { useScope } from '../contexts/ScopeContext';
 function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   if (ws.selectors.length === 0) return null;
   return { selectors: ws.selectors, range: ws.range, aggregation: 'auto' };
-}
-
-function isoDate(value: string | null | undefined): string | null {
-  const parsed = Date.parse(value ?? '');
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : null;
-}
-
-function exportGranularity(applied: string | undefined): HistoryExportGranularity {
-  return applied === 'raw' || applied === 'hourly' || applied === 'daily'
-    ? applied
-    : 'daily';
 }
 
 export function CrossZoneAnalysisPage() {
@@ -95,11 +84,10 @@ export function CrossZoneAnalysisPage() {
     () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
     [activeWorkspace.labelOverrides, data],
   );
-  const resolvedExportRange = useMemo(() => {
-    const from = isoDate(data?.range?.from);
-    const to = isoDate(data?.range?.to);
-    return from && to ? { from, to } : null;
-  }, [data?.range?.from, data?.range?.to]);
+  const resolvedExportRange = useMemo(
+    () => exportRangeFor(data?.range),
+    [data?.range],
+  );
   const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
     setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
   };
