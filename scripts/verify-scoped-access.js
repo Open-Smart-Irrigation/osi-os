@@ -139,7 +139,7 @@ const KNOWN_GAPS = new Map([
   ...['journal-entry-put-http', 'journal-entry-void-post-http'].map((id) => [
     id,
     'a journal entry without a plot is changed after a write-role decision only; it ' +
-      'needs the zone decision on the entry\'s own zone (#TBD-389-journal-zone)',
+      'needs the zone decision on the entry\'s own zone (#403)',
   ]),
 ]);
 
