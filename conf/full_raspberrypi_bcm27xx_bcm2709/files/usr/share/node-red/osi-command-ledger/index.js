@@ -270,7 +270,7 @@ function protectedContext(envelope, runtime, type) {
       !/^[0-9A-F]{16}$/.test(String(values.resource_id || '')) ||
       !/^[0-9A-F]{16}$/.test(String(values.gateway_device_eui || '')) ||
       values.gateway_device_eui !== runtimeGateway ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
+      !/^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
       !Number.isSafeInteger(values.base_sync_version) || values.base_sync_version < 0 ||
       !['set', 'delete'].includes(values.operation) ||
       values.operation !== spec.operation) {

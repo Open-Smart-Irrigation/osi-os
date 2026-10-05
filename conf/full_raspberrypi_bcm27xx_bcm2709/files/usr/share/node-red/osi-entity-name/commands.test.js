@@ -596,3 +596,67 @@ test('a command of another type is not handled and never inspects the runtime ga
   );
   assert.deepEqual(result, { handled: false });
 });
+
+// The cloud sends the acting user's gateway-local users.user_uuid as stored.
+// The first admin and every backfilled user hold 32 lower-case hex digits
+// (lower(hex(randomblob(16)))); the receiver must accept that form, look it up
+// unchanged, and keep refusing every other form.
+const HEX_OWNER = '0123456789abcdef0123456789abcdef';
+const HEX_UNKNOWN = 'fedcba9876543210fedcba9876543210';
+
+function hexOwnerFixture(t) {
+  const state = fixture(t);
+  state.raw.prepare('UPDATE users SET user_uuid=? WHERE id=1').run(HEX_OWNER);
+  return state;
+}
+
+test('a 32-hex owner renames a device and a zone in both access modes', async (t) => {
+  let id = 900;
+  for (const scopedMode of [false, true]) {
+    for (const [kind, build] of [['device', deviceCommand], ['zone', zoneCommand]]) {
+      const label = `${kind} scoped=${scopedMode}`;
+      const { raw, db } = hexOwnerFixture(t);
+      const command = build(id++, { actor_user_uuid: HEX_OWNER });
+      const result = await commands.applyNameCommand(db, command, runtime({ scopedMode }));
+      assert.equal(result.ack.result, 'APPLIED', `${label}: ${JSON.stringify(result.ack)}`);
+      const name = kind === 'device'
+        ? raw.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE).name
+        : raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name;
+      assert.equal(name, command.payload.values.name, label);
+      assert.equal(raw.prepare('SELECT result FROM applied_commands WHERE command_id=?').get(String(command.commandId)).result, 'APPLIED', label);
+      assert.equal(JSON.parse(raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get(String(command.commandId)).payload_json).result, 'APPLIED', label);
+      const replay = await commands.applyNameCommand(db, command, runtime({ scopedMode }));
+      assert.deepEqual(replay.ack, result.ack, `${label}: exact redelivery returns the stored ack`);
+    }
+  }
+});
+
+test('an unknown or disabled 32-hex actor is refused as actor_missing_or_disabled', async (t) => {
+  const { raw, db } = hexOwnerFixture(t);
+  const unknown = await commands.applyNameCommand(db, deviceCommand(920, { actor_user_uuid: HEX_UNKNOWN }), runtime());
+  assert.equal(unknown.ack.result, 'REJECTED_PERMANENT');
+  assert.equal(unknown.ack.reason, 'actor_missing_or_disabled');
+  raw.prepare('UPDATE users SET disabled_at=? WHERE user_uuid=?').run(NOW, HEX_OWNER);
+  const disabled = await commands.applyNameCommand(db, zoneCommand(921, { actor_user_uuid: HEX_OWNER }), runtime());
+  assert.equal(disabled.ack.reason, 'actor_missing_or_disabled');
+  assert.equal(raw.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE).name, 'Old device');
+  assert.equal(raw.prepare('SELECT name FROM irrigation_zones WHERE id=1').get().name, 'Old zone');
+});
+
+test('the hyphenated actor form is unchanged', async (t) => {
+  const { db } = fixture(t);
+  const result = await commands.applyNameCommand(db, zoneCommand(930, { actor_user_uuid: OWNER }), runtime());
+  assert.equal(result.ack.result, 'APPLIED');
+});
+
+test('a malformed actor id is refused as malformed in both forms', async (t) => {
+  let id = 940;
+  for (const actor of [HEX_OWNER.slice(1), HEX_OWNER + '0', HEX_OWNER.toUpperCase(), 'g'.repeat(32),
+    HEX_OWNER.slice(0, 8) + '-' + HEX_OWNER.slice(8)]) {
+    const { raw, db } = hexOwnerFixture(t);
+    const result = await commands.applyNameCommand(db, deviceCommand(id++, { actor_user_uuid: actor }), runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', actor);
+    assert.equal(result.ack.reason, 'malformed_command', actor);
+    assert.equal(raw.prepare('SELECT name FROM devices WHERE deveui=?').get(DEVICE).name, 'Old device', actor);
+  }
+});

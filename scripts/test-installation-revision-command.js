@@ -37,3 +37,56 @@ test('failed ACK persistence rolls back revision and operational event',async t=
  assert.equal(raw.prepare("SELECT count(*) n FROM sync_outbox WHERE op='DEVICE_INSTALLATION_LOCATION_REVISED'").get().n,0);
  assert.equal(raw.prepare('SELECT count(*) n FROM applied_commands').get().n,0);
 });
+// The cloud sends the acting user's gateway-local users.user_uuid as stored; the
+// first admin and backfilled users hold 32 lower-case hex digits. Both revision
+// commands and the local save path must accept that form unchanged.
+const hexOwner='0123456789abcdef0123456789abcdef',hexUnknown='fedcba9876543210fedcba9876543210';
+function hexFixture(t){const state=fixture(t);state.raw.prepare('UPDATE users SET user_uuid=? WHERE id=1').run(hexOwner);return state;}
+function typed(type,id,revision,actorUuid){
+ const radio=type==='UPSERT_DEVICE_RADIO_CONFIGURATION',prefix=radio?'device_radio_configuration':'device_installation_location';
+ return {commandId:id,commandType:type,payload:{command_id:revision,command_type:type,effect_key:prefix+':'+revision+':initial',device_eui:device,installation_uuid:installation,revision_uuid:revision,base_revision_uuid:null,actor_user_uuid:actorUuid,
+  values:radio?{effectiveFrom:'2026-09-10T08:00:00.000Z',txPowerDbm:14,antennaGainDbi:2,feederLossDb:0,configurationSource:'manual'}:{latitude:47,longitude:8,effectiveFrom:'2026-09-10T08:00:00.000Z',coordinateSource:'manual'}}};
+}
+const revisionTypes=[['UPSERT_DEVICE_INSTALLATION_LOCATION','device_installation_location_revisions','DEVICE_INSTALLATION_LOCATION_REVISED'],['UPSERT_DEVICE_RADIO_CONFIGURATION','device_radio_configuration_revisions','DEVICE_RADIO_CONFIGURATION_REVISED']];
+test('a 32-hex owner applies both revision commands; the actor is stored and emitted unchanged',async t=>{
+ let id=900;
+ for(const scopedMode of [false,true])for(const [type,table,op] of revisionTypes){
+  const label=type+' scoped='+scopedMode,{db,raw}=hexFixture(t),cmd=typed(type,id++,'66666666-6666-4666-8666-'+String(id).padStart(12,'0'),hexOwner);
+  const first=await helper.applyCommand(db,cmd,{gateway_device_eui:gateway,scopedMode});
+  assert.equal(first.ack.result,'APPLIED',label+': '+JSON.stringify(first.ack));
+  assert.equal(raw.prepare('SELECT actor_user_uuid FROM '+table).get().actor_user_uuid,hexOwner,label);
+  const events=raw.prepare('SELECT payload_json FROM sync_outbox WHERE op=?').all(op);assert.equal(events.length,1,label);
+  assert.equal(JSON.parse(events[0].payload_json).actor_user_uuid,hexOwner,label);
+  assert.equal(JSON.parse(raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get(String(cmd.commandId)).payload_json).result,'APPLIED',label);
+  assert.deepEqual((await helper.applyCommand(db,cmd,{gateway_device_eui:gateway,scopedMode})).ack,first.ack,label+': exact redelivery');
+  assert.equal(raw.prepare('SELECT count(*) n FROM '+table).get().n,1,label);
+ }
+});
+test('an unknown or disabled 32-hex actor is refused for both revision commands',async t=>{
+ let id=920;
+ for(const [type,table] of revisionTypes){
+  const {db,raw}=hexFixture(t);
+  const unknown=await helper.applyCommand(db,typed(type,id++,'77777777-7777-4777-8777-'+String(id).padStart(12,'0'),hexUnknown),{gateway_device_eui:gateway,scopedMode:true});
+  assert.equal(unknown.ack.result,'REJECTED_PERMANENT',type);assert.equal(unknown.ack.reason,'actor account disabled or missing',type);
+  raw.prepare("UPDATE users SET disabled_at='2026-09-10' WHERE id=1").run();
+  const disabled=await helper.applyCommand(db,typed(type,id++,'77777777-7777-4777-8777-'+String(id).padStart(12,'0'),hexOwner),{gateway_device_eui:gateway,scopedMode:true});
+  assert.equal(disabled.ack.reason,'actor account disabled or missing',type);
+  assert.equal(raw.prepare('SELECT count(*) n FROM '+table).get().n,0,type);
+ }
+});
+test('malformed actor ids are refused for both revision commands',async t=>{
+ let id=940;
+ for(const [type,table] of revisionTypes)for(const bad of [hexOwner.slice(1),hexOwner+'0',hexOwner.toUpperCase(),'g'.repeat(32),hexOwner.slice(0,8)+'-'+hexOwner.slice(8)]){
+  const {db,raw}=hexFixture(t);
+  const result=await helper.applyCommand(db,typed(type,id++,'88888888-8888-4888-8888-'+String(id).padStart(12,'0'),bad),{gateway_device_eui:gateway,scopedMode:true});
+  assert.equal(result.ack.result,'REJECTED_PERMANENT',type+' '+bad);assert.equal(result.ack.reason,'invalid device or actor identity',type+' '+bad);
+  assert.equal(raw.prepare('SELECT count(*) n FROM '+table).get().n,0);
+ }
+});
+test('the local save path keeps a 32-hex actor unchanged and refuses malformed actors',async t=>{
+ const {db,raw}=hexFixture(t);
+ const options={deviceEui:device,installationUuid:installation,gatewayEui:gateway,actorUserUuid:hexOwner,revisionUuid:'99999999-9999-4999-8999-999999999999',baseRevisionUuid:null,values:{latitude:47,longitude:8,effectiveFrom:'2026-09-10T08:00:00.000Z'}};
+ await helper.saveLocation(db,options);
+ assert.equal(raw.prepare('SELECT actor_user_uuid FROM device_installation_location_revisions').get().actor_user_uuid,hexOwner);
+ await assert.rejects(()=>helper.saveRadioConfiguration(db,Object.assign({},options,{actorUserUuid:hexOwner.toUpperCase(),revisionUuid:'99999999-9999-4999-8999-999999999998',values:{effectiveFrom:'2026-09-10T08:00:00.000Z'}})),/actorUserUuid/);
+});

@@ -1004,6 +1004,37 @@ reportCheck(
     'WATERMARK shared vector pins normalized replay semantics',
     'WATERMARK shared vector does not pin numeric, omission/null, or conflict semantics'
 );
+{
+    const hexActorVector = watermarkVector.bindingVectors.find((vector) => vector.name === 'gateway-local-hex-actor');
+    let hexActorOk = false;
+    try {
+        hexActorOk = Boolean(hexActorVector) &&
+            hexActorVector.input.actor_user_uuid === '0123456789abcdef0123456789abcdef' &&
+            canonicalBinding(hexActorVector.input) === hexActorVector.canonical_body &&
+            hexActorVector.canonical_body.includes('"actor_user_uuid":"0123456789abcdef0123456789abcdef"') &&
+            BINDING_CANONICALIZER.sha256(hexActorVector.input) === hexActorVector.sha256;
+    } catch (_) {
+        hexActorOk = false;
+    }
+    reportCheck(
+        hexActorOk,
+        'WATERMARK binding keeps a 32-hex gateway-local actor unchanged',
+        'WATERMARK binding does not keep a 32-hex gateway-local actor unchanged'
+    );
+    const refused = (watermarkVector.rejectedActorVectors || []).filter((vector) => {
+        try {
+            canonicalBinding({...watermarkVector.bindingVectors[0].input, actor_user_uuid: vector.actor_user_uuid});
+            return false;
+        } catch (error) {
+            return error instanceof TypeError;
+        }
+    });
+    reportCheck(
+        refused.length === 5 && refused.length === watermarkVector.rejectedActorVectors.length,
+        'WATERMARK binding refuses every rejected actor vector',
+        'WATERMARK binding accepts a rejected actor vector'
+    );
+}
 const watermarkCalibrationBase = {
     pullup_1_ohm: 30000, pulldown_1_ohm: 30000,
     series_fwd_1_ohm: 10, series_rev_1_ohm: 10,
@@ -1718,6 +1749,25 @@ expectInvalid(
     (() => { const copy = jsonClone(watermarkSetCommand); delete copy.actor_user_uuid; return copy; })(),
     /actor_user_uuid.*required/
 );
+// The actor is the gateway's users.user_uuid as stored: the hyphenated form, or
+// 32 lower-case hex digits for the first admin and backfilled users.
+const HEX_ACTOR = '0123456789abcdef0123456789abcdef';
+expectValid('WATERMARK set accepts a 32-hex gateway-local actor', cmdSchema, {...watermarkSetCommand, actor_user_uuid: HEX_ACTOR}, cmdSchema);
+expectValid('WATERMARK delete accepts a 32-hex gateway-local actor', cmdSchema, {...watermarkDeleteCommand, actor_user_uuid: HEX_ACTOR}, cmdSchema);
+for (const vector of watermarkVector.rejectedActorVectors) {
+    expectInvalid(
+        `WATERMARK set rejects actor ${vector.name}`,
+        cmdSchema,
+        {...watermarkSetCommand, actor_user_uuid: vector.actor_user_uuid},
+        /actor_user_uuid.*does not match/
+    );
+}
+expectInvalid(
+    'WATERMARK set rejects an upper-case hyphenated actor',
+    cmdSchema,
+    {...watermarkSetCommand, actor_user_uuid: UUID.toUpperCase()},
+    /actor_user_uuid.*does not match/
+);
 expectInvalid(
     'WATERMARK delete rejects normalized intent values',
     cmdSchema,
@@ -1757,6 +1807,7 @@ for (const [type, operation, prefix, base] of [
         values,
     };
     expectValid(`${type} exact-base synthetic vector`, cmdSchema, command, cmdSchema);
+    expectValid(`${type} accepts a 32-hex gateway-local actor`, cmdSchema, {...command, actor_user_uuid: HEX_ACTOR}, cmdSchema);
     expectInvalid(`${type} rejects empty normalized intent`, cmdSchema, {...command, values: {}}, /required/);
     expectInvalid(`${type} rejects unexpected normalized intent`, cmdSchema, {...command, values: {...values, unexpected: true}}, /property/);
     if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
@@ -2416,6 +2467,39 @@ const zoneAgronomyEvent = {
 expectValid('a ZONE_AGRONOMY_UPSERTED event with a composite key', eventsSchema, zoneAgronomyEvent, eventsSchema);
 expectInvalid('a ZONE_AGRONOMY_UPSERTED event whose version differs from its payload', eventsSchema,
     { ...zoneAgronomyEvent, syncVersion: 3 }, /syncVersion: must equal payload\.sync_version/, eventsSchema);
+
+// The acting user on rename and revision commands, and on the revision
+// resources the edge emits, is the gateway-local users.user_uuid as stored:
+// hyphenated, or 32 lower-case hex digits for the first admin and backfilled
+// users.
+{
+    const hexActor = '0123456789abcdef0123456789abcdef';
+    expectValid('UPSERT_DEVICE_NAME accepts a 32-hex gateway-local actor', cmdSchema, {...validDeviceName, actor_user_uuid: hexActor});
+    expectValid('UPSERT_ZONE_NAME accepts a 32-hex gateway-local actor', cmdSchema, {...validZoneName, actor_user_uuid: hexActor});
+    const revisionCommon = {
+        contract_version: 1, revision_uuid: UUID, device_eui: 'A840410000000001',
+        installation_uuid: '22222222-2222-4222-8222-222222222222', source_gateway_device_eui: '0016C001F1000001',
+        base_revision_uuid: null, revision_no: 1, effective_from: '2026-09-10T08:00:00.000Z',
+        recorded_at: '2026-09-10T08:00:00.000Z', actor_user_uuid: UUID, supersedes_revision_uuid: null,
+        sync_version: 1, created_at: '2026-09-10T08:00:00.000Z',
+    };
+    const revisions = [
+        ['DeviceInstallationLocationRevision', {...revisionCommon, latitude: 47, longitude: 8, altitude_m: null,
+            vertical_reference: null, accuracy_m: null, antenna_height_agl_m: null, coordinate_source: 'manual'}],
+        ['DeviceRadioConfigurationRevision', {...revisionCommon, tx_power_dbm: 14, antenna_gain_dbi: 2,
+            feeder_loss_db: 0, configuration_source: 'manual'}],
+    ];
+    for (const [name, revision] of revisions) {
+        const schema = resourcesSchema.definitions[name];
+        expectValid(`${name} with a hyphenated actor`, schema, revision, resourcesSchema);
+        expectValid(`${name} with a 32-hex gateway-local actor`, schema, {...revision, actor_user_uuid: hexActor}, resourcesSchema);
+        expectValid(`${name} without an actor`, schema, {...revision, actor_user_uuid: null}, resourcesSchema);
+        for (const vector of watermarkVector.rejectedActorVectors) {
+            expectInvalid(`${name} rejects actor ${vector.name}`, schema,
+                {...revision, actor_user_uuid: vector.actor_user_uuid}, /actor_user_uuid.*does not match/, resourcesSchema);
+        }
+    }
+}
 
 if (!ok) process.exit(1);
 console.log('PASS: contract schema checks pass');

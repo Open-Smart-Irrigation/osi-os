@@ -1406,3 +1406,91 @@ test('queueCommandAck never truncates result_detail for a non-valve command type
   );
   assert.equal(JSON.parse(durable.result_detail).reason, longError);
 });
+
+// A gateway-local actor is either the hyphenated form or 32 lower-case hex
+// digits (users.user_uuid of the first admin and of backfilled users). The
+// actor is not part of the effect key; it is a typed field of the trusted
+// binding hash and a stored applied_commands column, compared exactly. A
+// 32-hex actor must survive that round trip unchanged.
+const HEX_ACTOR = '0123456789abcdef0123456789abcdef';
+
+function hexActorEnvelope(commandId, actor = HEX_ACTOR) {
+  const envelope = watermarkEnvelope(commandId);
+  delete envelope.protected_context;
+  envelope.payload.actor_user_uuid = actor;
+  return envelope;
+}
+
+function productionRuntime() {
+  // The shape node watermark-config-command-apply-fn passes: only the
+  // trusted gateway; the ledger derives the binding from the payload.
+  return {
+    command_type_recognized: true,
+    gateway_device_eui: GATEWAY_EUI,
+    protected_context: { gateway_device_eui: GATEWAY_EUI },
+  };
+}
+
+function applyWith(db, envelope) {
+  return ledger.withProtectedCommandTransaction(db, envelope, productionRuntime(), async ({ terminalAck }) => {
+    const ack = await terminalAck({
+      commandId: envelope.commandId, result: 'APPLIED', status: 'ACKED', reason: null,
+      appliedSyncVersion: 5, duplicate: false,
+    });
+    return { handled: true, ack };
+  });
+}
+
+test('binding canonicalization keeps a 32-hex actor unchanged and refuses other forms', () => {
+  assert.equal(protectedBinding.canonicalize({ actor_user_uuid: HEX_ACTOR }), `{"actor_user_uuid":"${HEX_ACTOR}"}`);
+  assert.equal(protectedBinding.canonicalize({ actor_user_uuid: WATERMARK_ACTOR }), `{"actor_user_uuid":"${WATERMARK_ACTOR}"}`);
+  for (const bad of [HEX_ACTOR.slice(1), HEX_ACTOR + '0', HEX_ACTOR.toUpperCase(), 'g'.repeat(32)]) {
+    assert.throws(() => protectedBinding.canonicalize({ actor_user_uuid: bad }), TypeError, bad);
+  }
+  // The 32-hex form is accepted for the actor only, not for other UUID fields.
+  assert.throws(() => protectedBinding.canonicalize({ command_id: HEX_ACTOR }), TypeError);
+});
+
+test('a 32-hex actor round-trips through the protected binding, ledger row and replays', async () => {
+  const db = new TestDb();
+  const first = await applyWith(db, hexActorEnvelope(1001));
+  assert.equal(first.ack.result, 'APPLIED');
+  const row = await db.get('SELECT * FROM applied_commands WHERE command_id=?', ['1001']);
+  assert.equal(row.actor_user_uuid, HEX_ACTOR);
+  assert.equal(row.binding_hash, protectedBinding.sha256({
+    command_type: 'SET_WATERMARK_CALIBRATION', resource: 'WATERMARK_CALIBRATION',
+    device_eui: WATERMARK_DEVICE_EUI, gateway_device_eui: GATEWAY_EUI, actor_user_uuid: HEX_ACTOR,
+    base_sync_version: 4, operation: 'set', normalized_intent: { worst_residual_pct: 1 },
+  }));
+  assert.equal(JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['1001'])).payload_json).result, 'APPLIED');
+
+  // Exact command-ID redelivery matches the stored binding and returns the stored ACK.
+  const exact = await applyWith(db, hexActorEnvelope(1001));
+  assert.deepEqual(exact.ack, first.ack);
+
+  // The same binding under a new delivery id replays through the effect key and
+  // stores the same unchanged actor on the new row.
+  const effect = await applyWith(db, hexActorEnvelope(1002));
+  assert.equal(effect.ack.result, 'APPLIED');
+  assert.equal(effect.ack.duplicate, true);
+  assert.equal((await db.get('SELECT actor_user_uuid FROM applied_commands WHERE command_id=?', ['1002'])).actor_user_uuid, HEX_ACTOR);
+
+  // Another actor at the same effect key is a binding conflict, in either form.
+  for (const other of ['fedcba9876543210fedcba9876543210', WATERMARK_ACTOR]) {
+    await assert.rejects(applyWith(db, hexActorEnvelope(1003, other)),
+      (error) => error && error.code === 'protected_command_conflict', other);
+    await assert.rejects(applyWith(db, hexActorEnvelope(1001, other)),
+      (error) => error && error.code === 'protected_command_conflict', other);
+  }
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 2);
+});
+
+test('the ledger binding refuses malformed actor forms', async () => {
+  for (const bad of [HEX_ACTOR.slice(1), HEX_ACTOR + '0', HEX_ACTOR.toUpperCase(), 'g'.repeat(32),
+    WATERMARK_ACTOR.toUpperCase(), HEX_ACTOR.slice(0, 8) + '-' + HEX_ACTOR.slice(8)]) {
+    const db = new TestDb();
+    await assert.rejects(applyWith(db, hexActorEnvelope(1010, bad)),
+      (error) => error && error.code === 'protected_command_conflict', bad);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0, bad);
+  }
+});
