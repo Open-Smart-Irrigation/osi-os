@@ -255,10 +255,17 @@ function roundTo(value, decimals = 3) {
   return Math.round(number * factor) / factor;
 }
 
-// pF = log10(tension in hPa); 1 kPa = 10 hPa. Non-positive tension has no pF.
+// Tension at or below which pF takes its floor of 0 (log10(0.1 * 10) = 0).
+const PF_FLOOR_KPA = 0.1;
+
+// pF = log10(tension in hPa); 1 kPa = 10 hPa. pF is never written below 0:
+// a finite tension at or below 0.1 kPa (where the formula gives 0, a negative
+// or no value, e.g. a saturated probe at 0 kPa) derives the 0 pF floor.
+// A missing or non-finite reading stays null and gets no pF row.
 function kpaToPf(kpa) {
   const value = toFiniteNumber(kpa);
-  if (value === null || value <= 0) return null;
+  if (value === null) return null;
+  if (value <= PF_FLOOR_KPA) return 0;
   return Math.log10(value * 10);
 }
 
