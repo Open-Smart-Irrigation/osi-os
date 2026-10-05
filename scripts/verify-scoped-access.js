@@ -132,7 +132,8 @@ const PUBLIC_ALLOWLIST = new Set([
 // and an id whose guard has landed fails as stale until it is removed here.
 // (sys-reboot-in and sys-fan-in left this list once each made its own admin
 // decision before the effect; the account-link, force-sync and rollup-run
-// entries left it when their admin guards landed.)
+// entries left it when their admin guards landed, and WRITE_TARGETS now holds
+// them to an admin decision.)
 const PHASE_C_PENDING = new Set([
   // Wave 3 scoped-access port: these routes don't exist anywhere in AgroLink's
   // scope arc (valve-control and SDI-12 landed on main after AgroLink's fork;
@@ -523,6 +524,13 @@ const WRITE_TARGETS = new Map([
     'sync-outbox-recover-http',
     { object: 'admin', reason: 'outbox recovery acts on the whole gateway; admin-only' },
   ],
+  ...[
+    'al-link-in', 'al-unlink-in', 'sync-force-http', 'history-rollups-run-http',
+  ].map((id) => [id, {
+    object: 'admin',
+    reason: 'linking or unlinking the cloud account, a forced sync and a rollup run act on the whole ' +
+      'gateway; admin-only with scoped access on',
+  }]),
   ...[
     'history-gateway-cards-http', 'history-gateway-card-data-http', 'history-gateway-card-advanced-http',
     'history-gateway-card-preferences-http', 'history-gateway-card-opened-http',
