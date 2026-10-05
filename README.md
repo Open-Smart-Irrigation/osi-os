@@ -106,7 +106,7 @@ osi-os/
 
 ```bash
 cd web/react-gui
-npm install
+npm ci
 npm run dev
 ```
 
@@ -201,7 +201,7 @@ The `deploy.sh` script uses an SSH reverse tunnel to pull all files from your de
 
 ```bash
 # 1. Build and package the React GUI
-cd web/react-gui && npm install && npm run build && cd ../..
+cd web/react-gui && npm ci && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # 2. Serve the repo from your dev machine
@@ -283,7 +283,7 @@ Re-run `deploy.sh` to update application components. It is safe to re-run on liv
 
 ```bash
 # Rebuild and repackage the GUI if frontend changed
-cd web/react-gui && npm install && npm run build && cd ../..
+cd web/react-gui && npm ci && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # Serve and deploy

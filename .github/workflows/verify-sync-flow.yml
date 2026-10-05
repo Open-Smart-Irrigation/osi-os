@@ -187,5 +187,10 @@ jobs:
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync
         run: node --test scripts/test-zone-agronomy-sync-triggers.js
+      # pipefail: without it the step took tee's exit status, and the grep
+      # also matched the failure message, so a failing upgrade leg stayed green.
       - name: Guard against silent upgrade-leg skip
-        run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out
+        run: |
+          set -o pipefail
+          node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out
+          grep -qx 'OK sync history schema base seed + history migration' /tmp/schema.out
