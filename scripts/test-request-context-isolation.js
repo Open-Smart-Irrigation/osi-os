@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 'use strict';
 
-// Request isolation for the valve and zone-schedule mutation chains (osi-os #377).
+// Request isolation for the valve, zone-schedule and zone-delete mutation chains
+// (osi-os #377).
 //
 // Concurrent HTTP requests interleave at every asynchronous boundary of a Node-RED
 // chain (each sqlite node). The manual valve chain used to keep its target, action
 // and duration in shared flow context (valve_cmd_*), the zone-schedule chain kept its
-// validated patch there (sched_*), and the STREGA status ACK fell back to the last
-// routed cloud command id (lastCommandId). A request resumed after another request
+// validated patch there (sched_*), the zone-delete chain kept its zone, actor and
+// next sync_version there (delete_zone_*), and the STREGA status ACK fell back to the
+// last routed cloud command id (lastCommandId). A request resumed after another request
 // had passed the same node then used the other request's values: the wrong valve,
 // the wrong duration, the wrong schedule row, the wrong ACK.
 //
@@ -78,7 +80,7 @@ const ID = {
 };
 
 // Shared-context keys that carried per-request values before the fix.
-const REQUEST_SCRATCH_KEY = /^(valve_cmd_|sched_|lastCommand)/;
+const REQUEST_SCRATCH_KEY = /^(valve_cmd_|sched_|lastCommand|delete_zone_)/;
 
 const CHIRPSTACK_STUB = {
   createProvisioningClientFromEnv() {
@@ -877,6 +879,353 @@ test('schedule envelope: carries only approved keys and no credential material',
       },
     });
     const serialized = JSON.stringify(inFlight.osi);
+    assert.doesNotMatch(serialized, /bearer|token|password|secret|authorization/i);
+    assert.ok(!serialized.includes(token.slice(7)), 'bearer token must not enter the envelope');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Zone DELETE (flag off): DELETE /api/irrigation-zones/:id
+//   Decode Token -> Lookup User -> Verify Zone Ownership -> Verify Zone ->
+//   Unassign Devices -> (sqlite) -> (Soft) Delete Zone -> (sqlite) ->
+//   Disable Schedule -> (sqlite) -> Format Response (+ outbox flush ping).
+// The chain kept the zone id, the actor and the next zone sync_version in shared
+// flow context (delete_zone_*), so a request resumed after another one deleted
+// and disabled the other request's zone instead of its own.
+// ---------------------------------------------------------------------------
+const ZD = {
+  http: 'delete-zone-http',
+  userDb: 'delete-zone-lookup',
+  verify: 'delete-zone-verify',
+  zoneDb: 'delete-zone-verify-db',
+  unassign: 'delete-zone-unassign',
+  unassignDb: 'delete-zone-unassign-db',
+  softDelete: 'delete-zone-delete',
+  deleteDb: 'delete-zone-delete-db',
+  disable: '8180476b6ab55d6e',
+  disableDb: 'd6136c769242ca50',
+  flushLink: 'sync-outbox-flush-link-out-zone',
+};
+const ZD_WRITES = [ZD.unassignDb, ZD.deleteDb, ZD.disableDb];
+const ZONE3_SENSOR = 'A840410000000005';
+
+// Zone 1 (res1) and zone 3 (res1) and zone 2 (admin1) each have devices and an
+// enabled schedule; the gateway is cloud-linked so the outbox triggers fire.
+function seedZoneDelete(db) {
+  db.exec(`
+    INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('${ZONE3_SENSOR}', 'Sensor Z3', 'DRAGINO_LSN50', 2, 3, '2026-01-01', '2026-01-01');
+    INSERT INTO irrigation_schedules
+      (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version)
+      VALUES (2, 'SWT_2', 50, 10, 1, 'fixed', 2), (3, 'SWT_3', 70, 8, 1, 'aggressive', 6);
+    INSERT INTO sync_link_state (peer_node, linked, gateway_device_eui, updated_at)
+      VALUES ('cloud', 1, '${GATEWAY_EUI}', '2026-01-01');
+  `);
+}
+
+const ZONE_DELETE = {
+  A: { user: USERS.res1, zoneId: 1, zoneUuid: 'z-1' },
+  B: { user: USERS.admin1, zoneId: 2, zoneUuid: 'z-2' },
+  A3: { user: USERS.res1, zoneId: 3, zoneUuid: 'z-3' },
+};
+
+function zoneDeleteMsg(lane, { user = USERS.res1, zoneId, msgid, token }) {
+  const msg = {
+    req: { headers: { authorization: token || bearer(user) }, params: { id: String(zoneId) }, query: {} },
+    res: { lane },
+    payload: {},
+  };
+  if (msgid !== null) msg._msgid = msgid || 'msgid-' + lane;
+  return msg;
+}
+
+function plain(rows) {
+  return rows.map((row) => ({ ...row }));
+}
+
+function zoneState(db) {
+  return {
+    zones: plain(db.prepare(
+      'SELECT id, zone_uuid, deleted_at IS NOT NULL AS deleted, sync_version FROM irrigation_zones ORDER BY id'
+    ).all()),
+    devices: plain(db.prepare(
+      'SELECT deveui, irrigation_zone_id, sync_version FROM devices ORDER BY deveui'
+    ).all()),
+    schedules: plain(db.prepare(
+      'SELECT irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, deleted_at IS NOT NULL AS deleted FROM irrigation_schedules ORDER BY irrigation_zone_id'
+    ).all()),
+    outbox: plain(db.prepare(
+      'SELECT aggregate_type, aggregate_key, op, sync_version FROM sync_outbox ORDER BY rowid'
+    ).all()),
+  };
+}
+
+function sortedOutbox(state) {
+  return state.outbox.map((row) => JSON.stringify(row)).sort();
+}
+
+// The effect of running the same requests one after another, without interleaving,
+// on a fresh database: the oracle every interleaving must reproduce.
+async function serialZoneState(requests) {
+  scopeHelper._resetForTests();
+  const db = seedDb();
+  try {
+    seedZoneDelete(db);
+    const rt = new FlowRuntime(db, { scoped: false });
+    for (const [lane, nodeId, msg] of requests) {
+      rt.inject(lane, nodeId, msg);
+      await rt.run(lane);
+    }
+    return zoneState(db);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+}
+
+function lanesSql(rt, name, nodeId) {
+  return rt.lane(name).sql.filter((entry) => entry.node === nodeId).map((entry) => entry.topic);
+}
+
+function assertZoneDeleted(rt, db, name, spec, before) {
+  const response = onlyResponse(rt, name);
+  assert.equal(response.statusCode, 200, name + ' status: ' + JSON.stringify(response.payload));
+  assert.deepEqual(response.payload, { message: 'Zone deleted successfully' }, name + ' response');
+  assert.equal(rt.lane(name).links.filter((link) => link.node === ZD.flushLink).length, 1, name + ' outbox flush ping');
+
+  const unassign = lanesSql(rt, name, ZD.unassignDb);
+  assert.equal(unassign.length, 1, name + ' must unassign once');
+  assert.match(unassign[0], new RegExp('WHERE irrigation_zone_id = ' + spec.zoneId + '\\s'), name + ' unassign SQL');
+  const deletes = lanesSql(rt, name, ZD.deleteDb);
+  assert.equal(deletes.length, 1, name + ' must soft-delete once');
+  assert.match(deletes[0], new RegExp('WHERE id = ' + spec.zoneId + '\\s+AND user_id = ' + spec.user.userId + '\\s'), name + ' delete SQL');
+  const beforeZone = before.zones.find((zone) => zone.id === spec.zoneId);
+  assert.match(deletes[0], new RegExp('sync_version = ' + (beforeZone.sync_version + 1) + '\\s'), name + ' delete sync_version');
+  const disables = lanesSql(rt, name, ZD.disableDb);
+  assert.equal(disables.length, 1, name + ' must disable the schedule once');
+  assert.match(disables[0], new RegExp('WHERE irrigation_zone_id = ' + spec.zoneId + '\\s'), name + ' disable SQL zone');
+  assert.match(disables[0], new RegExp('AND user_id = ' + spec.user.userId + '\\s'), name + ' disable SQL actor');
+
+  const after = zoneState(db);
+  const zone = after.zones.find((row) => row.id === spec.zoneId);
+  assert.equal(zone.deleted, 1, name + ' zone ' + spec.zoneId + ' soft-deleted');
+  assert.equal(zone.sync_version, beforeZone.sync_version + 1, name + ' zone sync_version');
+  assert.deepEqual(after.devices.filter((device) => device.irrigation_zone_id === spec.zoneId), [],
+    name + ' devices of zone ' + spec.zoneId + ' unassigned');
+  const schedule = after.schedules.find((row) => row.irrigation_zone_id === spec.zoneId);
+  assert.equal(schedule.enabled, 0, name + ' schedule of zone ' + spec.zoneId + ' disabled');
+  assert.equal(
+    after.outbox.filter((row) => row.aggregate_type === 'ZONE' && row.aggregate_key === spec.zoneUuid && row.op === 'ZONE_DELETED').length,
+    1,
+    name + ' one ZONE_DELETED event for ' + spec.zoneUuid
+  );
+}
+
+function assertZoneUntouched(db, zoneId, before, label) {
+  const after = zoneState(db);
+  const pick = (state) => ({
+    zone: state.zones.find((row) => row.id === zoneId),
+    devices: state.devices.filter((row) => row.irrigation_zone_id === zoneId),
+    schedule: state.schedules.find((row) => row.irrigation_zone_id === zoneId),
+  });
+  assert.deepEqual(pick(after), pick(before), label + ': zone ' + zoneId + ' untouched');
+}
+
+function assertZoneDeleteRejected(rt, name, statusCode) {
+  const response = onlyResponse(rt, name);
+  assert.equal(response.statusCode, statusCode, name + ' status: ' + JSON.stringify(response.payload));
+  for (const nodeId of ZD_WRITES) {
+    assert.equal(lanesSql(rt, name, nodeId).length, 0, name + ' must not write at ' + nodeId);
+  }
+  assert.equal(rt.lane(name).links.filter((link) => link.node === ZD.flushLink).length, 0, name + ' no flush ping');
+}
+
+async function withZoneDeleteRuntime(body) {
+  await withRuntime({ scoped: false }, async (rt, db) => {
+    seedZoneDelete(db);
+    await body(rt, db, zoneState(db));
+  });
+}
+
+const ZONE_DELETE_BOUNDARIES = [ZD.userDb, ZD.zoneDb, ZD.unassignDb, ZD.deleteDb, ZD.disableDb];
+
+for (const boundary of ZONE_DELETE_BOUNDARIES) {
+  for (const paused of ['A', 'B']) {
+    const other = paused === 'A' ? 'B' : 'A';
+    test(`zone delete: two users, ${paused} paused at ${boundary}, ${other} completes, ${paused} resumes`, async () => {
+      const expected = await serialZoneState([
+        ['A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A)],
+        ['B', ZD.http, zoneDeleteMsg('B', ZONE_DELETE.B)],
+      ]);
+      await withZoneDeleteRuntime(async (rt, db, before) => {
+        rt.inject('A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A));
+        rt.inject('B', ZD.http, zoneDeleteMsg('B', ZONE_DELETE.B));
+        await rt.runUntil(paused, boundary);
+        await rt.run(other);
+        await rt.run(paused);
+        assertZoneDeleted(rt, db, 'A', ZONE_DELETE.A, before);
+        assertZoneDeleted(rt, db, 'B', ZONE_DELETE.B, before);
+        assertZoneUntouched(db, 3, before, 'zone 3');
+        const after = zoneState(db);
+        assert.deepEqual({ ...after, outbox: sortedOutbox(after) }, { ...expected, outbox: sortedOutbox(expected) },
+          'interleaved result equals the serial result');
+      });
+    });
+  }
+}
+
+for (const boundary of [ZD.zoneDb, ZD.deleteDb]) {
+  test(`zone delete: same user, two zones, A paused at ${boundary}`, async () => {
+    await withZoneDeleteRuntime(async (rt, db, before) => {
+      rt.inject('A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A));
+      rt.inject('A3', ZD.http, zoneDeleteMsg('A3', ZONE_DELETE.A3));
+      await rt.runUntil('A', boundary);
+      await rt.run('A3');
+      await rt.run('A');
+      assertZoneDeleted(rt, db, 'A', ZONE_DELETE.A, before);
+      assertZoneDeleted(rt, db, 'A3', ZONE_DELETE.A3, before);
+      assertZoneUntouched(db, 2, before, 'zone 2');
+    });
+  });
+}
+
+// A zone delete interleaved with a schedule PUT on another zone: the delete disables
+// only its own zone's schedule, and the PUT writes only its own zone's schedule.
+const SCHEDULE_Z3 = {
+  zoneId: 3,
+  zoneUuid: 'z-3',
+  version: 7,
+  patch: { trigger_metric: 'SWT_1', threshold_kpa: 35, duration_minutes: 9, response_mode: 'fixed', enabled: true },
+};
+const DELETE_VS_SCHEDULE = [
+  ['delete', ZD.zoneDb],
+  ['delete', ZD.deleteDb],
+  ['delete', ZD.disableDb],
+  ['schedule', ID.schedZoneDb],
+  ['schedule', ID.schedSaveDb],
+];
+for (const [paused, boundary] of DELETE_VS_SCHEDULE) {
+  const other = paused === 'delete' ? 'schedule' : 'delete';
+  test(`zone delete vs schedule PUT on another zone: ${paused} paused at ${boundary}`, async () => {
+    await withZoneDeleteRuntime(async (rt, db, before) => {
+      rt.inject('delete', ZD.http, zoneDeleteMsg('delete', ZONE_DELETE.A));
+      rt.inject('schedule', ID.schedHttp, scheduleMsg('schedule', SCHEDULE_Z3));
+      await rt.runUntil(paused, boundary);
+      await rt.run(other);
+      await rt.run(paused);
+      assertZoneDeleted(rt, db, 'delete', ZONE_DELETE.A, before);
+      assertScheduleApplied(rt, db, 'schedule', SCHEDULE_Z3);
+      const zone3 = zoneState(db).zones.find((row) => row.id === 3);
+      assert.equal(zone3.deleted, 0, 'zone 3 not deleted');
+      assertZoneUntouched(db, 2, before, 'zone 2');
+    });
+  });
+}
+
+// A request refused at the ownership check (another user's zone) interleaved with
+// the owner's own delete: the refused one writes nothing, the owner's completes.
+for (const boundary of [ZD.zoneDb, ZD.unassignDb, ZD.deleteDb]) {
+  test(`zone delete: foreign user refused while the owner waits at ${boundary}`, async () => {
+    await withZoneDeleteRuntime(async (rt, db, before) => {
+      rt.inject('owner', ZD.http, zoneDeleteMsg('owner', ZONE_DELETE.A3));
+      rt.inject('other', ZD.http, zoneDeleteMsg('other', { user: USERS.admin1, zoneId: 1 }));
+      await rt.runUntil('owner', boundary);
+      await rt.run('other');
+      await rt.run('owner');
+      assertZoneDeleteRejected(rt, 'other', 404);
+      assertZoneDeleted(rt, db, 'owner', ZONE_DELETE.A3, before);
+      assertZoneUntouched(db, 1, before, 'zone 1');
+      assertZoneUntouched(db, 2, before, 'zone 2');
+    });
+  });
+}
+
+test('zone delete: foreign user paused after its ownership check, owner completes first', async () => {
+  await withZoneDeleteRuntime(async (rt, db, before) => {
+    rt.inject('owner', ZD.http, zoneDeleteMsg('owner', ZONE_DELETE.A3));
+    rt.inject('other', ZD.http, zoneDeleteMsg('other', { user: USERS.admin1, zoneId: 1 }));
+    await rt.runUntil('other', ZD.zoneDb);
+    await rt.run('owner');
+    await rt.run('other');
+    assertZoneDeleteRejected(rt, 'other', 404);
+    assertZoneDeleted(rt, db, 'owner', ZONE_DELETE.A3, before);
+    assertZoneUntouched(db, 1, before, 'zone 1');
+  });
+});
+
+test('zone delete: invalid token interleaved with a valid delete', async () => {
+  await withZoneDeleteRuntime(async (rt, db, before) => {
+    rt.inject('A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A));
+    rt.inject('bad', ZD.http, zoneDeleteMsg('bad', { zoneId: 3, token: 'Bearer e30.invalid' }));
+    await rt.runUntil('A', ZD.deleteDb);
+    await rt.run('bad');
+    await rt.run('A');
+    assertZoneDeleteRejected(rt, 'bad', 401);
+    assertZoneDeleted(rt, db, 'A', ZONE_DELETE.A, before);
+    assertZoneUntouched(db, 3, before, 'zone 3');
+  });
+});
+
+// Fail closed: a message that reaches a later chain node without its own request
+// envelope (or with one naming another zone) answers 500 through the tab's catch
+// and writes nothing. Not reachable from the HTTP entry; pins the defensive branch.
+function zoneRow(zoneId) {
+  return { id: zoneId, zone_uuid: 'z-' + zoneId, gateway_device_eui: null, sync_version: 1 };
+}
+
+function zoneDeleteEnvelope(zoneId, actorId, extra) {
+  return Object.assign({ request: { v: 1, kind: 'zone_delete', requestId: 'msgid-X', actorId, zoneId } }, extra || {});
+}
+
+const FAIL_CLOSED = [
+  ['Unassign Devices without envelope', ZD.unassign, () => ({ payload: [zoneRow(1)] })],
+  ['Unassign Devices with an envelope for another zone', ZD.unassign,
+    () => ({ payload: [zoneRow(1)], osi: zoneDeleteEnvelope(3, 2) })],
+  ['(Soft) Delete Zone without envelope', ZD.softDelete, () => ({ payload: [] })],
+  ['(Soft) Delete Zone without applied values', ZD.softDelete, () => ({ payload: [], osi: zoneDeleteEnvelope(1, 2) })],
+  ['Disable Schedule without envelope', ZD.disable,
+    () => ({ payload: [], topic: "UPDATE irrigation_zones SET deleted_at = '2026-01-02' WHERE id = 1 AND deleted_at IS NULL" })],
+];
+for (const [label, nodeId, build] of FAIL_CLOSED) {
+  test(`zone delete fail-closed: ${label}`, async () => {
+    await withZoneDeleteRuntime(async (rt, db, before) => {
+      const msg = Object.assign({
+        _msgid: 'msgid-X',
+        req: { headers: { authorization: bearer(USERS.res1) }, params: { id: '1' }, query: {} },
+        res: { lane: 'X' },
+      }, build());
+      rt.inject('X', nodeId, msg);
+      await rt.run('X');
+      assertZoneDeleteRejected(rt, 'X', 500);
+      assert.deepEqual(rt.lane('X').thrown.map((entry) => entry.node), [nodeId], 'fails at ' + nodeId);
+      assert.match(rt.lane('X').thrown[0].message, /^zone delete request context (missing|mismatch)$/);
+      assert.deepEqual(zoneState(db), before, 'no database change');
+    });
+  });
+}
+
+test('zone delete fail-closed: a request without _msgid', async () => {
+  await withZoneDeleteRuntime(async (rt, db, before) => {
+    rt.inject('A', ZD.http, zoneDeleteMsg('A', { ...ZONE_DELETE.A, msgid: null }));
+    await rt.run('A');
+    assertZoneDeleteRejected(rt, 'A', 500);
+    assert.equal(lanesSql(rt, 'A', ZD.zoneDb).length, 0, 'no zone lookup runs without a request id');
+    assert.deepEqual(zoneState(db), before, 'no database change');
+  });
+});
+
+test('zone delete envelope: carries only approved keys and no credential material', async () => {
+  await withZoneDeleteRuntime(async (rt) => {
+    const msg = zoneDeleteMsg('A', ZONE_DELETE.A);
+    const token = msg.req.headers.authorization;
+    rt.inject('A', ZD.http, msg);
+    await rt.runUntil('A', ZD.zoneDb);
+    const inFlight = rt.lane('A').queue[0].msg;
+    assert.ok(inFlight.osi && inFlight.osi.request, 'request envelope present on msg');
+    assert.deepEqual(inFlight.osi.request, { v: 1, kind: 'zone_delete', requestId: 'msgid-A', actorId: 2, zoneId: 1 });
+    await rt.runUntil('A', ZD.deleteDb);
+    assert.deepEqual(rt.lane('A').queue[0].msg.osi.applied, { sync_version: 2 });
+    const serialized = JSON.stringify(rt.lane('A').queue[0].msg.osi);
     assert.doesNotMatch(serialized, /bearer|token|password|secret|authorization/i);
     assert.ok(!serialized.includes(token.slice(7)), 'bearer token must not enter the envelope');
   });

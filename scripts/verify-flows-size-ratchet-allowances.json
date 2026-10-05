@@ -656,6 +656,14 @@
     "c8628cffe45f64f7": {
       "delta": 90,
       "reason": "Valve and schedule request isolation (osi-os #377), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 1499 -> HEAD 1589 = +90. Build Status + ACK drops the flow.get(lastCommandId) fallback and emits the command ACK only when its own _log_ctx carries a command id; a manual or scheduler open has none and used to acknowledge the last routed cloud command."
+    },
+    "delete-zone-verify": {
+      "delta": 271,
+      "reason": "Zone delete request isolation (osi-os #377, E02 zone delete), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 634 -> HEAD 905 = +271. Verify Zone Ownership refuses a request without a Node-RED _msgid (500) and builds the msg.osi.request envelope (v, kind zone_delete, requestId, actorId, zoneId) in place of two flow.set(delete_zone_*) calls."
+    },
+    "delete-zone-delete": {
+      "delta": 149,
+      "reason": "Zone delete request isolation (osi-os #377, E02 zone delete), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 442 -> HEAD 591 = +149. (Soft) Delete Zone reads zone id and actor from msg.osi.request and the next sync_version from msg.osi.applied instead of three flow.get(delete_zone_*) reads, and throws to the tab catch (500) when either is missing. Unassign Devices (-62) and Disable Schedule (-18) shrink in the same change; net +340 per profile."
     }
   },
   "total_allowance": {
