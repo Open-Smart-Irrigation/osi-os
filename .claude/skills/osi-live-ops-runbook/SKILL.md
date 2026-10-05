@@ -381,23 +381,34 @@ and a failed post-flip self-check, which either auto-rolls back and exits 1, or
 — when there is no previous payload — exits 1 with an `ERROR` and leaves the new
 payload live. All of these are hard aborts (`exit 1`), not partial continues.
 
-**Failed command-ledger activation.** Before activating, `deploy.sh` copies
-the live `osi-command-ledger/{package.json,index.js}` and
+**Failed command-ledger activation.** At staging, before anything is stopped,
+`deploy.sh` copies the live `osi-command-ledger/{package.json,index.js}` and
 `osi-watermark-binding/canonicalization.js` to
-`/srv/node-red/.osi-command-ledger-previous.<stamp>`. A successful deploy removes
-that copy; a failed one keeps it. On failure the script lists each live file as
-previous, candidate, absent or unknown, then loads the live pair in a fresh
-process:
-- it loads: the deploy's usual failure path runs (previous payload restarted
-  when the database allows it);
-- it does not load: the copy is restored and loaded again; if that loads, the
-  same failure path runs;
-- neither loads: Node-RED and identityd are held stopped, Node-RED start at boot
-  is disabled (marker `/srv/node-red/.osi-command-ledger-boot-hold`), and the
-  message says so. Way out: re-run the deploy; an activation whose pair loads
-  re-enables Node-RED at boot. After a manual repair instead:
-  `/etc/init.d/node-red enable && /etc/init.d/node-red start`, then delete the
-  marker.
+`/srv/node-red/.osi-command-ledger-previous.<stamp>`. The file `absent` in that
+directory lists the files that did not exist. If the copy fails, the deploy stops
+there. A successful deploy removes the copy; a failed one keeps it.
+
+If the activation fails, the script lists each live file as previous,
+candidate, absent or unknown, then decides:
+- no ledger file is in place, as before the deploy (a gateway that never had
+  one): the deploy's usual failure path runs, which restarts the previous
+  payload when the database allows it;
+- the live pair loads in a fresh process: the same failure path runs;
+- it does not load: the kept state is restored. Absent files are restored too:
+  candidate files that did not exist before are moved to `<copy>/failed`. If
+  the result has no ledger files, or loads, the same failure path runs;
+- otherwise: Node-RED and identityd are held **stopped**, as in the script's
+  other holds. Nothing is disabled, so a reboot or a manual start runs the
+  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
+  records the reason, the time and the copy.
+
+Every later deploy reads the marker before its first fetch:
+- if the live pair loads, it clears the marker and says so;
+- if not, it prints a `WARNING` and carries on; an activation whose pair
+  loads clears the marker.
+
+Way out: re-run the deploy. If it fails again, the load error printed by the
+installer or the probe names the cause.
 
 ### Private branch deployments
 
