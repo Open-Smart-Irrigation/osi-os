@@ -235,6 +235,37 @@ test('a key re-queued between the row lookup and the drop is not dropped', async
   assert.ok(h.warnings.some((w) => /dropped 1 queued device_data key\(s\)/.test(w)), h.warnings.join('\n'));
 });
 
+test('a failed row lookup drops nothing more, and drops made earlier in that turn are still logged', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(4,?,?,21)').run(SENSOR, '2026-08-13T00:00:00.000Z');
+  cursor.run('device_data', '4', null, '4', null);
+  link(db);
+  dirty(db, 'device_data', key(3), 'repair', T_DEAD);
+  dirty(db, 'device_data', key(4), 'repair', T_DEAD);
+  dirty(db, 'device_data', key(5), 'repair', T_DEAD);
+  const h = createHarness({
+    db,
+    lastTable: 'valve_actuation_expectations',
+    env: { DEVICE_EUI: GATEWAY },
+    afterAll: (sql, params) => {
+      if (/FROM device_data WHERE id = \?/.test(sql) && String(params[0]) === '4') {
+        throw Object.assign(new Error('SQLITE_BUSY: database is locked'), { code: 'SQLITE_BUSY' });
+      }
+    }
+  });
+  const built = await h.invoke('sync-history-build', {});
+  assert.equal(built, null, 'no batch in a turn whose lookup failed');
+  const row = (id) => db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
+  assert.equal(row(3).status, 'dropped');
+  assert.deepEqual([row(4).status, row(4).attempts, row(4).last_error], ['pending', 0, null], 'a read error never drops a key');
+  assert.deepEqual([row(5).status, row(5).attempts], ['pending', 0], 'keys behind the failed lookup are not touched');
+  assert.ok(h.warnings.some((w) => /dropped 1 queued device_data key\(s\): source row missing/.test(w)), h.warnings.join('\n'));
+  assert.equal(h.memory.get('sync_state').lastHistoryDroppedMissing.count, 1);
+  assert.match(h.memory.get('sync_state').lastHistorySyncError.message, /SQLITE_BUSY/);
+});
+
 test('a row-level permanent rejection sets that key aside and does not block the table', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
