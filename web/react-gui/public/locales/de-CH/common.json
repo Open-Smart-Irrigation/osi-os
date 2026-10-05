@@ -81,7 +81,14 @@
     "export": {
       "csv": "CSV exportieren",
       "png": "PNG exportieren",
-      "allZonesCsv": "CSV für alle Zonen exportieren"
+      "allZonesCsv": "CSV für alle Zonen exportieren",
+      "allZonesCsvBusy": "Wird exportiert…",
+      "errors": {
+        "tooLarge": "Dieser Export ist zu gross. Wählen Sie einen kürzeren Zeitraum oder eine gröbere Aggregation.",
+        "busy": "Ein anderer Export läuft. Versuchen Sie es gleich noch einmal.",
+        "invalidRange": "Dieser Zeitraum kann nicht exportiert werden. Prüfen Sie Start- und Enddatum.",
+        "failed": "Der Export ist fehlgeschlagen. Versuchen Sie es erneut."
+      }
     },
     "legend": {
       "label": "Diagrammlegende",

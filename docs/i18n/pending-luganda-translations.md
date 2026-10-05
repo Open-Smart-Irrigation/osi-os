@@ -190,14 +190,14 @@ Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
 
-## `common.json` — saved-view delete confirmation
+## `common.json` — all-zones export messages and saved-view delete
 
 | Keys | Reason |
 |---|---|
-| `analysis.views.confirmDelete` (1 key in `common.json`) | Added with the confirmation before a saved view is deleted on the analysis page. No human Luganda pass yet, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+| `analysis.export.allZonesCsvBusy`, `analysis.export.errors.tooLarge`, `busy`, `invalidRange`, `failed`; `analysis.views.confirmDelete` (6 keys in `common.json`) | Added with the analysis page's all-zones CSV export (its busy label and the messages for a refused or failed export) and the confirmation before a saved view is deleted. No human Luganda pass yet, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
 
 Tracked in code at `web/react-gui/tests/analysis-locales.test.ts`
-(`PENDING_HUMAN_LUGANDA` in the saved-view delete confirmation test), which asserts each
+(`PENDING_HUMAN_LUGANDA` in the all-zones export test), which asserts each
 key's `lg` value is still byte-identical to `en`. A human Luganda pass must
 drop the key from that set and from the table above in the same change.
 

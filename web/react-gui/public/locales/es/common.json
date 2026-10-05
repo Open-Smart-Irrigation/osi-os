@@ -81,7 +81,14 @@
     "export": {
       "csv": "Exportar CSV",
       "png": "Exportar PNG",
-      "allZonesCsv": "Exportar CSV de todas las zonas"
+      "allZonesCsv": "Exportar CSV de todas las zonas",
+      "allZonesCsvBusy": "Exportando…",
+      "errors": {
+        "tooLarge": "Esta exportación es demasiado grande. Elige un periodo más corto o una agregación más amplia.",
+        "busy": "Hay otra exportación en curso. Inténtalo de nuevo en un momento.",
+        "invalidRange": "Este periodo no se puede exportar. Revisa las fechas de inicio y fin.",
+        "failed": "La exportación ha fallado. Inténtalo de nuevo."
+      }
     },
     "legend": {
       "label": "Leyenda del gráfico",

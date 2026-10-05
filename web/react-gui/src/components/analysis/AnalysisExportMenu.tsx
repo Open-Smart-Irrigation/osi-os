@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import { useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AnalysisCatalogEntry, AnalysisSeries } from '../../analysis/types';
 import { toTidyCsv } from '../../analysis/csv';
@@ -8,6 +8,16 @@ import { historyExportAPI, type HistoryExportGranularity } from '../../services/
 import type { EChartHandle } from './EChart';
 
 type AnalysisTranslate = (key: string, options?: Record<string, unknown>) => string;
+
+// The gateway answers 413 past its range or row bound, 429 while another
+// export runs and 400 for a range it cannot export.
+function allZonesErrorKey(error: unknown): string {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 413) return 'analysis.export.errors.tooLarge';
+  if (status === 429) return 'analysis.export.errors.busy';
+  if (status === 400) return 'analysis.export.errors.invalidRange';
+  return 'analysis.export.errors.failed';
+}
 
 interface AnalysisExportMenuProps {
   series: AnalysisSeries[];
@@ -39,16 +49,24 @@ export function AnalysisExportMenu({
     if (dataUrl) downloadDataUrl(exportFileName(username, 'png'), dataUrl);
   };
 
+  const [allZonesPending, setAllZonesPending] = useState(false);
+  const [allZonesError, setAllZonesError] = useState<string | null>(null);
+
   const exportAllZonesCsv = () => {
-    if (!exportRange) return;
-    void historyExportAPI.downloadAllZones({
+    if (!exportRange || allZonesPending) return;
+    setAllZonesPending(true);
+    setAllZonesError(null);
+    historyExportAPI.downloadAllZones({
       ...exportRange,
       granularity: exportGranularity,
-    });
+    })
+      .catch((error: unknown) => setAllZonesError(allZonesErrorKey(error)))
+      .finally(() => setAllZonesPending(false));
   };
 
   return (
-    <div className="analysis-export-menu flex gap-2">
+    <div className="analysis-export-menu">
+    <div className="flex gap-2">
       <button
         type="button"
         disabled={disabled}
@@ -67,12 +85,19 @@ export function AnalysisExportMenu({
       </button>
       <button
         type="button"
-        disabled={!exportRange}
+        disabled={!exportRange || allZonesPending}
+        aria-busy={allZonesPending}
         onClick={exportAllZonesCsv}
         className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
       >
-        {t('analysis.export.allZonesCsv')}
+        {t(allZonesPending ? 'analysis.export.allZonesCsvBusy' : 'analysis.export.allZonesCsv')}
       </button>
+    </div>
+    {allZonesError && (
+      <p role="alert" className="mt-2 text-sm text-[var(--warn-text)]">
+        {t(allZonesError)}
+      </p>
+    )}
     </div>
   );
 }

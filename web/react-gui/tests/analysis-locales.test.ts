@@ -65,8 +65,13 @@ test('the weather data view keys resolve in all seven locales with matching plac
   }
 });
 
-test('the saved-view delete confirmation resolves in all seven locales', () => {
+test('the all-zones export messages and the saved-view delete confirmation resolve in all seven locales', () => {
   const keys = [
+    'export.allZonesCsvBusy',
+    'export.errors.tooLarge',
+    'export.errors.busy',
+    'export.errors.invalidRange',
+    'export.errors.failed',
     'views.confirmDelete',
   ];
   // lg ships the English text until a human pass; a translated key leaves this

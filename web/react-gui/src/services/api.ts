@@ -1950,21 +1950,59 @@ async function downloadHistoryCsv(
   URL.revokeObjectURL(url);
 }
 
+// A refused or failed CSV export: the HTTP status (null without an answer)
+// and the gateway's suggestion, read from the JSON error body that arrives as
+// a Blob because the request asks for one.
+export class HistoryExportError extends Error {
+  readonly status: number | null;
+  readonly suggestion: string | null;
+
+  constructor(message: string, status: number | null, suggestion: string | null) {
+    super(message);
+    this.name = 'HistoryExportError';
+    this.status = status;
+    this.suggestion = suggestion;
+  }
+}
+
+async function toHistoryExportError(error: unknown): Promise<HistoryExportError> {
+  const response = (error as { response?: { status?: unknown; data?: unknown } } | null)?.response;
+  const status = typeof response?.status === 'number' ? response.status : null;
+  let message = error instanceof Error ? error.message : 'export failed';
+  let suggestion: string | null = null;
+  const data = response?.data;
+  try {
+    const text = data instanceof Blob ? await data.text() : typeof data === 'string' ? data : null;
+    const body = text ? JSON.parse(text) as { error?: unknown; suggestion?: unknown } : null;
+    if (body && typeof body.error === 'string') message = body.error;
+    if (body && typeof body.suggestion === 'string') suggestion = body.suggestion;
+  } catch {
+    // A body that is not JSON keeps the status alone.
+  }
+  return new HistoryExportError(message, status, suggestion);
+}
+
 export const historyExportAPI = {
   downloadAllZones: async (opts: {
     from: string;
     to: string;
     granularity: HistoryExportGranularity;
-  }): Promise<void> => downloadHistoryCsv(
-    '/api/history/export.csv',
-    {
-      scope: 'allZones',
-      from: opts.from,
-      to: opts.to,
-      granularity: opts.granularity,
-    },
-    `all-zones-${opts.from}_${opts.to}-${opts.granularity}.csv`,
-  ),
+  }): Promise<void> => {
+    try {
+      await downloadHistoryCsv(
+        '/api/history/export.csv',
+        {
+          scope: 'allZones',
+          from: opts.from,
+          to: opts.to,
+          granularity: opts.granularity,
+        },
+        `all-zones-${opts.from}_${opts.to}-${opts.granularity}.csv`,
+      );
+    } catch (error) {
+      throw await toHistoryExportError(error);
+    }
+  },
 };
 
 export const zoneExportAPI = {

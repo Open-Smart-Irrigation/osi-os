@@ -100,4 +100,24 @@ describe('zoneExportAPI', () => {
     expect(click).toHaveBeenCalledTimes(1);
     click.mockRestore();
   });
+  it('turns a refused all-zones export into an error carrying the status and the server suggestion', async () => {
+    const body = new Blob([JSON.stringify({ error: 'export exceeds 200000 rows', suggestion: 'choose a shorter range' })], { type: 'application/json' });
+    axiosMocks.get.mockRejectedValue(Object.assign(new Error('Request failed with status code 413'), {
+      response: { status: 413, data: body },
+    }));
+    const { historyExportAPI } = await import('../../../services/api');
+
+    await expect(historyExportAPI.downloadAllZones({ from: '2026-01-01', to: '2026-07-01', granularity: 'raw' }))
+      .rejects.toMatchObject({ status: 413, suggestion: 'choose a shorter range' });
+  });
+
+  it('keeps the status of a refused export even when its body is not JSON', async () => {
+    axiosMocks.get.mockRejectedValue(Object.assign(new Error('Too Many Requests'), {
+      response: { status: 429, data: new Blob(['busy'], { type: 'text/plain' }) },
+    }));
+    const { historyExportAPI } = await import('../../../services/api');
+
+    await expect(historyExportAPI.downloadAllZones({ from: '2026-06-01', to: '2026-06-03', granularity: 'daily' }))
+      .rejects.toMatchObject({ status: 429, suggestion: null });
+  });
 });

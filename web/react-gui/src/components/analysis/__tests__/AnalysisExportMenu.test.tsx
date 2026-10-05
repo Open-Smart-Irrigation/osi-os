@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
@@ -105,6 +105,49 @@ describe('AnalysisExportMenu', () => {
     expect(screen.getByRole('button', { name: 'analysis.export.csv' })).toBeDisabled();
   });
 
+  const renderAllZones = () => render(
+    <AnalysisExportMenu
+      series={series}
+      catalogById={new Map()}
+      chartRef={{ current: null }}
+      username="admin"
+      exportRange={{ from: '2026-06-01', to: '2026-06-07' }}
+      exportGranularity="raw"
+    />,
+  );
+
+  it('shows a busy state while the all-zones export runs and clears it afterwards', async () => {
+    let finish: () => void = () => undefined;
+    downloadAllZones.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    renderAllZones();
+
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.export.allZonesCsv' }));
+    const busy = await screen.findByRole('button', { name: 'analysis.export.allZonesCsvBusy' });
+    expect(busy).toBeDisabled();
+    fireEvent.click(busy);
+    expect(downloadAllZones).toHaveBeenCalledTimes(1);
+
+    finish();
+    expect(await screen.findByRole('button', { name: 'analysis.export.allZonesCsv' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [413, 'analysis.export.errors.tooLarge'],
+    [429, 'analysis.export.errors.busy'],
+    [400, 'analysis.export.errors.invalidRange'],
+    [500, 'analysis.export.errors.failed'],
+    [undefined, 'analysis.export.errors.failed'],
+  ])('shows a visible message when the all-zones export answers %s', async (status, message) => {
+    downloadAllZones.mockRejectedValue(Object.assign(new Error('export failed'), { status }));
+    renderAllZones();
+
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.export.allZonesCsv' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'analysis.export.allZonesCsv' })).toBeEnabled());
+  });
+
   it('downloads all-zones CSV with the resolved analysis range and granularity', () => {
     render(
       <AnalysisExportMenu
@@ -117,6 +160,7 @@ describe('AnalysisExportMenu', () => {
       />,
     );
 
+    downloadAllZones.mockResolvedValue(undefined);
     fireEvent.click(screen.getByRole('button', { name: 'analysis.export.allZonesCsv' }));
 
     expect(downloadAllZones).toHaveBeenCalledWith({
