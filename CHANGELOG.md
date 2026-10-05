@@ -56,11 +56,40 @@ every 0.7.0 entry below.
 - The Node-RED editor is closed (see Security). Field repair that needs it
   means editing `/srv/node-red/settings.js` on the gateway and restarting
   Node-RED; the next `deploy.sh` run overwrites that edit.
-- `firmware_version` is written only by the first-boot
-  `96_osi_server_config`; `deploy.sh` does not change it. A gateway flashed
-  from an older image keeps reporting that image's version after an upgrade.
-  A gateway installed with `deploy.sh` on stock ChirpStack Gateway OS has no
-  such key and reports the deployed version.
+- `deploy.sh` writes `osi-server.cloud.firmware_version` from the deployed
+  tree after the payload flip and before its own Node-RED restart, and puts
+  the previous value back on every flip back. A gateway flashed from the
+  0.6.5 image stops reporting 0.6.5 after its first deploy. A missing `uci`
+  or `osi-server.cloud` section is logged as a `WARN` and does not fail the
+  deploy.
+- `deploy.sh` now refuses, before it stops Node-RED, when a migration file,
+  `CHECKSUMS.json` or a migration-runner module is missing, empty or does not
+  match the manifest, and it fails instead of reporting success when a
+  command-ledger staging or activation step fails.
+- After a failed command-ledger activation whose previous files also fail to
+  load, Node-RED and `osi-identityd` stay stopped and
+  `/srv/node-red/.osi-command-ledger-hold` records the reason and time. A
+  reboot starts the previous payload. Re-run the deploy to clear it: every
+  deploy reads the marker first and removes it once the ledger pair loads.
+- A gateway on an earlier main build receives the updated
+  `osi-command-ledger` and WATERMARK binding files through the deploy's
+  SHA-256-pinned install.
+- On an install onto stock ChirpStack Gateway OS, `deploy.sh` enables
+  `osi-bootstrap`, which provisions ChirpStack at the next boot;
+  `/etc/init.d/osi-bootstrap start` provisions at once. Do not run
+  `chirpstack-bootstrap.js` directly: it writes no stamp, so the next boot
+  runs it again and creates a second API key.
+
+### Known limitations
+- Journal entries written by a user whose gateway-local id is 32 hex digits
+  without hyphens (the first admin and backfilled users) are probably refused
+  when they replicate, and cloud journal writes for such an account are
+  refused: the journal's owner and author fields accept only the hyphenated
+  form. Read from the code, not reproduced; tracked in #401.
+- Device add, device assign, device delete and account link still keep
+  per-request values in shared flow context, so overlapping requests of
+  these kinds can exchange values (overlapping device adds can cross).
+  Tracked in #377.
 
 ### Added
 - **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
@@ -179,7 +208,13 @@ every 0.7.0 entry below.
   `scripts/requeue-rejected-outbox.js` (dry run by default), the
   `osi-sync-protocol-state` CLI, and the offline deploy bundle scripts.
 - CI and developer tooling: workflows for doc hygiene, Field Journal, journal
-  catalog parity and ui-core vendor parity; new verifiers including
+  catalog parity, ui-core vendor parity and the test inventory
+  (`scripts/verify-test-inventory.js` fails on a test file no workflow can
+  fail on); test steps fail on an empty collection; the GUI installs with
+  `npm ci` on Node 22 and gives each tsx test file 120 s; a request-state
+  guard (`verify-request-context-isolation.js`) and a scoped-access gate that
+  probes every HTTP route; the calibration seed script writes all seven seed
+  images or none; new verifiers including
   `verify-seed-db-ledger.js`, `verify-trigger-body-parity.js`,
   `verify-rename-swap-fence.js`, `verify-flows-output-arity.js`,
   `verify-module-file-deploy-coverage.js`, `verify-auth-flag-off-hermetic.js`,
@@ -207,6 +242,10 @@ every 0.7.0 entry below.
   focus inside and close on Escape; sensor chart axes and tooltips use the
   app date format; a newly created zone scrolls into view with focus; valve
   panel strings translated into Spanish, Italian and Portuguese.
+- `deploy.sh` enables `osi-bootstrap` where it installs it (also an
+  operator-disabled one; when the gateway is already provisioned it writes
+  the stamp so the bootstrap does not run again), and writes the deployed
+  firmware version.
 - `deploy.sh`: flows and GUI deploy and roll back as one pair; readiness is
   checked through the named procd service within a 30 s window; Node-RED stays
   stopped when a migration committed and no compatible payload exists; a fresh
@@ -219,8 +258,8 @@ every 0.7.0 entry below.
   in trigger fallbacks (normalizer v3).
 - The cloud sync token is refreshed once less than half its lifetime remains,
   instead of only in its last 24 h.
-- The heartbeat carries `sync_rejected_recent`, and `health_state` uses that
-  recent-rejection count instead of the all-time one.
+- The heartbeat carries `sync_rejected_recent`, the count of rejections in
+  the last 24 h, and `health_state` uses it instead of the all-time count.
 - Rejected outbox rows are pruned after 14 days.
 - Every ChirpStack gRPC call carries a deadline: 20 s by default,
   `OSI_CHIRPSTACK_GRPC_DEADLINE_MS` to override.
@@ -236,6 +275,11 @@ every 0.7.0 entry below.
   has run, which had let the previous boot node rebuild `devices` against the
   migrated schema and cascade-delete `device_data`. The boot node's `devices`
   rebuild now follows the seed's column order and copies by live column name.
+- Deploy: a failed command-ledger activation, or a migration file that failed
+  to download, no longer ends in "OK" and exit 0. Before, a missing 0068
+  could flip the new flows onto the old schema. The header shows the
+  download-then-run form, and the closing message names the bootstrap path
+  that exists on the gateway.
 - Deploy: a no-op migration no longer marks the database as migrated; after
   a later failure the deploy restores the retained flows and GUI pair when the
   schema is still compatible with it; the ledger reconciliation probe
@@ -273,6 +317,16 @@ every 0.7.0 entry below.
   `sync_version` for dendrometer daily, zone recommendation and zone
   environment rows; the dendrometer node's fallback table DDL includes
   `sync_version`, which had crashed the first rewrite on an older database.
+- Overlapping requests on the manual valve route
+  (`POST /api/valve/:deveui`), the zone schedule route
+  (`PUT /api/irrigation-zones/:id/schedule`) and zone delete could exchange
+  target, duration and response, or leave a deleted zone's schedule enabled:
+  request values now travel on the message. A manual or scheduled valve open
+  no longer acknowledges the last unrelated cloud command as applied.
+- Protected cloud commands (WATERMARK calibration, Chameleon configuration,
+  soil depths) and local installation-location and radio edits accept the
+  32-hex form of a gateway-local user id; before, they were refused for a
+  gateway's first admin (local edits with a 400).
 - Gateway attribution triggers fall back to the persisted link identifier,
   and linking commits account state and blank gateway identifiers in one
   transaction (`0058__gateway_eui_fallback.sql`).
@@ -306,6 +360,11 @@ every 0.7.0 entry below.
   token; in 0.7.0 both answered without one.
 - `PUT /api/irrigation-zones/:zone_id/timezone` changes only a zone the
   caller owns; in 0.7.0 any signed-in user could change any zone.
+- GUI: cached data and in-flight writes belong to one login session. After a
+  logout and login as another user in the same tab, the second user no
+  longer sees data cached for the first, and the first user's chained writes
+  stop. The support request status secret is no longer stored in the
+  browser.
 
 ---
 
