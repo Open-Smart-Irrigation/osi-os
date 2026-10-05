@@ -24,8 +24,9 @@
 //      assignment, the admin's account and rows) and sends no command naming
 //      one by its uuid or EUI. The runs name foreign objects by URL parameter,
 //      by every body or query field the fixture leaves unset, and by the body
-//      fields of the fixture's foreignBodies; bulk writes and set replacements
-//      are judged by the same comparison.
+//      fields of the fixture's foreignBodies (run after its foreignBodySetupSql,
+//      when it has one); bulk writes and set replacements are judged by the
+//      same comparison.
 // A scope decision is a call to a deciding function of osi-scope-helper
 // (assertFresh*Access, assertRole, assertFreshRole, assertEnabledAccount,
 // assertAuthenticatedRole, authorizeAdminRead, isAdmin, canMutate,
@@ -165,17 +166,12 @@ const PHASE_C_PENDING = new Set([
 // Known gaps: real gaps found by this verifier, each tracked by its issue. An
 // entry leaves the list when its fix lands (the stale check enforces it).
 const KNOWN_GAPS = new Map([
-  ['improvement-requests-post-http', '#400: needs an enabled-account decision'],
-  ['journal-catalog-get-http', '#400: needs an enabled-account decision'],
-  ['journal-entry-put-http', '#403: needs the zone decision on the entry\'s zone'],
-  ['journal-entry-void-post-http', '#403: needs the zone decision on the entry\'s zone'],
 ]);
 
 // Known gaps the outcome rule sees: the entry is checked like any other, and
 // only the listed change to rows outside the caller's scope is tolerated until
 // the issue's fix lands (then the entry is stale and fails until removed).
 const KNOWN_OUTCOME_GAPS = new Map([
-  ['s2120-zones-put-http', { issue: '#404', table: 'weather_station_zones', op: 'removed' }],
 ]);
 
 // Entries whose decision is real but made without the helper, so the probe
@@ -275,10 +271,14 @@ const REQUEST_FIXTURES = {
       layout_code: 'open_field', base_sync_version: 0,
     }],
   },
+  // The fixture request and the field runs keep the seeded zone-2 assignment,
+  // which no run may remove (#404); the foreign body runs without it, so that
+  // adding the station to the foreign zone is a visible change.
   's2120-zones-put-http': {
     params: { deveui: WEATHER_DEVEUI },
     body: { zone_ids: [1] },
     foreignBodies: [{ zone_ids: [1, FOREIGN_ZONE_ID] }],
+    foreignBodySetupSql: 'DELETE FROM weather_station_zones WHERE zone_id = ' + FOREIGN_ZONE_ID + ';',
   },
   // Write routes: inputs that take each distinct guard through to its write
   // when every decision says yes, so a decision that is ignored, or placed
@@ -415,9 +415,14 @@ const REQUEST_FIXTURES = {
     setupSql: "INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, created_at) VALUES ('" +
       PROBE_GRANT_UUID + "', '" + PROBE_DISABLED_UUID + "', '" + PROBE_PLOT_UUID + "', '2026-01-01T00:00:00Z');",
   },
+  // The discard verb of the entry PUT, on the foreign zone-only entry made a
+  // version-zero draft: it reaches its write when every decision says yes (an update needs
+  // a catalogue-valid body the probe does not build).
   'journal-entry-put-http': {
     params: { uuid: FOREIGN_ENTRY_UUID },
-    body: { entry_uuid: FOREIGN_ENTRY_UUID, base_sync_version: 1, status: 'final' },
+    body: { entry_uuid: FOREIGN_ENTRY_UUID, discard: true },
+    setupSql: "UPDATE journal_entries SET status = 'draft', sync_version = 0 WHERE entry_uuid = '" +
+      FOREIGN_ENTRY_UUID + "';",
   },
   'journal-entry-void-post-http': {
     params: { uuid: FOREIGN_ENTRY_UUID },
@@ -521,7 +526,13 @@ const WRITE_TARGETS = new Map([
   ...['journal-entry-put-http', 'journal-entry-void-post-http'].map((id) => [id, {
     object: 'zone',
     target: FOREIGN_ZONE_UUID,
-    reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone',
+    // #403, by the owner's decisions: an entry with a zone and no plot needs
+    // the grant on its zone, which the fixture's foreign zone-only entry tests.
+    // A farm-wide entry (no zone, no plot) is changed only by the account that
+    // wrote it or by an admin; the seed has none, so test-journal-api.js pins
+    // that rule, not this verifier.
+    reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone; farm-wide ' +
+      'entries (no zone, no plot) need their writer or an admin (#403)',
   }]),
   [
     'journal-custom-vocab-put-http',
@@ -542,6 +553,11 @@ const NO_WRITE_ROLE_NEEDED = new Map([
   [
     'analysis-views-post-http',
     'saves the caller\'s own analysis view, filtered by owner; no farm data changes',
+  ],
+  [
+    'improvement-requests-post-http',
+    'files a support request owned by the caller; any enabled role may report a problem, ' +
+      'so the enabled-account decision is the whole rule (#400)',
   ],
 ]);
 
@@ -847,8 +863,14 @@ async function checkOutcome(flows, entry, label, probeOptions) {
   for (const fill of FOREIGN_FILLS) {
     runs.push({ how: `unset fields set to ${fill}`, options: { variant: { fill } } });
   }
-  for (const body of ((probeOptions.fixture || {}).foreignBodies || [])) {
-    runs.push({ how: `body ${JSON.stringify(body)}`, options: { body } });
+  const fixture = probeOptions.fixture || {};
+  for (const body of (fixture.foreignBodies || [])) {
+    const options = { body };
+    // foreignBodySetupSql runs before each foreign-body run only, after setupSql.
+    if (fixture.foreignBodySetupSql) {
+      options.fixture = { ...fixture, setupSql: (fixture.setupSql || '') + '\n' + fixture.foreignBodySetupSql };
+    }
+    runs.push({ how: `body ${JSON.stringify(body)}`, options });
   }
   for (const run of runs) {
     const trace = await probeEntry(flows, entry, { ...base, ...run.options });

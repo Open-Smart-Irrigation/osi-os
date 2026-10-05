@@ -3125,3 +3125,288 @@ test('PR-N: Fan Control flag-off preserves the legacy bearer-only behavior for a
     db.close();
   }
 });
+
+// #400: filing an improvement request needs an enabled account in scoped mode.
+// Any enabled role may file one (the request belongs to the caller); a disabled
+// account is refused before the diagnostics are read or the row is written.
+const IMPROVEMENT_REQUEST_BODY = {
+  type: 'bug',
+  severity: 'idea',
+  area: 'other',
+  title: 'Scoped filing',
+  description: 'A description that is long enough',
+  consent_public: true,
+  consent_diagnostics: true,
+};
+
+function improvementRequestCounts(db) {
+  return {
+    requests: db.prepare('SELECT COUNT(*) AS n FROM improvement_requests').get().n,
+    queued: db.prepare(
+      "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type = 'WORK_REQUEST'"
+    ).get().n,
+  };
+}
+
+async function postImprovementRequest(db, userId, username, env = ENV, libOverrides = {}) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode('improvement-requests-api-router'), {
+    msg: scopedRequest(
+      userId,
+      username,
+      'POST',
+      '/api/improvement-requests',
+      {},
+      { ...IMPROVEMENT_REQUEST_BODY }
+    ),
+    env,
+    db,
+    libOverrides,
+  });
+}
+
+test('#400: a disabled account cannot file an improvement request and nothing is queued', async () => {
+  const db = seedScopedDb();
+  try {
+    db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
+    // Record every statement, so the test also pins that the refusal comes
+    // before the diagnostics read (the device counts).
+    const statements = [];
+    const recording = new Proxy(db, {
+      get(target, key) {
+        if (key === 'prepare') return (sql) => { statements.push(sql); return target.prepare(sql); };
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const response = await postImprovementRequest(recording, 2, 'res1');
+    assert.equal(response.result.statusCode, 403);
+    assert.equal(response.result.payload.request_id, undefined);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 0, queued: 0 });
+    assert.ok(statements.length > 0, 'the recording database saw the decision');
+    assert.equal(statements.some((sql) => /FROM devices/.test(sql)), false, 'no diagnostics read');
+  } finally {
+    db.close();
+  }
+});
+
+test('#400: an enabled account of any role still files an improvement request', async () => {
+  const db = seedScopedDb();
+  try {
+    const researcher = await postImprovementRequest(db, 2, 'res1');
+    assert.equal(researcher.result.statusCode, 201);
+    assert.equal(researcher.result.payload.local_status, 'QUEUED');
+    const viewer = await postImprovementRequest(db, 3, 'view1');
+    assert.equal(viewer.result.statusCode, 201);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 2, queued: 2 });
+    assert.deepEqual(
+      db.prepare('SELECT user_id FROM improvement_requests ORDER BY user_id').all().map((row) => row.user_id),
+      [2, 3]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('#400: flag-off filing is unchanged and never loads the scope helper', async () => {
+  const db = seedScopedDb();
+  try {
+    db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
+    const loaded = [];
+    const response = await postImprovementRequest(
+      db,
+      2,
+      'res1',
+      { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      {
+        osiLib: {
+          require(name) {
+            loaded.push(name);
+            return { ok: false, error: 'flag-off must not load modules' };
+          },
+        },
+      }
+    );
+    assert.equal(response.result.statusCode, 201);
+    assert.deepEqual(loaded, []);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 1, queued: 1 });
+  } finally {
+    db.close();
+  }
+});
+
+// #404: setting a weather station's zones changes only assignments to zones in
+// the caller's scope. An assignment to a zone outside it stays as it is, and so
+// does what the outbox tells the cloud; a request that names such a zone is
+// refused as before. Scope here is what the helper grants: owned plus granted
+// zones, for an admin too.
+function seedSharedStation() {
+  const db = seedScopedDb();
+  db.exec(`
+    UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-3';
+    UPDATE devices SET gateway_device_eui = '00000000000000A1' WHERE deveui = 'WX1';
+    INSERT INTO sync_link_state (peer_node, linked, updated_at) VALUES ('cloud', 1, '2026-01-01');
+    INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX1', 1), ('WX1', 2);
+    INSERT INTO weather_station_zone_state (deveui, sync_version, updated_at) VALUES ('WX1', 1, '2026-01-01');
+  `);
+  return db;
+}
+
+function stationZones(db) {
+  return db.prepare(
+    "SELECT zone_id FROM weather_station_zones WHERE deveui = 'WX1' ORDER BY zone_id"
+  ).all().map((row) => row.zone_id);
+}
+
+function stationZoneEvents(db) {
+  return db.prepare(
+    "SELECT payload_json FROM sync_outbox WHERE op = 'WEATHER_STATION_ZONES_REPLACED' ORDER BY rowid"
+  ).all().map((row) => JSON.parse(row.payload_json).zone_uuids);
+}
+
+async function setStationZones(db, userId, username, zoneIds, env = ENV) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode('scoped-weather-zone-assign-router'), {
+    msg: scopedRequest(
+      userId,
+      username,
+      'PUT',
+      '/api/devices/WX1/zone-assignments',
+      { deveui: 'WX1' },
+      { zone_ids: zoneIds }
+    ),
+    env,
+    db,
+  });
+}
+
+test('#404: a scoped caller never changes a station assignment outside its zones', async () => {
+  const db = seedSharedStation();
+  try {
+    const keep = await setStationZones(db, 2, 'res1', [1]);
+    assert.equal(keep.result[1].statusCode, 200);
+    assert.deepEqual(keep.result[1].payload.zone_ids, [1, 2]);
+    assert.deepEqual(stationZones(db), [1, 2]);
+
+    const clear = await setStationZones(db, 2, 'res1', []);
+    assert.equal(clear.result[1].statusCode, 200);
+    assert.deepEqual(clear.result[1].payload.zone_ids, [2]);
+    assert.deepEqual(stationZones(db), [2], 'only the in-scope assignment is removed');
+
+    const events = stationZoneEvents(db);
+    assert.deepEqual(events, [['z-1', 'z-2'], ['z-2']], 'no event tells the cloud zone 2 lost the station');
+
+    // A zone outside the caller's scope that the station is not assigned to
+    // may not be added: 404, nothing changes, nothing is queued. A second
+    // station already on that zone does not count as this station having it.
+    db.exec(`
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
+      VALUES (4, 'Z Four', 1, 'z-4', 'UTC', 'local');
+      INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at)
+      VALUES ('WX2', 'Weather 2', 'SENSECAP_S2120', 1, '2026-01-01', '2026-01-01');
+      INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX2', 4);
+    `);
+    for (const named of [[4], [1, 4], [2, 4]]) {
+      const refused = await setStationZones(db, 2, 'res1', named);
+      assert.equal(refused.result[1].statusCode, 404, `adding zone 4 is refused: ${named}`);
+      assert.deepEqual(refused.result[1].payload, { error: 'Zone not found' });
+    }
+    assert.deepEqual(stationZones(db), [2]);
+    assert.deepEqual(
+      db.prepare("SELECT zone_id FROM weather_station_zones WHERE deveui = 'WX2'").all().map((row) => row.zone_id),
+      [4]
+    );
+    assert.equal(stationZoneEvents(db).length, events.length, 'a refused request queues nothing');
+
+    // A caller left with no zone at all removes nothing.
+    db.exec(`
+      UPDATE irrigation_zones SET user_id = 1 WHERE id = 1;
+      UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-1';
+      INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX1', 1);
+    `);
+    const noZones = await setStationZones(db, 2, 'res1', []);
+    assert.equal(noZones.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1, 2]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: the full current list from the zone picker saves for a partial-scope caller', async () => {
+  // The GUI picker starts from every zone the station has (device.zone_ids)
+  // and sends the whole set back. A zone outside the caller's scope that is
+  // already assigned may be named and is left as it is.
+  const db = seedSharedStation();
+  try {
+    db.exec(`
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
+      VALUES (3, 'Z Three', 2, 'z-3', 'UTC', 'local');
+    `);
+    for (const [request, expected] of [
+      [[1, 2], [1, 2]],
+      [[1, 2, 3], [1, 2, 3]],
+      [[2, 3], [2, 3]],
+      [[2], [2]],
+    ]) {
+      const response = await setStationZones(db, 2, 'res1', request);
+      assert.equal(response.result[1].statusCode, 200, `request ${request}`);
+      assert.deepEqual(response.result[1].payload.zone_ids, expected);
+      assert.deepEqual(stationZones(db), expected);
+    }
+    assert.ok(
+      stationZoneEvents(db).every((zoneUuids) => zoneUuids.includes('z-2')),
+      'no event drops the out-of-scope assignment'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: an assignment to a deleted zone is cleared, and naming it does not block a save', async () => {
+  const db = seedSharedStation();
+  try {
+    db.exec("UPDATE irrigation_zones SET deleted_at = '2026-07-01' WHERE id = 2");
+    const response = await setStationZones(db, 2, 'res1', [1, 2]);
+    assert.equal(response.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: an admin holding both zones still sets the full list', async () => {
+  const db = seedSharedStation();
+  try {
+    db.exec(`
+      INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
+      VALUES ('g-4', 'u-admin', 'z-1', '2026-01-01');
+      DELETE FROM weather_station_zones;
+    `);
+    const full = await setStationZones(db, 1, 'admin1', [1, 2]);
+    assert.equal(full.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1, 2]);
+    const one = await setStationZones(db, 1, 'admin1', [2]);
+    assert.equal(one.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [2]);
+    const none = await setStationZones(db, 1, 'admin1', []);
+    assert.equal(none.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), []);
+    assert.deepEqual(stationZoneEvents(db), [['z-1', 'z-2'], ['z-2'], []]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: flag-off the scoped router passes the request on untouched', async () => {
+  const db = seedSharedStation();
+  try {
+    const response = await setStationZones(db, 2, 'res1', [], { ...ENV, OSI_SCOPED_ACCESS: '0' });
+    assert.ok(response.result[0], 'the request goes on to the legacy handler');
+    assert.equal(response.result[1], null);
+    assert.deepEqual(response.result[0].payload, { zone_ids: [] });
+    assert.deepEqual(stationZones(db), [1, 2]);
+    assert.deepEqual(stationZoneEvents(db), []);
+  } finally {
+    db.close();
+  }
+});

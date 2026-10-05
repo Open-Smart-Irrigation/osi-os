@@ -428,6 +428,9 @@ async function resolveCatalogPrincipal(db, principal, query) {
   if (filters.zone_uuid != null && filters.zone_uuid !== '') {
     return assertZoneWrite(db, principal, canonicalUuid(filters.zone_uuid, 'zone_uuid', true));
   }
+  // No plot or zone: the caller's own catalog (custom rows are read through the
+  // owner filter), after the enabled-account decision the other reads make.
+  await resolvedReadScope(db, principal);
   return principal;
 }
 
@@ -644,9 +647,10 @@ function scopedWriteHelper(principal, method) {
   return principal.scope;
 }
 
+// Returns the caller's fresh scope (role included) in scoped mode, else null.
 async function assertJournalWriteRole(db, principal) {
   const scopeHelper = scopedWriteHelper(principal, 'assertFreshRole');
-  if (!scopeHelper) return principal;
+  if (!scopeHelper) return null;
   const actor = await dbGet(
     db,
     'SELECT role FROM users WHERE user_uuid=? LIMIT 1',
@@ -660,7 +664,7 @@ async function assertJournalWriteRole(db, principal) {
     { scopedMode: true }
   );
   if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
-  return principal;
+  return fresh;
 }
 
 async function assertZoneWrite(db, principal, zoneUuid) {
@@ -727,13 +731,30 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid,owner_user_uuid,user_id FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
-      'AND deleted_at IS NULL LIMIT 1',
+    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id FROM journal_entries ' +
+      'WHERE entry_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
   if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
   if (!entry.plot_uuid) {
-    await assertJournalWriteRole(db, principal);
+    // #403, owner decisions. An entry with a zone but no plot (no API path
+    // creates one) needs the grant on that zone; a zone that cannot be resolved
+    // is refused. A farm-wide entry (no zone, no plot) may be changed only by
+    // the account that wrote it or by an admin; anyone else gets the answer a
+    // missing entry gets.
+    const actorScope = await assertJournalWriteRole(db, principal);
+    if (entry.zone_uuid == null && entry.zone_id == null) {
+      if (entry.owner_user_uuid !== principal.author_principal_uuid && actorScope.role !== 'admin') {
+        throw apiError(404, 'not_found', 'Journal entry was not found');
+      }
+    } else {
+      const zone = entry.zone_uuid != null ? { zone_uuid: entry.zone_uuid } : await dbGet(
+        db,
+        'SELECT zone_uuid FROM irrigation_zones WHERE id=? LIMIT 1',
+        [entry.zone_id]
+      );
+      await assertZoneWrite(db, principal, zone && zone.zone_uuid ? zone.zone_uuid : null);
+    }
     return Object.assign({}, principal, {
       owner_user_uuid: entry.owner_user_uuid,
       user_id: Number(entry.user_id),
