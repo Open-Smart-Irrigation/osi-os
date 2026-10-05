@@ -193,12 +193,12 @@ jobs:
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync
         run: node --test scripts/test-zone-agronomy-sync-triggers.js
-      # osi-os #377: the valve and zone-schedule routes keep each request's target,
-      # duration and identity on msg. Runs the shipped function bodies with two
-      # requests interleaved at every sqlite boundary, flag off and scoped, plus the
-      # STREGA and cloud command ACKs; the guard rejects per-request keys in shared
-      # flow or global context in both profiles.
-      - name: Valve and schedule request isolation
+      # osi-os #377: the valve, zone-schedule and zone-delete routes keep each
+      # request's target, duration and identity on msg. Runs the shipped function
+      # bodies with two requests interleaved at every sqlite boundary, flag off and
+      # scoped, plus the STREGA and cloud command ACKs; the guard rejects per-request
+      # keys in shared flow or global context in both profiles.
+      - name: Valve, schedule and zone delete request isolation
         run: |
           node --test scripts/test-request-context-isolation.js
           node scripts/verify-request-context-isolation.js
