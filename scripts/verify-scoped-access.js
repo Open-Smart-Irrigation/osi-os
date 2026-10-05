@@ -49,6 +49,8 @@
 // one probe database.
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const os = require('node:os');
 const {
   PROBE_DEVEUI,
   PROBE_GATEWAY_EUI,
@@ -715,9 +717,56 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
   return failures;
 }
 
+// Result cache. A pull request runs the ratchet up to three times on the same
+// tree (its workflow step, scripts/verify-sync-flow.js and the full-tree test).
+// The verdict depends only on the files hashed below and the Node version, so
+// the first run stores it under that digest in the temporary directory and the
+// others reuse it. OSI_SCOPED_ACCESS_RATCHET_CACHE=0 turns the cache off.
+function listFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const full = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...listFiles(full));
+    else if (entry.isFile()) files.push(full);
+  }
+  return files;
+}
+
+function inputDigest(profiles) {
+  const files = [
+    __filename,
+    require.resolve('./lib/scope-guard-probe'),
+    path.join(ROOT, 'database/seed-blank.sql'),
+  ];
+  for (const relativePath of profiles) {
+    files.push(path.join(ROOT, relativePath), ...listFiles(modulesRootFor(relativePath)));
+  }
+  const hash = crypto.createHash('sha256');
+  hash.update(process.version);
+  for (const file of files.sort()) {
+    hash.update('\0' + path.relative(ROOT, file) + '\0');
+    hash.update(fs.readFileSync(file));
+  }
+  return hash.digest('hex');
+}
+
 // options.load(profile): flows loader (tests mutate one profile with it).
 // options.only: forwarded to findFailures.
+// Neither given: the tracked tree, and the cached verdict may be used.
 async function verifyProfiles(profiles = PROFILES, options = {}) {
+  const tracked = !options.load && !options.only;
+  const useCache = tracked && process.env.OSI_SCOPED_ACCESS_RATCHET_CACHE !== '0';
+  let cachePath = null;
+  if (useCache) {
+    cachePath = path.join(os.tmpdir(), `osi-scoped-access-ratchet-${inputDigest(profiles)}.json`);
+    try {
+      const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      if (Array.isArray(cached.failures)) return cached.failures;
+    } catch (error) {
+      // No usable cached verdict: compute it.
+    }
+  }
   const load = options.load || ((relativePath) =>
     JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), 'utf8')));
   const failures = [];
@@ -725,6 +774,13 @@ async function verifyProfiles(profiles = PROFILES, options = {}) {
     const flows = load(relativePath);
     failures.push(...await findFailures(flows, relativePath, ALLOWLIST, { only: options.only }));
     failures.push(...findReadFilterRegressions(flows, relativePath));
+  }
+  if (cachePath) {
+    try {
+      fs.writeFileSync(cachePath, JSON.stringify({ failures }));
+    } catch (error) {
+      // A cache that cannot be written only costs a rerun.
+    }
   }
   return failures;
 }
