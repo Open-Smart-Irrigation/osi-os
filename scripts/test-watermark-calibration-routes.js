@@ -236,6 +236,13 @@ const QUERY_WRITE = Object.freeze(Object.fromEntries(
 ));
 
 const VIA_GUARD = ['scoped-device-config-guard', 'watermark-cal-fn', 'device-response'];
+
+// The guard's route table, a static JSON array literal in its source.
+function guardRouteTable() {
+  const source = BY_ID.get('scoped-device-config-guard').func.match(/const routeTable = (\[[^\n]+\]);/);
+  assert.ok(source, 'the guard route table is not a static JSON array');
+  return JSON.parse(source[1]);
+}
 const DIRECT = ['watermark-cal-fn', 'device-response'];
 
 // ------------------------------------------------------------------ cases --
@@ -265,7 +272,12 @@ const CASES = [
       assert.deepEqual(guard.wires[25], ['watermark-cal-fn']);
       assert.deepEqual(guard.wires[26], ['watermark-cal-fn']);
       assert.deepEqual(guard.wires[27], ['device-response']);
-      assert.ok(guard.func.includes('{"method":"PUT","suffix":"/watermark/calibration","index":25},{"method":"DELETE","suffix":"/watermark/calibration","index":26}]'));
+      const routes = guardRouteTable();
+      assert.equal(routes.length, 27);
+      assert.deepEqual(routes.slice(25).map((route) => [route.method, route.suffix, route.index]), [
+        ['PUT', '/watermark/calibration', 25],
+        ['DELETE', '/watermark/calibration', 26],
+      ]);
     },
   },
   {
@@ -574,6 +586,127 @@ CASES.push(
   },
 );
 
+
+// ------------------------------------- unassigned soil sensor, scoped mode --
+// A soil sensor taken out of its zone (irrigation_zone_id NULL) is in nobody's
+// zone scope. With the flag off its owner (devices.user_id) can still set its
+// soil depths and WATERMARK calibration through the handlers' owner filter;
+// scoped, the guard lets the owner through on exactly those three routes when
+// the owner may write. Everyone else, and every other route, still gets 404.
+
+function unassign(native, typeId) {
+  if (typeId) native.prepare('UPDATE devices SET type_id = ? WHERE deveui = ?').run(typeId, DEVEUI);
+  native.prepare('UPDATE devices SET irrigation_zone_id = NULL WHERE deveui = ?').run(DEVEUI);
+}
+
+CASES.push(
+  {
+    name: 'unassigned owner exception: only the soil-depth and the two WATERMARK calibration routes opt in',
+    async run() {
+      const optedIn = guardRouteTable()
+        .filter((route) => route.allowUnassignedOwner === true)
+        .map((route) => [route.method, route.suffix]);
+      assert.deepEqual(optedIn, [
+        ['PUT', '/soil-moisture-depths'],
+        ['PUT', '/watermark/calibration'],
+        ['DELETE', '/watermark/calibration'],
+      ]);
+      for (const route of guardRouteTable()) {
+        assert.ok(route.allowUnassignedOwner === undefined || route.allowUnassignedOwner === true,
+          route.suffix + ': the flag is either absent or true');
+      }
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: owner A previews, saves and deletes the calibration; B, R and V get 404 and nothing changes',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      for (const who of ['B', 'R', 'V']) {
+        const denied = await runChain(native, 'PUT', who, { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+        assert.equal(denied.status, who === 'V' ? 403 : 404, who + ': ' + JSON.stringify(denied.body));
+        assert.deepEqual(denied.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      }
+      assert.equal(calibrationRow(native), null);
+
+      const preview = await runChain(native, 'PUT', 'A', { scoped: true, body: { ...VALUES, dry_run: true } });
+      assert.deepEqual(preview.trail.slice(1), VIA_GUARD);
+      assert.equal(preview.status, 200, JSON.stringify(preview.body));
+      assert.equal(preview.body.dry_run, true);
+      assert.equal(calibrationRow(native), null, 'the preview stored a calibration');
+
+      const saved = await runChain(native, 'PUT', 'A', { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.sync_version, 1);
+
+      const foreignDelete = await runChain(native, 'DELETE', 'B', { scoped: true, query: { expected_sync_version: '1' } });
+      assert.equal(foreignDelete.status, 404, JSON.stringify(foreignDelete.body));
+      assert.equal(calibrationRow(native).sync_version, 1);
+
+      const deleted = await runChain(native, 'DELETE', 'A', { scoped: true, query: { expected_sync_version: '1' } });
+      assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+      assert.equal(deleted.body.sync_version, 2);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: owner A saves soil depths; B gets 404 and the row is unchanged',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const before = depthRow(native);
+      const b = await depthRequest(native, 'B', { swt_1: 20 }, { scoped: true });
+      assert.equal(b.status, 404, JSON.stringify(b.body));
+      assert.deepEqual(depthRow(native), before);
+      const a = await depthRequest(native, 'A', { swt_1: 20, swt_2: 40 }, { scoped: true });
+      assert.deepEqual(a.trail.slice(1), DEPTH_VIA_GUARD);
+      assert.equal(a.status, 200, JSON.stringify(a.body));
+      assert.deepEqual(JSON.parse(depthRow(native).depths), { swt_1: 20, swt_2: 40 });
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: a route that does not opt in still answers 404 to the owner',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const path = '/api/devices/' + DEVEUI + '/lsn50/interval';
+      const r = await runChain(native, 'PUT', 'A', {
+        scoped: true, httpIn: 'put-lsn50-interval-http', path, body: { minutes: 10 },
+      });
+      assert.equal(r.status, 404, JSON.stringify(r.body));
+      assert.deepEqual(r.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned valve: the owner exception does not apply; 404 and the row is unchanged',
+    async run() {
+      const native = freshDb();
+      unassign(native, 'STREGA_VALVE');
+      const before = depthRow(native);
+      const a = await depthRequest(native, 'A', { swt_1: 20 }, { scoped: true });
+      assert.equal(a.status, 404, JSON.stringify(a.body));
+      assert.deepEqual(depthRow(native), before);
+      native.close();
+    },
+  },
+  {
+    name: 'flag off, unassigned sensor: unchanged; owner A saves depths and calibration, B gets 404, the scope helper is never loaded',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const b = await depthRequest(native, 'B', { swt_1: 20 });
+      assert.equal(b.status, 404, JSON.stringify(b.body));
+      const a = await depthRequest(native, 'A', { swt_1: 20 });
+      assert.equal(a.status, 200, JSON.stringify(a.body));
+      const saved = await runChain(native, 'PUT', 'A', { body: { ...VALUES, expected_sync_version: 0 } });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      for (const r of [a, b, saved]) assert.ok(!r.requested.includes('scope'), 'flag off reached osiLib.require(scope)');
+      native.close();
+    },
+  },
+);
 
 // ----------------------------------------------------------------- runner --
 
