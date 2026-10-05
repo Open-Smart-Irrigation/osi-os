@@ -212,6 +212,58 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${label}: hourly and daily exports read history one local month at a time, with unchanged results`, async () => {
+    const raw = seedDb();
+    try {
+      // Zurich crosses both DST changes in this range; one reading every 3 h.
+      raw.exec("DELETE FROM device_data WHERE deveui = 'A840410000000001'");
+      const insert = raw.prepare('INSERT INTO device_data(deveui, recorded_at, swt_1, swt_2, swt_3) VALUES (?, ?, ?, ?, ?)');
+      const firstMs = Date.parse('2025-07-01T00:00:00.000Z');
+      raw.exec('BEGIN');
+      for (let step = 0; step < 366 * 8; step += 1) {
+        insert.run('A840410000000001', new Date(firstMs + step * 3 * 3600 * 1000).toISOString(), 10 + (step % 37), 20 + (step % 11), 30);
+      }
+      raw.exec('COMMIT');
+      const facade = facadeDb(raw);
+      const spans = [];
+      const recording = { ...facade, all(sql, params, callback) {
+        if (/FROM device_data/.test(sql)) {
+          const bounds = params.filter((value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value));
+          spans.push((Date.parse(bounds[1]) - Date.parse(bounds[0])) / 86400000);
+        }
+        return facade.all(sql, params, callback);
+      } };
+      const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+      for (const granularity of ['hourly', 'daily']) {
+        spans.length = 0;
+        const result = await helper.buildZoneExportCsv(recording, {
+          zoneId: 12, from: '2025-07-01', to: '2026-06-30', granularity, channels: 'swt_1', nowMs: NOW_MS,
+        });
+        assert.ok(spans.length >= 12, `${granularity}: one read per local month (${spans.length})`);
+        assert.ok(Math.max(...spans) <= 31 + 1 / 24, `${granularity}: no read spans more than a month (${Math.max(...spans)} days)`);
+        // The same buckets as one aggregation over the whole range.
+        const whole = await helper.aggregateDeviceData(facade, {
+          device_euis: ['A840410000000001'], sourceFilterActive: true, aggregation: granularity, channels: [channel],
+          start: '2025-06-30T22:00:00.000Z', end: '2026-06-30T22:00:00.000Z', timezone: 'Europe/Zurich', nowMs: NOW_MS,
+        });
+        const expected = whole.buckets
+          .filter((bucket) => bucket.series.swt_1.sampleCount > 0)
+          .map((bucket) => [bucket.bucketStart, bucket.series.swt_1.mean]);
+        const exported = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => [row.timestamp, row.value]);
+        assert.equal(exported.length, expected.length, `${granularity}: bucket count`);
+        assert.deepEqual(exported, expected, `${granularity}: bucket values`);
+      }
+      // The all-zones export takes the same path.
+      spans.length = 0;
+      await helper.buildAllZonesExportCsv(recording, {
+        zoneIds: [12], from: '2025-07-01', to: '2026-06-30', granularity: 'daily', nowMs: NOW_MS,
+      });
+      assert.ok(spans.length >= 12 && Math.max(...spans) <= 31 + 1 / 24);
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${label}: a daily export is bounded too, before any history is read, on both export routes`, async () => {
     const raw = seedDb();
     try {

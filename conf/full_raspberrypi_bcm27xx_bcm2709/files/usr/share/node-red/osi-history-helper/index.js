@@ -2241,6 +2241,27 @@ async function rawZoneExportRows(db, scope) {
   return rows;
 }
 
+// Local calendar months of an export range, as [start, end) instants. Hourly
+// and daily buckets never cross a local midnight, so aggregating one month at
+// a time gives the same buckets as one pass over the whole range, while only
+// one month of raw rows per source is in memory (a raw row costs about 2.4 KB
+// of heap once wrapped and sorted; ten years of 15-minute data would not fit).
+function exportMonthWindows(scope) {
+  const windows = [];
+  const lastDay = addIsoDays(scope.to, 1);
+  let day = scope.from;
+  let startIso = scope.start;
+  while (day < lastDay) {
+    const nextMonth = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)), 1)).toISOString().slice(0, 10);
+    const endDay = nextMonth < lastDay ? nextMonth : lastDay;
+    const endIso = endDay === lastDay ? scope.end : zoneDateStartIso(endDay, scope.timezone);
+    windows.push({ start: startIso, end: endIso });
+    day = endDay;
+    startIso = endIso;
+  }
+  return windows;
+}
+
 async function aggregateZoneExportRows(db, scope) {
   const rows = [];
   const zoneName = String(scope.zone.name || scope.zone.zone_uuid || scope.zone.id);
@@ -2262,24 +2283,26 @@ async function aggregateZoneExportRows(db, scope) {
       index += 1;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       if (!deveui) continue;
-      const aggregate = await aggregateDeviceData(db, {
-        zoneId: scope.zone.id,
-        cardType: card.cardType,
-        logicalSourceKey: card.logicalSourceKey,
-        device_euis: [deveui],
-        sourceFilterActive: true,
-        start: scope.start,
-        end: scope.end,
-        aggregation: scope.granularity,
-        channels,
-        timezone: scope.timezone,
-        nowMs: scope.nowMs,
-      });
-      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
-        site: scope.site,
-        zone: zoneName,
-      }));
-      assertExportRowBudget(rows, scope);
+      for (const window of exportMonthWindows(scope)) {
+        const aggregate = await aggregateDeviceData(db, {
+          zoneId: scope.zone.id,
+          cardType: card.cardType,
+          logicalSourceKey: card.logicalSourceKey,
+          device_euis: [deveui],
+          sourceFilterActive: true,
+          start: window.start,
+          end: window.end,
+          aggregation: scope.granularity,
+          channels,
+          timezone: scope.timezone,
+          nowMs: scope.nowMs,
+        });
+        for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
+          site: scope.site,
+          zone: zoneName,
+        })) rows.push(csvRow);
+        assertExportRowBudget(rows, scope);
+      }
     }
   }
   rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
