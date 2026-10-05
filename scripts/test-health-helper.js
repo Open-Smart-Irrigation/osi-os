@@ -564,3 +564,48 @@ test('gatherEdgeHealth includes rtc_present in its output shape', async () => {
   const health = await gatherEdgeHealth(db, { timeoutMs: 2000, diskPath: os.tmpdir() });
   assert.ok(Object.prototype.hasOwnProperty.call(health, 'rtc_present'));
 });
+
+// rejected_at is written as new Date().toISOString() ("YYYY-MM-DDTHH:MM:SS.sssZ").
+// Compared as text against SQLite's datetime() ("YYYY-MM-DD HH:MM:SS"), every
+// row on the cutoff's calendar date sorts after the cutoff ('T' > ' '), so the
+// 24-hour window stretched to up to 48 hours. The stale row below sits on that
+// date: 30 hours old when the UTC clock is past 06:00, otherwise the first
+// second of the cutoff date (older than 24 hours either way).
+function staleRejectionOnCutoffDate(nowMs) {
+  const cutoff = new Date(nowMs - 24 * 3600 * 1000);
+  const cutoffDayStart = Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth(), cutoff.getUTCDate());
+  return new Date(Math.max(nowMs - 30 * 3600 * 1000, cutoffDayStart));
+}
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  test(`sync_rejected_recent does not count a rejection older than 24 hours on the cutoff date (${profile})`, async (t) => {
+    const nowMs = Date.now();
+    const rejectedAt = staleRejectionOnCutoffDate(nowMs);
+    if (nowMs - rejectedAt.getTime() < 24 * 3600 * 1000 + 60 * 1000) {
+      t.skip('within a minute of UTC midnight there is no row older than 24 hours on the cutoff date');
+      return;
+    }
+    const modulePath = require.resolve(
+      `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-health-helper`
+    );
+    delete require.cache[modulePath];
+    const helper = require(modulePath);
+    const db = makeFacadeShim();
+    try {
+      await modernSchema(db);
+      await db.exec(`
+        INSERT INTO sync_outbox(event_uuid, occurred_at, delivered_at, rejected_at)
+        VALUES ('stale-same-date', '2026-07-05T00:00:00Z', NULL, '${rejectedAt.toISOString()}'),
+               ('recent', '2026-07-05T00:00:00Z', NULL, '${new Date(nowMs - 3600 * 1000).toISOString()}');
+      `);
+
+      const health = await helper.gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+      assert.strictEqual(health.sync_rejected, 2);
+      assert.strictEqual(health.sync_rejected_recent, 1,
+        `a rejection at ${rejectedAt.toISOString()} is outside the 24-hour window`);
+    } finally {
+      db.close();
+    }
+  });
+}

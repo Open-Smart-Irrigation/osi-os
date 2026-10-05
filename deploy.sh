@@ -3,8 +3,10 @@
 # Runs ON THE PI. Downloads OSI OS components from a local HTTP server
 # tunnelled through the SSH connection.
 #
-# Usage (from your dev machine):
-#   ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
+# Usage (from your dev machine), download first and then run, so a failed
+# download fails the SSH command instead of feeding an empty script to sh:
+#   ssh -R 9876:localhost:9876 root@<pi-ip> \
+#     'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 #
 # Safety invariant: this script must never overwrite /data/db/farming.db.
 # The edge database is live user data and osi-os is the operational source of
@@ -46,6 +48,14 @@ DEPLOY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 PAYLOAD_KEEP_N="${PAYLOAD_KEEP_N:-5}"
 GUI_ROOT="/usr/lib/node-red/gui"
 NODE_RED_INIT="/etc/init.d/node-red"
+OSI_BOOTSTRAP_INIT="/etc/init.d/osi-bootstrap"
+OSI_BOOTSTRAP_STAMP="/etc/osi-bootstrap.done"
+CHIRPSTACK_ENV_FILE="/srv/node-red/.chirpstack.env"
+# The image ships the bootstrap script in /usr/share/node-red; a stock gateway
+# OS install has only the copy this script fetches. osi-bootstrap prefers the
+# first that exists, in this order.
+BOOTSTRAP_SCRIPT_ROM="/usr/share/node-red/chirpstack-bootstrap.js"
+BOOTSTRAP_SCRIPT_FALLBACK="/srv/node-red/chirpstack-bootstrap.js"
 # Tracks whether this deploy's staged payload has already been flipped into
 # /srv/node-red/flows.json. Set by run_schema_migration() on a successful
 # migration (issue #222 / F4 — see there) and consulted by the later
@@ -53,6 +63,12 @@ NODE_RED_INIT="/etc/init.d/node-red"
 # on the no-op path, still flips exactly once).
 PAYLOAD_FLIPPED=0
 ROLLBACK_RESTORED=0
+# osi-server.cloud.firmware_version follows the active payload: written after
+# each switch to the new payload, put back before each switch away from it.
+DEPLOY_FIRMWARE_VERSION=""
+FW_PREV=""
+FW_PREV_SET=0
+FW_WRITTEN=0
 NODE_RED_LOG_MARK=""
 DB_MIGRATION_COMMITTED=0
 COMMAND_LEDGER_ACTIVATED=0
@@ -213,6 +229,90 @@ run_communication_preflight() {
         REPO_ROOT="$preflight_dir" node "$preflight_dir/scripts/verify-communication-contract.js"
     )
     echo "OK"
+}
+
+# The version of the tree this deploy installs. It is read from the first-boot
+# script that sets osi-server.cloud.firmware_version on a flashed image, so a
+# release bump there reaches deployed gateways too. Prints the version, or
+# nothing when the file cannot be fetched or holds no plain version string.
+# Never fails: a missing version only skips the record step.
+read_release_firmware_version() {
+    rfv_file="$TMP_DIR/release-version/96_osi_server_config"
+    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config" "$rfv_file" 2>/dev/null; then
+        return 0
+    fi
+    rfv_value="$(sed -n 's/^[[:space:]]*set osi-server\.cloud\.firmware_version=//p' "$rfv_file" 2>/dev/null | head -n 1 | tr -d '\r')"
+    case "$rfv_value" in
+        [0-9]*.[0-9]*) ;;
+        *) return 0 ;;
+    esac
+    case "$rfv_value" in
+        *[!0-9A-Za-z.+-]*) return 0 ;;
+    esac
+    printf '%s\n' "$rfv_value"
+}
+
+# A flashed image enables osi-bootstrap at first boot (uci-defaults
+# 95_osi_bootstrap_enable); a stock gateway OS install only gets the init file
+# from this script, so enable it here. rc.common enable is idempotent; an
+# already enabled service is left alone. A gateway provisioned by hand before
+# the service was enabled has a provisioned env file but no stamp; the service
+# would rerun chirpstack-bootstrap.js at the next boot, which mints a second
+# API key and rewrites the env file. Stamp it with the service's own test so
+# the boot run stays a no-op. Never fails the deploy.
+enable_osi_bootstrap() {
+    if "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "OK: osi-bootstrap already enabled"
+        return 0
+    fi
+    if ! "$OSI_BOOTSTRAP_INIT" enable; then
+        echo "WARN: could not enable osi-bootstrap; ChirpStack provisioning will not run at boot" >&2
+        return 0
+    fi
+    echo "OK: osi-bootstrap enabled (START=99; provisions ChirpStack at boot until stamped)"
+    if [ ! -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        if touch "$OSI_BOOTSTRAP_STAMP"; then
+            echo "OK: ChirpStack already provisioned; wrote $OSI_BOOTSTRAP_STAMP so the boot run is a no-op"
+        else
+            echo "WARN: could not write $OSI_BOOTSTRAP_STAMP; osi-bootstrap will rerun chirpstack-bootstrap.js at the next boot" >&2
+        fi
+    fi
+    return 0
+}
+
+# Closing-banner note on ChirpStack provisioning for the gateway this ran on.
+# It always points at the osi-bootstrap service, never at a bare
+# `node chirpstack-bootstrap.js`: a direct run writes no stamp, so the enabled
+# service would run the script again at the next boot, mint a second API key
+# and rewrite the env file. "Provisioned" uses the service's own test (stamp
+# plus a sensors application UUID in the env file).
+print_bootstrap_note() {
+    if [ -f "$BOOTSTRAP_SCRIPT_ROM" ]; then
+        pbn_script="$BOOTSTRAP_SCRIPT_ROM"
+    else
+        pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
+    fi
+    if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
+       grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
+        echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
+        echo "        this at every boot. To re-provision through the service with"
+        echo "        the existing API key ($pbn_script; it rewrites"
+        echo "        $CHIRPSTACK_ENV_FILE with the CHIRPSTACK_* keys only):"
+        # shellcheck disable=SC2016 # the command is printed for the operator, not run
+        printf '        rm -f %s && CHIRPSTACK_API_KEY="$(sed -n '\''s/^CHIRPSTACK_API_KEY=//p'\'' %s | head -1)" %s start\n' \
+            "$OSI_BOOTSTRAP_STAMP" "$CHIRPSTACK_ENV_FILE" "$OSI_BOOTSTRAP_INIT"
+    elif "$OSI_BOOTSTRAP_INIT" enabled >/dev/null 2>&1; then
+        echo "  NOTE: ChirpStack is not provisioned yet. osi-bootstrap (START=99)"
+        echo "        runs $pbn_script at the next boot; to provision now run:"
+        echo "        $OSI_BOOTSTRAP_INIT start"
+        echo "        Do not run the script directly: only the service writes"
+        echo "        $OSI_BOOTSTRAP_STAMP, and without it the next boot runs it again."
+    else
+        echo "  NOTE: osi-bootstrap is not enabled on this gateway. To provision"
+        echo "        ChirpStack (runs $pbn_script and writes the stamp):"
+        echo "        $OSI_BOOTSTRAP_INIT enable && $OSI_BOOTSTRAP_INIT start"
+    fi
 }
 
 ensure_journal_media_defaults() {
@@ -856,6 +956,75 @@ verify_payload_db_compatibility() {
     return 0
 }
 
+# osi-server.cloud.firmware_version follows the active payload. node-red.init
+# reads it when Node-RED starts and exports it as FIRMWARE_VERSION, so it is
+# written right after each switch to the new payload and before the restart
+# that starts it, and put back right before each switch to the previous payload
+# (or the removal of a failed first payload). None of these functions ever
+# fails the deploy: no uci, no osi-server.cloud section, an unknown version or
+# a failed write is logged and the deploy carries on.
+capture_previous_firmware_version() {
+    FW_PREV=""
+    FW_PREV_SET=0
+    command -v uci >/dev/null 2>&1 || return 0
+    if cpf_value="$(uci -q get osi-server.cloud.firmware_version 2>/dev/null)"; then
+        FW_PREV="$cpf_value"
+        FW_PREV_SET=1
+    fi
+    return 0
+}
+
+apply_release_firmware_version() {
+    arf_version="$1"
+    if [ -z "$arf_version" ]; then
+        echo "WARN: release version unknown; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; osi-server.cloud.firmware_version left unchanged" >&2
+        return 0
+    fi
+    if ! uci -q get osi-server.cloud >/dev/null 2>&1; then
+        echo "WARN: UCI section osi-server.cloud is missing; firmware_version left unchanged" >&2
+        return 0
+    fi
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ "$FW_PREV" = "$arf_version" ]; then
+        echo "OK: osi-server.cloud.firmware_version already $arf_version"
+        return 0
+    fi
+    if uci set "osi-server.cloud.firmware_version=$arf_version" && uci commit osi-server; then
+        FW_WRITTEN=1
+        echo "OK: osi-server.cloud.firmware_version ${FW_PREV:-unset} -> $arf_version (read by the next Node-RED start)"
+    else
+        uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+        echo "WARN: could not write osi-server.cloud.firmware_version; it stays ${FW_PREV:-unset}" >&2
+    fi
+    return 0
+}
+
+restore_previous_firmware_version() {
+    [ "${FW_WRITTEN:-0}" = "1" ] || return 0
+    if ! command -v uci >/dev/null 2>&1; then
+        echo "WARN: uci not found; could not restore osi-server.cloud.firmware_version" >&2
+        return 0
+    fi
+    # An empty previous value is treated as unset: never write an empty value.
+    if [ "${FW_PREV_SET:-0}" = "1" ] && [ -n "$FW_PREV" ]; then
+        if uci set "osi-server.cloud.firmware_version=$FW_PREV" && uci commit osi-server; then
+            FW_WRITTEN=0
+            echo "OK: osi-server.cloud.firmware_version restored to $FW_PREV"
+            return 0
+        fi
+    elif uci -q delete osi-server.cloud.firmware_version && uci commit osi-server; then
+        FW_WRITTEN=0
+        echo "OK: osi-server.cloud.firmware_version removed again (it was unset)"
+        return 0
+    fi
+    uci -q revert osi-server.cloud.firmware_version >/dev/null 2>&1 || true
+    echo "WARN: could not restore osi-server.cloud.firmware_version to ${FW_PREV:-unset}" >&2
+    return 0
+}
+
 restart_previous_payload() {
     if [ -z "${PREV_STAMP:-}" ]; then
         echo "ERROR: no previous payload is available for a safe restart" >&2
@@ -864,6 +1033,7 @@ restart_previous_payload() {
     if ! verify_payload_db_compatibility "$PREV_STAMP" retained; then
         return 1
     fi
+    restore_previous_firmware_version
     if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
         echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
         return 1
@@ -903,6 +1073,7 @@ cleanup_failed_first_payload() {
     else
         echo "ERROR: could not prove Node-RED stopped while cleaning up the first-deploy payload" >&2
     fi
+    restore_previous_firmware_version
     swap_call deactivate "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null || true
     swap_call discardPayload "$DEPLOY_STAMP" >/dev/null || true
     PAYLOAD_FLIPPED=0
@@ -1263,6 +1434,7 @@ process.stdout.write(String(applied.length));
             fi
             PAYLOAD_FLIPPED=1
             echo "OK: activated flows+GUI payloads/$DEPLOY_STAMP"
+            apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
         fi
         NODE_RED_LOG_MARK=0
         if command -v logread >/dev/null 2>&1; then
@@ -1295,6 +1467,14 @@ echo "Source: $BASE"
 
 run_communication_preflight
 run_native_sqlite3_preflight || exit 1
+
+DEPLOY_FIRMWARE_VERSION="$(read_release_firmware_version)"
+capture_previous_firmware_version
+if [ -n "$DEPLOY_FIRMWARE_VERSION" ]; then
+    echo "Release version: $DEPLOY_FIRMWARE_VERSION (written to UCI when the new payload is activated)"
+else
+    echo "WARN: could not read the release version; osi-server.cloud.firmware_version will not be updated" >&2
+fi
 
 fetch_required "Node-RED settings.js" \
     "feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js" \
@@ -1330,6 +1510,7 @@ fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
     "/etc/init.d/osi-bootstrap"
 chmod 755 /etc/init.d/osi-bootstrap
+enable_osi_bootstrap
 
 echo "--- Remove legacy gateway GPS sidecar ---"
 if [ -x /etc/init.d/osi-gateway-gps ]; then
@@ -2050,6 +2231,7 @@ if ! write_payload_compatibility "$DEPLOY_STAMP"; then
     exit 1
 fi
 
+# payload activation begin
 PAYLOAD_WAS_FLIPPED="$PAYLOAD_FLIPPED"
 if [ "$PAYLOAD_FLIPPED" != "1" ]; then
     if ! swap_call flipTo "$DEPLOY_STAMP" "$GUI_ROOT" >/dev/null; then
@@ -2064,6 +2246,8 @@ else
 fi
 
 if [ "$PAYLOAD_WAS_FLIPPED" != "1" ]; then
+    # Flipped just above: the restart below must read the new version.
+    apply_release_firmware_version "${DEPLOY_FIRMWARE_VERSION:-}"
     /etc/init.d/node-red restart || true
 else
     echo "OK: Node-RED already restarted on the activated pair during migration"
@@ -2176,6 +2360,7 @@ else
             echo "ERROR: refusing rollback restart because the retained payload/database pair was not proven compatible" >&2
             exit 1
         fi
+        restore_previous_firmware_version
         if ! swap_call flipTo "$PREV_STAMP" "$GUI_ROOT" >/dev/null; then
             echo "ERROR: retained paired payload activation failed; Node-RED remains stopped" >&2
             node_red_restart_needed=0
@@ -2219,6 +2404,8 @@ else
     exit 1
 fi
 
+# self-check verdict end
+
 echo "--- Gateway identity supervisor ---"
 if ! identityd_service enable; then
     echo "ERROR: failed to enable identityd" >&2
@@ -2238,7 +2425,4 @@ echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health s
 echo "  UI:       http://<device-ip>:1880/gui"
 echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
-echo "  NOTE: ChirpStack provisioning runs automatically on first boot via"
-echo "        osi-bootstrap (START=99).  No manual bootstrap step needed on"
-echo "        a freshly installed gateway.  To re-provision manually run:"
-echo "        node /usr/share/node-red/chirpstack-bootstrap.js"
+print_bootstrap_note

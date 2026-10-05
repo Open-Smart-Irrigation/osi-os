@@ -214,9 +214,7 @@ dev workstation unless noted.
    complete" and exit 0. Same failure class as `git push | tail -1` hiding a failed
    push behind `tail`'s exit code (engineering playbook §1). Download-then-run makes
    `curl`'s failure set `$rc`, so a 404'd deploy fails loudly over the SSH exit code.
-   `deploy.sh`'s own header comment still shows the shorter piped form as a
-   convenience one-liner — prefer the hardened form above for anything you need to
-   trust.
+   `deploy.sh`'s own header comment shows the same download-then-run form.
 
 5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
    restarts Node-RED itself, up to twice: once around the schema-migration step
@@ -278,9 +276,14 @@ dev workstation unless noted.
    `CHIRPSTACK_APP_SENSORS=` line in `/srv/node-red/.chirpstack.env`), and only
    re-runs `chirpstack-bootstrap.js` when that stamp is invalid or ChirpStack's
    gRPC port isn't answering yet. No manual bootstrap step is needed after a normal
-   restart on an already-provisioned gateway. Manual re-provision, if ever needed:
+   restart on an already-provisioned gateway. Never run `chirpstack-bootstrap.js`
+   directly: it writes no stamp, so the service runs it again at the next boot,
+   mints a second API key and rewrites `.chirpstack.env`. Provision a gateway
+   that is not provisioned yet with `/etc/init.d/osi-bootstrap start`. Manual
+   re-provision, if ever needed (reuses the existing API key; the env file keeps
+   only the `CHIRPSTACK_*` keys):
    ```bash
-   node /usr/share/node-red/chirpstack-bootstrap.js
+   rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
    ```
 
 ### What `deploy.sh` actually does end-to-end
@@ -295,8 +298,13 @@ Reading straight through the script, in order:
    and the diagnose script into a temp dir, fails loudly if any fetched artifact is
    empty, then runs `verify-communication-contract.js` against them before touching
    anything live.
-3. Deploys `settings.js`, the Node-RED init script, and the gateway identity
-   helper (the latter two `chmod 755`), removes a legacy GPS sidecar service if
+3. Reads the release version from `96_osi_server_config` and records the current
+   `osi-server.cloud.firmware_version`. Deploys `settings.js`, the Node-RED init
+   script, and the gateway identity helper (the latter two `chmod 755`), installs
+   `osi-bootstrap` and enables it when it is not enabled (this also re-enables a
+   service an operator disabled, and is not undone on rollback; when this deploy
+   enables it on a gateway whose env file is already provisioned, it writes
+   `/etc/osi-bootstrap.done`), removes a legacy GPS sidecar service if
    present, then fetches the deploy-payload-swap helper
    (`scripts/deploy-payload-swap.js`) and hard-aborts if `/srv/node-red/payloads`
    is on a different filesystem than `/srv/node-red` — the symlink flip in step
@@ -337,7 +345,9 @@ Reading straight through the script, in order:
    territory; this section only covers what `deploy.sh` does mechanically to
    fetch and invoke them.
 9. Fixes mosquitto file ownership/permissions if mosquitto is installed.
-10. Flips the payload live (`flipTo(<new stamp>)`), restarts Node-RED, waits 5s,
+10. Flips the payload live (`flipTo(<new stamp>)`), writes the new
+    `firmware_version` to UCI (every switch back to the previous payload puts
+    the old value back first), restarts Node-RED, waits 5s,
     then probes `http://127.0.0.1:1880/gui` with `wget --spider` (5.3 / DD10).
     On pass: prints `OK: local health self-check PASSED …` then
     `OK: committing payload <stamp>` and prunes old payload directories to

@@ -149,6 +149,7 @@ fetch_required() {
 restart_node_red() { echo "STUB restart_node_red"; return 0; }
 swap_call() { echo "STUB swap_call $*"; return 0; }
 write_payload_compatibility() { echo "STUB write_payload_compatibility $*"; return 0; }
+apply_release_firmware_version() { echo "STUB apply_release_firmware_version $*"; return 0; }
 fetch_reconciliation_assets() { echo "STUB fetch_reconciliation_assets"; return 0; }
 
 ${extractFunction('checkpoint_live_db')}
