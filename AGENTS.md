@@ -296,7 +296,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 | Device | ChirpStack app | Profile | Sensors |
 |--------|----------------|---------|---------|
 | KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
-| TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
+| TEKTELIC_CLOVER | Sensors | OSI CLOVER Sensor (Tektelic agriculture codec) | Ambient temp, humidity, light (VWC not stored) |
 | DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow), WATERMARK or Chameleon SWT |
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
@@ -324,6 +324,7 @@ node scripts/verify-sync-flow.js              # sync implementation
 node scripts/verify-no-new-silent-catch.js    # empty catch ratchet
 node scripts/verify-strega-gen1.js            # STREGA Gen1 decoder
 node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
+node scripts/verify-tektelic-agriculture-codec.js # Tektelic KIWI/CLOVER decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard

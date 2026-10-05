@@ -39,8 +39,8 @@ Do NOT use this skill for (route instead):
 
 | Device | ChirpStack app | Custom OSI decoder? | Primary `device_data` fields | Units |
 |---|---|---|---|---|
-| `KIWI_SENSOR` | Sensors | No (TEKTELIC/vendor payload, no file under `codecs/`) | `swt_1`, `swt_2` (via legacy `swt_wm1/2` aliasing), `light_lux`, `ambient_temperature`, `relative_humidity` | kPa, lux, °C, %RH |
-| `TEKTELIC_CLOVER` | Sensors | No | same shape as KIWI; VWC is **typed but not populated** (see VWC note below) | °C, %RH; VWC not stored |
+| `KIWI_SENSOR` | Sensors | No (vendor codec; the bootstrap does not attach one to the Kiwi profile, see below) | `swt_1`, `swt_2` (via legacy `swt_wm1/2` aliasing), `light_lux`, `ambient_temperature`, `relative_humidity` | kPa, lux, °C, %RH |
+| `TEKTELIC_CLOVER` | Sensors | Vendor — `tektelic_agriculture_decoder.js` (upstream TEKTELIC agriculture codec, shared with KIWI) | same shape as KIWI; VWC is **typed but not populated** (see VWC note below) | °C, %RH; VWC not stored |
 | `DRAGINO_LSN50` | Sensors | Yes — `dragino_lsn50_decoder.js` | `ext_temperature_c` (DS18B20), `adc_ch0v/adc_ch1v`, `bat_v`, plus MOD-specific: `dendro_position_mm`/`dendro_*` (dendrometer), `rain_*` (rain gauge), `flow_*` (flow meter), and Chameleon `swt_1/2/3` when a VIA Chameleon module is attached over I2C | °C, V, mm, µm, L |
 | `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_gauge_cumulative_mm` → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
@@ -50,7 +50,7 @@ Do NOT use this skill for (route instead):
 File locations for all OSI-authored decoders:
 `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/` (list with `ls` there; as of 2026-09-14: aquascope_lorain, dragino_lsn50, milesight_uc512, sensecap_s2120, strega_gen1, strega_gen2).
 The same directory also holds `agroscope_uplink_transform.js`, the edge→partner-institute IoT forwarding transform (osi-os PR #110) — it is not a device decoder.
-KIWI/CLOVER have no file here — their payload arrives already decoded (vendor/ChirpStack-side codec), which is why the table above says "No".
+`tektelic_agriculture_decoder.js` is the upstream TEKTELIC agriculture sensor codec (one codec for KIWI and CLOVER), vendored unmodified; the bootstrap attaches it to the `OSI CLOVER Sensor` profile only. It emits `input5_frequency`/`input6_frequency` for the KIWI watermark inputs, which Process Data accepts beside `watermark1_frequency`/`watermark2_frequency`. The Kiwi profile is still created without a codec; Kiwi gateways in the field run a codec attached by hand.
 
 **VWC note (not implemented on the edge):** `web/react-gui/src/types/farming.ts` types a
 `VWC` trigger metric as "planned; typed now", and `docs/channel-manifest.md`
