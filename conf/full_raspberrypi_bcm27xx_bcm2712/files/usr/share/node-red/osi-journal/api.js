@@ -647,9 +647,10 @@ function scopedWriteHelper(principal, method) {
   return principal.scope;
 }
 
+// Returns the caller's fresh scope (role included) in scoped mode, else null.
 async function assertJournalWriteRole(db, principal) {
   const scopeHelper = scopedWriteHelper(principal, 'assertFreshRole');
-  if (!scopeHelper) return principal;
+  if (!scopeHelper) return null;
   const actor = await dbGet(
     db,
     'SELECT role FROM users WHERE user_uuid=? LIMIT 1',
@@ -663,7 +664,7 @@ async function assertJournalWriteRole(db, principal) {
     { scopedMode: true }
   );
   if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
-  return principal;
+  return fresh;
 }
 
 async function assertZoneWrite(db, principal, zoneUuid) {
@@ -736,12 +737,17 @@ async function assertEntryWrite(db, principal, entryUuid) {
   );
   if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
   if (!entry.plot_uuid) {
-    // A farm-wide entry (no zone, no plot): any write-capable role may change
-    // it, so the role decision is the whole rule (#403, owner decision). An
-    // entry with a zone but no plot (no API path creates one) also needs the
-    // grant on that zone; a zone that cannot be resolved is refused.
-    await assertJournalWriteRole(db, principal);
-    if (entry.zone_uuid != null || entry.zone_id != null) {
+    // #403, owner decisions. An entry with a zone but no plot (no API path
+    // creates one) needs the grant on that zone; a zone that cannot be resolved
+    // is refused. A farm-wide entry (no zone, no plot) may be changed only by
+    // the account that wrote it or by an admin; anyone else gets the answer a
+    // missing entry gets.
+    const actorScope = await assertJournalWriteRole(db, principal);
+    if (entry.zone_uuid == null && entry.zone_id == null) {
+      if (entry.owner_user_uuid !== principal.author_principal_uuid && actorScope.role !== 'admin') {
+        throw apiError(404, 'not_found', 'Journal entry was not found');
+      }
+    } else {
       const zone = entry.zone_uuid != null ? { zone_uuid: entry.zone_uuid } : await dbGet(
         db,
         'SELECT zone_uuid FROM irrigation_zones WHERE id=? LIMIT 1',

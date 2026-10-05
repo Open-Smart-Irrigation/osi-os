@@ -526,12 +526,13 @@ const WRITE_TARGETS = new Map([
   ...['journal-entry-put-http', 'journal-entry-void-post-http'].map((id) => [id, {
     object: 'zone',
     target: FOREIGN_ZONE_UUID,
-    // #403, by the owner's decision: an entry with neither zone nor plot is
-    // farm-wide, and any write-capable role may change it without a zone grant
-    // (the role decision is the rule). An entry with a zone and no plot needs
+    // #403, by the owner's decisions: an entry with a zone and no plot needs
     // the grant on its zone, which the fixture's foreign zone-only entry tests.
+    // A farm-wide entry (no zone, no plot) is changed only by the account that
+    // wrote it or by an admin; the seed has none, so test-journal-api.js pins
+    // that rule, not this verifier.
     reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone; farm-wide ' +
-      'entries (no zone, no plot) need only the write role (#403)',
+      'entries (no zone, no plot) need their writer or an admin (#403)',
   }]),
   [
     'journal-custom-vocab-put-http',

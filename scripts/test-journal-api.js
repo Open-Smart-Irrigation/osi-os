@@ -685,13 +685,17 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
     [secondPlotlessEntryUuid, plotlessEntryUuid]
   );
 
-  const voided = await journal.voidEntry(
-    db,
-    plotlessEntryUuid,
-    { base_sync_version: 1, reason: 'Grantee correction' },
-    other
+  // Reading is account-wide; changing another account's farm-wide entry is
+  // not (#403, owner decision): it answers as if the entry did not exist.
+  await assert.rejects(
+    journal.voidEntry(
+      db,
+      plotlessEntryUuid,
+      { base_sync_version: 1, reason: 'Grantee correction' },
+      other
+    ),
+    (error) => error && error.code === 'not_found' && error.statusCode === 404
   );
-  assert.equal(voided.entry_uuid, plotlessEntryUuid);
 
   db.prepare("UPDATE users SET role='viewer' WHERE id=2").run();
   scopeHelper.invalidateScope(OTHER_OWNER_UUID);
@@ -707,18 +711,14 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   );
 });
 
-// #403, by the owner's decision: a farm-wide entry (no zone, no plot) may be
-// changed by any write-capable role without a zone grant. An entry that belongs
-// to a zone but to no plot (no API path creates one) needs the grant on that
-// zone, as a plot entry needs the grant on its plot.
-test('#403: a zone-only entry needs the zone grant, a farm-wide entry the write role', async () => {
+// #403: an entry that belongs to a zone but to no plot (no API path creates
+// one) needs the grant on that zone, as a plot entry needs the grant on its plot.
+test('#403: a zone-only entry needs the grant on its zone', async () => {
   const db = new TestDb('scoped-entry-zone-only');
   seedIdentity(db);
   const zoneOnlyFinal = '22150000-0000-4000-8000-000000000001';
   const zoneOnlyDraft = '22150000-0000-4000-8000-000000000002';
   const zoneIdOnly = '22150000-0000-4000-8000-000000000003';
-  const farmWide = '22150000-0000-4000-8000-000000000004';
-  const farmWideDraft = '22150000-0000-4000-8000-000000000005';
   // Entries of the other account; the zone-only ones are moved into the other
   // account's zone (id 2), on which the caller holds no grant.
   const other = principal({
@@ -736,8 +736,6 @@ test('#403: a zone-only entry needs the zone grant, a farm-wide entry the write 
   await create(zoneOnlyFinal, '2026-07-13T08:00:00');
   await create(zoneOnlyDraft, '2026-07-13T09:00:00', { status: 'draft' });
   await create(zoneIdOnly, '2026-07-13T10:00:00');
-  await create(farmWide, '2026-07-13T11:00:00');
-  await create(farmWideDraft, '2026-07-13T12:00:00', { status: 'draft' });
   db.prepare('UPDATE journal_entries SET zone_id=2, zone_uuid=? WHERE entry_uuid IN (?,?)')
     .run(FOREIGN_ZONE_UUID, zoneOnlyFinal, zoneOnlyDraft);
   db.prepare('UPDATE journal_entries SET zone_id=2, zone_uuid=NULL WHERE entry_uuid=?').run(zoneIdOnly);
@@ -777,13 +775,6 @@ test('#403: a zone-only entry needs the zone grant, a farm-wide entry the write 
   assert.deepEqual(state(), before, 'a refused change writes nothing');
   assert.equal(outbox(), queued, 'and queues nothing');
 
-  // Farm-wide: the write role is the rule, no grant needed.
-  const voided = await journal.voidEntry(
-    db, farmWide, { base_sync_version: 1, reason: 'Farm-wide correction' }, caller
-  );
-  assert.equal(voided.entry_uuid, farmWide);
-  await journal.discardEntry(db, farmWideDraft, {}, caller);
-
   // With the grant on the zone, the zone-only entry may be changed.
   db.prepare(
     'INSERT INTO user_zone_assignments (assignment_uuid,user_uuid,zone_uuid,created_at) VALUES (?,?,?,?)'
@@ -810,6 +801,142 @@ test('#403: a zone-only entry needs the zone grant, a farm-wide entry the write 
     journal.voidEntry(db, zoneIdOnly, { base_sync_version: 1, reason: 'Viewer' }, caller),
     (error) => error && error.statusCode === 403
   );
+});
+
+// #403, by the owner's decision: with scoped access on, a farm-wide entry (no
+// zone, no plot) is voided, updated or discarded only by the account that wrote
+// it or by an admin. Another account gets the answer a missing entry gets.
+test('#403: a farm-wide entry is changed only by its writer or an admin', async () => {
+  const db = new TestDb('scoped-entry-farm-wide');
+  seedIdentity(db);
+  const othersFinal = '22160000-0000-4000-8000-000000000001';
+  const othersDraft = '22160000-0000-4000-8000-000000000002';
+  const ownFinal = '22160000-0000-4000-8000-000000000003';
+  const ownDraft = '22160000-0000-4000-8000-000000000004';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  const create = (uuid, time, writer, overrides) => journal.saveEntry(
+    db,
+    entryInput(uuid, null, time, Object.assign({ season_crop: 'barley' }, overrides || {})),
+    writer,
+    { mode: 'create' }
+  );
+  await create(othersFinal, '2026-07-13T08:00:00', other);
+  await create(othersDraft, '2026-07-13T09:00:00', other, { status: 'draft' });
+  await create(ownFinal, '2026-07-13T10:00:00', principal());
+  await create(ownDraft, '2026-07-13T11:00:00', principal(), { status: 'draft' });
+
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  const state = () => db.prepare(
+    'SELECT entry_uuid,status,sync_version,note,author_principal_uuid FROM journal_entries ORDER BY entry_uuid'
+  ).all();
+  const outbox = () => db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  const hidden = (error) => error && error.code === 'not_found' && error.statusCode === 404 &&
+    error.message === 'Journal entry was not found';
+  const update = (uuid, time, writer, note) => journal.saveEntry(
+    db,
+    entryInput(uuid, null, time, { base_sync_version: 1, season_crop: 'barley', note }),
+    writer,
+    { mode: 'update', entryUuid: uuid }
+  );
+
+  // A researcher on another account's entries: refused, nothing written or queued,
+  // and the unsynced draft is not deleted.
+  const before = state();
+  const queued = outbox();
+  await assert.rejects(
+    journal.voidEntry(db, othersFinal, { base_sync_version: 1, reason: 'Not mine' }, caller),
+    hidden
+  );
+  await assert.rejects(update(othersFinal, '2026-07-13T08:00:00', caller, 'Not mine'), hidden);
+  await assert.rejects(journal.discardEntry(db, othersDraft, {}, caller), hidden);
+  assert.deepEqual(state(), before, 'a refused change writes nothing');
+  assert.equal(outbox(), queued, 'and queues nothing');
+
+  // The same refusal over HTTP, for the PUT discard verb and the void route.
+  const secret = 'scoped-entry-farm-wide-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 1,
+    username: 'field-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const http = (method, path, uuid, body) => journal.handleHttpRequest({
+    msg: { req: { method, path, headers: { authorization }, query: {}, params: { uuid }, body } },
+    Database: ExistingDb,
+    environment: { authTokenSecret: secret, deviceEui: GATEWAY_EUI, deviceEuiConfidence: 'authoritative' },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+  const httpDiscard = await http('PUT', '/api/journal/entries/' + othersDraft, othersDraft, { discard: true });
+  const httpVoid = await http('POST', '/api/journal/entries/' + othersFinal + '/void', othersFinal,
+    { base_sync_version: 1, reason: 'Not mine' });
+  for (const response of [httpDiscard, httpVoid]) {
+    assert.equal(response.statusCode, 404);
+    assert.deepEqual(
+      { error: response.payload.error, message: response.payload.message },
+      { error: 'not_found', message: 'Journal entry was not found' }
+    );
+  }
+  assert.deepEqual(state(), before);
+  assert.equal(outbox(), queued);
+
+  // A researcher on its own entries: allowed.
+  await update(ownFinal, '2026-07-13T10:00:00', caller, 'My correction');
+  const ownVoided = await journal.voidEntry(
+    db, ownFinal, { base_sync_version: 2, reason: 'My correction' }, caller
+  );
+  assert.equal(ownVoided.entry_uuid, ownFinal);
+  await journal.discardEntry(db, ownDraft, {}, caller);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(ownDraft).n, 0);
+
+  // An admin on another account's entries: allowed, and the entry keeps its owner.
+  db.prepare("UPDATE users SET role='admin' WHERE id=1").run();
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await update(othersFinal, '2026-07-13T08:00:00', caller, 'Admin correction');
+  const adminVoided = await journal.voidEntry(
+    db, othersFinal, { base_sync_version: 2, reason: 'Admin correction' }, caller
+  );
+  assert.equal(adminVoided.entry_uuid, othersFinal);
+  assert.equal(
+    db.prepare('SELECT owner_user_uuid FROM journal_entries WHERE entry_uuid=?').get(othersFinal).owner_user_uuid,
+    OTHER_OWNER_UUID
+  );
+  await journal.discardEntry(db, othersDraft, {}, caller);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(othersDraft).n, 0);
+});
+
+test('#403: flag-off changes to farm-wide entries are unchanged', async () => {
+  const db = new TestDb('flag-off-entry-farm-wide');
+  seedIdentity(db);
+  const othersFinal = '22170000-0000-4000-8000-000000000001';
+  const ownFinal = '22170000-0000-4000-8000-000000000002';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.saveEntry(db, entryInput(othersFinal, null, '2026-07-13T08:00:00', { season_crop: 'barley' }),
+    other, { mode: 'create' });
+  await journal.saveEntry(db, entryInput(ownFinal, null, '2026-07-13T09:00:00', { season_crop: 'barley' }),
+    principal(), { mode: 'create' });
+  // No scope helper: the legacy owner-filtered lifecycle decides, as before.
+  await assert.rejects(
+    journal.voidEntry(db, othersFinal, { base_sync_version: 1, reason: 'Not mine' }, principal()),
+    (error) => error && error.code === 'ownership'
+  );
+  const voided = await journal.voidEntry(db, ownFinal, { base_sync_version: 1, reason: 'Mine' }, principal());
+  assert.equal(voided.entry_uuid, ownFinal);
 });
 
 test('scoped catalog GET rewrites a grantee to the plot owner, while no context stays owner-only', async () => {
