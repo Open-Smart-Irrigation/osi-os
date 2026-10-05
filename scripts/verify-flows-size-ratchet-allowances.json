@@ -550,8 +550,8 @@
       "reason": "Gateway identity convergence through migration 0058: measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3683 -> HEAD 4481 = +798. The finalizer persists link state, attributes blank device and zone identities, mints missing irrigation-event keys for the linked gateway, and relies on the existing event-key update trigger to enqueue those events in the same transaction."
     },
     "sync-history-build": {
-      "delta": 4087,
-      "reason": "Wave 3 durable-history-batch promotion (AgroLink 7e30e6a4, renumbered migration 0051, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 5913 -> HEAD 10000 = +4087. Promotes durable history batches: snapshot-high-key cursor tracking, manifest tombstone accounting, and dirty-key-driven correction coverage for irrigation_events/valve_actuation_expectations, sourced from osi-history-sync-helper's expanded batch-build logic."
+      "delta": 382,
+      "reason": "History correction queue: a queued dirty key whose row no longer exists is set to status 'dropped' (guarded on status='pending' and the changed_at that was read, UPDATE ... RETURNING), counted per turn, warned once and recorded as sync_state.lastHistoryDroppedMissing, instead of a five-minute backoff for ever that starved the keys behind it. Supersedes the prior Wave 3 durable-history-batch entry (+4087), which origin/main already measures. Measured with verify-flows-size-ratchet measure() over both byte-identical profiles: origin/main 11233 -> HEAD 11615 = +382."
     },
     "sync-history-mark": {
       "delta": 3949,
