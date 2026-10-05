@@ -867,7 +867,7 @@ async function checkOutcome(flows, entry, label, probeOptions) {
     const options = { body };
     // foreignBodySetupSql runs before each foreign-body run only, after setupSql.
     if (fixture.foreignBodySetupSql) {
-      options.fixture = { ...fixture, setupSql: (fixture.setupSql || '') + fixture.foreignBodySetupSql };
+      options.fixture = { ...fixture, setupSql: (fixture.setupSql || '') + '\n' + fixture.foreignBodySetupSql };
     }
     runs.push({ how: `body ${JSON.stringify(body)}`, options });
   }

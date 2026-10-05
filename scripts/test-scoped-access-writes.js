@@ -3166,10 +3166,22 @@ test('#400: a disabled account cannot file an improvement request and nothing is
   const db = seedScopedDb();
   try {
     db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
-    const response = await postImprovementRequest(db, 2, 'res1');
+    // Record every statement, so the test also pins that the refusal comes
+    // before the diagnostics read (the device counts).
+    const statements = [];
+    const recording = new Proxy(db, {
+      get(target, key) {
+        if (key === 'prepare') return (sql) => { statements.push(sql); return target.prepare(sql); };
+        const value = target[key];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const response = await postImprovementRequest(recording, 2, 'res1');
     assert.equal(response.result.statusCode, 403);
     assert.equal(response.result.payload.request_id, undefined);
     assert.deepEqual(improvementRequestCounts(db), { requests: 0, queued: 0 });
+    assert.ok(statements.length > 0, 'the recording database saw the decision');
+    assert.equal(statements.some((sql) => /FROM devices/.test(sql)), false, 'no diagnostics read');
   } finally {
     db.close();
   }
