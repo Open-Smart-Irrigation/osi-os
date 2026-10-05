@@ -98,7 +98,7 @@ osi-os/
 
 ### Prerequisites
 
-- Node.js 20+ and npm
+- Node.js 22.12 or later (or 24+) and npm; `web/react-gui/package.json` requires `^22.12.0 || >=24.0.0`
 - A running Node-RED instance (local or on a Pi) with the flows loaded
 - A copy of `farming.db` accessible at the path configured in Node-RED
 
@@ -187,7 +187,7 @@ No further setup required. See [Step 4 — Install Tailscale](#step-4--install-t
 #### Prerequisites
 
 - This repository cloned on your dev machine
-- Node.js 20+ and npm on your dev machine
+- Node.js 22.12 or later (or 24+) and npm on your dev machine
 
 ### Step 1 — Flash ChirpStack Gateway OS
 
@@ -216,7 +216,7 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
-The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed, not enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
+The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed and enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
@@ -235,7 +235,7 @@ A manual file-by-file copy is not a supported install: it misses most helper mod
 
 ### Step 3 — ChirpStack auto-provision
 
-ChirpStack applications, device profiles (KIWI, LSN50, STREGA Gen1 and Gen2, S2120, LoRain, UC512, SDI-12, RAK10701), and UCI identity fields are provisioned automatically on first boot of the OSI OS image (Path A) by the `osi-bootstrap` init script (`START=99`). `deploy.sh` installs that script but does not enable it, so after a Path B deploy run the provisioning command below once.
+ChirpStack applications, device profiles (KIWI, LSN50, STREGA Gen1 and Gen2, S2120, LoRain, UC512, SDI-12, RAK10701), and UCI identity fields are provisioned automatically on first boot of the OSI OS image (Path A) by the `osi-bootstrap` init script (`START=99`).
 
 On Path B, `deploy.sh` enables `osi-bootstrap`, which provisions ChirpStack at the next boot. To provision at once, run `ssh root@<pi-ip> '/etc/init.d/osi-bootstrap start'`. Do not run `chirpstack-bootstrap.js` directly: only the service writes the stamp `/etc/osi-bootstrap.done`, and without it the next boot runs the script again, which creates a second API key and rewrites `/srv/node-red/.chirpstack.env`.
 
@@ -303,7 +303,7 @@ ssh -R 9876:localhost:9876 root@<pi-ip> \
   'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 ```
 
-No need to re-run `chirpstack-bootstrap.js` after the first provisioning unless ChirpStack was re-provisioned or device profiles are missing.
+No need to provision ChirpStack again after the first provisioning unless ChirpStack was re-provisioned or device profiles are missing; then use the re-provision command in Step 3.
 
 ---
 
