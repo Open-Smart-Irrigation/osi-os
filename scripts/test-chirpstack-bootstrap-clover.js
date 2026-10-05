@@ -497,6 +497,34 @@ test('--repair-soil-profiles leaves a codec attached by hand to the Kiwi profile
   assert.equal(world.profiles.find((p) => p.id === gw.ids.kiwi).script, handCodec);
 });
 
+test('--repair-soil-profiles attaches the codec to a configured, distinct Clover profile that has none', async () => {
+  const gw = provisionedGatewaySeed({ kiwiCodec: 'function decodeUplink(){return {data:{}};}' });
+  const world = makeWorld(gw.seed);
+  const handMade = nextUuid();
+  world.profiles.push({ id: handMade, name: 'Clover by hand', tenantId: gw.ids.tenantId, runtime: 0, script: '', autoDetect: false });
+  world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_PROFILE_CLOVER=${gw.ids.rak}`, `CHIRPSTACK_PROFILE_CLOVER=${handMade}`));
+  world.uci.set('osi-server.cloud.chirpstack_profile_clover', handMade);
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.deepEqual(world.writes, [['updateDeviceProfile', 'Clover by hand']]);
+  assert.equal(world.profiles.find((p) => p.id === handMade).runtime, JS_RUNTIME);
+  assert.equal(world.uci.get('osi-server.cloud.chirpstack_profile_clover'), handMade, 'the configured id is kept');
+});
+
+test('--repair-soil-profiles replaces a configured Clover id whose profile no longer exists', async () => {
+  const gw = provisionedGatewaySeed({ kiwiCodec: 'function decodeUplink(){return {data:{}};}' });
+  const world = makeWorld(gw.seed);
+  const gone = nextUuid();
+  world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_PROFILE_CLOVER=${gw.ids.rak}`, `CHIRPSTACK_PROFILE_CLOVER=${gone}`));
+  world.uci.set('osi-server.cloud.chirpstack_profile_clover', gone);
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  const clover = profileByName(world, 'OSI CLOVER Sensor');
+  assert.ok(clover);
+  assert.equal(world.uci.get('osi-server.cloud.chirpstack_profile_clover'), clover.id);
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_PROFILE_CLOVER, clover.id);
+});
+
 test('--repair-soil-profiles never falls through to a full provisioning pass when the repair fails', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);

@@ -634,6 +634,11 @@ async function repairCloverProfile(client, envText, envValues, codecScript) {
   // node-red.init resolves UCI first and falls back to the env file.
   const effectiveClover = uciClover || envClover;
   let cloverProfileId = usable(effectiveClover) ? effectiveClover : '';
+  // A distinct id alone is not proof: the profile must exist and run a codec.
+  if (cloverProfileId && (await ensureProfileCodec(client, cloverProfileId, 'Clover', codecScript)) === 'missing') {
+    console.log(`  ⚠ configured Clover profile ${cloverProfileId} not found in ChirpStack; using "${CFG.profileCloverName}"`);
+    cloverProfileId = '';
+  }
   if (!cloverProfileId) {
     cloverProfileId = await getOrCreateCloverProfile(client, await findTenantId(client), codecScript);
   }
