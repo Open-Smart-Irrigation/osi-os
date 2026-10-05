@@ -3122,3 +3122,100 @@ test('PR-N: Fan Control flag-off preserves the legacy bearer-only behavior for a
     db.close();
   }
 });
+
+// #400: filing an improvement request needs an enabled account in scoped mode.
+// Any enabled role may file one (the request belongs to the caller); a disabled
+// account is refused before the diagnostics are read or the row is written.
+const IMPROVEMENT_REQUEST_BODY = {
+  type: 'bug',
+  severity: 'idea',
+  area: 'other',
+  title: 'Scoped filing',
+  description: 'A description that is long enough',
+  consent_public: true,
+  consent_diagnostics: true,
+};
+
+function improvementRequestCounts(db) {
+  return {
+    requests: db.prepare('SELECT COUNT(*) AS n FROM improvement_requests').get().n,
+    queued: db.prepare(
+      "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type = 'WORK_REQUEST'"
+    ).get().n,
+  };
+}
+
+async function postImprovementRequest(db, userId, username, env = ENV, libOverrides = {}) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode('improvement-requests-api-router'), {
+    msg: scopedRequest(
+      userId,
+      username,
+      'POST',
+      '/api/improvement-requests',
+      {},
+      { ...IMPROVEMENT_REQUEST_BODY }
+    ),
+    env,
+    db,
+    libOverrides,
+  });
+}
+
+test('#400: a disabled account cannot file an improvement request and nothing is queued', async () => {
+  const db = seedScopedDb();
+  try {
+    db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
+    const response = await postImprovementRequest(db, 2, 'res1');
+    assert.equal(response.result.statusCode, 403);
+    assert.equal(response.result.payload.request_id, undefined);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 0, queued: 0 });
+  } finally {
+    db.close();
+  }
+});
+
+test('#400: an enabled account of any role still files an improvement request', async () => {
+  const db = seedScopedDb();
+  try {
+    const researcher = await postImprovementRequest(db, 2, 'res1');
+    assert.equal(researcher.result.statusCode, 201);
+    assert.equal(researcher.result.payload.local_status, 'QUEUED');
+    const viewer = await postImprovementRequest(db, 3, 'view1');
+    assert.equal(viewer.result.statusCode, 201);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 2, queued: 2 });
+    assert.deepEqual(
+      db.prepare('SELECT user_id FROM improvement_requests ORDER BY user_id').all().map((row) => row.user_id),
+      [2, 3]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('#400: flag-off filing is unchanged and never loads the scope helper', async () => {
+  const db = seedScopedDb();
+  try {
+    db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
+    const loaded = [];
+    const response = await postImprovementRequest(
+      db,
+      2,
+      'res1',
+      { ...ENV, OSI_SCOPED_ACCESS: '0' },
+      {
+        osiLib: {
+          require(name) {
+            loaded.push(name);
+            return { ok: false, error: 'flag-off must not load modules' };
+          },
+        },
+      }
+    );
+    assert.equal(response.result.statusCode, 201);
+    assert.deepEqual(loaded, []);
+    assert.deepEqual(improvementRequestCounts(db), { requests: 1, queued: 1 });
+  } finally {
+    db.close();
+  }
+});

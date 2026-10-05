@@ -165,7 +165,6 @@ const PHASE_C_PENDING = new Set([
 // Known gaps: real gaps found by this verifier, each tracked by its issue. An
 // entry leaves the list when its fix lands (the stale check enforces it).
 const KNOWN_GAPS = new Map([
-  ['improvement-requests-post-http', '#400: needs an enabled-account decision'],
   ['journal-catalog-get-http', '#400: needs an enabled-account decision'],
   ['journal-entry-put-http', '#403: needs the zone decision on the entry\'s zone'],
   ['journal-entry-void-post-http', '#403: needs the zone decision on the entry\'s zone'],
@@ -542,6 +541,11 @@ const NO_WRITE_ROLE_NEEDED = new Map([
   [
     'analysis-views-post-http',
     'saves the caller\'s own analysis view, filtered by owner; no farm data changes',
+  ],
+  [
+    'improvement-requests-post-http',
+    'files a support request owned by the caller; any enabled role may report a problem, ' +
+      'so the enabled-account decision is the whole rule (#400)',
   ],
 ]);
 
