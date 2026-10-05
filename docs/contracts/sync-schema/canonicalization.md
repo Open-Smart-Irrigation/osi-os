@@ -165,12 +165,21 @@ producing a canonical body or hash.
 pF is never stored or synced for measurements; every consumer derives it from
 canonical kPa with this exact rule:
 
-- `pF = log10(kPa * 10)` (pF is the decimal logarithm of tension in hPa; 1 kPa = 10 hPa)
-- `kPa = 10^pF / 10`
-- `NULL`, non-finite, or `<= 0` kPa derives `null` (no clamping, no substitute values)
-- Display rounding: pF `toFixed(2)`; CSV export value: 4 decimals
-- CSV pairing: each SWT kPa row is paired with a row whose `channel_key` gains the
-  `_pf` suffix, `unit` is `pF`, and `series_label` gains the ` (pF)` suffix
+- `pF = log10(kPa * 10)` for finite kPa above 0.1 (pF is the decimal logarithm of
+  tension in hPa; 1 kPa = 10 hPa)
+- pF is never below 0: finite kPa at or below 0.1 (where the formula gives 0, a
+  negative value, or no value) derives the floor `0`; this includes a saturated
+  probe at 0 kPa and a negative kPa, which should not occur
+- `NULL` or non-finite kPa derives `null` (no value)
+- `kPa = 10^pF / 10` for pF >= 0; it is exact above the floor, and 0 pF maps to
+  0.1 kPa, the floor itself
+- The floor applies to derived pF only; stored and synced kPa, and kPa displays,
+  are unchanged
+- Display rounding: pF `toFixed(2)` (the floor shows `0.00 pF`); CSV export value:
+  4 decimals (the floor writes `0`)
+- CSV pairing: each finite SWT kPa row is paired with a row whose `channel_key`
+  gains the `_pf` suffix, `unit` is `pF`, and `series_label` gains the ` (pF)`
+  suffix
 
 Golden vectors (all implementations - edge JS, GUI TS, server Java - must match):
 
@@ -180,8 +189,11 @@ Golden vectors (all implementations - edge JS, GUI TS, server Java - must match)
 | 30 | 2.4771212547196626 | 2.48 | 2.4771 |
 | 60 | 2.7781512503836436 | 2.78 | 2.7782 |
 | 300 | 3.4771212547196626 | 3.48 | 3.4771 |
-| 0 | null | null | null |
-| -5 | null | null | null |
+| 0.11 | 0.04139268515822507 | 0.04 | 0.0414 |
+| 0.1 | 0 | 0.00 | 0 |
+| 0.05 | 0 (floor) | 0.00 | 0 |
+| 0 | 0 (floor) | 0.00 | 0 |
+| -5 | 0 (floor) | 0.00 | 0 |
 | null | null | null | null |
 
 ## Valve schedule

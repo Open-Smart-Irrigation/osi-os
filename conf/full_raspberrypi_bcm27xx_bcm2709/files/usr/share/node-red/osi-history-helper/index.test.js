@@ -18,16 +18,22 @@ test('normalizeDeveui accepts valid hex EUIs and cleans separators', () => {
   assert.equal(hh.normalizeDeveui(12345), null);
 });
 
-test('kpaToPf converts positive kPa to pF and rejects non-positive/invalid input', () => {
+// pF is never below 0: finite kPa at or below 0.1 derives the 0 pF floor
+// (0 and -5 kPa returned null before this rule, 0.05 kPa returned -0.30).
+test('kpaToPf converts kPa to pF, floors at 0 pF for 0.1 kPa and below, and rejects missing/invalid input', () => {
   assert.equal(hh.kpaToPf(10), 2);
   assert.equal(hh.kpaToPf(1), 1);
-  assert.equal(hh.kpaToPf(0), null);
-  assert.equal(hh.kpaToPf(-5), null);
+  assert.equal(hh.kpaToPf('10'), 2);
+  assert.ok(Math.abs(hh.kpaToPf(0.11) - Math.log10(1.1)) < 1e-12);
+  assert.equal(hh.kpaToPf(0.1), 0);
+  assert.equal(hh.kpaToPf(0.05), 0);
+  assert.equal(hh.kpaToPf(0), 0);
+  assert.equal(hh.kpaToPf(-5), 0);
   assert.equal(hh.kpaToPf(null), null);
+  assert.equal(hh.kpaToPf(undefined), null);
+  assert.equal(hh.kpaToPf(''), null);
   assert.equal(hh.kpaToPf(NaN), null);
   assert.equal(hh.kpaToPf(Infinity), null);
-  assert.equal(hh.kpaToPf('10'), 2);
-  assert.equal(hh.kpaToPf(0.1), 0);
 });
 
 test('resolveAggregation honors explicit levels and rejects unsupported ones', () => {

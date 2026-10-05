@@ -130,24 +130,29 @@ There is no `swt_*_pf` column and no schema change was needed to add it
 
 **Exact formula, verified in `web/react-gui/src/utils/swt.ts`:**
 ```ts
-// pF = log10(tension in hPa); 1 kPa = 10 hPa. Non-positive tension has no pF.
+export const PF_FLOOR_KPA = 0.1;
 export function kpaToPf(kpa: unknown): number | null {
   const value = toFiniteSwtValue(kpa);
-  if (value === null || value <= 0) return null;
+  if (value === null) return null;
+  if (value <= PF_FLOOR_KPA) return 0;
   return Math.log10(value * 10);
 }
 ```
 So **`pF = log10(kPa * 10)`**, and the inverse `pfToKpa` is
-`kPa = 10^pF / 10`. Non-positive, non-finite, or missing kPa produces `null`
-pF — there is no clamping and no substitute value (consistent with the
-missing-data rule below). This exact formula, and its rounding, is pinned as
+`kPa = 10^pF / 10` (exact above the floor; 0 pF maps to 0.1 kPa; a negative
+pF is rejected). **pF is never shown below 0**: a finite kPa at or below 0.1
+(a saturated probe reads 0 kPa) shows the floor `0.00 pF` and exports `0`.
+Missing or non-finite kPa still produces `null` pF (consistent with the
+missing-data rule below). kPa displays are unaffected by the floor.
+
+This exact formula, and its rounding, is pinned as
 a cross-runtime contract in `docs/contracts/sync-schema/canonicalization.md`
 ("SWT pF Derivation") with golden vectors edge JS / GUI TS / server Java must
 all match, e.g. 30 kPa → `2.4771212547196626` (2.48 at 2 dp, 2.4771 at 4 dp),
-0 or negative kPa → `null`. Display rounds pF to 2 decimals
+0 or negative kPa → `0` (the floor), missing kPa → `null`. Display rounds pF to 2 decimals
 (`formatSwtValue`); CSV export rounds to 4 decimals.
 
-**CSV pairing:** each SWT kPa row exported gets a paired `_pf` row — verified
+**CSV pairing:** each finite SWT kPa row exported gets a paired `_pf` row — verified
 in `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js`:
 `channel_key: \`${channel.id}_pf\`` and `series_label: \`${kpaRow.series_label} (pF)\`` — with `unit: 'pF'`.
 

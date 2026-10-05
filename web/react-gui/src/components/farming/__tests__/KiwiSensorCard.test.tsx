@@ -87,16 +87,35 @@ describe('KiwiSensorCard SWT unit preference', () => {
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
   });
 
-  it('keeps zero visible in pF mode and gives it one Wet status', () => {
+  // Before the pF floor rule a zero fell back to '0.0 kPa' in pF mode.
+  it('shows zero as the 0 pF floor in pF mode and gives it one Wet status', () => {
     window.localStorage.setItem('osi.display.swtUnit', 'pF');
     render(<KiwiSensorCard removeContext="farm" device={{
       ...kiwiDevice,
       last_seen: FRESH,
       latest_data: { swt_1: 0 },
     }} />);
-    expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
-    expect(screen.queryByText('0.00 pF')).not.toBeInTheDocument();
+    expect(screen.getByText('0.00 pF')).toBeInTheDocument();
+    expect(screen.queryByText('0.0 kPa')).not.toBeInTheDocument();
     expect(screen.getAllByText('Wet')).toHaveLength(1);
+  });
+
+  it('opens the kPa history chart from a floored pF value, so no point is plotted below 0 pF', async () => {
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    const { sensorAPI } = await import('../../../services/api');
+    vi.mocked(sensorAPI.getHistory).mockResolvedValueOnce([
+      { t: '2026-09-24T06:00:00.000Z', value: 0.05 },
+      { t: '2026-09-24T07:00:00.000Z', value: 0 },
+    ] as never);
+    render(<KiwiSensorCard removeContext="farm" device={{
+      ...kiwiDevice, last_seen: FRESH, latest_data: { swt_1: 0.05 },
+    }} />);
+    fireEvent.click(screen.getByRole('button', { name: '0.00 pF' }));
+    expect(await screen.findByRole('heading', { name: 'Soil Water Tension 1 (kPa)' })).toBeInTheDocument();
+    expect(screen.getAllByText('0.0 kPa').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/-\d+(\.\d+)? (pF|kPa)/)).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 
   it('keeps the KIWI history control separate from its status pill', () => {

@@ -1361,8 +1361,10 @@ test('kpaToPf matches the contract golden vectors', () => {
   assert.ok(Math.abs(helper.kpaToPf(30) - 2.4771212547196626) < 1e-12);
   assert.ok(Math.abs(helper.kpaToPf(60) - 2.7781512503836436) < 1e-12);
   assert.ok(Math.abs(helper.kpaToPf(300) - 3.4771212547196626) < 1e-12);
-  assert.strictEqual(helper.kpaToPf(0), null);
-  assert.strictEqual(helper.kpaToPf(-4), null);
+  assert.strictEqual(helper.kpaToPf(0.1), 0);
+  assert.strictEqual(helper.kpaToPf(0.05), 0);
+  assert.strictEqual(helper.kpaToPf(0), 0);
+  assert.strictEqual(helper.kpaToPf(-4), 0);
   assert.strictEqual(helper.kpaToPf(null), null);
   assert.strictEqual(helper.kpaToPf('nope'), null);
 });
@@ -1401,7 +1403,8 @@ test('raw zone export pairs every SWT kPa row with a derived pF row', async () =
   }
 });
 
-test('zone export emits no pF row for non-positive kPa values', async () => {
+// Before the pF floor rule, 0 kPa had no pF row and 0.05 kPa wrote -0.301.
+test('zone export writes the 0 pF floor for kPa at or below 0.1', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -1410,7 +1413,12 @@ test('zone export emits no pF row for non-positive kPa values', async () => {
       INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,chameleon_enabled,created_at,updated_at)
         VALUES('AA00000000000001','Chameleon 1','DRAGINO_LSN50',1,12,1,'2026-05-31T00:00:00.000Z','2026-05-31T00:00:00.000Z');
       INSERT INTO device_data(deveui,recorded_at,swt_1) VALUES
-        ('AA00000000000001','2026-06-01T08:00:00.000Z',0);
+        ('AA00000000000001','2026-06-01T08:00:00.000Z',0),
+        ('AA00000000000001','2026-06-01T08:10:00.000Z',0.05),
+        ('AA00000000000001','2026-06-01T08:20:00.000Z',0.1),
+        ('AA00000000000001','2026-06-01T08:30:00.000Z',0.11),
+        ('AA00000000000001','2026-06-01T08:40:00.000Z',-2),
+        ('AA00000000000001','2026-06-01T08:50:00.000Z',NULL);
     `);
     const res = await helper.buildZoneExportCsv(db, {
       zoneId: 12,
@@ -1419,8 +1427,17 @@ test('zone export emits no pF row for non-positive kPa values', async () => {
       granularity: 'raw',
       nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
     });
-    assert.ok(res.rows.some((row) => row.channel_key === 'swt_1' && row.value === 0), 'kPa zero row kept');
-    assert.ok(!res.rows.some((row) => row.channel_key === 'swt_1_pf'), 'no pF row for saturated soil');
+    const values = (channelKey) => res.rows
+      .filter((row) => row.channel_key === channelKey)
+      .map((row) => [row.timestamp.slice(11, 16), row.value]);
+    assert.deepStrictEqual(values('swt_1'), [['08:00', 0], ['08:10', 0.05], ['08:20', 0.1], ['08:30', 0.11], ['08:40', -2]],
+      'kPa rows unchanged, missing reading has no row');
+    assert.deepStrictEqual(values('swt_1_pf'), [['08:00', 0], ['08:10', 0], ['08:20', 0], ['08:30', 0.0414], ['08:40', 0]],
+      'pF rows floored at 0, never negative');
+    assert.ok(res.rows.filter((row) => row.channel_key === 'swt_1_pf').every((row) => row.unit === 'pF'));
+    const csv = helper.toCsv(res.columns, res.rows);
+    assert.match(csv, /,swt_1_pf,[^,]*,[^,]*,pF,0\n/, 'floored pF written as 0 in the CSV body');
+    assert.ok(!/,pF,-/.test(csv), 'no negative pF in the CSV body');
   } finally {
     db.close();
   }
