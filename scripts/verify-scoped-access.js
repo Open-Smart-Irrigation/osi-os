@@ -24,8 +24,9 @@
 //      assignment, the admin's account and rows) and sends no command naming
 //      one by its uuid or EUI. The runs name foreign objects by URL parameter,
 //      by every body or query field the fixture leaves unset, and by the body
-//      fields of the fixture's foreignBodies; bulk writes and set replacements
-//      are judged by the same comparison.
+//      fields of the fixture's foreignBodies (run after its foreignBodySetupSql,
+//      when it has one); bulk writes and set replacements are judged by the
+//      same comparison.
 // A scope decision is a call to a deciding function of osi-scope-helper
 // (assertFresh*Access, assertRole, assertFreshRole, assertEnabledAccount,
 // assertAuthenticatedRole, authorizeAdminRead, isAdmin, canMutate,
@@ -271,10 +272,14 @@ const REQUEST_FIXTURES = {
       layout_code: 'open_field', base_sync_version: 0,
     }],
   },
+  // The fixture request and the field runs keep the seeded zone-2 assignment,
+  // which no run may remove (#404); the foreign body runs without it, so that
+  // adding the station to the foreign zone is a visible change.
   's2120-zones-put-http': {
     params: { deveui: WEATHER_DEVEUI },
     body: { zone_ids: [1] },
     foreignBodies: [{ zone_ids: [1, FOREIGN_ZONE_ID] }],
+    foreignBodySetupSql: 'DELETE FROM weather_station_zones WHERE zone_id = ' + FOREIGN_ZONE_ID + ';',
   },
   // Write routes: inputs that take each distinct guard through to its write
   // when every decision says yes, so a decision that is ignored, or placed
@@ -858,8 +863,14 @@ async function checkOutcome(flows, entry, label, probeOptions) {
   for (const fill of FOREIGN_FILLS) {
     runs.push({ how: `unset fields set to ${fill}`, options: { variant: { fill } } });
   }
-  for (const body of ((probeOptions.fixture || {}).foreignBodies || [])) {
-    runs.push({ how: `body ${JSON.stringify(body)}`, options: { body } });
+  const fixture = probeOptions.fixture || {};
+  for (const body of (fixture.foreignBodies || [])) {
+    const options = { body };
+    // foreignBodySetupSql runs before each foreign-body run only, after setupSql.
+    if (fixture.foreignBodySetupSql) {
+      options.fixture = { ...fixture, setupSql: (fixture.setupSql || '') + fixture.foreignBodySetupSql };
+    }
+    runs.push({ how: `body ${JSON.stringify(body)}`, options });
   }
   for (const run of runs) {
     const trace = await probeEntry(flows, entry, { ...base, ...run.options });
