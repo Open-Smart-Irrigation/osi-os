@@ -3294,10 +3294,14 @@ test('#404: a scoped caller never changes a station assignment outside its zones
     assert.deepEqual(events, [['z-1', 'z-2'], ['z-2']], 'no event tells the cloud zone 2 lost the station');
 
     // A zone outside the caller's scope that the station is not assigned to
-    // may not be added: 404, nothing changes, nothing is queued.
+    // may not be added: 404, nothing changes, nothing is queued. A second
+    // station already on that zone does not count as this station having it.
     db.exec(`
       INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
       VALUES (4, 'Z Four', 1, 'z-4', 'UTC', 'local');
+      INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at)
+      VALUES ('WX2', 'Weather 2', 'SENSECAP_S2120', 1, '2026-01-01', '2026-01-01');
+      INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX2', 4);
     `);
     for (const named of [[4], [1, 4], [2, 4]]) {
       const refused = await setStationZones(db, 2, 'res1', named);
@@ -3305,6 +3309,10 @@ test('#404: a scoped caller never changes a station assignment outside its zones
       assert.deepEqual(refused.result[1].payload, { error: 'Zone not found' });
     }
     assert.deepEqual(stationZones(db), [2]);
+    assert.deepEqual(
+      db.prepare("SELECT zone_id FROM weather_station_zones WHERE deveui = 'WX2'").all().map((row) => row.zone_id),
+      [4]
+    );
     assert.equal(stationZoneEvents(db).length, events.length, 'a refused request queues nothing');
 
     // A caller left with no zone at all removes nothing.
