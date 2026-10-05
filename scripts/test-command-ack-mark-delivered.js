@@ -565,8 +565,95 @@ function testPendingSplitHttp200StillReplays() {
   });
 }
 
+// ===========================================================================
+// 7. command-ack-build-batch groups the queued rows by commandId.
+//    Several writers insert into command_ack_outbox without first removing an
+//    undelivered row for the same command, so one commandId can have more than
+//    one pending row. The cloud answers each entry of a batch in order, so two
+//    entries for one commandId get two answers, and the edge cannot tell which
+//    answer belongs to which row.
+// ===========================================================================
+function seedAckPayload(db, id, commandId, payload, retryCount) {
+  db.prepare(
+    'INSERT INTO command_ack_outbox (id, command_id, payload_json, created_at, retry_count) VALUES (?,?,?,?,?)'
+  ).run(id, commandId, JSON.stringify(payload), new Date(Date.now() - (1000 - id) * 1000).toISOString(), retryCount || 0);
+}
+
+function buildBatch(db, flowState) {
+  db.prepare("INSERT INTO users (server_url, server_sync_token, server_linked_at) VALUES ('https://cloud.example', 'tok', '2026-01-01')").run();
+  return execute(nodeById('command-ack-build-batch'), {}, db, {
+    env: { DEVICE_EUI: '0016C001F1000001', DEVICE_EUI_CONFIDENCE: 'confirmed' },
+    global: { fs: { existsSync: () => false } },
+    flowState: flowState || { sync_state: {} },
+  });
+}
+
+async function testBuildBatchCollapsesIdenticalRows() {
+  const db = freshDb();
+  const ack = { commandId: 501, status: 'ACKED', result: 'APPLIED', duplicate: false };
+  seedAckPayload(db, 201, '501', ack);
+  seedAckPayload(db, 202, '501', ack);
+  seedAckPayload(db, 203, '502', { commandId: 502, status: 'ACKED', result: 'APPLIED', duplicate: false });
+  const { resultPromise } = buildBatch(db);
+  const out = await resultPromise;
+  assert.ok(out, 'a batch must be built');
+  assert.deepEqual(out.payload.acks.map((entry) => entry.commandId), [501, 502],
+    'two byte-identical rows for one commandId must go out as ONE entry, so the cloud answers that commandId once');
+  assert.deepEqual(out._commandAckIds, [201, 202, 203]);
+  assert.deepEqual(out._localAckCorrelation['501'], [201, 202],
+    'both local rows must follow the single answer for their commandId');
+  assert.deepEqual(out._localAckCorrelation['502'], [203]);
+  db.close();
+}
+
+async function testBuildBatchWithholdsConflictingRows() {
+  const db = freshDb();
+  seedAckPayload(db, 301, '601', { commandId: 601, status: 'ACKED', result: 'APPLIED', duplicate: false });
+  seedAckPayload(db, 302, '601', { commandId: 601, status: 'NACKED', result: 'REJECTED_PERMANENT', duplicate: false });
+  seedAckPayload(db, 303, '602', { commandId: 602, status: 'ACKED', result: 'APPLIED', duplicate: false });
+  const { resultPromise, warnings } = buildBatch(db);
+  const out = await resultPromise;
+  assert.ok(out, 'the unaffected row must still be delivered');
+  assert.deepEqual(out.payload.acks.map((entry) => entry.commandId), [602],
+    'rows that disagree about one commandId must not be sent: the cloud would take the first and the edge would mark both by the last answer');
+  assert.deepEqual(out._commandAckIds, [303]);
+  assert.equal(out._localAckCorrelation['601'], undefined);
+  const rows = rowsById(db);
+  for (const id of [301, 302]) {
+    assert.equal(rows[id].delivered_at, null, id + ' must stay pending: a later ledger write may still resolve the conflict');
+    assert.equal(rows[id].retry_count, 1, id + ' must count the withheld attempt, so the conflict cannot hold a batch slot for ever');
+    assert.match(rows[id].last_error || '', /conflicting_local_acks/);
+  }
+  assert.equal(rows[303].retry_count, 0);
+  assert.equal(warnings.length, 1, 'one warning per withheld commandId set');
+  assert.match(warnings[0], /601/);
+  db.close();
+}
+
+async function testBuildBatchDeadLettersConflictAtCap() {
+  const db = freshDb();
+  seedAckPayload(db, 311, '611', { commandId: 611, status: 'ACKED', result: 'APPLIED', duplicate: false }, 19);
+  seedAckPayload(db, 312, '611', { commandId: 611, status: 'NACKED', result: 'REJECTED_PERMANENT', duplicate: false }, 19);
+  const flowState = { sync_state: {} };
+  const { resultPromise } = buildBatch(db, flowState);
+  const out = await resultPromise;
+  assert.equal(out, null, 'with only conflicting rows queued there is nothing to send');
+  const rows = rowsById(db);
+  for (const id of [311, 312]) {
+    assert.ok(rows[id].delivered_at, id + ' must be dead-lettered at the retry cap instead of blocking the queue for ever');
+    assert.equal(rows[id].retry_count, 20);
+    assert.match(rows[id].last_error || '', /^dead_letter: retry_cap_exceeded - conflicting_local_acks/);
+  }
+  assert.ok(flowState.sync_state.lastError, 'the dead letter must be surfaced on sync_state.lastError');
+  assert.equal(flowState.sync_state.lastError.source, 'commandAck');
+  db.close();
+}
+
 (async () => {
   await checkAsync('command-ack-build-batch sets msg._localAckCorrelation from command_id', testBuildBatchCorrelation);
+  await checkAsync('command-ack-build-batch: identical rows for one commandId go out as one entry', testBuildBatchCollapsesIdenticalRows);
+  await checkAsync('command-ack-build-batch: rows that disagree about one commandId are withheld and counted', testBuildBatchWithholdsConflictingRows);
+  await checkAsync('command-ack-build-batch: a withheld conflict dead-letters at the retry cap', testBuildBatchDeadLettersConflictAtCap);
   await checkAsync('command-ack-mark-delivered: mixed 200 result set marks each row by its own outcome', testMixedResultsPerEntry);
   await checkAsync('command-ack-mark-delivered: statusCode=0 retries every row', testTransportFailureZeroRetriesAll);
   await checkAsync('command-ack-mark-delivered: HTTP 500 retries every row', testHttp500RetriesAll);

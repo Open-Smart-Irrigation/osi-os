@@ -1177,7 +1177,11 @@ if (sizeAllowances) {
     // the gateway-bound live/tombstone calibration snapshot. Re-measured fresh:
     // origin/main 69244 -> HEAD 70063 = +819.
     'sync-force-build': 819,
-    'command-ack-build-batch': 975,
+    // Re-pinned from 975 to +2235 (the 975 is baked into origin/main, 4071 chars): the
+    // batch now groups queued rows by commandId and withholds rows that disagree. The
+    // restart-sentinel guard above is unchanged. Re-measured fresh:
+    // origin/main 4071 -> HEAD 6306 = +2235.
+    'command-ack-build-batch': 2235,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
     // from the pending count, so rejection_reason was read by nothing and an unbounded
