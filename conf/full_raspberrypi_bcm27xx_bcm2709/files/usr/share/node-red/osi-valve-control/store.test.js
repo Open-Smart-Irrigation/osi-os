@@ -517,6 +517,50 @@ test('clock step back: listQueued re-emits outstanding pushes in insertion order
   db.close();
 });
 
+// Guards for the invariant the reads above rely on: rowid order is insertion order. Each of
+// these changes would silently break it: a WITHOUT ROWID or INTEGER PRIMARY KEY table (no
+// rowid, or a caller-chosen one), REPLACE/DELETE on the ledger, or a migration that rebuilds
+// the table and copies rows without their rowid (the copy renumbers them in scan order).
+test('push ledger invariant: the table keeps an implicit rowid that grows with every insert', async () => {
+  const { db } = await tempDb();
+  const ddl = (await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='valve_schedule_pushes'")).sql;
+  assert.doesNotMatch(ddl, /WITHOUT\s+ROWID/i);
+  const intPk = (await db.all('PRAGMA table_info(valve_schedule_pushes)')).filter((c) => c.pk > 0 && /^INTEGER$/i.test(c.type));
+  assert.deepEqual(intPk, [], 'an INTEGER PRIMARY KEY column would alias rowid to a caller-written value');
+  const row = (id) => ({ push_id: id, device_eui: STEP_EUI, purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null });
+  await store.insertPushes(db, [row('i1'), row('i2'), row('i3')]);
+  await db.run("DELETE FROM valve_schedule_pushes WHERE push_id='i3'"); // the newest row gone: its rowid may be reused
+  await store.insertPushes(db, [row('i4')]);
+  const ids = (await db.all('SELECT push_id FROM valve_schedule_pushes ORDER BY rowid')).map((r) => r.push_id);
+  assert.deepEqual(ids, ['i1', 'i2', 'i4'], 'a new insert sorts after every existing row');
+  db.close();
+});
+
+test('push ledger invariant: no product code replaces or deletes ledger rows, and no migration copies the table without its rowid', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const f of fs.readdirSync(__dirname).filter((n) => n.endsWith('.js') && !n.endsWith('.test.js'))) {
+    const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    assert.doesNotMatch(src, /(REPLACE\s+INTO|DELETE\s+FROM)\s+valve_schedule_pushes\b/i, f + ' must keep the push ledger append-only');
+  }
+  let root = __dirname;
+  while (!fs.existsSync(path.join(root, 'database/migrations/ordered'))) {
+    const up = path.dirname(root);
+    assert.notEqual(up, root, 'database/migrations/ordered not found above ' + __dirname);
+    root = up;
+  }
+  const dir = path.join(root, 'database/migrations/ordered');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.sql'))) {
+    for (const stmt of fs.readFileSync(path.join(dir, f), 'utf8').split(';')) {
+      if (!/valve_schedule_pushes/i.test(stmt)) continue;
+      assert.doesNotMatch(stmt, /(REPLACE\s+INTO|DELETE\s+FROM)\s+valve_schedule_pushes\b/i, f);
+      if (/INSERT\s+(OR\s+\w+\s+)?INTO[\s\S]*\bSELECT\b/i.test(stmt)) {
+        assert.match(stmt, /\browid\b/i, f + ': a rebuild of valve_schedule_pushes must copy rowid (INSERT INTO new(rowid, ...) SELECT rowid, ...)');
+      }
+    }
+  }
+});
+
 // --- F144: updateSchedule/softDeleteSchedule are scoped to the owning valve ---
 // One gateway, one valve_schedules table: every writer must name the valve it means, so a
 // caller that passes the wrong (or no) EUI writes nothing instead of hitting another valve's
