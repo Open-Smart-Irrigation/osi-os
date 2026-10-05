@@ -385,7 +385,7 @@ On each Pi after the deploy:
 ## Checklist summary
 
 ```
-[ ] Pre-flight — mains merged, CI green (9 workflows), contract change decided,
+[ ] Pre-flight — mains merged, CI green (all workflows), contract change decided,
                  matching osi-server revision found with verify-sync-op-parity
 [ ] Step 1  — Bump every version location; run the verifiers
 [ ] Step 1a — Do not bundle Chameleon calibrations
