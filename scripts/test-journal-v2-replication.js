@@ -114,7 +114,7 @@ test('accepts every V2 mutation union including entry create, correct, and void'
     new Set(queued.map(function(item) { return item.operation; })),
     new Set([
       'ENTRY_CREATE', 'ENTRY_CORRECT', 'ENTRY_VOID', 'PRODUCT_UPSERT',
-      'CUSTOM_VOCAB_UPSERT', 'PLOT_SNAPSHOT', 'CUTOVER_BARRIER_RECEIPT',
+      'CUSTOM_VOCAB_UPSERT', 'PLOT_SNAPSHOT', 'PLOT_GROUP_SNAPSHOT', 'CUTOVER_BARRIER_RECEIPT',
     ])
   );
 });
@@ -218,6 +218,7 @@ test('projects replacement entry values, references, plots, crop cycles, attachm
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_v2_entry_values').get().count, 2);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_v2_reference_data').get().count, 1);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_v2_plot_snapshots').get().count, 1);
+  assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_v2_plot_group_snapshots').get().count, 1);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_v2_crop_cycles').get().count, 1);
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM journal_attachment_replicas').get().count, 1);
   assert.equal(database.prepare('SELECT state FROM journal_authority_state').get().state,
