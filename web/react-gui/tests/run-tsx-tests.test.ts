@@ -22,10 +22,15 @@ function scratch(files: Record<string, string>): string {
   return root;
 }
 
-function run(cwd: string, args: string[]) {
-  const env = { ...process.env };
+// Spins without yielding, like the hang in #393, so nothing inside the file
+// can stop it; only the runner's limit can.
+const SPINNING = "import test from 'node:test';\ntest('spins', () => { for (;;) {} });\n";
+
+function run(cwd: string, args: string[], extraEnv: Record<string, string> = {}) {
+  const env = { ...process.env, ...extraEnv };
   delete env.NODE_TEST_CONTEXT;
-  const r = spawnSync(process.execPath, [RUNNER, ...args], { cwd, env, encoding: 'utf8' });
+  // The outer timeout only keeps a broken runner from hanging this test.
+  const r = spawnSync(process.execPath, [RUNNER, ...args], { cwd, env, encoding: 'utf8', timeout: 60_000 });
   fs.rmSync(cwd, { recursive: true, force: true });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
@@ -54,4 +59,28 @@ test('a failing test propagates a nonzero exit', () => {
   const r = run(scratch({ 'tests/a.test.ts': PASSING, 'tests/b.test.ts': FAILING }), ['tests/**/*.test.ts']);
   assert.notEqual(r.code, 0);
   assert.match(r.out, /# fail 1/);
+});
+
+test('a file that runs past the time limit is stopped and named', () => {
+  const started = Date.now();
+  const r = run(
+    scratch({ 'tests/a.test.ts': PASSING, 'tests/hangs.test.ts': SPINNING }),
+    ['tests/**/*.test.ts'],
+    { RUN_TSX_TESTS_TIMEOUT_MS: '3000' },
+  );
+  const elapsedMs = Date.now() - started;
+  assert.notEqual(r.code, 0, r.out);
+  assert.notEqual(r.code, null, 'the runner itself had to be killed');
+  assert.match(r.out, /time limit 3000 ms per file/);
+  assert.match(r.out, /not ok \d+ - tests\/hangs\.test\.ts/);
+  assert.match(r.out, /test timed out after 3000ms/);
+  assert.match(r.out, /# pass 1/);
+  assert.ok(elapsedMs < 30_000, `the runner took ${elapsedMs} ms`);
+});
+
+test('a time limit that is not a positive whole number fails before any test runs', () => {
+  const r = run(scratch({ 'tests/a.test.ts': PASSING }), ['tests/**/*.test.ts'], { RUN_TSX_TESTS_TIMEOUT_MS: '2m' });
+  assert.equal(r.code, 2);
+  assert.match(r.out, /RUN_TSX_TESTS_TIMEOUT_MS must be a positive whole number/);
+  assert.doesNotMatch(r.out, /# tests/);
 });
