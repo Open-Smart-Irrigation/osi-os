@@ -813,6 +813,7 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   const othersDraft = '22160000-0000-4000-8000-000000000002';
   const ownFinal = '22160000-0000-4000-8000-000000000003';
   const ownDraft = '22160000-0000-4000-8000-000000000004';
+  const othersSecond = '22160000-0000-4000-8000-000000000005';
   const other = principal({
     user_id: 2,
     owner_user_uuid: OTHER_OWNER_UUID,
@@ -829,6 +830,7 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   await create(othersDraft, '2026-07-13T09:00:00', other, { status: 'draft' });
   await create(ownFinal, '2026-07-13T10:00:00', principal());
   await create(ownDraft, '2026-07-13T11:00:00', principal(), { status: 'draft' });
+  await create(othersSecond, '2026-07-13T12:00:00', other);
 
   const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
   scopeHelper.invalidateScope(OWNER_UUID);
@@ -900,8 +902,10 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(ownDraft).n, 0);
 
   // An admin on another account's entries: allowed, and the entry keeps its owner.
+  // The role is read fresh: the cached scope still says researcher (warmed, not
+  // invalidated), and the promotion counts at once.
+  await scopeHelper.resolveScope(db, OWNER_UUID, { scopedMode: true });
   db.prepare("UPDATE users SET role='admin' WHERE id=1").run();
-  scopeHelper.invalidateScope(OWNER_UUID);
   await update(othersFinal, '2026-07-13T08:00:00', caller, 'Admin correction');
   const adminVoided = await journal.voidEntry(
     db, othersFinal, { base_sync_version: 2, reason: 'Admin correction' }, caller
@@ -913,6 +917,18 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   );
   await journal.discardEntry(db, othersDraft, {}, caller);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(othersDraft).n, 0);
+
+  // A demotion counts at once too, although the cached scope still says admin.
+  await scopeHelper.resolveScope(db, OWNER_UUID, { scopedMode: true });
+  db.prepare("UPDATE users SET role='researcher' WHERE id=1").run();
+  await assert.rejects(
+    journal.voidEntry(db, othersSecond, { base_sync_version: 1, reason: 'Demoted' }, caller),
+    hidden
+  );
+  assert.equal(
+    db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(othersSecond).status,
+    'final'
+  );
 });
 
 test('#403: flag-off changes to farm-wide entries are unchanged', async () => {
