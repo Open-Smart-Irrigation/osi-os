@@ -438,6 +438,85 @@ test('weekdayPushStates (F135): the same tie must not hand a slot to the older r
   db.close();
 });
 
+// A gateway clock that steps backwards (a clock set ahead and then corrected by NTP, a
+// restore from a wrong RTC; runHousekeeping already detects such jumps) stamps a LATER push
+// with an EARLIER queued_at, because queued_at is only ever the wall clock at insert time.
+// The ledger's insertion order is what the valve saw last (ChirpStack delivers FIFO), so
+// "newest per slot" must follow insertion order, not the clock. Each case below inserts
+// 'ahead' first under a clock 5 minutes fast, then 'behind' after the clock was corrected,
+// and acks 'ahead' late, after 'behind' exists, to show a state change on the older row
+// does not move it either.
+const STEP_EUI = '0016C001F1000001';
+const STEP_AHEAD = '2026-09-17 14:05:00';
+const STEP_BEHIND = '2026-09-17 14:00:00';
+
+async function seedClockStepBack(db, purpose, { aheadPayload, behindPayload, aheadState = 'ACKED' } = {}) {
+  const weekday = purpose === 'WEEKDAY_PLAN' ? 1 : null;
+  const fport = purpose === 'WEEKDAY_PLAN' ? 15 : 25;
+  await store.insertPushes(db, [{ push_id: 'ahead', device_eui: STEP_EUI, purpose, weekday, fport, payload_hex: aheadPayload || '00', plan_hash: 'h-ahead' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id='ahead'", [STEP_AHEAD]);
+  await store.insertPushes(db, [{ push_id: 'behind', device_eui: STEP_EUI, purpose, weekday, fport, payload_hex: behindPayload || '01', plan_hash: 'h-behind' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id='behind'", [STEP_BEHIND]);
+  if (aheadState === 'ACKED') {
+    await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=? WHERE push_id='ahead'", ['2026-09-17T14:01:00.000Z']);
+  }
+}
+
+test('clock step back: weekdayPushStates hands the slot to the later insert, not the later timestamp', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const rows = await store.weekdayPushStates(db, STEP_EUI);
+  assert.equal(rows[0].queued_at, STEP_BEHIND, 'the push queued after the clock was corrected is the newest');
+  assert.equal(rows[0].state, 'QUEUED');
+  db.close();
+});
+
+test('clock step back: pushSummary counts the later insert for the slot', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const summary = await store.pushSummary(db, STEP_EUI, new Date('2026-09-17T14:01:00Z'));
+  assert.equal(summary.queued, 1, 'the plan the valve has not confirmed yet is outstanding');
+  assert.equal(summary.acked, 0, 'the earlier plan the valve confirmed is no longer what it should hold');
+  db.close();
+});
+
+test('clock step back: lastPushHashes reports the later insert, so a revert to the earlier plan is pushed again (GEN1)', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const hashes = await store.lastPushHashes(db, STEP_EUI);
+  assert.equal(hashes['WEEKDAY_PLAN:1'], 'h-behind');
+  db.close();
+});
+
+test('clock step back: lastPushHashes reports the later insert per weekday (GEN2 daymask)', async () => {
+  const { db } = await tempDb();
+  // Both rows cover Monday (bit 1); 'ahead' also covers Tuesday (bit 2), which nothing newer touches.
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0699151930', behindPayload: '0299151930' });
+  const hashes = await store.lastPushHashes(db, STEP_EUI);
+  assert.equal(hashes['GEN2DAY:1'], 'h-behind');
+  assert.equal(hashes['GEN2DAY:2'], 'h-ahead');
+  db.close();
+});
+
+test('clock step back: ackPush settles the later QUEUED insert when two are outstanding for the same purpose and port', async () => {
+  const { db } = await tempDb();
+  // GEN2 rows with disjoint masks are not superseded by each other, so both stay QUEUED.
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
+  assert.equal(await store.ackPush(db, STEP_EUI, 'DAYMASK_PLAN', 25, null, 0, '2026-09-17T14:02:00.000Z'), 1);
+  const byId = Object.fromEntries((await db.all('SELECT push_id, state FROM valve_schedule_pushes')).map((r) => [r.push_id, r.state]));
+  assert.equal(byId.behind, 'ACKED');
+  assert.equal(byId.ahead, 'QUEUED');
+  db.close();
+});
+
+test('clock step back: listQueued re-emits outstanding pushes in insertion order', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
+  const queued = await store.listQueued(db, STEP_EUI);
+  assert.deepEqual(queued.map((r) => r.push_id), ['ahead', 'behind']);
+  db.close();
+});
+
 // --- F144: updateSchedule/softDeleteSchedule are scoped to the owning valve ---
 // One gateway, one valve_schedules table: every writer must name the valve it means, so a
 // caller that passes the wrong (or no) EUI writes nothing instead of hitting another valve's
