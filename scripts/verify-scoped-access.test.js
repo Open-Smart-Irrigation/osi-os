@@ -833,3 +833,57 @@ test('plot-group members named in the body are checked against foreign plots', a
   // so the caller's own group is no longer found (404) and no row changes.
   assert.doesNotMatch(text, /journal-plot-group-put-http.*changes a row outside/);
 });
+
+// Gateway-wide writes held to an admin decision with scoped access on: entry,
+// its admin guard, and the handler the guard hands an allowed request to.
+const ADMIN_GATEWAY_WRITES = [
+  ['al-link-in', 'account-link-admin-write-guard', 'al-link-validate'],
+  ['al-unlink-in', 'account-unlink-admin-write-guard', 'al-unlink-func'],
+  ['sync-force-http', 'sync-force-admin-write-guard', 'sync-force-build'],
+  ['history-rollups-run-http', 'history-rollups-admin-write-guard', 'history-rollup-tick-fn'],
+];
+
+test('account link, unlink, force sync and rollup run are probed, not exempt', () => {
+  for (const [entry] of ADMIN_GATEWAY_WRITES) {
+    assert.ok(!ALLOWLIST.has(entry), `${entry} must not be on an exemption list`);
+    assert.ok(!INLINE_ACCOUNT_CHECKS.has(entry), `${entry} must not be on the inline check list`);
+  }
+});
+
+test('an admin-only gateway write wired around its admin guard fails', async () => {
+  const flows = loadFlows();
+  const byId = new Map(flows.map((node) => [node.id, node]));
+  for (const [entry, guard, handler] of ADMIN_GATEWAY_WRITES) {
+    assert.deepEqual(byId.get(entry).wires, [[guard]], `${entry} is wired to its guard`);
+    byId.get(entry).wires = [[handler]];
+  }
+  const text = await failuresFor(flows, ADMIN_GATEWAY_WRITES.map(([entry]) => entry));
+  for (const [entry] of ADMIN_GATEWAY_WRITES) {
+    assert.match(text, new RegExp(`\\(${entry}\\) has no scope call`));
+  }
+});
+
+test('an admin-only gateway write whose guard checks only the write role fails', async () => {
+  const flows = loadFlows();
+  const byId = new Map(flows.map((node) => [node.id, node]));
+  for (const [, guard] of ADMIN_GATEWAY_WRITES) {
+    assert.match(byId.get(guard).func, /scopeLoad\.value\.authorizeAdminRead\(/);
+    byId.get(guard).func = guardBody(ROLE_CHECKS);
+  }
+  const text = await failuresFor(flows, ADMIN_GATEWAY_WRITES.map(([entry]) => entry));
+  for (const [entry] of ADMIN_GATEWAY_WRITES) {
+    assert.match(text, new RegExp(`\\(${entry}\\) makes no admin decision before it writes`));
+  }
+});
+
+test('a swallowed admin decision on a gateway write fails', async () => {
+  const flows = loadFlows();
+  const guard = flows.find((node) => node.id === 'history-rollups-admin-write-guard');
+  const call = /await scopeLoad\.value\.authorizeAdminRead\(\{[\s\S]*?\}\);/;
+  assert.match(guard.func, call);
+  guard.func = guard.func.replace(call, (found) => `try { ${found} } catch (ignored) { node.warn('ignored'); }`);
+  assert.match(
+    await failuresFor(flows, ['history-rollups-run-http']),
+    /history-rollups-run-http.*goes on after its scope decision said no/
+  );
+});

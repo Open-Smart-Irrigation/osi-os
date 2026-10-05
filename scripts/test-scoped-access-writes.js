@@ -3410,3 +3410,166 @@ test('#404: flag-off the scoped router passes the request on untouched', async (
     db.close();
   }
 });
+
+// Gateway-wide writes: linking or unlinking the cloud account, a forced sync
+// and a history rollup run. With scoped access on, each entry goes through an
+// admin guard before its handler; with the flag off the guard passes every
+// request on untouched, so the handler's own bearer check is the whole rule,
+// as before.
+const ADMIN_SYSTEM_WRITES = [
+  {
+    label: 'account link',
+    entry: 'al-link-in',
+    guard: 'account-link-admin-write-guard',
+    handler: 'al-link-validate',
+    response: 'al-link-resp',
+    method: 'POST',
+    path: '/api/account-link',
+  },
+  {
+    label: 'account unlink',
+    entry: 'al-unlink-in',
+    guard: 'account-unlink-admin-write-guard',
+    handler: 'al-unlink-func',
+    response: 'al-unlink-resp',
+    method: 'DELETE',
+    path: '/api/account-link',
+  },
+  {
+    label: 'force sync',
+    entry: 'sync-force-http',
+    guard: 'sync-force-admin-write-guard',
+    handler: 'sync-force-build',
+    response: 'sync-force-response',
+    method: 'POST',
+    path: '/api/sync/force',
+  },
+  {
+    label: 'history rollup run',
+    entry: 'history-rollups-run-http',
+    guard: 'history-rollups-admin-write-guard',
+    handler: 'history-rollup-tick-fn',
+    response: 'history-api-response',
+    method: 'POST',
+    path: '/api/history/rollups/run',
+  },
+];
+
+function adminSystemWriteRequest(route, authorization) {
+  const headers = authorization ? { authorization } : {};
+  return {
+    req: { method: route.method, path: route.path, url: route.path, headers, params: {}, query: {}, body: {} },
+    payload: {},
+  };
+}
+
+// osiLib for the flag-off runs: any helper load fails the test, because the
+// flag-off path must not touch the scope helper or the database.
+const OSI_LIB_UNTOUCHED = {
+  require(name) {
+    throw new Error('osiLib.require(' + JSON.stringify(name) + ') reached with scoped access off');
+  },
+};
+
+async function runAdminSystemGuard(route, authorization, options = {}) {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  try {
+    if (options.mutateDb) options.mutateDb(db);
+    const msg = adminSystemWriteRequest(route, authorization);
+    const out = await executeFunction(loadNode(route.guard), {
+      msg,
+      env: options.env || ENV,
+      db,
+      libOverrides: options.libOverrides || {},
+    });
+    assert.ok(Array.isArray(out.result) && out.result.length === 2,
+      route.guard + ' answers on exactly two outputs');
+    return { pass: out.result[0], refuse: out.result[1], sent: msg, errors: out.errors };
+  } finally {
+    db.close();
+  }
+}
+
+const bearerFor = (userId, username) => makeAuthHeader({ userId, username, secret: AUTH_SECRET });
+
+test('admin system writes: each entry goes through its admin guard to the unchanged handler', () => {
+  for (const route of ADMIN_SYSTEM_WRITES) {
+    const entry = loadNode(route.entry);
+    assert.equal(entry.type, 'http in');
+    assert.equal(entry.method, route.method.toLowerCase());
+    assert.equal(entry.url, route.path);
+    assert.deepEqual(entry.wires, [[route.guard]], route.label + ': the entry is wired only to its guard');
+    const guard = loadNode(route.guard);
+    assert.equal(guard.type, 'function');
+    assert.equal(guard.z, entry.z, route.label + ': the guard sits on the entry\'s tab');
+    assert.equal(guard.outputs, 2);
+    assert.deepEqual(guard.wires, [[route.handler], [route.response]]);
+  }
+  // Internal callers keep their direct path: the cloud's force-sync command
+  // and the rollup timer carry no user and never pass the HTTP guard.
+  assert.ok(loadNode('cs-reg-cloud-fn').wires.flat().includes('sync-force-build'));
+  assert.ok(loadNode('history-rollups-schedule').wires.flat().includes('history-rollup-tick-fn'));
+});
+
+test('admin system writes: scoped, a researcher, a viewer and a disabled admin are refused with 403', async () => {
+  for (const route of ADMIN_SYSTEM_WRITES) {
+    for (const [userId, username, mutateDb] of [
+      [2, 'res1'],
+      [3, 'view1'],
+      [1, 'admin1', (db) => db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 1").run()],
+    ]) {
+      const run = await runAdminSystemGuard(route, bearerFor(userId, username), { mutateDb });
+      const who = route.label + ' as ' + username + (mutateDb ? ' (disabled)' : '');
+      assert.equal(run.pass, null, who + ': the handler must not run');
+      assert.equal(run.refuse && run.refuse.statusCode, 403, who);
+      assert.equal(run.refuse.payload.message, 'Forbidden', who);
+    }
+  }
+});
+
+test('admin system writes: scoped, a missing, forged or stale token is refused with 401', async () => {
+  for (const route of ADMIN_SYSTEM_WRITES) {
+    for (const [label, authorization] of [
+      ['no token', null],
+      ['forged token', makeAuthHeader({ userId: 1, username: 'admin1', secret: 'another-secret' })],
+      ['token of a removed account', bearerFor(9, 'gone')],
+    ]) {
+      const run = await runAdminSystemGuard(route, authorization);
+      assert.equal(run.pass, null, route.label + ' with ' + label + ': the handler must not run');
+      assert.equal(run.refuse && run.refuse.statusCode, 401, route.label + ' with ' + label);
+    }
+  }
+});
+
+test('admin system writes: scoped, an enabled admin passes on to the handler unchanged', async () => {
+  for (const route of ADMIN_SYSTEM_WRITES) {
+    const authorization = bearerFor(1, 'admin1');
+    const run = await runAdminSystemGuard(route, authorization);
+    assert.equal(run.refuse, null, route.label);
+    assert.equal(run.pass, run.sent, route.label + ': the same message goes on');
+    assert.equal(run.pass.statusCode, undefined, route.label);
+    assert.equal(run.pass.req.headers.authorization, authorization, route.label);
+    assert.deepEqual(run.errors, [], route.label);
+  }
+});
+
+test('admin system writes: flag off, every request passes on untouched without loading a helper', async () => {
+  const envOff = { ...ENV, OSI_SCOPED_ACCESS: '0' };
+  for (const route of ADMIN_SYSTEM_WRITES) {
+    for (const [label, authorization] of [
+      ['researcher', bearerFor(2, 'res1')],
+      ['viewer', bearerFor(3, 'view1')],
+      ['no token', null],
+    ]) {
+      const run = await runAdminSystemGuard(route, authorization, {
+        env: envOff,
+        libOverrides: { osiLib: OSI_LIB_UNTOUCHED },
+      });
+      assert.equal(run.refuse, null, route.label + ' (' + label + ')');
+      assert.equal(run.pass, run.sent, route.label + ' (' + label + '): the same message goes on');
+      assert.equal(run.pass.statusCode, undefined, route.label + ' (' + label + ')');
+      assert.deepEqual(run.errors, [], route.label + ' (' + label + ')');
+    }
+  }
+});

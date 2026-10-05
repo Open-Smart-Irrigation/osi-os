@@ -4875,7 +4875,34 @@
     "y": 220,
     "wires": [
       [
+        "account-link-admin-write-guard"
+      ]
+    ]
+  },
+  {
+    "id": "account-link-admin-write-guard",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Admin Guard: Account Link",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nconst dbLoad = osiLib.require('osi-db-helper');\nconst scopeLoad = osiLib.require('scope');\nif (!dbLoad.ok || !scopeLoad.ok) {\n  const detail = [dbLoad, scopeLoad]\n    .filter(function(load) { return !load.ok; })\n    .map(function(load) { return load.error; })\n    .join('; ');\n  node.error('account-link admin guard: helpers unavailable: ' + detail, msg);\n  msg.statusCode = 500;\n  msg.payload = { message: 'admin authorization unavailable' };\n  return [null, msg];\n}\ntry {\n  await scopeLoad.value.authorizeAdminRead({\n    Database: dbLoad.value.Database,\n    authorization: msg.req && msg.req.headers && msg.req.headers.authorization,\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  });\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = { message: msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error) };\n  return [null, msg];\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 260,
+    "y": 260,
+    "wires": [
+      [
         "al-link-validate"
+      ],
+      [
+        "al-link-resp"
       ]
     ]
   },
@@ -5088,7 +5115,34 @@
     "y": 360,
     "wires": [
       [
+        "account-unlink-admin-write-guard"
+      ]
+    ]
+  },
+  {
+    "id": "account-unlink-admin-write-guard",
+    "type": "function",
+    "z": "account-link-tab",
+    "name": "Admin Guard: Account Unlink",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nconst dbLoad = osiLib.require('osi-db-helper');\nconst scopeLoad = osiLib.require('scope');\nif (!dbLoad.ok || !scopeLoad.ok) {\n  const detail = [dbLoad, scopeLoad]\n    .filter(function(load) { return !load.ok; })\n    .map(function(load) { return load.error; })\n    .join('; ');\n  node.error('account-unlink admin guard: helpers unavailable: ' + detail, msg);\n  msg.statusCode = 500;\n  msg.payload = { message: 'admin authorization unavailable' };\n  return [null, msg];\n}\ntry {\n  await scopeLoad.value.authorizeAdminRead({\n    Database: dbLoad.value.Database,\n    authorization: msg.req && msg.req.headers && msg.req.headers.authorization,\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  });\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = { message: msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error) };\n  return [null, msg];\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 270,
+    "y": 400,
+    "wires": [
+      [
         "al-unlink-func"
+      ],
+      [
+        "al-unlink-resp"
       ]
     ]
   },
@@ -6752,7 +6806,34 @@
     "y": 1240,
     "wires": [
       [
+        "sync-force-admin-write-guard"
+      ]
+    ]
+  },
+  {
+    "id": "sync-force-admin-write-guard",
+    "type": "function",
+    "z": "93b1537a596e0e6d",
+    "name": "Admin Guard: Force Sync",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nconst dbLoad = osiLib.require('osi-db-helper');\nconst scopeLoad = osiLib.require('scope');\nif (!dbLoad.ok || !scopeLoad.ok) {\n  const detail = [dbLoad, scopeLoad]\n    .filter(function(load) { return !load.ok; })\n    .map(function(load) { return load.error; })\n    .join('; ');\n  node.error('force-sync admin guard: helpers unavailable: ' + detail, msg);\n  msg.statusCode = 500;\n  msg.payload = { message: 'admin authorization unavailable' };\n  return [null, msg];\n}\ntry {\n  await scopeLoad.value.authorizeAdminRead({\n    Database: dbLoad.value.Database,\n    authorization: msg.req && msg.req.headers && msg.req.headers.authorization,\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  });\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = { message: msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error) };\n  return [null, msg];\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 295,
+    "y": 1280,
+    "wires": [
+      [
         "sync-force-build"
+      ],
+      [
+        "sync-force-response"
       ]
     ]
   },
@@ -10660,7 +10741,34 @@
     "y": 680,
     "wires": [
       [
+        "history-rollups-admin-write-guard"
+      ]
+    ]
+  },
+  {
+    "id": "history-rollups-admin-write-guard",
+    "type": "function",
+    "z": "history-api-tab",
+    "name": "Admin Guard: History Rollup Run",
+    "func": "return (async () => {\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') return [msg, null];\nconst dbLoad = osiLib.require('osi-db-helper');\nconst scopeLoad = osiLib.require('scope');\nif (!dbLoad.ok || !scopeLoad.ok) {\n  const detail = [dbLoad, scopeLoad]\n    .filter(function(load) { return !load.ok; })\n    .map(function(load) { return load.error; })\n    .join('; ');\n  node.error('history-rollup admin guard: helpers unavailable: ' + detail, msg);\n  msg.statusCode = 500;\n  msg.payload = { message: 'admin authorization unavailable' };\n  return [null, msg];\n}\ntry {\n  await scopeLoad.value.authorizeAdminRead({\n    Database: dbLoad.value.Database,\n    authorization: msg.req && msg.req.headers && msg.req.headers.authorization,\n    configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); }\n  });\n  return [msg, null];\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = { message: msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error) };\n  return [null, msg];\n}\n})();",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      }
+    ],
+    "x": 330,
+    "y": 720,
+    "wires": [
+      [
         "history-rollup-tick-fn"
+      ],
+      [
+        "history-api-response"
       ]
     ]
   },
@@ -13877,7 +13985,7 @@
     "type": "function",
     "z": "device-api-tab",
     "name": "Fresh Device Config Scope",
-    "func": "return (async () => {\nconst routeTable = [{\"method\":\"PUT\",\"suffix\":\"/dendro\",\"index\":0},{\"method\":\"PUT\",\"suffix\":\"/temp\",\"index\":1},{\"method\":\"PUT\",\"suffix\":\"/reference-tree\",\"index\":2},{\"method\":\"PUT\",\"suffix\":\"/lsn50/mode\",\"index\":3},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interval\",\"index\":4},{\"method\":\"PUT\",\"suffix\":\"/kiwi/interval\",\"index\":5},{\"method\":\"POST\",\"suffix\":\"/kiwi/temperature-humidity/enable\",\"index\":6},{\"method\":\"PUT\",\"suffix\":\"/strega/interval\",\"index\":7},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interrupt-mode\",\"index\":8},{\"method\":\"PUT\",\"suffix\":\"/lsn50/5v-warmup\",\"index\":9},{\"method\":\"PUT\",\"suffix\":\"/strega/model\",\"index\":10},{\"method\":\"PUT\",\"suffix\":\"/strega/timed-action\",\"index\":11},{\"method\":\"PUT\",\"suffix\":\"/strega/magnet\",\"index\":12},{\"method\":\"PUT\",\"suffix\":\"/strega/partial-opening\",\"index\":13},{\"method\":\"PUT\",\"suffix\":\"/strega/flushing\",\"index\":14},{\"method\":\"PUT\",\"suffix\":\"/rain-gauge\",\"index\":15},{\"method\":\"PUT\",\"suffix\":\"/flow-meter\",\"index\":16},{\"method\":\"PUT\",\"suffix\":\"/soil-moisture-depths\",\"index\":17},{\"method\":\"PUT\",\"suffix\":\"/chameleon\",\"index\":18},{\"method\":\"PUT\",\"suffix\":\"/dendro-config\",\"index\":19},{\"method\":\"POST\",\"suffix\":\"/dendro-baseline/reset\",\"index\":20},{\"method\":\"POST\",\"suffix\":\"/chameleon/refresh-calibration\",\"index\":21},{\"method\":\"PUT\",\"suffix\":\"/chameleon/depth\",\"index\":22},{\"method\":\"POST\",\"suffix\":\"/sdi12/identify\",\"index\":23},{\"method\":\"PUT\",\"suffix\":\"/sdi12/config\",\"index\":24},{\"method\":\"PUT\",\"suffix\":\"/watermark/calibration\",\"index\":25},{\"method\":\"DELETE\",\"suffix\":\"/watermark/calibration\",\"index\":26}];\nconst method = String(msg.req && msg.req.method || '').toUpperCase();\nconst requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];\nconst deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();\nconst prefix = '/api/devices/' + String(msg.req && msg.req.params && msg.req.params.deveui || '');\nconst suffix = requestPath.startsWith(prefix) ? requestPath.slice(prefix.length) : '';\nconst route = routeTable.find(function(candidate) {\n  return candidate.method === method && candidate.suffix === suffix;\n});\nconst outputs = new Array(routeTable.length + 1).fill(null);\nconst errorOutput = routeTable.length;\nif (!route) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Device config route not found' };\n  outputs[errorOutput] = msg;\n  return outputs;\n}\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  outputs[route.index] = msg;\n  return outputs;\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('device config scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  const actorScope = await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    actor.role,\n    { scopedMode: true }\n  );\n  if (!scope.canMutate(actorScope.role)) {\n    throw Object.assign(new Error('insufficient role'), { statusCode: 403 });\n  }\n  await scope.assertFreshDeviceAccess(\n    db,\n    actor.user_uuid,\n    deveui,\n    { scopedMode: true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  outputs[route.index] = msg;\n  return outputs;\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 404 ? 'Device not found' :\n      (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  outputs[errorOutput] = msg;\n  return outputs;\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('device config scope close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
+    "func": "return (async () => {\nconst routeTable = [{\"method\":\"PUT\",\"suffix\":\"/dendro\",\"index\":0},{\"method\":\"PUT\",\"suffix\":\"/temp\",\"index\":1},{\"method\":\"PUT\",\"suffix\":\"/reference-tree\",\"index\":2},{\"method\":\"PUT\",\"suffix\":\"/lsn50/mode\",\"index\":3},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interval\",\"index\":4},{\"method\":\"PUT\",\"suffix\":\"/kiwi/interval\",\"index\":5},{\"method\":\"POST\",\"suffix\":\"/kiwi/temperature-humidity/enable\",\"index\":6},{\"method\":\"PUT\",\"suffix\":\"/strega/interval\",\"index\":7},{\"method\":\"PUT\",\"suffix\":\"/lsn50/interrupt-mode\",\"index\":8},{\"method\":\"PUT\",\"suffix\":\"/lsn50/5v-warmup\",\"index\":9},{\"method\":\"PUT\",\"suffix\":\"/strega/model\",\"index\":10},{\"method\":\"PUT\",\"suffix\":\"/strega/timed-action\",\"index\":11},{\"method\":\"PUT\",\"suffix\":\"/strega/magnet\",\"index\":12},{\"method\":\"PUT\",\"suffix\":\"/strega/partial-opening\",\"index\":13},{\"method\":\"PUT\",\"suffix\":\"/strega/flushing\",\"index\":14},{\"method\":\"PUT\",\"suffix\":\"/rain-gauge\",\"index\":15},{\"method\":\"PUT\",\"suffix\":\"/flow-meter\",\"index\":16},{\"method\":\"PUT\",\"suffix\":\"/soil-moisture-depths\",\"index\":17,\"allowUnassignedOwner\":true},{\"method\":\"PUT\",\"suffix\":\"/chameleon\",\"index\":18},{\"method\":\"PUT\",\"suffix\":\"/dendro-config\",\"index\":19},{\"method\":\"POST\",\"suffix\":\"/dendro-baseline/reset\",\"index\":20},{\"method\":\"POST\",\"suffix\":\"/chameleon/refresh-calibration\",\"index\":21},{\"method\":\"PUT\",\"suffix\":\"/chameleon/depth\",\"index\":22},{\"method\":\"POST\",\"suffix\":\"/sdi12/identify\",\"index\":23},{\"method\":\"PUT\",\"suffix\":\"/sdi12/config\",\"index\":24},{\"method\":\"PUT\",\"suffix\":\"/watermark/calibration\",\"index\":25,\"allowUnassignedOwner\":true},{\"method\":\"DELETE\",\"suffix\":\"/watermark/calibration\",\"index\":26,\"allowUnassignedOwner\":true}];\nconst method = String(msg.req && msg.req.method || '').toUpperCase();\nconst requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];\nconst deveui = String(msg.req && msg.req.params && msg.req.params.deveui || '').trim().toUpperCase();\nconst prefix = '/api/devices/' + String(msg.req && msg.req.params && msg.req.params.deveui || '');\nconst suffix = requestPath.startsWith(prefix) ? requestPath.slice(prefix.length) : '';\nconst route = routeTable.find(function(candidate) {\n  return candidate.method === method && candidate.suffix === suffix;\n});\nconst outputs = new Array(routeTable.length + 1).fill(null);\nconst errorOutput = routeTable.length;\nif (!route) {\n  msg.statusCode = 404;\n  msg.payload = { message: 'Device config route not found' };\n  outputs[errorOutput] = msg;\n  return outputs;\n}\nif (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {\n  outputs[route.index] = msg;\n  return outputs;\n}\nlet db;\nconst closeDb = function() {\n  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();\n};\ntry {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('device config scope: module unavailable: ' + scopeLoad.error, msg);\n    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });\n  }\n  const scope = scopeLoad.value;\n  const auth = scope.verifyBearer(\n    msg.req && msg.req.headers && msg.req.headers.authorization,\n    {\n      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n      fs: global.get('fs'),\n      warn: function(message) { node.warn(message); }\n    }\n  );\n  db = new osiDb.Database('/data/db/farming.db');\n  const actor = await db.get(\n    'SELECT user_uuid, role FROM users WHERE id = ? AND username = ? LIMIT 1',\n    [auth.userId, auth.username]\n  );\n  if (!actor || !actor.user_uuid) {\n    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });\n  }\n  const actorScope = await scope.assertFreshRole(\n    db,\n    actor.user_uuid,\n    actor.role,\n    { scopedMode: true }\n  );\n  if (!scope.canMutate(actorScope.role)) {\n    throw Object.assign(new Error('insufficient role'), { statusCode: 403 });\n  }\n  await scope.assertFreshDeviceAccess(\n    db,\n    actor.user_uuid,\n    deveui,\n    { scopedMode: true, allowUnassignedOwner: route.allowUnassignedOwner === true }\n  );\n  msg.actor_user_uuid = actor.user_uuid;\n  outputs[route.index] = msg;\n  return outputs;\n} catch (error) {\n  msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;\n  msg.payload = {\n    message: msg.statusCode === 404 ? 'Device not found' :\n      (msg.statusCode === 403 ? 'Forbidden' : String(error && error.message || error))\n  };\n  outputs[errorOutput] = msg;\n  return outputs;\n} finally {\n  try {\n    await closeDb();\n  } catch (closeError) {\n    node.warn('device config scope close: ' + String(closeError && closeError.message ? closeError.message : closeError));\n  }\n}\n})();",
     "outputs": 28,
     "noerr": 0,
     "initialize": "",

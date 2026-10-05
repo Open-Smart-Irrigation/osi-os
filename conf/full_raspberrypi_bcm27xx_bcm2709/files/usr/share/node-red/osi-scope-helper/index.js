@@ -4,6 +4,9 @@ const crypto = require('crypto');
 const CACHE_TTL_MS = 30000;
 const cache = new Map();
 const WEATHER_TYPE_IDS = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
+// Soil sensors whose depth and calibration settings their owner may still
+// change after the sensor has left every zone (allowUnassignedOwner below).
+const SOIL_DEPTH_TYPE_IDS = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
 
 function isScopedMode(envValue) {
   return String(
@@ -203,20 +206,32 @@ async function assertFreshPlotAccess(db, userUuid, plotUuid, { scopedMode } = {}
   return scope;
 }
 
-async function assertFreshDeviceAccess(db, userUuid, deveui, { scopedMode } = {}) {
+// options.allowUnassignedOwner: set by a route that configures a soil sensor
+// (depths, WATERMARK calibration). A soil sensor in no zone is in nobody's
+// zone scope; for such a route its owner (devices.user_id) may still change
+// it, when the owner's role may write. The flag-off handlers allow the same
+// through their owner filter. Nobody else gets the exception, admins included.
+async function assertFreshDeviceAccess(db, userUuid, deveui, { scopedMode, allowUnassignedOwner = false } = {}) {
   if (!isScopedMode() && scopedMode !== true) {
     return { role: 'admin', disabled: false, wildcard: true };
   }
   const device = await db.get(
-    `SELECT d.deveui, d.type_id, iz.zone_uuid
+    `SELECT d.deveui, d.type_id, d.irrigation_zone_id, iz.zone_uuid, owner.user_uuid AS owner_user_uuid
        FROM devices d LEFT JOIN irrigation_zones iz
          ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+       LEFT JOIN users owner ON owner.id = d.user_id
       WHERE d.deveui = ? AND d.deleted_at IS NULL`,
     [deveui]
   );
   if (!device) throw httpError(404, 'device not found');
   const scope = await loadScope(db, userUuid);
   if (scope.disabled) throw httpError(403, 'account disabled');
+  if (allowUnassignedOwner === true &&
+      device.irrigation_zone_id === null &&
+      SOIL_DEPTH_TYPE_IDS.has(device.type_id)) {
+    if (canMutate(scope.role) && device.owner_user_uuid && device.owner_user_uuid === userUuid) return scope;
+    throw httpError(404, 'device not found');
+  }
   if (WEATHER_TYPE_IDS.has(device.type_id)) return scope;
   if (!device.zone_uuid || !scope.zoneUuids.has(device.zone_uuid)) {
     throw httpError(404, 'device not found');
