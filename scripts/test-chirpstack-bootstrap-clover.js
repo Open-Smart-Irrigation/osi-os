@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 'use strict';
 
-// chirpstack-bootstrap.js and the TEKTELIC Clover device profile.
+// chirpstack-bootstrap.js and the TEKTELIC KIWI and CLOVER device profiles.
 //
-// The bootstrap once wrote CHIRPSTACK_PROFILE_CLOVER as an alias of the RAK10701
-// field-tester profile, which carries no payload codec. A Clover registered on a
-// bootstrapped gateway therefore never produced a decoded `object`, and Process
-// Data dropped every uplink. These cases run the real script source as a CLI
-// against an in-memory ChirpStack, file system and UCI store, and check:
-//   - a fresh gateway gets its own Clover profile with the Tektelic codec;
-//   - a gateway that already has a Clover profile keeps it, and its own codec;
-//   - `--repair-clover-profile` fixes an already provisioned gateway without a
-//     re-provision: one profile, one UCI key, one env line, nothing else;
+// The bootstrap once created the Kiwi profile without a codec and wrote
+// CHIRPSTACK_PROFILE_CLOVER as an alias of the RAK10701 field-tester profile,
+// which has no codec either. Kiwi and Clover uplinks are decoded only by the
+// profile codec, so on a bootstrapped gateway they never produced a decoded
+// `object`, and Process Data dropped every one. These cases run the real
+// script source as a CLI against an in-memory ChirpStack, file system and UCI
+// store, and check:
+//   - a fresh gateway gets a Kiwi and a Clover profile with the Tektelic codec;
+//   - a profile that already runs a codec (also one attached by hand) keeps it;
+//   - `--repair-soil-profiles` fixes an already provisioned gateway without a
+//     re-provision: codec on the Kiwi and Clover profiles, one UCI key, one env
+//     line, nothing else, and zero writes once everything is correct;
 //   - `--repoint-clover-device` moves a registered Clover off the field-tester
 //     profile through the ChirpStack API, and refuses anything else.
 //
@@ -63,6 +66,11 @@ function makeWorld(seed = {}) {
 
 function profileView(profile) {
   return {
+    getName: () => profile.name,
+    getDescription: () => profile.description || '',
+    getTenantId: () => profile.tenantId,
+    getUplinkInterval: () => profile.uplinkInterval || 3600,
+    getDeviceStatusReqInterval: () => profile.deviceStatusReqInterval || 1,
     getPayloadCodecRuntime: () => profile.runtime,
     getPayloadCodecScript: () => profile.script,
     getAutoDetectMeasurements: () => profile.autoDetect,
@@ -91,6 +99,7 @@ function makeChirpStack(world) {
       return world.profiles.filter((p) => p.tenantId === tenantId).map((p) => ({ id: p.id, name: p.name }));
     },
     async getDeviceProfile(id) {
+      if (world.failProfileReads) throw new Error('14 UNAVAILABLE: connect ECONNREFUSED');
       const profile = world.profiles.find((p) => p.id === id);
       return profile ? profileView(profile) : null;
     },
@@ -100,6 +109,9 @@ function makeChirpStack(world) {
       world.profiles.push({
         id,
         name: input.name,
+        description: input.description,
+        uplinkInterval: input.uplinkInterval,
+        deviceStatusReqInterval: input.deviceStatusReqInterval,
         tenantId: input.tenantId,
         runtime: script.trim() ? JS_RUNTIME : 0,
         script,
@@ -110,6 +122,11 @@ function makeChirpStack(world) {
     },
     async updateDeviceProfile(input) {
       const profile = world.profiles.find((p) => p.id === input.id);
+      // UpdateDeviceProfile replaces the whole profile with what was sent.
+      profile.name = input.name;
+      profile.description = input.description;
+      profile.uplinkInterval = input.uplinkInterval;
+      profile.deviceStatusReqInterval = input.deviceStatusReqInterval;
       const script = String(input.payloadCodecScript || '');
       profile.script = script;
       profile.runtime = script.trim() ? JS_RUNTIME : 0;
@@ -174,6 +191,26 @@ function makeFs(world) {
       }
     },
     unlinkSync(file) { world.files.delete(file); },
+    openSync(file, flags, mode) {
+      const fd = world.nextFd = (world.nextFd || 100) + 1;
+      world.openFds = world.openFds || new Map();
+      world.openFds.set(fd, { file, chunks: [], synced: false });
+      world.files.set(file, '');
+      if (mode !== undefined) world.fileModes.set(file, mode);
+      return fd;
+    },
+    writeSync(fd, text) { world.openFds.get(fd).chunks.push(String(text)); },
+    fsyncSync(fd) {
+      const entry = world.openFds.get(fd);
+      world.files.set(entry.file, entry.chunks.join(''));
+      entry.synced = true;
+      world.fsyncs = (world.fsyncs || 0) + 1;
+    },
+    closeSync(fd) {
+      const entry = world.openFds.get(fd);
+      world.files.set(entry.file, entry.chunks.join(''));
+      world.openFds.delete(fd);
+    },
   };
 }
 
@@ -271,7 +308,7 @@ function tektelicCodec() {
 // A gateway provisioned by an earlier bootstrap: every profile present, the
 // env file and UCI with CLOVER aliased to the field-tester profile, and lines
 // an operator or deploy.sh added after the bootstrap.
-function provisionedGatewaySeed() {
+function provisionedGatewaySeed({ kiwiCodec = '' } = {}) {
   const tenantId = nextUuid();
   const sensorsApp = nextUuid();
   const fieldTesterApp = nextUuid();
@@ -301,7 +338,7 @@ function provisionedGatewaySeed() {
         { id: fieldTesterApp, name: 'OSI Field Tester', tenantId },
       ],
       profiles: [
-        { id: kiwi, name: 'OSI KIWI Sensor', tenantId, runtime: 0, script: '', autoDetect: false },
+        { id: kiwi, name: 'OSI KIWI Sensor', description: 'Kiwi as provisioned', uplinkInterval: 900, deviceStatusReqInterval: 4, tenantId, runtime: kiwiCodec ? JS_RUNTIME : 0, script: kiwiCodec, autoDetect: Boolean(kiwiCodec) },
         { id: lsn50, name: 'OSI Dragino LSN50', tenantId, runtime: JS_RUNTIME, script: 'function decodeUplink(){return {data:{}};}', autoDetect: true },
         { id: rak, name: 'OSI RAK Field Tester', tenantId, runtime: 0, script: '', autoDetect: false },
       ],
@@ -321,7 +358,7 @@ test('the Tektelic agriculture codec ships in the codecs directory', () => {
   assert.ok(fs.existsSync(TEKTELIC_CODEC), `missing ${path.relative(ROOT, TEKTELIC_CODEC)}`);
 });
 
-test('fresh gateway: Clover gets its own profile with the Tektelic codec; the field tester keeps its profile', async () => {
+test('fresh gateway: Kiwi and Clover get the Tektelic codec, Clover its own profile; the field tester keeps its profile', async () => {
   const world = await runBootstrap(makeWorld());
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
   const env = parseEnv(world.files.get(ENV_FILE));
@@ -340,6 +377,25 @@ test('fresh gateway: Clover gets its own profile with the Tektelic codec; the fi
   assert.equal(clover.runtime, JS_RUNTIME, 'Clover profile runs a JS codec');
   assert.equal(clover.script.trim(), tektelicCodec().trim(), 'Clover profile carries the shipped Tektelic codec');
   assert.equal(clover.autoDetect, true);
+
+  const kiwi = profileByName(world, 'OSI KIWI Sensor');
+  assert.equal(env.CHIRPSTACK_PROFILE_KIWI, kiwi.id);
+  assert.equal(kiwi.runtime, JS_RUNTIME, 'Kiwi profile runs a JS codec');
+  assert.equal(kiwi.script.trim(), tektelicCodec().trim(), 'Kiwi profile carries the shipped Tektelic codec');
+});
+
+test('full bootstrap leaves a codec attached by hand to the Kiwi profile alone', async () => {
+  const tenantId = nextUuid();
+  const kiwiId = nextUuid();
+  const handCodec = 'function decodeUplink(input){return {data:{watermark1_frequency:1}};}';
+  const world = await runBootstrap(makeWorld({
+    tenants: [{ id: tenantId, name: 'Open Smart Irrigation' }],
+    profiles: [{ id: kiwiId, name: 'OSI KIWI Sensor', tenantId, runtime: JS_RUNTIME, script: handCodec, autoDetect: true }],
+  }));
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.profiles.find((p) => p.id === kiwiId).script, handCodec);
+  assert.ok(!world.writes.some(([op, name]) => op === 'updateDeviceProfile' && name === 'OSI KIWI Sensor'));
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_PROFILE_KIWI, kiwiId);
 });
 
 test('full bootstrap keeps an existing Clover profile and its own codec', async () => {
@@ -372,11 +428,12 @@ test('full bootstrap attaches the codec to an existing Clover profile that has n
   assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_PROFILE_CLOVER, bareId);
 });
 
-test('--repair-clover-profile: provisioned gateway gets one new profile, one UCI key and one env line', async () => {
+test('--repair-soil-profiles: provisioned gateway gets the Kiwi codec, one new Clover profile, one UCI key and one env line', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
-  const profilesBefore = world.profiles.map((p) => ({ ...p }));
-  await runBootstrap(world, { args: ['--repair-clover-profile'] });
+  const profilesBefore = world.profiles.filter((p) => p.id !== gw.ids.kiwi).map((p) => ({ ...p }));
+  const kiwiBefore = { ...world.profiles.find((p) => p.id === gw.ids.kiwi) };
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
 
   const clover = profileByName(world, 'OSI CLOVER Sensor');
@@ -385,8 +442,14 @@ test('--repair-clover-profile: provisioned gateway gets one new profile, one UCI
   assert.equal(clover.script.trim(), tektelicCodec().trim());
   assert.notEqual(clover.id, gw.ids.rak);
 
-  assert.deepEqual(world.writes, [['createDeviceProfile', 'OSI CLOVER Sensor']],
+  assert.deepEqual(world.writes, [['updateDeviceProfile', 'OSI KIWI Sensor'], ['createDeviceProfile', 'OSI CLOVER Sensor']],
     'no tenant, application or other profile is created or changed');
+  const kiwi = world.profiles.find((p) => p.id === gw.ids.kiwi);
+  assert.equal(kiwi.runtime, JS_RUNTIME, 'the codec-less Kiwi profile gets the codec');
+  assert.equal(kiwi.script.trim(), tektelicCodec().trim());
+  for (const field of ['name', 'description', 'uplinkInterval', 'deviceStatusReqInterval', 'tenantId']) {
+    assert.equal(kiwi[field], kiwiBefore[field], `Kiwi profile keeps its ${field}`);
+  }
   for (const before of profilesBefore) {
     assert.deepEqual(world.profiles.find((p) => p.id === before.id), before, `${before.name} untouched`);
   }
@@ -400,49 +463,66 @@ test('--repair-clover-profile: provisioned gateway gets one new profile, one UCI
   assert.equal(world.uci.get('osi-server.cloud.chirpstack_profile_kiwi'), gw.ids.kiwi);
 });
 
-test('--repair-clover-profile is idempotent: a second run changes nothing', async () => {
+test('--repair-soil-profiles is idempotent: a second run makes zero writes', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
-  await runBootstrap(world, { args: ['--repair-clover-profile'] });
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
   const envAfterFirst = world.files.get(ENV_FILE);
   const writesAfterFirst = world.writes.length;
   const uciSetsAfterFirst = world.uciCommands.filter((c) => c.startsWith('set')).length;
 
   world.exitCode = null;
-  await runBootstrap(world, { args: ['--repair-clover-profile'] });
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
   assert.equal(world.files.get(ENV_FILE), envAfterFirst);
   assert.equal(world.writes.length, writesAfterFirst, 'no ChirpStack write on the second run');
   assert.equal(world.uciCommands.filter((c) => c.startsWith('set')).length, uciSetsAfterFirst, 'no UCI write on the second run');
 });
 
-test('--repair-clover-profile also repairs a UCI key still aliased when the env line is already distinct', async () => {
-  const gw = provisionedGatewaySeed();
+test('--repair-soil-profiles leaves a codec attached by hand to the Kiwi profile alone: zero writes when all is correct', async () => {
+  const handCodec = 'function decodeUplink(input){return {data:{watermark1_frequency:1}};}';
+  const gw = provisionedGatewaySeed({ kiwiCodec: handCodec });
+  const world = makeWorld(gw.seed);
+  const cloverId = nextUuid();
+  world.profiles.push({ id: cloverId, name: 'OSI CLOVER Sensor', tenantId: gw.ids.tenantId, runtime: JS_RUNTIME, script: tektelicCodec(), autoDetect: true });
+  world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_PROFILE_CLOVER=${gw.ids.rak}`, `CHIRPSTACK_PROFILE_CLOVER=${cloverId}`));
+  world.uci.set('osi-server.cloud.chirpstack_profile_clover', cloverId);
+  const envBefore = world.files.get(ENV_FILE);
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.deepEqual(world.writes, [], 'no ChirpStack write');
+  assert.deepEqual(world.uciCommands.filter((c) => c.startsWith('set')), [], 'no UCI write');
+  assert.equal(world.files.get(ENV_FILE), envBefore, 'env file unchanged');
+  assert.equal(world.profiles.find((p) => p.id === gw.ids.kiwi).script, handCodec);
+});
+
+test('--repair-soil-profiles also repairs a UCI key still aliased when the env line is already distinct', async () => {
+  const gw = provisionedGatewaySeed({ kiwiCodec: 'function decodeUplink(){return {data:{}};}' });
   const world = makeWorld(gw.seed);
   const existingClover = nextUuid();
   world.profiles.push({ id: existingClover, name: 'OSI CLOVER Sensor', tenantId: gw.ids.tenantId, runtime: JS_RUNTIME, script: tektelicCodec(), autoDetect: true });
   world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_PROFILE_CLOVER=${gw.ids.rak}`, `CHIRPSTACK_PROFILE_CLOVER=${existingClover}`));
-  await runBootstrap(world, { args: ['--repair-clover-profile'] });
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
   assert.equal(world.uci.get('osi-server.cloud.chirpstack_profile_clover'), existingClover);
   assert.deepEqual(world.writes, [], 'the existing Clover profile is reused, not recreated');
 });
 
-test('--repair-clover-profile refuses to run without the existing API key', async () => {
+test('--repair-soil-profiles refuses to run without the existing API key', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
   world.files.set(ENV_FILE, gw.envText.replace(`CHIRPSTACK_API_KEY=${API_KEY}\n`, ''));
-  await runBootstrap(world, { args: ['--repair-clover-profile'], env: { CHIRPSTACK_API_KEY: '' } });
+  await runBootstrap(world, { args: ['--repair-soil-profiles'], env: { CHIRPSTACK_API_KEY: '' } });
   assert.equal(world.exitCode, 1);
   assert.equal(world.cliApiKeyCalls, 0, 'never mints a second API key');
   assert.deepEqual(world.writes, []);
   assert.equal(world.files.get(ENV_FILE), gw.envText.replace(`CHIRPSTACK_API_KEY=${API_KEY}\n`, ''));
 });
 
-test('--repair-clover-profile refuses a gateway that was never provisioned', async () => {
+test('--repair-soil-profiles refuses a gateway that was never provisioned', async () => {
   const world = makeWorld();
-  await runBootstrap(world, { args: ['--repair-clover-profile'] });
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 1);
   assert.deepEqual(world.writes, [], 'never creates a tenant or profile on an unprovisioned gateway');
   assert.equal(world.files.has(ENV_FILE), false);
@@ -455,7 +535,7 @@ test('--repoint-clover-device moves a Clover off the field-tester profile and re
   world.devices.set('A840410000000001', { profileId: gw.ids.rak });
   world.devices.set('A840410000000002', { profileId: otherProfile });
   await runBootstrap(world, {
-    args: ['--repair-clover-profile', '--repoint-clover-device=a840410000000001', '--repoint-clover-device=A840410000000002', '--repoint-clover-device=A840410000000003'],
+    args: ['--repair-soil-profiles', '--repoint-clover-device=a840410000000001', '--repoint-clover-device=A840410000000002', '--repoint-clover-device=A840410000000003'],
   });
   const clover = profileByName(world, 'OSI CLOVER Sensor');
   assert.equal(world.devices.get('A840410000000001').profileId, clover.id, 'Clover on the field-tester profile is repointed');
@@ -467,15 +547,15 @@ test('--repoint-clover-device moves a Clover off the field-tester profile and re
   // Second run with only the repointed device: unchanged, success.
   world.exitCode = null;
   const writes = world.writes.length;
-  await runBootstrap(world, { args: ['--repair-clover-profile', '--repoint-clover-device=A840410000000001'] });
+  await runBootstrap(world, { args: ['--repair-soil-profiles', '--repoint-clover-device=A840410000000001'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
   assert.equal(world.writes.length, writes, 'repointing is idempotent');
 });
 
-test('an unknown option fails instead of running a full provisioning pass', async () => {
+test('an unknown option (also the unreleased --repair-clover-profile) fails instead of provisioning', async () => {
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
-  await runBootstrap(world, { args: ['--repair-clover-profiles'] });
+  await runBootstrap(world, { args: ['--repair-clover-profile'] });
   assert.equal(world.exitCode, 1);
   assert.deepEqual(world.writes, []);
   assert.equal(world.files.get(ENV_FILE), gw.envText);

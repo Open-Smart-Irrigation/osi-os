@@ -295,7 +295,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 | Device | ChirpStack app | Profile | Sensors |
 |--------|----------------|---------|---------|
-| KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
+| KIWI_SENSOR | Sensors | OSI KIWI Sensor (Tektelic agriculture codec) | SWT, light, temp, humidity |
 | TEKTELIC_CLOVER | Sensors | OSI CLOVER Sensor (Tektelic agriculture codec) | Ambient temp, humidity, light (VWC not stored) |
 | DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow), WATERMARK or Chameleon SWT |
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |

@@ -2524,19 +2524,21 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
     fi
 fi
 
-# Earlier bootstraps wrote CHIRPSTACK_PROFILE_CLOVER as an alias of the RAK
-# field-tester profile, which has no codec, so a registered Clover never
-# decoded. The repair mode reuses the gateway's API key, touches only the Clover
-# profile, the chirpstack_profile_clover UCI key and the CHIRPSTACK_PROFILE_CLOVER
-# env line, and is a no-op once both hold a distinct id. Node-RED picks the id
-# up at its restart later in this deploy. Never fails the deploy.
+# Earlier bootstraps created the Kiwi profile without a codec and wrote
+# CHIRPSTACK_PROFILE_CLOVER as an alias of the codec-less RAK field-tester
+# profile, so Kiwi and Clover uplinks never decoded. The repair mode reuses the
+# gateway's API key and never provisions: it attaches the Tektelic codec to a
+# Kiwi or Clover profile that has none (a codec already there is left alone),
+# fixes the Clover profile id in one UCI key and one env line, and makes no
+# write once all is correct. Each ChirpStack call is bounded at 20 s. Node-RED
+# picks the id up at its restart later in this deploy. Never fails the deploy.
 if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null; then
-    echo "--- Clover device profile (repair if aliased to the field tester) ---"
-    if node /srv/node-red/chirpstack-bootstrap.js --repair-clover-profile; then
-        echo "OK: Clover device profile checked"
+    echo "--- Kiwi and Clover device profiles (codec and Clover profile id) ---"
+    if OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
+        echo "OK: Kiwi and Clover device profiles checked"
     else
-        echo "WARN: Clover profile repair failed; Clover devices stay without decoded data until it succeeds"
-        echo "NOTE: rerun it with: node /srv/node-red/chirpstack-bootstrap.js --repair-clover-profile"
+        echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
+        echo "NOTE: rerun it with: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
     fi
 fi
 

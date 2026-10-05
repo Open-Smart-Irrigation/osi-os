@@ -3349,8 +3349,9 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js"', 'deploys the shipped Tektelic KIWI/CLOVER decoder to live devices');
-expectFileIncludes('deploy.sh', deployScript, 'node /srv/node-red/chirpstack-bootstrap.js --repair-clover-profile', 'repairs a Clover profile aliased to the field tester on provisioned gateways');
-expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CLOVER_CODEC_PATH', 'allows overriding the Clover decoder path during bootstrap');
+expectFileIncludes('deploy.sh', deployScript, 'node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles', 'repairs the Kiwi and Clover profiles on provisioned gateways');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'TEKTELIC_CODEC_PATH', 'allows overriding the Tektelic decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'getOrCreateKiwiProfile(client, tenantId, tektelicCodecScript)', 'creates the Kiwi profile with the Tektelic codec');
 expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_CLOVER: cloverProfileId', 'writes the Clover profile id, not the field-tester alias');
 expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
