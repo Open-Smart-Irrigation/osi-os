@@ -531,12 +531,27 @@ function rowByHistoryKeyQuery(tableName, key) {
   throw new Error(`unsupported dirty-key table ${tableName}`);
 }
 
+const LONG_MIN = -(2n ** 63n);
+const LONG_MAX = 2n ** 63n - 1n;
+
+// The text after the last '|' as Java's Long.parseLong reads it, or null.
+function historyKeyLong(key) {
+  const text = String(key || '');
+  const pos = text.lastIndexOf('|');
+  if (pos < 0) return null;
+  const tail = text.slice(pos + 1);
+  if (!/^[+-]?\d+$/.test(tail)) return null;
+  const value = BigInt(tail);
+  return value < LONG_MIN || value > LONG_MAX ? null : value;
+}
+
+// Mirrors the cloud's batch order check for every table: two keys compare
+// numerically when both tails parse as a Long (row ids, and valve expectation
+// ids that are cloud command ids), otherwise by code unit over the whole key.
 function compareHistoryKeys(tableName, left, right) {
-  if (cursorKind(tableName) === 'id') {
-    const leftId = BigInt(String(left || '').split('|').at(-1));
-    const rightId = BigInt(String(right || '').split('|').at(-1));
-    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
-  }
+  definition(tableName);
+  const leftId = historyKeyLong(left), rightId = historyKeyLong(right);
+  if (leftId !== null && rightId !== null) return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
   const leftKey = String(left || ''), rightKey = String(right || '');
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }

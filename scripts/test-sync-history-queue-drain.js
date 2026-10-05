@@ -102,6 +102,44 @@ test('compareHistoryKeys orders id keys numerically and other keys by code unit'
   }
 });
 
+// The cloud compares two keys numerically when both tails parse as a Java
+// Long, otherwise by code unit (EdgeHistoryIngestService.firstOutOfOrderNumericRow),
+// for every table. A valve expectation id is the cloud command id when there is one.
+test('compareHistoryKeys follows the cloud rule for every table, including numeric valve ids', () => {
+  const valve = (id) => `VALVE_ACTUATION|${GATEWAY}|${id}`;
+  for (const profile of PROFILES) {
+    const { helper } = loadProfile(profile);
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve(999), valve(1000)), -1, profile);
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve(1000), valve(999)), 1, profile);
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve(-2), valve(-10)), 1, profile);
+    // Only one tail parses: both sides compare the whole key by code unit.
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve(1000), valve('0b7c5a52-0000-4000-8000-000000000001')), 1, profile);
+    // Past the Long range the cloud no longer parses the tail either.
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve('9223372036854775808'), valve('10')), 1, profile);
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve('9223372036854775807'), valve('10')), 1, profile);
+    assert.equal(helper.compareHistoryKeys('valve_actuation_expectations', valve('9223372036854775807'), valve('9223372036854775807')), 0, profile);
+  }
+});
+
+test('a valve correction batch with command ids of different lengths is accepted in one pass', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const cursor = seed(db);
+  const insert = db.prepare("INSERT INTO valve_actuation_expectations(expectation_id,device_eui,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,created_at) VALUES(?,?,?,600,?,'none',?)");
+  for (const id of ['1000', '999']) insert.run(id, SOIL, '2026-10-05T08:00:00.000Z', '2026-10-05T08:10:00.000Z', '2026-10-05T08:00:00.000Z');
+  for (const table of ['device_data', 'chameleon_readings', 'dendrometer_readings', 'irrigation_events']) cursor.run(table, '0', null, '0', null);
+  for (const table of ['dendrometer_daily', 'zone_daily_environment', 'zone_daily_recommendations', 'valve_actuation_expectations']) cursor.run(table, null, '', null, '');
+  link(db);
+  const valve = (id) => `VALVE_ACTUATION|${GATEWAY}|${id}`;
+  dirty(db, 'valve_actuation_expectations', valve(1000), 'upsert', '2026-10-05T09:00:00.000Z');
+  dirty(db, 'valve_actuation_expectations', valve(999), 'upsert', '2026-10-05T09:00:01.000Z');
+  const h = createHarness({ db, lastTable: 'irrigation_events', env: { DEVICE_EUI: GATEWAY } });
+  await h.tick();
+  const batches = h.cloud.batches.filter((b) => b.tableName === 'valve_actuation_expectations');
+  assert.deepEqual(batches.map((b) => [b.keys, b.rejected]), [[[valve(999), valve(1000)], null]]);
+  assert.deepEqual(statusCounts(db, 'valve_actuation_expectations'), { done: 2 });
+});
+
 test('a correction batch is sent in ascending row id order whatever the queue order', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
