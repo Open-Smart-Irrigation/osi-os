@@ -122,6 +122,12 @@ jobs:
       # osi-bootstrap service enabled on a stock gateway OS install.
       - name: Deploy gateway setup
         run: node --test scripts/test-deploy-gateway-setup.js
+      # TEKTELIC Clover: chirpstack-bootstrap.js gives the Clover its own device
+      # profile with the Tektelic codec instead of aliasing the codec-less
+      # field-tester profile, and --repair-clover-profile fixes an already
+      # provisioned gateway (one profile, one UCI key, one env line).
+      - name: Clover device profile
+        run: node --test scripts/test-chirpstack-bootstrap-clover.js
       # Migration 0068 rehearsal (bound applied-command columns, calibration-only
       # outbox triggers, live and tombstone events, readings stay local) and the
       # journal v2 replication flows migration this branch touches.

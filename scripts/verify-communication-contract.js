@@ -134,7 +134,9 @@ expectIncludes(nodeRedSettingsPath, nodeRedSettings, 'process.env[key] = value;'
 
 const bootstrap = read(chirpstackBootstrapPath);
 expectIncludes(chirpstackBootstrapPath, bootstrap, 'writeUciConfig(envVars)', 'persists ChirpStack IDs to UCI');
-expectIncludes(chirpstackBootstrapPath, bootstrap, 'CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId', 'maps Clover compatibility profile to the RAK10701 profile ID');
+expectIncludes(chirpstackBootstrapPath, bootstrap, 'CHIRPSTACK_PROFILE_CLOVER: cloverProfileId', 'writes the Clover profile, which carries the Tektelic codec, as CHIRPSTACK_PROFILE_CLOVER');
+expectExcludes(chirpstackBootstrapPath, bootstrap, 'CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId', 'must not alias Clover to the codec-less RAK10701 field-tester profile');
+expectIncludes(chirpstackBootstrapPath, bootstrap, "readCodecScript(CFG.cloverCodecPath, 'Clover')", 'loads the shipped Tektelic codec for the Clover profile');
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${sensorsAppId}/device/#`', 'must not rewrite sensor MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, '`application/${fieldTesterAppId}/#`', 'must not rewrite field tester MQTT input topics to installation-specific IDs');
 expectExcludes(chirpstackBootstrapPath, bootstrap, 'FIXED_APP_ID -> env.get(CHIRPSTACK_APP_ACTUATORS)', 'must not patch STREGA flow code during normal bootstrap');
