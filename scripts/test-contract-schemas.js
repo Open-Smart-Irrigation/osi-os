@@ -1004,6 +1004,37 @@ reportCheck(
     'WATERMARK shared vector pins normalized replay semantics',
     'WATERMARK shared vector does not pin numeric, omission/null, or conflict semantics'
 );
+{
+    const hexActorVector = watermarkVector.bindingVectors.find((vector) => vector.name === 'gateway-local-hex-actor');
+    let hexActorOk = false;
+    try {
+        hexActorOk = Boolean(hexActorVector) &&
+            hexActorVector.input.actor_user_uuid === '0123456789abcdef0123456789abcdef' &&
+            canonicalBinding(hexActorVector.input) === hexActorVector.canonical_body &&
+            hexActorVector.canonical_body.includes('"actor_user_uuid":"0123456789abcdef0123456789abcdef"') &&
+            BINDING_CANONICALIZER.sha256(hexActorVector.input) === hexActorVector.sha256;
+    } catch (_) {
+        hexActorOk = false;
+    }
+    reportCheck(
+        hexActorOk,
+        'WATERMARK binding keeps a 32-hex gateway-local actor unchanged',
+        'WATERMARK binding does not keep a 32-hex gateway-local actor unchanged'
+    );
+    const refused = (watermarkVector.rejectedActorVectors || []).filter((vector) => {
+        try {
+            canonicalBinding({...watermarkVector.bindingVectors[0].input, actor_user_uuid: vector.actor_user_uuid});
+            return false;
+        } catch (error) {
+            return error instanceof TypeError;
+        }
+    });
+    reportCheck(
+        refused.length === 5 && refused.length === watermarkVector.rejectedActorVectors.length,
+        'WATERMARK binding refuses every rejected actor vector',
+        'WATERMARK binding accepts a rejected actor vector'
+    );
+}
 const watermarkCalibrationBase = {
     pullup_1_ohm: 30000, pulldown_1_ohm: 30000,
     series_fwd_1_ohm: 10, series_rev_1_ohm: 10,
@@ -1718,6 +1749,25 @@ expectInvalid(
     (() => { const copy = jsonClone(watermarkSetCommand); delete copy.actor_user_uuid; return copy; })(),
     /actor_user_uuid.*required/
 );
+// The actor is the gateway's users.user_uuid as stored: the hyphenated form, or
+// 32 lower-case hex digits for the first admin and backfilled users.
+const HEX_ACTOR = '0123456789abcdef0123456789abcdef';
+expectValid('WATERMARK set accepts a 32-hex gateway-local actor', cmdSchema, {...watermarkSetCommand, actor_user_uuid: HEX_ACTOR}, cmdSchema);
+expectValid('WATERMARK delete accepts a 32-hex gateway-local actor', cmdSchema, {...watermarkDeleteCommand, actor_user_uuid: HEX_ACTOR}, cmdSchema);
+for (const vector of watermarkVector.rejectedActorVectors) {
+    expectInvalid(
+        `WATERMARK set rejects actor ${vector.name}`,
+        cmdSchema,
+        {...watermarkSetCommand, actor_user_uuid: vector.actor_user_uuid},
+        /actor_user_uuid.*does not match/
+    );
+}
+expectInvalid(
+    'WATERMARK set rejects an upper-case hyphenated actor',
+    cmdSchema,
+    {...watermarkSetCommand, actor_user_uuid: UUID.toUpperCase()},
+    /actor_user_uuid.*does not match/
+);
 expectInvalid(
     'WATERMARK delete rejects normalized intent values',
     cmdSchema,
@@ -1757,6 +1807,7 @@ for (const [type, operation, prefix, base] of [
         values,
     };
     expectValid(`${type} exact-base synthetic vector`, cmdSchema, command, cmdSchema);
+    expectValid(`${type} accepts a 32-hex gateway-local actor`, cmdSchema, {...command, actor_user_uuid: HEX_ACTOR}, cmdSchema);
     expectInvalid(`${type} rejects empty normalized intent`, cmdSchema, {...command, values: {}}, /required/);
     expectInvalid(`${type} rejects unexpected normalized intent`, cmdSchema, {...command, values: {...values, unexpected: true}}, /property/);
     if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {

@@ -75,7 +75,20 @@
       "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A84041A171000002","gateway_device_eui":"A84041A171000001","actor_user_uuid":"12345678-1234-4234-8234-123456789abc","base_sync_version":7,"operation":"set","key\u001b":"key-control","normalized_intent":{"control":"start\u001bend","quote_backslash":"\"\\\\\n","unicode":"café 😀","surrogate":"\ud800"}},
       "canonical_body": "{\"actor_user_uuid\":\"12345678-1234-4234-8234-123456789abc\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A84041A171000002\",\"gateway_device_eui\":\"A84041A171000001\",\"key\\u001b\":\"key-control\",\"normalized_intent\":{\"control\":\"start\\u001bend\",\"quote_backslash\":\"\\\"\\\\\\\\\\n\",\"surrogate\":\"\\ud800\",\"unicode\":\"café 😀\"},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
       "sha256": "ef8c7d3cf133a21566a73d39f5d5280c57a83ccf7b088037d8d5aba3bf87678f"
+    },
+    {
+      "name": "gateway-local-hex-actor",
+      "input": {"command_type":"SET_WATERMARK_CALIBRATION","resource":"WATERMARK_CALIBRATION","device_eui":"A840410000000001","gateway_device_eui":"0016C001F1000001","actor_user_uuid":"0123456789abcdef0123456789abcdef","base_sync_version":7,"operation":"set","normalized_intent":{"worst_residual_pct":1}},
+      "canonical_body": "{\"actor_user_uuid\":\"0123456789abcdef0123456789abcdef\",\"base_sync_version\":7,\"command_type\":\"SET_WATERMARK_CALIBRATION\",\"device_eui\":\"A840410000000001\",\"gateway_device_eui\":\"0016C001F1000001\",\"normalized_intent\":{\"worst_residual_pct\":1},\"operation\":\"set\",\"resource\":\"WATERMARK_CALIBRATION\"}",
+      "sha256": "f5ce01ad9464a36c5fb0659d22c2cdec874a025fecaf25ef86acfa96a351084f"
     }
+  ],
+  "rejectedActorVectors": [
+    {"name":"hex-31-digits","actor_user_uuid":"123456789abcdef0123456789abcdef"},
+    {"name":"hex-33-digits","actor_user_uuid":"0123456789abcdef0123456789abcdef0"},
+    {"name":"hex-upper-case","actor_user_uuid":"0123456789ABCDEF0123456789ABCDEF"},
+    {"name":"hex-non-hex-digit","actor_user_uuid":"0123456789abcdef0123456789abcdeg"},
+    {"name":"hex-misplaced-hyphen","actor_user_uuid":"01234567-89abcdef0123456789abcdef"}
   ],
   "conflictCases": {
     "sameKeyDifferentIntent": "conflict",
