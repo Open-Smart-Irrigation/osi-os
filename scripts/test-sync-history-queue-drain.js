@@ -6,7 +6,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const { PROFILES, createHarness, loadProfile } = require('./history-sync-flow-harness');
 
@@ -457,4 +459,76 @@ test('radio_uplinks: dead keys are dropped, a rejected key is set aside, an old-
   const cur = db.prepare("SELECT next_attempt_at, retry_count FROM sync_history_cursors WHERE table_name='radio_uplinks'").get();
   assert.ok(!cur.next_attempt_at || cur.next_attempt_at < '9999', 'radio history is not parked');
   assert.ok(h.warnings.some((w) => /dropped 2 queued radio_uplinks key\(s\): source row missing/.test(w)), h.warnings.join('\n'));
+});
+
+// The rehearsal CLI replaces its working copy on every run, so --work must be a
+// scratch directory: empty, or created by an earlier run (it holds the marker).
+const REHEARSAL = path.join(root, 'scripts/rehearse-history-queue-drain.js');
+
+function rehearse(args) {
+  return spawnSync(process.execPath, [REHEARSAL, ...args, '--hours', '0.01'], { encoding: 'utf8', timeout: 60000 });
+}
+
+function scratchDir(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'history-rehearsal-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+function seededFile(file) {
+  const db = new DatabaseSync(file);
+  db.exec(fs.readFileSync(path.join(root, 'database/seed-blank.sql'), 'utf8'));
+  db.close();
+}
+
+test('the rehearsal CLI refuses a --work that is a file, foreign or under the live database directory', (t) => {
+  const dir = scratchDir(t);
+  const pulled = path.join(dir, 'pulled.db');
+  const scratch = path.join(dir, 'scratch.db');
+  seededFile(pulled);
+  fs.writeFileSync(scratch, 'not a database');
+  const pulledBytes = fs.readFileSync(pulled);
+  // Swapped arguments: the pulled copy given as --work.
+  const swapped = rehearse(['--db', scratch, '--work', pulled]);
+  assert.notEqual(swapped.status, 0, 'a file as --work is refused');
+  assert.match(swapped.stderr, /--work must be a scratch directory/);
+  assert.deepEqual(fs.readFileSync(pulled), pulledBytes, 'the pulled copy is untouched');
+  // A directory with someone else's files.
+  const foreign = path.join(dir, 'foreign');
+  fs.mkdirSync(foreign);
+  fs.writeFileSync(path.join(foreign, 'keep.txt'), 'keep');
+  const foreignRun = rehearse(['--db', pulled, '--work', foreign]);
+  assert.notEqual(foreignRun.status, 0);
+  assert.match(foreignRun.stderr, /not empty and was not created by this script/);
+  assert.deepEqual(fs.readdirSync(foreign), ['keep.txt']);
+  // The live database directory, directly and through a symbolic link.
+  const live = rehearse(['--db', pulled, '--work', '/data/db/rehearsal']);
+  assert.notEqual(live.status, 0);
+  assert.match(live.stderr, /refusing a path under \/data\/db/);
+  fs.symlinkSync('/data/db', path.join(dir, 'live-link'));
+  const linked = rehearse(['--db', path.join(dir, 'live-link', 'farming.db'), '--work', path.join(dir, 'work')]);
+  assert.notEqual(linked.status, 0);
+  assert.match(linked.stderr, /refusing a path under \/data\/db/);
+  // A --work that holds the source.
+  const holder = rehearse(['--db', pulled, '--work', dir]);
+  assert.notEqual(holder.status, 0);
+  assert.match(holder.stderr, /--work must not contain --db/);
+  assert.deepEqual(fs.readFileSync(pulled), pulledBytes, 'the pulled copy is untouched');
+});
+
+test('the rehearsal CLI works in a new or empty scratch directory and reuses its own', (t) => {
+  const dir = scratchDir(t);
+  const pulled = path.join(dir, 'pulled.db');
+  seededFile(pulled);
+  const fresh = path.join(dir, 'work');
+  const first = rehearse(['--db', pulled, '--work', fresh]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.ok(fs.existsSync(path.join(fresh, 'farming.db')), 'the working copy lives inside --work');
+  const again = rehearse(['--db', pulled, '--work', fresh]);
+  assert.equal(again.status, 0, again.stderr);
+  const empty = path.join(dir, 'empty');
+  fs.mkdirSync(empty);
+  const emptyRun = rehearse(['--db', pulled, '--work', empty]);
+  assert.equal(emptyRun.status, 0, emptyRun.stderr);
+  assert.ok(fs.existsSync(path.join(empty, 'farming.db')));
 });

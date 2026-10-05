@@ -7,10 +7,14 @@
 // ordering, hash, row-index, quarantine and manifest-comparison rules.
 // Nothing leaves the machine.
 //
-//   node scripts/rehearse-history-queue-drain.js --db <pulled farming.db> --work <scratch path>
+//   node scripts/rehearse-history-queue-drain.js --db <pulled farming.db> --work <scratch directory>
 //       [--hours 24] [--start <ISO>] [--cloud-index <csv>] [--repair-from <db> --repair-after-min 60]
 //
-// The source file is never opened: it (and its -wal) is copied to --work first.
+// The source file is never opened: it (and its -wal) is copied to <work>/farming.db
+// first. --work must be an empty directory, a new path, or a directory an earlier
+// run created (it holds the marker file); the working copy in it is replaced on
+// every run. Paths under /data/db (a gateway's live database directory) are
+// refused for all three arguments, after resolving symbolic links.
 // The fake cloud's row index starts as "the cloud holds the edge's current row"
 // for every row the tail can reach, except a pending 'correction' key (the cloud
 // holds the old value) and rows of an unresolvable zone (quarantined). Segments
@@ -26,6 +30,8 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { createHarness } = require('./history-sync-flow-harness');
 
+const LIVE_DB_DIR = '/data/db';
+const WORK_MARKER = '.history-queue-rehearsal';
 const TABLES = ['device_data', 'chameleon_readings', 'dendrometer_readings', 'dendrometer_daily',
   'zone_daily_environment', 'zone_daily_recommendations', 'irrigation_events', 'valve_actuation_expectations'];
 // A table is drained when no key queued longer ago than this is still pending.
@@ -44,13 +50,57 @@ function parseArgs(argv) {
     else if (arg === '--repair-after-min') options.repairAfterMin = Number(argv[++i]);
     else throw new Error('unknown argument ' + arg);
   }
-  if (!options.db || !options.work) throw new Error('usage: --db <copy> --work <scratch path> [--hours N] [--start ISO] [--cloud-index csv] [--repair-from db --repair-after-min N]');
-  if (path.resolve(options.db) === path.resolve(options.work)) throw new Error('--work must differ from --db');
-  for (const p of [options.db, options.repairFrom]) {
-    if (p && path.resolve(p) === '/data/db/farming.db') throw new Error('refusing to read a live gateway database path; pull a copy first');
-  }
+  if (!options.db || !options.work) throw new Error('usage: --db <copy> --work <scratch directory> [--hours N] [--start ISO] [--cloud-index csv] [--repair-from db --repair-after-min N]');
   if (!(options.hours > 0)) throw new Error('--hours must be positive');
   return options;
+}
+
+// The real path of p, also when p does not exist yet: the nearest existing
+// parent is resolved, and a link whose target is missing is followed.
+function realPath(p, depth = 0) {
+  const absolute = path.resolve(p);
+  try {
+    return fs.realpathSync(absolute);
+  } catch (_) {
+    if (depth > 40) throw new Error('too many symbolic links: ' + p);
+    const parent = path.dirname(absolute);
+    if (parent === absolute) return absolute;
+    const resolvedParent = realPath(parent, depth + 1);
+    const candidate = path.join(resolvedParent, path.basename(absolute));
+    let link = null;
+    try { link = fs.readlinkSync(candidate); } catch (_) { /* not a link: a path that does not exist yet */ }
+    return link === null ? candidate : realPath(path.resolve(resolvedParent, link), depth + 1);
+  }
+}
+
+function isInside(child, parent) {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+// Checks --work, --db and --repair-from before anything is written and returns
+// the working copy's path inside --work.
+function prepareWork(options) {
+  const work = realPath(options.work);
+  const sources = [options.db, options.repairFrom].filter(Boolean).map(realPath);
+  const liveDirs = [LIVE_DB_DIR, realPath(LIVE_DB_DIR)];
+  for (const p of [work, ...sources]) {
+    if (liveDirs.some((dir) => isInside(p, dir))) throw new Error('refusing a path under ' + LIVE_DB_DIR + ' (' + p + '); pull a copy first');
+  }
+  for (const source of sources) {
+    if (isInside(source, work)) throw new Error('--work must not contain --db or --repair-from (' + source + ')');
+  }
+  if (fs.existsSync(work)) {
+    if (!fs.statSync(work).isDirectory()) throw new Error('--work must be a scratch directory, not a file (' + work + ')');
+    const entries = fs.readdirSync(work);
+    if (entries.length && !entries.includes(WORK_MARKER)) {
+      throw new Error('--work is not empty and was not created by this script (no ' + WORK_MARKER + ' in ' + work + ')');
+    }
+  } else {
+    fs.mkdirSync(work, { recursive: true });
+  }
+  fs.writeFileSync(path.join(work, WORK_MARKER), 'Scratch directory of scripts/rehearse-history-queue-drain.js; its working copy is replaced on every run.\n');
+  return path.join(work, 'farming.db');
 }
 
 function queue(db) {
@@ -97,16 +147,17 @@ function seedCloud(h, db, gatewayEui, cloudIndexPath) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  const workDb = prepareWork(options);
   for (const suffix of ['', '-wal']) {
-    const target = options.work + suffix;
-    if (fs.existsSync(target)) fs.rmSync(target);
+    const target = workDb + suffix;
+    fs.rmSync(target, { force: true });
     if (fs.existsSync(options.db + suffix)) {
       fs.copyFileSync(options.db + suffix, target);
       fs.chmodSync(target, 0o600); // a pulled backup is often read-only
     }
   }
-  fs.rmSync(options.work + '-shm', { force: true });
-  const db = new DatabaseSync(options.work);
+  fs.rmSync(workDb + '-shm', { force: true });
+  const db = new DatabaseSync(workDb);
   // Scratch copy only: no fsync per statement (a .dump-restored copy is in rollback-journal mode).
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=OFF;');
   const link = db.prepare("SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'").get() || {};
