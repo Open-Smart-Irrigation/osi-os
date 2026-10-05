@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 Ordered schema migrations `0017__zone_key_fallback_parity.sql` to
-`0068__watermark_cloud_parity.sql` (52 migrations) are new since 0.7.0. Two
+`0070__journal_catalog_v11.sql` (54 migrations) are new since 0.7.0. Two
 new device types: `DRAGINO_SDI12` and `RAK10701_FIELD_TESTER`. The last
 pre-built image was 0.6.5, so a gateway upgraded from that image also takes
 every 0.7.0 entry below.
@@ -38,10 +38,16 @@ every 0.7.0 entry below.
   `flows.json` and the GUI as one payload, stops Node-RED (and
   `osi-identityd`) before migrating, applies pending migrations with
   `scripts/migrate-cli.js` after a backup, and activates the new payload
-  before Node-RED starts again. Three migrations in the range are
+  before Node-RED starts again. Four migrations in the range are
   `destructive` (`0027` and `0060` rebuild the `devices` type list, `0058`
-  recreates the gateway-attribution triggers) and need the writers-stopped
+  recreates the gateway-attribution triggers, `0069` rebuilds the journal V2
+  queue and replay tables and copies their rows) and need the writers-stopped
   state that only the deploy provides.
+- **Journal catalog v11, cloud first.** The cloud compares the catalog
+  version and hash a gateway advertises with the catalog it vendors, and
+  disables cloud journal capture for a gateway whose catalog differs. Deploy
+  an OSI Server revision that vendors catalog v11 before upgrading a linked
+  gateway, or cloud capture stays off for that gateway until it does.
 - A gateway whose database has no `schema_migrations` ledger (installed from
   the 0.6.5 image and never upgraded since) takes the pre-ledger path on its
   first deploy: `repair-sync-outbox-v2.js`, then `baseline-existing-db.js`,
@@ -100,6 +106,18 @@ every 0.7.0 entry below.
   Tracked in #377.
 
 ### Added
+- **Journal catalog v11 and plot-group snapshots**
+  (`0069__journal_v2_plot_group_snapshot.sql`,
+  `0070__journal_catalog_v11.sql`). Catalog v11 adds `full_record@11` with a
+  final-entry requirement matrix (which fields a final entry needs per
+  activity or operation, and which quantity families may be recorded as not
+  observed), plot layouts that declare their machinery availability, and a
+  `farm_wide` layout. 0069 widens the closed operation and kind lists of the
+  journal V2 queue and replay tables with `PLOT_GROUP_SNAPSHOT` and adds
+  `journal_v2_plot_group_snapshots`; the replication worker validates and
+  stores plot-group snapshots. The sync contract defines the
+  `UPSERT_JOURNAL_ENTRY_BATCH` command and the `JOURNAL_CROP_CYCLE_UPSERTED`
+  event; both are staged (no edge applier or emitter yet).
 - **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
   `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
   and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
