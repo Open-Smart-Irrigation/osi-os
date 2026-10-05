@@ -679,6 +679,13 @@ function portableRows(db, sql, params) {
 // Scoped mode: the token's subject must still be this account (id and
 // username, as the History API Router checks) and enabled, read fresh here and
 // decided by the scope helper.
+// Flag off: the token's user must still exist, as the Analysis API Router
+// checks (401 User not found).
+async function portableAssertUserExists(db, auth) {
+  const users = await portableRows(db, 'SELECT id FROM users WHERE id = ? LIMIT 1', [auth.userId]);
+  if (!users.length) httpError(401, 'User not found');
+}
+
 async function portableAssertEnabledAccount(db, scope, auth) {
   const users = await portableRows(db, 'SELECT user_uuid, disabled_at FROM users WHERE id = ? AND username = ? LIMIT 1', [auth.userId, auth.username]);
   const user = users[0];
@@ -695,7 +702,11 @@ let portableExportInFlight = false;
 
 async function portableAllZonesExport(request, history, db, auth, scope) {
   const query = request.query || {};
-  if (scope) await portableAssertEnabledAccount(db, scope, auth);
+  if (scope) {
+    await portableAssertEnabledAccount(db, scope, auth);
+  } else {
+    await portableAssertUserExists(db, auth);
+  }
   if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
   if (portableExportInFlight) {
     const busy = new Error('export already running');
@@ -747,8 +758,7 @@ async function portableDeleteAnalysisView(request, history, db, auth, scope, vie
   if (scope) {
     await portableAssertEnabledAccount(db, scope, auth);
   } else {
-    const users = await portableRows(db, 'SELECT id FROM users WHERE id = ? LIMIT 1', [auth.userId]);
-    if (!users.length) httpError(401, 'User not found');
+    await portableAssertUserExists(db, auth);
   }
   // Saved views are per user in every mode: the delete is filtered by owner.
   await history.deleteAnalysisView(db, { userId: auth.userId }, viewId);

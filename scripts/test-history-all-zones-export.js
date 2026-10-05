@@ -416,6 +416,8 @@ for (const profile of PROFILES) {
         authorization: makeAuthHeader({ userId: 1, username: 'owner-one', secret: 'another-secret' }),
       }));
       assert.equal(forged.statusCode, 401);
+      const ghost = await router.handlePortableHistoryRequest(exportRequest(raw, 9, 'removed-user'));
+      assert.equal(ghost.statusCode, 401, 'a valid token of a user who no longer exists');
       const wrongScope = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { query: { from: '2026-07-01' } }));
       assert.equal(wrongScope.statusCode, 400);
       const tooLarge = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', {
