@@ -31,14 +31,14 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
 - [ ] `osi-server` VPS is healthy (`docker compose ps` — all services Up/healthy).
 - [ ] No uncommitted changes: `git status --short` is clean.
 - [ ] Every CI workflow is green on the `main` commit you are releasing. There
-      are nine: Codec Verifiers, Doc Hygiene, Field Journal Tests, History
+      are ten: Codec Verifiers, Doc Hygiene, Field Journal Tests, History
       Router Tests, Journal Catalog Vendor Parity, Edge Migrations, GUI
-      Typecheck & Unit Tests, UI Core Vendor Parity, Sync Flow Verifier
-      (`.github/workflows/*.yml`). Check with:
+      Typecheck & Unit Tests, UI Core Vendor Parity, Sync Flow Verifier,
+      Test Inventory (`.github/workflows/*.yml`). Check with:
       ```bash
       gh run list --commit "$(git rev-parse origin/main)" --json workflowName,conclusion
       ```
-      Nine entries, each `success`. A run still in progress is not green.
+      Ten entries, each `success`. A run still in progress is not green.
 - [ ] Decide whether the sync contract changed since the previous release:
       ```bash
       git diff --stat v<OLD>..origin/main -- docs/contracts/
