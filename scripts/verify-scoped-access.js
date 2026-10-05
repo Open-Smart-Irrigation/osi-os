@@ -172,7 +172,6 @@ const KNOWN_GAPS = new Map([
 // only the listed change to rows outside the caller's scope is tolerated until
 // the issue's fix lands (then the entry is stale and fails until removed).
 const KNOWN_OUTCOME_GAPS = new Map([
-  ['s2120-zones-put-http', { issue: '#404', table: 'weather_station_zones', op: 'removed' }],
 ]);
 
 // Entries whose decision is real but made without the helper, so the probe

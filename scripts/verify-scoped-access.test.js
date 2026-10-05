@@ -685,6 +685,18 @@ test('a weather station zone set that skips the per-zone check fails', async () 
   );
 });
 
+test('a weather station zone set that removes an assignment outside the caller\'s scope fails', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-weather-zone-assign-router');
+  const scoped = /  await run\(\n    'DELETE FROM weather_station_zones WHERE deveui = \? AND zone_id IN [^]*?\n  \);\n/;
+  assert.match(router.func, scoped, 'the router removes only assignments to the caller\'s zones');
+  router.func = router.func.replace(scoped, "  await run('DELETE FROM weather_station_zones WHERE deveui = ?', [deveui]);\n");
+  assert.match(
+    await failuresFor(flows, ['s2120-zones-put-http']),
+    /s2120-zones-put-http.*changes a row outside the caller's scope \(the fixture request\): weather_station_zones row removed/
+  );
+});
+
 const ADMIN_CHECK = /await scope\.assertFreshRole\(\s*db,\s*actor\.user_uuid,\s*'admin',\s*\{ scopedMode: true \}\s*\);/;
 
 test('an admin route without a URL parameter needs an admin decision', async () => {

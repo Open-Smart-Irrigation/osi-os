@@ -3219,3 +3219,122 @@ test('#400: flag-off filing is unchanged and never loads the scope helper', asyn
     db.close();
   }
 });
+
+// #404: setting a weather station's zones changes only assignments to zones in
+// the caller's scope. An assignment to a zone outside it stays as it is, and so
+// does what the outbox tells the cloud; a request that names such a zone is
+// refused as before. Scope here is what the helper grants: owned plus granted
+// zones, for an admin too.
+function seedSharedStation() {
+  const db = seedScopedDb();
+  db.exec(`
+    UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-3';
+    UPDATE devices SET gateway_device_eui = '00000000000000A1' WHERE deveui = 'WX1';
+    INSERT INTO sync_link_state (peer_node, linked, updated_at) VALUES ('cloud', 1, '2026-01-01');
+    INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX1', 1), ('WX1', 2);
+    INSERT INTO weather_station_zone_state (deveui, sync_version, updated_at) VALUES ('WX1', 1, '2026-01-01');
+  `);
+  return db;
+}
+
+function stationZones(db) {
+  return db.prepare(
+    "SELECT zone_id FROM weather_station_zones WHERE deveui = 'WX1' ORDER BY zone_id"
+  ).all().map((row) => row.zone_id);
+}
+
+function stationZoneEvents(db) {
+  return db.prepare(
+    "SELECT payload_json FROM sync_outbox WHERE op = 'WEATHER_STATION_ZONES_REPLACED' ORDER BY rowid"
+  ).all().map((row) => JSON.parse(row.payload_json).zone_uuids);
+}
+
+async function setStationZones(db, userId, username, zoneIds, env = ENV) {
+  scopeHelper._resetForTests();
+  return executeFunction(loadNode('scoped-weather-zone-assign-router'), {
+    msg: scopedRequest(
+      userId,
+      username,
+      'PUT',
+      '/api/devices/WX1/zone-assignments',
+      { deveui: 'WX1' },
+      { zone_ids: zoneIds }
+    ),
+    env,
+    db,
+  });
+}
+
+test('#404: a scoped caller never changes a station assignment outside its zones', async () => {
+  const db = seedSharedStation();
+  try {
+    const keep = await setStationZones(db, 2, 'res1', [1]);
+    assert.equal(keep.result[1].statusCode, 200);
+    assert.deepEqual(keep.result[1].payload.zone_ids, [1, 2]);
+    assert.deepEqual(stationZones(db), [1, 2]);
+
+    const clear = await setStationZones(db, 2, 'res1', []);
+    assert.equal(clear.result[1].statusCode, 200);
+    assert.deepEqual(clear.result[1].payload.zone_ids, [2]);
+    assert.deepEqual(stationZones(db), [2], 'only the in-scope assignment is removed');
+
+    const events = stationZoneEvents(db);
+    assert.deepEqual(events, [['z-1', 'z-2'], ['z-2']], 'no event tells the cloud zone 2 lost the station');
+
+    for (const named of [[1, 2], [2]]) {
+      const refused = await setStationZones(db, 2, 'res1', named);
+      assert.equal(refused.result[1].statusCode, 404, `naming zone 2 is refused: ${named}`);
+    }
+    assert.deepEqual(stationZones(db), [2]);
+    assert.equal(stationZoneEvents(db).length, events.length, 'a refused request queues nothing');
+
+    // A caller left with no zone at all removes nothing.
+    db.exec(`
+      UPDATE irrigation_zones SET user_id = 1 WHERE id = 1;
+      UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-1';
+      INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('WX1', 1);
+    `);
+    const noZones = await setStationZones(db, 2, 'res1', []);
+    assert.equal(noZones.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1, 2]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: an admin holding both zones still sets the full list', async () => {
+  const db = seedSharedStation();
+  try {
+    db.exec(`
+      INSERT INTO user_zone_assignments (assignment_uuid, user_uuid, zone_uuid, created_at)
+      VALUES ('g-4', 'u-admin', 'z-1', '2026-01-01');
+      DELETE FROM weather_station_zones;
+    `);
+    const full = await setStationZones(db, 1, 'admin1', [1, 2]);
+    assert.equal(full.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1, 2]);
+    const one = await setStationZones(db, 1, 'admin1', [2]);
+    assert.equal(one.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [2]);
+    const none = await setStationZones(db, 1, 'admin1', []);
+    assert.equal(none.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), []);
+    assert.deepEqual(stationZoneEvents(db), [['z-1', 'z-2'], ['z-2'], []]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: flag-off the scoped router passes the request on untouched', async () => {
+  const db = seedSharedStation();
+  try {
+    const response = await setStationZones(db, 2, 'res1', [], { ...ENV, OSI_SCOPED_ACCESS: '0' });
+    assert.ok(response.result[0], 'the request goes on to the legacy handler');
+    assert.equal(response.result[1], null);
+    assert.deepEqual(response.result[0].payload, { zone_ids: [] });
+    assert.deepEqual(stationZones(db), [1, 2]);
+    assert.deepEqual(stationZoneEvents(db), []);
+  } finally {
+    db.close();
+  }
+});
