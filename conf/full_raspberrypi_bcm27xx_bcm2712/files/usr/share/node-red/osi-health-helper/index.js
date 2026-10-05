@@ -24,6 +24,7 @@ function allNullHealth() {
     sync_rejected: null,
     sync_rejected_recent: null,
     sync_dirty_pending: null,
+    sync_dirty_rejected: null,
     disk_free_pct: null,
     crash_count: null,
     crash_looping: null,
@@ -337,6 +338,17 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
     health.sync_dirty_pending = toCount(await queryGet(
       db,
       "SELECT COUNT(*) c FROM sync_history_dirty_keys WHERE status='pending'"
+    ));
+  } catch (_) {}
+
+  // A history key the cloud rejected three times leaves 'pending' for good
+  // (only a change to its row re-queues it), so sync_dirty_pending stops
+  // showing it. Counted apart, and kept out of health_state: like the
+  // all-time sync_rejected it does not return to zero on its own.
+  try {
+    health.sync_dirty_rejected = toCount(await queryGet(
+      db,
+      "SELECT COUNT(*) c FROM sync_history_dirty_keys WHERE status='rejected'"
     ));
   } catch (_) {}
 

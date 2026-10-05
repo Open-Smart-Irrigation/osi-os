@@ -99,6 +99,14 @@ jobs:
       # temperature-enabled WATERMARK node kept as a soil source (cards, series, CSV).
       - name: Soil history source and rollup rule
         run: node --test scripts/test-history-router-soil-projection.js
+      # History correction queue (shipped Build / POST / Mark History Batch and
+      # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
+      # the cloud's ordering, hash, row-index and manifest rules): batches go out
+      # in ascending key order, a key whose row is gone is dropped, and a
+      # row-level permanent rejection sets one key aside, and the 5-minute
+      # manifest keeps a queued key in place so a mismatching segment converges.
+      - name: History correction queue drain
+        run: node --test scripts/test-sync-history-queue-drain.js
       # The staged, digest-pinned command-ledger install in deploy.sh (activation
       # after the schema migration, stale stage cleanup), the fetch list and the
       # payload lifecycle. The pin check fails when a ledger, binding or installer
