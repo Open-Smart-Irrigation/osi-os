@@ -39,6 +39,8 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
       gh run list --commit "$(git rev-parse origin/main)" --json workflowName,conclusion
       ```
       Ten entries, each `success`. A run still in progress is not green.
+      Test Inventory (`node scripts/verify-test-inventory.js`) is the gate
+      that fails when a test file exists that no workflow can fail on.
 - [ ] Decide whether the sync contract changed since the previous release:
       ```bash
       git diff --stat v<OLD>..origin/main -- docs/contracts/
@@ -108,24 +110,44 @@ node scripts/verify-profile-parity.js
 node scripts/verify-flows-fn-parse.js
 ```
 
-**What the version string reaches.** `96_osi_server_config` is a first-boot
-`uci-defaults` script: it sets `osi-server.cloud.firmware_version` once, when
-a flashed image boots for the first time. `deploy.sh` never writes that key,
-so a gateway upgraded with `deploy.sh` keeps reporting the version of the
-image it was flashed with (a gateway flashed from the 0.6.5 image reports
-`0.6.5` however often it is upgraded). A gateway installed with `deploy.sh`
-on stock ChirpStack Gateway OS has no such key and reports the
-`node-red.init` fallback, which is the deployed version. Step 9 sets the key
-on every gateway you upgrade.
+**What the version string reaches.** `96_osi_server_config` sets
+`osi-server.cloud.firmware_version` when a flashed image boots for the first
+time. `deploy.sh` reads the release version from the same file and writes it
+to that key right after it flips to the new payload and before the restart
+that starts it; every flip back to the previous payload restores the
+previous value first. `node-red.init` reads the key when Node-RED starts, so
+the deploy's own restart makes the heartbeat report the new version. A
+missing `uci`, a missing `osi-server.cloud` section or a failed commit is
+logged as a `WARN` and does not fail the deploy; the gateway then reports the
+`node-red.init` fallback or the old value.
 
-### Step 1a — Chameleon calibrations (not bundled)
+### Step 1a — Bundle Chameleon calibrations
 
-The release image does not bundle Chameleon calibrations; gateways fetch
-them from OSI Server at runtime. Do not run
-`scripts/apply-chameleon-calibration-seed.js` for a release: it writes only
-four of the seven seed images listed in `scripts/seed-db-paths.js`, so
-`node scripts/verify-seed-db-ledger.js` and the Edge Migrations workflow fail
-afterwards.
+Bundle the known calibrations into every seed image, so a fresh gateway has
+them before it reaches OSI Server. The refresh reads from
+`https://server.opensmartirrigation.org` unless `OSI_SERVER_BASE_URL` is set;
+without an admin token, skip it and apply the committed snapshot.
+
+```bash
+OSI_ADMIN_TOKEN=<token> node scripts/refresh-chameleon-calibrations.js
+node scripts/apply-chameleon-calibration-seed.js --require-rows
+```
+
+The apply script writes all seven seed images listed in
+`scripts/seed-db-paths.js`, or none of them when any write fails, and leaves
+them byte-identical. `--require-rows` makes an empty snapshot fail. Review the
+diff of `database/seeds/chameleon-calibrations.sql`, then confirm the seed
+gates still pass:
+
+```bash
+node scripts/verify-seed-db-ledger.js
+node scripts/verify-db-schema-consistency.js
+node scripts/verify-profile-parity.js
+node --test scripts/test-apply-chameleon-calibration-seed.js
+```
+
+Rebuilding the seed images later with `node scripts/build-seed-db.js` drops
+the bundled rows; run this step again after any such rebuild.
 
 ---
 
@@ -196,8 +218,8 @@ grep -rl "OSI OS v<NEW>" feeds/chirpstack-openwrt-feed/apps/node-red/files/gui/a
 
 ## Step 4 — Commit, merge and tag
 
-Commit the version bump, the CHANGELOG and the refreshed feed GUI on a
-release branch and merge it through a pull request, so the CI workflows from
+Commit the version bump, the CHANGELOG, the calibration snapshot with the
+seven seed images, and the refreshed feed GUI on a release branch and merge it through a pull request, so the CI workflows from
 the pre-flight run on the release commit. The feed GUI is tracked in git;
 `git add -A` on its directory also stages the deleted old hashed assets:
 
@@ -213,6 +235,8 @@ git add web/react-gui/src/pages/Login.tsx \
         .claude/skills/osi-config-and-flags/SKILL.md \
         README.md \
         CHANGELOG.md
+git add database/seeds/chameleon-calibrations.sql \
+        $(node -p "require('./scripts/seed-db-paths').SEED_DB_RELATIVE_PATHS.join(' ')")
 git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
 git status --short    # nothing left unstaged
 git commit -m "release: OSI OS v<NEW>"
@@ -355,21 +379,24 @@ Build the release payload and hand it to the deployment procedure for the target
 ## Step 9 — Deploy to the gateways and smoke test
 
 Deploy to a test gateway first, then to the others, with the procedure from
-Step 8, and only after Step 6 when the sync contract changed. After each
-green deploy verdict, record the release version on the gateway;
-`deploy.sh` does not do it (see Step 1):
+Step 8, and only after Step 6 when the sync contract changed. `deploy.sh`
+writes the firmware version itself (see Step 1): its output shows
+`OK: osi-server.cloud.firmware_version <previous> -> <NEW>` or `already
+<NEW>`. A `WARN` line there means the key was not written.
 
-```bash
-ssh root@<pi-ip> 'uci set osi-server.cloud.firmware_version=<NEW> && uci commit osi-server'
-```
-
-`node-red.init` exports the value as `FIRMWARE_VERSION` when Node-RED starts,
-so the heartbeat reports it from the next Node-RED start.
+A failed command-ledger activation can leave Node-RED and `osi-identityd`
+stopped with the marker `/srv/node-red/.osi-command-ledger-hold`, which
+records the reason and the time. The way out is to re-run the deploy: every
+deploy reads the marker first and clears it once the ledger pair loads
+(`.claude/skills/osi-live-ops-runbook/SKILL.md`, "Failed command-ledger
+activation").
 
 On each Pi after the deploy:
 
-- [ ] `uci get osi-server.cloud.firmware_version` → `<NEW>` (the heartbeat
-      and the cloud show `<NEW>` only after the next Node-RED start)
+- [ ] No ledger hold: `ssh root@<pi-ip> 'test ! -e /srv/node-red/.osi-command-ledger-hold && echo no-hold'`
+      prints `no-hold`
+- [ ] `uci get osi-server.cloud.firmware_version` → `<NEW>`, and the
+      heartbeat in the cloud reports `<NEW>`
 - [ ] Login screen in browser shows `OSI OS v<NEW> (Alpha)`
 - [ ] Dashboard loads without console errors
 - [ ] Latest heartbeat visible in osi-server cloud (within 90 s)
@@ -388,13 +415,13 @@ On each Pi after the deploy:
 [ ] Pre-flight — mains merged, CI green (all workflows), contract change decided,
                  matching osi-server revision found with verify-sync-op-parity
 [ ] Step 1  — Bump every version location; run the verifiers
-[ ] Step 1a — Do not bundle Chameleon calibrations
+[ ] Step 1a — Bundle Chameleon calibrations into all seven seed images; seed gates green
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
-[ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, tag v<NEW>, push only the tag
+[ ] Step 4  — Release PR (incl. seed images and feed GUI), merge, CI green, tag v<NEW>, push only the tag
 [ ] Step 5  — Build both factory images, rename, SHA256SUMS, first-boot check
 [ ] Step 6  — Deploy and verify osi-server (required first if the contract changed)
 [ ] Step 7  — GitHub Release (notes checked, images + SHA256SUMS attached)
 [ ] Step 8  — Prepare deployment payload
-[ ] Step 9  — Deploy to Pis (test gateway first), set firmware_version, smoke test
+[ ] Step 9  — Deploy to Pis (test gateway first), check version line and hold marker, smoke test
 ```
