@@ -132,9 +132,10 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: [],
+      edgeDeferred: ['UPSERT_JOURNAL_ENTRY_BATCH'],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
+        'UPSERT_JOURNAL_ENTRY_BATCH',
         'VOID_JOURNAL_ENTRY',
         'UPSERT_JOURNAL_CUSTOM_VOCAB',
         'UPSERT_JOURNAL_PLOT',
@@ -153,11 +154,11 @@ function exactJournalStaging() {
       // WATERMARK calibration events are SQL-owned in the active contract; only
       // their cloud applier is staged here while edge trigger emission remains
       // deliberately outside this journal fixture.
-      edgeDeferred: [],
+      edgeDeferred: ['JOURNAL_CROP_CYCLE_UPSERTED'],
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
-      edgeStaged: JOURNAL_EVENT_OPS.slice(),
-      cloudDeferred: [...JOURNAL_EVENT_OPS, ...SCOPED_ACCESS_EVENT_OPS],
+      edgeStaged: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED'],
+      cloudDeferred: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED', ...SCOPED_ACCESS_EVENT_OPS],
     },
   };
 }
@@ -178,6 +179,7 @@ function createStagedParityFixture(overrides) {
     type: 'object',
     properties: {
       op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, [
+        'JOURNAL_CROP_CYCLE_UPSERTED',
         'WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED',
       ]) },
       payload: {
