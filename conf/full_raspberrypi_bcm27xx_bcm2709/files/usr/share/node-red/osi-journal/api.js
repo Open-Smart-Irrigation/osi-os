@@ -730,13 +730,25 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid,owner_user_uuid,user_id FROM journal_entries WHERE entry_uuid=? AND gateway_device_eui=? ' +
-      'AND deleted_at IS NULL LIMIT 1',
+    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id FROM journal_entries ' +
+      'WHERE entry_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
   if (!entry) throw apiError(404, 'not_found', 'Journal entry was not found');
   if (!entry.plot_uuid) {
+    // A farm-wide entry (no zone, no plot): any write-capable role may change
+    // it, so the role decision is the whole rule (#403, owner decision). An
+    // entry with a zone but no plot (no API path creates one) also needs the
+    // grant on that zone; a zone that cannot be resolved is refused.
     await assertJournalWriteRole(db, principal);
+    if (entry.zone_uuid != null || entry.zone_id != null) {
+      const zone = entry.zone_uuid != null ? { zone_uuid: entry.zone_uuid } : await dbGet(
+        db,
+        'SELECT zone_uuid FROM irrigation_zones WHERE id=? LIMIT 1',
+        [entry.zone_id]
+      );
+      await assertZoneWrite(db, principal, zone && zone.zone_uuid ? zone.zone_uuid : null);
+    }
     return Object.assign({}, principal, {
       owner_user_uuid: entry.owner_user_uuid,
       user_id: Number(entry.user_id),

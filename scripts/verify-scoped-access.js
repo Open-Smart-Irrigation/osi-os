@@ -165,8 +165,6 @@ const PHASE_C_PENDING = new Set([
 // Known gaps: real gaps found by this verifier, each tracked by its issue. An
 // entry leaves the list when its fix lands (the stale check enforces it).
 const KNOWN_GAPS = new Map([
-  ['journal-entry-put-http', '#403: needs the zone decision on the entry\'s zone'],
-  ['journal-entry-void-post-http', '#403: needs the zone decision on the entry\'s zone'],
 ]);
 
 // Known gaps the outcome rule sees: the entry is checked like any other, and
@@ -413,9 +411,14 @@ const REQUEST_FIXTURES = {
     setupSql: "INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, created_at) VALUES ('" +
       PROBE_GRANT_UUID + "', '" + PROBE_DISABLED_UUID + "', '" + PROBE_PLOT_UUID + "', '2026-01-01T00:00:00Z');",
   },
+  // The discard verb of the entry PUT, on the foreign zone-only entry made a
+  // version-zero draft: it reaches its write when every decision says yes (an update needs
+  // a catalogue-valid body the probe does not build).
   'journal-entry-put-http': {
     params: { uuid: FOREIGN_ENTRY_UUID },
-    body: { entry_uuid: FOREIGN_ENTRY_UUID, base_sync_version: 1, status: 'final' },
+    body: { entry_uuid: FOREIGN_ENTRY_UUID, discard: true },
+    setupSql: "UPDATE journal_entries SET status = 'draft', sync_version = 0 WHERE entry_uuid = '" +
+      FOREIGN_ENTRY_UUID + "';",
   },
   'journal-entry-void-post-http': {
     params: { uuid: FOREIGN_ENTRY_UUID },
@@ -519,7 +522,12 @@ const WRITE_TARGETS = new Map([
   ...['journal-entry-put-http', 'journal-entry-void-post-http'].map((id) => [id, {
     object: 'zone',
     target: FOREIGN_ZONE_UUID,
-    reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone',
+    // #403, by the owner's decision: an entry with neither zone nor plot is
+    // farm-wide, and any write-capable role may change it without a zone grant
+    // (the role decision is the rule). An entry with a zone and no plot needs
+    // the grant on its zone, which the fixture's foreign zone-only entry tests.
+    reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone; farm-wide ' +
+      'entries (no zone, no plot) need only the write role (#403)',
   }]),
   [
     'journal-custom-vocab-put-http',

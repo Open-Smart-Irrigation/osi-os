@@ -707,6 +707,111 @@ test('W2: a plot-less entry is still listed in scoped mode', async () => {
   );
 });
 
+// #403, by the owner's decision: a farm-wide entry (no zone, no plot) may be
+// changed by any write-capable role without a zone grant. An entry that belongs
+// to a zone but to no plot (no API path creates one) needs the grant on that
+// zone, as a plot entry needs the grant on its plot.
+test('#403: a zone-only entry needs the zone grant, a farm-wide entry the write role', async () => {
+  const db = new TestDb('scoped-entry-zone-only');
+  seedIdentity(db);
+  const zoneOnlyFinal = '22150000-0000-4000-8000-000000000001';
+  const zoneOnlyDraft = '22150000-0000-4000-8000-000000000002';
+  const zoneIdOnly = '22150000-0000-4000-8000-000000000003';
+  const farmWide = '22150000-0000-4000-8000-000000000004';
+  const farmWideDraft = '22150000-0000-4000-8000-000000000005';
+  // Entries of the other account; the zone-only ones are moved into the other
+  // account's zone (id 2), on which the caller holds no grant.
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  const create = (uuid, time, overrides) => journal.saveEntry(
+    db,
+    entryInput(uuid, null, time, Object.assign({ season_crop: 'barley' }, overrides || {})),
+    other,
+    { mode: 'create' }
+  );
+  await create(zoneOnlyFinal, '2026-07-13T08:00:00');
+  await create(zoneOnlyDraft, '2026-07-13T09:00:00', { status: 'draft' });
+  await create(zoneIdOnly, '2026-07-13T10:00:00');
+  await create(farmWide, '2026-07-13T11:00:00');
+  await create(farmWideDraft, '2026-07-13T12:00:00', { status: 'draft' });
+  db.prepare('UPDATE journal_entries SET zone_id=2, zone_uuid=? WHERE entry_uuid IN (?,?)')
+    .run(FOREIGN_ZONE_UUID, zoneOnlyFinal, zoneOnlyDraft);
+  db.prepare('UPDATE journal_entries SET zone_id=2, zone_uuid=NULL WHERE entry_uuid=?').run(zoneIdOnly);
+
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  const state = () => db.prepare(
+    'SELECT entry_uuid,status,sync_version,note FROM journal_entries ORDER BY entry_uuid'
+  ).all();
+  const outbox = () => db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  const refused = (error) => error && error.statusCode === 404;
+
+  const before = state();
+  const queued = outbox();
+  await assert.rejects(
+    journal.voidEntry(db, zoneOnlyFinal, { base_sync_version: 1, reason: 'No grant' }, caller),
+    refused
+  );
+  await assert.rejects(
+    journal.saveEntry(
+      db,
+      entryInput(zoneOnlyFinal, null, '2026-07-13T08:00:00', {
+        base_sync_version: 1,
+        season_crop: 'barley',
+        note: 'Changed without a grant',
+      }),
+      caller,
+      { mode: 'update', entryUuid: zoneOnlyFinal }
+    ),
+    refused
+  );
+  await assert.rejects(journal.discardEntry(db, zoneOnlyDraft, {}, caller), refused);
+  await assert.rejects(
+    journal.voidEntry(db, zoneIdOnly, { base_sync_version: 1, reason: 'No grant' }, caller),
+    refused
+  );
+  assert.deepEqual(state(), before, 'a refused change writes nothing');
+  assert.equal(outbox(), queued, 'and queues nothing');
+
+  // Farm-wide: the write role is the rule, no grant needed.
+  const voided = await journal.voidEntry(
+    db, farmWide, { base_sync_version: 1, reason: 'Farm-wide correction' }, caller
+  );
+  assert.equal(voided.entry_uuid, farmWide);
+  await journal.discardEntry(db, farmWideDraft, {}, caller);
+
+  // With the grant on the zone, the zone-only entry may be changed.
+  db.prepare(
+    'INSERT INTO user_zone_assignments (assignment_uuid,user_uuid,zone_uuid,created_at) VALUES (?,?,?,?)'
+  ).run('22150000-0000-4000-8000-000000000006', OWNER_UUID, FOREIGN_ZONE_UUID, '2026-07-13T00:00:00.000Z');
+  scopeHelper.invalidateScope(OWNER_UUID);
+  const granted = await journal.voidEntry(
+    db, zoneOnlyFinal, { base_sync_version: 1, reason: 'Granted correction' }, caller
+  );
+  assert.equal(granted.entry_uuid, zoneOnlyFinal);
+  await journal.discardEntry(db, zoneOnlyDraft, {}, caller);
+  const voidedRow = db.prepare(
+    'SELECT status,owner_user_uuid,voided_by_principal_uuid FROM journal_entries WHERE entry_uuid=?'
+  ).get(zoneOnlyFinal);
+  assert.deepEqual(
+    { ...voidedRow },
+    { status: 'voided', owner_user_uuid: OTHER_OWNER_UUID, voided_by_principal_uuid: OWNER_UUID },
+    'the entry keeps its owner'
+  );
+
+  // A viewer is refused on both kinds, as before.
+  db.prepare("UPDATE users SET role='viewer' WHERE id=1").run();
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.voidEntry(db, zoneIdOnly, { base_sync_version: 1, reason: 'Viewer' }, caller),
+    (error) => error && error.statusCode === 403
+  );
+});
+
 test('scoped catalog GET rewrites a grantee to the plot owner, while no context stays owner-only', async () => {
   const db = new TestDb('scoped-catalog-owner');
   seedIdentity(db);
