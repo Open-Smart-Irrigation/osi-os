@@ -245,3 +245,94 @@ test('a systemic rejection keeps the table backed off and sets no key aside', as
   assert.ok(Date.parse(cur.next_attempt_at) > sentAt, 'the table is backed off');
   assert.equal(cur.last_error, 'permanent: unsupported_protocol_version');
 });
+
+// Field shape of the manifest loop: four segments of one day, 118 rows each,
+// interleaved ids 537..1476, all queued as repair keys; the cloud's row index
+// lacks the rows with ids 827..996, which sort last in string order. Before the
+// manifest kept pending keys in place, every cycle re-dated all 472 keys and the
+// same first 100 were re-sent for ever.
+const SEGMENT_NODES = ['A840410000000021', 'A840410000000022', 'A840410000000023', 'A840410000000024'];
+
+function manifestFixture(db, h) {
+  const cursor = seed(db);
+  const device = db.prepare("INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at,gateway_device_eui) VALUES(?,?,'DRAGINO_LSN50',1,'2026-08-01T00:00:00.000Z','2026-08-01T00:00:00.000Z',?)");
+  SEGMENT_NODES.forEach((eui, i) => device.run(eui, 'Node ' + i, GATEWAY));
+  const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1,dendro_valid) VALUES(?,?,?,?,1)');
+  const ids = [];
+  for (let j = 0; j < 118; j += 1) {
+    for (let k = 0; k < 4; k += 1) {
+      const id = 537 + k + 8 * j;
+      insert.run(id, SEGMENT_NODES[3 - k], new Date(Date.UTC(2026, 7, 13, 0, 0) + j * 600000 + k * 1000).toISOString(), 20 + (j % 9));
+      ids.push(id);
+    }
+  }
+  // dead keys of a deleted device in front, as on the gateway
+  const deadIds = [];
+  for (let j = 0; j < 30; j += 1) deadIds.push(541 + 8 * j);
+  cursor.run('device_data', '1476', null, '1476', null);
+  for (const table of ['chameleon_readings', 'dendrometer_readings', 'irrigation_events']) cursor.run(table, '0', null, '0', null);
+  for (const table of ['dendrometer_daily', 'zone_daily_environment', 'zone_daily_recommendations', 'valve_actuation_expectations']) cursor.run(table, null, '', null, '');
+  link(db);
+  const helper = h.helper;
+  const segmentRows = new Map();
+  for (const row of db.prepare('SELECT * FROM device_data ORDER BY id').all()) {
+    const segmentKey = helper.segmentKey('device_data', row);
+    if (!segmentRows.has(segmentKey)) segmentRows.set(segmentKey, []);
+    segmentRows.get(segmentKey).push(row);
+    const prepared = helper.prepareRow('device_data', GATEWAY, row);
+    if (row.id < 827 || row.id > 996) h.cloud.seed('device_data', prepared.historyKey, segmentKey, prepared.payloadHash);
+  }
+  const segmentInsert = db.prepare("INSERT INTO sync_history_segments(peer_node,table_name,segment_key,hash_version,canonical_row_count,syncable_row_count,syncable_payload_hash,quarantined_count,tombstone_count,covered_max_id,computed_at) VALUES('cloud','device_data',?,1,?,?,?,0,0,1476,'2026-08-14T00:00:00.000Z')");
+  for (const [segmentKey, rows] of segmentRows) {
+    const manifest = helper.buildSegment('device_data', GATEWAY, segmentKey, rows).manifest;
+    segmentInsert.run(segmentKey, manifest.canonicalRowCount, manifest.syncableRowCount, manifest.syncablePayloadHash);
+  }
+  deadIds.forEach((id) => dirty(db, 'device_data', key(id + 100000), 'repair', T_DEAD, 9000));
+  ids.forEach((id) => dirty(db, 'device_data', key(id), 'repair', '2026-08-14T23:45:00.000Z'));
+  return { ids, deadIds, missing: ids.filter((id) => id >= 827 && id <= 996) };
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: with the 5-minute manifest, a segment the cloud lacks rows of converges and the tail runs again`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    const h = createHarness({ db, profile, env: { DEVICE_EUI: GATEWAY }, manifestEvery: 10, start: '2026-10-06T08:00:00.000Z' });
+    const shape = manifestFixture(db, h);
+    assert.equal(shape.missing.length, 86);
+    let drainedAtTick = null;
+    for (let i = 0; i < 6 * 120; i += 1) {
+      await h.tick();
+      const pending = db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='device_data' AND status='pending'").get().n;
+      if (pending === 0 && drainedAtTick === null) drainedAtTick = i;
+    }
+    assert.notEqual(drainedAtTick, null, 'device_data queue drained; still pending: ' + db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='device_data' AND status='pending'").get().n);
+    assert.deepEqual(statusCounts(db, 'device_data'), { done: shape.ids.length, dropped: shape.deadIds.length });
+    for (const id of shape.missing) assert.ok(h.cloud.index.has('device_data\u0000' + key(id)), `row ${id} reached the cloud`);
+    assert.deepEqual(h.cloud.manifests.at(-1).filter((s) => s.startsWith('device_data|')), [], 'the last manifest requests no device_data repair');
+    // The tail runs again: a new row reaches the cloud through the tail.
+    db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1,dendro_valid) VALUES(2001,?,?,22,1)').run(SEGMENT_NODES[0], '2026-10-06T12:00:00.000Z');
+    const before = h.cloud.batches.length;
+    for (let i = 0; i < 16; i += 1) await h.tick();
+    const tail = h.cloud.batches.slice(before).filter((b) => b.tableName === 'device_data' && b.phase === 'tail');
+    assert.ok(tail.some((b) => b.keys.includes(key(2001))), 'the new row went out in a tail batch');
+    assert.deepEqual(h.cloud.batches.filter((b) => b.rejected), []);
+  });
+}
+
+test('the manifest keeps a pending key in place and does not revive a rejected key', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  const h = createHarness({ db, env: { DEVICE_EUI: GATEWAY }, start: '2026-10-06T08:00:00.000Z' });
+  const shape = manifestFixture(db, h);
+  const [first, second] = shape.ids;
+  db.prepare("UPDATE sync_history_dirty_keys SET attempts=2, next_attempt_at='2026-10-06T08:04:00.000Z', last_error='permanent: hash_mismatch' WHERE row_key=?").run(key(first));
+  db.prepare("UPDATE sync_history_dirty_keys SET status='rejected', attempts=3, last_error='permanent: hash_mismatch' WHERE row_key=?").run(key(second));
+  const third = shape.ids[2];
+  db.prepare("UPDATE sync_history_dirty_keys SET status='done' WHERE row_key=?").run(key(third));
+  assert.ok(await h.manifest());
+  const row = (id) => db.prepare('SELECT status, changed_at, attempts, next_attempt_at, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
+  assert.deepEqual({ ...row(first) }, { status: 'pending', changed_at: '2026-08-14T23:45:00.000Z', attempts: 2, next_attempt_at: '2026-10-06T08:04:00.000Z', last_error: null });
+  assert.equal(row(second).status, 'rejected');
+  assert.equal(row(second).attempts, 3);
+  assert.deepEqual([row(third).status, row(third).changed_at], ['pending', '2026-10-06T08:00:00.000Z'], 'a done key in a mismatching segment is queued again, dated now');
+});

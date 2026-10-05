@@ -562,8 +562,8 @@
       "reason": "Wave 3 durable-history-batch promotion (AgroLink 7e30e6a4, renumbered migration 0051, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3431 -> HEAD 3504 = +73. Manifest segments now report tombstone_count."
     },
     "sync-history-manifest-mark": {
-      "delta": 2351,
-      "reason": "Wave 3 durable-history-batch promotion (AgroLink 7e30e6a4, renumbered migration 0051, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 685 -> HEAD 3036 = +2351. Manifest ACK handling gains tombstone-aware quarantine bookkeeping to match the promoted durable-batch cursor state."
+      "delta": 354,
+      "reason": "History correction queue: the manifest repair upsert keeps changed_at, attempts and next_attempt_at of a key that is already pending, re-dates only done/dropped keys, and leaves a rejected key terminal (WHERE status <> 'rejected'), instead of re-dating every row of a mismatching segment every 300 s, which kept the same first ~100 keys in front for ever and starved the tail. Supersedes the prior Wave 3 durable-history-batch entry (+2351), which origin/main already measures. Measured with verify-flows-size-ratchet measure() over both byte-identical profiles: origin/main 3780 -> HEAD 4134 = +354."
     },
     "4f4a765f36cee6f3": {
       "delta": 5890,

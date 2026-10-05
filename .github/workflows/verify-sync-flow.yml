@@ -103,7 +103,8 @@ jobs:
       # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
       # the cloud's ordering, hash, row-index and manifest rules): batches go out
       # in ascending key order, a key whose row is gone is dropped, and a
-      # row-level permanent rejection sets one key aside.
+      # row-level permanent rejection sets one key aside, and the 5-minute
+      # manifest keeps a queued key in place so a mismatching segment converges.
       - name: History correction queue drain
         run: node --test scripts/test-sync-history-queue-drain.js
       # The staged, digest-pinned command-ledger install in deploy.sh (activation
