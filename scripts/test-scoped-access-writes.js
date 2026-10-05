@@ -3281,9 +3281,16 @@ test('#404: a scoped caller never changes a station assignment outside its zones
     const events = stationZoneEvents(db);
     assert.deepEqual(events, [['z-1', 'z-2'], ['z-2']], 'no event tells the cloud zone 2 lost the station');
 
-    for (const named of [[1, 2], [2]]) {
+    // A zone outside the caller's scope that the station is not assigned to
+    // may not be added: 404, nothing changes, nothing is queued.
+    db.exec(`
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
+      VALUES (4, 'Z Four', 1, 'z-4', 'UTC', 'local');
+    `);
+    for (const named of [[4], [1, 4], [2, 4]]) {
       const refused = await setStationZones(db, 2, 'res1', named);
-      assert.equal(refused.result[1].statusCode, 404, `naming zone 2 is refused: ${named}`);
+      assert.equal(refused.result[1].statusCode, 404, `adding zone 4 is refused: ${named}`);
+      assert.deepEqual(refused.result[1].payload, { error: 'Zone not found' });
     }
     assert.deepEqual(stationZones(db), [2]);
     assert.equal(stationZoneEvents(db).length, events.length, 'a refused request queues nothing');
@@ -3297,6 +3304,48 @@ test('#404: a scoped caller never changes a station assignment outside its zones
     const noZones = await setStationZones(db, 2, 'res1', []);
     assert.equal(noZones.result[1].statusCode, 200);
     assert.deepEqual(stationZones(db), [1, 2]);
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: the full current list from the zone picker saves for a partial-scope caller', async () => {
+  // The GUI picker starts from every zone the station has (device.zone_ids)
+  // and sends the whole set back. A zone outside the caller's scope that is
+  // already assigned may be named and is left as it is.
+  const db = seedSharedStation();
+  try {
+    db.exec(`
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
+      VALUES (3, 'Z Three', 2, 'z-3', 'UTC', 'local');
+    `);
+    for (const [request, expected] of [
+      [[1, 2], [1, 2]],
+      [[1, 2, 3], [1, 2, 3]],
+      [[2, 3], [2, 3]],
+      [[2], [2]],
+    ]) {
+      const response = await setStationZones(db, 2, 'res1', request);
+      assert.equal(response.result[1].statusCode, 200, `request ${request}`);
+      assert.deepEqual(response.result[1].payload.zone_ids, expected);
+      assert.deepEqual(stationZones(db), expected);
+    }
+    assert.ok(
+      stationZoneEvents(db).every((zoneUuids) => zoneUuids.includes('z-2')),
+      'no event drops the out-of-scope assignment'
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('#404: an assignment to a deleted zone is cleared, and naming it does not block a save', async () => {
+  const db = seedSharedStation();
+  try {
+    db.exec("UPDATE irrigation_zones SET deleted_at = '2026-07-01' WHERE id = 2");
+    const response = await setStationZones(db, 2, 'res1', [1, 2]);
+    assert.equal(response.result[1].statusCode, 200);
+    assert.deepEqual(stationZones(db), [1]);
   } finally {
     db.close();
   }
