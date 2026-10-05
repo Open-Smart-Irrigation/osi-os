@@ -25,6 +25,7 @@ function allNullHealth() {
     sync_rejected_recent: null,
     sync_dirty_pending: null,
     sync_dirty_rejected: null,
+    command_ack_dead_lettered: null,
     disk_free_pct: null,
     crash_count: null,
     crash_looping: null,
@@ -349,6 +350,19 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
     health.sync_dirty_rejected = toCount(await queryGet(
       db,
       "SELECT COUNT(*) c FROM sync_history_dirty_keys WHERE status='rejected'"
+    ));
+  } catch (_) {}
+
+  // A command ACK the cloud never accepted and that will not be sent again:
+  // command-ack-mark-delivered and command-ack-build-batch mark such a row
+  // delivered with a 'dead_letter:' reason. The cloud then shows the command
+  // as expired or failed, whatever ran on the edge. Delivered rows are pruned
+  // after their retention, so this is a recent count. Kept out of
+  // health_state: it does not return to zero on its own.
+  try {
+    health.command_ack_dead_lettered = toCount(await queryGet(
+      db,
+      "SELECT COUNT(*) c FROM command_ack_outbox WHERE delivered_at IS NOT NULL AND last_error LIKE 'dead_letter:%'"
     ));
   } catch (_) {}
 

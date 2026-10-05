@@ -17,6 +17,7 @@ const REQUIRED_HEALTH_KEYS = [
   'errors_last_at',
   'errors_total',
   'clock_source',
+  'command_ack_dead_lettered',
   'health_state',
   'rtc_present',
   'schema_sig',
@@ -302,6 +303,7 @@ function assertHealthPayload(profile, buildNode) {
     health_state: 'healthy',
     rtc_present: true,
     clock_source: 'rtc',
+    command_ack_dead_lettered: 1,
     ignored_extra_key: 'must not leak',
   };
 
@@ -336,6 +338,7 @@ function assertHealthPayload(profile, buildNode) {
       health_state: null,
       rtc_present: null,
       clock_source: null,
+      command_ack_dead_lettered: null,
     });
 
     const stringResult = runBuildHeartbeat(profile, buildNode, 'malformed-health');
@@ -368,6 +371,7 @@ function assertHealthPayload(profile, buildNode) {
       disk_free_pct: Infinity,
       errors_total: { invalid: true },
       errors_last_at: Symbol('invalid-errors-last-at'),
+      command_ack_dead_lettered: NaN,
     });
     assertAllNullHealth(profile, 'fresh invalid values', invalidValuesResult.payload && invalidValuesResult.payload.health);
 
