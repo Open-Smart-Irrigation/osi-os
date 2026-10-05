@@ -11,6 +11,7 @@ const {
   PHASE_C_PENDING,
   PROFILES,
   findFailures,
+  isDenialRecord,
   verifyProfiles,
 } = require('./verify-scoped-access');
 
@@ -618,4 +619,145 @@ if (!scope.canMutate(actor.role)) throw Object.assign(new Error('insufficient ro
     await failuresFor(flows, ['probe-masked-first-http']),
     /probe-masked-first-http.*goes on after its scope decision said no/
   );
+});
+
+// ---------------------------------------------------------------------------
+// Outcome rule, reachable writes and admin routes (#389 fix round 2).
+
+const WRITE_TARGET_FROM_BODY = `
+return (async () => {
+  const db = new (osiLib.require('osi-db-helper').value.Database)('/data/db/farming.db');
+  const target = (msg.payload && msg.payload.target) || msg.req.params.deveui;
+  await db.run('UPDATE devices SET name = ? WHERE deveui = ?', ['renamed', target]);
+  msg.statusCode = 200;
+  msg.payload = { ok: true };
+  return msg;
+})();
+`;
+
+test('a write on a device named in the body, after a check on the URL device, fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-body-target-http', { workerFunc: WRITE_TARGET_FROM_BODY });
+  assert.match(
+    await failuresFor(flows, ['probe-body-target-http']),
+    /probe-body-target-http.*changes a row outside the caller's scope.*devices row/
+  );
+});
+
+test('a bulk write across zones fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-bulk-http', {
+    workerFunc: `
+return (async () => {
+  const db = new (osiLib.require('osi-db-helper').value.Database)('/data/db/farming.db');
+  await db.run('UPDATE irrigation_schedules SET enabled = 0');
+  msg.statusCode = 200;
+  msg.payload = { ok: true };
+  return msg;
+})();
+`,
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-bulk-http']),
+    /probe-bulk-http.*changes a row outside the caller's scope.*irrigation_schedules/
+  );
+});
+
+test('a device assignment that may take a device from another zone fails', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-device-assign-router');
+  assert.ok(router.func.includes(' AND irrigation_zone_id IS NULL'));
+  router.func = router.func.replace(' AND irrigation_zone_id IS NULL', '');
+  assert.match(
+    await failuresFor(flows, ['assign-device-http']),
+    /assign-device-http.*changes a row outside the caller's scope \(URL .*devices row/
+  );
+});
+
+test('a weather station zone set that skips the per-zone check fails', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-weather-zone-assign-router');
+  const check = '    await scope.assertFreshZoneAccess(db, actor.user_uuid, zoneUuid, { scopedMode: true });\n';
+  assert.ok(router.func.includes(check));
+  router.func = router.func.replace(check, '');
+  assert.match(
+    await failuresFor(flows, ['s2120-zones-put-http']),
+    /s2120-zones-put-http.*changes a row outside the caller's scope \(body .*weather_station_zones row added/
+  );
+});
+
+const ADMIN_CHECK = /await scope\.assertFreshRole\(\s*db,\s*actor\.user_uuid,\s*'admin',\s*\{ scopedMode: true \}\s*\);/;
+
+test('an admin route without a URL parameter needs an admin decision', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-admin-account-router');
+  assert.match(router.func, ADMIN_CHECK);
+  router.func = router.func.replace(ADMIN_CHECK,
+    "const downgraded = await scope.assertFreshRole(db, actor.user_uuid, actor.role, { scopedMode: true }); " +
+    "if (!scope.canMutate(downgraded.role)) throw Object.assign(new Error('insufficient role'), { statusCode: 403 });");
+  const text = await failuresFor(flows, ['admin-zone-grant-http', 'admin-users-create-http']);
+  assert.match(text, /admin-zone-grant-http.*makes no admin decision before it writes/);
+  assert.match(text, /admin-users-create-http.*makes no admin decision before it writes/);
+});
+
+test('a swallowed admin decision fails once the write is reachable', async () => {
+  const flows = loadFlows();
+  const router = flows.find((node) => node.id === 'scoped-admin-account-router');
+  router.func = router.func.replace(ADMIN_CHECK,
+    "try { await scope.assertFreshRole(db, actor.user_uuid, 'admin', { scopedMode: true }); } catch (ignored) {}");
+  assert.match(
+    await failuresFor(flows, ['admin-users-role-http']),
+    /admin-users-role-http.*goes on after its scope decision said no.*UPDATE users/
+  );
+});
+
+test('a swallowed outbox-recovery admin decision fails', async () => {
+  const flows = loadFlows();
+  const guard = flows.find((node) => node.id === 'sync-outbox-recover-admin-guard');
+  const call = /const scope = await scopeLoad\.value\.authorizeAdminRead\(\{[\s\S]*?\}\);/;
+  assert.match(guard.func, call);
+  guard.func = guard.func.replace(call,
+    'let scope = null; try { scope = await scopeLoad.value.authorizeAdminRead({ Database: osiDb.Database, ' +
+    "authorization, configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'), " +
+    "fs: global.get('fs'), warn: (message) => node.warn(message) }); } catch (ignored) {}");
+  assert.match(
+    await failuresFor(flows, ['sync-outbox-recover-http']),
+    /sync-outbox-recover-http.*goes on after its scope decision said no: sync-outbox-recover-fn: read SELECT event_uuid/
+  );
+});
+
+test('a write route whose write is never reached fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-unreached-http', {
+    workerFunc: "msg.statusCode = 400; msg.payload = { message: 'always invalid' }; return msg;",
+  });
+  assert.match(
+    await failuresFor(flows, ['probe-unreached-http']),
+    /probe-unreached-http.*never reaches its write with every decision allowed/
+  );
+});
+
+test('a decision skipped for a header or an `in` test fails', async () => {
+  const flows = addRoute(loadFlows(), 'probe-skip-header-http', {
+    decision: ROLE_CHECKS + `
+if (!msg.req.headers['x-probe-internal']) {
+  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+}
+`,
+  });
+  addRoute(flows, 'probe-skip-in-http', {
+    decision: ROLE_CHECKS + `
+if (!('force' in msg.payload)) {
+  await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
+}
+`,
+  });
+  const text = await failuresFor(flows, ['probe-skip-header-http', 'probe-skip-in-http']);
+  assert.match(text, /probe-skip-header-http.*skips or ignores its scope decision when the request sets a field/);
+  assert.match(text, /probe-skip-in-http.*skips or ignores its scope decision when the request sets a field/);
+});
+
+test('a denial record admits only the rejection write', () => {
+  const base = { node: 'write-strega-expectation', tables: ['applied_commands'] };
+  assert.equal(isDenialRecord({ ...base, write: false, detail: '[]' }), true);
+  assert.equal(isDenialRecord({ ...base, write: true, detail: '["x","scope_denied"]' }), true);
+  assert.equal(isDenialRecord({ ...base, write: true, detail: '["x","SUCCESS"]' }), false);
+  assert.equal(isDenialRecord({ ...base, tables: ['applied_commands', 'devices'], write: false }), false);
 });

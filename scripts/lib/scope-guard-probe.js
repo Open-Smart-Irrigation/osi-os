@@ -47,8 +47,25 @@ const SEED_SQL_PATH = path.join(ROOT, 'database/seed-blank.sql');
 const PROBE_SECRET = 'scope-guard-probe-secret';
 const PROBE_GATEWAY_EUI = '00000000000000A1';
 const PROBE_DEVEUI = '00000000000000D1';
-const PROBE_ZONE_UUID = 'z-probe';
-const PROBE_PLOT_UUID = '00000000-0000-4000-8000-0000000000b1';
+// Identities are canonical UUIDs because the journal module refuses others.
+const PROBE_ADMIN_UUID = '00000000-0000-4000-8000-00000000a001';
+const PROBE_CALLER_UUID = '00000000-0000-4000-8000-00000000a002';
+const PROBE_DISABLED_UUID = '00000000-0000-4000-8000-00000000a003';
+const PROBE_ZONE_UUID = '00000000-0000-4000-8000-00000000b001';
+const PROBE_PLOT_UUID = '00000000-0000-4000-8000-00000000b101';
+// Objects outside the caller's scope: a second zone owned by the admin, with
+// a device, a valve, a plot, a schedule, a plot group and a journal entry.
+const FOREIGN_ZONE_ID = 2;
+const FOREIGN_ZONE_UUID = '00000000-0000-4000-8000-00000000b002';
+const FOREIGN_DEVEUI = '00000000000000E1';
+const FOREIGN_VALVE_DEVEUI = '00000000000000E2';
+const FOREIGN_PLOT_UUID = '00000000-0000-4000-8000-00000000b102';
+const FOREIGN_GROUP_UUID = '00000000-0000-4000-8000-00000000b201';
+const FOREIGN_ENTRY_UUID = '00000000-0000-4000-8000-00000000b301';
+const FOREIGN_SCHEDULE_ID = 2;
+// A weather station: shared by design (the helper allows every caller on
+// weather-class devices), assigned to both zones.
+const WEATHER_DEVEUI = '00000000000000C1';
 const NODE_TIMEOUT_MS = 3000;
 const MAX_STEPS = 60;
 
@@ -110,27 +127,149 @@ function seedSql() {
   return seedSqlCache;
 }
 
+// The caller (user 2, researcher) owns zone 1 and everything in it; the admin
+// (user 1) owns zone 2 and everything in it. User 3 is disabled.
 function seedProbeDatabase(db) {
   db.exec(seedSql());
+  const t = "'2026-01-01T00:00:00Z'";
   db.exec(`
     INSERT INTO users (id, username, password_hash, created_at, user_uuid, role, sync_version)
     VALUES
-      (1, 'probe-admin', 'x', '2026-01-01', 'u-probe-admin', 'admin', 1),
-      (2, 'probe-user', 'x', '2026-01-01', 'u-probe-user', 'researcher', 1),
-      (3, 'probe-disabled', 'x', '2026-01-01', 'u-probe-disabled', 'researcher', 1);
+      (1, 'probe-admin', 'x', '2026-01-01', '${PROBE_ADMIN_UUID}', 'admin', 1),
+      (2, 'probe-user', 'x', '2026-01-01', '${PROBE_CALLER_UUID}', 'researcher', 1),
+      (3, 'probe-disabled', 'x', '2026-01-01', '${PROBE_DISABLED_UUID}', 'researcher', 1);
     UPDATE users SET disabled_at = '2026-01-02T00:00:00Z' WHERE id = 3;
     INSERT INTO installation_identity (
       singleton_id, installation_uuid, current_gateway_device_eui, created_at, updated_at
     ) VALUES (
       1, '00000000-0000-4000-8000-0000000000c1', '${PROBE_GATEWAY_EUI}', '2026-01-01', '2026-01-01'
     );
-    INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode)
-    VALUES (1, 'Probe zone', 1, '${PROBE_ZONE_UUID}', 'UTC', 'local');
+    INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode, gateway_device_eui)
+    VALUES
+      (1, 'Probe zone', 2, '${PROBE_ZONE_UUID}', 'UTC', 'local', '${PROBE_GATEWAY_EUI}'),
+      (${FOREIGN_ZONE_ID}, 'Foreign zone', 1, '${FOREIGN_ZONE_UUID}', 'UTC', 'local', '${PROBE_GATEWAY_EUI}');
     INSERT INTO journal_plots (plot_uuid, plot_code, name, zone_uuid, gateway_device_eui, owner_user_uuid)
-    VALUES ('${PROBE_PLOT_UUID}', 'PROBE1', 'Probe plot', '${PROBE_ZONE_UUID}', '${PROBE_GATEWAY_EUI}', 'u-probe-admin');
+    VALUES
+      ('${PROBE_PLOT_UUID}', 'PROBE1', 'Probe plot', '${PROBE_ZONE_UUID}', '${PROBE_GATEWAY_EUI}', '${PROBE_CALLER_UUID}'),
+      ('${FOREIGN_PLOT_UUID}', 'FOREIGN1', 'Foreign plot', '${FOREIGN_ZONE_UUID}', '${PROBE_GATEWAY_EUI}', '${PROBE_ADMIN_UUID}');
+    INSERT INTO journal_plot_settings (plot_uuid, layout_code, updated_at, updated_by_principal_uuid)
+    VALUES
+      ('${PROBE_PLOT_UUID}', 'open_field', ${t}, '${PROBE_CALLER_UUID}'),
+      ('${FOREIGN_PLOT_UUID}', 'open_field', ${t}, '${PROBE_ADMIN_UUID}');
     INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
-    VALUES ('${PROBE_DEVEUI}', 'Probe device', 'DRAGINO_LSN50', 1, 1, '2026-01-01', '2026-01-01');
+    VALUES
+      ('${PROBE_DEVEUI}', 'Probe device', 'DRAGINO_LSN50', 2, 1, '2026-01-01', '2026-01-01'),
+      ('${FOREIGN_DEVEUI}', 'Foreign device', 'DRAGINO_LSN50', 1, ${FOREIGN_ZONE_ID}, '2026-01-01', '2026-01-01'),
+      ('${FOREIGN_VALVE_DEVEUI}', 'Foreign valve', 'STREGA_VALVE', 1, ${FOREIGN_ZONE_ID}, '2026-01-01', '2026-01-01'),
+      ('${WEATHER_DEVEUI}', 'Shared weather station', 'SENSECAP_S2120', NULL, NULL, '2026-01-01', '2026-01-01');
+    INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('${WEATHER_DEVEUI}', 1), ('${WEATHER_DEVEUI}', ${FOREIGN_ZONE_ID});
+    INSERT INTO irrigation_schedules (id, irrigation_zone_id, trigger_metric, threshold_kpa, enabled)
+    VALUES (1, 1, 'SWT_1', 30, 1), (${FOREIGN_SCHEDULE_ID}, ${FOREIGN_ZONE_ID}, 'SWT_1', 30, 1);
+    INSERT INTO journal_plot_groups (group_uuid, label, gateway_device_eui, created_by_principal_uuid, owner_user_uuid)
+    VALUES ('${FOREIGN_GROUP_UUID}', 'Foreign group', '${PROBE_GATEWAY_EUI}', '${PROBE_ADMIN_UUID}', '${PROBE_ADMIN_UUID}');
+    INSERT INTO journal_plot_group_members (group_uuid, plot_uuid) VALUES ('${FOREIGN_GROUP_UUID}', '${FOREIGN_PLOT_UUID}');
+    INSERT INTO journal_entries (entry_uuid, owner_user_uuid, user_id, author_principal_uuid,
+      plot_uuid, zone_id, zone_uuid, activity_code, template_code, template_version, layout_code,
+      layout_version, catalog_version, occurred_start, occurred_timezone, occurred_utc_offset_minutes,
+      recorded_at, origin, status, sync_version, gateway_device_eui, created_at, updated_at)
+    VALUES ('${FOREIGN_ENTRY_UUID}', '${PROBE_ADMIN_UUID}', 1, '${PROBE_ADMIN_UUID}', NULL, ${FOREIGN_ZONE_ID},
+      '${FOREIGN_ZONE_UUID}', (SELECT code FROM journal_vocab ORDER BY code LIMIT 1), 'probe', 1, 'probe', 1, 1,
+      ${t}, 'UTC', 0, ${t}, 'edge-ui', 'final', 1, '${PROBE_GATEWAY_EUI}', ${t}, ${t});
   `);
+}
+
+// Values that mark a row as belonging to an object outside the caller's scope.
+// A row is foreign when an identifier column (or an identifier key inside a
+// *_json column) holds a foreign id, when a zone-id column holds the foreign
+// zone, when an owner column holds the admin, or when it is the foreign
+// schedule, zone or admin account itself. Free-text columns are not read: a
+// caller may write any text into its own rows.
+const FOREIGN_IDS = [
+  FOREIGN_ZONE_UUID, FOREIGN_DEVEUI, FOREIGN_VALVE_DEVEUI, FOREIGN_PLOT_UUID,
+  FOREIGN_GROUP_UUID, FOREIGN_ENTRY_UUID, PROBE_ADMIN_UUID,
+];
+const ID_NAME = /(?:uuid|eui|deveui|_id|_key)$|^(?:id|key)$|(?:Uuid|Eui|Id|Key)$/;
+const ZONE_ID_COLUMN = /(?:^|_)zone_id$|zoneId$/;
+const OWNER_ID_COLUMN = /^(?:user_id|owner_user_id|userId|ownerUserId)$/;
+
+function markValue(name, value, marks) {
+  if (typeof value === 'string') {
+    if (!ID_NAME.test(name)) return;
+    for (const id of FOREIGN_IDS) {
+      if (value.toUpperCase() === id.toUpperCase() || (/key$/i.test(name) && value.includes(id))) {
+        marks.push(`${name} = ${id}`);
+      }
+    }
+  } else if (typeof value === 'number' || typeof value === 'bigint') {
+    const number = Number(value);
+    if (ZONE_ID_COLUMN.test(name) && number === FOREIGN_ZONE_ID) marks.push(`${name} = ${number}`);
+    if (OWNER_ID_COLUMN.test(name) && number === 1) marks.push(`${name} = 1 (the admin)`);
+  }
+}
+
+function markJson(value, marks, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 6) return;
+  for (const [key, inner] of Object.entries(value)) {
+    if (inner && typeof inner === 'object') markJson(inner, marks, depth + 1);
+    else markValue(key, inner, marks);
+  }
+}
+
+// An effect (a downlink, an MQTT message, a command) aimed at a foreign object:
+// its arguments name a foreign device, zone, plot or account.
+function foreignEffect(detail) {
+  const text = String(detail || '').toUpperCase();
+  return FOREIGN_IDS.find((id) => text.includes(id.toUpperCase())) || null;
+}
+
+function foreignMarkers(table, row) {
+  const marks = [];
+  for (const [column, value] of Object.entries(row)) {
+    if (/_json$/.test(column) && typeof value === 'string') {
+      try { markJson(JSON.parse(value), marks); } catch (_) { /* not JSON */ }
+    } else {
+      markValue(column, value, marks);
+    }
+  }
+  if (table === 'irrigation_schedules' && Number(row.id) === FOREIGN_SCHEDULE_ID) marks.push('the foreign schedule');
+  if (table === 'irrigation_zones' && Number(row.id) === FOREIGN_ZONE_ID) marks.push('the foreign zone');
+  if (table === 'users' && Number(row.id) === 1) marks.push('the admin account');
+  return marks;
+}
+
+// Rows of every table, keyed by their JSON form (with a count), so the
+// difference before/after a run lists inserted and deleted row versions; an
+// update shows as one of each.
+function snapshotDatabase(db) {
+  const tables = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+  ).all().map((row) => row.name);
+  const snapshot = new Map();
+  for (const table of tables) {
+    const rows = new Map();
+    for (const row of db.prepare(`SELECT * FROM "${table}"`).all()) {
+      const key = JSON.stringify(row, (_k, v) => (typeof v === 'bigint' ? String(v) : v));
+      rows.set(key, (rows.get(key) || 0) + 1);
+    }
+    snapshot.set(table, rows);
+  }
+  return snapshot;
+}
+
+function diffSnapshots(before, after) {
+  const changes = [];
+  const tables = new Set([...before.keys(), ...after.keys()]);
+  for (const table of tables) {
+    const old = before.get(table) || new Map();
+    const next = after.get(table) || new Map();
+    for (const [key, count] of old) {
+      for (let i = 0; i < count - (next.get(key) || 0); i += 1) changes.push({ table, op: 'removed', row: JSON.parse(key) });
+    }
+    for (const [key, count] of next) {
+      for (let i = 0; i < count - (old.get(key) || 0); i += 1) changes.push({ table, op: 'added', row: JSON.parse(key) });
+    }
+  }
+  return changes;
 }
 
 // Building the database from seed-blank.sql takes ~30 ms; a probe run needs a
@@ -239,18 +378,21 @@ function bindParams(params) {
 }
 
 function makeRecordingDatabaseModule(sqlite, recorder) {
-  function recordSql(sql) {
+  function recordSql(sql, params) {
     const verdict = classifySql(sql);
+    let detail = '';
+    try { detail = JSON.stringify(params === undefined ? [] : params).slice(0, 2000); } catch (_) { detail = ''; }
     recorder.events.push({
       kind: 'sql',
       sql: shortSql(sql),
       access: verdict.access,
       sqlKind: verdict.kind,
       tables: verdict.tables,
+      detail,
     });
   }
   function execute(method, sql, params) {
-    recordSql(sql);
+    recordSql(sql, params);
     const statement = sqlite.prepare(String(sql));
     const bound = bindParams(params);
     if (method === 'run') {
@@ -456,7 +598,17 @@ function makeEffectStub(label, recorder, kind = 'effect') {
       return makeEffectStub(`${label}.${String(prop)}`, recorder, kind);
     },
     apply(_t, _this, args) {
-      recorder.events.push({ kind, what: `${label}(${args.length && typeof args[0] !== 'function' ? JSON.stringify(args[0]).slice(0, 60) : ''})` });
+      let argsText = '';
+      try {
+        argsText = JSON.stringify(args.filter((arg) => typeof arg !== 'function')) || '';
+      } catch (_) {
+        argsText = '[unserialisable arguments]';
+      }
+      recorder.events.push({
+        kind,
+        what: `${label}(${argsText.slice(1, 61)})`,
+        detail: argsText.slice(0, 2000),
+      });
       const last = args.length ? args[args.length - 1] : undefined;
       if (typeof last === 'function') {
         setImmediate(() => {
@@ -564,6 +716,9 @@ const PARAM_DEFAULTS = {
 };
 
 const ACTORS = {
+  // The admin, for admin-only routes whose own inline check needs that role
+  // before the write can be reached (used with every decision allowed only).
+  admin: { userId: 1, username: 'probe-admin' },
   // An enabled researcher with no grants: what a scoped user who reaches for
   // something outside their scope looks like.
   researcher: { userId: 2, username: 'probe-user' },
@@ -598,6 +753,12 @@ function truthyRecord(base, value) {
       if (typeof prop !== 'string' || prop in target || TRUTHY_PASSTHROUGH.has(prop)) return target[prop];
       return value;
     },
+    // `'field' in body` reads as present too. Object.keys, spread and JSON
+    // still see only the fields actually set.
+    has(target, prop) {
+      if (typeof prop !== 'string' || TRUTHY_PASSTHROUGH.has(prop)) return prop in target;
+      return true;
+    },
   });
 }
 
@@ -616,10 +777,21 @@ function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWr
     ? '?' + new URLSearchParams(query).toString()
     : '';
   let payload = Array.isArray(fixture.body) ? JSON.parse(JSON.stringify(fixture.body)) : { ...body };
+  let headers = {
+    authorization: makeAuthorization(actor.userId, actor.username),
+    'content-type': 'application/json',
+    host: 'probe.local',
+  };
   if (variant === 'truthy') {
     query = truthyRecord(query, '1');
     if (!Array.isArray(body)) body = truthyRecord(body, true);
     if (!Array.isArray(payload)) payload = truthyRecord(payload, true);
+    headers = truthyRecord(headers, '1');
+  } else if (variant && Object.prototype.hasOwnProperty.call(variant, 'fill')) {
+    // Every unset query or body field names one foreign object.
+    query = truthyRecord(query, String(variant.fill));
+    if (!Array.isArray(body)) body = truthyRecord(body, variant.fill);
+    if (!Array.isArray(payload)) payload = truthyRecord(payload, variant.fill);
   }
   return {
     _msgid: 'scope-guard-probe',
@@ -633,11 +805,7 @@ function buildRequestMsg(entry, fixture = {}, actorName = 'researcher', streamWr
       params,
       query,
       body,
-      headers: {
-        authorization: makeAuthorization(actor.userId, actor.username),
-        'content-type': 'application/json',
-        host: 'probe.local',
-      },
+      headers,
       get(name) { return this.headers[String(name).toLowerCase()]; },
       ip: '127.0.0.1',
     },
@@ -658,6 +826,21 @@ function makeEnv(extra) {
     DEVICE_EUI: PROBE_GATEWAY_EUI,
     DEVICE_EUI_SOURCE: 'probe',
     DEVICE_EUI_CONFIDENCE: 'authoritative',
+    // ChirpStack is a recording stand-in; configured names let the handlers
+    // reach the downlink they queue there.
+    CHIRPSTACK_APP_SENSORS: 'probe-app',
+    CHIRPSTACK_APP_ACTUATORS: 'probe-app',
+    CHIRPSTACK_APP_FIELD_TESTER: 'probe-app',
+    CHIRPSTACK_PROFILE_KIWI: 'probe-profile',
+    CHIRPSTACK_PROFILE_STREGA: 'probe-profile',
+    CHIRPSTACK_PROFILE_STREGA_GEN2: 'probe-profile',
+    CHIRPSTACK_PROFILE_LSN50: 'probe-profile',
+    CHIRPSTACK_PROFILE_CLOVER: 'probe-profile',
+    CHIRPSTACK_PROFILE_S2120: 'probe-profile',
+    CHIRPSTACK_PROFILE_LORAIN: 'probe-profile',
+    CHIRPSTACK_PROFILE_UC512: 'probe-profile',
+    CHIRPSTACK_PROFILE_SDI12: 'probe-profile',
+    CHIRPSTACK_PROFILE_RAK10701: 'probe-profile',
     ...extra,
   };
   return { get: (key) => (Object.prototype.hasOwnProperty.call(values, key) ? values[key] : '') };
@@ -793,10 +976,11 @@ function classifyAccess(event, state) {
   }
   const what = describeEvent(event);
   const tables = event.tables || [];
-  if (state.denied) return { phase: 'after', write, what, tables };
+  const detail = event.detail;
+  if (state.denied) return { phase: 'after', write, what, tables, detail };
   if (resolution) return null;
-  if (!state.decided) return { phase: 'before', write, what, tables };
-  return write ? { phase: 'between', write, what, tables } : null;
+  if (!state.decided) return { phase: 'before', write, what, tables, detail };
+  return write ? { phase: 'between', write, what, tables, detail } : null;
 }
 
 function describeEvent(event) {
@@ -818,16 +1002,25 @@ function describeEvent(event) {
 // ({ params, query, body, env, flow, setupSql, radioStore }), actor
 // ('researcher' | 'disabled'), denyAt (1 = deny every decision, k = allow the
 // first k-1, Infinity = allow all), denyOnly (deny decision k alone),
-// decisions ('real' for investigations),
-// variant ('truthy': unknown query and body fields read as set).
+// decisions ('real': the real helper decides against the probe database),
+// variant ('truthy': unknown query, body and header fields read as set;
+// { fill: value }: unknown query and body fields read as that value),
+// params / body (override the fixture's), snapshot (record trace.changes:
+// every row version added or removed in the probe database).
 async function probeEntry(flows, entry, options = {}) {
   const modulesRoot = options.modulesRoot;
   const byId = options.byId || new Map(flows.map((n) => [n.id, n]));
   const terminalLinkIns = options.terminalLinkIns || new Set();
-  const fixture = options.fixture || {};
+  const baseFixture = options.fixture || {};
+  const fixture = {
+    ...baseFixture,
+    params: { ...(baseFixture.params || {}), ...(options.params || {}) },
+    ...(options.body !== undefined ? { body: options.body } : {}),
+  };
   const probeDb = createProbeDatabase();
   const sqlite = probeDb.db;
   if (fixture.setupSql) sqlite.exec(fixture.setupSql);
+  const before = options.snapshot ? snapshotDatabase(sqlite) : null;
   // Decisions are numbered in the order the chain makes them. denyOnly = k
   // denies decision k and allows every other one; without it, denyAt = k
   // allows decisions 1..k-1 and denies the rest (default 1: deny all;
@@ -844,6 +1037,13 @@ async function probeEntry(flows, entry, options = {}) {
   };
   const registry = readOsiLibRegistry(modulesRoot);
   const realScope = loadRealModule(modulesRoot, registry.scope || 'osi-scope-helper');
+  // Real decisions read the scope helper's own flag and cache: scoped mode on,
+  // cache empty, for this probe only.
+  const savedScopedEnv = process.env.OSI_SCOPED_ACCESS;
+  if (options.decisions === 'real') {
+    process.env.OSI_SCOPED_ACCESS = '1';
+    if (typeof realScope._resetForTests === 'function') realScope._resetForTests();
+  }
   const unclassified = Object.keys(realScope).filter((name) =>
     typeof realScope[name] === 'function' && !DENIED_DECISIONS[name] && !HELPER_NON_DECISIONS.has(name));
   const contexts = new Map();
@@ -891,7 +1091,7 @@ async function probeEntry(flows, entry, options = {}) {
       'deciding or not; classify it in scripts/lib/scope-guard-probe.js'
     );
   }
-  const actorName = options.actor || 'researcher';
+  const actorName = options.actor || fixture.actor || 'researcher';
   const streamWrites = (chunk) => {
     trace.streamed = true;
     if (ctx.activeRecorder) ctx.activeRecorder.events.push({ kind: 'stream', what: `streams to the caller: ${chunk}` });
@@ -979,6 +1179,37 @@ async function probeEntry(flows, entry, options = {}) {
         case 'debug':
         case 'comment':
           break;
+        case 'switch': {
+          // Node-RED switch on a msg property, with the rule types the flows use.
+          if (node.propertyType && node.propertyType !== 'msg') {
+            trace.unanalysable.push(`switch ${node.id} reads a ${node.propertyType} property`);
+            break;
+          }
+          const value = String(node.property || '').split('.').reduce(
+            (current, key) => (current === null || current === undefined ? undefined : current[key]), item.msg);
+          let matched = false;
+          let unknown = false;
+          (node.rules || []).forEach((rule, port) => {
+            if (matched && node.checkall !== 'true') return;
+            let hit;
+            switch (rule.t) {
+              case 'null': hit = value === null || value === undefined; break;
+              case 'nnull': hit = value !== null && value !== undefined; break;
+              case 'true': hit = value === true; break;
+              case 'false': hit = value === false; break;
+              case 'eq': hit = String(value) === String(rule.v); break;
+              case 'neq': hit = String(value) !== String(rule.v); break;
+              case 'else': hit = !matched; break;
+              default: unknown = true; hit = false;
+            }
+            if (hit) {
+              matched = true;
+              forward(port, item.msg, passOn);
+            }
+          });
+          if (unknown) trace.unanalysable.push(`switch ${node.id} uses a rule type the probe does not simulate`);
+          break;
+        }
         case 'link out':
           if (node.mode && node.mode !== 'link') {
             trace.unanalysable.push(`link out ${node.id} in mode ${node.mode}`);
@@ -1022,14 +1253,25 @@ async function probeEntry(flows, entry, options = {}) {
         case 'tcp out':
         case 'udp out':
         case 'websocket out':
-          noteAccess(node.id, { kind: 'effect', what: `${node.type} node` }, passOn);
+          let detail = '';
+          try {
+            detail = JSON.stringify({ topic: item.msg && item.msg.topic, payload: item.msg && item.msg.payload }).slice(0, 2000);
+          } catch (_) {
+            detail = '';
+          }
+          noteAccess(node.id, { kind: 'effect', what: `${node.type} node`, detail }, passOn);
           break;
         default:
           trace.unanalysable.push(`reaches a ${node.type} node (${node.id}) the probe cannot simulate`);
       }
     }
   } finally {
+    if (before) trace.changes = diffSnapshots(before, snapshotDatabase(sqlite));
     probeDb.dispose();
+    if (options.decisions === 'real') {
+      if (savedScopedEnv === undefined) delete process.env.OSI_SCOPED_ACCESS;
+      else process.env.OSI_SCOPED_ACCESS = savedScopedEnv;
+    }
   }
   return trace;
 }
@@ -1043,6 +1285,20 @@ module.exports = {
   PROBE_GATEWAY_EUI,
   PROBE_PLOT_UUID,
   PROBE_ZONE_UUID,
+  PROBE_ADMIN_UUID,
+  PROBE_CALLER_UUID,
+  PROBE_DISABLED_UUID,
+  FOREIGN_DEVEUI,
+  FOREIGN_ENTRY_UUID,
+  FOREIGN_GROUP_UUID,
+  FOREIGN_PLOT_UUID,
+  FOREIGN_SCHEDULE_ID,
+  FOREIGN_VALVE_DEVEUI,
+  FOREIGN_ZONE_ID,
+  FOREIGN_ZONE_UUID,
+  WEATHER_DEVEUI,
+  foreignEffect,
+  foreignMarkers,
   SCOPE_RESOLUTION_TABLES,
   buildRequestMsg,
   classifySql,
