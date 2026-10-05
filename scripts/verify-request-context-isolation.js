@@ -3,13 +3,13 @@
 
 // verify-request-context-isolation (osi-os #377).
 //
-// The valve and zone-schedule mutation chains carry each request's identity, target
-// and payload on msg (msg.osi.request). Shared flow/global context is one store for
+// The valve, zone-schedule and zone-delete mutation chains carry each request's
+// identity, target and payload on msg (msg.osi.request). Shared flow/global context is one store for
 // every concurrent request, so a per-request value kept there is read by whichever
 // request runs next. This guard fails when:
 //   1. any function node in a maintained flows.json profile reads or writes a
-//      per-request key (valve_cmd_*, sched_*, lastCommand, lastCommandId) in flow,
-//      global or node context;
+//      per-request key (valve_cmd_*, sched_*, delete_zone_*, lastCommand,
+//      lastCommandId) in flow, global or node context;
 //   2. a node of the converted chains touches flow/global/node context beyond its
 //      explicit allowlist (process configuration such as global.get('fs') only), or
 //      with a key that is not a string literal;
@@ -28,7 +28,7 @@ const DEFAULT_PROFILES = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ];
 
-const REQUEST_SCRATCH_KEY = /^(valve_cmd_|sched_|lastCommand(Id)?$)/;
+const REQUEST_SCRATCH_KEY = /^(valve_cmd_|sched_|delete_zone_|lastCommand(Id)?$)/;
 
 const CONVERTED = {
   '83bb4a452dd9ae37': { name: 'Auth + Validate + Normalize', kind: 'valve_command', allowed: ["global.get('fs')"] },
@@ -40,6 +40,15 @@ const CONVERTED = {
   'c8628cffe45f64f7': { name: 'Build Status + ACK', kind: null, allowed: [] },
   'e2e139678c3ddded': { name: 'Build Schedule ACK', kind: null, allowed: [] },
   '934bf2bc19a8ce22': { name: 'Route Command', kind: null, allowed: ["global.get('fs')", "global.get('cp')"] },
+  // Zone delete (DELETE /api/irrigation-zones/:id): every node of the chain, so a
+  // new shared-context key under another name fails here too.
+  'scoped-zone-delete-router': { name: 'Scoped Zone Delete', kind: null, allowed: ["global.get('fs')"] },
+  'delete-zone-auth': { name: 'Decode Token', kind: null, allowed: ["global.get('fs')"] },
+  'delete-zone-verify': { name: 'Verify Zone Ownership', kind: 'zone_delete', allowed: [] },
+  'delete-zone-unassign': { name: 'Unassign Devices', kind: 'zone_delete', allowed: [] },
+  'delete-zone-delete': { name: '(Soft) Delete Zone', kind: 'zone_delete', allowed: [] },
+  '8180476b6ab55d6e': { name: 'Disable Schedule', kind: 'zone_delete', allowed: [] },
+  'delete-zone-response': { name: 'Format Response', kind: null, allowed: [] },
 };
 
 const CONTEXT_CALL = /\b(flow|global|context)\s*\.\s*(get|set|keys)\s*\(\s*([^,)]*)/g;

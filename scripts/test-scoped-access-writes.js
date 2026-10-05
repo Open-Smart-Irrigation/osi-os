@@ -2318,8 +2318,11 @@ test('E7: deleting a zone unassigns members claimed by other users', async () =>
   `);
   try {
     const response = await executeFunction(loadNode('delete-zone-unassign'), {
-      msg: { payload: [{ id: 1, zone_uuid: 'z-1', sync_version: 1 }] },
-      flowState: { delete_zone_user_id: 2 },
+      msg: {
+        _msgid: 'msgid-e7',
+        osi: { request: { v: 1, kind: 'zone_delete', requestId: 'msgid-e7', actorId: 2, zoneId: 1 } },
+        payload: [{ id: 1, zone_uuid: 'z-1', sync_version: 1 }],
+      },
       env: DEVICE_POST_ENV,
       db,
     });
