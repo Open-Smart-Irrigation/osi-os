@@ -2538,7 +2538,8 @@ if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env
         echo "OK: Kiwi and Clover device profiles checked"
     else
         echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
-        echo "NOTE: rerun it with: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
+        echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
+        echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
     fi
 fi
 

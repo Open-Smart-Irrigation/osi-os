@@ -497,6 +497,29 @@ test('--repair-soil-profiles leaves a codec attached by hand to the Kiwi profile
   assert.equal(world.profiles.find((p) => p.id === gw.ids.kiwi).script, handCodec);
 });
 
+test('--repair-soil-profiles never falls through to a full provisioning pass when the repair fails', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.failProfileReads = true;
+  await runBootstrap(world, { args: ['--repair-soil-profiles'] });
+  assert.equal(world.exitCode, 1);
+  assert.deepEqual(world.writes, [], 'nothing created or changed');
+  assert.equal(world.cliApiKeyCalls, 0);
+  assert.equal(world.files.get(ENV_FILE), gw.envText, 'env file not rewritten');
+  assert.deepEqual(world.uciCommands.filter((c) => c.startsWith('set')), []);
+});
+
+test('--repoint-clover-device alone never falls through to a full provisioning pass either', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.failProfileReads = true;
+  await runBootstrap(world, { args: ['--repoint-clover-device=A840410000000001'] });
+  assert.equal(world.exitCode, 1);
+  assert.deepEqual(world.writes, []);
+  assert.equal(world.cliApiKeyCalls, 0);
+  assert.equal(world.files.get(ENV_FILE), gw.envText);
+});
+
 test('--repair-soil-profiles also repairs a UCI key still aliased when the env line is already distinct', async () => {
   const gw = provisionedGatewaySeed({ kiwiCodec: 'function decodeUplink(){return {data:{}};}' });
   const world = makeWorld(gw.seed);
