@@ -1225,3 +1225,20 @@ report_command_ledger_activation_failure ${shellQuote(before)} ${shellQuote(path
     assert.doesNotMatch(result.stderr, /proved loadable/, harnessOutput(result));
   });
 });
+
+for (const [label, inject] of [
+  ['database', 'ls() { case "$*" in *farming.db) return 2 ;; esac; command ls "$@"; }'],
+  ['WAL', 'printf x > "$DB_PATH-wal"; ls() { case "$*" in *farming.db-wal) return 2 ;; esac; command ls "$@"; }'],
+]) {
+  test(`an unreadable ${label} size fails the disk preflight instead of reading as zero`, () => {
+    withActivationRoot((root) => {
+      const result = runActivationHarness(root, inject);
+      assert.notEqual(result.status, 0, harnessOutput(result));
+      assert.match(result.stderr, /ERROR: could not read the size of \S*farming\.db\S* for the disk preflight/, harnessOutput(result));
+      assert.doesNotMatch(result.stdout, /\[migrate\] applied/);
+      assert.doesNotMatch(result.nodeRedLog, /stop/, 'the disk preflight runs before Node-RED is stopped');
+      assert.equal(result.activeFlows, 'prev');
+      assert.equal(result.nodeRed, '1');
+    });
+  });
+}

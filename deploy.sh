@@ -1322,8 +1322,22 @@ run_schema_migration() {
     # for lack of free space. BusyBox has no `stat`; use O(1) `ls -ln` for
     # size instead of `wc -c`.
     db_bytes=$(ls -ln "$DB_PATH" | awk '{print $5}')
+    # An empty value reads as 0 in shell arithmetic and would quietly shrink
+    # the gate to its margin.
+    case "$db_bytes" in
+        ''|*[!0-9]*)
+            echo "ERROR: could not read the size of $DB_PATH for the disk preflight; refusing schema migration (Node-RED was not stopped)" >&2
+            return 1
+            ;;
+    esac
     if [ -e "$DB_PATH-wal" ]; then
         wal_bytes=$(ls -ln "$DB_PATH-wal" | awk '{print $5}')
+        case "$wal_bytes" in
+            ''|*[!0-9]*)
+                echo "ERROR: could not read the size of $DB_PATH-wal for the disk preflight; refusing schema migration (Node-RED was not stopped)" >&2
+                return 1
+                ;;
+        esac
         db_bytes=$((db_bytes + wal_bytes))
     fi
     # BusyBox `df` wraps long device names onto their own line, pushing every
