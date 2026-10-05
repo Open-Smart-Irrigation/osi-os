@@ -359,7 +359,7 @@ for (const profile of PROFILES) {
   });
 }
 
-test('the manifest keeps a pending key in place and does not revive a rejected key', async (t) => {
+test('the manifest keeps a pending key in place, with its last error, and does not revive a rejected key', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
   const h = createHarness({ db, env: { DEVICE_EUI: GATEWAY }, start: '2026-10-06T08:00:00.000Z' });
@@ -369,12 +369,15 @@ test('the manifest keeps a pending key in place and does not revive a rejected k
   db.prepare("UPDATE sync_history_dirty_keys SET status='rejected', attempts=3, last_error='permanent: hash_mismatch' WHERE row_key=?").run(key(second));
   const third = shape.ids[2];
   db.prepare("UPDATE sync_history_dirty_keys SET status='done' WHERE row_key=?").run(key(third));
+  const fourth = shape.ids[3];
+  db.prepare("UPDATE sync_history_dirty_keys SET status='dropped', last_error='source row missing' WHERE row_key=?").run(key(fourth));
   assert.ok(await h.manifest());
   const row = (id) => db.prepare('SELECT status, changed_at, attempts, next_attempt_at, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
-  assert.deepEqual({ ...row(first) }, { status: 'pending', changed_at: '2026-08-14T23:45:00.000Z', attempts: 2, next_attempt_at: '2026-10-06T08:04:00.000Z', last_error: null });
+  assert.deepEqual({ ...row(first) }, { status: 'pending', changed_at: '2026-08-14T23:45:00.000Z', attempts: 2, next_attempt_at: '2026-10-06T08:04:00.000Z', last_error: 'permanent: hash_mismatch' }, 'a key set aside keeps its reason until it completes or turns rejected');
   assert.equal(row(second).status, 'rejected');
   assert.equal(row(second).attempts, 3);
   assert.deepEqual([row(third).status, row(third).changed_at], ['pending', '2026-10-06T08:00:00.000Z'], 'a done key in a mismatching segment is queued again, dated now');
+  assert.deepEqual([row(fourth).status, row(fourth).last_error], ['pending', null], 'a revived dropped key starts without the old reason');
 });
 
 // A dirty key is stored in the form the trigger or the manifest wrote it: under
