@@ -362,7 +362,7 @@ test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read
   assert.match(warnings[0], /gateway_timezone read failed:.*SQLITE_BUSY/);
 });
 
-// F135. Silvan harness run 5, case V2 check #18: GET /api/valves reported
+// F135. Customer test gateway harness run 5, case V2 check #18: GET /api/valves reported
 // {"queued":0,"acked":7} while the ledger held three QUEUED plan pushes, so the one
 // question the check exists to answer -- "did this valve ever answer?" -- came back
 // wrong. The ledger was never wrong; the newest-per-slot collapse was. queued_at is
@@ -372,15 +372,25 @@ test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read
 // at 14:00:13.657 and a dropped-ACK recompile at 14:00:13.98 shared queued_at
 // '2026-09-17 14:00:13', and the older ACKED rows won all three slots. It passed in
 // runs 2-4 and failed twice in run 5 on byte-identical code, which is the signature
-// of an ordering tie rather than a regression. store.js:286 (listQueued) already
-// carries the rowid tiebreaker this needs.
+// of an ordering tie rather than a regression.
+//
+// The tie is written as fixed values, not taken from the wall clock. An earlier version
+// copied one h2 row's datetime('now') onto the h3 rows; when the three h2 inserts
+// straddled a second boundary (n0 at :09, n1 and n2 at :10), the h3 rows got :09 and the
+// "tie" became an h3 row one second OLDER than the h2 row it was meant to tie with, so
+// the slot correctly went to h2 and the test failed (once in CI). Fixed timestamps make
+// the fixture describe one situation on every run.
+const F135_EARLIER = '2026-09-17 13:59:13';
+const F135_TIE = '2026-09-17 14:00:13';
+const F135_NOW = new Date('2026-09-17T14:00:14Z');
+
 async function seedSameSecondRecompile(db, store) {
   const plan = [];
   for (let d = 0; d < 7; d += 1) {
     plan.push({ push_id: 'p' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '00', plan_hash: 'h1' });
   }
   await store.insertPushes(db, plan);
-  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime(queued_at, '-1 minute'), state='ACKED', acked_at=datetime('now') WHERE plan_hash='h1'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ?, state='ACKED', acked_at=? WHERE plan_hash='h1'", [F135_EARLIER, F135_EARLIER]);
 
   // Recompile one: answered, so these rows end ACKED.
   const nacked = [];
@@ -388,7 +398,7 @@ async function seedSameSecondRecompile(db, store) {
     nacked.push({ push_id: 'n' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '01', plan_hash: 'h2' });
   }
   await store.insertPushes(db, nacked);
-  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=datetime('now') WHERE plan_hash='h2'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ?, state='ACKED', acked_at=? WHERE plan_hash='h2'", [F135_TIE, F135_TIE]);
 
   // Recompile two, same wall-clock second, never answered: these are the rows an
   // operator must see as outstanding.
@@ -397,14 +407,14 @@ async function seedSameSecondRecompile(db, store) {
     dropped.push({ push_id: 'q' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '02', plan_hash: 'h3' });
   }
   await store.insertPushes(db, dropped);
-  await db.run("UPDATE valve_schedule_pushes SET queued_at = (SELECT queued_at FROM valve_schedule_pushes WHERE plan_hash='h2' LIMIT 1) WHERE plan_hash='h3'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ? WHERE plan_hash='h3'", [F135_TIE]);
 }
 
 test('pushSummary (F135): when two recompiles share a queued_at second, the later one owns the slot', async () => {
   const { db } = await tempDb();
   await seedSameSecondRecompile(db, store);
 
-  const summary = await store.pushSummary(db, '0016C001F1000001');
+  const summary = await store.pushSummary(db, '0016C001F1000001', F135_NOW);
   assert.equal(summary.queued, 3, 'the three unanswered slots must be reported as queued');
   assert.equal(summary.acked, 4, 'only the four untouched weekdays are still acked');
   db.close();
