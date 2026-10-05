@@ -18,6 +18,7 @@ function decodeTesterGps(data, time) {
   if (hdop > 2 || satellites < 5) return null;
   const lat = (((b[0] & 63) << 17) + (b[1] << 9) + (b[2] << 1) + (b[3] >> 7));
   const lon = ((b[3] & 127) << 16) + (b[4] << 8) + b[5];
+  if (lat === 0 && lon === 0) return null; // all-zero coordinate bits = no fix, whatever the quality byte says
   const latitude = ((b[0] & 64) ? -1 : 1) * (lat * 108 + 53) / 1e7;
   const longitude = ((b[0] & 128) ? -1 : 1) * (lon * 215 + 107) / 1e7;
   if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;

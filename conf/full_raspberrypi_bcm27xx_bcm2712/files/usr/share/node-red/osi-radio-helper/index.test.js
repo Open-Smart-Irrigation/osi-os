@@ -81,7 +81,7 @@ test('preserves GPS and confirmed location provenance while dropping unknown fie
 test('decodes the tester position from a gateway-realistic environment', () => {
   const frame = {
     time: '2026-09-22T15:36:28.199Z',
-    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+    deviceInfo: { devEui: 'a840410000000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
       deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
     fPort: 1, fCnt: 4, data: 'INlJhJz1BdwMCA==',
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
@@ -105,7 +105,7 @@ test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position,
   // decodeTesterGps for RAK's own has_gps = (hdop <= 2) && (sats >= 5) gate.
   const zeroFrame = {
     time: '2026-09-22T15:36:28.199Z',
-    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+    deviceInfo: { devEui: 'a840410000000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
       deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
     fPort: 1, fCnt: 1, data: Buffer.alloc(10).toString('base64'),
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
@@ -121,7 +121,7 @@ test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position,
 });
 
 test('a static gateway position is not subject to the gpsd freshness window', () => {
-  const frame = { time: '2026-09-22T15:36:28.199Z', deviceInfo: { devEui: 'ac1f09fffe000001' }, fPort: 1,
+  const frame = { time: '2026-09-22T15:36:28.199Z', deviceInfo: { devEui: 'a840410000000001' }, fPort: 1,
     data: 'INlJhJz1BdwMCA==', rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }], txInfo: {} };
   const positions = { '0016C001F1000002': { latitude: 46.5, longitude: 6.5, altitude_m: null,
     source: 'static', last_good_fix_at: '2026-01-01T00:00:00.000Z' } };
