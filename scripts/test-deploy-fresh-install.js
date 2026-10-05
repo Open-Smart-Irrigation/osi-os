@@ -157,6 +157,17 @@ ${extractFunction('seed_db_if_missing')}
 ${extractFunction('fetch_migration_runner')}
 ${extractFunction('stage_command_ledger_dependency')}
 ${extractFunction('activate_command_ledger_dependency')}
+${extractFunction('command_ledger_live_hashes')}
+${extractFunction('report_command_ledger_activation_failure')}
+${extractFunction('keep_command_ledger_copy')}
+${extractFunction('restore_command_ledger_copy')}
+${extractFunction('command_ledger_live_pair_loads')}
+${extractFunction('clear_command_ledger_hold')}
+${extractFunction('check_command_ledger_hold')}
+${extractFunction('command_ledger_none_live')}
+${extractFunction('hold_for_unloadable_command_ledger')}
+${extractFunction('check_fetched_manifest')}
+${extractFunction('check_fetched_js_files')}
 
 osi_schema_decision() {
 ${extractSchemaDecisionFragment()}

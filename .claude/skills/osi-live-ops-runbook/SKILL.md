@@ -330,9 +330,13 @@ Reading straight through the script, in order:
    schema, not seed-plus-migrations). Otherwise it ensures the `sqlite3` CLI is
    present (attempting `opkg install sqlite3-cli` if missing); fetches
    `database/migrations/ordered/CHECKSUMS.json`, every ordered migration file
-   it names, the Stage 0 helper scripts (`repair-sync-outbox-v2.js`,
-   `baseline-existing-db.js`, `migrate-cli.js`, `semantic-schema-compare.js`),
-   and the `lib/osi-migrate` runner modules; stops Node-RED and waits up to 30s
+   it names, the helper scripts (`baseline-existing-db.js`,
+   `repair-sync-outbox-v2.js`, `migrate-cli.js`, `semantic-schema-compare.js`,
+   `restamp-fingerprints.js`, `verify-head-cli.js`,
+   `verify-runtime-schema-parity.js`) and the `lib/osi-migrate` runner
+   modules, then refuses, before Node-RED is touched, unless every migration
+   matches its `CHECKSUMS.json` SHA-256, no unnamed `.sql` sits beside them,
+   and every runner file is non-empty and parses; stops Node-RED and waits up to 30s
    for the process to exit, refusing to proceed if it doesn't; WAL-checkpoints
    the DB and runs `PRAGMA integrity_check`; if the `schema_migrations` ledger
    has zero rows, runs the sync-outbox v2 repair then `baseline-existing-db.js`
@@ -377,10 +381,44 @@ sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and n
 installable via `opkg`; Node-RED failing to stop within 30s before a migration;
 a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
 is restarted before the script exits — except `migrate-cli.js` exit code 3, a
-backup-restore integrity failure, which leaves Node-RED stopped); and a failed
-post-flip self-check, which either auto-rolls back and exits 1, or — when there is
-no previous payload — exits 1 with an `ERROR` and leaves the new payload live. All
-of these are hard aborts (`exit 1`), not partial continues.
+backup-restore integrity failure, which leaves Node-RED stopped); a failed
+download or verification of the migration runner, an uncreatable migration
+backup directory, or an unreadable database size (refused before Node-RED is
+stopped); a failed ledger-reconciliation download or probe (the previous
+payload is restarted); a failed command-ledger staging run (before anything is
+stopped); a failed command-ledger activation after the migration (see below);
+and a failed post-flip self-check, which either auto-rolls back and exits 1, or
+— when there is no previous payload — exits 1 with an `ERROR` and leaves the new
+payload live. All of these are hard aborts (`exit 1`), not partial continues.
+
+**Failed command-ledger activation.** At staging, before anything is stopped,
+`deploy.sh` copies the live `osi-command-ledger/{package.json,index.js}` and
+`osi-watermark-binding/canonicalization.js` to
+`/srv/node-red/.osi-command-ledger-previous.<stamp>`. The file `absent` in that
+directory lists the files that did not exist. If the copy fails, the deploy stops
+there. A successful deploy removes the copy; a failed one keeps it.
+
+If the activation fails, the script lists each live file as previous,
+candidate, absent or unknown, then decides:
+- no ledger file is in place, as before the deploy (a gateway that never had
+  one): the deploy's usual failure path runs, which restarts the previous
+  payload when the database allows it;
+- the live pair loads in a fresh process: the same failure path runs;
+- it does not load: the kept state is restored. Absent files are restored too:
+  candidate files that did not exist before are moved to `<copy>/failed`. If
+  the result has no ledger files, or loads, the same failure path runs;
+- otherwise: Node-RED and identityd are held **stopped**, as in the script's
+  other holds. Nothing is disabled, so a reboot or a manual start runs the
+  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
+  records the reason, the time and the copy.
+
+Every later deploy reads the marker before its first fetch:
+- if the live pair loads, it clears the marker and says so;
+- if not, it prints a `WARNING` and carries on; an activation whose pair
+  loads clears the marker.
+
+Way out: re-run the deploy. If it fails again, the load error printed by the
+installer or the probe names the cause.
 
 ### Private branch deployments
 

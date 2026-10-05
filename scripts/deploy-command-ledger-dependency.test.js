@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync, spawn } = require('node:child_process');
+const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const http = require('node:http');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -470,6 +470,7 @@ test('staging removes stage directories left by earlier killed deploys', () => {
   const match = /^stage_command_ledger_dependency\(\) \{\n[\s\S]*?\n\}\n/m.exec(DEPLOY);
   assert.ok(match, 'stage_command_ledger_dependency must be defined in deploy.sh');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-stage-root-'));
+  const liveRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-live-root-'));
   try {
     for (const leftover of ['.osi-command-ledger-stage.111', '.osi-command-ledger-stage.222']) {
       fs.mkdirSync(path.join(root, leftover, 'osi-command-ledger'), { recursive: true });
@@ -483,8 +484,11 @@ test('staging removes stage directories left by earlier killed deploys', () => {
       `COMMAND_LEDGER_STAGE='${root}/.osi-command-ledger-stage.333'`,
       `COMMAND_LEDGER_INSTALLER='${root}/installer.js'`,
       `COMMAND_LEDGER_HELPER_SHA256='${'c'.repeat(64)}'`,
+      `NODE_RED_ROOT='${liveRoot}'`,
+      'DEPLOY_STAMP=333',
       'fetch_required() { :; }',
       'node() { printf %s "$COMMAND_LEDGER_HELPER_SHA256"; }',
+      optionalShellFunction('keep_command_ledger_copy'),
       match[0],
       'stage_command_ledger_dependency',
     ].join('\n');
@@ -493,5 +497,871 @@ test('staging removes stage directories left by earlier killed deploys', () => {
     assert.deepEqual(entries, ['.osi-command-ledger-stage-notes', '.osi-command-ledger-stage.333', 'osi-command-ledger']);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(liveRoot, { recursive: true, force: true });
   }
+});
+
+// --- Failure paths of staging and activation under a suspended set -e --------
+//
+// deploy.sh calls run_schema_migration and activate_command_ledger_dependency
+// as `f || exit 1`, and run_schema_migration calls the activation inside
+// `if !`. A shell does not apply set -e inside a function called from such a
+// condition, so every step of these functions must check its own status. The
+// harness below runs the shipped text of the staging and activation functions,
+// run_schema_migration, restart_node_red, fetch_required, swap_call, the
+// payload and identityd lifecycles (including the real EXIT handler) and the
+// deploy.sh call sequence from install_deploy_exit_trap to the explicit
+// post-migration activation. Stubbed: fetch (copies from the working tree),
+// the Node-RED and identityd services, migrate-cli and verify-head-cli (a
+// one-row schema_migrations table stands in for the database), and the
+// migration-runner fetch.
+
+const SWAP_JS = path.join(__dirname, 'deploy-payload-swap.js');
+const ACTIVATED_LINE = 'OK: command-ledger dependency pair activated after schema migration';
+const STAGED_LINE = 'OK: command-ledger dependency pair staged; activation deferred until schema migration';
+
+// The ledger helpers added after the first fix; absent ones are left out so
+// the same harness also runs against older deploy.sh text.
+function optionalShellFunction(name) {
+  return new RegExp(`^${name}\\(\\) \\{$`, 'm').test(DEPLOY) ? shellFunction(name) : '';
+}
+
+function shellFunction(name, endNeedle = '\n}\n') {
+  const open = new RegExp(`^${name}\\(\\) \\{$`, 'm').exec(DEPLOY);
+  assert.ok(open, `deploy.sh must define ${name}()`);
+  const close = DEPLOY.indexOf(endNeedle, open.index);
+  assert.notEqual(close, -1, `deploy.sh's ${name}() has no closing brace`);
+  return DEPLOY.slice(open.index, close + 3);
+}
+
+function deployFragment(begin, end) {
+  const start = DEPLOY.indexOf(begin);
+  const finish = DEPLOY.indexOf(end, start);
+  assert.ok(start >= 0 && finish > start, `deploy.sh fragment markers missing: ${begin} -> ${end}`);
+  return DEPLOY.slice(start + begin.length, finish);
+}
+
+// The deploy.sh call sequence from the EXIT trap through the explicit
+// post-migration activation, verbatim.
+function postMigrationCallSequence() {
+  const start = DEPLOY.indexOf('\ninstall_deploy_exit_trap\n');
+  const last = 'activate_command_ledger_dependency || exit 1\n';
+  const end = DEPLOY.indexOf(last, start);
+  assert.ok(start >= 0 && end > start, 'deploy.sh must run the exit trap, migration and activation in sequence');
+  const sequence = DEPLOY.slice(start + 1, end + last.length);
+  assert.match(sequence, /^run_schema_migration \|\| exit 1$/m);
+  return sequence;
+}
+
+function commandLedgerPins() {
+  const pins = DEPLOY.match(/^COMMAND_LEDGER_(?:HELPER|PACKAGE|INDEX|BINDING)_SHA256="[0-9a-f]{64}"$/gm) || [];
+  assert.equal(pins.length, 4, 'deploy.sh must pin the installer, ledger package, ledger index and binding');
+  return pins.join('\n');
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function activationHarness(root, inject, options = {}) {
+  const initPath = '/etc/init.d/node-red';
+  const identity = deployFragment('# identityd deploy lifecycle begin\n', '# identityd deploy lifecycle end')
+    .replace('deploy_exit_handler() {', 'deploy_exit_handler_under_test() {');
+  const payload = deployFragment('# deploy payload lifecycle begin\n', '# deploy payload lifecycle end');
+  const migration = shellFunction('run_schema_migration', '\n}\n\necho "=== OSI OS Deploy ==="')
+    .replaceAll(initPath, '"$NODE_RED_INIT"');
+  assert.match(migration, /if ! activate_command_ledger_dependency; then/);
+  return `set -eu
+REPO_ROOT=${shellQuote(ROOT)}
+ROOT_DIR=${shellQuote(root)}
+TMP_DIR="$ROOT_DIR/tmp"
+DB_DIR="$ROOT_DIR"
+DB_PATH="$ROOT_DIR/farming.db"
+SWAP_ROOT="$ROOT_DIR"
+SWAP_JS=${shellQuote(SWAP_JS)}
+export SWAP_ROOT SWAP_JS
+PAYLOADS_ROOT="$ROOT_DIR/payloads"
+GUI_ROOT="$ROOT_DIR/gui"
+NODE_RED_INIT="$ROOT_DIR/node-red-init"
+NODE_RED_STATE_FILE="$ROOT_DIR/node-red.state"
+NODE_RED_LOG="$ROOT_DIR/node-red.log"
+NODE_RED_BOOT_FILE="$ROOT_DIR/node-red.boot"
+export NODE_RED_STATE_FILE NODE_RED_LOG NODE_RED_BOOT_FILE
+IDENTITYD_LOCK_PATH="$ROOT_DIR/identityd.lock"
+IDENTITYD_STATE_FILE="$ROOT_DIR/identityd.state"
+HARNESS_STATE="$ROOT_DIR/exit-state"
+NODE_RED_ROOT="$ROOT_DIR/node-red"
+COMMAND_LEDGER_STAGE_ROOT="$NODE_RED_ROOT"
+COMMAND_LEDGER_STAGE="$COMMAND_LEDGER_STAGE_ROOT/.osi-command-ledger-stage.harness"
+COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
+COMMAND_LEDGER_ACTIVATED=0
+${commandLedgerPins()}
+MIGRATE_BACKUP_DIR="$TMP_DIR/backups"
+DEPLOY_STAMP=new
+PREV_STAMP=prev
+PREV_CAPTURED=0
+PAYLOAD_FLIPPED=0
+ROLLBACK_RESTORED=0
+DB_MIGRATION_COMMITTED=0
+DEPLOY_HOLD_SERVICES=0
+MIGRATION_RUNNER_AVAILABLE=0
+NODE_RED_LOG_MARK=""
+node_red_restart_needed=0
+mkdir -p "$TMP_DIR" "$PAYLOADS_ROOT" "$GUI_ROOT"
+
+# HARNESS_FETCH_PATH names one repo path whose download fails: "missing" is
+# a 404 (curl -f writes nothing and exits 22); "truncated" and "empty" are a
+# server that answers 200 with half of the file or with no bytes at all;
+# "unwritten" reports success but leaves no file, so the file is absent from
+# the directory although CHECKSUMS.json names it.
+fetch() {
+    mkdir -p "$(dirname "$2")"
+    if [ -n "\${HARNESS_FETCH_PATH:-}" ] && [ "$1" = "$HARNESS_FETCH_PATH" ]; then
+        case "\${HARNESS_FETCH_FAULT:-missing}" in
+            missing) return 22 ;;
+            unwritten) return 0 ;;
+            empty) : > "$2"; return 0 ;;
+            truncated) head -c "$(( $(wc -c < "$REPO_ROOT/$1") / 2 ))" "$REPO_ROOT/$1" > "$2"; return 0 ;;
+        esac
+    fi
+    cp "$REPO_ROOT/$1" "$2"
+}
+${shellFunction('fetch_required')}
+${shellFunction('swap_call')}
+${shellFunction('stage_command_ledger_dependency')}
+${shellFunction('activate_command_ledger_dependency')}
+${['command_ledger_live_hashes', 'report_command_ledger_activation_failure', 'keep_command_ledger_copy',
+  'restore_command_ledger_copy', 'command_ledger_live_pair_loads', 'release_command_ledger_boot_hold',
+  'hold_for_unloadable_command_ledger', 'clear_command_ledger_hold', 'check_command_ledger_hold',
+  'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
+${shellFunction('check_fetched_manifest')}
+${shellFunction('check_fetched_js_files')}
+${identity}
+${payload}
+${shellFunction('checkpoint_live_db')}
+${shellFunction('ensure_sqlite3_cli')}
+${shellFunction('restart_node_red').replaceAll(initPath, '"$NODE_RED_INIT"')}
+${shellFunction('fetch_reconciliation_assets')}
+${options.realRunner ? shellFunction('fetch_migration_runner') : `fetch_migration_runner() {
+    migrations_dir="$REPO_ROOT/database/migrations/ordered"
+    MIGRATION_RUNNER_AVAILABLE=1
+}`}
+${migration}
+
+deploy_exit_handler() {
+    printf 'activated=%s flipped=%s committed=%s\\n' "$COMMAND_LEDGER_ACTIVATED" "$PAYLOAD_FLIPPED" "$DB_MIGRATION_COMMITTED" > "$HARNESS_STATE"
+    deploy_exit_handler_under_test "$1"
+}
+cleanup() { :; }
+wait_for_node_red_stop() { return 0; }
+wait_for_node_red_health() { return 0; }
+identityd_service() {
+    case "$1" in
+        running) [ "$(cat "$IDENTITYD_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] ;;
+        stop) echo 0 > "$IDENTITYD_STATE_FILE"; rm -f "$IDENTITYD_LOCK_PATH" ;;
+        start) echo 1 > "$IDENTITYD_STATE_FILE" ;;
+        ready) [ "$(cat "$IDENTITYD_STATE_FILE" 2>/dev/null || echo 0)" = 1 ] ;;
+        *) return 0 ;;
+    esac
+}
+identityd_sleep() { :; }
+
+cat > "$NODE_RED_INIT" <<'NODEINIT'
+#!/bin/sh
+printf '%s\\n' "$1" >> "$NODE_RED_LOG"
+case "$1" in
+    stop) echo 0 > "$NODE_RED_STATE_FILE" ;;
+    start|restart) echo 1 > "$NODE_RED_STATE_FILE" ;;
+    enable) echo 1 > "$NODE_RED_BOOT_FILE" ;;
+    disable) echo 0 > "$NODE_RED_BOOT_FILE" ;;
+esac
+NODEINIT
+chmod 755 "$NODE_RED_INIT"
+# HARNESS_RERUN=1 runs the deploy again on the state the previous run left.
+if [ "\${HARNESS_RERUN:-0}" != 1 ]; then
+echo 1 > "$NODE_RED_STATE_FILE"
+echo 1 > "$IDENTITYD_STATE_FILE"
+if [ -n "\${HARNESS_DB_SOURCE:-}" ]; then
+    cp "$HARNESS_DB_SOURCE" "$DB_PATH"
+else
+    sqlite3 "$DB_PATH" "CREATE TABLE schema_migrations(version INTEGER, checksum TEXT, status TEXT); INSERT INTO schema_migrations VALUES (12, 'old', 'applied');"
+    if [ "\${HARNESS_FOREIGN_ROW:-0}" = 1 ]; then
+        # A ledger row above 0021 whose checksum is not main's: the probe
+        # sends the deploy into ledger numbering reconciliation.
+        sqlite3 "$DB_PATH" "INSERT INTO schema_migrations VALUES (22, 'feedface', 'applied');"
+    fi
+fi
+for stamp in prev new; do
+    mkdir -p "$ROOT_DIR/src-gui-$stamp"
+    printf '%s\\n' "[{\\"id\\":\\"$stamp\\"}]" > "$ROOT_DIR/src-flows-$stamp.json"
+    printf '%s\\n' "$stamp" > "$ROOT_DIR/src-gui-$stamp/index.html"
+done
+swap_call stagePayload prev "$ROOT_DIR/src-flows-prev.json" "$ROOT_DIR/src-gui-prev" >/dev/null
+write_payload_compatibility prev
+swap_call flipTo prev "$GUI_ROOT" >/dev/null
+fi
+swap_call stagePayload new "$ROOT_DIR/src-flows-new.json" "$ROOT_DIR/src-gui-new" >/dev/null
+
+# --- injected before staging ---
+${options.preStage || ':'}
+# deploy.sh checks for an earlier command-ledger hold before its first fetch.
+if command -v check_command_ledger_hold >/dev/null 2>&1; then
+    check_command_ledger_hold
+fi
+stage_command_ledger_dependency
+# --- injected failure ---
+${inject}
+# --- deploy.sh call sequence ---
+${postMigrationCallSequence()}
+echo "REACHED: post-migration deploy steps"
+`;
+}
+
+// Stands in for migrate-cli.js and verify-head-cli.js; every other node call
+// runs the real node.
+function writeNodeShim(root) {
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh
+if [ "\${HARNESS_REAL_MIGRATE:-0}" = 1 ]; then
+  exec ${shellQuote(process.execPath)} "$@"
+fi
+case "$1" in
+  *migrate-cli.js)
+    case " $* " in *" --prune-only "*) exit 0 ;; esac
+    if [ "\${HARNESS_MIGRATION_COMMITS:-0}" = 1 ]; then
+      sqlite3 "$2" "INSERT INTO schema_migrations VALUES (13, 'new', 'applied');" || exit 1
+      echo '[migrate] applied: [13]'
+    else
+      echo '[migrate] applied: []'
+    fi
+    exit 0 ;;
+  *verify-head-cli.js) exit 0 ;;
+  *) exec ${shellQuote(process.execPath)} "$@" ;;
+esac
+`, { mode: 0o755 });
+  return bin;
+}
+
+function runActivationHarness(root, inject, env = {}, options = {}) {
+  let bin = path.join(root, 'bin');
+  if (!options.rerun) {
+    if (options.noLedger) fs.mkdirSync(path.join(root, 'node-red'), { recursive: true });
+    else writeOldPair(path.join(root, 'node-red'));
+    bin = writeNodeShim(root);
+  }
+  const result = spawnSync('sh', ['-c', activationHarness(root, inject, options)], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...(options.rerun ? { HARNESS_RERUN: '1' } : {}), ...env },
+    timeout: 120000,
+  });
+  const read = (name) => (fs.existsSync(path.join(root, name)) ? fs.readFileSync(path.join(root, name), 'utf8').trim() : null);
+  return {
+    ...result,
+    exitState: read('exit-state'),
+    nodeRed: read('node-red.state'),
+    identityd: read('identityd.state'),
+    nodeRedLog: read('node-red.log') || '',
+    nodeRedBoot: read('node-red.boot'),
+    bootHold: fs.existsSync(path.join(root, 'node-red', '.osi-command-ledger-boot-hold')),
+    holdMarker: read('node-red/.osi-command-ledger-hold'),
+    restoreLeftovers: ['osi-command-ledger', 'osi-watermark-binding'].flatMap((dir) => {
+      const full = path.join(root, 'node-red', dir);
+      return fs.existsSync(full) ? fs.readdirSync(full).filter((name) => name.endsWith('.osi-restore')) : [];
+    }),
+    ledgerCopies: fs.readdirSync(path.join(root, 'node-red')).filter((name) => name.startsWith('.osi-command-ledger-previous.')),
+    activeFlows: swapStamp(root),
+    newPayloadKept: fs.existsSync(path.join(root, 'payloads', 'new')),
+    liveLedger: Object.fromEntries(['osi-command-ledger/package.json', 'osi-command-ledger/index.js', 'osi-watermark-binding/canonicalization.js']
+      .map((file) => {
+        const live = path.join(root, 'node-red', file);
+        return [file, fs.existsSync(live) ? sha256(live) : null];
+      })),
+  };
+}
+
+function swapStamp(root) {
+  const swap = require(SWAP_JS);
+  return swap.currentStamp(root);
+}
+
+function oldPairHashes() {
+  return {
+    'osi-command-ledger/package.json': sha256(path.join(OLD_LEDGER_FIXTURE, 'package.json')),
+    'osi-command-ledger/index.js': sha256(path.join(OLD_LEDGER_FIXTURE, 'index.js')),
+    'osi-watermark-binding/canonicalization.js': null,
+  };
+}
+
+function candidateHashes() {
+  return {
+    'osi-command-ledger/package.json': sha256(path.join(LEDGER, 'package.json')),
+    'osi-command-ledger/index.js': sha256(path.join(LEDGER, 'index.js')),
+    'osi-watermark-binding/canonicalization.js': sha256(path.join(BINDING, 'canonicalization.js')),
+  };
+}
+
+function withActivationRoot(fn) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-ledger-activation-'));
+  try {
+    return fn(root);
+  } finally {
+    for (const dir of ['osi-watermark-binding', 'osi-command-ledger']) {
+      const blocked = path.join(root, 'node-red', dir);
+      if (fs.existsSync(blocked)) fs.chmodSync(blocked, 0o755);
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function harnessOutput(result) {
+  return `status=${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`;
+}
+
+test('the activation harness completes a deploy when nothing fails', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':');
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.equal(result.stdout.split(ACTIVATED_LINE).length - 1, 1, harnessOutput(result));
+    assert.match(result.stdout, /REACHED: post-migration deploy steps/);
+    assert.equal(result.exitState, 'activated=1 flipped=1 committed=0');
+    assert.equal(result.activeFlows, 'new');
+    assert.deepEqual(result.liveLedger, candidateHashes());
+    assert.equal(result.identityd, '1');
+    assert.deepEqual(result.ledgerCopies, [], 'a successful deploy removes the copy of the previous ledger files');
+    assert.equal(result.nodeRedBoot, null, 'a successful deploy does not change Node-RED start at boot');
+    assert.equal(result.holdMarker, null);
+  });
+});
+
+// Each step that can fail during activation, injected after a successful
+// staging run. The live ledger files each scenario must leave behind: before
+// any rename the previous pair; the post-activation check runs after all three
+// renames, and the installer does not undo them. With the candidate pair in
+// place but failing its load, the previous payload must not be restarted
+// beside it: Node-RED and identityd stay stopped and the error says so.
+// The pre-WATERMARK package.json is byte-identical to the candidate's, so it
+// reads as the previous file whether or not it was moved.
+const PREVIOUS_FILES = [/osi-command-ledger\/package\.json: previous/, /osi-command-ledger\/index\.js: previous$/m, /osi-watermark-binding\/canonicalization\.js: absent/];
+const CANDIDATE_FILES = [/osi-command-ledger\/package\.json: (candidate|previous, identical to the candidate)$/m, /osi-command-ledger\/index\.js: candidate$/m, /osi-watermark-binding\/canonicalization\.js: candidate$/m];
+const ACTIVATION_FAILURES = [
+  ['digest verification', 'printf "\\n" >> "$COMMAND_LEDGER_STAGE/osi-watermark-binding/canonicalization.js"', {}, oldPairHashes, PREVIOUS_FILES],
+  ['the installer', 'printf "%s\\n" "console.error(\\"injected installer failure\\"); process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"', {}, oldPairHashes, PREVIOUS_FILES],
+  ['the move into place', 'mkdir -p "$NODE_RED_ROOT/osi-watermark-binding" && chmod 555 "$NODE_RED_ROOT/osi-watermark-binding"', { skipAsRoot: true }, oldPairHashes, PREVIOUS_FILES],
+  ['the post-activation check', 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS', { preload: true, held: true }, restoredHashes, CANDIDATE_FILES],
+];
+
+// Fails every fresh-process load of the LIVE ledger, whatever files are there:
+// the installer's post-activation check and deploy.sh's own load probe.
+function writeLiveLoadFailure(root) {
+  fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'),
+    `if (process.argv.includes(${JSON.stringify(path.join(root, 'node-red', 'osi-command-ledger'))})) {\n` +
+    "  console.error('injected post-activation load failure');\n  process.exit(42);\n}\n");
+}
+
+// Fails a live load only while the candidate index.js is in place.
+function writeCandidateLoadFailure(root) {
+  fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'),
+    `const live = ${JSON.stringify(path.join(root, 'node-red', 'osi-command-ledger'))};\n` +
+    `if (process.argv.includes(live) && require('crypto').createHash('sha256').update(require('fs').readFileSync(live + '/index.js')).digest('hex') === ${JSON.stringify(sha256(path.join(LEDGER, 'index.js')))}) {\n` +
+    "  console.error('injected candidate load failure');\n  process.exit(42);\n}\n");
+}
+
+// Fails only the first live load: the installer's post-activation check.
+function writeTransientLoadFailure(root) {
+  const marker = path.join(root, 'transient-load-failure-used');
+  fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'),
+    `if (process.argv.includes(${JSON.stringify(path.join(root, 'node-red', 'osi-command-ledger'))}) && !require('fs').existsSync(${JSON.stringify(marker)})) {\n` +
+    `  require('fs').writeFileSync(${JSON.stringify(marker)}, '1');\n` +
+    "  console.error('injected transient load failure');\n  process.exit(42);\n}\n");
+}
+
+const LIVE_LOAD_FAILURE = 'NODE_OPTIONS="--require $ROOT_DIR/fail-live-ledger-load.js"; export NODE_OPTIONS';
+
+// The state restored from the kept copy: the previous index.js and
+// package.json, and no binding, because the previous gateway had none.
+function restoredHashes() {
+  return oldPairHashes();
+}
+
+function assertHeldWithoutDisable(result) {
+  assert.match(result.stderr, /the previous payload is held stopped/, harnessOutput(result));
+  assert.match(result.stderr, /re-run the deploy/);
+  assert.equal(result.nodeRed, '0', harnessOutput(result));
+  assert.equal(result.nodeRedBoot, null, 'a hold must not change Node-RED start at boot');
+  assert.doesNotMatch(result.nodeRedLog, /disable/);
+  assert.match(result.holdMarker || '', /^reason=.+\ntime=\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/m, 'the hold marker records its reason and time');
+}
+
+for (const [step, inject, options, expectedLedger, expectedFileLines] of ACTIVATION_FAILURES) {
+  test(`a failing activation step (${step}) aborts the deploy before the payload flip`, (t) => {
+    if (options.skipAsRoot && typeof process.getuid === 'function' && process.getuid() === 0) {
+      t.skip('root ignores directory permissions');
+      return;
+    }
+    withActivationRoot((root) => {
+      if (options.preload) writeLiveLoadFailure(root);
+      const result = runActivationHarness(root, inject);
+      assert.notEqual(result.status, 0, `deploy must fail when ${step} fails\n${harnessOutput(result)}`);
+      assert.doesNotMatch(result.stdout, new RegExp(ACTIVATED_LINE), harnessOutput(result));
+      assert.doesNotMatch(result.stdout, /REACHED: post-migration deploy steps/);
+      assert.doesNotMatch(result.stdout, /OK: activated flows\+GUI payloads\/new/);
+      assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+      // The existing failure path of the schema phase: the staged payload is
+      // discarded and the previous, schema-compatible payload restarted, or
+      // held stopped when the candidate pair is in place but failed to load.
+      assert.equal(result.activeFlows, 'prev');
+      assert.equal(result.newPayloadKept, false);
+      assert.equal(result.nodeRed, options.held ? '0' : '1', harnessOutput(result));
+      assert.equal(result.identityd, options.held ? '0' : '1', harnessOutput(result));
+      assert.deepEqual(result.liveLedger, expectedLedger());
+      for (const line of expectedFileLines) assert.match(result.stderr, line, harnessOutput(result));
+      if (options.held) {
+        assert.match(result.stderr, /restored the state from before this activation from \S*\.osi-command-ledger-previous\.new; it does not load either/, harnessOutput(result));
+        assertHeldWithoutDisable(result);
+      } else {
+        assert.doesNotMatch(result.stderr, /held stopped/);
+        assert.match(result.stderr, /the live command-ledger files load in a fresh process/, harnessOutput(result));
+        assert.equal(result.nodeRedBoot, null);
+        assert.equal(result.holdMarker, null);
+      }
+      assert.deepEqual(result.ledgerCopies, ['.osi-command-ledger-previous.new'], 'a failed deploy keeps the copy');
+    });
+  });
+}
+
+test('a failing activation after a committed migration holds services on the previous payload', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root,
+      'printf "%s\\n" "process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"',
+      { HARNESS_MIGRATION_COMMITS: '1' });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.doesNotMatch(result.stdout, new RegExp(ACTIVATED_LINE), harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=1', harnessOutput(result));
+    // The previous payload was recorded for the pre-migration head, so the
+    // existing path refuses to restart it and holds both services stopped.
+    assert.match(result.stderr, /migrated database has no proven compatible active payload; keeping Node-RED stopped/);
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.newPayloadKept, false);
+    assert.equal(result.nodeRed, '0');
+    assert.equal(result.identityd, '0');
+    assert.deepEqual(result.liveLedger, oldPairHashes());
+  });
+});
+
+test('staging returns failure from inside a condition when a fetch fails', () => {
+  withActivationRoot((root) => {
+    const tmp = path.join(root, 'tmp');
+    const stage = path.join(root, 'node-red', '.osi-command-ledger-stage.harness');
+    fs.mkdirSync(tmp, { recursive: true });
+    const script = `set -eu
+REPO_ROOT=${shellQuote(ROOT)}
+TMP_DIR=${shellQuote(tmp)}
+NODE_RED_ROOT=${shellQuote(path.join(root, 'node-red'))}
+COMMAND_LEDGER_STAGE_ROOT="$NODE_RED_ROOT"
+COMMAND_LEDGER_STAGE=${shellQuote(stage)}
+COMMAND_LEDGER_INSTALLER="$TMP_DIR/deploy-command-ledger-dependency.js"
+${commandLedgerPins()}
+mkdir -p "$NODE_RED_ROOT"
+fetch() {
+    mkdir -p "$(dirname "$2")"
+    if [ "$1" = "$HARNESS_FAIL_FETCH" ]; then
+        return 22
+    fi
+    cp "$REPO_ROOT/$1" "$2"
+}
+${shellFunction('fetch_required')}
+${shellFunction('stage_command_ledger_dependency')}
+if stage_command_ledger_dependency; then
+    echo "STAGE-RC=0"
+else
+    echo "STAGE-RC=$?"
+fi
+`;
+    const result = spawnSync('sh', ['-c', script], {
+      encoding: 'utf8',
+      env: { ...process.env, HARNESS_FAIL_FETCH: 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js' },
+      timeout: 60000,
+    });
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.doesNotMatch(result.stdout, /STAGE-RC=0/, harnessOutput(result));
+    assert.match(result.stdout, /STAGE-RC=[1-9]/);
+    assert.doesNotMatch(result.stdout, new RegExp(STAGED_LINE));
+    assert.doesNotMatch(result.stdout, /--- osi-command-ledger index\.js ---\nOK\n/,
+      'fetch_required must not report OK for a failed fetch');
+    assert.doesNotMatch(result.stdout, /--- osi-watermark-binding canonicalization\.js ---/,
+      'staging must stop at the failed fetch');
+  });
+});
+
+test('a post-activation load failure after a committed migration also reports the files and holds services', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE, { HARNESS_MIGRATION_COMMITS: '1' });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=1', harnessOutput(result));
+    for (const line of CANDIDATE_FILES) assert.match(result.stderr, line, harnessOutput(result));
+    assert.match(result.stderr, /the previous payload is held stopped/);
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '0');
+    assert.equal(result.identityd, '0');
+    assertHeldWithoutDisable(result);
+    assert.deepEqual(result.liveLedger, restoredHashes());
+  });
+});
+
+test('an activation that stops between renames reports the mixed ledger files', (t) => {
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('root ignores directory permissions');
+    return;
+  }
+  withActivationRoot((root) => {
+    // The binding is renamed into place first; the ledger directory then
+    // refuses the package.json rename.
+    const result = runActivationHarness(root, 'chmod 555 "$NODE_RED_ROOT/osi-command-ledger"');
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+    assert.match(result.stderr, /osi-watermark-binding\/canonicalization\.js: candidate/, harnessOutput(result));
+    assert.match(result.stderr, /osi-command-ledger\/package\.json: previous/);
+    assert.match(result.stderr, /osi-command-ledger\/index\.js: previous/);
+    assert.match(result.stderr, /stopped part-way: the old ledger index with the candidate binding/);
+    assert.match(result.stderr, /the live command-ledger files load in a fresh process/);
+    // The installer proved this mix loads before it moved anything, so the
+    // existing failure path restarts the previous payload on it.
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1');
+    assert.equal(result.identityd, '1');
+  });
+});
+
+// --- Migration runner fetch -------------------------------------------------
+//
+// The bundled seed of a main commit before migration 0068 is a real database
+// stamped at 0067. These tests run the shipped fetch_migration_runner and the
+// real migrate-cli.js and verify-head-cli.js against a copy of it.
+
+let preMigrationDb = null;
+function preMigrationDbFile() {
+  if (!preMigrationDb) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-pre-0068-db-'));
+    preMigrationDb = path.join(dir, 'farming.db');
+    fs.writeFileSync(preMigrationDb, execFileSync('git', ['show', `${PRE_0068_MAIN_COMMIT}:conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db`],
+      { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }));
+    process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  }
+  return preMigrationDb;
+}
+
+function dbHead(root) {
+  return execFileSync('sqlite3', [path.join(root, 'farming.db'), "SELECT MAX(version) FROM schema_migrations WHERE status='applied'"], { encoding: 'utf8' }).trim();
+}
+
+const MIGRATION_NAMES = Object.keys(JSON.parse(fs.readFileSync(path.join(ROOT, 'database/migrations/ordered/CHECKSUMS.json'), 'utf8'))).sort();
+const LAST_MIGRATION = MIGRATION_NAMES[MIGRATION_NAMES.length - 1];
+const LAST_VERSION = String(Number(LAST_MIGRATION.slice(0, 4)));
+
+function runRunnerHarness(root, env = {}, inject = ':') {
+  return runActivationHarness(root, inject, { HARNESS_REAL_MIGRATE: '1', HARNESS_DB_SOURCE: preMigrationDbFile(), ...env }, { realRunner: true });
+}
+
+test('the real migration runner takes a pre-0068 database to head and activates the ledger', () => {
+  assert.equal(LAST_MIGRATION.slice(0, 4), '0068', 'these tests assume 0068 is the newest migration on this line');
+  withActivationRoot((root) => {
+    const result = runRunnerHarness(root);
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.equal(dbHead(root), LAST_VERSION);
+    assert.equal(result.exitState, 'activated=1 flipped=1 committed=1');
+    assert.equal(result.activeFlows, 'new');
+  });
+});
+
+const RUNNER_FETCH_TARGETS = [
+  [`database/migrations/ordered/${LAST_MIGRATION}`, LAST_MIGRATION],
+  ['database/migrations/ordered/CHECKSUMS.json', 'CHECKSUMS.json'],
+  ['lib/osi-migrate/runner.js', 'runner.js'],
+];
+
+for (const [target, name] of RUNNER_FETCH_TARGETS) {
+  for (const fault of ['missing', 'truncated', 'empty', 'unwritten']) {
+    test(`a ${fault} download of ${name} stops the deploy before the migration`, () => {
+      withActivationRoot((root) => {
+        const result = runRunnerHarness(root, { HARNESS_FETCH_PATH: target, HARNESS_FETCH_FAULT: fault });
+        assert.notEqual(result.status, 0, harnessOutput(result));
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        assert.match(result.stderr, new RegExp(`ERROR: [^\\n]*${escaped}`), harnessOutput(result));
+        assert.doesNotMatch(result.stdout, /\[migrate\] applied/, harnessOutput(result));
+        assert.doesNotMatch(result.stdout, /--- Stop Node-RED for schema migration ---/);
+        assert.equal(dbHead(root), '67', 'nothing may be migrated');
+        assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+        assert.equal(result.activeFlows, 'prev');
+        assert.equal(result.newPayloadKept, false);
+        // The fetch runs before Node-RED is stopped for the migration: it was
+        // never stopped and identityd is restored.
+        assert.doesNotMatch(result.nodeRedLog, /stop/);
+        assert.equal(result.nodeRed, '1');
+        assert.equal(result.identityd, '1');
+        assert.deepEqual(result.liveLedger, oldPairHashes());
+      });
+    });
+  }
+}
+
+// --- Other steps of the schema phase that ran without set -e ------------------
+
+function assertSchemaPhaseStopped(result, message, { nodeRedStopped }) {
+  assert.notEqual(result.status, 0, harnessOutput(result));
+  assert.match(result.stderr, message, harnessOutput(result));
+  assert.doesNotMatch(result.stdout, /\[migrate\] applied/, harnessOutput(result));
+  assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+  assert.equal(result.activeFlows, 'prev');
+  assert.equal(result.newPayloadKept, false);
+  assert.equal(/stop/.test(result.nodeRedLog), nodeRedStopped, harnessOutput(result));
+  // Never stopped, or restarted on the previous payload: running either way.
+  assert.equal(result.nodeRed, '1');
+  assert.equal(result.identityd, '1');
+}
+
+test('a failed fetch of the reconciliation assets stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':', {
+      HARNESS_FOREIGN_ROW: '1',
+      HARNESS_FETCH_PATH: 'scripts/reconcile-ledger-numbering.js',
+    });
+    assert.match(result.stdout, /Foreign-numbered schema_migrations ledger detected/, harnessOutput(result));
+    assertSchemaPhaseStopped(result, /ERROR: could not fetch scripts\/reconcile-ledger-numbering\.js/, { nodeRedStopped: true });
+    assert.match(result.stderr, /ERROR: could not fetch the ledger numbering reconciliation assets/);
+    assert.doesNotMatch(result.stderr, /Cannot find module/, 'the reconciliation tool must not be started');
+  });
+});
+
+test('a migration backup directory that cannot be created stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, 'printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"');
+    assertSchemaPhaseStopped(result, /ERROR: could not create the migration backup directory/, { nodeRedStopped: false });
+  });
+});
+
+test('a failed ledger read in the reconciliation probe stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root,
+      'sqlite3() { case "$*" in *"version > 21"*) return 1 ;; esac; command sqlite3 "$@"; }');
+    assertSchemaPhaseStopped(result, /ERROR: could not read the schema_migrations ledger for the reconciliation probe/, { nodeRedStopped: true });
+  });
+});
+
+test('a failed comparison in the reconciliation probe stops the deploy at that step', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root,
+      'node() { case "$2" in *ledgerChecksum*) return 1 ;; esac; command node "$@"; }');
+    assertSchemaPhaseStopped(result, /ERROR: the reconciliation probe could not compare the ledger with CHECKSUMS\.json/, { nodeRedStopped: true });
+  });
+});
+
+// --- Fix round 1: decide the hold by loading the live pair ------------------
+
+test('a candidate pair that does not load is replaced by the kept previous files, and the previous payload restarts', () => {
+  withActivationRoot((root) => {
+    writeCandidateLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE);
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.equal(result.exitState, 'activated=0 flipped=0 committed=0', harnessOutput(result));
+    assert.match(result.stderr, /restored the state from before this activation from \S*\.osi-command-ledger-previous\.new, and it loads/, harnessOutput(result));
+    assert.equal(result.holdMarker, null);
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.deepEqual(result.liveLedger, restoredHashes());
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1', 'the previous payload must be restarted and confirmed');
+    assert.equal(result.identityd, '1');
+    assert.equal(result.nodeRedBoot, null);
+    assert.deepEqual(result.ledgerCopies, ['.osi-command-ledger-previous.new']);
+  });
+});
+
+test('a transient failure of the installer load check does not hold a gateway whose live pair loads', () => {
+  withActivationRoot((root) => {
+    writeTransientLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE);
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /injected transient load failure/, harnessOutput(result));
+    assert.match(result.stderr, /the live command-ledger files load in a fresh process/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.deepEqual(result.liveLedger, candidateHashes());
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1');
+    assert.equal(result.identityd, '1');
+    assert.equal(result.nodeRedBoot, null);
+  });
+});
+
+test('a re-run after a hold holds again while the live pair does not load, and a good run releases it', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const first = runActivationHarness(root, LIVE_LOAD_FAILURE);
+    assertHeldWithoutDisable(first);
+
+    // The fault persists, so it is present from the start of the re-run.
+    const second = runActivationHarness(root, LIVE_LOAD_FAILURE, {}, { rerun: true, preStage: LIVE_LOAD_FAILURE });
+    assert.notEqual(second.status, 0, harnessOutput(second));
+    assert.match(second.stderr, /WARNING: this gateway has been in a command-ledger hold since \S+ \(.+\); the live pair still does not load/, harnessOutput(second));
+    assert.doesNotMatch(second.stderr, /load in a fresh process/);
+    assert.equal(second.activeFlows, 'prev');
+    assert.equal(second.nodeRed, '0', 'a re-run must not restart the previous payload beside a ledger that does not load');
+    assertHeldWithoutDisable(second);
+
+    fs.rmSync(path.join(root, 'fail-live-ledger-load.js'));
+    fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'), '');
+    const third = runActivationHarness(root, ':', {}, { rerun: true });
+    assert.equal(third.status, 0, harnessOutput(third));
+    // The early check finds the restored pair loading and clears the hold
+    // before staging.
+    assert.match(third.stdout, /OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at/, harnessOutput(third));
+    assert.equal(third.exitState, 'activated=1 flipped=1 committed=0');
+    assert.equal(third.nodeRedBoot, null);
+    assert.equal(third.holdMarker, null);
+    assert.deepEqual(third.ledgerCopies, []);
+    assert.deepEqual(third.liveLedger, candidateHashes());
+  });
+});
+
+test('an unreadable live ledger file is reported as undetermined, not as a proven mix', () => {
+  withActivationRoot((root) => {
+    const nodeRedRoot = path.join(root, 'node-red');
+    writeOldPair(nodeRedRoot);
+    const before = [
+      `osi-command-ledger/package.json ${sha256(path.join(OLD_LEDGER_FIXTURE, 'package.json'))}`,
+      `osi-command-ledger/index.js ${sha256(path.join(OLD_LEDGER_FIXTURE, 'index.js'))}`,
+      'osi-watermark-binding/canonicalization.js absent',
+    ].join('\n');
+    const script = `set -eu
+NODE_RED_ROOT=${shellQuote(nodeRedRoot)}
+NODE_RED_INIT=:
+node_red_restart_needed=0
+identityd_deploy_state=restore_running
+${commandLedgerPins()}
+${['report_command_ledger_activation_failure', 'command_ledger_live_pair_loads', 'restore_command_ledger_copy',
+  'release_command_ledger_boot_hold', 'hold_for_unloadable_command_ledger', 'clear_command_ledger_hold',
+  'command_ledger_none_live'].map(optionalShellFunction).join('\n')}
+# The producer reads package.json, then fails on index.js (EACCES, EIO).
+command_ledger_live_hashes() {
+    printf 'osi-command-ledger/package.json %s\\n' "$COMMAND_LEDGER_PACKAGE_SHA256"
+    return 1
+}
+report_command_ledger_activation_failure ${shellQuote(before)} ${shellQuote(path.join(nodeRedRoot, '.osi-command-ledger-previous.none'))} || true
+`;
+    const result = spawnSync('sh', ['-c', script], { encoding: 'utf8', timeout: 60000 });
+    assert.equal(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /could not determine which command-ledger files are in place/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /proved loadable/, harnessOutput(result));
+  });
+});
+
+for (const [label, inject] of [
+  ['database', 'ls() { case "$*" in *farming.db) return 2 ;; esac; command ls "$@"; }'],
+  ['WAL', 'printf x > "$DB_PATH-wal"; ls() { case "$*" in *farming.db-wal) return 2 ;; esac; command ls "$@"; }'],
+]) {
+  test(`an unreadable ${label} size fails the disk preflight instead of reading as zero`, () => {
+    withActivationRoot((root) => {
+      const result = runActivationHarness(root, inject);
+      assert.notEqual(result.status, 0, harnessOutput(result));
+      assert.match(result.stderr, /ERROR: could not read the size of \S*farming\.db\S* for the disk preflight/, harnessOutput(result));
+      assert.doesNotMatch(result.stdout, /\[migrate\] applied/);
+      assert.doesNotMatch(result.nodeRedLog, /stop/, 'the disk preflight runs before Node-RED is stopped');
+      assert.equal(result.activeFlows, 'prev');
+      assert.equal(result.nodeRed, '1');
+    });
+  });
+}
+
+// --- Fix round 2: stop-only hold, marker checked by every deploy -------------
+
+test('a gateway without a command ledger whose installer fails is left as it was, without a hold', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, 'printf "%s\\n" "process.exit(1);" > "$COMMAND_LEDGER_INSTALLER"', {}, { noLedger: true });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /no command-ledger files are in place, as before this activation/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.equal(result.holdMarker, null);
+    assert.equal(result.activeFlows, 'prev');
+    assert.equal(result.nodeRed, '1', 'the previous payload, which ran without a ledger, must be restarted');
+    assert.equal(result.identityd, '1');
+    assert.equal(result.nodeRedBoot, null);
+    assert.deepEqual(Object.values(result.liveLedger), [null, null, null]);
+  });
+});
+
+test('a gateway without a command ledger gets its absence back when the activated pair does not load', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root, LIVE_LOAD_FAILURE, {}, { noLedger: true });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /no command-ledger files are in place, as before this activation/, harnessOutput(result));
+    assert.doesNotMatch(result.stderr, /held stopped/);
+    assert.equal(result.holdMarker, null);
+    assert.deepEqual(Object.values(result.liveLedger), [null, null, null], 'the candidate files must be moved out of the live tree');
+    assert.ok(fs.existsSync(path.join(root, 'node-red', '.osi-command-ledger-previous.new', 'failed', 'osi-command-ledger', 'index.js')),
+      'the moved candidate files are kept beside the copy');
+    assert.equal(result.nodeRed, '1');
+    assert.equal(result.nodeRedBoot, null);
+  });
+});
+
+test('a deploy that fails before activation reports and clears an earlier hold once the pair loads', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    assertHeldWithoutDisable(runActivationHarness(root, LIVE_LOAD_FAILURE));
+    fs.writeFileSync(path.join(root, 'fail-live-ledger-load.js'), '');
+    const later = runActivationHarness(root, 'printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"', {}, { rerun: true });
+    assert.notEqual(later.status, 0, harnessOutput(later));
+    assert.match(later.stdout, /OK: the live command-ledger pair loads again; cleared the command-ledger hold recorded at \d{4}-/, harnessOutput(later));
+    assert.match(later.stderr, /could not create the migration backup directory/);
+    assert.equal(later.holdMarker, null);
+    assert.equal(later.nodeRedBoot, null);
+  });
+});
+
+test('a deploy that fails before activation reports a hold that still applies', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    assertHeldWithoutDisable(runActivationHarness(root, LIVE_LOAD_FAILURE));
+    const later = runActivationHarness(root, `${LIVE_LOAD_FAILURE}; printf x > "$TMP_DIR/blocker"; MIGRATE_BACKUP_DIR="$TMP_DIR/blocker/backups"`, {},
+      { rerun: true, preStage: LIVE_LOAD_FAILURE });
+    assert.notEqual(later.status, 0, harnessOutput(later));
+    assert.match(later.stderr, /WARNING: this gateway has been in a command-ledger hold since \S+ \(.+\); the live pair still does not load; the deploy continues/, harnessOutput(later));
+    assert.match(later.holdMarker || '', /^reason=/m, 'the marker stays until a pair loads');
+  });
+});
+
+test('the copy of the previous ledger files is taken at staging, before anything is stopped', () => {
+  withActivationRoot((root) => {
+    const result = runActivationHarness(root, ':', {}, {
+      preStage: 'cp() { case "$*" in *.osi-command-ledger-previous*) return 1 ;; esac; command cp "$@"; }',
+    });
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /could not copy the live command-ledger files to \S*\.osi-command-ledger-previous\.new/, harnessOutput(result));
+    assert.doesNotMatch(result.stdout, /Stop Node-RED for schema migration/);
+    assert.doesNotMatch(result.nodeRedLog, /stop/);
+    assert.deepEqual(result.ledgerCopies, [], 'a partial copy is removed');
+    assert.equal(result.activeFlows, 'prev');
+    assert.deepEqual(result.liveLedger, oldPairHashes());
+  });
+});
+
+test('a failed restore leaves no temporary file beside the live ledger', () => {
+  withActivationRoot((root) => {
+    writeLiveLoadFailure(root);
+    const result = runActivationHarness(root,
+      `${LIVE_LOAD_FAILURE}; mv() { case "$*" in *.osi-restore*) return 1 ;; esac; command mv "$@"; }`);
+    assert.notEqual(result.status, 0, harnessOutput(result));
+    assert.match(result.stderr, /restoring the state from before this activation from \S* failed/, harnessOutput(result));
+    assert.deepEqual(result.restoreLeftovers, []);
+    assertHeldWithoutDisable(result);
+  });
+});
+
+test('deploy.sh checks for a command-ledger hold before its first fetch and never disables a service at boot', () => {
+  const check = DEPLOY.indexOf('\ncheck_command_ledger_hold\n');
+  const firstFetch = DEPLOY.indexOf('\nrun_communication_preflight\n');
+  assert.ok(check > 0 && check < firstFetch, 'check_command_ledger_hold must run before run_communication_preflight');
+  assert.doesNotMatch(DEPLOY, /node-red"?\s+disable|NODE_RED_INIT"?\s+disable/, 'deploy.sh must not disable Node-RED at boot');
+  assert.doesNotMatch(DEPLOY, /\$NODE_RED_INIT"? enable/, 'with nothing disabled there is nothing to re-enable');
 });
