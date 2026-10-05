@@ -106,8 +106,11 @@ function describeConflict(details: ValvePlanError[], t: Translate): string {
   return t('scheduleDialog.conflictInvalidStart');
 }
 
+// The gateway returns push rows newest first in ledger insertion order (store.weekdayPushStates,
+// ORDER BY rowid DESC). queuedAt is the gateway's wall clock and can step backwards, so it must
+// not be used to re-sort: the first row is the newest.
 function latestPush(rows: ValveWeekdayPush[]): ValveWeekdayPush | null {
-  return rows.slice().sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0] ?? null;
+  return rows[0] ?? null;
 }
 
 function pushBadgeLabel(row: ValveWeekdayPush | null, timeZone: string, t: Translate, language: string | undefined): string | null {

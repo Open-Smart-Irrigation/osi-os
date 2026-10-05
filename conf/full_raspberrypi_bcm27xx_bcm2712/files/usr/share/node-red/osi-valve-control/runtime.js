@@ -101,9 +101,9 @@ async function buildRuntimePayload(db, deviceEui, now) {
     // unbounded -- supersedeQueued only ever touches state='QUEUED' rows, so an already-ACKED row
     // is never superseded by a later re-edit of the same weekday and both rows survive the
     // state IN ('QUEUED','ACKED','FAILED') filter forever. Collapse to one entry per weekday here,
-    // the same first-wins-in-queued_at-DESC-order collapse store.pushSummary()'s own
-    // latestStateBySlot already applies for its aggregate counts -- rows arrive pre-sorted
-    // `ORDER BY queued_at DESC`, so the first row seen per weekday is the newest.
+    // the same first-wins collapse store.pushSummary()'s own latestStateBySlot already applies
+    // for its aggregate counts -- rows arrive pre-sorted newest (last inserted) first, `ORDER BY
+    // rowid DESC`, so the first row seen per weekday is the newest.
     const rows = await store.weekdayPushStates(db, eui);
     const latestByWeekday = new Map();
     for (const r of rows) {
