@@ -1324,6 +1324,115 @@ test('F7: analysis views remain per-user while selectors are account-wide', asyn
   }
 });
 
+function seedExportRows(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('A840410000000011', 'Zone one sensor', 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01'),
+      ('A840410000000012', 'Zone two sensor', 'KIWI_SENSOR', 1, 2, '2026-01-01', '2026-01-01');
+    INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+      ('A840410000000011', '2026-01-02T08:00:00.000Z', 20),
+      ('A840410000000012', '2026-01-02T09:00:00.000Z', 40);
+  `);
+}
+
+function allZonesExportRequest(userId, username) {
+  const msg = historyRequest(userId, username, 'GET', '/api/history/export.csv');
+  msg.req.query = { scope: 'allZones', from: '2026-01-02', to: '2026-01-02', granularity: 'raw' };
+  return msg;
+}
+
+test('F4: the all-zones history export is account-wide for every enabled role', async () => {
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    seedExportRows(db);
+    try {
+      const response = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: allZonesExportRequest(userId, username),
+        env: ENV,
+        db,
+      });
+      assert.equal(response.result && response.result.statusCode, 200, username);
+      assert.match(response.result.payload, /Z One/, username);
+      assert.match(response.result.payload, /Z Two/, username);
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
+});
+
+test('P1: the all-zones history export refuses a disabled account', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedExportRows(db);
+  db.prepare("UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'").run();
+  try {
+    const response = await executeFunction(loadNode('portable-history-api-fn'), {
+      msg: allZonesExportRequest(3, 'view1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 403);
+    assert.doesNotMatch(JSON.stringify(response.result.payload), /Z One|Z Two/);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F4: flag-off all-zones history export stays owner-only', async () => {
+  const db = seedScopedDb();
+  seedExportRows(db);
+  try {
+    const response = await executeFunction(loadNode('portable-history-api-fn'), {
+      msg: allZonesExportRequest(2, 'res1'),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 200);
+    assert.match(response.result.payload, /Z One/);
+    assert.doesNotMatch(response.result.payload, /Z Two/);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis view deletion cannot cross user ownership', async () => {
+  for (const env of [ENV, { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' }]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    db.exec(`
+      INSERT INTO analysis_views(id, user_id, owner_user_uuid, name, view_json) VALUES
+        (1, 2, 'u-res1', 'Researcher view', '{"schemaVersion":1,"selectors":[]}'),
+        (2, 3, 'u-view1', 'Viewer view', '{"schemaVersion":1,"selectors":[]}');
+    `);
+    try {
+      const foreign = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/1', { id: '1' }),
+        env,
+        db,
+      });
+      assert.equal(foreign.result && foreign.result.statusCode, 404);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 1').get().count, 1);
+
+      scopeHelper._resetForTests();
+      const own = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/2', { id: '2' }),
+        env,
+        db,
+      });
+      assert.equal(own.result && own.result.statusCode, 204);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 2').get().count, 0);
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
+});
+
 test('F7: recent actuations are account-wide, not owned-plus-granted only', async () => {
   scopeHelper._resetForTests();
   const db = seedScopedDb();

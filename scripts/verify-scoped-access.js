@@ -62,7 +62,8 @@
 //     them: valve schedules, plans and actuation expectations; device
 //     calibrations (watermark, chameleon); zone configuration, calibration,
 //     seasons and recommendations; other users' grants and custom terms;
-//     history workspaces and preferences; analysis views; devices of types
+//     history workspaces and preferences; analysis views (only the view
+//     delete route seeds an admin's view and points :id at it); devices of types
 //     other than the three seeded (LSN50, STREGA valve, S2120 weather station).
 //     An inserted row that carries a foreign id is still seen;
 //   - foreign links the markers do not read: numeric foreign keys other than
@@ -224,6 +225,9 @@ const FILTERING_ENTRIES = new Map([
 
 const ALLOWLIST = new Set([...PUBLIC_ALLOWLIST, ...PHASE_C_PENDING, ...KNOWN_GAPS.keys()]);
 
+// The admin's saved analysis view in the analysis-views-delete-http fixture;
+// the outcome rule points :id at it.
+const FOREIGN_ANALYSIS_VIEW_ID = '2';
 const probeDeviceType = (type) => "UPDATE devices SET type_id = '" + type + "' WHERE deveui = '" + PROBE_DEVEUI + "';";
 const PROBE_GRANT_UUID = '00000000-0000-4000-8000-00000000c001';
 const PROBE_ZONE2_UUID = '00000000-0000-4000-8000-00000000c003';
@@ -386,6 +390,16 @@ const REQUEST_FIXTURES = {
     }],
   },
   'analysis-views-post-http': { body: { view: { name: 'Probe view' } } },
+  // The caller's own saved view (id 1, the default :id) beside one of the
+  // admin's, so a delete that ignored the owner filter would show.
+  'analysis-views-delete-http': {
+    setupSql: 'INSERT INTO analysis_views (id, user_id, owner_user_uuid, name, view_json) VALUES ' +
+      "(1, 2, '" + PROBE_CALLER_UUID + "', 'Probe view', '{}'), (" + FOREIGN_ANALYSIS_VIEW_ID + ", 1, '" +
+      PROBE_ADMIN_UUID + "', 'Foreign view', '{}');",
+  },
+  'history-all-zones-export-csv-http': {
+    query: { scope: 'allZones', from: '2026-01-01', to: '2026-01-01', granularity: 'daily' },
+  },
   'sdi12-identify-http': { setupSql: probeDeviceType('DRAGINO_SDI12') },
   'network-api-http-7': { actor: 'admin', body: { latitude: 46.5, longitude: 7.5 } },
   'put-chameleon-enabled-http': { body: { enabled: true } },
@@ -539,6 +553,14 @@ const WRITE_TARGETS = new Map([
     { object: 'own', reason: 'custom terms are read and written through owner filters' },
   ],
   [
+    'analysis-views-delete-http',
+    {
+      object: 'own',
+      reason: 'the :id is a saved analysis view; the delete is filtered by the caller\'s user id, so only ' +
+        'the caller\'s own view can go',
+    },
+  ],
+  [
     'journal-plot-group-put-http',
     {
       object: 'own',
@@ -553,6 +575,10 @@ const NO_WRITE_ROLE_NEEDED = new Map([
   [
     'analysis-views-post-http',
     'saves the caller\'s own analysis view, filtered by owner; no farm data changes',
+  ],
+  [
+    'analysis-views-delete-http',
+    'deletes the caller\'s own analysis view, filtered by owner; no farm data changes',
   ],
   [
     'improvement-requests-post-http',
@@ -829,6 +855,7 @@ function foreignParams(entry) {
   if (/^\/api\/journal\/plot-groups\/:uuid\b/.test(url)) variants.push({ uuid: FOREIGN_GROUP_UUID });
   if (/^\/api\/journal\/entries\/:uuid\b/.test(url)) variants.push({ uuid: FOREIGN_ENTRY_UUID });
   if (/^\/api\/users\/:uuid\b/.test(url)) variants.push({ uuid: PROBE_ADMIN_UUID });
+  if (/^\/api\/analysis\/views\/:id\b/.test(url)) variants.push({ id: FOREIGN_ANALYSIS_VIEW_ID });
   return variants;
 }
 
