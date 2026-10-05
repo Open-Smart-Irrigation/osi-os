@@ -116,12 +116,14 @@ binding to match, and a reused key with different intent is a conflict.
 ## Expiry of valve commands
 
 The cloud gives every command that can move a valve a short `expires_at`
-(five minutes): `VALVE_COMMAND`, `OPEN_FOR_DURATION`,
-`UC512_OPEN_FOR_DURATION`, `CLOSE`, `CANCEL_VALVE_ACTUATION`,
+(five minutes) and stops handing such a command out once that instant has
+passed. For the commands that can start or extend water flow
+(`VALVE_COMMAND`, `OPEN_FOR_DURATION`, `UC512_OPEN_FOR_DURATION`,
 `SET_STREGA_TIMED_ACTION`, `SET_STREGA_PARTIAL_OPENING` and
-`SET_STREGA_FLUSHING`. The cloud stops handing such a command out once that
-instant has passed, and the edge ledger checks the same instant before
-dispatch:
+`SET_STREGA_FLUSHING`) the edge ledger checks the same instant before
+dispatch. The stop commands `CLOSE` and `CANCEL_VALVE_ACTUATION` are never
+refused on their expiry: a gateway clock that runs ahead must not leave a
+valve open. For the checked commands:
 
 - Exact `command_id` replay is checked first, so a command that already ran
   keeps its stored answer.

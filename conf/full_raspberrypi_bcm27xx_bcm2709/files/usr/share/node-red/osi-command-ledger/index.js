@@ -436,19 +436,24 @@ async function validEffectBinding(envelope, opts) {
   return validNonJournalEffectBinding(envelope, opts);
 }
 
-// Commands that can move a valve. The cloud gives each of them a short
-// expires_at (five minutes) and stops handing them out once it has passed
-// (osi-server CommandService: PHYSICAL_ACTION_EFFECTS plus VALVE_ACTUATIONS).
-// The edge enforces the same instant before dispatch, so a command that
-// reaches it late is answered EXPIRED and never moves the valve.
+// Commands that can start or extend water flow. The cloud gives each of them
+// a short expires_at (five minutes) and stops handing them out once it has
+// passed (osi-server CommandService: PHYSICAL_ACTION_EFFECTS plus
+// VALVE_ACTUATIONS). The edge enforces the same instant before dispatch, so a
+// command that reaches it late is answered EXPIRED and never opens a valve.
+//
+// The cloud gives the two stop commands, CLOSE and CANCEL_VALVE_ACTUATION,
+// the same expiry, but they are deliberately absent here: their only effect
+// is to end or prevent an actuation. Refusing one on a gateway clock that runs
+// ahead would leave a valve open, so they are dispatched whatever their expiry
+// says, exactly as before this fence existed. With the same skew an open is
+// refused, which fails safe.
 const VALVE_EXPIRY_COMMANDS = new Set([
   'SET_STREGA_TIMED_ACTION',
   'SET_STREGA_PARTIAL_OPENING',
   'SET_STREGA_FLUSHING',
   'OPEN_FOR_DURATION',
   'UC512_OPEN_FOR_DURATION',
-  'CANCEL_VALVE_ACTUATION',
-  'CLOSE',
   'VALVE_COMMAND',
 ]);
 

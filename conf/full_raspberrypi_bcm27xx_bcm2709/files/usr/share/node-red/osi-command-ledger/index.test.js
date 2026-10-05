@@ -1563,11 +1563,10 @@ test('expiry fence answers an elapsed VALVE_COMMAND EXPIRED before dispatch and 
   );
 });
 
-test('expiry fence covers every command type the cloud gives a valve expiry', async () => {
+test('expiry fence covers every command type that can start or extend water flow', async () => {
   const types = [
-    'VALVE_COMMAND', 'OPEN_FOR_DURATION', 'UC512_OPEN_FOR_DURATION', 'CLOSE',
-    'CANCEL_VALVE_ACTUATION', 'SET_STREGA_TIMED_ACTION', 'SET_STREGA_PARTIAL_OPENING',
-    'SET_STREGA_FLUSHING',
+    'VALVE_COMMAND', 'OPEN_FOR_DURATION', 'UC512_OPEN_FOR_DURATION',
+    'SET_STREGA_TIMED_ACTION', 'SET_STREGA_PARTIAL_OPENING', 'SET_STREGA_FLUSHING',
   ];
   let commandId = 820;
   for (const type of types) {
@@ -1674,4 +1673,39 @@ test('expiry fence rolls back the ledger row when the ACK cannot be queued', asy
   );
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
+});
+
+// A command whose only effect is to stop water must never be refused by the
+// fence: with a gateway clock that runs ahead, an EXPIRED answer would leave a
+// valve open. The cloud gives CLOSE and CANCEL_VALVE_ACTUATION the same
+// five-minute expiry; the edge dispatches them whatever it says. Opens keep
+// the fence, so the same skew only ever fails safe.
+test('a stop command is dispatched and acknowledged with the gateway clock 10 minutes ahead', async () => {
+  const cloudNow = '2026-07-29T10:00:00.000Z';
+  const cloudExpiry = '2026-07-29T10:05:00.000Z';
+  const skewedEdgeNow = '2026-07-29T10:10:00.000Z';
+  let commandId = 890;
+  for (const type of ['CLOSE', 'CANCEL_VALVE_ACTUATION']) {
+    for (const expiresAt of [cloudExpiry, 'not-an-instant']) {
+      const db = new TestDb();
+      commandId += 1;
+      const result = await ledger.deduplicatePendingCommand(
+        db, valveEnvelope(commandId, type, expiresAt), fenceRuntime(skewedEdgeNow));
+      assert.deepEqual(result, { handled: false }, type + ' with expires_at ' + expiresAt + ' must reach dispatch');
+      assert.equal((await db.get('SELECT COUNT(*) AS n FROM applied_commands')).n, 0);
+      const acked = await ledger.queueCommandAck(db, {
+        commandId, commandType: type, deviceEui: FENCE_VALVE_EUI, result: 'APPLIED',
+        timestamp: cloudNow,
+      }, { gateway_device_eui: FENCE_GATEWAY_EUI });
+      assert.equal(acked.status, 'ACKED', type + ' is acknowledged as applied');
+      const queued = JSON.parse((await db.get(
+        'SELECT payload_json FROM command_ack_outbox WHERE command_id=?', [String(commandId)])).payload_json);
+      assert.equal(queued.result, 'APPLIED');
+    }
+  }
+  const db = new TestDb();
+  const open = await ledger.deduplicatePendingCommand(
+    db, valveEnvelope(899, 'OPEN_FOR_DURATION', cloudExpiry), fenceRuntime(skewedEdgeNow));
+  assert.equal(open.handled, true, 'the same skew still refuses an open');
+  assert.equal(open.ack.result, 'EXPIRED');
 });
