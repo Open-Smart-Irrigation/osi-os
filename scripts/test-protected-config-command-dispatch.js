@@ -174,6 +174,18 @@ const protectedChainProbe = spawnSync(process.execPath, ['-e', `
     assert.deepEqual(sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device), calibrationBefore);
     assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?').get('9131').n, 0);
     assert.equal(sharedRaw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('9131').n, 0);
+    // A first admin or backfilled user carries a 32-hex users.user_uuid. The
+    // flow hands it to the helper unchanged and the exact lookup finds it.
+    const hexAdmin = '0123456789abcdef0123456789abcdef';
+    sharedRaw.prepare('INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role) VALUES(?,?,?,?,?,?,?)').run(2, 'hex-admin', 'hash', now, now, hexAdmin, 'admin');
+    const hexValues = Object.assign({}, calibration, { pullup_1_ohm: 41673 });
+    const hexApplied = await invoke(makeEnvelope(9140, 'SET_WATERMARK_CALIBRATION', { actor_user_uuid: hexAdmin, base_sync_version: 1, effect_key: 'watermark_calibration:set:' + gateway + ':' + device + ':1', values: hexValues }));
+    assert.equal(hexApplied.result, 'APPLIED', JSON.stringify(hexApplied));
+    assert.equal(sharedRaw.prepare('SELECT actor_user_uuid FROM applied_commands WHERE command_id=?').get('9140').actor_user_uuid, hexAdmin);
+    assert.deepEqual({ ...sharedRaw.prepare('SELECT sync_version,pullup_1_ohm FROM watermark_calibrations WHERE deveui=?').get(device) }, { sync_version: 2, pullup_1_ohm: 41673 });
+    const hexUnknown = await invoke(makeEnvelope(9141, 'SET_WATERMARK_CALIBRATION', { actor_user_uuid: 'fedcba9876543210fedcba9876543210', base_sync_version: 2, effect_key: 'watermark_calibration:set:' + gateway + ':' + device + ':2' }));
+    assert.equal(hexUnknown.result, 'REJECTED_PERMANENT');
+    assert.equal(hexUnknown.reason, 'actor_missing_or_disabled');
     console.log('STATEFUL_PROTECTED_MATRIX_OK');
   })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
 `], { cwd: ROOT, encoding: 'utf8', timeout: 180000 });

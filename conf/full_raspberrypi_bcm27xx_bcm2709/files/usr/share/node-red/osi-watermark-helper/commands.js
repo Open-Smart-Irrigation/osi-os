@@ -15,6 +15,9 @@ const COMMAND_TYPES = [
 ];
 const EUI = /^[0-9A-F]{16}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// users.user_uuid as stored: the hyphenated form, or 32 lower-case hex digits
+// (first admin and backfilled users). Matched exactly, never rewritten.
+const LOCAL_USER_UUID = /^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TYPES = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
 const CAL_TYPES = new Set(['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG']);
 
@@ -45,7 +48,7 @@ function validateIdentity(type, payload, runtime) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw error('malformed_command', 'payload must be an object');
   if (str(payload.command_type) !== type) throw error('malformed_command', 'command_type does not match the envelope');
   if (!UUID.test(str(payload.command_id))) throw error('malformed_command', 'command_id must be a canonical UUID');
-  if (!UUID.test(str(payload.actor_user_uuid))) throw error('malformed_command', 'actor_user_uuid must be a canonical UUID');
+  if (!LOCAL_USER_UUID.test(str(payload.actor_user_uuid))) throw error('malformed_command', 'actor_user_uuid must be a gateway-local user UUID');
   const gateway = str(payload.gateway_device_eui);
   const device = str(payload.device_eui);
   const trusted = upperEui(runtime && runtime.gateway_device_eui);
@@ -65,7 +68,7 @@ function validateIdentity(type, payload, runtime) {
   if (payload.operation !== expectedOperation) throw error('binding_mismatch', 'operation does not match command type', 'CONFLICT');
   const effect = str(payload.effect_key || payload.effectKey || '');
   if (effect !== expectedEffect(type, gateway, device, payload.base_sync_version)) throw error('binding_mismatch', 'effect_key does not match exact base', 'CONFLICT');
-  return { gateway, device, actorUuid: canonicalUuid(payload.actor_user_uuid), base: payload.base_sync_version };
+  return { gateway, device, actorUuid: str(payload.actor_user_uuid), base: payload.base_sync_version };
 }
 
 async function authorizeDevice(tx, identity, type, runtime) {
