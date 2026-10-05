@@ -3,6 +3,7 @@ import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import {useDismissOnPointerDown} from '../../../hooks/useDismissOnPointerDown';
 import { devicesAPI, valvesAPI } from '../../../services/api';
+import { useSessionFence } from '../../../contexts/AuthSessionDataBoundary';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
 import { ValveTile } from './ValveTile';
@@ -72,6 +73,7 @@ const valvesFetcher = () => valvesAPI.list();
 
 export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite, batteryByEui }) => {
   const { t } = useTranslation('valves');
+  const sessionFence = useSessionFence();
   const { t: tc } = useTranslation('common');
 
   const { data: valves, error, mutate } = useSWR<ValveSummary[]>('/api/valves', valvesFetcher, {
@@ -134,6 +136,8 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     // duration" preference is not worth surfacing as an open failure (which would keep the
     // dialog open and imply the valve didn't actually open).
     try {
+      // #378: a second write after an await; skip it if the session ended.
+      sessionFence();
       await valvesAPI.updateSettings(selectedValve.deviceEui, { defaultOpenMinutes: minutes });
     } catch (err) {
       console.warn('Failed to save the default open-minutes preference', err);

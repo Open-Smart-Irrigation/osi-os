@@ -21,7 +21,8 @@ export const Login: React.FC = () => {
 
     try {
       await login({ username, password });
-      navigate('/dashboard');
+      // Replace: Back must not return to the sign-in form of a finished login.
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.message || t('login.failed'));
     } finally {

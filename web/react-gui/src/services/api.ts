@@ -1,5 +1,12 @@
-import axios from 'axios';
-import { notifyAuthExpired } from './authEvents';
+import axios, { type GenericAbortSignal, type InternalAxiosRequestConfig } from 'axios';
+import {
+  StaleSessionRequestError,
+  currentSessionSignal,
+  expireAuthSession,
+  getAuthSession,
+  isCurrentAuthSession,
+  type AuthSessionSnapshot,
+} from './authSession';
 import type {
   AnalysisCatalogResponse,
   AnalysisSeriesRequest,
@@ -158,47 +165,109 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to attach Authorization token
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * The session a request belongs to (#378). Set it on work that is queued
+     * or sent later (services/authSession.ts SessionBoundRequest); the request
+     * interceptor records the current session on every other request.
+     */
+    authSession?: AuthSessionSnapshot;
+    /**
+     * A credential request (login, register): it is sent without the
+     * session's token, and its 401 is a credential error, not the end of a
+     * session, so a wrong password neither signs out the current session nor
+     * remounts the login page.
+     */
+    skipAuthExpiry?: boolean;
+  }
+}
+
+const rejectStaleSessionRequest = (): Promise<never> =>
+  Promise.reject(new StaleSessionRequestError());
+
+function abortWithSession(own: GenericAbortSignal | undefined, session: AbortSignal): GenericAbortSignal {
+  if (!own) return session;
+  if (typeof AbortSignal.any === 'function' && own instanceof AbortSignal) {
+    return AbortSignal.any([own, session]);
+  }
+  // Fallback without AbortSignal.any: the first abort removes both listeners.
+  const either = new AbortController();
+  if (own.aborted || session.aborted) {
+    either.abort();
+    return either.signal;
+  }
+  const abort = () => {
+    own.removeEventListener?.('abort', abort);
+    session.removeEventListener('abort', abort);
+    either.abort();
+  };
+  own.addEventListener?.('abort', abort);
+  session.addEventListener('abort', abort);
+  return either.signal;
+}
+
+// Binds each request to its session at creation. Synchronous so the session
+// is read when the caller creates the request, not a microtask later; a
+// synchronous interceptor that throws would still dispatch, so a stale
+// request is refused by replacing its adapter instead. Every request also
+// carries the epoch's abort signal: ending the session cancels it.
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      if (!config.headers) {
-        config.headers = {} as any;
-      }
-      config.headers['Authorization'] = `Bearer ${token}`;
+  (config: InternalAxiosRequestConfig) => {
+    const captured = config.authSession;
+    if (captured && !isCurrentAuthSession(captured)) {
+      config.adapter = rejectStaleSessionRequest;
+      return config;
+    }
+    if (config.skipAuthExpiry) {
+      // A credential request (login, register) belongs to no session: it
+      // carries no session's token, and a session ending while it is in
+      // flight does not cancel it (the login operation fence decides
+      // whether its result may commit).
+      config.authSession = undefined;
+      return config;
+    }
+    config.signal = abortWithSession(config.signal, currentSessionSignal());
+    const session = captured ?? getAuthSession();
+    const bearer = session.token ? `Bearer ${session.token}` : null;
+    const explicit = config.headers.get('Authorization');
+    if (explicit) {
+      // Never replace an Authorization the caller set. Only a header that is
+      // this session's own token lets a 401 end the session.
+      config.authSession = explicit === bearer ? session : undefined;
+    } else {
+      config.authSession = session;
+      if (bearer) config.headers.set('Authorization', bearer);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  undefined,
+  { synchronous: true },
 );
 
-// Response interceptor to handle auth errors
+// A 401 ends the session only when it answers a request sent with the
+// current session's token, and never for the credential endpoints.
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('username');
-      notifyAuthExpired();
+    if (error?.response?.status === 401 && !error.config?.skipAuthExpiry) {
+      expireAuthSession(error.config?.authSession);
     }
     return Promise.reject(error);
-  }
+  },
 );
+
+const CREDENTIAL_REQUEST = { skipAuthExpiry: true } as const;
 
 // Auth API
 export const authAPI = {
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
-    const response = await api.post<LoginResponse>('/auth/login', credentials);
+    const response = await api.post<LoginResponse>('/auth/login', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 
   register: async (credentials: RegisterRequest): Promise<RegisterResponse> => {
-    const response = await api.post<RegisterResponse>('/auth/register', credentials);
+    const response = await api.post<RegisterResponse>('/auth/register', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 };

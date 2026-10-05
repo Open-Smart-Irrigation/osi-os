@@ -1,5 +1,5 @@
 import axios, {AxiosError} from 'axios';
-import {mutate} from 'swr';
+import {requestDemoRevalidation} from './revalidation';
 import {Simulator, DemoError} from './model';
 import {CHANNEL, isHostCommand} from './protocol';
 import i18n from './i18n';
@@ -102,7 +102,7 @@ function tick() {
   const current = performance.now();
   sim.active = hostActive && !document.hidden;
   const changed = sim.advance(current - last); last = current;
-  if (changed) void Promise.all(['/api/devices', '/api/valves', '/api/irrigation/recent-actuations'].map(key => mutate(key)));
+  if (changed) requestDemoRevalidation(['/api/devices', '/api/valves', '/api/irrigation/recent-actuations']);
 }
 const timer = window.setInterval(tick, 100);
 document.addEventListener('visibilitychange', () => {last = performance.now();});

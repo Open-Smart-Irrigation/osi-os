@@ -7,7 +7,6 @@ import type {
   SupportRequest,
   SupportRequestArea,
   SupportRequestCloudStatus,
-  SupportRequestCreateResponse,
   SupportRequestCreateRequest,
   SupportRequestLocalStatus,
   SupportRequestSeverity,
@@ -93,17 +92,6 @@ function hasKnownStatus(code: string): code is SupportRequestCloudStatus | Suppo
 
 function sortDiagnosticsEntries(value: Record<string, SupportDiagnosticsValue>) {
   return Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
-}
-
-function storeStatusSecret(response: SupportRequestCreateResponse) {
-  const statusSecret = typeof response.status_secret === 'string' ? response.status_secret.trim() : '';
-  if (!statusSecret) return;
-
-  try {
-    localStorage.setItem(`osi.support.statusSecret.${response.request_id}`, statusSecret);
-  } catch {
-    // localStorage may be disabled or quota-limited; the request itself is still saved locally.
-  }
 }
 
 const DiagnosticsValue: React.FC<{ value: SupportDiagnosticsValue; depth?: number }> = ({ value, depth = 0 }) => {
@@ -249,8 +237,10 @@ export const SupportRequests: React.FC = () => {
     setSubmitError('');
     setSubmitNotice('');
     try {
-      const response = await supportRequestsAPI.create(payload);
-      storeStatusSecret(response);
+      // The response's status_secret is a bearer credential for this
+      // request's cloud status. Nothing reads it, so it is not kept: a
+      // stored copy outlived the session and reached the next account (#378).
+      await supportRequestsAPI.create(payload);
       setSubmitNotice(t('status.QUEUED'));
       resetForm();
       setRequestsLoading(true);

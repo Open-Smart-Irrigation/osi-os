@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { refreshDraftsQueue } from '../../../journal/useDraftsQueue';
+import { useRefreshDraftsQueue } from '../../../journal/useDraftsQueue';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
 import type { JournalPlotGroupResourceActions } from '../../../journal/useJournalPlotGroups';
 import type { JournalPlotResourceActions } from '../../../journal/useJournalPlots';
@@ -259,6 +259,7 @@ export function JournalWorkspace({
   // A page 2+ view isn't invalidated by this; a known, accepted gap, the same
   // shape as the scopeNotNarrowed gap documented above.
   const { retry: retryEntries } = useJournalEntries({ ...entryListFilters, limit: PAGE_SIZE }, true);
+  const refreshDraftsQueue = useRefreshDraftsQueue();
 
   useEffect(() => {
     if (wasCaptureOpenRef.current && !captureOpen) {
@@ -296,7 +297,7 @@ export function JournalWorkspace({
     void retryEntries();
     void refreshDraftsQueue();
     void plotState.revalidate();
-  }, [plotState, retryEntries]);
+  }, [plotState, refreshDraftsQueue, retryEntries]);
 
   // Also revalidates the drafts queue: finalizing turns a draft final, which
   // must make it disappear from "Needs completion" just as promptly as a new
@@ -310,7 +311,7 @@ export function JournalWorkspace({
     setCaptureOpen(false);
     const entryUuid = savedEntryUuid(receipt);
     if (entryUuid) setSelectedEntryUuid(entryUuid);
-  }, [plotState, retryEntries]);
+  }, [plotState, refreshDraftsQueue, retryEntries]);
 
   const handleCaptureOpenExisting = useCallback((entryUuid: string) => {
     setCaptureOpen(false);
