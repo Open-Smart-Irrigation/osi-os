@@ -1,6 +1,51 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// node:sqlite-backed stand-in for the native `sqlite3` addon (#392): lets this
+// test run where the addon is not built. Scoped via Module._load to
+// osi-db-helper's own require('sqlite3') only.
+const Module = require('node:module');
+const { DatabaseSync } = require('node:sqlite');
+function sqlite3Adapter() {
+  class Database {
+    constructor(filename, mode, callback) {
+      if (typeof mode === 'function') { callback = mode; mode = undefined; }
+      this.native = new DatabaseSync(filename, { readOnly: mode === 1 });
+      queueMicrotask(() => callback && callback.call(this, null));
+    }
+    all(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { callback.call(this, null, this.native.prepare(sql).all(...(params || []))); } catch (error) { callback.call(this, error); }
+    }
+    get(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { callback.call(this, null, this.native.prepare(sql).get(...(params || []))); } catch (error) { callback.call(this, error); }
+    }
+    run(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { const result = this.native.prepare(sql).run(...(params || [])); callback.call({ changes: Number(result.changes) }, null); } catch (error) { callback.call(this, error); }
+    }
+    exec(sql, callback) {
+      callback = callback || (() => {});
+      try { this.native.exec(sql); callback.call(this, null); } catch (error) { callback.call(this, error); }
+    }
+    close(callback) {
+      callback = callback || (() => {});
+      try { this.native.close(); callback.call(this, null); } catch (error) { callback.call(this, error); }
+    }
+  }
+  return { Database, OPEN_READONLY: 1, OPEN_READWRITE: 2, OPEN_CREATE: 4 };
+}
+const RADIO_HELPER_DIR = __dirname;
+const DB_HELPER_PATH = require.resolve('osi-db-helper', { paths: [RADIO_HELPER_DIR] });
+const originalLoad = Module._load;
+Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === 'sqlite3' && parent && parent.filename === DB_HELPER_PATH) return sqlite3Adapter();
+  return originalLoad.call(this, request, parent, isMain);
+};
 const { normalizeUplink, fromChirpStack } = require('./index');
 const uuid = '00000000-0000-4000-8000-000000000000';
 test('normalizes and bounds receiver metadata', () => {
