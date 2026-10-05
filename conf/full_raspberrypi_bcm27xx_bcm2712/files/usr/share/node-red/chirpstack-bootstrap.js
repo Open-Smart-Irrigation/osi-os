@@ -621,6 +621,10 @@ async function repairCloverProfile(options) {
       console.log(`  ✓ ${CFG.envFile}: ${CLOVER_ENV_KEY}=${cloverProfileId}`);
     }
     console.log('  Restart Node-RED for the new profile id to take effect (deploy.sh does this).');
+    if (!options.repointDevEuis.length) {
+      console.log('  A Clover registered before this repair stays on the field-tester profile until it is');
+      console.log('  re-registered, or moved with: --repoint-clover-device=<DevEUI>');
+    }
   } else {
     console.log(`  ✓ Clover profile already distinct from the field-tester profile: ${effectiveClover}`);
   }

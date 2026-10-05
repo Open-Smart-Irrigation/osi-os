@@ -2473,6 +2473,10 @@ fetch_required "SDI12 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
     "/srv/node-red/codecs/dragino_sdi12_decoder.js"
 
+fetch_required "Tektelic KIWI/CLOVER codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
+    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
+
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
@@ -2517,6 +2521,22 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
             done < "$cs_env_backup"
         fi
         chmod 600 "$cs_env_backup" 2>/dev/null || true
+    fi
+fi
+
+# Earlier bootstraps wrote CHIRPSTACK_PROFILE_CLOVER as an alias of the RAK
+# field-tester profile, which has no codec, so a registered Clover never
+# decoded. The repair mode reuses the gateway's API key, touches only the Clover
+# profile, the chirpstack_profile_clover UCI key and the CHIRPSTACK_PROFILE_CLOVER
+# env line, and is a no-op once both hold a distinct id. Node-RED picks the id
+# up at its restart later in this deploy. Never fails the deploy.
+if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null; then
+    echo "--- Clover device profile (repair if aliased to the field tester) ---"
+    if node /srv/node-red/chirpstack-bootstrap.js --repair-clover-profile; then
+        echo "OK: Clover device profile checked"
+    else
+        echo "WARN: Clover profile repair failed; Clover devices stay without decoded data until it succeeds"
+        echo "NOTE: rerun it with: node /srv/node-red/chirpstack-bootstrap.js --repair-clover-profile"
     fi
 fi
 
