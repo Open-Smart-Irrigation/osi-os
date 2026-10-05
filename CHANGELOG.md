@@ -252,7 +252,9 @@ every 0.7.0 entry below.
   and error messages, and a confirmed delete for saved views. Daily CSV
   exports, the per-zone one included, are now limited to 3,660 days, and CSV
   text cells that start with a tab or a carriage return are neutralised like
-  formula prefixes.
+  formula prefixes. Hourly and daily CSV exports (both routes) aggregate one
+  local month at a time, so a long range no longer holds every raw reading
+  in memory at once.
 
 ### Changed
 - Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
