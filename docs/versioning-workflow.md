@@ -75,7 +75,7 @@ Keep entries user-facing: what changed and why it matters. Reference deploy.sh s
 ## Step 3 — Rebuild the React GUI
 
 ```bash
-cd web/react-gui && npm install && npm run build
+cd web/react-gui && npm ci && npm run build
 cd ../..
 tar -czf react_gui.tar.gz -C web/react-gui/build .
 ```
