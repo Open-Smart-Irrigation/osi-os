@@ -2300,9 +2300,12 @@ async function buildZoneExportCsv(db, options = {}) {
 
 // Upper bound on the rows of one all-zones CSV answer. Node-RED's http response
 // sends a whole string, so the answer is built in memory: at most this many
-// lines of text (about 130 bytes each, so about 26 MB) plus the row objects of
-// the one zone being built, which the same budget caps. Past it the export
-// stops and answers 413 instead of growing without limit on the gateway.
+// lines of text (about 130 bytes each, so about 26 MB) plus the CSV row
+// objects of the one zone being built, which the same budget caps. Past it the
+// export stops and answers 413 instead of growing without limit on the
+// gateway. The budget counts output rows only: the database rows one card
+// (raw) or one source (hourly, daily) fetches for the range are bounded by the
+// range limits of assertExportRangeAllowed, not by this budget.
 const ALL_ZONES_EXPORT_MAX_ROWS = 200000;
 
 function exportTooLarge(maxRows) {
@@ -2323,8 +2326,9 @@ function assertExportRowBudget(rows, scope) {
 // Each zone keeps its own local-day boundaries and its own per-source channels,
 // as in the per-zone export; rows are grouped by zone (zone id order) and
 // sorted within a zone as the per-zone export sorts them. Zones are built one
-// at a time and turned into text at once, so only one zone's row objects are
-// alive at any moment.
+// at a time and turned into text at once, so only one zone's CSV row objects
+// are alive at any moment (see ALL_ZONES_EXPORT_MAX_ROWS for what bounds the
+// database fetch).
 async function buildAllZonesExportCsv(db, options = {}) {
   const maxRows = Number.isSafeInteger(options.maxRows) && options.maxRows > 0
     ? options.maxRows
