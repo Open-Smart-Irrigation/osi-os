@@ -30,6 +30,7 @@ const PUBLIC_HEALTH_KEYS = [
   'sync_rejected',
   'sync_rejected_recent',
   'sync_dirty_pending',
+  'sync_dirty_rejected',
   'disk_free_pct',
   'crash_count',
   'crash_looping',
@@ -148,6 +149,7 @@ function assertSyncFieldsNull(health) {
   assert.strictEqual(health.sync_rejected, null);
   assert.strictEqual(health.sync_rejected_recent, null);
   assert.strictEqual(health.sync_dirty_pending, null);
+  assert.strictEqual(health.sync_dirty_rejected, null);
 }
 
 test('modern schema reports schema, sync, and disk health', async () => {
@@ -169,6 +171,7 @@ test('modern schema reports schema, sync, and disk health', async () => {
     assert.strictEqual(health.sync_rejected, 0);
     assert.strictEqual(health.sync_rejected_recent, 0);
     assert.strictEqual(health.sync_dirty_pending, 0);
+    assert.strictEqual(health.sync_dirty_rejected, 0);
     assertDiskFreePct(health.disk_free_pct);
   } finally {
     db.close();
@@ -257,6 +260,31 @@ test('sync backlog counters count pending, rejected, and dirty pending rows inde
     assert.strictEqual(health.sync_rejected_recent, 0, 'the fixture rejection is long past the 24h window');
     assert.strictEqual(health.sync_dirty_pending, 1);
     assert(Number.isInteger(health.sync_oldest_age_s));
+  } finally {
+    db.close();
+  }
+});
+
+test('rejected history keys are counted apart from pending ones and do not drive health_state', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    await db.exec(`
+      INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, changed_at, status)
+      VALUES
+        ('cloud', 'device_data', 'pending-key', '2026-07-05T00:04:00Z', 'pending'),
+        ('cloud', 'device_data', 'rejected-key-1', '2026-07-05T00:05:00Z', 'rejected'),
+        ('cloud', 'dendrometer_daily', 'rejected-key-2', '2026-07-05T00:06:00Z', 'rejected'),
+        ('cloud', 'device_data', 'dropped-key', '2026-07-05T00:07:00Z', 'dropped'),
+        ('cloud', 'device_data', 'done-key', '2026-07-05T00:08:00Z', 'done');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.sync_dirty_pending, 1, 'only pending keys count as the dirty backlog');
+    assert.strictEqual(health.sync_dirty_rejected, 2, 'a key the cloud condemned stays visible after it leaves pending');
+    assert.strictEqual(health.health_state, 'healthy', 'rejected history keys are a diagnostic count, not a health_state input');
   } finally {
     db.close();
   }
