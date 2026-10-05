@@ -76,10 +76,6 @@
       "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
     },
     {
-      "path": "scripts/verify-scoped-access.test.js",
-      "reason": "fails on main (#389): 3 of 6 tests fail. verify-scoped-access.js passes a route when any node downstream of it mentions the scope helper, so removing a guard's own scope call is not detected; the mutation tests expect that failure and get empty output"
-    },
-    {
       "path": "scripts/test-task14-journal-preview.js",
       "reason": "needs a production GUI build (web/react-gui/build/index.html); all 16 tests fail without one, and CI builds no GUI"
     },

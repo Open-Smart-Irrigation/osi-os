@@ -181,7 +181,7 @@ test('temporary Phase C debt is exact and remove-one controlled', async () => {
   );
 });
 
-test('umbrella verifier and workflow pin the scoped-access command', () => {
+test('umbrella verifier and workflow pin the scoped-access command and its tests', () => {
   const umbrella = fs.readFileSync(path.join(ROOT, 'scripts/verify-sync-flow.js'), 'utf8');
   const workflow = fs.readFileSync(
     path.join(ROOT, '.github/workflows/verify-sync-flow.yml'),
@@ -189,6 +189,7 @@ test('umbrella verifier and workflow pin the scoped-access command', () => {
   );
   assert.match(umbrella, /verify-scoped-access\.js/);
   assert.match(workflow, /name: Scoped-access endpoint ratchet[\s\S]*node scripts\/verify-scoped-access\.js/);
+  assert.match(workflow, /node --test scripts\/verify-scoped-access\.test\.js/);
 });
 
 // ---------------------------------------------------------------------------

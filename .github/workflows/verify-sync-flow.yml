@@ -28,6 +28,10 @@ jobs:
       # profile parity). Must end with "All parity checks passed."
       - name: Scoped-access endpoint ratchet
         run: node scripts/verify-scoped-access.js
+      # The ratchet's own tests: each removes, hides or misplaces a guard's
+      # scope decision and expects the ratchet to fail (#389).
+      - name: Scoped-access ratchet tests
+        run: node --test scripts/verify-scoped-access.test.js
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
