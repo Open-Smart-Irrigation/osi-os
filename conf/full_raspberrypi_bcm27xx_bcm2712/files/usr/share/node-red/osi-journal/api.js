@@ -428,6 +428,9 @@ async function resolveCatalogPrincipal(db, principal, query) {
   if (filters.zone_uuid != null && filters.zone_uuid !== '') {
     return assertZoneWrite(db, principal, canonicalUuid(filters.zone_uuid, 'zone_uuid', true));
   }
+  // No plot or zone: the caller's own catalog (custom rows are read through the
+  // owner filter), after the enabled-account decision the other reads make.
+  await resolvedReadScope(db, principal);
   return principal;
 }
 

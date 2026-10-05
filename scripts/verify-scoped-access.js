@@ -165,7 +165,6 @@ const PHASE_C_PENDING = new Set([
 // Known gaps: real gaps found by this verifier, each tracked by its issue. An
 // entry leaves the list when its fix lands (the stale check enforces it).
 const KNOWN_GAPS = new Map([
-  ['journal-catalog-get-http', '#400: needs an enabled-account decision'],
   ['journal-entry-put-http', '#403: needs the zone decision on the entry\'s zone'],
   ['journal-entry-void-post-http', '#403: needs the zone decision on the entry\'s zone'],
 ]);

@@ -774,6 +774,74 @@ test('scoped catalog GET rewrites a grantee to the plot owner, while no context 
   );
 });
 
+// #400: the catalog's only per-account content is custom vocabulary, its
+// mappings and farm products, read through the owner filter (the caller's own,
+// or the owner of a plot or zone the caller holds). Without a plot or zone the
+// read still needs the enabled-account decision every other journal read makes.
+test('#400: the scoped catalog refuses a disabled account and keeps its owner filter', async () => {
+  const db = new TestDb('scoped-catalog-disabled');
+  seedIdentity(db);
+  const ownerCustomUuid = '22140000-0000-4000-8000-000000000001';
+  const otherCustomUuid = '22140000-0000-4000-8000-000000000002';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertCustomVocab(db, customVocabInput(ownerCustomUuid), principal());
+  await journal.upsertCustomVocab(db, customVocabInput(otherCustomUuid), other);
+  const secret = 'scoped-catalog-disabled-secret';
+  const authorization = 'Bearer ' + token(secret, {
+    userId: 2,
+    username: 'other-user',
+    exp: Date.now() + 60_000,
+  });
+  class ExistingDb {
+    constructor() {
+      return db;
+    }
+  }
+  const request = (scoped) => journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET',
+        path: '/api/journal/catalog',
+        headers: { authorization },
+        query: {},
+        params: {},
+      },
+    },
+    Database: ExistingDb,
+    environment: {
+      authTokenSecret: secret,
+      deviceEui: GATEWAY_EUI,
+      deviceEuiConfidence: 'authoritative',
+    },
+    scope: scoped ? scopeHelper : null,
+    scopedMode: scoped,
+  });
+  const codes = (response) => (response.payload.vocab || []).map((row) => row.code);
+
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const enabled = await request(true);
+  assert.equal(enabled.statusCode, 200);
+  assert.ok(codes(enabled).includes('custom.' + otherCustomUuid), 'the caller sees its own terms');
+  assert.ok(!codes(enabled).includes('custom.' + ownerCustomUuid), 'and no other account\'s terms');
+
+  db.prepare("UPDATE users SET disabled_at='2026-07-13T12:00:00.000Z' WHERE id=2").run();
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  const disabled = await request(true);
+  assert.equal(disabled.statusCode, 403);
+  assert.equal(disabled.payload.vocab, undefined);
+
+  // Flag off: unchanged, the catalog is answered without any scope decision.
+  const flagOff = await request(false);
+  assert.equal(flagOff.statusCode, 200);
+  assert.ok(codes(flagOff).includes('custom.' + otherCustomUuid));
+  assert.ok(!codes(flagOff).includes('custom.' + ownerCustomUuid));
+});
+
 test('scoped journal writes allow plot grantees, preserve ownership, and revoke immediately', async () => {
   const db = new TestDb('scoped-resource-writes');
   seedIdentity(db);
