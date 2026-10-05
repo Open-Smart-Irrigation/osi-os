@@ -2,7 +2,8 @@
 'use strict';
 
 // GET /api/history/export.csv (all zones) and DELETE /api/analysis/views/:id:
-// the helper behaviour (osi-history-helper), both profiles.
+// the helper behaviour (osi-history-helper) and the route handler
+// (osi-history-router handlePortableHistoryRequest), both profiles.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,10 +11,11 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { facadeDb } = require('./lib/scoped-access-harness');
+const { facadeDb, makeAuthHeader } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['full_raspberrypi_bcm27xx_bcm2712', 'full_raspberrypi_bcm27xx_bcm2709'];
+const SECRET = 'portable-history-test-secret';
 const NOW_MS = Date.parse('2026-07-03T12:00:00.000Z');
 
 function modulesRoot(profile) {
@@ -24,6 +26,8 @@ function loadModules(profile) {
   const root = modulesRoot(profile);
   return {
     helper: require(path.join(root, 'osi-history-helper')),
+    router: require(path.join(root, 'osi-history-router')),
+    scope: require(path.join(root, 'osi-scope-helper')),
   };
 }
 
@@ -79,7 +83,7 @@ function parseCsv(text) {
 }
 
 for (const profile of PROFILES) {
-  const { helper } = loadModules(profile);
+  const { helper, router, scope } = loadModules(profile);
   const label = profile.replace('full_raspberrypi_bcm27xx_', '');
 
   test(`${label}: all-zones export covers the listed zones with each zone's local day`, async () => {
@@ -293,10 +297,165 @@ for (const profile of PROFILES) {
       raw.close();
     }
   });
+
+  // ---------------------------------------------------------------------
+  // Route handler: authentication and scope as the neighbouring history
+  // (zone export) and analysis (saved views) routes.
+
+  function request(raw, overrides = {}) {
+    const scoped = overrides.scopedMode === true;
+    return {
+      db: facadeDb(raw),
+      history: helper,
+      scope: scoped ? scope : null,
+      scopedMode: scoped,
+      authSecret: SECRET,
+      fs: null,
+      warn: () => {},
+      site: '0016C001F1000001',
+      nowMs: NOW_MS,
+      ...overrides,
+    };
+  }
+
+  function exportRequest(raw, userId, username, overrides = {}) {
+    return request(raw, {
+      method: 'GET',
+      path: '/api/history/export.csv',
+      authorization: makeAuthHeader({ userId, username, secret: SECRET }),
+      query: { scope: 'allZones', from: '2026-07-01', to: '2026-07-01', granularity: 'raw' },
+      ...overrides,
+    });
+  }
+
+  function deleteRequest(raw, userId, username, id, overrides = {}) {
+    return request(raw, {
+      method: 'DELETE',
+      path: `/api/analysis/views/${id}`,
+      params: { id: String(id) },
+      authorization: makeAuthHeader({ userId, username, secret: SECRET }),
+      ...overrides,
+    });
+  }
+
+  test(`${label}: route, flag off: the export holds only the caller's own zones`, async () => {
+    const raw = seedDb();
+    try {
+      const response = await router.handlePortableHistoryRequest(exportRequest(raw, 2, 'owner-two'));
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.headers['Content-Type'], 'text/csv; charset=utf-8');
+      assert.match(response.headers['Content-Disposition'], /^attachment; filename="all-zones-2026-07-01_2026-07-01-raw\.csv"$/);
+      const zones = new Set(parseCsv(response.payload).map((row) => row.zone));
+      assert.deepEqual([...zones], ['Other owner']);
+
+      const owner = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one'));
+      assert.deepEqual([...new Set(parseCsv(owner.payload).map((row) => row.zone))], ['Zurich', 'Coast']);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${label}: route, flag on: every enabled account exports every zone (W1); a disabled account is refused`, async () => {
+    const raw = seedDb();
+    try {
+      for (const [userId, username] of [[1, 'owner-one'], [2, 'owner-two'], [3, 'viewer-three']]) {
+        scope._resetForTests();
+        const response = await router.handlePortableHistoryRequest(exportRequest(raw, userId, username, { scopedMode: true }));
+        assert.equal(response.statusCode, 200, username);
+        assert.deepEqual([...new Set(parseCsv(response.payload).map((row) => row.zone))].sort(),
+          ['Coast', 'Other owner', 'Zurich'], username);
+      }
+      raw.exec("UPDATE users SET disabled_at = '2026-06-01T00:00:00.000Z' WHERE id = 3");
+      scope._resetForTests();
+      const refused = await router.handlePortableHistoryRequest(exportRequest(raw, 3, 'viewer-three', { scopedMode: true }));
+      assert.equal(refused.statusCode, 403);
+      assert.doesNotMatch(JSON.stringify(refused.payload), /Zurich|Coast/);
+
+      // A token whose username no longer matches the account (immutable subject).
+      scope._resetForTests();
+      const renamed = await router.handlePortableHistoryRequest(exportRequest(raw, 2, 'someone-else', { scopedMode: true }));
+      assert.equal(renamed.statusCode, 403);
+    } finally {
+      scope._resetForTests();
+      raw.close();
+    }
+  });
+
+  test(`${label}: route: no token is 401, a wrong export scope is 400, a too-large range answers 413 with a suggestion`, async () => {
+    const raw = seedDb();
+    try {
+      const anonymous = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { authorization: undefined }));
+      assert.equal(anonymous.statusCode, 401);
+      const forged = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', {
+        authorization: makeAuthHeader({ userId: 1, username: 'owner-one', secret: 'another-secret' }),
+      }));
+      assert.equal(forged.statusCode, 401);
+      const wrongScope = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { query: { from: '2026-07-01' } }));
+      assert.equal(wrongScope.statusCode, 400);
+      const tooLarge = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', {
+        query: { scope: 'allZones', from: '2026-01-01', to: '2026-07-01', granularity: 'raw' },
+      }));
+      assert.equal(tooLarge.statusCode, 413);
+      assert.ok(tooLarge.payload.suggestion);
+      const daily = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', {
+        query: { scope: 'allZones', from: '2026-07-01' },
+      }));
+      assert.equal(daily.statusCode, 200);
+      assert.match(daily.headers['Content-Disposition'], /-daily\.csv"$/);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${label}: route: a saved view is deleted only by its owner, in both modes`, async () => {
+    for (const scopedMode of [false, true]) {
+      const raw = seedDb();
+      try {
+        raw.exec(`
+          INSERT INTO analysis_views(id, user_id, owner_user_uuid, name, view_json) VALUES
+            (1, 2, 'u-two', 'Researcher view', '{"schemaVersion":1,"selectors":[]}'),
+            (2, 3, 'u-three', 'Viewer view', '{"schemaVersion":1,"selectors":[]}');
+        `);
+        scope._resetForTests();
+        const foreign = await router.handlePortableHistoryRequest(deleteRequest(raw, 3, 'viewer-three', 1, { scopedMode }));
+        assert.equal(foreign.statusCode, 404, `scoped=${scopedMode}`);
+        assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM analysis_views WHERE id = 1').get().n, 1);
+        scope._resetForTests();
+        const own = await router.handlePortableHistoryRequest(deleteRequest(raw, 3, 'viewer-three', 2, { scopedMode }));
+        assert.equal(own.statusCode, 204, `scoped=${scopedMode}`);
+        assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM analysis_views WHERE id = 2').get().n, 0);
+        const anonymous = await router.handlePortableHistoryRequest(deleteRequest(raw, 2, 'owner-two', 1, { scopedMode, authorization: undefined }));
+        assert.equal(anonymous.statusCode, 401);
+        if (scopedMode) {
+          raw.exec("UPDATE users SET disabled_at = '2026-06-01T00:00:00.000Z' WHERE id = 2");
+          scope._resetForTests();
+          const disabled = await router.handlePortableHistoryRequest(deleteRequest(raw, 2, 'owner-two', 1, { scopedMode }));
+          assert.equal(disabled.statusCode, 403);
+          assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM analysis_views WHERE id = 1').get().n, 1);
+        }
+      } finally {
+        scope._resetForTests();
+        raw.close();
+      }
+    }
+  });
+
+  test(`${label}: route: anything else is 404 and flag-off never uses the scope helper`, async () => {
+    const raw = seedDb();
+    try {
+      const unknown = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { path: '/api/history/other.csv' }));
+      assert.equal(unknown.statusCode, 404);
+      const trap = new Proxy({}, { get() { throw new Error('scope helper used with the flag off'); } });
+      const response = await router.handlePortableHistoryRequest(exportRequest(raw, 1, 'owner-one', { scope: trap }));
+      assert.equal(response.statusCode, 200);
+    } finally {
+      raw.close();
+    }
+  });
 }
 
 test('both profiles carry byte-identical history modules', () => {
-  for (const relative of ['osi-history-helper/index.js', 'osi-history-helper/analysis.js']) {
+  for (const relative of ['osi-history-helper/index.js', 'osi-history-helper/analysis.js', 'osi-history-router/index.js']) {
     const hashes = PROFILES.map((profile) => crypto.createHash('sha256')
       .update(fs.readFileSync(path.join(modulesRoot(profile), relative))).digest('hex'));
     assert.equal(hashes[0], hashes[1], relative);
