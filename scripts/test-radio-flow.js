@@ -181,11 +181,15 @@ test('radio-capture-fn declares the chirpstack lib binding it now calls',()=>{
 const TESTER_EUI='A840410000000001';// the device typed RAK10701_FIELD_TESTER in the fake devices table
 function testerUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
 function otherAppUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000002',applicationId:OTHER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
-function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,identity,fieldTesterApp=FIELD_TESTER_APP,testerEuis=[TESTER_EUI],testerLookupError=null}){
+function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,identity,fieldTesterApp=FIELD_TESTER_APP,testerEuis=[TESTER_EUI],testerLookupError=null,enqueueFailsOnce=false}){
  // `order` records the sequence of side-effecting calls (enqueue vs capture) so
  // Finding 1's reordering can be pinned directly, not just inferred from which
  // calls happened at all.
- const calls={capture:[],enqueue:[],statusSet:[],warn:[],order:[],fromChirpStackContexts:[],testerQueries:[]};
+ const calls={capture:[],enqueue:[],statusSet:[],warn:[],order:[],fromChirpStackContexts:[],testerQueries:[],clientsCreated:0};
+ // Node-RED's default in-memory node context: persists across runs of one node.
+ const contextStore=new Map();
+ const context={get:(k)=>contextStore.get(k),set:(k,v)=>{contextStore.set(k,v);}};
+ let enqueueFailuresLeft=enqueueFailsOnce?1:0;
  const fakeRow={
   deveui:'A840410000000001',
   recorded_at:'2026-09-25T10:00:00Z',
@@ -224,18 +228,18 @@ function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,
  const env=makeEnv({OSI_RADIO_CAPTURE_ENABLED:'1',DEVICE_EUI:'0016C001F1000002',CHIRPSTACK_PROFILE_RAK10701:'tester-profile',CHIRPSTACK_PROFILE_CLOVER:'clover-profile',CHIRPSTACK_APP_FIELD_TESTER:fieldTesterApp});
  const node={warn:(m)=>{calls.warn.push(m);},status:()=>{},error:()=>{}};
  const global_={set:(k,v)=>{calls.statusSet.push({key:k,value:v});},get:()=>undefined};
- const chirpstack={createProvisioningClientFromEnv:()=>({
+ const chirpstack={createProvisioningClientFromEnv:()=>{calls.clientsCreated++;return {
   // No flushDeviceQueue here (Finding 1): radio-capture-fn must never call it, so
   // a regression that reintroduces the call fails with 'not a function', caught
   // by the reply's own try/catch and surfacing as an unexpected warn below.
-  enqueueDownlink:async(opts)=>{calls.order.push('enqueue');calls.enqueue.push(opts);if(enqueueImpl)return enqueueImpl(opts);return{id:'q-1'};}
- })};
+  enqueueDownlink:async(opts)=>{calls.order.push('enqueue');calls.enqueue.push(opts);if(enqueueFailuresLeft>0){enqueueFailuresLeft--;throw new Error('401 invalid api key');}if(enqueueImpl)return enqueueImpl(opts);return{id:'q-1'};}
+ };}};
  // Node-RED's real function-node sandbox provides Buffer as a global (86 existing
  // function nodes already rely on this); radio-capture-fn's new port/length gate is
  // the first thing in this test file's own vm sandbox to need it, so it must be
  // supplied explicitly -- vm.runInNewContext, unlike Node-RED's own function.js,
  // does not inherit the host's globals.
- return{sandbox:{env,node,osiLib,osiDb,global:global_,chirpstack,Buffer},calls};
+ return{sandbox:{env,node,osiLib,osiDb,global:global_,context,chirpstack,Buffer},calls};
 }
 
 test('a tester uplink with receivers enqueues a fPort 2 six-byte reply before capture is even attempted',async()=>{
@@ -550,4 +554,30 @@ test('catalog-response offers the field tester to the add-device modal',async()=
  assert.ok(entry,'the add-device modal renders exactly what this node returns; a type missing here cannot be picked at all');
  assert.equal(typeof entry.name,'string');
  assert.ok(entry.name.length>0);
+});
+
+test('the reply carries an expiry 700 ms ahead',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5}});
+ const before=Date.now();
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ const after=Date.now();
+ assert.equal(calls.enqueue.length,1);
+ // The node runs in its own vm realm, so instanceof Date against the host's Date is false.
+ assert.equal(Object.prototype.toString.call(calls.enqueue[0].expiresAt),'[object Date]','the reply must carry an expiresAt Date');
+ const at=calls.enqueue[0].expiresAt.getTime();
+ assert.ok(at>=before+700&&at<=after+700,'expiry must be now + 700 ms, got '+(at-before)+' ms');
+});
+test('an enqueue error drops the cached client',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},enqueueFailsOnce:true});
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ await runNode('radio-capture-fn',testerUplink(2),sandbox);
+ assert.equal(calls.clientsCreated,2);
+ assert.equal(calls.enqueue.length,2);
+});
+test('one ChirpStack client serves consecutive replies',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5}});
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ await runNode('radio-capture-fn',testerUplink(2),sandbox);
+ assert.equal(calls.clientsCreated,1);
+ assert.equal(calls.enqueue.length,2);
 });

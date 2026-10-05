@@ -12,6 +12,7 @@ const profilePb = require('@chirpstack/chirpstack-api/api/device_profile_pb');
 const gatewayGrpc = require('@chirpstack/chirpstack-api/api/gateway_grpc_pb');
 const gatewayPb = require('@chirpstack/chirpstack-api/api/gateway_pb');
 const commonPb = require('@chirpstack/chirpstack-api/common/common_pb');
+const timestampPb = require('google-protobuf/google/protobuf/timestamp_pb');
 
 const DEFAULT_PAGE_SIZE = 100;
 
@@ -631,7 +632,9 @@ class ChirpStackClient {
   // same convention getData_asB64()/getData_asU8() read back with), so a
   // caller may pass either -- every call site in this repo so far passes the
   // base64 string a Buffer#toString('base64') already produced.
-  async enqueueDownlink({ devEui, fPort, data, confirmed }) {
+  // `expiresAt` drops the item if ChirpStack has not sent it by then (supported
+  // since ChirpStack 4.x; gateways run 4.16).
+  async enqueueDownlink({ devEui, fPort, data, confirmed, expiresAt }) {
     const normalizedDevEui = normalizeDevEui(devEui);
     if (!normalizedDevEui) {
       throw annotateError(new Error('DevEUI is required'), 'enqueueDownlink');
@@ -648,6 +651,16 @@ class ChirpStackClient {
     queueItem.setFPort(port);
     queueItem.setConfirmed(Boolean(confirmed));
     queueItem.setData(data);
+    if (expiresAt !== undefined && expiresAt !== null) {
+      // Not `instanceof Date`: Node-RED function nodes run in their own vm realm,
+      // whose Date is not this module's Date.
+      if (Object.prototype.toString.call(expiresAt) !== '[object Date]' || !Number.isFinite(expiresAt.getTime())) {
+        throw annotateError(new Error('expiresAt must be a valid Date'), 'enqueueDownlink');
+      }
+      const ts = new timestampPb.Timestamp();
+      ts.fromDate(expiresAt);
+      queueItem.setExpiresAt(ts);
+    }
     const request = new devicePb.EnqueueDeviceQueueItemRequest();
     request.setQueueItem(queueItem);
     const response = await grpcInvoke(this.deviceClient, 'enqueue', request, this.metadata, 'enqueueDownlink');

@@ -773,3 +773,45 @@ test('updateDeviceName treats a blank or whitespace-only stored name as skipped 
     assert.deepEqual(captured.updates, []);
   }
 });
+
+function enqueueClient() {
+  const calls = { enqueue: [] };
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  client.deviceClient = {
+    enqueue: (request, metadata, options, callback) => {
+      calls.enqueue.push(request);
+      callback(null, { getId: () => 'q1' });
+    }
+  };
+  return { client, calls };
+}
+
+test('enqueueDownlink sets expiresAt when given', async () => {
+  const { client, calls } = enqueueClient();
+  const at = new Date('2026-10-05T10:00:01.000Z');
+  await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', confirmed: false, expiresAt: at });
+  const item = calls.enqueue[0].getQueueItem();
+  assert.equal(item.getExpiresAt().toDate().toISOString(), at.toISOString());
+});
+
+test('enqueueDownlink rejects an invalid expiresAt', async () => {
+  const { client } = enqueueClient();
+  await assert.rejects(
+    client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: new Date('x') }),
+    /expiresAt must be a valid Date/
+  );
+});
+
+test('enqueueDownlink without expiresAt leaves it unset', async () => {
+  const { client, calls } = enqueueClient();
+  await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID' });
+  assert.equal(calls.enqueue[0].getQueueItem().hasExpiresAt(), false);
+});
+
+test('enqueueDownlink accepts a Date created in another vm realm (Node-RED function nodes)', async () => {
+  const { client, calls } = enqueueClient();
+  const at = require('node:vm').runInNewContext('new Date(1790000000000)');
+  assert.equal(at instanceof Date, false);
+  await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: at });
+  assert.equal(calls.enqueue[0].getQueueItem().getExpiresAt().toDate().getTime(), 1790000000000);
+});
