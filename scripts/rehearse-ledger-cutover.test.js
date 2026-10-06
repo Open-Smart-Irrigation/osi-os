@@ -246,6 +246,26 @@ DROP TABLE device_data; ALTER TABLE device_data_next RENAME TO device_data;`);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('compareSnapshots requires pre-existing rows to carry an added column\'s declared default', () => {
+  const root = scratch();
+  const base = "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT); INSERT INTO t (a) VALUES ('x'), ('y');";
+  const snapBefore = snapshotTables(tinyDb(root, 'before.db', base));
+  const cases = [
+    ['default kept', "ALTER TABLE t ADD COLUMN b INTEGER NOT NULL DEFAULT 0;", true],
+    ['text default kept', "ALTER TABLE t ADD COLUMN b TEXT DEFAULT 'auto';", true],
+    ['no default, NULL', 'ALTER TABLE t ADD COLUMN b TEXT;', true],
+    ['backfilled', "ALTER TABLE t ADD COLUMN b INTEGER NOT NULL DEFAULT 0; UPDATE t SET b = 5 WHERE id = 1;", false],
+    ['backfilled text', "ALTER TABLE t ADD COLUMN b TEXT DEFAULT 'auto'; UPDATE t SET b = 'manual';", false],
+    ['backfilled from NULL', 'ALTER TABLE t ADD COLUMN b TEXT; UPDATE t SET b = a;', false],
+  ];
+  for (const [label, change, ok] of cases) {
+    const after = tinyDb(root, label.replace(/\W/g, '_') + '.db', base + change);
+    const res = compareSnapshots(snapBefore, snapshotTables(after, { columnsFrom: snapBefore }), {});
+    assert.equal(res.ok, ok, label + ' ' + JSON.stringify(res.unexpected));
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 // A gateway outbox keeps delivered rows for 30 days up to 50,000 rows, so the
 // 0064 ZONE event can land in an outbox far above the row-values limit.
 test('the 0064 change validates in an outbox larger than the row-values limit', () => {

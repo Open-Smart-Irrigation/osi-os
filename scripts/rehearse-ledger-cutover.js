@@ -418,7 +418,17 @@ function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() 
         }
         rows.set(key, { h, v: keep ? row : null });
       }
-      tables[name] = { columns, pk, count, sha256: hash.digest('hex'), rows, missingColumns, addedColumns };
+      // Rows in an added column must hold its declared default (no migration
+      // backfills one unless a rule says so). A non-constant default is
+      // recorded as not checked.
+      const addedColumnDefaults = addedColumns.map((c) => {
+        const dflt = info.find((x) => x.name === c).dflt_value;
+        const literal = dflt === null ? 'NULL' : String(dflt).trim().replace(/^\((.*)\)$/s, '$1').trim();
+        if (!/^(NULL|TRUE|FALSE|[-+]?\d+(\.\d+)?([eE][-+]?\d+)?|'(?:[^']|'')*')$/i.test(literal)) return { column: c, default: dflt, nonDefaultRows: null };
+        const n = Number(db.prepare(`SELECT COUNT(*) AS n FROM ${quoteIdent(name)} WHERE ${quoteIdent(c)} IS NOT (${literal})`).get().n);
+        return { column: c, default: dflt, nonDefaultRows: n };
+      });
+      tables[name] = { columns, pk, count, sha256: hash.digest('hex'), rows, missingColumns, addedColumns, addedColumnDefaults };
     }
     return { tables };
   } finally {
@@ -463,7 +473,14 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
   for (const [name, b] of Object.entries(before.tables)) {
     const a = after.tables[name];
     if (!a) { result.unexpected.push({ table: name, reason: 'table removed', countBefore: b.count }); continue; }
-    if (a.addedColumns.length) result.addedColumns.push({ table: name, columns: a.addedColumns });
+    if (a.addedColumns.length) {
+      result.addedColumns.push({ table: name, columns: a.addedColumns });
+      const ruleColumns = new Set((rules.get(name) || []).flatMap((r) => r.columns || []));
+      const filled = (a.addedColumnDefaults || []).filter((d) => d.nonDefaultRows > 0 && !ruleColumns.has(d.column));
+      if (filled.length) {
+        result.unexpected.push({ table: name, reason: 'added columns hold values other than their declared default: ' + filled.map((d) => `${d.column} (${d.nonDefaultRows} row(s), default ${d.default})`).join(', ') });
+      }
+    }
     if (a.missingColumns.length) result.unexpected.push({ table: name, reason: 'columns removed: ' + a.missingColumns.join(', ') });
     if (a.count === b.count && a.sha256 === b.sha256 && !a.missingColumns.length) {
       result.unchanged.push(name);
