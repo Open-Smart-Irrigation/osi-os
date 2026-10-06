@@ -837,6 +837,35 @@ test('plot-group members named in the body stay refused without the plot check (
   assert.doesNotMatch(text, /journal-plot-group-put-http.*changes a row outside/);
 });
 
+// A module root identical to the shipped one except for osi-journal/api.js,
+// which `patch` rewrites. Every other module is a symlink to the original.
+function journalModulesRootWith(patch) {
+  const original = path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'scoped-access-modules-'));
+  for (const name of fs.readdirSync(original)) {
+    if (name === 'osi-journal') continue;
+    fs.symlinkSync(path.join(original, name), path.join(root, name));
+  }
+  fs.cpSync(path.join(original, 'osi-journal'), path.join(root, 'osi-journal'), { recursive: true });
+  const api = path.join(root, 'osi-journal', 'api.js');
+  fs.writeFileSync(api, patch(fs.readFileSync(api, 'utf8')));
+  return root;
+}
+
+test('the grantee plot-group run catches a missing group ownership rule (#418) on its own', async (t) => {
+  const rule = 'if (caller.scoped && principal.owner_user_uuid !== caller.author_principal_uuid) {';
+  const modulesRoot = journalModulesRootWith((source) => {
+    assert.ok(source.includes(rule), 'the shipped api.js carries the #418 rule');
+    return source.replace(rule, 'if (false) {');
+  });
+  t.after(() => fs.rmSync(modulesRoot, { recursive: true, force: true }));
+  const failures = await findFailures(loadFlows(), 'mutation', ALLOWLIST, {
+    only: new Set(['journal-plot-groups-post-http']),
+    modulesRoot,
+  });
+  assert.match(failures.join('\n'), /journal-plot-groups-post-http.*lets a grantee create a plot group on another user's plot \(#418\)/);
+});
+
 // Gateway-wide writes held to an admin decision with scoped access on: entry,
 // its admin guard, and the handler the guard hands an allowed request to.
 const ADMIN_GATEWAY_WRITES = [
