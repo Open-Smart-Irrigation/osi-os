@@ -36,7 +36,8 @@ const PUBLIC_HEALTH_KEYS = [
   'crash_looping',
   'health_state',
   'rtc_present',
-  'clock_source'
+  'clock_source',
+  'command_ack_dead_lettered'
 ];
 
 const ALL_NULL_HEALTH = Object.fromEntries(PUBLIC_HEALTH_KEYS.map((key) => [key, null]));
@@ -143,6 +144,7 @@ function modernSchema(db) {
 }
 
 function assertSyncFieldsNull(health) {
+  assert.strictEqual(health.command_ack_dead_lettered, null);
   assert.strictEqual(health.sync_linked, null);
   assert.strictEqual(health.sync_pending, null);
   assert.strictEqual(health.sync_oldest_age_s, null);
@@ -637,3 +639,38 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
   });
 }
+
+test('dead-lettered command ACKs are counted and do not drive health_state', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    await db.exec(`
+      CREATE TABLE command_ack_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+      );
+      INSERT INTO command_ack_outbox(command_id, payload_json, created_at, delivered_at, retry_count, last_error)
+      VALUES
+        ('1', '{}', '2026-07-05T00:00:00Z', '2026-07-05T00:00:30Z', 0, NULL),
+        ('2', '{}', '2026-07-05T00:01:00Z', '2026-07-05T00:11:00Z', 20, 'dead_letter: retry_cap_exceeded - LEASE_MISMATCH'),
+        ('3', '{}', '2026-07-05T00:02:00Z', '2026-07-05T00:02:30Z', 0, 'dead_letter: http 400 {}'),
+        ('4', '{}', '2026-07-05T00:03:00Z', NULL, 3, 'conflicting_local_acks: queued rows for this commandId disagree'),
+        ('5', '{}', '2026-07-05T00:04:00Z', NULL, 0, 'transport: {"statusCode":0}');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.command_ack_dead_lettered, 2,
+      'only delivered rows marked dead_letter count: the cloud never accepted these ACKs');
+    assert.strictEqual(health.health_state, 'healthy',
+      'dead-lettered ACKs are a diagnostic count, not a health_state input');
+  } finally {
+    db.close();
+  }
+});
