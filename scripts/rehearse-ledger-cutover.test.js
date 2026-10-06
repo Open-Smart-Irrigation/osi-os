@@ -56,7 +56,8 @@ test('parseArgs requires --db and --work and validates --gateway-eui', () => {
   assert.throws(() => parseArgs(['--db', 'a.db']), /usage/);
   assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--gateway-eui', 'xyz']), /16 hex/);
   assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--bogus']), /unknown argument/);
-  assert.deepEqual(parseArgs(['--db', 'a.db', '--work', 'w', '--json']), { db: 'a.db', work: 'w', gatewayEui: null, json: true, allowDirty: false });
+  assert.deepEqual(parseArgs(['--db', 'a.db', '--work', 'w', '--json']), { db: 'a.db', work: 'w', gatewayEui: null, json: true, allowDirty: false, requireFreeze: false });
+  assert.equal(parseArgs(['--db', 'a.db', '--work', 'w', '--require-freeze']).requireFreeze, true);
   assert.equal(parseArgs(['--db', 'a.db', '--work', 'w', '--allow-dirty']).allowDirty, true);
 });
 
@@ -411,6 +412,23 @@ test('a corrupted ledger is refused before any write', { timeout: 300_000 }, () 
   assert.match(stepOf(report, 1, 'preflight').result.problems.join('\n'), /v12 .*status 'repair_required'/);
   assert.equal(report.workingCopySha256, wedgedSha);
   assert.equal(stepOf(report, 1, 'reconcile-report'), undefined);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('--require-freeze fails the preflight when the cutover freeze does not hold', { timeout: 300_000 }, () => {
+  const root = scratch();
+  const db = path.join(root, 'unlinked.db');
+  fs.copyFileSync(BUNDLED_DB, db);
+  sql(db, `INSERT INTO sync_outbox (event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at) VALUES ('dddddddd000000000000000000000001', 'ZONE', 'bbbbbbbb000000000000000000000001', 'ZONE_UPSERTED', '{}', 1, '2026-09-01T00:00:00Z');`);
+  const work = path.join(root, 'work');
+  const r = runCli(['--db', db, '--work', work, '--require-freeze']);
+  assert.equal(r.status, 1, r.stderr.slice(-2000));
+  const report = readReport(work);
+  assert.equal(report.failedStep, 'pass 1 preflight');
+  const pre = stepOf(report, 1, 'preflight').result;
+  assert.match(pre.problems.join('\n'), /1 outbox event\(s\) pending/);
+  assert.match(pre.problems.join('\n'), /no cloud link row with a gateway EUI/);
+  assert.equal(report.workingCopySha256, sha(db));
   fs.rmSync(root, { recursive: true, force: true });
 });
 

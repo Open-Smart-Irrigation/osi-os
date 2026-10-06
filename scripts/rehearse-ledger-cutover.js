@@ -10,7 +10,11 @@
 //      after the boot node) -> a second full pass that must change nothing.
 //
 //   node scripts/rehearse-ledger-cutover.js --db <pulled copy of farming.db> --work <scratch directory>
-//       [--gateway-eui <16 hex>] [--allow-dirty] [--json]
+//       [--gateway-eui <16 hex>] [--allow-dirty] [--require-freeze] [--json]
+//
+// --require-freeze fails the preflight unless the cutover freeze holds (no
+// pending outbox event, no in_flight history key, a cloud link with a gateway
+// EUI); without it those are warnings. RH-E runs with it.
 //
 // The report records the checkout (HEAD, `git status --porcelain`, and the
 // sha256 of CHECKSUMS.json, the boot node text, seed-blank.sql, the lineage
@@ -198,7 +202,7 @@ const EXPECTED_CHANGES = {
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const options = { db: null, work: null, gatewayEui: null, json: false, allowDirty: false };
+  const options = { db: null, work: null, gatewayEui: null, json: false, allowDirty: false, requireFreeze: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--db') options.db = argv[++i];
@@ -206,9 +210,10 @@ function parseArgs(argv) {
     else if (arg === '--gateway-eui') options.gatewayEui = argv[++i];
     else if (arg === '--json') options.json = true;
     else if (arg === '--allow-dirty') options.allowDirty = true;
+    else if (arg === '--require-freeze') options.requireFreeze = true;
     else throw new UsageError('unknown argument ' + arg);
   }
-  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--allow-dirty] [--json]');
+  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--allow-dirty] [--require-freeze] [--json]');
   if (options.gatewayEui !== null && !/^[0-9A-Fa-f]{16}$/.test(options.gatewayEui)) throw new UsageError('--gateway-eui must be 16 hex digits');
   return options;
 }
@@ -716,7 +721,7 @@ async function runStep(pass, name, log, fn) {
   return entry.result;
 }
 
-async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, report }) {
+async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, report, options }) {
   const { runReconcile } = require('./reconcile-ledger-numbering');
   const { runMigrateCli } = require('./migrate-cli');
   const { runVerifyHead } = require('./verify-head-cli');
@@ -751,6 +756,7 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
     if (operational.historyInFlight > 0) warnings.push(`${operational.historyInFlight} history queue key(s) in_flight`);
     if (!(operational.link || []).some((l) => l.peer_node === 'cloud' && l.has_gateway_eui)) warnings.push('no cloud link row with a gateway EUI');
     if (passNumber === 1) report.warnings.push(...warnings);
+    if (passNumber === 1 && options.requireFreeze) problems.push(...warnings);
     return {
       ok: problems.length === 0, problems, warnings, integrity, foreignKeyViolations: foreignKeys.length,
       ledger: { rows: ledger.rows, head: ledger.head, statuses: ledger.statuses },
@@ -928,6 +934,7 @@ async function rehearse(options, { log }) {
     verdict: 'FAIL',
     failedStep: null,
     previousRunInterrupted: interrupted,
+    requireFreeze: options.requireFreeze,
     warnings: [],
     checkout: { head: null, migrationsHead: migrations[migrations.length - 1].version, migrationCount: migrations.length },
     source: (() => {
@@ -975,8 +982,8 @@ async function rehearse(options, { log }) {
         gatewayEuiMatchesLink: fromDb ? fromDb === gatewayEui.value : null,
       };
     });
-    await runPass({ passNumber: 1, workDb, work, gatewayEui, log, migrations, report });
-    await runPass({ passNumber: 2, workDb, work, gatewayEui, log, migrations, report });
+    await runPass({ passNumber: 1, workDb, work, gatewayEui, log, migrations, report, options });
+    await runPass({ passNumber: 2, workDb, work, gatewayEui, log, migrations, report, options });
     report.verdict = 'PASS';
   } catch (error) {
     if (!(error instanceof StepFailed)) {
