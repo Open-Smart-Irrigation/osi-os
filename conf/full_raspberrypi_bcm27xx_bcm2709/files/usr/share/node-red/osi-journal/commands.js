@@ -556,6 +556,18 @@ function batchInput(payload) {
 }
 
 async function applyBatchInTransaction(tx, catalog, batch, principal, deliveryId, type, intentHash) {
+  // Every member of a cloud batch is new (base version 0); an exact replay of
+  // the same command is answered by the ledger before this runs. A member
+  // entry that already exists therefore belongs to another command, and is
+  // refused instead of being mistaken for a retry of this batch.
+  const existing = await tx.get(
+    'SELECT entry_uuid FROM journal_entries WHERE entry_uuid IN (' +
+      batch.members.map(function() { return '?'; }).join(',') + ') LIMIT 1',
+    batch.members.map(function(member) { return member.entry_uuid; })
+  );
+  if (existing) {
+    throw commandError('idempotency_conflict', 'A journal batch member entry already exists: ' + existing.entry_uuid);
+  }
   const result = await lifecycle.finalizeBatchInTransaction(
     tx, catalog, batch.input, batch.members, principal,
     { suppressCommandTerminal: true, includeAggregate: true }

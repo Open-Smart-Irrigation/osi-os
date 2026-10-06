@@ -833,7 +833,7 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
 
 function batchCommandEnvelope(overrides, options) {
   options = options || {};
-  const batchUuid = '99999999-9999-4999-8999-999999999999';
+  const batchUuid = options.batchUuid || '99999999-9999-4999-8999-999999999999';
   const source = entryAggregate({ batch_uuid: batchUuid });
   const shared = {
     activity_code: source.activity_code,
@@ -1038,6 +1038,23 @@ test('UPSERT_JOURNAL_ENTRY_BATCH never writes a member on a plot the named owner
     assert.equal(counts.entries, 0);
     assert.equal(counts.values, 0);
     assert.equal(counts.outbox, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses a member entry UUID another batch already wrote', async () => {
+  const db = fixtureDb('batch-reused-entry');
+  try {
+    await journal.applyJournalCommand(db, batchCommandEnvelope({ commandId: 830 }), { gateway_device_eui: GATEWAY_EUI });
+    const before = await journalRowCounts(db);
+    const reused = batchCommandEnvelope({ commandId: 831 }, { batchUuid: '98989898-9898-4898-8898-989898989898' });
+    const result = await journal.applyJournalCommand(db, reused, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'idempotency_conflict');
+    const after = await journalRowCounts(db);
+    assert.equal(after.entries, before.entries);
+    assert.equal(after.outbox, before.outbox);
   } finally {
     db.close();
   }
