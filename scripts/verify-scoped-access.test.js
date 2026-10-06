@@ -824,13 +824,16 @@ test('a plot created or moved into a zone named in the body is checked against f
   assert.match(text, /journal-plot-put-http.*changes a row outside the caller's scope \(body .*journal_plots row added/);
 });
 
-test('plot-group members named in the body are checked against foreign plots', async () => {
+test('plot-group members named in the body stay refused without the plot check (#418 owner rule)', async () => {
   const flows = journalWithoutObjectChecks(loadFlows());
   const text = await failuresFor(flows, ['journal-plot-groups-post-http', 'journal-plot-group-put-http']);
-  assert.match(text, /journal-plot-groups-post-http.*changes a row outside the caller's scope \(body .*journal_plot_group_members row added/);
-  // The PUT gets the same foreign body, but even without the plot check it
-  // cannot write: the member check makes the plot's owner the acting owner,
-  // so the caller's own group is no longer found (404) and no row changes.
+  // Two defences now stand in front of a group on a foreign plot: the plot
+  // check and, behind it, the group ownership rule (#418: the acting owner a
+  // member check resolves must be the caller). With the plot check removed
+  // the POST is still refused, so no foreign row appears.
+  assert.doesNotMatch(text, /journal-plot-groups-post-http.*changes a row outside/);
+  // The PUT gets the same foreign body: the member check makes the plot's
+  // owner the acting owner, so the ownership rule refuses it as well.
   assert.doesNotMatch(text, /journal-plot-group-put-http.*changes a row outside/);
 });
 

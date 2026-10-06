@@ -369,12 +369,6 @@ const REQUEST_FIXTURES = {
       group_uuid: '00000000-0000-4000-8000-00000000d004', label: 'Probe new group', resolved: false,
       base_sync_version: 0, members: [FOREIGN_PLOT_UUID],
     }],
-    // #418: the caller holds a grant on the foreign plot. The grant lets it
-    // write entries there, never create a group attributed to the plot's owner.
-    foreignBodySetupSql:
-      'INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, gateway_device_eui, created_at) ' +
-      "VALUES ('00000000-0000-4000-8000-00000000c418', '" + PROBE_CALLER_UUID + "', '" + FOREIGN_PLOT_UUID +
-      "', '" + PROBE_GATEWAY_EUI + "', '2026-01-01T00:00:00Z');",
   },
   'journal-plots-post-http': {
     // A second zone of the caller's, without a plot yet; and the foreign zone's
@@ -996,6 +990,38 @@ function modulesRootFor(profileLabel) {
   return DEFAULT_MODULES_ROOT;
 }
 
+// #418: a grant on another user's plot lets the caller write entries there,
+// never create a plot group attributed to that plot's owner. The foreign
+// bodies above run without a grant (the plot check refuses them); this run
+// adds the grant, so only the group ownership rule stands between the caller
+// and a group owned by the admin. A control run on the caller's own plot,
+// with the same grant, must create its group.
+const PLOT_GROUP_CREATE_ID = 'journal-plot-groups-post-http';
+const PLOT_GROUP_GRANT_SQL =
+  'INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, gateway_device_eui, created_at) ' +
+  "VALUES ('00000000-0000-4000-8000-00000000c418', '" + PROBE_CALLER_UUID + "', '" + FOREIGN_PLOT_UUID +
+  "', '" + PROBE_GATEWAY_EUI + "', '2026-01-01T00:00:00Z');";
+
+async function checkGranteePlotGroup(flows, entry, label, probeOptions) {
+  const failures = [];
+  const fixture = probeOptions.fixture || {};
+  const granted = { ...fixture, setupSql: (fixture.setupSql || '') + '\n' + PLOT_GROUP_GRANT_SQL };
+  const groupBody = (members) => ({
+    group_uuid: '00000000-0000-4000-8000-00000000d418', label: 'Probe grantee group', resolved: false,
+    base_sync_version: 0, members,
+  });
+  const addsGroup = (trace) => (trace.changes || []).some((change) =>
+    change.table === 'journal_plot_groups' && change.op === 'added');
+  const base = { ...probeOptions, decisions: 'real', snapshot: true, fixture: granted };
+  if (addsGroup(await probeEntry(flows, entry, { ...base, body: groupBody([FOREIGN_PLOT_UUID]) }))) {
+    failures.push(`${label} lets a grantee create a plot group on another user's plot (#418)`);
+  }
+  if (!addsGroup(await probeEntry(flows, entry, { ...base, body: groupBody([PROBE_PLOT_UUID]) }))) {
+    failures.push(`${label}: the grantee control run on its own plot creates no group, so the refusal proves nothing`);
+  }
+  return failures;
+}
+
 // Owner decision 2026-10-05: with scoped access on, a farm-wide journal entry
 // (no plot, no zone) is recorded only by the farm owner (the cloud-linked
 // account) or an enabled admin. The probe caller is a researcher that is not
@@ -1122,6 +1148,7 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
 
     const { failures: verdict } = await checkEntry(flows, entry, label, probeOptions);
     if (entry.id === FARM_WIDE_ENTRY_ID) failures.push(...await checkFarmWideCreate(flows, entry, label, probeOptions));
+    if (entry.id === PLOT_GROUP_CREATE_ID) failures.push(...await checkGranteePlotGroup(flows, entry, label, probeOptions));
 
     if (allowlist.has(entry.id)) {
       if (!verdict.length) {
