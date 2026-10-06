@@ -28,6 +28,7 @@ const expectedExports = [
   'resolveAnalysisSeries',
   'listAnalysisViews',
   'saveAnalysisView',
+  'deleteAnalysisView',
   'deriveCardId',
   'deriveCardsForZone',
   'deriveGatewayCard',
@@ -48,6 +49,7 @@ const expectedExports = [
   'legacySensorHistory',
   'legacyRainDailyHistory',
   'buildZoneExportCsv',
+  'buildAllZonesExportCsv',
   'toCsv',
   'writeZoneCsv',
   'rotateZoneCsv',
@@ -460,6 +462,11 @@ test('toCsv neutralizes spreadsheet formulas in text cells', () => {
     value: 12.5,
   }]);
   assert.strictEqual(csv, "zone,source,array_id,value\n'=Zone,'+Source,'@ARRAY,12.5\n");
+});
+
+test('toCsv also neutralizes text cells that start with a tab or a carriage return', () => {
+  const csv = helper.toCsv(['zone', 'source', 'value'], [{ zone: '\tZone', source: '\r=cmd', value: -3 }]);
+  assert.strictEqual(csv, "zone,source,value\n'\tZone,\"'\r=cmd\",-3\n");
 });
 
 test('classifySoilStatus uses 22/50 kPa thresholds', () => {

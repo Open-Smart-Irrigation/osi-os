@@ -80,7 +80,15 @@
     },
     "export": {
       "csv": "Exporter CSV",
-      "png": "Exporter PNG"
+      "png": "Exporter PNG",
+      "allZonesCsv": "Exporter toutes les zones CSV",
+      "allZonesCsvBusy": "Exportation…",
+      "errors": {
+        "tooLarge": "Cet export est trop volumineux. Choisissez une période plus courte ou une agrégation plus grossière.",
+        "busy": "Un autre export est en cours. Réessayez dans un instant.",
+        "invalidRange": "Cette période ne peut pas être exportée. Vérifiez les dates de début et de fin.",
+        "failed": "L'export a échoué. Réessayez."
+      }
     },
     "legend": {
       "label": "Légende du graphique",
@@ -91,7 +99,8 @@
       "save": "Enregistrer la vue",
       "namePlaceholder": "Nommer cette vue",
       "delete": "Supprimer la vue",
-      "empty": "Aucune vue enregistrée pour le moment."
+      "empty": "Aucune vue enregistrée pour le moment.",
+      "confirmDelete": "Supprimer la vue enregistrée « {{name}} » ?"
     },
     "droppedNotice": "{{count}} séries n'ont pas pu être chargées",
     "correlation": {

@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const historyHelper = require('../osi-history-helper');
 
 const LIMITS = {
@@ -592,7 +593,215 @@ function displaySourceLabels(devices) {
   }).filter(Boolean);
 }
 
+// ---------------------------------------------------------------------------
+// Portable history routes: GET /api/history/export.csv (every zone the caller
+// may read, one CSV) and DELETE /api/analysis/views/:id (one saved view of the
+// caller). Served by the "Portable History API" function node, which hands in
+// the database, the history helper and, with scoped access on only, the scope
+// helper. Authentication and scope follow the neighbouring routes: the export
+// as the per-zone export of the History API Router, the delete as the saved
+// views of the Analysis API Router.
+
+const PORTABLE_RESPONSE_HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization'
+};
+
+// Flag-off secret and bearer check: the same secret sources, token format and
+// answers as the inline getAuthSecret/verifyBearer of the History and Analysis
+// API Router nodes. With scoped access off nothing on these routes loads the
+// scope helper (contract of scripts/verify-auth-flag-off-hermetic.js).
+function portableAuthSecret(request) {
+  const configured = String(request.authSecret || '').trim();
+  if (configured) return configured;
+  const fsMod = request.fs;
+  const warn = typeof request.warn === 'function' ? request.warn : function() {};
+  const secretPaths = ['/data/db/osi_auth_token_secret', '/var/lib/node-red/.node-red/osi_auth_token_secret'];
+  if (fsMod) {
+    for (const secretPath of secretPaths) {
+      try {
+        const existing = String(fsMod.readFileSync(secretPath, 'utf8') || '').trim();
+        if (existing) return existing;
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') {
+          warn('portable history auth secret read failed for ' + secretPath + ': ' + String(error && error.message ? error.message : error));
+        }
+      }
+    }
+    const generated = crypto.randomBytes(48).toString('hex');
+    for (const secretPath of secretPaths) {
+      try {
+        fsMod.writeFileSync(secretPath, generated + '\n', { mode: 0o600 });
+        return generated;
+      } catch (error) {
+        warn('portable history auth secret write failed for ' + secretPath + ': ' + String(error && error.message ? error.message : error));
+      }
+    }
+  }
+  httpError(500, 'AUTH_TOKEN_SECRET or JWT_SECRET must be configured');
+}
+
+function portableVerifyBearer(authHeader, request) {
+  if (!authHeader || !String(authHeader).startsWith('Bearer ')) httpError(401, 'Unauthorized');
+  const parts = String(authHeader).substring(7).trim().split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) httpError(401, 'Invalid token');
+  const expected = crypto.createHmac('sha256', portableAuthSecret(request)).update(parts[0]).digest('base64url');
+  const actualBuffer = Buffer.from(parts[1], 'utf8');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  if (actualBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(actualBuffer, expectedBuffer)) {
+    httpError(401, 'Invalid token');
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  } catch (_) {
+    httpError(401, 'Invalid token');
+  }
+  const userId = Number(payload && payload.userId);
+  const username = String(payload && payload.username || '').trim();
+  const exp = Number(payload && payload.exp || 0);
+  if (!Number.isFinite(userId) || !username) httpError(401, 'Invalid token');
+  if (exp && Date.now() > exp) httpError(401, 'Token expired');
+  return { userId, username };
+}
+
+function portableRows(db, sql, params) {
+  return new Promise(function(resolve, reject) {
+    db.all(sql, params || [], function(error, rows) {
+      if (error) return reject(error);
+      return resolve(rows || []);
+    });
+  });
+}
+
+// Scoped mode: the token's subject must still be this account (id and
+// username, as the History API Router checks) and enabled, read fresh here and
+// decided by the scope helper.
+// Flag off: the token's user must still exist, as the Analysis API Router
+// checks (401 User not found).
+async function portableAssertUserExists(db, auth) {
+  const users = await portableRows(db, 'SELECT id FROM users WHERE id = ? LIMIT 1', [auth.userId]);
+  if (!users.length) httpError(401, 'User not found');
+}
+
+async function portableAssertEnabledAccount(db, scope, auth) {
+  const users = await portableRows(db, 'SELECT user_uuid, disabled_at FROM users WHERE id = ? AND username = ? LIMIT 1', [auth.userId, auth.username]);
+  const user = users[0];
+  if (!user || user.disabled_at) httpError(403, 'forbidden');
+  await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true });
+}
+
+// One all-zones export at a time per Node-RED process: an export near its row
+// bound holds about 100-140 MB of heap and seconds of event-loop time, and
+// its queries queue on the shared database connection ahead of ingest. The
+// slot is released when the export finishes, whatever the outcome; a client
+// that disconnects early frees it when the build it started completes.
+let portableExportInFlight = false;
+
+async function portableAllZonesExport(request, history, db, auth, scope) {
+  const query = request.query || {};
+  if (scope) {
+    await portableAssertEnabledAccount(db, scope, auth);
+  } else {
+    await portableAssertUserExists(db, auth);
+  }
+  if (query.scope !== 'allZones') httpError(400, 'Unsupported export scope', 'use scope=allZones');
+  if (portableExportInFlight) {
+    const busy = new Error('export already running');
+    busy.statusCode = 429;
+    busy.suggestion = 'try again when the current export finishes';
+    busy.headers = { 'Retry-After': '30' };
+    throw busy;
+  }
+  portableExportInFlight = true;
+  try {
+    return await portableBuildAllZonesExport(request, history, db, auth, scope, query);
+  } finally {
+    portableExportInFlight = false;
+  }
+}
+
+async function portableBuildAllZonesExport(request, history, db, auth, scope, query) {
+  // Scoped mode, write-only scoping (W1): zone history is account-wide for
+  // every enabled account, as on the per-zone history routes. Flag off: the
+  // caller's own zones, as the per-zone routes resolve them.
+  const zoneRows = scope
+    ? await portableRows(db, 'SELECT id FROM irrigation_zones WHERE deleted_at IS NULL ORDER BY id ASC', [])
+    : await portableRows(db, 'SELECT id FROM irrigation_zones WHERE user_id = ? AND deleted_at IS NULL ORDER BY id ASC', [auth.userId]);
+  const granularity = String(query.granularity || 'daily').trim().toLowerCase() || 'daily';
+  const from = String(query.from || '').trim();
+  const to = String(query.to || query.from || '').trim();
+  const result = await history.buildAllZonesExportCsv(db, {
+    zoneIds: zoneRows.map(function(row) { return Number(row.id); }),
+    from: from,
+    to: to,
+    granularity: granularity,
+    channels: String(query.channels || '').trim(),
+    site: String(request.site || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN',
+    nowMs: request.nowMs || Date.now()
+  });
+  const filename = 'all-zones-' + safeFilenamePart(from, 'from') + '_' + safeFilenamePart(to, 'to') + '-' + safeFilenamePart(granularity, 'daily') + '.csv';
+  return {
+    statusCode: 200,
+    headers: Object.assign({}, PORTABLE_RESPONSE_HEADERS, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="' + safeFilenamePart(filename, 'all-zones-export.csv') + '"'
+    }),
+    payload: result.csv,
+    rowCount: result.rowCount
+  };
+}
+
+async function portableDeleteAnalysisView(request, history, db, auth, scope, viewId) {
+  if (scope) {
+    await portableAssertEnabledAccount(db, scope, auth);
+  } else {
+    await portableAssertUserExists(db, auth);
+  }
+  // Saved views are per user in every mode: the delete is filtered by owner.
+  await history.deleteAnalysisView(db, { userId: auth.userId }, viewId);
+  return { statusCode: 204, headers: PORTABLE_RESPONSE_HEADERS, payload: '' };
+}
+
+async function handlePortableHistoryRequest(request = {}) {
+  try {
+    const method = String(request.method || '').toUpperCase();
+    const requestPath = String(request.path || '').split('?')[0];
+    const history = request.history || historyHelper;
+    const db = request.db;
+    const scope = request.scopedMode === true ? request.scope : null;
+    if (request.scopedMode === true && (!scope || typeof scope.verifyBearer !== 'function')) {
+      httpError(500, 'scope resolver unavailable');
+    }
+    const auth = scope
+      ? scope.verifyBearer(request.authorization, { configuredSecret: request.authSecret, fs: request.fs, warn: request.warn })
+      : portableVerifyBearer(request.authorization, request);
+    if (!db) httpError(500, 'database unavailable');
+    if (method === 'GET' && requestPath === '/api/history/export.csv') {
+      return await portableAllZonesExport(request, history, db, auth, scope);
+    }
+    const viewMatch = /^\/api\/analysis\/views\/([^/]+)$/.exec(requestPath);
+    if (method === 'DELETE' && viewMatch) {
+      const viewId = request.params && request.params.id !== undefined ? request.params.id : decodeURIComponent(viewMatch[1]);
+      return await portableDeleteAnalysisView(request, history, db, auth, scope, viewId);
+    }
+    httpError(404, 'Endpoint not found');
+  } catch (error) {
+    const payload = { error: error && error.message ? error.message : 'Unexpected error' };
+    if (error && error.detail !== undefined) payload.detail = error.detail;
+    if (error && error.suggestion) payload.suggestion = error.suggestion;
+    return {
+      statusCode: error && (error.statusCode || error.status) ? (error.statusCode || error.status) : 500,
+      headers: error && error.headers ? Object.assign({}, PORTABLE_RESPONSE_HEADERS, error.headers) : PORTABLE_RESPONSE_HEADERS,
+      payload: payload
+    };
+  }
+}
+
 module.exports = {
+  handlePortableHistoryRequest,
   safeFilenamePart,
   httpError,
   parseZoneId,

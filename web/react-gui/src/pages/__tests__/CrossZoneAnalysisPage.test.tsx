@@ -15,6 +15,7 @@ const scopeState = {
   loading: false,
 };
 const saveViewMock = vi.fn();
+const deleteViewMock = vi.fn(() => Promise.resolve());
 vi.mock('../../components/AppHeader', () => ({
   AppHeader: (props: unknown) => {
     appHeaderProps(props);
@@ -34,15 +35,20 @@ vi.mock('../../components/analysis/AnalysisViewsMenu', () => ({
   AnalysisViewsMenu: ({
     onLoad,
     onSave,
+    onDelete,
     views,
   }: {
     onLoad: (view: unknown) => void;
     onSave: (name: string) => void;
-    views: unknown[];
+    onDelete?: (id: number) => void;
+    views: Array<{ id: number }>;
   }) => (
     <div>
       <button type="button" data-testid="load-view" onClick={() => onLoad(views[0])}>load</button>
       <button type="button" data-testid="save-view" onClick={() => onSave('Broken save')}>save</button>
+      {onDelete ? (
+        <button type="button" data-testid="delete-view" onClick={() => onDelete(views[0].id)}>delete</button>
+      ) : null}
     </div>
   ),
 }));
@@ -127,6 +133,7 @@ vi.mock('../../analysis/useAnalysisViews', () => ({
     isLoading: false,
     error: undefined,
     saveView: saveViewMock,
+    deleteView: deleteViewMock,
     refresh: vi.fn(),
   }),
 }));
@@ -277,14 +284,40 @@ describe('CrossZoneAnalysisPage', () => {
     expect(exportMenuProps).toHaveBeenCalledWith(expect.objectContaining({ username: 'field-admin' }));
   });
 
-  it('does not pass server-only history export props to the edge export menu', () => {
+  it('passes the resolved range and aggregation to account-wide export', () => {
     catalogState = loadedCatalogState();
     render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByText('SWT 1'));
 
-    expect(exportMenuProps.mock.lastCall?.[0]).not.toHaveProperty('exportRange');
-    expect(exportMenuProps.mock.lastCall?.[0]).not.toHaveProperty('exportGranularity');
+    expect(exportMenuProps.mock.lastCall?.[0]).toEqual(expect.objectContaining({
+      exportRange: { from: '2026-06-01', to: '2026-06-07' },
+      exportGranularity: 'hourly',
+    }));
+  });
+
+  it('asks before deleting a saved view and deletes it once confirmed', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    catalogState = loadedCatalogState();
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByTestId('delete-view'));
+
+    expect(confirm).toHaveBeenCalledWith('analysis.views.confirmDelete');
+    expect(deleteViewMock).toHaveBeenCalledWith(9);
+    confirm.mockRestore();
+  });
+
+  it('keeps the saved view when the delete is cancelled', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    catalogState = loadedCatalogState();
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+
+    fireEvent.click(screen.getByTestId('delete-view'));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(deleteViewMock).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 
   it('hydrates saved custom range values into the page controls', () => {

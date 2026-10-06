@@ -10826,6 +10826,83 @@
     ]
   },
   {
+    "id": "history-all-zones-export-csv-http",
+    "type": "http in",
+    "z": "history-api-tab",
+    "name": "GET /api/history/export.csv",
+    "url": "/api/history/export.csv",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 210,
+    "y": 1120,
+    "wires": [
+      [
+        "portable-history-api-fn"
+      ]
+    ]
+  },
+  {
+    "id": "analysis-views-delete-http",
+    "type": "http in",
+    "z": "history-api-tab",
+    "name": "DELETE /api/analysis/views/:id",
+    "url": "/api/analysis/views/:id",
+    "method": "delete",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 1160,
+    "wires": [
+      [
+        "portable-history-api-fn"
+      ]
+    ]
+  },
+  {
+    "id": "portable-history-api-fn",
+    "type": "function",
+    "z": "history-api-tab",
+    "name": "Portable History API",
+    "func": "// GET /api/history/export.csv and DELETE /api/analysis/views/:id. Auth, scope\n// and the work live in osi-history-router (handlePortableHistoryRequest); the\n// scope helper is loaded only with scoped access on.\nreturn (async () => {\nconst started = Date.now();\nconst failed = function(statusCode, error) {\n  msg.statusCode = statusCode;\n  msg.headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };\n  msg.payload = { error: error };\n  return msg;\n};\nconst scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';\nconst routerLoad = osiLib.require('history-router');\nif (!routerLoad.ok) {\n  node.error('Portable history: history router module unavailable: ' + routerLoad.error, msg);\n  return failed(503, 'history_unavailable');\n}\nlet scope = null;\nif (scopedOn) {\n  const scopeLoad = osiLib.require('scope');\n  if (!scopeLoad.ok) {\n    node.error('Portable history: scope module unavailable: ' + scopeLoad.error, msg);\n    return failed(500, 'scope resolver unavailable');\n  }\n  scope = scopeLoad.value;\n}\nconst req = msg.req || {};\nconst path = String(req.path || (req.originalUrl || '').split('?')[0] || '');\nconst db = new osiDb.Database('/data/db/farming.db');\ntry {\n  const result = await routerLoad.value.handlePortableHistoryRequest({\n    db: db,\n    history: osiHistory,\n    scope: scope,\n    scopedMode: scopedOn,\n    authorization: req.headers && req.headers.authorization,\n    authSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),\n    fs: global.get('fs'),\n    warn: function(message) { node.warn(message); },\n    method: req.method,\n    path: path,\n    params: req.params,\n    query: req.query,\n    site: String(env.get('DEVICE_EUI') || env.get('GATEWAY_DEVICE_EUI') || 'UNKNOWN')\n  });\n  msg.statusCode = result.statusCode;\n  msg.headers = result.headers;\n  msg.payload = result.payload;\n  if (result.statusCode === 200 && typeof result.rowCount === 'number') {\n    node.log('[history-api] all zones export csv rows=' + String(result.rowCount) + ' durationMs=' + String(Date.now() - started));\n  }\n} catch (error) {\n  node.warn('Portable history failed: ' + String(error && error.message ? error.message : error));\n  failed(500, 'Unexpected error');\n} finally {\n  try {\n    await new Promise(function(resolve) { db.close(function() { resolve(); }); });\n  } catch (error) {\n    node.warn('Portable history DB close failed: ' + String(error && error.message ? error.message : error));\n  }\n}\nreturn msg;\n})();",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "osiLib",
+        "module": "osi-lib"
+      },
+      {
+        "var": "osiDb",
+        "module": "osi-db-helper"
+      },
+      {
+        "var": "osiHistory",
+        "module": "osi-history-helper"
+      }
+    ],
+    "x": 520,
+    "y": 1140,
+    "wires": [
+      [
+        "portable-history-api-response"
+      ]
+    ]
+  },
+  {
+    "id": "portable-history-api-response",
+    "type": "http response",
+    "z": "history-api-tab",
+    "name": "Portable History Response",
+    "statusCode": "",
+    "headers": {},
+    "x": 800,
+    "y": 1140,
+    "wires": []
+  },
+  {
     "id": "analysis-channels-http",
     "type": "http in",
     "z": "history-api-tab",

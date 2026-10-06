@@ -80,7 +80,15 @@
     },
     "export": {
       "csv": "Gyamu CSV",
-      "png": "Gyamu PNG"
+      "png": "Gyamu PNG",
+      "allZonesCsv": "Gyamu CSV ya zone zonna",
+      "allZonesCsvBusy": "Exporting…",
+      "errors": {
+        "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
+        "busy": "Another export is running. Try again in a moment.",
+        "invalidRange": "This range cannot be exported. Check the start and end dates.",
+        "failed": "The export failed. Try again."
+      }
     },
     "legend": {
       "label": "Ekiraga ebiri ku chart",
@@ -91,7 +99,8 @@
       "save": "Tereka endaba",
       "namePlaceholder": "Tuuma endaba eno erinnya",
       "delete": "Sangula endaba",
-      "empty": "Tewali ndaba ziterekeddwa."
+      "empty": "Tewali ndaba ziterekeddwa.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series tezaasobola kusomebwa",
     "correlation": {

@@ -1810,6 +1810,10 @@ export const analysisAPI = {
     const response = await api.post<unknown>('/api/analysis/views', toEdgeAnalysisViewPayload(request));
     return adaptEdgeSavedViewResponse(response.data);
   },
+
+  deleteView: async (id: number): Promise<void> => {
+    await api.delete(`/api/analysis/views/${id}`);
+  },
 };
 
 export const historyAPI = {
@@ -1926,7 +1930,80 @@ export const historyAPI = {
   },
 };
 
-export type ZoneExportGranularity = 'raw' | 'hourly' | 'daily';
+export type HistoryExportGranularity = 'raw' | 'hourly' | 'daily';
+export type ZoneExportGranularity = HistoryExportGranularity;
+
+async function downloadHistoryCsv(
+  endpoint: string,
+  params: Record<string, string>,
+  filename: string,
+): Promise<void> {
+  const response = await api.get(endpoint, { params, responseType: 'blob' });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+// A refused or failed CSV export: the HTTP status (null without an answer)
+// and the gateway's suggestion, read from the JSON error body that arrives as
+// a Blob because the request asks for one.
+export class HistoryExportError extends Error {
+  readonly status: number | null;
+  readonly suggestion: string | null;
+
+  constructor(message: string, status: number | null, suggestion: string | null) {
+    super(message);
+    this.name = 'HistoryExportError';
+    this.status = status;
+    this.suggestion = suggestion;
+  }
+}
+
+async function toHistoryExportError(error: unknown): Promise<HistoryExportError> {
+  const response = (error as { response?: { status?: unknown; data?: unknown } } | null)?.response;
+  const status = typeof response?.status === 'number' ? response.status : null;
+  let message = error instanceof Error ? error.message : 'export failed';
+  let suggestion: string | null = null;
+  const data = response?.data;
+  try {
+    const text = data instanceof Blob ? await data.text() : typeof data === 'string' ? data : null;
+    const body = text ? JSON.parse(text) as { error?: unknown; suggestion?: unknown } : null;
+    if (body && typeof body.error === 'string') message = body.error;
+    if (body && typeof body.suggestion === 'string') suggestion = body.suggestion;
+  } catch {
+    // A body that is not JSON keeps the status alone.
+  }
+  return new HistoryExportError(message, status, suggestion);
+}
+
+export const historyExportAPI = {
+  downloadAllZones: async (opts: {
+    from: string;
+    to: string;
+    granularity: HistoryExportGranularity;
+  }): Promise<void> => {
+    try {
+      await downloadHistoryCsv(
+        '/api/history/export.csv',
+        {
+          scope: 'allZones',
+          from: opts.from,
+          to: opts.to,
+          granularity: opts.granularity,
+        },
+        `all-zones-${opts.from}_${opts.to}-${opts.granularity}.csv`,
+      );
+    } catch (error) {
+      throw await toHistoryExportError(error);
+    }
+  },
+};
 
 export const zoneExportAPI = {
   download: async (
@@ -1939,19 +2016,11 @@ export const zoneExportAPI = {
       granularity: opts.granularity,
     };
     if (opts.channels?.length) params.channels = opts.channels.join(',');
-    const response = await api.get(`/api/history/zones/${zoneId}/export.csv`, {
+    await downloadHistoryCsv(
+      `/api/history/zones/${zoneId}/export.csv`,
       params,
-      responseType: 'blob',
-    });
-    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `zone-${zoneId}-${opts.from}_${opts.to}-${opts.granularity}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+      `zone-${zoneId}-${opts.from}_${opts.to}-${opts.granularity}.csv`,
+    );
   },
 };
 

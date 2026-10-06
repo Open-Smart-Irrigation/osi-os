@@ -80,7 +80,15 @@
     },
     "export": {
       "csv": "Export CSV",
-      "png": "Export PNG"
+      "png": "Export PNG",
+      "allZonesCsv": "Export all zones CSV",
+      "allZonesCsvBusy": "Exporting…",
+      "errors": {
+        "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
+        "busy": "Another export is running. Try again in a moment.",
+        "invalidRange": "This range cannot be exported. Check the start and end dates.",
+        "failed": "The export failed. Try again."
+      }
     },
     "legend": {
       "label": "Chart legend",
@@ -91,7 +99,8 @@
       "save": "Save view",
       "namePlaceholder": "Name this view",
       "delete": "Delete view",
-      "empty": "No saved views yet."
+      "empty": "No saved views yet.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series could not be loaded",
     "correlation": {

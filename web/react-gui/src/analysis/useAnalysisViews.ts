@@ -16,5 +16,12 @@ export function useAnalysisViews(enabled: boolean = true) {
     return created;
   };
 
-  return { views: data ?? [], error, isLoading, saveView, refresh: mutate };
+  const deleteView = async (id: number) => {
+    await analysisAPI.deleteView(id);
+    await mutate((current = []) => current.filter((view) => view.id !== id), {
+      revalidate: false,
+    });
+  };
+
+  return { views: data ?? [], error, isLoading, saveView, deleteView, refresh: mutate };
 }

@@ -24,6 +24,7 @@ import {
 } from '../analysis/workspaceModel';
 import type { AnalysisRange, AnalysisSeriesRequest } from '../analysis/types';
 import { canonicalize } from '../channels/registry';
+import { exportGranularity, exportRangeFor } from '../analysis/exportRange';
 import { AnalysisSeriesTray } from '../components/analysis/AnalysisSeriesTray';
 import { AnalysisControls } from '../components/analysis/AnalysisControls';
 import { AnalysisChartPanel } from '../components/analysis/AnalysisChartPanel';
@@ -50,7 +51,7 @@ export function CrossZoneAnalysisPage() {
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useAnalysisCatalog();
-  const { views, saveView, error: viewsError } = useAnalysisViews();
+  const { views, saveView, deleteView, error: viewsError } = useAnalysisViews();
 
   const activeWorkspace = useMemo(
     () => (catalog ? migrateWorkspaceSeriesIds(workspace, catalog.channels) : workspace),
@@ -82,6 +83,10 @@ export function CrossZoneAnalysisPage() {
   const displayedSeries = useMemo(
     () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
     [activeWorkspace.labelOverrides, data],
+  );
+  const resolvedExportRange = useMemo(
+    () => exportRangeFor(data?.range),
+    [data?.range],
   );
   const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
     setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
@@ -181,6 +186,12 @@ export function CrossZoneAnalysisPage() {
                 void saveCurrentView(name);
               }}
               onLoad={loadView}
+              onDelete={(id) => {
+                const name = views.find((view) => view.id === id)?.name ?? '';
+                if (!window.confirm(t('analysis.views.confirmDelete', { name }))) return;
+                setViewSaveError(null);
+                void deleteView(id).catch(setViewSaveError);
+              }}
             />
           </div>
         </aside>
@@ -228,6 +239,8 @@ export function CrossZoneAnalysisPage() {
               catalogById={catalogById}
               chartRef={chartRef}
               username={username}
+              exportRange={resolvedExportRange}
+              exportGranularity={exportGranularity(data?.aggregation.applied)}
             />
           </div>
           {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}

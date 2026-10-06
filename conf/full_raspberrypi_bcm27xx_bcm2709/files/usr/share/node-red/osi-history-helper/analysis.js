@@ -733,6 +733,25 @@ function createAnalysis(deps) {
     return parseViewRow(rows[0]);
   }
 
+  // Deletes one saved view of the caller. Views are per user in every mode:
+  // another user's view and a missing one both answer 404, so the route does
+  // not reveal which ids exist.
+  async function deleteAnalysisView(db, user = {}, viewId) {
+    const userId = userIdFor(user);
+    const raw = String(viewId === undefined || viewId === null ? '' : viewId).trim();
+    const id = /^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw badRequest('analysis view id must be a positive integer');
+    }
+    const rows = await dbAll(db, 'SELECT id FROM analysis_views WHERE id = ? AND user_id = ?', [id, userId]);
+    if (!rows.length) {
+      const error = new Error('analysis view not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    await dbRun(db, 'DELETE FROM analysis_views WHERE id = ? AND user_id = ?', [id, userId]);
+  }
+
   return {
     ANALYSIS_VIEWS_SCHEMA,
     analysisSeriesId,
@@ -740,6 +759,7 @@ function createAnalysis(deps) {
     listAnalysisViews,
     resolveAnalysisSeries,
     saveAnalysisView,
+    deleteAnalysisView,
   };
 }
 
