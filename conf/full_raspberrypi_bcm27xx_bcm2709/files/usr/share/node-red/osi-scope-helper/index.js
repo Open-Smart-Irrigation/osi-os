@@ -4,8 +4,9 @@ const crypto = require('crypto');
 const CACHE_TTL_MS = 30000;
 const cache = new Map();
 const WEATHER_TYPE_IDS = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
-// Soil sensors whose depth and calibration settings their owner may still
-// change after the sensor has left every zone (allowUnassignedOwner below).
+// Soil sensors whose depth and calibration settings their owner or an admin
+// may still change after the sensor has left every zone (allowUnassignedOwner
+// below).
 const SOIL_DEPTH_TYPE_IDS = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
 
 function isScopedMode(envValue) {
@@ -209,8 +210,9 @@ async function assertFreshPlotAccess(db, userUuid, plotUuid, { scopedMode } = {}
 // options.allowUnassignedOwner: set by a route that configures a soil sensor
 // (depths, WATERMARK calibration). A soil sensor in no zone is in nobody's
 // zone scope; for such a route its owner (devices.user_id) may still change
-// it, when the owner's role may write. The flag-off handlers allow the same
-// through their owner filter. Nobody else gets the exception, admins included.
+// it when the owner's role may write, and so may any enabled admin, owner or
+// not (the same rule as the cloud command path in osi-watermark-helper).
+// Everyone else gets 404; a disabled account was refused with 403 above.
 async function assertFreshDeviceAccess(db, userUuid, deveui, { scopedMode, allowUnassignedOwner = false } = {}) {
   if (!isScopedMode() && scopedMode !== true) {
     return { role: 'admin', disabled: false, wildcard: true };
@@ -229,6 +231,7 @@ async function assertFreshDeviceAccess(db, userUuid, deveui, { scopedMode, allow
   if (allowUnassignedOwner === true &&
       device.irrigation_zone_id === null &&
       SOIL_DEPTH_TYPE_IDS.has(device.type_id)) {
+    if (scope.role === 'admin') return scope;
     if (canMutate(scope.role) && device.owner_user_uuid && device.owner_user_uuid === userUuid) return scope;
     throw httpError(404, 'device not found');
   }
