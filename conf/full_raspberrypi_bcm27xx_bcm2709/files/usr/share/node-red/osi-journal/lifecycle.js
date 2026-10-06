@@ -1757,6 +1757,17 @@ async function emitJournalOutbox(tx, source, op) {
       replication_mode: 'v2',
     };
   }
+  // The cloud's V2 validator refuses a catalog-v11 final with no plot unless
+  // it is farm_wide. Refuse it here, before it is queued, so it can never
+  // stand at the head of the mutation queue. The V1 and local paths keep
+  // accepting plot-less finals.
+  if (authority.mode === 'v2' && entry && op === 'JOURNAL_ENTRY_UPSERTED' &&
+      entry.status === 'final' && entry.plot_uuid == null && entry.layout_code !== 'farm_wide' &&
+      Number(entry.catalog_version) >= 11) {
+    const refusal = lifecycleError('plot_required', 'plot_uuid is required for non-farm-wide final entries');
+    refusal.statusCode = 422;
+    throw refusal;
+  }
   if (authority.mode === 'v2' && v2Compatible) {
     const mutationSource = entry
       ? { aggregate }

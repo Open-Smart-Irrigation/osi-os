@@ -480,6 +480,57 @@ test('saveEntry batch retry returns the original V2 mutation receipts after the 
     'only the two pre-barrier plot events remain in V1');
 });
 
+test('with V2 authority a plot-less non-farm-wide v11 final is refused before it is queued', async () => {
+  const db = createJournalDb('v2-plotless-final-refused');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotless = function(uuid, overrides) {
+    return Object.assign({
+      entry_uuid: uuid,
+      base_sync_version: 0,
+      status: 'final',
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-19T08:00:00',
+      occurred_timezone: 'Europe/Zurich',
+      season_crop: 'barley',
+      values: [{
+        attribute_code: 'attr.irrigation_depth', group_index: 0, value: 12,
+        unit_code: 'unit.mm_water', value_status: 'observed',
+      }],
+    }, overrides || {});
+  };
+  // Without V2 authority: accepted, as on main.
+  const legacy = await saveEntry(db, plotless('22990000-0000-4000-8000-000000000001'), principal, { mode: 'create' });
+  assert.equal(legacy.entry_uuid, '22990000-0000-4000-8000-000000000001');
+
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run('20000000-0000-4000-8000-000000000099', JOURNAL_TEST_GATEWAY_EUI, '2026-08-08T10:11:12.123Z');
+  const mutations = () => db.prepare('SELECT COUNT(*) AS n FROM journal_edge_mutations').get().n;
+  const before = mutations();
+  await assert.rejects(
+    saveEntry(db, plotless('22990000-0000-4000-8000-000000000002'), principal, { mode: 'create' }),
+    (error) => error && error.code === 'plot_required' && error.statusCode === 422 &&
+      error.message === 'plot_uuid is required for non-farm-wide final entries'
+  );
+  assert.equal(mutations(), before, 'nothing is queued for the cloud');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?')
+    .get('22990000-0000-4000-8000-000000000002').n, 0);
+
+  // A farm_wide final still goes to the V2 queue.
+  await saveEntry(db, plotless('22990000-0000-4000-8000-000000000003', {
+    activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+    layout_code: 'farm_wide', layout_version: 1, values: [], season_crop: null, note: 'Serviced mower',
+  }), principal, { mode: 'create' });
+  assert.equal(mutations(), before + 1);
+});
+
 test('post-barrier plot snapshots use V2 while plot groups preserve V1 compatibility', async () => {
   const db = createJournalDb('post-barrier-plot-group');
   seedJournalTestIdentity(db);
