@@ -2197,6 +2197,85 @@ test('validateEntry: full_record@10 fertilization with no operation falls back t
   assert.equal(withDose.ok, true, JSON.stringify(withDose.errors));
 });
 
+test('validateEntry: full_record@11 uses the generated final matrix and permits only listed not_observed families', async () => {
+  const { catalog } = await loadedFixture('final-requirement-matrix-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  assert.ok(fullRecordV11, 'catalog must publish full_record@11');
+  assert.ok(openFieldV11, 'catalog must publish open_field@11');
+  assert.ok(fullRecordV11.definition.final_requirement_matrix, 'full_record@11 carries the matrix');
+
+  const missingIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11, values: [],
+  }));
+  assert.equal(missingIrrigation.ok, false);
+  assert.ok(missingIrrigation.errors.some((error) => error.code === 'required'));
+
+  const unobservedIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+    values: [{
+      attribute_code: 'attr.irrigation_depth', group_index: 0,
+      unit_code: 'unit.mm_water', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedIrrigation.ok, true, JSON.stringify(unobservedIrrigation.errors));
+
+  const unobservedProduct = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    activity_code: 'fertilization', template_code: 'full_record', template_version: 11,
+    layout_version: 11,
+    values: [{
+      attribute_code: 'attr.product', group_index: 0, value_status: 'not_observed',
+    }, {
+      attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+      unit_code: 'unit.kg_per_ha_product', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedProduct.ok, false);
+  assert.ok(unobservedProduct.errors.some((error) =>
+    error.field === 'attr.product_uuid|attr.product' && error.code === 'required'));
+});
+
+test('validateEntry: a farm_wide entry carries no plot, zone or other field context', async () => {
+  const { catalog } = await loadedFixture('farm-wide-final-scope-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const farmWide = catalog.layouts.get('farm_wide').get(1);
+  const farmWideMaintenance = function(overrides) {
+    return validIrrigation(Object.assign({
+      activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+      layout_code: 'farm_wide', layout_version: 1, values: [], note: 'Serviced mower',
+    }, overrides || {}));
+  };
+  const accepted = validateEntry(catalog, farmWide, fullRecordV11, farmWideMaintenance(), { enforceScope: true });
+  assert.equal(accepted.ok, true, JSON.stringify(accepted.errors));
+
+  const withPlot = validateEntry(catalog, farmWide, fullRecordV11, farmWideMaintenance({
+    plot_uuid: '11111111-1111-4111-8111-111111111111',
+  }), { enforceScope: true });
+  assert.equal(withPlot.ok, false);
+  assert.ok(withPlot.errors.some((error) => error.code === 'farm_wide_requires_no_plot'));
+
+  for (const field of [
+    'zone_uuid', 'season_uuid', 'season_crop', 'season_variety', 'cycle_uuid',
+    'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code',
+    'pass_uuid', 'batch_uuid', 'device_eui', 'context', 'context_json',
+  ]) {
+    const candidate = farmWideMaintenance();
+    candidate[field] = field === 'context' ? {} : field === 'context_json' ? '{}'
+      : '11111111-1111-4111-8111-111111111111';
+    const scoped = validateEntry(catalog, farmWide, fullRecordV11, candidate, { enforceScope: true });
+    assert.equal(scoped.ok, false, field);
+    assert.ok(scoped.errors.some((error) => error.field === field && error.code === 'farm_wide_requires_no_context'), field);
+  }
+
+  // A plot-less final on any other layout keeps main's behaviour: the farm-wide
+  // rule constrains the farm_wide layout only and adds no plot requirement.
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  const plotless = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+  }), { enforceScope: true });
+  assert.ok(!plotless.errors || !plotless.errors.some((error) => error.code === 'plot_required'));
+});
+
 // Version-pinned control: an entry pinned to the frozen full_record@9 keeps
 // v9's activity-wide harvest requirement (crop + harvest_area +
 // harvest_yield_area) — only NEW entries created against @10 get
