@@ -674,6 +674,22 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
   return { handled: true, ack };
 }
 
+// The journal command types this applier executes. The replication worker
+// reads it (supportsCommandType) before it advertises the entry batch release
+// to the cloud, so the advertisement follows what this runtime can apply.
+const SUPPORTED_COMMAND_TYPES = new Set([
+  'UPSERT_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_ENTRY_BATCH',
+  'VOID_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_CUSTOM_VOCAB',
+  'UPSERT_JOURNAL_PLOT',
+  'UPSERT_JOURNAL_PLOT_GROUP',
+]);
+
+function supportsCommandType(type) {
+  return SUPPORTED_COMMAND_TYPES.has(String(type || '').trim().toUpperCase());
+}
+
 let journalApplyTail = Promise.resolve();
 
 function enqueueJournalApply(work) {
@@ -685,14 +701,7 @@ function enqueueJournalApply(work) {
 async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
   envelope = object(envelope, 'Pending command envelope');
   const type = commandType(envelope);
-  const supported = new Set([
-    'UPSERT_JOURNAL_ENTRY',
-    'UPSERT_JOURNAL_ENTRY_BATCH',
-    'VOID_JOURNAL_ENTRY',
-    'UPSERT_JOURNAL_CUSTOM_VOCAB',
-    'UPSERT_JOURNAL_PLOT',
-    'UPSERT_JOURNAL_PLOT_GROUP',
-  ]);
+  const supported = SUPPORTED_COMMAND_TYPES;
   const deliveryId = deliveryCommandId(envelope);
   if (recheckReplay) {
     const replay = await deduplicatePendingCommand(db, envelope, runtime);
@@ -794,4 +803,5 @@ module.exports = {
   queueCommandAck,
   validJournalEffectBinding,
   submittedIntentHash,
+  supportsCommandType,
 };

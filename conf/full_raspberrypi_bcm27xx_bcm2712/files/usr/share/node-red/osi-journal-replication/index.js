@@ -793,6 +793,62 @@ function clearJournalUnsupported(key) {
 
 function _resetJournalV2BackoffForTests() {
   journalUnsupportedBackoff.clear();
+  entryBatchAdvertisements.clear();
+}
+
+// Journal entry batches (UPSERT_JOURNAL_ENTRY_BATCH) are a separate release
+// on the cloud's capability table. The gateway advertises it only once its
+// journal contract is accepted, and reports edge_producer_ready from the
+// command applier itself: a runtime without the batch applier says false, so
+// the cloud never issues a batch this gateway cannot apply. An unchanged
+// advertisement is repeated at most hourly per link.
+const ENTRY_BATCH_RELEASE_ID = 'journal_entry_batch_v1';
+const ENTRY_BATCH_READVERTISE_MS = 3600000;
+const entryBatchAdvertisements = new Map(); // linkKey -> { ready, at }
+
+function entryBatchApplierReady() {
+  let commands;
+  try {
+    commands = require('../osi-journal/commands');
+  } catch (cause) {
+    return false;
+  }
+  return typeof commands.supportsCommandType === 'function' &&
+    commands.supportsCommandType('UPSERT_JOURNAL_ENTRY_BATCH');
+}
+
+async function advertiseEntryBatchRelease(httpApi, config, linkKey) {
+  const ready = entryBatchApplierReady();
+  const previous = entryBatchAdvertisements.get(linkKey);
+  if (previous && previous.ready === ready && Date.now() - previous.at < ENTRY_BATCH_READVERTISE_MS) {
+    return ready ? 'advertised' : 'not_ready';
+  }
+  try {
+    const answer = await cloudRequest(httpApi, {
+      method: 'POST',
+      url: gatewayEndpoint(config, '/capabilities'),
+      headers: authHeaders(config),
+      payload: {
+        release_id: ENTRY_BATCH_RELEASE_ID,
+        schema_fingerprint: config.schema_fingerprint,
+        schema_accepted: true,
+        edge_producer_ready: ready,
+        advertised_at: now(),
+      },
+      timeoutMs: 30000,
+    }, [200]);
+    if (!answer || typeof answer !== 'object' || answer.release_id !== ENTRY_BATCH_RELEASE_ID ||
+        answer.gateway_eui !== config.gateway_device_eui) {
+      throw error('invalid_capability', 'Journal entry batch capability response is malformed');
+    }
+  } catch (cause) {
+    // Reported in the tick result and retried on the next tick; replication
+    // itself does not depend on this release.
+    entryBatchAdvertisements.delete(linkKey);
+    return 'failed:' + String(cause && cause.code || 'unknown');
+  }
+  entryBatchAdvertisements.set(linkKey, { ready, at: Date.now() });
+  return ready ? 'advertised' : 'not_ready';
 }
 
 function journalUnsupportedError(message, extra) {
@@ -1046,6 +1102,10 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     }
   }
 
+  const entryBatchCapability = capability.locally_accepted
+    ? await advertiseEntryBatchRelease(httpApi, config, journalLinkKey)
+    : 'not_advertised';
+
   const cache = await enforcePhotoCache(db, fsApi, {
     max_bytes: config.photo_cache_bytes,
     min_free_bytes: config.min_free_bytes,
@@ -1053,6 +1113,7 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   });
   return {
     capability_state: capability.locally_accepted ? 'accepted' : 'rejected',
+    entry_batch_capability: entryBatchCapability,
     sent_mutations: sentMutations,
     applied_envelopes: appliedEnvelopes,
     committed_sequence: committedSequence,
