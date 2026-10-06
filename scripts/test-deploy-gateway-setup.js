@@ -809,3 +809,17 @@ test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap 
   assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_ROM="\/usr\/share\/node-red\/chirpstack-bootstrap\.js"/);
   assert.match(BOOTSTRAP_INIT, /BOOTSTRAP_FALLBACK="\/srv\/node-red\/chirpstack-bootstrap\.js"/);
 });
+
+test('a failed Kiwi/Clover profile repair is repeated in the closing banner with the exact rerun command', () => {
+  const repair = DEPLOY.indexOf('--repair-soil-profiles; then');
+  const complete = DEPLOY.indexOf('echo "=== Deploy complete. ==="');
+  assert.ok(repair > 0 && complete > repair, 'repair step runs before the closing banner');
+  const before = DEPLOY.slice(0, repair);
+  assert.match(before.slice(before.lastIndexOf('\n\n')), /soil_profile_repair_failed=0/, 'flag initialised right before the repair step');
+  const elseBranch = DEPLOY.slice(repair, DEPLOY.indexOf('\nfi\n', repair));
+  assert.match(elseBranch, /else[\s\S]*soil_profile_repair_failed=1/, 'flag set when the repair fails');
+  const banner = DEPLOY.slice(complete);
+  assert.match(banner,
+    /if \[ "\$soil_profile_repair_failed" = 1 \]; then[\s\S]*node \$BOOTSTRAP_SCRIPT_FALLBACK --repair-soil-profiles[\s\S]*fi/,
+    'the closing banner repeats the warning with the /srv/node-red command');
+});
