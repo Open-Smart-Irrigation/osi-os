@@ -91,19 +91,66 @@ function validateFaoStageKeys({ changedRows, columns }) {
   return problems;
 }
 
-// 0064: the zone outbox trigger emits one ZONE event per changed zone, stamped
-// with the gateway EUI.
+// The cloud link as the earlier snapshot holds it (sync_link_state is small,
+// so its values are always kept).
+function linkOf(snapshot) {
+  const t = snapshot && snapshot.tables.sync_link_state;
+  if (!t || !t.rows) return { linked: false, eui: null };
+  for (const { v } of t.rows.values()) {
+    if (v && col(v, t.columns, 'peer_node') === 'cloud') {
+      return { linked: BigInt(col(v, t.columns, 'linked') || 0) === 1n, eui: String(col(v, t.columns, 'gateway_device_eui') || '').trim() || null };
+    }
+  }
+  return { linked: false, eui: null };
+}
+
+// 0064: when 0064 runs, the only AFTER UPDATE trigger on irrigation_zones is
+// 0058's trg_sync_zones_outbox_au. With the cloud link up it writes exactly
+// one ZONE_CONFIG_UPSERTED event per changed zone, stamped with the gateway
+// EUI, whose payload carries the new stage and sync_version; without the link
+// it writes nothing.
 function validateZoneOutbox({ addedRows, columns, context }) {
   const problems = [];
   const zoneChanges = context.changedKeysByTable.get('irrigation_zones');
-  const changedZoneUuids = new Set((zoneChanges ? zoneChanges.changedRows : [])
-    .map((r) => col(r.after, zoneChanges.columns, 'zone_uuid')));
-  for (const row of addedRows) {
-    const aggregateKey = col(row, columns, 'aggregate_key');
-    if (!changedZoneUuids.has(aggregateKey)) problems.push(`outbox row for zone ${aggregateKey}, which 0064 did not change`);
-    if (!String(col(row, columns, 'gateway_device_eui') || '').trim()) problems.push(`outbox row for zone ${aggregateKey} has no gateway_device_eui`);
+  const changedZones = new Map();
+  for (const r of (zoneChanges ? zoneChanges.changedRows : [])) {
+    if (!r.after) { problems.push('changed zone values not kept'); continue; }
+    changedZones.set(col(r.after, zoneChanges.columns, 'zone_uuid'), {
+      stage: col(r.after, zoneChanges.columns, 'phenological_stage'),
+      version: String(col(r.after, zoneChanges.columns, 'sync_version')),
+    });
   }
-  if (addedRows.length > changedZoneUuids.size) problems.push(`${addedRows.length} outbox rows for ${changedZoneUuids.size} changed zones`);
+  const link = linkOf(context.before);
+  if (!link.linked) {
+    if (addedRows.length) problems.push(`${addedRows.length} ZONE outbox row(s) although the cloud link is down (the zone trigger writes none)`);
+    return problems;
+  }
+  const byZone = new Map();
+  for (const row of addedRows) {
+    const zone = col(row, columns, 'aggregate_key');
+    if (!changedZones.has(zone)) problems.push(`outbox row for zone ${zone}, which 0064 did not change`);
+    byZone.set(zone, (byZone.get(zone) || []).concat([row]));
+  }
+  for (const [zone, expected] of changedZones) {
+    const events = byZone.get(zone) || [];
+    if (events.length !== 1) { problems.push(`zone ${zone}: ${events.length} outbox event(s), expected exactly 1`); continue; }
+    const row = events[0];
+    const op = col(row, columns, 'op');
+    if (op !== 'ZONE_CONFIG_UPSERTED') problems.push(`zone ${zone}: event op ${op}, expected ZONE_CONFIG_UPSERTED`);
+    const eui = String(col(row, columns, 'gateway_device_eui') || '').trim();
+    if (!eui) problems.push(`zone ${zone}: event has no gateway_device_eui`);
+    else if (eui !== link.eui) problems.push(`zone ${zone}: event EUI ${eui} is not the link EUI ${link.eui}`);
+    if (columns.includes('sync_version') && String(col(row, columns, 'sync_version')) !== expected.version) {
+      problems.push(`zone ${zone}: event sync_version ${col(row, columns, 'sync_version')}, zone has ${expected.version}`);
+    }
+    let payload = null;
+    try { payload = JSON.parse(String(col(row, columns, 'payload_json'))); } catch (_) { /* reported below */ }
+    if (!payload) problems.push(`zone ${zone}: event payload is not JSON`);
+    else {
+      if (payload.phenological_stage !== expected.stage) problems.push(`zone ${zone}: payload stage ${payload.phenological_stage}, zone has ${expected.stage}`);
+      if (String(payload.sync_version) !== expected.version) problems.push(`zone ${zone}: payload sync_version ${payload.sync_version}, zone has ${expected.version}`);
+    }
+  }
   return problems;
 }
 
@@ -357,14 +404,22 @@ function matchesAppendFilter(filter, row, columns) {
 // Everything else must be byte-for-byte equal in the compared columns.
 function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping = false } = {}) {
   const result = { unchanged: [], changedByDesign: [], bookkeeping: [], newTables: [], addedColumns: [], unexpected: [] };
-  const context = { changedKeysByTable: new Map() };
+  const context = { changedKeysByTable: new Map(), before, after };
   const deferred = [];
   for (const [name, b] of Object.entries(before.tables)) {
     const a = after.tables[name];
     if (!a) { result.unexpected.push({ table: name, reason: 'table removed', countBefore: b.count }); continue; }
     if (a.addedColumns.length) result.addedColumns.push({ table: name, columns: a.addedColumns });
     if (a.missingColumns.length) result.unexpected.push({ table: name, reason: 'columns removed: ' + a.missingColumns.join(', ') });
-    if (a.count === b.count && a.sha256 === b.sha256 && !a.missingColumns.length) { result.unchanged.push(name); continue; }
+    if (a.count === b.count && a.sha256 === b.sha256 && !a.missingColumns.length) {
+      result.unchanged.push(name);
+      // A validator can require a change (one outbox event per changed zone),
+      // so it runs on an unchanged rule table too.
+      if ((rules.get(name) || []).some((r) => r.validate)) {
+        deferred.push({ name, unchanged: true, diff: { table: name, countBefore: b.count, countAfter: a.count }, addedRows: [], removedKeys: [], changedRows: [], changedColumns: new Set(), columns: a.columns });
+      }
+      continue;
+    }
     if (BOOKKEEPING_TABLES.has(name) && allowBookkeeping) {
       result.bookkeeping.push({ table: name, countBefore: b.count, countAfter: a.count });
       continue;
@@ -412,6 +467,11 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
       continue;
     }
     const tableRules = rules.get(d.name) || [];
+    if (d.unchanged) {
+      for (const rule of tableRules) if (rule.validate) problems.push(...rule.validate({ changedRows: [], addedRows: [], columns: d.columns, context }));
+      if (problems.length) result.unexpected.push({ ...d.diff, reason: problems.join('; ') });
+      continue;
+    }
     if (!tableRules.length) { result.unexpected.push({ ...d.diff, reason: 'rows changed, no migration changes this table by design' }); continue; }
     const allowedColumns = new Set(tableRules.flatMap((r) => r.columns || []));
     const appendRules = tableRules.filter((r) => r.append);

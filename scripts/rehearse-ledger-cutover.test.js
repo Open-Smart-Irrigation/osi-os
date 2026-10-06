@@ -127,20 +127,25 @@ function tinyDb(root, name, statements) {
   return p;
 }
 
-const ZONES_DDL = `CREATE TABLE irrigation_zones (id INTEGER PRIMARY KEY AUTOINCREMENT, zone_uuid TEXT, name TEXT, phenological_stage TEXT, sync_version INTEGER, updated_at TEXT, deleted_at TEXT);
-CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT, op TEXT, gateway_device_eui TEXT);
+const zonesDdl = (linked) => `CREATE TABLE irrigation_zones (id INTEGER PRIMARY KEY AUTOINCREMENT, zone_uuid TEXT, name TEXT, phenological_stage TEXT, sync_version INTEGER, updated_at TEXT, deleted_at TEXT);
+CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT, op TEXT, payload_json TEXT, sync_version INTEGER, gateway_device_eui TEXT);
+CREATE TABLE sync_link_state (peer_node TEXT PRIMARY KEY, linked INTEGER, gateway_device_eui TEXT);
+INSERT INTO sync_link_state VALUES ('cloud', ${linked}, '0016C001F1000001');
 CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, swt_wm1 REAL);
 CREATE TABLE app_notes (id INTEGER PRIMARY KEY, v);
 INSERT INTO app_notes (v) VALUES (13);
 INSERT INTO irrigation_zones (zone_uuid, name, phenological_stage, sync_version, updated_at) VALUES ('z1', 'A', 'veraison', 3, 't0'), ('z2', 'B', 'initial', 1, 't0');
 INSERT INTO device_data (deveui, swt_wm1) VALUES ('A840410000000001', 12.5), ('A840410000000001', 13);`;
+const ZONES_DDL = zonesDdl(1);
+const STAGE_Z1 = "UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=4, updated_at='t1' WHERE zone_uuid='z1';";
+// The event 0058's trg_sync_zones_outbox_au writes for that update.
+const zoneEvent = ({ id = 'e1', zone = 'z1', op = 'ZONE_CONFIG_UPSERTED', eui = '0016C001F1000001', stage = 'mid_season', version = 4 } = {}) =>
+  `INSERT INTO sync_outbox VALUES ('${id}', 'ZONE', '${zone}', '${op}', '${JSON.stringify({ contract_version: 1, zone_uuid: zone, phenological_stage: stage, sync_version: version })}', ${version}, ${eui === null ? 'NULL' : `'${eui}'`});`;
 
 test('compareSnapshots accepts exactly the 0064 design and flags anything else', () => {
   const root = scratch();
   const before = tinyDb(root, 'before.db', ZONES_DDL);
-  const good = tinyDb(root, 'good.db', ZONES_DDL + `
-UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=4, updated_at='t1' WHERE zone_uuid='z1';
-INSERT INTO sync_outbox VALUES ('e1', 'ZONE', 'z1', 'ZONE_CONFIG_UPSERTED', '0016C001F1000001');`);
+  const good = tinyDb(root, 'good.db', ZONES_DDL + '\n' + STAGE_Z1 + '\n' + zoneEvent());
   const snapBefore = snapshotTables(before);
   const rules = rulesFor([64]);
 
@@ -155,13 +160,20 @@ INSERT INTO sync_outbox VALUES ('e1', 'ZONE', 'z1', 'ZONE_CONFIG_UPSERTED', '001
   assert.equal(cmp.ok, false);
 
   const cases = {
-    'wrong FAO key': `UPDATE irrigation_zones SET phenological_stage='initial', sync_version=4 WHERE zone_uuid='z1';`,
-    'version not +1': `UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=9 WHERE zone_uuid='z1';`,
+    'wrong FAO key': `UPDATE irrigation_zones SET phenological_stage='initial', sync_version=4 WHERE zone_uuid='z1';` + zoneEvent({ stage: 'initial' }),
+    'version not +1': `UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=9 WHERE zone_uuid='z1';` + zoneEvent({ version: 9 }),
     'other column': `UPDATE irrigation_zones SET name='renamed' WHERE zone_uuid='z2';`,
     'telemetry changed': `UPDATE device_data SET swt_wm1=99 WHERE id=1;`,
     'telemetry lost': `DELETE FROM device_data WHERE id=2;`,
-    'outbox without EUI': `UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=4 WHERE zone_uuid='z1'; INSERT INTO sync_outbox VALUES ('e1', 'ZONE', 'z1', 'ZONE_CONFIG_UPSERTED', NULL);`,
-    'outbox other type': `INSERT INTO sync_outbox VALUES ('e2', 'DEVICE', 'A840410000000001', 'DEVICE_UPSERTED', '0016C001F1000001');`,
+    'zone changed, no event while linked': STAGE_Z1,
+    'two events for one zone': STAGE_Z1 + zoneEvent() + zoneEvent({ id: 'e9' }),
+    'event with another op': STAGE_Z1 + zoneEvent({ op: 'ZONE_UPSERTED' }),
+    'event without EUI': STAGE_Z1 + zoneEvent({ eui: null }),
+    'event with a foreign EUI': STAGE_Z1 + zoneEvent({ eui: '0016C001F1000099' }),
+    'event payload with another stage': STAGE_Z1 + zoneEvent({ stage: 'development' }),
+    'event payload with another version': STAGE_Z1 + zoneEvent({ version: 3 }),
+    'event for an unchanged zone': STAGE_Z1 + zoneEvent() + zoneEvent({ id: 'e2', zone: 'z2', stage: 'initial', version: 1 }),
+    'outbox other type': `INSERT INTO sync_outbox VALUES ('e2', 'DEVICE', 'A840410000000001', 'DEVICE_UPSERTED', '{}', 1, '0016C001F1000001');`,
     'table dropped': 'DROP TABLE device_data;',
     'integer became text': `UPDATE app_notes SET v='13' WHERE id=1;`,
   };
@@ -171,6 +183,16 @@ INSERT INTO sync_outbox VALUES ('e1', 'ZONE', 'z1', 'ZONE_CONFIG_UPSERTED', '001
     assert.equal(res.ok, false, label);
     assert.ok(res.unexpected.length > 0, label);
   }
+
+  // Not linked: the trigger stays silent, so a changed zone has no event and
+  // an event would be unexpected.
+  const unlinkedBefore = snapshotTables(tinyDb(root, 'unlinked-before.db', zonesDdl(0)));
+  const unlinkedQuiet = tinyDb(root, 'unlinked-quiet.db', zonesDdl(0) + '\n' + STAGE_Z1);
+  cmp = compareSnapshots(unlinkedBefore, snapshotTables(unlinkedQuiet, { columnsFrom: unlinkedBefore }), { rules });
+  assert.equal(cmp.ok, true, JSON.stringify(cmp.unexpected));
+  const unlinkedEvent = tinyDb(root, 'unlinked-event.db', zonesDdl(0) + '\n' + STAGE_Z1 + '\n' + zoneEvent());
+  cmp = compareSnapshots(unlinkedBefore, snapshotTables(unlinkedEvent, { columnsFrom: unlinkedBefore }), { rules });
+  assert.equal(cmp.ok, false);
 
   // A rebuilt table with an extra column and a new physical order compares equal.
   const rebuilt = tinyDb(root, 'rebuilt.db', ZONES_DDL + `
