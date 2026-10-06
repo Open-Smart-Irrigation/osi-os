@@ -1046,6 +1046,24 @@ test('scoped mode: only the farm owner or an enabled admin creates a farm-wide e
   await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000008'), flagOff, { mode: 'create' });
 });
 
+test('the farm owner is the account sync uses; a disabled latest link leaves no owner', async () => {
+  const db = new TestDb('farm-owner-disabled-link');
+  seedIdentity(db);
+  const { farmWideWritable } = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api');
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OWNER_UUID);
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-14T00:00:00.000Z', " +
+    "disabled_at='2026-07-15T00:00:00.000Z' WHERE user_uuid=?").run(OTHER_OWNER_UUID);
+  // Sync still runs on the latest link; an older link does not become the owner.
+  assert.equal(await farmWideWritable(db, caller), false);
+  db.prepare('UPDATE users SET disabled_at=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  assert.equal(await farmWideWritable(db, caller), false);
+  db.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  assert.equal(await farmWideWritable(db, caller), true);
+});
+
 test('#403: flag-off changes to farm-wide entries are unchanged', async () => {
   const db = new TestDb('flag-off-entry-farm-wide');
   seedIdentity(db);

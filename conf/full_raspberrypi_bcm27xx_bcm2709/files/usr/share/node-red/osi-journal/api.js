@@ -739,23 +739,31 @@ async function assertJournalWriteRole(db, principal) {
   return fresh;
 }
 
+// The farm owner: the account this gateway syncs with, chosen exactly as the
+// sync target is (latest link first). When that account is disabled there is
+// no owner, rather than falling back to an older link sync does not use.
+async function farmOwnerUuid(db) {
+  const linked = await dbGet(
+    db,
+    "SELECT user_uuid,disabled_at FROM users WHERE server_url IS NOT NULL AND server_url <> '' " +
+      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
+    []
+  );
+  if (!linked || !linked.user_uuid || linked.disabled_at != null) return null;
+  return String(linked.user_uuid);
+}
+
 // Owner decision 2026-10-05: in scoped mode a farm-wide entry (no plot, no
 // zone) is recorded only by the farm owner or an enabled admin. The farm owner
-// is the account this gateway is linked to the cloud with (the latest link,
-// as the cloud workspace owner), when it is enabled. With scoped access off
+// is farmOwnerUuid: the account this gateway syncs with (the latest link, as
+// the cloud workspace owner), when it is enabled. With scoped access off
 // every signed-in account keeps recording them, as before.
 async function farmWideWritable(db, principal) {
   if (!principal || !principal.scoped) return true;
   const fresh = await freshJournalScope(db, principal);
   if (!principal.scope.canMutate(fresh.role)) return false;
   if (fresh.role === 'admin') return true;
-  const owner = await dbGet(
-    db,
-    "SELECT user_uuid FROM users WHERE server_url IS NOT NULL AND server_url <> '' AND disabled_at IS NULL " +
-      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
-    []
-  );
-  return Boolean(owner && owner.user_uuid === principal.author_principal_uuid);
+  return (await farmOwnerUuid(db)) === principal.author_principal_uuid;
 }
 
 // The GUI hint only (catalog response): the same rule read from the account
@@ -771,13 +779,7 @@ async function farmWideOffered(db, principal) {
   if (!actor || actor.disabled_at != null) return false;
   if (actor.role === 'admin') return true;
   if (actor.role !== 'researcher') return false;
-  const owner = await dbGet(
-    db,
-    "SELECT user_uuid FROM users WHERE server_url IS NOT NULL AND server_url <> '' AND disabled_at IS NULL " +
-      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
-    []
-  );
-  return Boolean(owner && owner.user_uuid === principal.author_principal_uuid);
+  return (await farmOwnerUuid(db)) === principal.author_principal_uuid;
 }
 
 async function assertFarmWideWrite(db, principal) {
