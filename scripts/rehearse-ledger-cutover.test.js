@@ -432,9 +432,11 @@ test('--require-freeze fails the preflight when the cutover freeze does not hold
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-// Kills the CLI once pass 1 has started migrating, then runs it again in the
-// same --work directory: the restart begins from the pristine copy and must
-// pass, with exactly the row changes the migrations make by design.
+// Kills the CLI inside pass 1's migrate-cli, once the destructive 0058 has
+// committed on the working copy, then runs it again in the same --work
+// directory: the restart begins from the pristine copy and must pass (with
+// --require-freeze, as RH-E runs it), with exactly the row changes the
+// migrations make by design.
 test('earlier lineage at 53 with data: interrupted run, clean restart, designed changes only, second pass a no-op', { timeout: 2_400_000 }, async () => {
   const root = scratch();
   const db = path.join(root, 'earlier-lineage.db');
@@ -443,27 +445,41 @@ test('earlier lineage at 53 with data: interrupted run, clean restart, designed 
   fs.chmodSync(db, 0o444);
   const dbSha = sha(db);
   const work = path.join(root, 'work');
+  const workDb = path.join(work, 'farming.db');
+  const ledgerHas = (file, version) => {
+    try {
+      return execFileSync('sqlite3', ['-readonly', '-cmd', '.timeout 50', file, `SELECT COUNT(*) FROM schema_migrations WHERE version=${version} AND status='applied'`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() === '1';
+    } catch (_) { return false; }
+  };
 
   const killedAt = await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [CLI, '--db', db, '--work', work, ...DIRTY_ARGS], { stdio: ['ignore', 'ignore', 'pipe'] });
     let buf = '';
     let killed = null;
+    let poll = null;
     child.stderr.on('data', (d) => {
       buf += d;
-      if (!killed && /pass 1 step migrate-cli start/.test(buf)) {
-        killed = 'migrate-cli';
-        child.kill('SIGKILL');
+      if (!poll && /pass 1 step migrate-cli start/.test(buf)) {
+        poll = setInterval(() => {
+          if (!killed && ledgerHas(workDb, 58)) {
+            killed = 'after 0058 committed';
+            child.kill('SIGKILL');
+          }
+        }, 100);
       }
     });
     child.on('error', reject);
-    child.on('exit', () => resolve(killed));
+    child.on('exit', () => { if (poll) clearInterval(poll); resolve(killed); });
   });
-  assert.equal(killedAt, 'migrate-cli');
+  assert.equal(killedAt, 'after 0058 committed');
   assert.equal(JSON.parse(fs.readFileSync(path.join(work, 'run-state.json'), 'utf8')).status, 'running');
   // Let any sqlite3 child of the killed process finish.
   await new Promise((resolve) => setTimeout(resolve, 2000));
+  // The killed run left a half-migrated working copy; the source is untouched.
+  assert.equal(ledgerHas(workDb, 58), true);
+  assert.equal(ledgerHas(db, 58), false);
 
-  const r = runCli(['--db', db, '--work', work]);
+  const r = runCli(['--db', db, '--work', work, '--require-freeze']);
   const report = readReport(work);
   assert.equal(r.status, 0, JSON.stringify(report.passes.flatMap((p) => p.steps.filter((s) => !s.ok)), null, 1).slice(0, 6000));
   assert.equal(report.verdict, 'PASS');
