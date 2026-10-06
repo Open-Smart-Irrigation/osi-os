@@ -1060,6 +1060,24 @@ test('UPSERT_JOURNAL_ENTRY_BATCH refuses a member entry UUID another batch alrea
   }
 });
 
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses a pass UUID, which would drop member crop-cycle choices', async () => {
+  const db = fixtureDb('batch-pass-uuid');
+  try {
+    addSecondPlot(db, OWNER_UUID);
+    const members = twoMembers();
+    members[1].cycle_action = 'new';
+    const envelope = batchCommandEnvelope({ commandId: 832 }, { members });
+    envelope.payload.shared.pass_uuid = '97979797-9797-4797-8797-979797979797';
+    envelope.payload.submitted_intent_hash = journal.submittedIntentHash(envelope.commandType, envelope.payload);
+    const result = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'malformed_command');
+    assert.equal((await journalRowCounts(db)).entries, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('UPSERT_JOURNAL_ENTRY_BATCH rolls back members and ledger when ACK persistence faults', async () => {
   const db = fixtureDb('batch-ack-fault');
   try {

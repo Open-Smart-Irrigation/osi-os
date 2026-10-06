@@ -502,6 +502,12 @@ function batchInput(payload) {
     throw commandError('malformed_command', 'Journal batch identity or members are malformed');
   }
   onlyFields(shared, BATCH_SHARED_FIELDS, 'Journal batch shared');
+  // A cloud batch has one member per plot, so it is never a tank-mix pass
+  // (several products on one plot). A pass UUID would switch the lifecycle to
+  // pass semantics, which keep only the first member's crop-cycle choice.
+  if (shared.pass_uuid != null) {
+    throw commandError('malformed_command', 'A journal entry batch cannot carry a pass_uuid');
+  }
   const start = localOccurrence(
     shared.occurred_start, shared.occurred_timezone, shared.occurred_utc_offset_minutes, 'shared.occurred_start'
   );
