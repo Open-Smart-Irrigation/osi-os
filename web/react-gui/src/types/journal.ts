@@ -76,6 +76,11 @@ export interface JournalCatalog {
   layouts: JournalDefinitionRow[];
   products: JournalProductRow[];
   mappings: JournalMappingRow[];
+  /**
+   * What the gateway lets this account record. Absent on older gateways,
+   * which keeps the previous behaviour (every option offered).
+   */
+  capture_permissions?: { farm_wide: boolean };
 }
 
 export interface EntryValue {

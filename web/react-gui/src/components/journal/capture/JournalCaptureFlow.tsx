@@ -1842,8 +1842,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     }
   };
 
+  // Scoped gateways let only the farm owner or an admin record farm-wide
+  // entries; the gateway says so in the catalog and refuses the write too.
+  const farmWideAllowed = catalog.capture_permissions?.farm_wide !== false;
+
   const selectFarmWide = () => {
-    if (interactionLocked) return;
+    if (interactionLocked || !farmWideAllowed) return;
     selectPlot('', []);
     chooseLayout('farm_wide');
   };
@@ -1962,7 +1966,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return;
     }
     if (step === 'where') {
-      if (selectedPlotUuids.length === 0 && layoutCode !== 'farm_wide') {
+      if (selectedPlotUuids.length === 0 && (layoutCode !== 'farm_wide' || !farmWideAllowed)) {
         setWhereError('capture.validation.invalidDefinition');
         return;
       }
@@ -2615,7 +2619,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             onCreateGroup={groupState.createPlotGroup}
             onUpdateGroup={groupState.updatePlotGroup}
           />
-          <button
+          {farmWideAllowed && <button
             type="button"
             aria-pressed={!selectedPlot && layoutCode === 'farm_wide'}
             disabled={interactionLocked}
@@ -2623,7 +2627,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             className={`min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)] ${FOCUS_RING}`}
           >
             {t('capture.where.farmLevel')}
-          </button>
+          </button>}
           {plotEditor ? (
             <PlotForm
               mode={plotEditor.mode}
@@ -2650,7 +2654,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </button>
             </div>
           )}
-          {selectedPlotUuids.length === 0 && !plotEditor && (
+          {farmWideAllowed && selectedPlotUuids.length === 0 && !plotEditor && (
             <label className="block text-sm font-bold text-[var(--text)]">
               {t('capture.where.layout')}
               <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">

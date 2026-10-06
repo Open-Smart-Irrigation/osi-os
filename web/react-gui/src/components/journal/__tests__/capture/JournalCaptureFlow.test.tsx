@@ -1748,6 +1748,23 @@ describe('JournalCaptureFlow', () => {
     });
   });
 
+  it('offers the farm-wide choice only when the gateway permits it for this account', () => {
+    render(<JournalCaptureFlow {...baseProps} plots={[]} />);
+    expect(screen.getByRole('button', { name: 'capture.where.farmLevel' })).toBeInTheDocument();
+    cleanup();
+
+    render(<JournalCaptureFlow
+      {...baseProps}
+      plots={[]}
+      catalog={{ ...catalog, capture_permissions: { farm_wide: false } }}
+    />);
+    expect(screen.queryByRole('button', { name: 'capture.where.farmLevel' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'capture.where.layout' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
+    cleanup();
+  });
+
   it('does not offer an ordinary growing setting without a selected plot', () => {
     render(<JournalCaptureFlow {...baseProps} plots={[]} />);
     const layout = screen.getByRole('combobox', { name: 'capture.where.layout' });
