@@ -259,9 +259,17 @@ function checkPaths(options) {
     if (entries.length && !entries.includes(WORK_MARKER)) {
       throw new UsageError('--work is not empty and was not created by this script (no ' + WORK_MARKER + ' in ' + work + ')');
     }
-    try {
-      interrupted = JSON.parse(fs.readFileSync(path.join(work, STATE_NAME), 'utf8')).status === 'running';
-    } catch (_) { /* no earlier state */ }
+    let state = null;
+    try { state = JSON.parse(fs.readFileSync(path.join(work, STATE_NAME), 'utf8')); } catch (_) { /* no earlier state */ }
+    if (state && state.status === 'running') {
+      // A run whose process is gone was interrupted; one still alive owns --work.
+      let alive = false;
+      if (Number.isInteger(state.pid) && state.pid !== process.pid) {
+        try { process.kill(state.pid, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; }
+      } else if (state.pid === process.pid) alive = true;
+      if (alive) throw new UsageError(`another run (pid ${state.pid}) is using --work ${work}; wait for it, or remove ${STATE_NAME} if that process is not this tool`);
+      interrupted = true;
+    }
   }
   return { work, source, interrupted };
 }
@@ -328,6 +336,11 @@ function checkoutProvenance() {
 }
 
 // --- small helpers ------------------------------------------------------------
+
+// The source file and its -wal (when one sits next to it).
+function sourceHashes(source) {
+  return { sha256: sha256File(source), walSha256: fs.existsSync(source + '-wal') ? sha256File(source + '-wal') : null };
+}
 
 function sha256File(p) {
   const hash = crypto.createHash('sha256');
@@ -917,7 +930,10 @@ async function rehearse(options, { log }) {
     previousRunInterrupted: interrupted,
     warnings: [],
     checkout: { head: null, migrationsHead: migrations[migrations.length - 1].version, migrationCount: migrations.length },
-    source: { path: source, bytes: fs.statSync(source).size, sha256Before: sha256File(source), sha256After: null, wal: fs.existsSync(source + '-wal') },
+    source: (() => {
+      const h = sourceHashes(source);
+      return { path: source, bytes: fs.statSync(source).size, sha256Before: h.sha256, sha256After: null, walSha256Before: h.walSha256, walSha256After: null };
+    })(),
     work,
     expectedChanges: Object.fromEntries(Object.entries(EXPECTED_CHANGES).map(([v, e]) => [v, { name: e.name, rules: e.rules.map((r) => ({ table: r.table, columns: r.columns || [], append: r.append || false })) }])),
     passes: [],
@@ -969,8 +985,10 @@ async function rehearse(options, { log }) {
     const failed = report.passes.flatMap((p) => p.steps.map((s) => ({ pass: p.pass, ...s }))).find((s) => !s.ok);
     report.failedStep = failed ? `pass ${failed.pass} ${failed.name}` : 'internal error';
   }
-  report.source.sha256After = sha256File(source);
-  if (report.source.sha256After !== report.source.sha256Before) {
+  const after = sourceHashes(source);
+  report.source.sha256After = after.sha256;
+  report.source.walSha256After = after.walSha256;
+  if (report.source.sha256After !== report.source.sha256Before || report.source.walSha256After !== report.source.walSha256Before) {
     report.verdict = 'FAIL';
     report.failedStep = report.failedStep || 'source changed';
   }
@@ -1023,5 +1041,6 @@ module.exports = {
   ruleTables,
   gitState,
   checkoutProvenance,
+  sourceHashes,
   rehearse,
 };

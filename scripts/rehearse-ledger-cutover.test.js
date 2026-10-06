@@ -150,6 +150,32 @@ test('a wrong --work or --db path is refused with exit 2 and nothing written', (
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a second run is refused while a live run holds --work; the source -wal is hashed', () => {
+  const root = scratch();
+  const db = path.join(root, 'copy.db');
+  fs.copyFileSync(BUNDLED_DB, db);
+  const work = path.join(root, 'work');
+  fs.mkdirSync(work);
+  fs.writeFileSync(path.join(work, WORK_MARKER), '');
+  fs.writeFileSync(path.join(work, 'notes-of-the-live-run'), 'x');
+  // This test process stands in for the live run.
+  fs.writeFileSync(path.join(work, 'run-state.json'), JSON.stringify({ status: 'running', pid: process.pid }));
+  const r = runCli(['--db', db, '--work', work]);
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, new RegExp(`another run \\(pid ${process.pid}\\) is using --work`));
+  assert.ok(fs.existsSync(path.join(work, 'notes-of-the-live-run')));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(work, 'run-state.json'), 'utf8')).pid, process.pid);
+
+  const { sourceHashes } = require('./rehearse-ledger-cutover');
+  fs.writeFileSync(db + '-wal', 'wal bytes');
+  const h = sourceHashes(db);
+  assert.equal(h.sha256, sha(db));
+  assert.equal(h.walSha256, sha(db + '-wal'));
+  fs.rmSync(db + '-wal');
+  assert.equal(sourceHashes(db).walSha256, null);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('checkLedgerShape refuses non-applied rows, bad checksums and bad versions', () => {
   const ok = { version: 1, name: '0001__a.sql', checksum: 'a'.repeat(64), status: 'applied' };
   assert.deepEqual(checkLedgerShape([ok]), []);
