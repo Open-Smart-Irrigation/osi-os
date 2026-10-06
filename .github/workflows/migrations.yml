@@ -87,6 +87,8 @@ jobs:
       - run: node scripts/test-history-helper.js
       - name: All-zones history export and saved-view delete, both profiles
         run: node --test scripts/test-history-all-zones-export.js
+      - name: History readers select by instant across recorded_at shapes, both profiles
+        run: node --test scripts/test-history-recorded-at-formats.js
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
       - run: node --test scripts/test-scheduler-clock-jump.js

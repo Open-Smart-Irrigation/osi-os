@@ -1966,7 +1966,8 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
     });
     assert.ok(Array.isArray(clamped));
     assert.strictEqual(db.lastQuery.params[0], '840 minutes');
-    assert.strictEqual(db.lastQuery.params[3], '2025-07-02T10:00:00.000Z');
+    assert.strictEqual(db.lastQuery.params[3], '2025-07-01');
+    assert.strictEqual(db.lastQuery.params[5], '2025-07-02T10:00:00.000Z');
   } finally {
     db.close();
   }
@@ -2049,11 +2050,20 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(raw.aggregation, 'hourly');
     assert.strictEqual(raw.buckets[0].series.swt_1.sampleCount, 3);
     assert.match(db.lastQuery.sql, /deveui IN \(\?,\?\)/);
-    assert.match(db.lastQuery.sql, /recorded_at BETWEEN \? AND \?/);
+    // Whole-date text bounds for the index, then each row's instant (strftime)
+    // against the range, widened by a millisecond for SQLite's rounding.
+    assert.match(db.lastQuery.sql, /recorded_at >= \? AND recorded_at < \? AND strftime\('%Y-%m-%dT%H:%M:%fZ', recorded_at\) >= \? AND strftime\('%Y-%m-%dT%H:%M:%fZ', recorded_at\) <= \?/);
     assert.match(db.lastQuery.sql, /ORDER BY deveui ASC, recorded_at ASC/);
     assert(!/ORDER BY recorded_at ASC\b/.test(db.lastQuery.sql), 'query must not sort by recorded_at alone');
     assert(!db.lastQuery.sql.includes('AA00000000000001'), 'query must keep DevEUIs in params');
-    assert.deepStrictEqual(db.lastQuery.params.slice(0, 4), ['AA00000000000001', 'AA00000000000002', iso(0), iso(60)]);
+    const dayMs = 24 * 60 * 60 * 1000;
+    assert.deepStrictEqual(db.lastQuery.params.slice(0, 6), [
+      'AA00000000000001', 'AA00000000000002',
+      new Date(Date.parse(iso(0)) - dayMs).toISOString().slice(0, 10),
+      new Date(Date.parse(iso(60)) + 2 * dayMs).toISOString().slice(0, 10),
+      new Date(Date.parse(iso(0)) - 1).toISOString(),
+      new Date(Date.parse(iso(60)) + 1).toISOString(),
+    ]);
 
     const rollup = await helper.aggregateDeviceData(db, {
       zoneId: 7,
@@ -2126,7 +2136,9 @@ test('aggregates SQL-backed device_data with parameterized range queries and rol
     assert.strictEqual(filteredLongRange.aggregation, 'daily');
     assert.strictEqual(filteredLongRange.source, 'device_data');
     assert.match(db.lastQuery.sql, /FROM device_data/);
-    assert.deepStrictEqual(db.lastQuery.params.slice(0, 3), ['AA00000000000001', '2026-05-31T00:00:00.000Z', '2026-06-30T00:00:00.000Z']);
+    assert.deepStrictEqual(db.lastQuery.params.slice(0, 5), [
+      'AA00000000000001', '2026-05-30', '2026-07-02', '2026-05-30T23:59:59.999Z', '2026-06-30T00:00:00.001Z',
+    ]);
   } finally {
     db.close();
   }

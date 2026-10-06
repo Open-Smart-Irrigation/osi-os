@@ -421,6 +421,7 @@ function createAnalysis(deps) {
     localDateKey,
     normalizeDeveui,
     normalizeTimezone,
+    recordedAtRangeSql,
     resolveAggregation,
     soilDepthCm,
     sourceDevicesForCard,
@@ -640,11 +641,12 @@ function createAnalysis(deps) {
       if (remaining <= 0) {
         throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
       }
+      const recordedAt = group.kind === 'device' ? recordedAtRangeSql('recorded_at', range.from, range.to) : null;
       const rows = group.kind === 'device'
         ? await dbAll(
           db,
-          `SELECT deveui, recorded_at, ${unique(group.entries.map(({ meta }) => meta.edgeField)).map(sqlIdent).join(', ')} FROM device_data WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC LIMIT ?`,
-          [group.owner, range.from, range.to, remaining + 1]
+          `SELECT deveui, recorded_at, ${unique(group.entries.map(({ meta }) => meta.edgeField)).map(sqlIdent).join(', ')} FROM device_data WHERE deveui = ? AND ${recordedAt.sql} ORDER BY recorded_at ASC LIMIT ?`,
+          [group.owner].concat(recordedAt.params, [remaining + 1])
         )
         : await readWeatherRows(db, { kind: group.kind, owner: group.owner, entries: group.entries.map(({ entry }) => entry) }, range, remaining + 1);
       if (rows.length > remaining) {

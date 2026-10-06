@@ -290,6 +290,87 @@ function parseTime(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+// device_data.recorded_at is TEXT, and gateways hold more than one shape in
+// it: toISOString ('2026-08-17T17:47:12.123Z'), the uplink's RFC 3339 time
+// ('2026-08-17T17:47:12.123456789+00:00', also without a fraction) and
+// SQLite's 'YYYY-MM-DD HH:MM:SS'. Text order is not time order across those
+// shapes: a row in the same millisecond as a bound, or any space-separated
+// row of the bound's date, falls on the wrong side of a plain
+// `recorded_at >= ?` (with month windows, out of both windows). So a row's
+// instant is read here, the same way for every shape: a zone-less value is
+// UTC (as SQLite and the cloud read it), digits below the millisecond are
+// dropped (as Date.parse and the sync hash do).
+const ZONELESS_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+
+function parseRecordedAtMs(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  const zoneless = ZONELESS_TIMESTAMP.exec(text);
+  const ms = Date.parse(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// The ISO UTC form of a stored recorded_at, for output (CSV, raw series).
+// Unchanged for a toISOString value; an unreadable value is passed through.
+function canonicalRecordedAt(value) {
+  const ms = parseRecordedAtMs(value);
+  return ms === null ? value : new Date(ms).toISOString();
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SQLITE_UTC_MS_FORMAT = '%Y-%m-%dT%H:%M:%fZ';
+
+function isoDate(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// A WHERE fragment selecting the rows of `column` whose instant may lie in
+// [start, end) (or [start, end] with endInclusive). It is a superset by at
+// most a millisecond at each end (SQLite rounds the sub-millisecond digits
+// that parseRecordedAtMs drops), so callers that need the exact range filter
+// the rows with recordedAtRangeFilter. The first pair of bounds is plain text on
+// whole dates, wide enough for any shape and offset (a stored date can be a
+// day off the UTC date), so the (deveui, recorded_at) index still bounds the
+// scan; strftime then reads each candidate's instant. With `exact`, the
+// SQLite instant is the final filter (for SQL-side aggregates).
+function recordedAtRangeSql(column, start, end, options = {}) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  const upper = options.endInclusive ? '<=' : '<';
+  if (startMs === null || endMs === null) {
+    return { sql: `${column} >= ? AND ${column} ${upper} ?`, params: [start, end] };
+  }
+  const instant = `strftime('${SQLITE_UTC_MS_FORMAT}', ${column})`;
+  const marginMs = options.exact ? 0 : 1;
+  return {
+    sql: `${column} >= ? AND ${column} < ? AND ${instant} >= ? AND ${instant} ${options.exact ? upper : '<='} ?`,
+    params: [
+      isoDate(startMs - DAY_MS),
+      isoDate(endMs + 2 * DAY_MS),
+      new Date(startMs - marginMs).toISOString(),
+      new Date(endMs + marginMs).toISOString(),
+    ],
+  };
+}
+
+// The exact [start, end) filter on a row's instant, for rows selected with
+// recordedAtRangeSql.
+function recordedAtRangeFilter(start, end) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  return (row) => {
+    const ms = parseRecordedAtMs(row.recorded_at);
+    return ms !== null && (startMs === null || ms >= startMs) && (endMs === null || ms < endMs);
+  };
+}
+
+function sortByRecordedAt(rows) {
+  return rows
+    .map((row, index) => ({ row, index, ms: parseRecordedAtMs(row.recorded_at) }))
+    .sort((left, right) => (left.ms - right.ms) || (left.index - right.index))
+    .map((entry) => entry.row);
+}
+
 function normalizeDeveui(value) {
   const normalized = String(value || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
   return /^[0-9A-F]{16}$/.test(normalized) ? normalized : null;
@@ -1233,7 +1314,7 @@ function aggregateRows(rows, options = {}) {
   if (channels.length === 0) throw new Error('aggregateRows requires at least one channel');
 
   const sortedRows = filterSoilRowsForSources(rows, options.sourceDevices)
-    .map((row) => ({ row, recordedAtMs: parseTime(row.recorded_at || row.recordedAt) }))
+    .map((row) => ({ row, recordedAtMs: parseRecordedAtMs(row.recorded_at || row.recordedAt) }))
     .filter((entry) => entry.recordedAtMs !== null)
     .filter((entry) => (startMs === null || entry.recordedAtMs >= startMs) && (endMs === null || entry.recordedAtMs < endMs))
     .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
@@ -1404,8 +1485,9 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const end = new Date(todayStartMs).toISOString();
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-  const rows = await dbAll(db, sql, deveuis.concat([start, end]));
+  const range = recordedAtRangeSql('recorded_at', start, end);
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+  const rows = await dbAll(db, sql, deveuis.concat(range.params));
   const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices });
   const out = [];
   for (const bucket of result.buckets || []) {
@@ -1646,8 +1728,9 @@ async function aggregateDeviceData(db, query = {}) {
     if (hasTrailingWindow && deveuis.length > 0) {
       const livePlaceholders = deveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-      const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
+      const range = recordedAtRangeSql('recorded_at', splitIso, end);
+      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+      const rows = await dbAll(db, sql, deveuis.concat(range.params));
       live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: query.sourceDevices });
     }
     if (rollupRows.length || live) {
@@ -1670,8 +1753,9 @@ async function aggregateDeviceData(db, query = {}) {
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
-  const params = deveuis.concat([start, end]);
+  const range = recordedAtRangeSql('recorded_at', start, end, { endInclusive: true });
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC`;
+  const params = deveuis.concat(range.params);
   const rows = await dbAll(db, sql, params);
   const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices: query.sourceDevices });
   if (shouldUseRollups) result.source = 'device_data_fallback';
@@ -1767,6 +1851,7 @@ async function rawLegacySensorHistory(db, options = {}) {
   if (!start || !end) throw new Error('rawLegacySensorHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
   const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
+  const range = recordedAtRangeSql('dd.recorded_at', start, end);
   const rows = await dbAll(db, `
     SELECT dd.recorded_at, ${expression} AS value
     FROM device_data dd
@@ -1774,12 +1859,12 @@ async function rawLegacySensorHistory(db, options = {}) {
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
       AND ${expression} IS NOT NULL
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
+      AND ${range.sql}
     ORDER BY dd.recorded_at ASC
     LIMIT ?
-  `, [normalizedDeveui].concat(ownerFilter.params, [start, end, limit]));
-  return rows.map((row) => ({ t: row.recorded_at, value: toFiniteNumber(row.value) }));
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit]));
+  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
+    .map((row) => ({ t: canonicalRecordedAt(row.recorded_at), value: toFiniteNumber(row.value) }));
 }
 
 function legacyAggregationForHours(hours) {
@@ -1834,6 +1919,7 @@ async function rawLegacyDendroHistory(db, options = {}) {
   const end = options.end;
   if (!start || !end) throw new Error('rawLegacyDendroHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
+  const range = recordedAtRangeSql('dd.recorded_at', start, end);
   const rows = await dbAll(db, `
     SELECT
       dd.recorded_at,
@@ -1852,13 +1938,13 @@ async function rawLegacyDendroHistory(db, options = {}) {
     JOIN devices dv ON dv.deveui = dd.deveui
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
+      AND ${range.sql}
       AND (dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)
     ORDER BY dd.recorded_at ASC
     LIMIT 30000
-  `, [normalizedDeveui].concat(ownerFilter.params, [start, end]));
-  return rows.map(dendroHistoryRow);
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params));
+  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
+    .map((row) => dendroHistoryRow({ ...row, recorded_at: canonicalRecordedAt(row.recorded_at) }));
 }
 
 function mergeDendroAggregateField(byTime, field, points) {
@@ -1958,6 +2044,7 @@ async function legacyRainDailyHistory(db, options = {}) {
   const start = new Date(localTodayStartMs - (days - 1) * RAIN_DAY_MS).toISOString();
   const end = new Date(nowMs).toISOString();
   const ownerFilter = optionalUserFilter(options, 'dv');
+  const range = recordedAtRangeSql('dd.recorded_at', start, end, { exact: true });
   const rows = await dbAll(db, `
     SELECT
       date(dd.recorded_at, ?) AS day,
@@ -1968,11 +2055,10 @@ async function legacyRainDailyHistory(db, options = {}) {
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
       AND dd.rain_mm_delta IS NOT NULL
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
+      AND ${range.sql}
     GROUP BY day
     ORDER BY day ASC
-  `, [`${tzOffsetMin} minutes`, normalizedDeveui].concat(ownerFilter.params, [start, end]));
+  `, [`${tzOffsetMin} minutes`, normalizedDeveui].concat(ownerFilter.params, range.params));
   return rows.map((row) => ({
     day: String(row.day),
     total_mm: roundTo(row.total_mm, 3) ?? 0,
@@ -2189,8 +2275,11 @@ async function rawZoneExportRows(db, scope) {
 
     const selectedFields = Array.from(new Set(cardChannels.flatMap(channelFieldNames)));
     const placeholders = deveuis.map(() => '?').join(',');
-    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-    const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
+    const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
+    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+    // The rows are sorted by their ISO UTC timestamp at the end.
+    const dataRows = (await dbAll(db, sql, deveuis.concat(range.params)))
+      .filter(recordedAtRangeFilter(scope.start, scope.end));
     const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
     const rowsByDeveui = {};
     for (const row of dataRows) {
@@ -2208,11 +2297,12 @@ async function rawZoneExportRows(db, scope) {
       const sourceName = displayDeviceName(device, index);
       const arrayId = arrayIdByDeveui[deveui] || null;
       for (const row of sourceRows) {
+        const timestamp = canonicalRecordedAt(row.recorded_at);
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
           const csvRow = {
-            timestamp: row.recorded_at,
+            timestamp,
             site: scope.site,
             zone: zoneName,
             series_label: seriesLabel(sourceName, channel),
@@ -3086,6 +3176,7 @@ const analysis = createAnalysis({
   localDateKey,
   normalizeDeveui,
   normalizeTimezone,
+  recordedAtRangeSql,
   resolveAggregation,
   soilDepthCm,
   sourceDevicesForCard,
