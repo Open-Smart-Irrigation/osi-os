@@ -806,7 +806,7 @@ test('#403: a zone-only entry needs the grant on its zone', async () => {
 // #403, by the owner's decision: with scoped access on, a farm-wide entry (no
 // zone, no plot) is voided, updated or discarded only by the account that wrote
 // it or by an admin. Another account gets the answer a missing entry gets.
-test('#403: a farm-wide entry is changed only by its writer or an admin', async () => {
+test('#403: a farm-wide final is changed only by the farm owner or an admin, a draft by its writer', async () => {
   const db = new TestDb('scoped-entry-farm-wide');
   seedIdentity(db);
   const othersFinal = '22160000-0000-4000-8000-000000000001';
@@ -892,12 +892,26 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   assert.deepEqual(state(), before);
   assert.equal(outbox(), queued);
 
-  // A researcher on its own entries: allowed.
+  // A researcher on its own farm-wide final, written before the owner rule or
+  // with scoped access off: read-only for it now (owner decision 2026-10-05:
+  // farm-wide entries are created, changed and voided by the farm owner or an
+  // admin). Its own private draft can still be discarded.
+  const ownBefore = state();
+  await assert.rejects(update(ownFinal, '2026-07-13T10:00:00', caller, 'My correction'), hidden);
+  await assert.rejects(
+    journal.voidEntry(db, ownFinal, { base_sync_version: 1, reason: 'My correction' }, caller),
+    hidden
+  );
+  assert.deepEqual(state(), ownBefore);
+  // The linked farm owner may change and void it.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE id=1').run();
   await update(ownFinal, '2026-07-13T10:00:00', caller, 'My correction');
   const ownVoided = await journal.voidEntry(
     db, ownFinal, { base_sync_version: 2, reason: 'My correction' }, caller
   );
   assert.equal(ownVoided.entry_uuid, ownFinal);
+  db.prepare('UPDATE users SET server_url=NULL WHERE id=1').run();
   await journal.discardEntry(db, ownDraft, {}, caller);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(ownDraft).n, 0);
 
@@ -929,6 +943,125 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
     db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(othersSecond).status,
     'final'
   );
+});
+
+test('scoped mode: only the farm owner or an enabled admin creates a farm-wide entry', async () => {
+  const db = new TestDb('scoped-farm-wide-create');
+  seedIdentity(db);
+  const plotUuid = '22800000-0000-4000-8000-000000000010';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'farm-wide-neighbour'), principal());
+  const farmWide = (uuid, overrides) => entryInput(uuid, null, '2026-07-13T08:00:00', Object.assign({
+    activity_code: 'equipment_maintenance',
+    template_code: 'full_record',
+    template_version: 11,
+    layout_code: 'farm_wide',
+    layout_version: 1,
+    values: [],
+    note: 'Serviced mower',
+  }, overrides || {}));
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  const refused = (error) => error && error.statusCode === 403 && error.code === 'forbidden';
+  const rows = () => db.prepare('SELECT entry_uuid,status FROM journal_entries ORDER BY entry_uuid').all()
+    .map((row) => Object.assign({}, row));
+  const outbox = () => db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  // A researcher that is not the linked farm owner: refused, nothing written or queued.
+  const before = rows();
+  const queued = outbox();
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000001'), caller, { mode: 'create' }),
+    refused
+  );
+  // A plot-less irrigation final is farm-wide too (#403: no zone, no plot).
+  await assert.rejects(
+    journal.saveEntry(db, entryInput('22800000-0000-4000-8000-000000000002', null, '2026-07-13T09:00:00',
+      { season_crop: 'barley' }), caller, { mode: 'create' }),
+    refused
+  );
+  assert.deepEqual(rows(), before);
+  assert.equal(outbox(), queued);
+  // Its own plot-less draft stays private and allowed; promoting it to final is a create.
+  const draftUuid = '22800000-0000-4000-8000-000000000003';
+  await journal.saveEntry(db, farmWide(draftUuid, { status: 'draft' }), caller, { mode: 'create' });
+  await assert.rejects(
+    journal.saveEntry(db, farmWide(draftUuid, { base_sync_version: 0 }), caller,
+      { mode: 'update', entryUuid: draftUuid }),
+    refused
+  );
+  assert.equal(db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status, 'draft');
+  // Plot-bound entries are unaffected.
+  await journal.saveEntry(db, entryInput('22800000-0000-4000-8000-000000000004', plotUuid,
+    '2026-07-13T10:00:00', { season_crop: 'barley' }), caller, { mode: 'create' });
+  const catalog = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET', path: '/api/journal/catalog', query: {}, params: {},
+        headers: { authorization: 'Bearer ' + token('farm-wide-secret', {
+          userId: 1, username: 'field-user', exp: Date.now() + 60_000,
+        }) },
+      },
+    },
+    Database: class { constructor() { return db; } },
+    environment: { authTokenSecret: 'farm-wide-secret', deviceEui: GATEWAY_EUI, deviceEuiConfidence: 'authoritative' },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+  assert.equal(catalog.statusCode, 200);
+  assert.deepEqual(catalog.payload.capture_permissions, { farm_wide: false });
+
+  // The linked farm owner: allowed.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000005'), caller, { mode: 'create' });
+  await journal.saveEntry(db, farmWide(draftUuid, { base_sync_version: 0 }), caller,
+    { mode: 'update', entryUuid: draftUuid });
+  assert.equal(db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status, 'final');
+
+  // Another account linked last is the owner now; an enabled admin is allowed, a disabled one is not.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-14T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000006'), caller, { mode: 'create' }),
+    refused
+  );
+  db.prepare("UPDATE users SET role='admin' WHERE user_uuid=?").run(OWNER_UUID);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000006'), caller, { mode: 'create' });
+  db.prepare("UPDATE users SET disabled_at='2026-07-15T00:00:00.000Z' WHERE user_uuid=?").run(OWNER_UUID);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000007'), caller, { mode: 'create' }),
+    (error) => error && error.statusCode === 403
+  );
+
+  // Flag off: main's behaviour, any signed-in account records farm-wide entries.
+  const flagOff = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  db.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000008'), flagOff, { mode: 'create' });
+});
+
+test('the farm owner is the account sync uses; a disabled latest link leaves no owner', async () => {
+  const db = new TestDb('farm-owner-disabled-link');
+  seedIdentity(db);
+  const { farmWideWritable } = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api');
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OWNER_UUID);
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OWNER_UUID);
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-14T00:00:00.000Z', " +
+    "disabled_at='2026-07-15T00:00:00.000Z' WHERE user_uuid=?").run(OTHER_OWNER_UUID);
+  // Sync still runs on the latest link; an older link does not become the owner.
+  assert.equal(await farmWideWritable(db, caller), false);
+  db.prepare('UPDATE users SET disabled_at=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  assert.equal(await farmWideWritable(db, caller), false);
+  db.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  assert.equal(await farmWideWritable(db, caller), true);
 });
 
 test('#403: flag-off changes to farm-wide entries are unchanged', async () => {
@@ -2512,6 +2645,210 @@ async function createPagedEntries(name, note, count) {
   }
   return { db, entryUuids };
 }
+
+test('a farm-wide entry is saved without plot or zone and refuses field context', async () => {
+  const db = new TestDb('farm-wide-entry');
+  seedIdentity(db);
+  const farmWide = function(uuid, overrides) {
+    return entryInput(uuid, null, '2026-07-13T08:00:00', Object.assign({
+      activity_code: 'equipment_maintenance',
+      template_code: 'full_record',
+      template_version: 11,
+      layout_code: 'farm_wide',
+      layout_version: 1,
+      values: [],
+      note: 'Serviced mower',
+    }, overrides || {}));
+  };
+  const created = await journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000001'), principal(),
+    { mode: 'create' });
+  const stored = db.prepare('SELECT plot_uuid,zone_id,layout_code FROM journal_entries WHERE entry_uuid=?')
+    .get(created.entry_uuid);
+  assert.deepEqual(Object.assign({}, stored), { plot_uuid: null, zone_id: null, layout_code: 'farm_wide' });
+  const plotUuid = '22700000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'farm-wide-refused'), principal());
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000003', { plot_uuid: plotUuid }), principal(),
+      { mode: 'create' }),
+    (error) => error && error.code === 'validation_failed' &&
+      error.errors.some((item) => item.code === 'farm_wide_requires_no_plot')
+  );
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000004', { season_crop: 'barley' }), principal(),
+      { mode: 'create' }),
+    (error) => error && error.code === 'validation_failed' &&
+      error.errors.some((item) => item.code === 'farm_wide_requires_no_context')
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, 1);
+});
+
+test('station and group entry scopes are exclusive, normalized, and never fall back to all entries', async () => {
+  const { db, entryUuids } = await createPagedEntries('entry-scopes', null, 3);
+  const firstPlot = '61000000-0000-4000-8000-000000000001';
+  const secondPlot = '61000000-0000-4000-8000-000000000002';
+  const groupUuid = '62000000-0000-4000-8000-000000000001';
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-A', firstPlot);
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-B', secondPlot);
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Scope cohort',
+    resolved: false,
+    members: [firstPlot, secondPlot],
+  }, principal());
+
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', plot_uuid: firstPlot, station_code: 'Station-A' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'conflicting_scope_filters'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', group_uuid: 'not-a-uuid' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_uuid'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', station_code: 'x'.repeat(241) }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_filter'
+  );
+  const station = await journal.listEntries(db, { status: 'final', station_code: ' Station-A ' }, principal());
+  assert.deepEqual(station.entries.map((entry) => entry.entry_uuid), [entryUuids[0]]);
+  const group = await journal.listEntries(db, { status: 'final', group_uuid: groupUuid }, principal());
+  assert.deepEqual(group.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  const selection = { status: 'final', group_uuid: groupUuid };
+  const csvRecords = parseCsvRecords(await journal.exportWideCsv(db, selection, principal()));
+  const uuidColumn = csvRecords[0].findIndex((cell) => cell.value === 'entry_uuid');
+  assert.deepEqual(csvRecords.slice(1).map((record) => record[uuidColumn].value), entryUuids.slice(0, 2));
+  const exported = JSON.parse(await journal.exportJson(db, selection, principal()));
+  assert.deepEqual(exported.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  for (const scope of [{ station_code: 'missing' }, { group_uuid: '62000000-0000-4000-8000-000000000099' }]) {
+    await assert.rejects(
+      journal.listEntries(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+    await assert.rejects(
+      journal.exportJson(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+  }
+});
+
+test('entry scopes follow the read rule: owner-only flag-off, account-wide in scoped mode', async () => {
+  const { db, entryUuids } = await createPagedEntries('entry-scope-ownership', null, 2);
+  const firstPlot = '61000000-0000-4000-8000-000000000001';
+  const groupUuid = '62000000-0000-4000-8000-000000000002';
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-A', firstPlot);
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Owner cohort',
+    resolved: false,
+    members: [firstPlot],
+  }, principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  for (const scope of [{ plot_uuid: firstPlot }, { station_code: 'Station-A' }, { group_uuid: groupUuid }]) {
+    await assert.rejects(
+      journal.listEntries(db, Object.assign({ status: 'final' }, scope), other),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found',
+      JSON.stringify(scope)
+    );
+    await assert.rejects(
+      journal.exportJson(db, Object.assign({ status: 'final' }, scope), other),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found',
+      JSON.stringify(scope)
+    );
+  }
+  const scopedOther = Object.assign({}, other, { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  for (const scope of [{ plot_uuid: firstPlot }, { station_code: 'Station-A' }, { group_uuid: groupUuid }]) {
+    const listed = await journal.listEntries(db, Object.assign({ status: 'final' }, scope), scopedOther);
+    assert.deepEqual(listed.entries.map((entry) => entry.entry_uuid), [entryUuids[0]], JSON.stringify(scope));
+  }
+});
+
+test('#418: in scoped mode a collaborator cannot create or rewrite another user\'s plot group', async () => {
+  const db = new TestDb('scoped-plot-group-ownership');
+  seedIdentity(db);
+  const foreignPlotUuid = '22600000-0000-4000-8000-000000000001';
+  const ownPlotUuid = '22600000-0000-4000-8000-000000000002';
+  const foreignGroupUuid = '22600000-0000-4000-8000-000000000003';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(foreignPlotUuid, 'foreign-group-plot'), other);
+  await journal.upsertPlot(db, plotInput(ownPlotUuid, 'own-group-plot'), principal());
+  await journal.upsertPlotGroup(db, {
+    group_uuid: foreignGroupUuid,
+    base_sync_version: 0,
+    label: 'Owner group',
+    resolved: false,
+    members: [foreignPlotUuid],
+  }, other);
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run('22600000-0000-4000-8000-000000000004', OWNER_UUID, foreignPlotUuid, GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z');
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  const groupsBefore = db.prepare('SELECT * FROM journal_plot_groups ORDER BY group_uuid').all();
+  const outboxBefore = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  for (const role of ['researcher', 'admin']) {
+    db.prepare('UPDATE users SET role=? WHERE user_uuid=?').run(role, OWNER_UUID);
+    scopeHelper.invalidateScope(OWNER_UUID);
+    await assert.rejects(
+      journal.upsertPlotGroup(db, {
+        group_uuid: '22600000-0000-4000-8000-000000000005',
+        base_sync_version: 0,
+        label: 'Attributed to the plot owner',
+        resolved: false,
+        members: [foreignPlotUuid],
+      }, scoped),
+      (error) => error && error.statusCode === 403 && error.code === 'forbidden',
+      role + ' create'
+    );
+    await assert.rejects(
+      journal.upsertPlotGroup(db, {
+        group_uuid: foreignGroupUuid,
+        base_sync_version: 1,
+        label: 'Rewritten by a collaborator',
+        resolved: false,
+        members: [foreignPlotUuid],
+      }, scoped, foreignGroupUuid),
+      (error) => error && error.statusCode === 403 && error.code === 'forbidden',
+      role + ' update'
+    );
+  }
+  assert.deepEqual(db.prepare('SELECT * FROM journal_plot_groups ORDER BY group_uuid').all(), groupsBefore);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBefore);
+
+  const own = await journal.upsertPlotGroup(db, {
+    group_uuid: '22600000-0000-4000-8000-000000000006',
+    base_sync_version: 0,
+    label: 'Own group',
+    resolved: false,
+    members: [ownPlotUuid],
+  }, scoped);
+  assert.equal(own.plot_group.owner_user_uuid, OWNER_UUID);
+
+  // Flag-off behaviour is unchanged: the other owner's plot is simply not found.
+  await assert.rejects(
+    journal.upsertPlotGroup(db, {
+      group_uuid: '22600000-0000-4000-8000-000000000007',
+      base_sync_version: 0,
+      label: 'Flag-off foreign',
+      resolved: false,
+      members: [foreignPlotUuid],
+    }, principal()),
+    (error) => error && error.statusCode === 404
+  );
+});
 
 test('entry keyset pagination is stable for equal timestamps and rejects cursor filter reuse', async () => {
   const { db, entryUuids } = await createPagedEntries('pagination');

@@ -708,3 +708,101 @@ test('repeated 403s double the backoff window up to the configured cap (#251)', 
   }
   assert.deepEqual(observedBackoffs, [20, 40, 50, 50]);
 });
+
+function entryBatchRoutes(primary, batchResponses) {
+  return [
+    {
+      match: (request) => request.url.endsWith('/capabilities') &&
+        request.payload.release_id === 'journal_entry_batch_v1',
+      respond: (request) => batchResponses(request),
+    },
+    {
+      match: (request) => request.url.endsWith('/capabilities'),
+      respond: () => ({ statusCode: 200, payload: primary }),
+    },
+    {
+      match: (request) => request.url.includes('/replication?'),
+      respond: () => ({ statusCode: 200, payload: [] }),
+    },
+  ];
+}
+
+function batchCapabilityAnswer(request) {
+  return {
+    statusCode: 200,
+    payload: acceptedCapability({
+      release_id: 'journal_entry_batch_v1',
+      edge_producer_ready: request.payload.edge_producer_ready,
+    }),
+  };
+}
+
+test('an accepted gateway advertises the journal entry batch release it can apply', async (t) => {
+  const { database } = fixture(t, 'entry-batch-advertised');
+  t.after(() => database.close());
+  replication._resetJournalV2BackoffForTests();
+  t.after(() => replication._resetJournalV2BackoffForTests());
+  const calls = [];
+  const http = fakeHttp(database, entryBatchRoutes(acceptedCapability(), batchCapabilityAnswer), calls);
+
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+
+  const advertisements = calls.filter((request) => request.url.endsWith('/capabilities') &&
+    request.payload.release_id === 'journal_entry_batch_v1');
+  assert.equal(advertisements.length, 1);
+  assert.equal(advertisements[0].method, 'POST');
+  assert.equal(advertisements[0].payload.schema_fingerprint, SCHEMA_FINGERPRINT);
+  assert.equal(advertisements[0].payload.edge_producer_ready, true);
+  assert.match(advertisements[0].payload.advertised_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(result.entry_batch_capability, 'advertised');
+
+  await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(calls.filter((request) => request.payload &&
+    request.payload.release_id === 'journal_entry_batch_v1').length, 1,
+  'an unchanged advertisement is not repeated on every tick');
+});
+
+test('a rejected journal contract never advertises the entry batch release', async (t) => {
+  const { database } = fixture(t, 'entry-batch-rejected-contract');
+  t.after(() => database.close());
+  replication._resetJournalV2BackoffForTests();
+  t.after(() => replication._resetJournalV2BackoffForTests());
+  const calls = [];
+  const http = fakeHttp(database, entryBatchRoutes(acceptedCapability({
+    schema_fingerprint: 'a'.repeat(64), schema_accepted: false, edge_producer_ready: false,
+  }), batchCapabilityAnswer), calls);
+
+  const result = await replication.runReplicationTick(facade(database), http, fs, config());
+
+  assert.equal(calls.some((request) => request.payload &&
+    request.payload.release_id === 'journal_entry_batch_v1'), false);
+  assert.equal(result.entry_batch_capability, 'not_advertised');
+});
+
+test('a failed entry batch advertisement is reported, backed off and retried without stopping replication', async (t) => {
+  const { database } = fixture(t, 'entry-batch-advertisement-failed');
+  t.after(() => database.close());
+  replication._resetJournalV2BackoffForTests();
+  t.after(() => replication._resetJournalV2BackoffForTests());
+  withTinyJournalBackoff(t, { initialMs: 40, capMs: 1000 });
+  let answer = () => ({ statusCode: 500, payload: { error: 'unavailable' } });
+  const calls = [];
+  const http = fakeHttp(database, entryBatchRoutes(acceptedCapability(), (request) => answer(request)), calls);
+
+  const failed = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(failed.capability_state, 'accepted');
+  assert.equal(failed.entry_batch_capability, 'failed:transient_cloud_failure');
+  assert.ok(calls.some((request) => request.url.includes('/replication?')), 'replication still ran');
+
+  const batchPosts = () => calls.filter((request) => request.payload &&
+    request.payload.release_id === 'journal_entry_batch_v1').length;
+  const postsAfterFailure = batchPosts();
+  const backedOff = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(backedOff.entry_batch_capability, 'backoff');
+  assert.equal(batchPosts(), postsAfterFailure, 'no new advertisement inside the backoff window');
+
+  await sleep(60);
+  answer = batchCapabilityAnswer;
+  const retried = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(retried.entry_batch_capability, 'advertised');
+});

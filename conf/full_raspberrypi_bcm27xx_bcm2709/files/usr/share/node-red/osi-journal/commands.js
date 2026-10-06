@@ -5,6 +5,7 @@ const lifecycle = require('./lifecycle');
 const journalApi = require('./api');
 const { aggregateHash } = require('./aggregate');
 const ledger = require('../osi-command-ledger');
+const scopeHelper = require('../osi-scope-helper');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI64 = /^[0-9A-F]{16}$/;
@@ -197,6 +198,16 @@ function submittedIntent(type, payload) {
     author_label: payload.author_label == null ? null : payload.author_label,
   };
   if (type === 'UPSERT_JOURNAL_ENTRY') intent.entry = payload.entry;
+  else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+    intent.batch_uuid = payload.batch_uuid;
+    intent.shared = payload.shared;
+    intent.members = Array.isArray(payload.members)
+      ? payload.members.slice().sort(function(left, right) {
+        return codeUnitCompare(String(left.plot_uuid), String(right.plot_uuid)) ||
+          codeUnitCompare(String(left.entry_uuid), String(right.entry_uuid));
+      })
+      : payload.members;
+  }
   else if (type === 'VOID_JOURNAL_ENTRY') {
     intent.void_entry = {
       entry_uuid: payload.entry_uuid,
@@ -318,6 +329,7 @@ async function persistedAck(db, deliveryId) {
 }
 
 function resourceReference(type, payload) {
+  if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') return null;
   if (type === 'UPSERT_JOURNAL_ENTRY') {
     return { aggregate_type: 'JOURNAL_ENTRY', key: payload.entry && payload.entry.entry_uuid,
       table: 'journal_entries', key_column: 'entry_uuid' };
@@ -342,6 +354,7 @@ function resourceReference(type, payload) {
 
 async function currentResourceFacts(db, type, payload, owner, gateway) {
   const reference = resourceReference(type, payload);
+  if (!reference) return { currentSyncVersion: null, currentPayloadHash: null };
   if (!UUID.test(reference.key || '') || !UUID.test(owner || '') || !EUI64.test(gateway || '')) {
     return { currentSyncVersion: null, currentPayloadHash: null };
   }
@@ -419,6 +432,11 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
         resource.author_principal_uuid !== payload.author_principal_uuid ||
         resource.author_label !== payload.author_label ||
         resource.gateway_device_eui !== gateway) return false;
+  } else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+    key = payload.batch_uuid;
+    baseVersion = payload.base_sync_version;
+    prefix = 'journal_entry_batch';
+    if (!payload.shared || !Array.isArray(payload.members)) return false;
   } else if (type === 'VOID_JOURNAL_ENTRY') {
     key = payload.entry_uuid;
     baseVersion = payload.base_sync_version;
@@ -446,6 +464,206 @@ async function validJournalEffectBinding(db, envelope, runtime, type) {
         resource.gateway_device_eui !== gateway)) return false;
   return UUID.test(key || '') && Number.isInteger(baseVersion) && baseVersion >= 0 &&
     payload.effect_key === prefix + ':' + key + ':' + baseVersion;
+}
+
+// The shared facts and member fields of JournalEntryBatchShared /
+// JournalEntryBatchMember (docs/contracts/sync-schema/resources.schema.json).
+// Anything else is refused rather than copied into the lifecycle input, so a
+// command can never smuggle identity, status or origin fields into an entry.
+const BATCH_SHARED_FIELDS = new Set([
+  'activity_code', 'template_code', 'template_version', 'layout_code', 'layout_version',
+  'catalog_version', 'occurred_start', 'occurred_end', 'occurred_timezone',
+  'occurred_utc_offset_minutes', 'device_eui', 'season_crop', 'season_variety',
+  'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code',
+  'pass_uuid', 'note', 'values',
+]);
+const BATCH_MEMBER_FIELDS = new Set([
+  'entry_uuid', 'base_sync_version', 'plot_uuid', 'cycle_uuid', 'cycle_action',
+]);
+
+function onlyFields(value, allowed, label) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw commandError('malformed_command', label + ' field is not in the contract: ' + key);
+    }
+  }
+}
+
+function codeUnitCompare(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function batchInput(payload) {
+  const shared = object(payload.shared, 'shared');
+  if (!UUID.test(payload.batch_uuid || '') || payload.base_sync_version !== 0 ||
+      !Array.isArray(payload.members) || payload.members.length < 1 || payload.members.length > 100) {
+    throw commandError('malformed_command', 'Journal batch identity or members are malformed');
+  }
+  if (payload.effect_key !== 'journal_entry_batch:' + payload.batch_uuid + ':0') {
+    throw commandError('invalid_effect_key', 'Command effect key does not match the journal batch');
+  }
+  onlyFields(shared, BATCH_SHARED_FIELDS, 'Journal batch shared');
+  // A cloud batch has one member per plot, so it is never a tank-mix pass
+  // (several products on one plot). A pass UUID would switch the lifecycle to
+  // pass semantics, which keep only the first member's crop-cycle choice.
+  if (shared.pass_uuid != null) {
+    throw commandError('malformed_command', 'A journal entry batch cannot carry a pass_uuid');
+  }
+  const start = localOccurrence(
+    shared.occurred_start, shared.occurred_timezone, shared.occurred_utc_offset_minutes, 'shared.occurred_start'
+  );
+  const end = shared.occurred_end == null
+    ? null
+    : localOccurrence(shared.occurred_end, shared.occurred_timezone, null, 'shared.occurred_end');
+  const members = payload.members.map(function(member) {
+    member = object(member, 'member');
+    onlyFields(member, BATCH_MEMBER_FIELDS, 'Journal batch member');
+    const cycleUuid = member.cycle_uuid == null ? null : member.cycle_uuid;
+    const cycleAction = member.cycle_action == null ? null : member.cycle_action;
+    if (!UUID.test(member.entry_uuid || '') || !UUID.test(member.plot_uuid || '') ||
+        member.base_sync_version !== 0 ||
+        (cycleUuid != null && !UUID.test(cycleUuid)) ||
+        ![null, 'continue', 'new'].includes(cycleAction)) {
+      throw commandError('malformed_command', 'Journal batch member is malformed');
+    }
+    return {
+      entry_uuid: member.entry_uuid,
+      plot_uuid: member.plot_uuid,
+      cycle_uuid: cycleUuid,
+      cycle_action: cycleAction,
+    };
+  });
+  // The cloud issuer orders members by plot, then entry (Java String order);
+  // the same code-unit order is required here, and both identities are unique.
+  const canonical = members.slice().sort(function(left, right) {
+    return codeUnitCompare(left.plot_uuid, right.plot_uuid) ||
+      codeUnitCompare(left.entry_uuid, right.entry_uuid);
+  });
+  if (JSON.stringify(members) !== JSON.stringify(canonical) ||
+      new Set(members.map(function(member) { return member.entry_uuid; })).size !== members.length ||
+      new Set(members.map(function(member) { return member.plot_uuid; })).size !== members.length) {
+    throw commandError('malformed_command', 'Journal batch members must be unique and canonical ordered');
+  }
+  const input = {};
+  for (const field of BATCH_SHARED_FIELDS) {
+    if (hasOwn(shared, field)) input[field] = shared[field];
+  }
+  delete input.occurred_start;
+  delete input.occurred_end;
+  return {
+    input: Object.assign(input, {
+      batch_uuid: payload.batch_uuid,
+      occurred_start_local: start.local,
+      occurred_end_local: end && end.local,
+      occurred_utc_offset_minutes: start.offset_minutes,
+      occurred_end_utc_offset_minutes: end && end.offset_minutes,
+    }),
+    members: canonical,
+  };
+}
+
+async function applyBatchInTransaction(tx, catalog, batch, principal, deliveryId, type, intentHash) {
+  // Every member of a cloud batch is new (base version 0); an exact replay of
+  // the same command is answered by the ledger before this runs. A member
+  // entry that already exists therefore belongs to another command, and is
+  // refused instead of being mistaken for a retry of this batch.
+  const existing = await tx.get(
+    'SELECT entry_uuid FROM journal_entries WHERE entry_uuid IN (' +
+      batch.members.map(function() { return '?'; }).join(',') + ') LIMIT 1',
+    batch.members.map(function(member) { return member.entry_uuid; })
+  );
+  if (existing) {
+    throw commandError('idempotency_conflict', 'A journal batch member entry already exists: ' + existing.entry_uuid);
+  }
+  const result = await lifecycle.finalizeBatchInTransaction(
+    tx, catalog, batch.input, batch.members, principal,
+    { suppressCommandTerminal: true, includeAggregate: true }
+  );
+  const appliedAt = new Date().toISOString();
+  const members = result.entries.map(function(entry) {
+    return {
+      entryUuid: entry.entry_uuid,
+      plotUuid: entry.plot_uuid,
+      syncVersion: entry.sync_version,
+      payloadHash: aggregateHash(entry.aggregate),
+    };
+  });
+  const ack = {
+    commandId: deliveryId,
+    commandType: type,
+    status: 'ACKED',
+    result: 'APPLIED',
+    duplicate: false,
+    effectKey: principal.effect_key,
+    submittedIntentHash: intentHash,
+    ownerUserUuid: principal.owner_user_uuid,
+    authorPrincipalUuid: principal.author_principal_uuid,
+    authorLabel: principal.author_label,
+    gatewayDeviceEui: principal.gateway_device_eui,
+    batchUuid: result.batch_uuid,
+    members,
+    appliedAt,
+  };
+  await tx.run(
+    'INSERT INTO applied_commands (' +
+      'command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator' +
+    ') VALUES (?,?,?,?,?,?,?,?)',
+    [String(deliveryId), principal.gateway_device_eui, type, principal.effect_key,
+      appliedAt, 'APPLIED', JSON.stringify(ack), 'edge']
+  );
+  await tx.run('DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [String(deliveryId)]);
+  await tx.run(
+    'INSERT INTO command_ack_outbox (command_id,payload_json,created_at) VALUES (?,?,?)',
+    [String(deliveryId), JSON.stringify(ack), appliedAt]
+  );
+  return ack;
+}
+
+// Owner decision 2026-10-05: with scoped access on, a farm-wide entry (no
+// plot, no zone) is recorded, changed and voided only by the farm owner or an
+// enabled admin. The cloud authorizes a plot-less entry without a plot
+// scope, so the gateway applies the same rule to cloud commands as to its own
+// API, judged on the command's author (the gateway-local identity). Drafts
+// never arrive here (cloud entry commands are final).
+async function assertCommandFarmWideAuthor(db, type, payload) {
+  if (!scopeHelper.isScopedMode()) return;
+  let entryUuid = null;
+  let farmWide = false;
+  if (type === 'UPSERT_JOURNAL_ENTRY') {
+    const entry = payload.entry || {};
+    entryUuid = entry.entry_uuid;
+    farmWide = entry.plot_uuid == null;
+  } else if (type === 'VOID_JOURNAL_ENTRY') {
+    entryUuid = payload.entry_uuid;
+  } else {
+    return;
+  }
+  if (!farmWide && UUID.test(entryUuid || '')) {
+    const stored = await db.get(
+      'SELECT plot_uuid,zone_id,zone_uuid,status FROM journal_entries WHERE entry_uuid=? LIMIT 1',
+      [entryUuid]
+    );
+    farmWide = Boolean(stored && stored.plot_uuid == null && stored.zone_id == null &&
+      stored.zone_uuid == null && stored.status !== 'draft');
+  }
+  if (!farmWide) return;
+  let allowed;
+  try {
+    allowed = await journalApi.farmWideWritable(db, {
+      author_principal_uuid: payload.author_principal_uuid,
+      scoped: true,
+      scope: scopeHelper,
+    });
+  } catch (error) {
+    // A database fault stays retryable; an unknown or disabled author is a no.
+    if (/^SQLITE_/.test(String(error && error.code || ''))) throw error;
+    allowed = false;
+  }
+  if (!allowed) {
+    throw commandError('scope_denied', 'Only the farm owner or an admin may record or change farm-wide journal entries');
+  }
 }
 
 // Thin, signature-identical wrappers over osi-command-ledger's generic
@@ -523,6 +741,22 @@ async function persistFailure(db, envelope, payload, runtime, type, deliveryId, 
   return { handled: true, ack };
 }
 
+// The journal command types this applier executes. The replication worker
+// reads it (supportsCommandType) before it advertises the entry batch release
+// to the cloud, so the advertisement follows what this runtime can apply.
+const SUPPORTED_COMMAND_TYPES = new Set([
+  'UPSERT_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_ENTRY_BATCH',
+  'VOID_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_CUSTOM_VOCAB',
+  'UPSERT_JOURNAL_PLOT',
+  'UPSERT_JOURNAL_PLOT_GROUP',
+]);
+
+function supportsCommandType(type) {
+  return SUPPORTED_COMMAND_TYPES.has(String(type || '').trim().toUpperCase());
+}
+
 let journalApplyTail = Promise.resolve();
 
 function enqueueJournalApply(work) {
@@ -534,13 +768,7 @@ function enqueueJournalApply(work) {
 async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
   envelope = object(envelope, 'Pending command envelope');
   const type = commandType(envelope);
-  const supported = new Set([
-    'UPSERT_JOURNAL_ENTRY',
-    'VOID_JOURNAL_ENTRY',
-    'UPSERT_JOURNAL_CUSTOM_VOCAB',
-    'UPSERT_JOURNAL_PLOT',
-    'UPSERT_JOURNAL_PLOT_GROUP',
-  ]);
+  const supported = SUPPORTED_COMMAND_TYPES;
   const deliveryId = deliveryCommandId(envelope);
   if (recheckReplay) {
     const replay = await deduplicatePendingCommand(db, envelope, runtime);
@@ -568,10 +796,22 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
     }
     assertDuplicateGuardControl(type, payload);
     intentHash = submittedIntentHash(type, payload);
+    if (type === 'UPSERT_JOURNAL_ENTRY_BATCH' &&
+        (intentHash == null || payload.submitted_intent_hash !== intentHash)) {
+      throw commandError('invalid_intent_hash', 'Journal batch submitted intent hash does not match canonical payload');
+    }
     const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId, intentHash);
+    await assertCommandFarmWideAuthor(db, type, payload);
     if (type === 'UPSERT_JOURNAL_ENTRY') {
       const catalog = await loadCatalog(db, principal);
       await lifecycle.finalize(db, catalog, entryInput(payload, principal), principal);
+    } else if (type === 'UPSERT_JOURNAL_ENTRY_BATCH') {
+      const batch = batchInput(payload);
+      const catalog = await loadCatalog(db, principal);
+      const ack = await db.transaction(function(tx) {
+        return applyBatchInTransaction(tx, catalog, batch, principal, deliveryId, type, intentHash);
+      });
+      return { handled: true, ack };
     } else if (type === 'VOID_JOURNAL_ENTRY') {
       if (!UUID.test(payload.entry_uuid || '') || !Number.isInteger(payload.base_sync_version) ||
           payload.base_sync_version < 0) {
@@ -631,4 +871,5 @@ module.exports = {
   queueCommandAck,
   validJournalEffectBinding,
   submittedIntentHash,
+  supportsCommandType,
 };

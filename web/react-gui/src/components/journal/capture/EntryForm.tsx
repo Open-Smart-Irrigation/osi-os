@@ -174,7 +174,9 @@ function numericInput(
   return {
     attribute_code: code,
     ...(previous?.group_index == null ? {} : { group_index: previous.group_index }),
-    ...(previous?.value_status == null ? {} : { value_status: previous.value_status }),
+    ...(previous?.value_status === 'not_observed'
+      ? { value_status: 'observed' as const }
+      : previous?.value_status == null ? {} : { value_status: previous.value_status }),
     entered_value_num: enteredValue,
     entered_unit_code: enteredUnit,
   };
@@ -704,7 +706,40 @@ export const EntryForm: React.FC<EntryFormProps> = ({
           ? attribute.default_unit_code
           : unitCodes.length === 1 ? unitCodes[0] : null);
       const selectedUnitLabel = unitOptions.find(({ code }) => code === selectedUnit)?.label;
+      const notObservedUnit = currentUnit ?? (unitCodes.length === 1 ? unitCodes[0] : null);
       const numberError = errorFor(state.code, existing?.group_index ?? 0);
+      if (existing?.value_status === 'not_observed') {
+        return (
+          <div key={state.code} className="space-y-2 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+            <p className="text-sm font-bold text-[var(--text)]">{label}</p>
+            <p className="text-sm text-[var(--text-secondary)]">
+              {t('capture.carry.valueStatus.not_observed')}{selectedUnitLabel ? ` · ${selectedUnitLabel}` : ''}
+            </p>
+            <button
+              type="button"
+              onClick={() => updateSingle(state.code, numericInput(state.code, null, notObservedUnit, existing))}
+              className={`min-h-11 rounded-xl border border-[var(--border)] px-3 text-sm font-bold text-[var(--primary)] ${FOCUS_RING}`}
+            >
+              {t('capture.form.value')}
+            </button>
+          </div>
+        );
+      }
+      const notObservedControl = (state.required || requiredAnyGroup) && (
+        <button
+          type="button"
+          disabled={notObservedUnit == null}
+          onClick={() => updateSingle(state.code, {
+            attribute_code: state.code,
+            value_status: 'not_observed',
+            unit_code: notObservedUnit,
+            entered_unit_code: notObservedUnit,
+          })}
+          className={`min-h-11 rounded-xl border border-[var(--border)] px-3 text-sm font-bold text-[var(--primary)] disabled:opacity-50 ${FOCUS_RING}`}
+        >
+          {t('capture.carry.valueStatus.not_observed')}
+        </button>
+      );
       const control = (
         <NumberStepper
           id={state.code}
@@ -740,6 +775,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         return (
           <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             {control}
+            {notObservedControl}
             <div role="group" aria-label={t('capture.form.unit')} className="inline-flex w-full overflow-hidden rounded-xl border border-[var(--border)]">
               {unitOptions.map((unit) => {
                 const selected = unit.code === selectedUnit;
@@ -769,6 +805,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         return (
           <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
             {control}
+            {notObservedControl}
             <label htmlFor={`${state.code}-unit`} className="sr-only">{t('capture.form.unit')}</label>
             <select
               id={`${state.code}-unit`}
@@ -788,7 +825,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         );
       }
 
-      return <div key={state.code} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">{control}</div>;
+      return <div key={state.code} className="space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">{control}{notObservedControl}</div>;
     }
 
     if (attribute.value_type === 'choice') {

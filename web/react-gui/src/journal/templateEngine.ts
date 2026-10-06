@@ -321,6 +321,15 @@ function baseOutput(input: CaptureEntryValueInput): CaptureEntryValueOutput {
     attribute_code: input.attribute_code,
     ...(input.group_index == null ? {} : { group_index: input.group_index }),
     ...(input.value_status == null ? {} : { value_status: input.value_status }),
+    // A missing numeric observation still has a semantic unit. Preserve it so
+    // review and downstream validation can distinguish, for example, an
+    // unobserved application mass in kg/ha from an unspecified quantity.
+    ...(input.value_status != null && input.value_status !== 'observed' && input.unit_code != null
+      ? { unit_code: input.unit_code }
+      : {}),
+    ...(input.value_status != null && input.value_status !== 'observed' && input.entered_unit_code != null
+      ? { entered_unit_code: input.entered_unit_code }
+      : {}),
   };
 }
 

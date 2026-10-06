@@ -563,11 +563,11 @@ const WRITE_TARGETS = new Map([
     target: FOREIGN_ZONE_UUID,
     // #403, by the owner's decisions: an entry with a zone and no plot needs
     // the grant on its zone, which the fixture's foreign zone-only entry tests.
-    // A farm-wide entry (no zone, no plot) is changed only by the account that
-    // wrote it or by an admin; the seed has none, so test-journal-api.js pins
-    // that rule, not this verifier.
+    // A farm-wide final (no zone, no plot) is changed only by the farm owner
+    // or an admin, a farm-wide draft by its writer or an admin; the seed has
+    // none, so checkFarmWideVoid and test-journal-api.js pin that rule.
     reason: 'the fixture entry is a zone-only entry (no plot) in the foreign zone; farm-wide ' +
-      'entries (no zone, no plot) need their writer or an admin (#403)',
+      'finals (no zone, no plot) need the farm owner or an admin (#403, owner decision 2026-10-05)',
   }]),
   [
     'journal-custom-vocab-put-http',
@@ -990,6 +990,123 @@ function modulesRootFor(profileLabel) {
   return DEFAULT_MODULES_ROOT;
 }
 
+// #418: a grant on another user's plot lets the caller write entries there,
+// never create a plot group attributed to that plot's owner. The foreign
+// bodies above run without a grant (the plot check refuses them); this run
+// adds the grant, so only the group ownership rule stands between the caller
+// and a group owned by the admin. A control run on the caller's own plot,
+// with the same grant, must create its group.
+const PLOT_GROUP_CREATE_ID = 'journal-plot-groups-post-http';
+const PLOT_GROUP_GRANT_SQL =
+  'INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, gateway_device_eui, created_at) ' +
+  "VALUES ('00000000-0000-4000-8000-00000000c418', '" + PROBE_CALLER_UUID + "', '" + FOREIGN_PLOT_UUID +
+  "', '" + PROBE_GATEWAY_EUI + "', '2026-01-01T00:00:00Z');";
+
+async function checkGranteePlotGroup(flows, entry, label, probeOptions) {
+  const failures = [];
+  const fixture = probeOptions.fixture || {};
+  const granted = { ...fixture, setupSql: (fixture.setupSql || '') + '\n' + PLOT_GROUP_GRANT_SQL };
+  const groupBody = (members) => ({
+    group_uuid: '00000000-0000-4000-8000-00000000d418', label: 'Probe grantee group', resolved: false,
+    base_sync_version: 0, members,
+  });
+  const addsGroup = (trace) => (trace.changes || []).some((change) =>
+    change.table === 'journal_plot_groups' && change.op === 'added');
+  const base = { ...probeOptions, decisions: 'real', snapshot: true, fixture: granted };
+  if (addsGroup(await probeEntry(flows, entry, { ...base, body: groupBody([FOREIGN_PLOT_UUID]) }))) {
+    failures.push(`${label} lets a grantee create a plot group on another user's plot (#418)`);
+  }
+  if (!addsGroup(await probeEntry(flows, entry, { ...base, body: groupBody([PROBE_PLOT_UUID]) }))) {
+    failures.push(`${label}: the grantee control run on its own plot creates no group, so the refusal proves nothing`);
+  }
+  return failures;
+}
+
+// Owner decision 2026-10-05: with scoped access on, a farm-wide journal entry
+// (no plot, no zone) is recorded only by the farm owner (the cloud-linked
+// account) or an enabled admin. The probe caller is a researcher that is not
+// linked: a catalogue-valid farm-wide final must add no journal row. A control
+// run with the caller linked must add one, so the refusal is the rule and not
+// the body. Farm-wide rows carry no foreign id, so rule 4 cannot see this.
+const FARM_WIDE_ENTRY_ID = 'journal-entries-post-http';
+const FARM_WIDE_ENTRY_BODY = {
+  entry_uuid: '00000000-0000-4000-8000-00000000d0f1',
+  base_sync_version: 0,
+  status: 'final',
+  activity_code: 'equipment_maintenance',
+  template_code: 'full_record',
+  template_version: 11,
+  layout_code: 'farm_wide',
+  layout_version: 1,
+  occurred_start_local: '2026-01-05T08:00:00',
+  occurred_timezone: 'UTC',
+  values: [],
+  note: 'Probe farm-wide entry',
+};
+
+async function checkFarmWideCreate(flows, entry, label, probeOptions) {
+  const failures = [];
+  const base = { ...probeOptions, decisions: 'real', snapshot: true, body: FARM_WIDE_ENTRY_BODY };
+  const addsEntry = (trace) => (trace.changes || []).some((change) =>
+    change.table === 'journal_entries' && change.op === 'added');
+  if (addsEntry(await probeEntry(flows, entry, base))) {
+    failures.push(`${label} lets a researcher that is not the farm owner record a farm-wide journal entry`);
+  }
+  const fixture = probeOptions.fixture || {};
+  const linked = await probeEntry(flows, entry, {
+    ...base,
+    fixture: {
+      ...fixture,
+      setupSql: (fixture.setupSql || '') + "\nUPDATE users SET server_url = 'https://cloud.example.test', " +
+        "server_linked_at = '2026-01-02T00:00:00Z' WHERE user_uuid = '" + PROBE_CALLER_UUID + "';",
+    },
+  });
+  if (!addsEntry(linked)) {
+    failures.push(`${label}: the farm-wide control run as the linked farm owner records no entry, so the refusal proves nothing`);
+  }
+  return failures;
+}
+
+// The same owner decision covers change and void: a farm-wide final the
+// probe researcher wrote itself (before the rule, or with scoped access off)
+// is read-only for it. The void must change nothing; a control run with the
+// caller linked must void it.
+const FARM_WIDE_VOID_ID = 'journal-entry-void-post-http';
+const FARM_WIDE_OWN_ENTRY_UUID = '00000000-0000-4000-8000-00000000d0f2';
+const FARM_WIDE_OWN_ENTRY_SQL =
+  'INSERT INTO journal_entries (entry_uuid, owner_user_uuid, user_id, author_principal_uuid, ' +
+  'plot_uuid, zone_id, zone_uuid, activity_code, template_code, template_version, layout_code, ' +
+  'layout_version, catalog_version, occurred_start, occurred_timezone, occurred_utc_offset_minutes, ' +
+  'recorded_at, origin, status, sync_version, gateway_device_eui, created_at, updated_at) VALUES (' +
+  "'" + FARM_WIDE_OWN_ENTRY_UUID + "', '" + PROBE_CALLER_UUID + "', 2, '" + PROBE_CALLER_UUID + "', " +
+  "NULL, NULL, NULL, 'equipment_maintenance', 'full_record', 11, 'farm_wide', 1, 11, " +
+  "'2026-01-05T08:00:00Z', 'UTC', 0, '2026-01-05T08:00:00Z', 'edge-ui', 'final', 1, '" + PROBE_GATEWAY_EUI +
+  "', '2026-01-05T08:00:00Z', '2026-01-05T08:00:00Z');";
+
+async function checkFarmWideVoid(flows, entry, label, probeOptions) {
+  const failures = [];
+  const fixture = probeOptions.fixture || {};
+  const run = (extraSql) => probeEntry(flows, entry, {
+    ...probeOptions,
+    decisions: 'real',
+    snapshot: true,
+    params: { uuid: FARM_WIDE_OWN_ENTRY_UUID },
+    body: { base_sync_version: 1, reason: 'Probe farm-wide void' },
+    fixture: { ...fixture, setupSql: (fixture.setupSql || '') + '\n' + FARM_WIDE_OWN_ENTRY_SQL + extraSql },
+  });
+  const changesEntry = (trace) => (trace.changes || []).some((change) =>
+    change.table === 'journal_entries' && change.row && change.row.entry_uuid === FARM_WIDE_OWN_ENTRY_UUID);
+  if (changesEntry(await run(''))) {
+    failures.push(`${label} lets a researcher that is not the farm owner void a farm-wide journal entry`);
+  }
+  const linked = await run("\nUPDATE users SET server_url = 'https://cloud.example.test', " +
+    "server_linked_at = '2026-01-02T00:00:00Z' WHERE user_uuid = '" + PROBE_CALLER_UUID + "';");
+  if (!changesEntry(linked)) {
+    failures.push(`${label}: the farm-wide void control run as the linked farm owner changes nothing, so the refusal proves nothing`);
+  }
+  return failures;
+}
+
 // options.only: probe just these entry ids (tests use it; the CLI probes all).
 // options.modulesRoot: the profile's node-red directory for its seam modules.
 async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options = {}) {
@@ -1070,6 +1187,9 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
     }
 
     const { failures: verdict } = await checkEntry(flows, entry, label, probeOptions);
+    if (entry.id === FARM_WIDE_ENTRY_ID) failures.push(...await checkFarmWideCreate(flows, entry, label, probeOptions));
+    if (entry.id === FARM_WIDE_VOID_ID) failures.push(...await checkFarmWideVoid(flows, entry, label, probeOptions));
+    if (entry.id === PLOT_GROUP_CREATE_ID) failures.push(...await checkGranteePlotGroup(flows, entry, label, probeOptions));
 
     if (allowlist.has(entry.id)) {
       if (!verdict.length) {

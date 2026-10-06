@@ -504,6 +504,26 @@ describe('DetailPanel — correction and void are blocked for draft and voided e
     expect(screen.getByRole('button', { name: 'workspace.detail.actions.correct' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'workspace.detail.actions.void' })).toBeInTheDocument();
   });
+
+  it('offers no action on a farm-wide final when the gateway does not let this account change one', () => {
+    const farmWide = entry({ plot_uuid: null, zone_uuid: null });
+    mockDetail({ entries: [farmWide] });
+    renderPanel({ catalogOverride: { ...catalog, capture_permissions: { farm_wide: false } } });
+    expect(screen.queryByRole('button', { name: 'workspace.detail.actions.correct' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'workspace.detail.actions.void' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the actions on a plot final, and on a farm-wide final when the gateway permits it', () => {
+    mockDetail({ entries: [entry()] });
+    const denied = { ...catalog, capture_permissions: { farm_wide: false } };
+    const { unmount } = renderPanel({ catalogOverride: denied });
+    expect(screen.getByRole('button', { name: 'workspace.detail.actions.void' })).toBeInTheDocument();
+    unmount();
+
+    mockDetail({ entries: [entry({ plot_uuid: null, zone_uuid: null })] });
+    renderPanel({ catalogOverride: { ...catalog, capture_permissions: { farm_wide: true } } });
+    expect(screen.getByRole('button', { name: 'workspace.detail.actions.void' })).toBeInTheDocument();
+  });
 });
 
 describe('DetailPanel — void', () => {

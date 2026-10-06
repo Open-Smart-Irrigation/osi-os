@@ -117,7 +117,23 @@ every 0.7.0 entry below.
   `journal_v2_plot_group_snapshots`; the replication worker validates and
   stores plot-group snapshots. The sync contract defines the
   `UPSERT_JOURNAL_ENTRY_BATCH` command and the `JOURNAL_CROP_CYCLE_UPSERTED`
-  event; both are staged (no edge applier or emitter yet).
+  event.
+- **Journal entry batches and crop-cycle projection.** A cloud-issued
+  `UPSERT_JOURNAL_ENTRY_BATCH` is applied in one transaction: all member
+  entries, the command ledger row and one ACK listing every member's
+  version and payload hash, or nothing. Every crop-cycle change (seeding,
+  harvest, reseed, manual close, correction, void) is sent to the cloud as
+  `JOURNAL_CROP_CYCLE_UPSERTED`, except on a cloud-primary gateway. The
+  replication worker advertises the `journal_entry_batch_v1` release once
+  the cloud accepts the gateway's journal contract.
+- **Journal capture.** Final entries on catalog v11 Full templates are
+  checked against the catalog's final-requirement matrix; a required
+  quantity the matrix allows may be recorded as not observed. A Farm-wide
+  choice records maintenance and observations on the `farm_wide` layout
+  without plot, zone or other field context. Entry lists and exports narrow
+  to a station or a plot group. Capture closes with Escape, the activity
+  grid is one tab stop moved with the arrow keys, and the detail preference
+  falls back to the least detailed template a layout supports.
 - **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
   `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
   and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
@@ -275,6 +291,15 @@ every 0.7.0 entry below.
   in memory at once.
 
 ### Changed
+- Journal API and capture with scoped access off: a `plot_uuid` filter on a
+  plot the caller does not own, or that does not exist, answers 404
+  `scope_not_found` instead of an empty list; `station_code` and
+  `group_uuid` now narrow entry lists and exports; the catalog response
+  carries `capture_permissions`; with no plot chosen, the capture layout
+  selector offers only the farm-wide layout.
+- A non-admin farm owner loses the farm-wide right when another account
+  links the gateway later: the farm owner is always the latest linked
+  account, the one sync uses.
 - Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
   both revision resources in `resources.schema.json`
   (`DeviceInstallationLocationRevision`, `DeviceRadioConfigurationRevision`)
@@ -408,6 +433,17 @@ every 0.7.0 entry below.
   token; in 0.7.0 both answered without one.
 - `PUT /api/irrigation-zones/:zone_id/timezone` changes only a zone the
   caller owns; in 0.7.0 any signed-in user could change any zone.
+- With scoped access on, only the owner of a journal plot group's plots
+  may create or change the group. A grant on another user's plot no longer
+  lets the grantee create or rewrite that user's group (#418).
+- With scoped access on, a farm-wide journal entry (no plot, no zone) is
+  created, finalized, changed or voided only by the farm owner (the account
+  the gateway is linked to the cloud with) or an enabled admin, from the
+  gateway GUI and from cloud commands alike. Others get 403 (404 for an
+  existing entry; `scope_denied` for a cloud command), and the capture screen
+  no longer offers them the Farm-wide choice. Farm-wide finals that another
+  account wrote earlier become read-only for that account; its own
+  farm-wide drafts stay editable.
 - GUI: cached data and in-flight writes belong to one login session. After a
   logout and login as another user in the same tab, the second user no
   longer sees data cached for the first, and the first user's chained writes

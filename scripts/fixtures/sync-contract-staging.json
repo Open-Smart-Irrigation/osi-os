@@ -1,9 +1,7 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [
-      "UPSERT_JOURNAL_ENTRY_BATCH"
-    ],
+    "edgeDeferred": [],
     "cloudDeferred": [
       "UPSERT_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_ENTRY_BATCH",
@@ -25,11 +23,10 @@
       "JOURNAL_ENTRY_VOIDED",
       "JOURNAL_VOCAB_UPSERTED",
       "JOURNAL_PLOT_UPSERTED",
-      "JOURNAL_PLOT_GROUP_UPSERTED"
-    ],
-    "edgeDeferred": [
+      "JOURNAL_PLOT_GROUP_UPSERTED",
       "JOURNAL_CROP_CYCLE_UPSERTED"
     ],
+    "edgeDeferred": [],
     "edgeStaged": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",

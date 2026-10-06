@@ -878,6 +878,10 @@ async function closeCycleMembership(tx, cycle, plotUuid, endsOn, closingEntryUui
     'WHERE cycle_uuid=? AND plot_uuid=? AND ends_on IS NULL',
     [endsOn, closingEntryUuid, closeReason, cycle.cycle_uuid, plotUuid]
   );
+  await tx.run(
+    'UPDATE journal_crop_cycles SET sync_version=sync_version+1,updated_at=? WHERE cycle_uuid=?',
+    [new Date().toISOString(), cycle.cycle_uuid]
+  );
   await freezeClosedSpan(
     tx, plotUuid, cycle.starts_on, endsOn, cycle.crop_code, nullable(cycle.variety), closingEntryUuid
   );
@@ -954,7 +958,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
   const continuing = isMatch && effectiveAction === 'continue';
   const toClose = target != null && !continuing ? [target] : [];
 
-  if (continuing) return;
+  if (continuing) return [];
   if (cropCode == null) {
     throw lifecycleError(
       'crop_required_for_seeding',
@@ -977,7 +981,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
     'INSERT INTO journal_crop_cycles(' +
       'cycle_uuid,crop_code,variety,group_uuid,opened_by_entry_uuid,starts_on,gateway_device_eui,' +
       'created_by_principal_uuid,sync_version,created_at,updated_at,deleted_at' +
-    ') VALUES (?,?,?,NULL,?,?,?,?,0,?,?,NULL)',
+    ') VALUES (?,?,?,NULL,?,?,?,?,1,?,?,NULL)',
     [
       cycleUuid, cropCode, normalizedVariety, entryUuid, localDate,
       plot.gateway_device_eui, principal.author_principal_uuid, now, now,
@@ -991,6 +995,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
   for (const cycle of toClose) {
     await closeCycleMembership(tx, cycle, plot.plot_uuid, localDate, entryUuid, 'reseed');
   }
+  return [cycleUuid].concat(toClose.map(function(cycle) { return cycle.cycle_uuid; }));
 }
 
 // D2.1/D10/R7: a final harvest entry closes the covering membership for its
@@ -1001,7 +1006,7 @@ async function applySeedingCycleEffect(tx, plot, localDate, entryUuid, principal
 // harvesting cycle-less plots until the "assign crop" flow exists).
 async function applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input) {
   const covering = await openCyclesCoveringPlot(tx, plot.plot_uuid, localDate);
-  if (!covering.length) return;
+  if (!covering.length) return [];
   const target = selectTargetCycle(
     covering,
     input,
@@ -1009,6 +1014,7 @@ async function applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input) {
     'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this harvest closes'
   );
   await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'harvest');
+  return [target.cycle_uuid];
 }
 
 // R3: a tillage_soil_work/mowing/plant_protection_application entry carrying
@@ -1027,25 +1033,27 @@ async function applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input
     'Multiple open crop cycles cover this plot; specify cycle_uuid to select which one this closes'
   );
   await closeCycleMembership(tx, target, plot.plot_uuid, localDate, entryUuid, 'manual');
+  return [target.cycle_uuid];
 }
 
 // Single dispatch point called after a final entry (create or draft
 // promotion) is persisted: routes to the seeding/harvest/manual-close cycle
 // effect for its activity, or does nothing for every other activity code.
 async function applyActivityCycleCascade(tx, principal, plot, occurrence, entryUuid, activityCode, input, values) {
-  if (plot.plot_uuid == null) return;
+  if (plot.plot_uuid == null) return [];
   const localDate = occurrence.start.localDate;
   if (SEEDING_ACTIVITY_CODES.has(activityCode)) {
-    await applySeedingCycleEffect(
+    return applySeedingCycleEffect(
       tx, plot, localDate, entryUuid, principal, input,
       findAttributeValue(values, 'attr.crop'),
       findAttributeValue(values, 'attr.variety')
     );
   } else if (activityCode === 'harvest') {
-    await applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input);
+    return applyHarvestCycleEffect(tx, plot, localDate, entryUuid, input);
   } else if (MANUAL_CLOSE_ACTIVITY_CODES.has(activityCode) && input.ends_crop_cycle === true) {
-    await applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input);
+    return applyManualCloseCycleEffect(tx, plot, localDate, entryUuid, input);
   }
+  return [];
 }
 
 // S2 (review fix -- a minimum guard, NOT a full correction-cascade): there
@@ -1121,24 +1129,25 @@ async function assertCorrectionWontDesyncCycle(tx, existing, occurrence, normali
 // membership. A correction that clears the crop entirely is ignored rather
 // than blanking a tracked cycle's crop_code (which is NOT NULL).
 async function applySeedingCorrectionCascade(tx, existing, plot, normalized) {
-  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return;
-  if (nullable(plot.plot_uuid) !== nullable(existing.plot_uuid)) return;
+  if (!SEEDING_ACTIVITY_CODES.has(existing.activity_code)) return [];
+  if (nullable(plot.plot_uuid) !== nullable(existing.plot_uuid)) return [];
   const cycle = await tx.get(
     'SELECT cycle_uuid,crop_code,variety FROM journal_crop_cycles ' +
     'WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
     [existing.entry_uuid]
   );
-  if (!cycle) return;
+  if (!cycle) return [];
   const cropCode = findAttributeValue(normalized.values, 'attr.crop');
   const variety = findAttributeValue(normalized.values, 'attr.variety');
-  if (cropCode == null) return;
-  if (cropCode === cycle.crop_code && nullable(variety) === nullable(cycle.variety)) return;
+  if (cropCode == null) return [];
+  if (cropCode === cycle.crop_code && nullable(variety) === nullable(cycle.variety)) return [];
   const now = new Date().toISOString();
   await tx.run(
     'UPDATE journal_crop_cycles SET crop_code=?,variety=?,updated_at=?,sync_version=sync_version+1 ' +
     'WHERE cycle_uuid=?',
     [cropCode, nullable(variety), now, cycle.cycle_uuid]
   );
+  return [cycle.cycle_uuid];
 }
 
 // D13/R7 void cascades:
@@ -1178,6 +1187,7 @@ async function findCycleDependents(tx, membership, cycle, excludeEntryUuid) {
 }
 
 async function applyVoidCycleCascade(tx, entry, principal, options) {
+  const affected = [];
   const opened = await tx.get(
     'SELECT * FROM journal_crop_cycles WHERE opened_by_entry_uuid=? AND deleted_at IS NULL',
     [entry.entry_uuid]
@@ -1204,6 +1214,7 @@ async function applyVoidCycleCascade(tx, entry, principal, options) {
       'UPDATE journal_crop_cycles SET deleted_at=?,updated_at=?,sync_version=sync_version+1 WHERE cycle_uuid=?',
       [now, now, opened.cycle_uuid]
     );
+    affected.push(opened.cycle_uuid);
   }
 
   const closedMemberships = await tx.all(
@@ -1235,11 +1246,17 @@ async function applyVoidCycleCascade(tx, entry, principal, options) {
       'WHERE cycle_uuid=? AND plot_uuid=?',
       [membership.cycle_uuid, membership.plot_uuid]
     );
+    await tx.run(
+      'UPDATE journal_crop_cycles SET sync_version=sync_version+1,updated_at=? WHERE cycle_uuid=?',
+      [new Date().toISOString(), membership.cycle_uuid]
+    );
     await unfreezeClosedSpan(
       tx, membership.plot_uuid, membership.starts_on, membership.ends_on,
       membership.crop_code, nullable(membership.variety)
     );
+    affected.push(membership.cycle_uuid);
   }
+  return affected;
 }
 
 function parsedDefinition(row) {
@@ -1726,7 +1743,31 @@ async function emitJournalOutbox(tx, source, op) {
   const authority = await journalAuthority(tx, gatewayDeviceEui);
   // The V2 union has no plot-group mutation. Preserve that existing V1 route
   // until the paired contract defines an authoritative group representation.
-  const v2Compatible = aggregateType !== 'JOURNAL_PLOT_GROUP';
+  const v2Compatible = aggregateType !== 'JOURNAL_PLOT_GROUP' &&
+    aggregateType !== 'JOURNAL_CROP_CYCLE';
+  // Crop cycles are an edge-authored V1 evidence projection. A cloud-primary
+  // V2 workspace must not fall through to the V1 outbox: its current cycle
+  // state is already canonical in V2 and no V2 crop-cycle mutation exists.
+  if (authority.mode === 'v2' && aggregateType === 'JOURNAL_CROP_CYCLE') {
+    return {
+      aggregate,
+      entry,
+      event_uuid: eventUuid,
+      mutation_uuid: null,
+      replication_mode: 'v2',
+    };
+  }
+  // The cloud's V2 validator refuses a catalog-v11 final with no plot unless
+  // it is farm_wide. Refuse it here, before it is queued, so it can never
+  // stand at the head of the mutation queue. The V1 and local paths keep
+  // accepting plot-less finals.
+  if (authority.mode === 'v2' && entry && op === 'JOURNAL_ENTRY_UPSERTED' &&
+      entry.status === 'final' && entry.plot_uuid == null && entry.layout_code !== 'farm_wide' &&
+      Number(entry.catalog_version) >= 11) {
+    const refusal = lifecycleError('plot_required', 'plot_uuid is required for non-farm-wide final entries');
+    refusal.statusCode = 422;
+    throw refusal;
+  }
   if (authority.mode === 'v2' && v2Compatible) {
     const mutationSource = entry
       ? { aggregate }
@@ -1765,6 +1806,62 @@ async function emitJournalOutbox(tx, source, op) {
     ]
   );
   return { aggregate, entry, event_uuid: eventUuid, mutation_uuid: null, replication_mode: 'v1' };
+}
+
+// The crop-cycle projection is edge-owned evidence. It has a separate
+// aggregate/version because a seeding or harvest changes cycle membership
+// without changing the plot resource itself; reusing plot sync_version would
+// make cloud watermarking reject the updated cycle as an equal-version replay.
+async function emitCropCycleProjection(tx, cycleUuid) {
+  const cycle = await tx.get(
+    'SELECT cc.*,je.owner_user_uuid FROM journal_crop_cycles AS cc ' +
+    'JOIN journal_entries AS je ON je.entry_uuid=cc.opened_by_entry_uuid WHERE cc.cycle_uuid=?',
+    [cycleUuid]
+  );
+  if (!cycle) throw lifecycleError('cycle_not_found', 'Crop cycle was not found for projection');
+  const memberships = await tx.all(
+    'SELECT cycle_uuid,plot_uuid,ends_on,closed_by_entry_uuid,close_reason ' +
+    'FROM journal_crop_cycle_plots WHERE cycle_uuid=? ORDER BY plot_uuid',
+    [cycleUuid]
+  );
+  const aggregate = {
+    contract_version: 1,
+    cycle_uuid: cycle.cycle_uuid,
+    owner_user_uuid: cycle.owner_user_uuid,
+    crop_code: cycle.crop_code,
+    variety: nullable(cycle.variety),
+    group_uuid: nullable(cycle.group_uuid),
+    opened_by_entry_uuid: cycle.opened_by_entry_uuid,
+    starts_on: cycle.starts_on,
+    gateway_device_eui: cycle.gateway_device_eui,
+    created_by_principal_uuid: cycle.created_by_principal_uuid,
+    sync_version: Number(cycle.sync_version),
+    created_at: cycle.created_at,
+    updated_at: cycle.updated_at,
+    deleted_at: nullable(cycle.deleted_at),
+    plots: memberships.map(function(row) {
+      return {
+        cycle_uuid: row.cycle_uuid,
+        plot_uuid: row.plot_uuid,
+        ends_on: nullable(row.ends_on),
+        closed_by_entry_uuid: nullable(row.closed_by_entry_uuid),
+        close_reason: nullable(row.close_reason),
+      };
+    }),
+  };
+  return emitJournalOutbox(tx, {
+    aggregate,
+    aggregate_type: 'JOURNAL_CROP_CYCLE',
+    aggregate_key: cycle.cycle_uuid,
+    sync_version: Number(cycle.sync_version),
+    occurred_at: cycle.updated_at,
+    gateway_device_eui: cycle.gateway_device_eui,
+  }, 'JOURNAL_CROP_CYCLE_UPSERTED');
+}
+
+async function emitAffectedCropCycles(tx, cycleUuids) {
+  const unique = Array.from(new Set(cycleUuids || [])).sort();
+  for (const cycleUuid of unique) await emitCropCycleProjection(tx, cycleUuid);
 }
 
 function journalReceipt(emission) {
@@ -2209,7 +2306,7 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
     definitions.layout,
     definitions.template,
     candidate,
-    { mode: 'correction', originalEntry, referenceValues }
+    { mode: 'correction', originalEntry, referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal correction validation failed', validation);
@@ -2244,7 +2341,9 @@ async function correctFinalInTransaction(tx, catalog, input, principal, entryInd
   );
   // D13 (narrow scope, see applySeedingCorrectionCascade): propagate a
   // corrected seeding's crop/variety into the cycle it opened.
-  await applySeedingCorrectionCascade(tx, existing, plot, normalized);
+  await emitAffectedCropCycles(
+    tx, await applySeedingCorrectionCascade(tx, existing, plot, normalized)
+  );
   return result;
 }
 
@@ -2290,7 +2389,7 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
     definitions.layout,
     definitions.template,
     candidate,
-    { referenceValues }
+    { referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal draft finalization validation failed', validation);
@@ -2315,9 +2414,9 @@ async function promoteDraftInTransaction(tx, catalog, input, principal, entryInd
   );
   // A draft's first finalization is functionally a create: run the same
   // seeding/harvest/manual-close cascade createFinalInTransaction runs.
-  await applyActivityCycleCascade(
+  await emitAffectedCropCycles(tx, await applyActivityCycleCascade(
     tx, principal, plot, occurrence, existing.entry_uuid, normalized.activity_code, input, normalized.values
-  );
+  ));
   // B1(c) (review fix): replaceExistingWithFinal already emitted the outbox
   // event and recorded the terminal command BEFORE the cascade above ran, so
   // re-read the entry's sync_version now and make the RETURNED payload agree
@@ -2384,7 +2483,7 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     definitions.layout,
     definitions.template,
     candidate,
-    { referenceValues }
+    { referenceValues, enforceScope: true }
   );
   if (!validation.ok) {
     throw entryValidationError('Journal entry validation failed', validation);
@@ -2409,9 +2508,9 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     batch_uuid: row.batch_uuid,
     sync_version: row.sync_version,
   });
-  await applyActivityCycleCascade(
+  await emitAffectedCropCycles(tx, await applyActivityCycleCascade(
     tx, principal, plot, occurrence, row.entry_uuid, normalized.activity_code, input, normalized.values
-  );
+  ));
   const emission = await emitJournalOutbox(
     tx,
     options && options.outbox_event_uuid
@@ -2431,12 +2530,16 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     sync_version: finalSyncVersion,
     gateway_device_eui: row.gateway_device_eui,
   };
-  assertCommandJournalEntryEffectKey(principal, terminal);
-  await recordTerminalCommand(tx, principal, terminal);
-  return Object.assign({
+  if (!(options && options.suppressCommandTerminal)) {
+    assertCommandJournalEntryEffectKey(principal, terminal);
+    await recordTerminalCommand(tx, principal, terminal);
+  }
+  const result = Object.assign({
     entry_uuid: row.entry_uuid,
     sync_version: finalSyncVersion,
   }, journalReceipt(emission));
+  if (options && options.includeAggregate) result.aggregate = emission.aggregate;
+  return result;
 }
 
 async function saveDraft(db, catalog, input, principal) {
@@ -2515,6 +2618,12 @@ async function finalizeBatch(db, catalog, input, members, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
   members = normalizeBatchMembers(members, input.pass_uuid);
+  return db.transaction(function(tx) {
+    return finalizeBatchInTransaction(tx, catalog, input, members, principal);
+  });
+}
+
+async function finalizeBatchInTransaction(tx, catalog, input, members, principal, options) {
   const isPassBatch = Boolean(input.pass_uuid);
   const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
     ? []
@@ -2525,127 +2634,129 @@ async function finalizeBatch(db, catalog, input, members, principal) {
     throw lifecycleError('invalid_duplicate_ack', 'Batch duplicate acknowledgements are invalid');
   }
   const acknowledgements = new Set(acknowledgementValues);
-  return db.transaction(async function(tx) {
-    const duplicateCandidates = [];
-    const existingEntries = new Map();
-    const newMembers = [];
-    for (const member of members) {
-      const existing = await tx.get(
-        'SELECT * FROM journal_entries WHERE entry_uuid=?',
-        [member.entry_uuid]
-      );
-      if (existing) {
-        assertOwnedEntry(existing, principal);
-        if (existing.deleted_at != null) {
-          throw idempotencyConflict('A batch retry cannot replay a deleted journal entry');
-        }
-        if (existing.plot_uuid !== member.plot_uuid) {
-          throw idempotencyConflict('Entry UUID is already assigned to another plot');
-        }
-        // B1 fix (Slice F, atomic tank-mix pass): a pass member's entry_uuid
-        // — the primary in particular — is very likely already autosaved as
-        // a version-zero draft before the pass is ever finalized. Promoting
-        // it to final here is a fresh write, not a retry of an
-        // already-finalized batch, so it belongs with the brand-new members
-        // below (createFinalInTransaction already knows how to promote a
-        // draft in place) rather than the strict all-existing-or-all-new
-        // retry-matching path, which only ever expects already-FINAL
-        // members.
-        if (existing.status === 'draft') {
-          const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
-          newMembers.push({ member, plot });
-          continue;
-        }
-        existingEntries.set(member.entry_uuid, existing);
-      } else {
+  const duplicateCandidates = [];
+  const existingEntries = new Map();
+  const newMembers = [];
+  for (const member of members) {
+    const existing = await tx.get(
+      'SELECT * FROM journal_entries WHERE entry_uuid=?',
+      [member.entry_uuid]
+    );
+    if (existing) {
+      assertOwnedEntry(existing, principal);
+      if (existing.deleted_at != null) {
+        throw idempotencyConflict('A batch retry cannot replay a deleted journal entry');
+      }
+      if (existing.plot_uuid !== member.plot_uuid) {
+        throw idempotencyConflict('Entry UUID is already assigned to another plot');
+      }
+      // B1 fix (Slice F, atomic tank-mix pass): a pass member's entry_uuid
+      // — the primary in particular — is very likely already autosaved as
+      // a version-zero draft before the pass is ever finalized. Promoting
+      // it to final here is a fresh write, not a retry of an
+      // already-finalized batch, so it belongs with the brand-new members
+      // below (createFinalInTransaction already knows how to promote a
+      // draft in place) rather than the strict all-existing-or-all-new
+      // retry-matching path, which only ever expects already-FINAL
+      // members.
+      if (existing.status === 'draft') {
         const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
         newMembers.push({ member, plot });
+        continue;
       }
+      existingEntries.set(member.entry_uuid, existing);
+    } else {
+      const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
+      newMembers.push({ member, plot });
     }
-    if (existingEntries.size) {
-      if (existingEntries.size !== members.length) {
-        throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
-      }
-      return existingBatchRetry(tx, input, members, existingEntries);
+  }
+  if (existingEntries.size) {
+    if (existingEntries.size !== members.length) {
+      throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
     }
-    for (const item of newMembers) {
-      const member = item.member;
-      const plot = item.plot;
-      const candidateInput = Object.assign({}, input, { plot_uuid: member.plot_uuid });
-      const occurrence = occurrenceFor(candidateInput, plot);
-      const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
-      if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
-    }
-    const candidateUuids = new Set(duplicateCandidates.map(function(candidate) {
-      return candidate.entryUuid;
-    }));
-    for (const acknowledged of acknowledgements) {
-      if (!candidateUuids.has(acknowledged)) {
-        const error = lifecycleError(
-          'invalid_duplicate_ack',
-          'A batch duplicate acknowledgement does not match a current candidate'
-        );
-        error.statusCode = 422;
-        throw error;
-      }
-    }
-    const unacknowledged = duplicateCandidates.filter(function(candidate) {
-      return !acknowledgements.has(candidate.entryUuid);
-    });
-    if (unacknowledged.length) {
+    return existingBatchRetry(tx, input, members, existingEntries);
+  }
+  for (const item of newMembers) {
+    const member = item.member;
+    const plot = item.plot;
+    const candidateInput = Object.assign({}, input, { plot_uuid: member.plot_uuid });
+    const occurrence = occurrenceFor(candidateInput, plot);
+    const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
+    if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
+  }
+  const candidateUuids = new Set(duplicateCandidates.map(function(candidate) {
+    return candidate.entryUuid;
+  }));
+  for (const acknowledged of acknowledgements) {
+    if (!candidateUuids.has(acknowledged)) {
       const error = lifecycleError(
-        'duplicate_candidates',
-        'Similar final journal entries already exist'
+        'invalid_duplicate_ack',
+        'A batch duplicate acknowledgement does not match a current candidate'
       );
-      error.statusCode = 409;
-      error.details = { duplicateCandidates: unacknowledged };
+      error.statusCode = 422;
       throw error;
     }
-    const batchUuid = crypto.randomUUID();
-    const contextCache = new Map();
-    const entries = [];
-    for (let index = 0; index < members.length; index += 1) {
-      const member = members[index];
-      const entryInput = Object.assign({}, input, {
-        entry_uuid: member.entry_uuid,
-        plot_uuid: member.plot_uuid,
-        batch_uuid: batchUuid,
-        base_sync_version: 0,
-      });
-      // Pass batch (Slice F): a member's own values (each product line) win
-      // over the batch's shared top-level values; a cross-plot batch never
-      // sets per-member values, so entryInput.values stays exactly what it
-      // always was (the shared top-level values applied to every plot).
-      if (Array.isArray(member.values)) entryInput.values = member.values;
-      // The crop-cycle cascade (open/close) is one agronomic decision for
-      // the whole pass, not one per product line — applying it once per
-      // member on the SAME plot would try to close (or open) the same cycle
-      // N times inside this one transaction and fail on the second attempt.
-      // Restrict it to the pass's first/primary member, matching the
-      // pre-fix behavior where only the primary's create ever carried these
-      // fields at all (the additional members were plain journalApi.
-      // createEntry calls that never included them).
-      if (isPassBatch && index > 0) {
-        delete entryInput.cycle_action;
-        delete entryInput.cycle_uuid;
-        delete entryInput.ends_crop_cycle;
-      }
-      const result = await createFinalInTransaction(
-        tx,
-        catalog,
-        entryInput,
-        principal,
-        index,
-        contextCache,
-        {
-          duplicateAcknowledgements: acknowledgements,
-          outbox_event_uuid: batchMemberEventUuid(input, member),
-        }
-      );
-      entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
-    }
-    return { batch_uuid: batchUuid, entries };
+  }
+  const unacknowledged = duplicateCandidates.filter(function(candidate) {
+    return !acknowledgements.has(candidate.entryUuid);
   });
+  if (unacknowledged.length) {
+    const error = lifecycleError(
+      'duplicate_candidates',
+      'Similar final journal entries already exist'
+    );
+    error.statusCode = 409;
+    error.details = { duplicateCandidates: unacknowledged };
+    throw error;
+  }
+  const batchUuid = input.batch_uuid || crypto.randomUUID();
+  const contextCache = new Map();
+  const entries = [];
+  for (let index = 0; index < members.length; index += 1) {
+    const member = members[index];
+    const entryInput = Object.assign({}, input, {
+      entry_uuid: member.entry_uuid,
+      plot_uuid: member.plot_uuid,
+      batch_uuid: batchUuid,
+      base_sync_version: 0,
+    });
+    // Pass batch (Slice F): a member's own values (each product line) win
+    // over the batch's shared top-level values; a cross-plot batch never
+    // sets per-member values, so entryInput.values stays exactly what it
+    // always was (the shared top-level values applied to every plot).
+    if (Array.isArray(member.values)) entryInput.values = member.values;
+    // A cloud-issued batch names the crop-cycle decision per member plot;
+    // the local API path never carries these member fields.
+    if (member.cycle_action != null) entryInput.cycle_action = member.cycle_action;
+    if (member.cycle_uuid != null) entryInput.cycle_uuid = member.cycle_uuid;
+    // The crop-cycle cascade (open/close) is one agronomic decision for
+    // the whole pass, not one per product line — applying it once per
+    // member on the SAME plot would try to close (or open) the same cycle
+    // N times inside this one transaction and fail on the second attempt.
+    // Restrict it to the pass's first/primary member, matching the
+    // pre-fix behavior where only the primary's create ever carried these
+    // fields at all (the additional members were plain journalApi.
+    // createEntry calls that never included them).
+    if (isPassBatch && index > 0) {
+      delete entryInput.cycle_action;
+      delete entryInput.cycle_uuid;
+      delete entryInput.ends_crop_cycle;
+    }
+    const result = await createFinalInTransaction(
+      tx,
+      catalog,
+      entryInput,
+      principal,
+      index,
+      contextCache,
+      Object.assign({
+        duplicateAcknowledgements: acknowledgements,
+        outbox_event_uuid: batchMemberEventUuid(input, member),
+      }, options || {})
+    );
+    entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
+  }
+  return { batch_uuid: batchUuid, entries };
 }
 
 async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal, options) {
@@ -2670,7 +2781,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
     // dependents) or a harvest/manual-close (reopen + un-freeze, guarded by
     // a reopen collision). Runs before the status flip so either guard abort
     // rolls back the whole transaction, leaving nothing changed.
-    await applyVoidCycleCascade(tx, entry, principal, options);
+    const affectedCycles = await applyVoidCycleCascade(tx, entry, principal, options);
     // B1(c) (review fix): re-read the sync_version AFTER the cascade rather
     // than trusting `entry` as fetched before it ran. findCycleDependents
     // already excludes this entry_uuid from its own dependents, and (for a
@@ -2704,6 +2815,7 @@ async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal
       entryUuid,
       'JOURNAL_ENTRY_VOIDED'
     );
+    await emitAffectedCropCycles(tx, affectedCycles);
     const terminal = {
       aggregate: emission.aggregate,
       entry_uuid: entryUuid,
@@ -2757,6 +2869,7 @@ module.exports = {
   finalize,
   finalizeCreate,
   finalizeBatch,
+  finalizeBatchInTransaction,
   openCyclesCoveringPlot,
   resolveClosedCropCycleOverrides,
   resolveLiveCropOverrides,

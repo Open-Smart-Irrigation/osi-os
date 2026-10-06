@@ -30,7 +30,27 @@ function errorResult(field, code, message) {
   return { ok: false, errors: [{ field, code, message }] };
 }
 
-function requiredErrors(requirement, present) {
+// A final_requirement_matrix requirement may list quantity families under
+// `missing`: such a family is satisfied by exactly one of its fields recorded
+// with value_status 'not_observed' instead of a measured value.
+function missingFamilyAllowsNotObserved(requirement, alternatives, values) {
+  const allowed = (requirement && requirement.missing) || [];
+  const isAllowed = allowed.some(function(family) {
+    return Array.isArray(family) && family.length === alternatives.length &&
+      family.every(function(field) { return alternatives.includes(field); });
+  });
+  if (!isAllowed) return false;
+  return values.filter(function(value) {
+    return alternatives.includes(value.attribute_code) && value.value_status === 'not_observed';
+  }).length === 1;
+}
+
+function requiredFamilySatisfied(requirement, alternatives, present, values) {
+  return alternatives.some(function(field) { return present.has(field); }) ||
+    missingFamilyAllowsNotObserved(requirement, alternatives, values);
+}
+
+function requiredErrors(requirement, present, values) {
   const errors = [];
   for (const field of (requirement && requirement.required) || []) {
     if (!present.has(field)) {
@@ -38,7 +58,7 @@ function requiredErrors(requirement, present) {
     }
   }
   for (const alternatives of (requirement && requirement.required_any) || []) {
-    if (!alternatives.some(function(field) { return present.has(field); })) {
+    if (!requiredFamilySatisfied(requirement, alternatives, present, values || [])) {
       errors.push({
         field: alternatives.join('|'),
         code: 'required',
@@ -69,7 +89,7 @@ function requiredGroupErrors(requirement, values) {
     for (const alternatives of families) {
       const satisfied = groupValues.some(function(value) {
         return alternatives.includes(value.attribute_code) && isSemanticallyPresentValue(value);
-      });
+      }) || missingFamilyAllowsNotObserved(requirement, alternatives, groupValues);
       if (!satisfied) {
         errors.push({
           field: 'values[group=' + groupIndex + '].' + alternatives.join('|'),
@@ -585,6 +605,24 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     });
   }
   if (compatibilityErrors.length) return { ok: false, errors: compatibilityErrors };
+  if (context.enforceScope && _layoutDef.code === 'farm_wide') {
+    // A farm-wide record describes work on the farm, not a hidden plot or
+    // zone. Any linkage would make later exports look more precise than what
+    // the farmer entered, so it is refused rather than derived.
+    for (const field of [
+      'plot_uuid', 'zone_uuid', 'season_uuid', 'season_crop', 'season_variety',
+      'cycle_uuid', 'campaign_uuid', 'protocol_code', 'protocol_version',
+      'observation_unit_code', 'pass_uuid', 'batch_uuid', 'device_eui', 'context', 'context_json',
+    ]) {
+      if (entryInput[field] != null) {
+        return errorResult(
+          field,
+          field === 'plot_uuid' ? 'farm_wide_requires_no_plot' : 'farm_wide_requires_no_context',
+          'Farm-wide entries cannot carry ' + field
+        );
+      }
+    }
+  }
   if (!Array.isArray(entryInput.values)) {
     return errorResult('values', 'invalid_type', 'Values must be an array');
   }
@@ -941,9 +979,16 @@ function validateEntry(catalog, _layoutDef, _templateDef, entryInput, validation
     return value.attribute_code === 'attr.agroscope.operation' && isSemanticallyPresentValue(value);
   });
   const operationRequirements = definition.operation_requirements;
-  const requirements = (operationValue && operationRequirements && operationRequirements[operationValue.value]) ||
-    (activityRequirements && activityRequirements[entryInput.activity_code]);
-  const errors = requiredErrors(requirements, present);
+  // Catalog v11 templates publish a generated final_requirement_matrix
+  // (leaves per operation, activities as fallback); earlier template
+  // versions keep their own operation and activity requirements.
+  const finalMatrix = definition.final_requirement_matrix;
+  const requirements = finalMatrix
+    ? ((operationValue && finalMatrix.leaves && finalMatrix.leaves[operationValue.value]) ||
+      (finalMatrix.activities && finalMatrix.activities[entryInput.activity_code]))
+    : ((operationValue && operationRequirements && operationRequirements[operationValue.value]) ||
+      (activityRequirements && activityRequirements[entryInput.activity_code]));
+  const errors = requiredErrors(requirements, present, normalizedValues);
   errors.push(...requiredGroupErrors(requirements, normalizedValues));
   for (const group of definition.conditional_groups || []) {
     if (Array.isArray(group.activity_codes) && group.activity_codes.includes(entryInput.activity_code)) {

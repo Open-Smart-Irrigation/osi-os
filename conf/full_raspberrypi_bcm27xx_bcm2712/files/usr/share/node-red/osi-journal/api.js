@@ -33,6 +33,8 @@ const RESEARCH_IDENTITY_FIELDS = new Set([
 const ENTRY_FILTERS = [
   'entry_uuid',
   'plot_uuid',
+  'station_code',
+  'group_uuid',
   'zone_uuid',
   'activity_code',
   'status',
@@ -448,13 +450,25 @@ function normalizeEntryFilters(rawFilters) {
   for (const field of ENTRY_FILTERS) {
     if (field === 'status') continue;
     let value = normalizedStringFilter(raw[field], field);
-    if (value != null && ['entry_uuid', 'plot_uuid', 'zone_uuid', 'campaign_uuid', 'batch_uuid', 'pass_uuid'].includes(field)) {
+    if (value != null && ['entry_uuid', 'plot_uuid', 'group_uuid', 'zone_uuid', 'campaign_uuid', 'batch_uuid', 'pass_uuid'].includes(field)) {
       value = canonicalUuid(value, field, true);
     }
     if (value != null && ['occurred_from', 'occurred_to'].includes(field) && !Number.isFinite(Date.parse(value))) {
       badRequest('invalid_filter', field + ' must be an ISO timestamp');
     }
     if (value != null) filters[field] = value;
+  }
+  const scopes = ['plot_uuid', 'station_code', 'group_uuid'].filter(function(field) {
+    return filters[field] != null;
+  });
+  if (scopes.length > 1) {
+    badRequest('conflicting_scope_filters', 'Only one entry scope filter may be supplied');
+  }
+  if (filters.station_code != null) {
+    filters.station_code = filters.station_code.normalize('NFKC').trim();
+    if (!filters.station_code || Buffer.byteLength(filters.station_code, 'utf8') > 240) {
+      badRequest('invalid_filter', 'station_code filter is invalid');
+    }
   }
   filters.status = String(raw.status || 'final').trim().toLowerCase();
   if (!['draft', 'final', 'voided', 'all'].includes(filters.status)) {
@@ -465,6 +479,53 @@ function normalizeEntryFilters(rawFilters) {
   filters.limit = Math.min(limit, 100);
   if (raw.cursor != null && raw.cursor !== '') filters.cursor = String(raw.cursor);
   return filters;
+}
+
+// A plot, station or group selection narrows entries to the plots it names
+// and keeps the read rule of the list it narrows: account-wide in scoped mode
+// (readScope), the caller's own resources otherwise. An unknown or foreign
+// selection is a 404, never a silent fall back to every entry.
+async function resolveEntryScope(db, filters, principal, readScope) {
+  const ownerClause = readScope ? '' : ' AND owner_user_uuid=?';
+  const ownerParams = readScope ? [] : [principal.owner_user_uuid];
+  const unavailable = function() {
+    throw apiError(404, 'scope_not_found', 'Journal scope was not found');
+  };
+  const plotList = function(plots) {
+    if (!plots.length) unavailable();
+    return {
+      clause: 'e.plot_uuid IN (' + plots.map(function() { return '?'; }).join(',') + ')',
+      params: plots.map(function(plot) { return plot.plot_uuid; }),
+    };
+  };
+  if (filters.plot_uuid != null) {
+    // A plot keeps its entries after it is soft-deleted, so its history stays
+    // selectable; only ownership (flag-off) decides.
+    const plot = await dbGet(db,
+      'SELECT plot_uuid FROM journal_plots WHERE plot_uuid=? AND gateway_device_eui=?' + ownerClause + ' LIMIT 1',
+      [filters.plot_uuid, principal.gateway_device_eui].concat(ownerParams));
+    if (!plot) unavailable();
+    return { clause: 'e.plot_uuid=?', params: [plot.plot_uuid] };
+  }
+  if (filters.station_code != null) {
+    return plotList(await dbAll(db,
+      'SELECT plot_uuid FROM journal_plots WHERE station_code=? AND gateway_device_eui=? AND deleted_at IS NULL' +
+        ownerClause + ' ORDER BY plot_uuid',
+      [filters.station_code, principal.gateway_device_eui].concat(ownerParams)));
+  }
+  if (filters.group_uuid != null) {
+    const group = await dbGet(db,
+      'SELECT group_uuid FROM journal_plot_groups WHERE group_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL' +
+        ownerClause + ' LIMIT 1',
+      [filters.group_uuid, principal.gateway_device_eui].concat(ownerParams));
+    if (!group) unavailable();
+    return plotList(await dbAll(db,
+      'SELECT p.plot_uuid FROM journal_plot_group_members AS m JOIN journal_plots AS p ON p.plot_uuid=m.plot_uuid ' +
+        'WHERE m.group_uuid=? AND p.gateway_device_eui=? AND p.deleted_at IS NULL' +
+        (readScope ? '' : ' AND p.owner_user_uuid=?') + ' ORDER BY p.plot_uuid',
+      [group.group_uuid, principal.gateway_device_eui].concat(ownerParams)));
+  }
+  return null;
 }
 
 function canonicalExportSelection(rawFilters) {
@@ -514,6 +575,11 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   const params = readScope
     ? [principal.gateway_device_eui]
     : [principal.owner_user_uuid, principal.user_id, principal.gateway_device_eui];
+  const entryScope = await resolveEntryScope(db, filters, principal, readScope);
+  if (entryScope) {
+    clauses.push(entryScope.clause);
+    params.push(...entryScope.params);
+  }
   // Write-only scoping (W2): every enabled account on the gateway reads every
   // journal entry, including plot-less (zone-only) entries. resolvedReadScope
   // is retained for its disabled-account 403 (P1); its plotUuids are not read.
@@ -523,7 +589,6 @@ async function buildEntryWhere(db, rawFilters, principal, includeCursor) {
   }
   const fieldColumns = {
     entry_uuid: 'e.entry_uuid',
-    plot_uuid: 'e.plot_uuid',
     activity_code: 'e.activity_code',
     campaign_uuid: 'e.campaign_uuid',
     protocol_code: 'e.protocol_code',
@@ -647,8 +712,9 @@ function scopedWriteHelper(principal, method) {
   return principal.scope;
 }
 
-// Returns the caller's fresh scope (role included) in scoped mode, else null.
-async function assertJournalWriteRole(db, principal) {
+// The caller's fresh scope (role included) in scoped mode, else null. A
+// disabled account is refused by the scope helper.
+async function freshJournalScope(db, principal) {
   const scopeHelper = scopedWriteHelper(principal, 'assertFreshRole');
   if (!scopeHelper) return null;
   const actor = await dbGet(
@@ -657,14 +723,82 @@ async function assertJournalWriteRole(db, principal) {
     [principal.author_principal_uuid]
   );
   if (!actor) throw apiError(401, 'unauthorized', 'Authentication is required');
-  const fresh = await scopeHelper.assertFreshRole(
+  return scopeHelper.assertFreshRole(
     db,
     principal.author_principal_uuid,
     actor.role,
     { scopedMode: true }
   );
-  if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
+}
+
+// Returns the caller's fresh scope (role included) in scoped mode, else null.
+async function assertJournalWriteRole(db, principal) {
+  const fresh = await freshJournalScope(db, principal);
+  if (!fresh) return null;
+  if (!principal.scope.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
   return fresh;
+}
+
+// The farm owner: the account this gateway syncs with, chosen exactly as the
+// sync target is (latest link first). When that account is disabled there is
+// no owner, rather than falling back to an older link sync does not use.
+async function farmOwnerUuid(db) {
+  const linked = await dbGet(
+    db,
+    "SELECT user_uuid,disabled_at FROM users WHERE server_url IS NOT NULL AND server_url <> '' " +
+      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
+    []
+  );
+  if (!linked || !linked.user_uuid || linked.disabled_at != null) return null;
+  return String(linked.user_uuid);
+}
+
+// Owner decision 2026-10-05: in scoped mode a farm-wide entry (no plot, no
+// zone) is recorded only by the farm owner or an enabled admin. The farm owner
+// is farmOwnerUuid: the account this gateway syncs with (the latest link, as
+// the cloud workspace owner), when it is enabled. With scoped access off
+// every signed-in account keeps recording them, as before.
+async function farmWideWritable(db, principal) {
+  if (!principal || !principal.scoped) return true;
+  const fresh = await freshJournalScope(db, principal);
+  if (!principal.scope.canMutate(fresh.role)) return false;
+  if (fresh.role === 'admin') return true;
+  return (await farmOwnerUuid(db)) === principal.author_principal_uuid;
+}
+
+// The GUI hint only (catalog response): the same rule read from the account
+// row, without a scope decision, so a refused hint never looks like an
+// ignored refusal. A missing or disabled account gets false.
+async function farmWideOffered(db, principal) {
+  if (!principal || !principal.scoped) return true;
+  const actor = await dbGet(
+    db,
+    'SELECT role,disabled_at FROM users WHERE user_uuid=? LIMIT 1',
+    [principal.author_principal_uuid]
+  );
+  if (!actor || actor.disabled_at != null) return false;
+  if (actor.role === 'admin') return true;
+  if (actor.role !== 'researcher') return false;
+  return (await farmOwnerUuid(db)) === principal.author_principal_uuid;
+}
+
+async function assertFarmWideWrite(db, principal) {
+  if (!(await farmWideWritable(db, principal))) {
+    throw apiError(403, 'forbidden', 'Only the farm owner or an admin may record farm-wide journal entries');
+  }
+}
+
+// A final without a plot is a new farm-wide record when it is created, or
+// when an update turns a draft or a plot entry into one. Changes to an
+// existing farm-wide final keep the #403 rule (its writer or an admin).
+async function createsFarmWideFinal(db, mode, entryUuid) {
+  if (mode !== 'update') return true;
+  const existing = await dbGet(
+    db,
+    'SELECT status,plot_uuid FROM journal_entries WHERE entry_uuid=? LIMIT 1',
+    [entryUuid]
+  );
+  return !(existing && existing.status === 'final' && existing.plot_uuid == null);
 }
 
 async function assertZoneWrite(db, principal, zoneUuid) {
@@ -731,7 +865,7 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id FROM journal_entries ' +
+    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id,status FROM journal_entries ' +
       'WHERE entry_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
@@ -739,12 +873,17 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!entry.plot_uuid) {
     // #403, owner decisions. An entry with a zone but no plot (no API path
     // creates one) needs the grant on that zone; a zone that cannot be resolved
-    // is refused. A farm-wide entry (no zone, no plot) may be changed only by
-    // the account that wrote it or by an admin; anyone else gets the answer a
-    // missing entry gets.
+    // is refused. A farm-wide final (no zone, no plot) is changed or voided
+    // only by the farm owner or an enabled admin (owner decision 2026-10-05,
+    // which also covers finals written earlier by someone else); a farm-wide
+    // draft stays with the account that wrote it or an admin. Anyone else
+    // gets the answer a missing entry gets.
     const actorScope = await assertJournalWriteRole(db, principal);
     if (entry.zone_uuid == null && entry.zone_id == null) {
-      if (entry.owner_user_uuid !== principal.author_principal_uuid && actorScope.role !== 'admin') {
+      const allowed = entry.status === 'draft'
+        ? entry.owner_user_uuid === principal.author_principal_uuid || actorScope.role === 'admin'
+        : await farmWideWritable(db, principal);
+      if (!allowed) {
         throw apiError(404, 'not_found', 'Journal entry was not found');
       }
     } else {
@@ -1333,6 +1472,10 @@ async function saveEntry(db, input, principal, options) {
     plotUuid = await ensureZonePlot(db, zoneUuid, body, principal);
   }
   if (plotUuid) await assertPlotZoneMatch(db, plotUuid, zoneUuid, principal);
+  if (!batchRequest && !plotUuid && body.status === 'final' && principal && principal.scoped &&
+      await createsFarmWideFinal(db, mode, body.entry_uuid)) {
+    await assertFarmWideWrite(db, principal);
+  }
   body.plot_uuid = plotUuid;
   delete body.zone_uuid;
   const catalog = await loadCatalog(db, principal);
@@ -2068,11 +2211,19 @@ async function upsertPlotGroup(db, input, principal, pathUuid) {
   const groupUuid = canonicalUuid(pathUuid || inputUuid, 'group_uuid', true);
   if (inputUuid && inputUuid !== groupUuid) badRequest('path_body_mismatch', 'Path and body group UUID differ');
   if (Array.isArray(input.members) && input.members.length) {
+    const caller = principal;
     principal = await assertPlotSetWrite(
       db,
       principal,
       input.members.map(function(value) { return canonicalUuid(value, 'members', true); })
     );
+    // #418, same rule as the cloud: a plot group belongs to the owner of its
+    // plots, and only that owner may create or change it. A grant on another
+    // user's plot lets a collaborator write entries there (attributed to the
+    // owner), never create or rewrite the owner's groups. Admins included.
+    if (caller.scoped && principal.owner_user_uuid !== caller.author_principal_uuid) {
+      throw apiError(403, 'forbidden', 'Only the owner of these plots may create or change their plot group');
+    }
   }
   return writeTransaction(db, async function(tx) {
     const existing = await dbGet(
@@ -3339,8 +3490,12 @@ async function handleHttpRequest(options) {
     }
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
       const catalogPrincipal = await resolveCatalogPrincipal(db, principal, query);
-      return respond(200, await loadScopedCatalog(db, catalogPrincipal, {
+      const catalogBody = await loadScopedCatalog(db, catalogPrincipal, {
         includeDefinitions: query.include === 'definitions',
+      });
+      // What the capture GUI may offer this caller; the write paths enforce it.
+      return respond(200, Object.assign({}, catalogBody, {
+        capture_permissions: { farm_wide: await farmWideOffered(db, principal) },
       }));
     }
     if (method === 'GET' && requestPath === '/api/journal/entries') {
@@ -3428,6 +3583,7 @@ async function handleHttpRequest(options) {
 
 module.exports = {
   discardEntry,
+  farmWideWritable,
   errorResponse,
   exportJson,
   exportResearchPackage,

@@ -480,6 +480,57 @@ test('saveEntry batch retry returns the original V2 mutation receipts after the 
     'only the two pre-barrier plot events remain in V1');
 });
 
+test('with V2 authority a plot-less non-farm-wide v11 final is refused before it is queued', async () => {
+  const db = createJournalDb('v2-plotless-final-refused');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plotless = function(uuid, overrides) {
+    return Object.assign({
+      entry_uuid: uuid,
+      base_sync_version: 0,
+      status: 'final',
+      activity_code: 'irrigation',
+      template_code: 'farmer_quick',
+      template_version: 1,
+      layout_code: 'open_field',
+      layout_version: 1,
+      occurred_start_local: '2026-07-19T08:00:00',
+      occurred_timezone: 'Europe/Zurich',
+      season_crop: 'barley',
+      values: [{
+        attribute_code: 'attr.irrigation_depth', group_index: 0, value: 12,
+        unit_code: 'unit.mm_water', value_status: 'observed',
+      }],
+    }, overrides || {});
+  };
+  // Without V2 authority: accepted, as on main.
+  const legacy = await saveEntry(db, plotless('22990000-0000-4000-8000-000000000001'), principal, { mode: 'create' });
+  assert.equal(legacy.entry_uuid, '22990000-0000-4000-8000-000000000001');
+
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run('20000000-0000-4000-8000-000000000099', JOURNAL_TEST_GATEWAY_EUI, '2026-08-08T10:11:12.123Z');
+  const mutations = () => db.prepare('SELECT COUNT(*) AS n FROM journal_edge_mutations').get().n;
+  const before = mutations();
+  await assert.rejects(
+    saveEntry(db, plotless('22990000-0000-4000-8000-000000000002'), principal, { mode: 'create' }),
+    (error) => error && error.code === 'plot_required' && error.statusCode === 422 &&
+      error.message === 'plot_uuid is required for non-farm-wide final entries'
+  );
+  assert.equal(mutations(), before, 'nothing is queued for the cloud');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?')
+    .get('22990000-0000-4000-8000-000000000002').n, 0);
+
+  // A farm_wide final still goes to the V2 queue.
+  await saveEntry(db, plotless('22990000-0000-4000-8000-000000000003', {
+    activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+    layout_code: 'farm_wide', layout_version: 1, values: [], season_crop: null, note: 'Serviced mower',
+  }), principal, { mode: 'create' });
+  assert.equal(mutations(), before + 1);
+});
+
 test('post-barrier plot snapshots use V2 while plot groups preserve V1 compatibility', async () => {
   const db = createJournalDb('post-barrier-plot-group');
   seedJournalTestIdentity(db);
@@ -2195,6 +2246,85 @@ test('validateEntry: full_record@10 fertilization with no operation falls back t
     ],
   }));
   assert.equal(withDose.ok, true, JSON.stringify(withDose.errors));
+});
+
+test('validateEntry: full_record@11 uses the generated final matrix and permits only listed not_observed families', async () => {
+  const { catalog } = await loadedFixture('final-requirement-matrix-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  assert.ok(fullRecordV11, 'catalog must publish full_record@11');
+  assert.ok(openFieldV11, 'catalog must publish open_field@11');
+  assert.ok(fullRecordV11.definition.final_requirement_matrix, 'full_record@11 carries the matrix');
+
+  const missingIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11, values: [],
+  }));
+  assert.equal(missingIrrigation.ok, false);
+  assert.ok(missingIrrigation.errors.some((error) => error.code === 'required'));
+
+  const unobservedIrrigation = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+    values: [{
+      attribute_code: 'attr.irrigation_depth', group_index: 0,
+      unit_code: 'unit.mm_water', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedIrrigation.ok, true, JSON.stringify(unobservedIrrigation.errors));
+
+  const unobservedProduct = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    activity_code: 'fertilization', template_code: 'full_record', template_version: 11,
+    layout_version: 11,
+    values: [{
+      attribute_code: 'attr.product', group_index: 0, value_status: 'not_observed',
+    }, {
+      attribute_code: 'attr.amount_mass_area_product', group_index: 0,
+      unit_code: 'unit.kg_per_ha_product', value_status: 'not_observed',
+    }],
+  }));
+  assert.equal(unobservedProduct.ok, false);
+  assert.ok(unobservedProduct.errors.some((error) =>
+    error.field === 'attr.product_uuid|attr.product' && error.code === 'required'));
+});
+
+test('validateEntry: a farm_wide entry carries no plot, zone or other field context', async () => {
+  const { catalog } = await loadedFixture('farm-wide-final-scope-v11');
+  const fullRecordV11 = catalog.templates.get('full_record').get(11);
+  const farmWide = catalog.layouts.get('farm_wide').get(1);
+  const farmWideMaintenance = function(overrides) {
+    return validIrrigation(Object.assign({
+      activity_code: 'equipment_maintenance', template_code: 'full_record', template_version: 11,
+      layout_code: 'farm_wide', layout_version: 1, values: [], note: 'Serviced mower',
+    }, overrides || {}));
+  };
+  const accepted = validateEntry(catalog, farmWide, fullRecordV11, farmWideMaintenance(), { enforceScope: true });
+  assert.equal(accepted.ok, true, JSON.stringify(accepted.errors));
+
+  const withPlot = validateEntry(catalog, farmWide, fullRecordV11, farmWideMaintenance({
+    plot_uuid: '11111111-1111-4111-8111-111111111111',
+  }), { enforceScope: true });
+  assert.equal(withPlot.ok, false);
+  assert.ok(withPlot.errors.some((error) => error.code === 'farm_wide_requires_no_plot'));
+
+  for (const field of [
+    'zone_uuid', 'season_uuid', 'season_crop', 'season_variety', 'cycle_uuid',
+    'campaign_uuid', 'protocol_code', 'protocol_version', 'observation_unit_code',
+    'pass_uuid', 'batch_uuid', 'device_eui', 'context', 'context_json',
+  ]) {
+    const candidate = farmWideMaintenance();
+    candidate[field] = field === 'context' ? {} : field === 'context_json' ? '{}'
+      : '11111111-1111-4111-8111-111111111111';
+    const scoped = validateEntry(catalog, farmWide, fullRecordV11, candidate, { enforceScope: true });
+    assert.equal(scoped.ok, false, field);
+    assert.ok(scoped.errors.some((error) => error.field === field && error.code === 'farm_wide_requires_no_context'), field);
+  }
+
+  // A plot-less final on any other layout keeps main's behaviour: the farm-wide
+  // rule constrains the farm_wide layout only and adds no plot requirement.
+  const openFieldV11 = catalog.layouts.get('open_field').get(11);
+  const plotless = validateEntry(catalog, openFieldV11, fullRecordV11, validIrrigation({
+    template_code: 'full_record', template_version: 11, layout_version: 11,
+  }), { enforceScope: true });
+  assert.ok(!plotless.errors || !plotless.errors.some((error) => error.code === 'plot_required'));
 });
 
 // Version-pinned control: an entry pinned to the frozen full_record@9 keeps
@@ -5386,7 +5516,7 @@ test('voiding a harvest refuses with a clear error when a reseed already opened 
 // cascade runs so the returned/ACK'd version always matches the DB.
 
 test(
-  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits one coherent outbox event',
+  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits entry plus crop-cycle projection events',
   async () => {
     const db = createJournalDb('cc-b1-harvest-self-freeze-fix');
     seedJournalTestIdentity(db);
@@ -5423,8 +5553,98 @@ test(
     const membership = readCycleMemberships(db, plot)[0];
     assert.equal(membership.ends_on, '2026-08-01');
     assert.equal(membership.close_reason, 'harvest');
+
+    const cycleOutboxRows = db.prepare(
+      "SELECT aggregate_key,sync_version,payload_json FROM sync_outbox " +
+        "WHERE aggregate_type='JOURNAL_CROP_CYCLE' AND op='JOURNAL_CROP_CYCLE_UPSERTED' ORDER BY sync_version"
+    ).all();
+    assert.equal(cycleOutboxRows.length, 2, 'seeding open and harvest close each project the cycle');
+    assert.equal(cycleOutboxRows[0].sync_version, 1, 'a new cycle projects at version 1');
+    const closedCycle = JSON.parse(cycleOutboxRows[1].payload_json);
+    assert.equal(cycleOutboxRows[1].aggregate_key, membership.cycle_uuid);
+    assert.equal(cycleOutboxRows[1].sync_version, 2, 'closing a membership increments the cycle projection version');
+    assert.equal(closedCycle.plots[0].ends_on, '2026-08-01');
+    assert.equal(closedCycle.plots[0].close_reason, 'harvest');
+    assert.equal(closedCycle.owner_user_uuid, principal.owner_user_uuid);
   }
 );
+
+test('crop-cycle projection payloads carry exactly the JournalCropCycle contract fields', async () => {
+  const resources = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'docs/contracts/sync-schema/resources.schema.json'), 'utf8'
+  ));
+  const cycleShape = resources.definitions.JournalCropCycle;
+  const plotShape = resources.definitions.JournalCropCyclePlot;
+  const db = createJournalDb('cc-projection-contract-shape');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(104);
+  await makeCropCyclePlot(db, principal, plot);
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(104),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const row = db.prepare(
+    "SELECT payload_json FROM sync_outbox WHERE op='JOURNAL_CROP_CYCLE_UPSERTED'"
+  ).get();
+  const payload = JSON.parse(row.payload_json);
+  assert.deepEqual(Object.keys(payload).sort(), Object.keys(cycleShape.properties).sort());
+  assert.deepEqual(cycleShape.required.slice().sort(), Object.keys(cycleShape.properties).sort());
+  assert.deepEqual(Object.keys(payload.plots[0]).sort(), Object.keys(plotShape.properties).sort());
+  assert.equal(payload.contract_version, 1);
+  assert.equal(payload.sync_version, 1);
+  assert.equal(payload.opened_by_entry_uuid, cropCycleEntryUuid(104));
+  assert.equal(payload.plots[0].plot_uuid, plot);
+  assert.equal(payload.deleted_at, null);
+});
+
+test('voiding a seeding projects the deleted crop cycle at a higher version', async () => {
+  const db = createJournalDb('cc-void-seeding-projects');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(105);
+  await makeCropCyclePlot(db, principal, plot);
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(105),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const { voidEntry } = require('./index');
+  await voidEntry(db, cropCycleEntryUuid(105), { base_sync_version: 1, reason: 'entered by mistake' }, principal);
+  const rows = db.prepare(
+    "SELECT sync_version,payload_json FROM sync_outbox WHERE op='JOURNAL_CROP_CYCLE_UPSERTED' ORDER BY sync_version"
+  ).all();
+  assert.equal(rows.length, 2);
+  assert.ok(rows[1].sync_version > rows[0].sync_version);
+  assert.ok(JSON.parse(rows[1].payload_json).deleted_at, 'the projection carries the soft delete');
+});
+
+test('a cloud-primary gateway keeps crop cycles out of both the V1 outbox and the V2 queue', async () => {
+  const db = createJournalDb('cc-projection-v2-authority');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(106);
+  await makeCropCyclePlot(db, principal, plot);
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run('20000000-0000-4000-8000-000000000106', JOURNAL_TEST_GATEWAY_EUI, '2026-08-08T10:11:12.123Z');
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(106),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(readCycleMemberships(db, plot).length, 1, 'the local cycle still opens');
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_CROP_CYCLE'").get().n,
+    0
+  );
+  const operations = db.prepare('SELECT operation FROM journal_edge_mutations').all()
+    .map(function(row) { return row.operation; });
+  assert.ok(!operations.some(function(operation) { return /CYCLE/.test(operation); }));
+});
 
 test('a batch harvest that closes cycles is idempotently retryable (B1)', async () => {
   const db = createJournalDb('cc-b1-batch-harvest-retry');
