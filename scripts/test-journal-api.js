@@ -931,6 +931,107 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   );
 });
 
+test('scoped mode: only the farm owner or an enabled admin creates a farm-wide entry', async () => {
+  const db = new TestDb('scoped-farm-wide-create');
+  seedIdentity(db);
+  const plotUuid = '22800000-0000-4000-8000-000000000010';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'farm-wide-neighbour'), principal());
+  const farmWide = (uuid, overrides) => entryInput(uuid, null, '2026-07-13T08:00:00', Object.assign({
+    activity_code: 'equipment_maintenance',
+    template_code: 'full_record',
+    template_version: 11,
+    layout_code: 'farm_wide',
+    layout_version: 1,
+    values: [],
+    note: 'Serviced mower',
+  }, overrides || {}));
+  const caller = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  const refused = (error) => error && error.statusCode === 403 && error.code === 'forbidden';
+  const rows = () => db.prepare('SELECT entry_uuid,status FROM journal_entries ORDER BY entry_uuid').all()
+    .map((row) => Object.assign({}, row));
+  const outbox = () => db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+  scopeHelper.invalidateScope(OWNER_UUID);
+
+  // A researcher that is not the linked farm owner: refused, nothing written or queued.
+  const before = rows();
+  const queued = outbox();
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000001'), caller, { mode: 'create' }),
+    refused
+  );
+  // A plot-less irrigation final is farm-wide too (#403: no zone, no plot).
+  await assert.rejects(
+    journal.saveEntry(db, entryInput('22800000-0000-4000-8000-000000000002', null, '2026-07-13T09:00:00',
+      { season_crop: 'barley' }), caller, { mode: 'create' }),
+    refused
+  );
+  assert.deepEqual(rows(), before);
+  assert.equal(outbox(), queued);
+  // Its own plot-less draft stays private and allowed; promoting it to final is a create.
+  const draftUuid = '22800000-0000-4000-8000-000000000003';
+  await journal.saveEntry(db, farmWide(draftUuid, { status: 'draft' }), caller, { mode: 'create' });
+  await assert.rejects(
+    journal.saveEntry(db, farmWide(draftUuid, { base_sync_version: 0 }), caller,
+      { mode: 'update', entryUuid: draftUuid }),
+    refused
+  );
+  assert.equal(db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status, 'draft');
+  // Plot-bound entries are unaffected.
+  await journal.saveEntry(db, entryInput('22800000-0000-4000-8000-000000000004', plotUuid,
+    '2026-07-13T10:00:00', { season_crop: 'barley' }), caller, { mode: 'create' });
+  const catalog = await journal.handleHttpRequest({
+    msg: {
+      req: {
+        method: 'GET', path: '/api/journal/catalog', query: {}, params: {},
+        headers: { authorization: 'Bearer ' + token('farm-wide-secret', {
+          userId: 1, username: 'field-user', exp: Date.now() + 60_000,
+        }) },
+      },
+    },
+    Database: class { constructor() { return db; } },
+    environment: { authTokenSecret: 'farm-wide-secret', deviceEui: GATEWAY_EUI, deviceEuiConfidence: 'authoritative' },
+    scope: scopeHelper,
+    scopedMode: true,
+  });
+  assert.equal(catalog.statusCode, 200);
+  assert.deepEqual(catalog.payload.capture_permissions, { farm_wide: false });
+
+  // The linked farm owner: allowed.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000005'), caller, { mode: 'create' });
+  await journal.saveEntry(db, farmWide(draftUuid, { base_sync_version: 0 }), caller,
+    { mode: 'update', entryUuid: draftUuid });
+  assert.equal(db.prepare('SELECT status FROM journal_entries WHERE entry_uuid=?').get(draftUuid).status, 'final');
+
+  // Another account linked last is the owner now; an enabled admin is allowed, a disabled one is not.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-14T00:00:00.000Z' " +
+    'WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000006'), caller, { mode: 'create' }),
+    refused
+  );
+  db.prepare("UPDATE users SET role='admin' WHERE user_uuid=?").run(OWNER_UUID);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000006'), caller, { mode: 'create' });
+  db.prepare("UPDATE users SET disabled_at='2026-07-15T00:00:00.000Z' WHERE user_uuid=?").run(OWNER_UUID);
+  scopeHelper.invalidateScope(OWNER_UUID);
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000007'), caller, { mode: 'create' }),
+    (error) => error && error.statusCode === 403
+  );
+
+  // Flag off: main's behaviour, any signed-in account records farm-wide entries.
+  const flagOff = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  db.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(OTHER_OWNER_UUID);
+  await journal.saveEntry(db, farmWide('22800000-0000-4000-8000-000000000008'), flagOff, { mode: 'create' });
+});
+
 test('#403: flag-off changes to farm-wide entries are unchanged', async () => {
   const db = new TestDb('flag-off-entry-farm-wide');
   seedIdentity(db);

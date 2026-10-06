@@ -996,6 +996,51 @@ function modulesRootFor(profileLabel) {
   return DEFAULT_MODULES_ROOT;
 }
 
+// Owner decision 2026-10-05: with scoped access on, a farm-wide journal entry
+// (no plot, no zone) is recorded only by the farm owner (the cloud-linked
+// account) or an enabled admin. The probe caller is a researcher that is not
+// linked: a catalogue-valid farm-wide final must add no journal row. A control
+// run with the caller linked must add one, so the refusal is the rule and not
+// the body. Farm-wide rows carry no foreign id, so rule 4 cannot see this.
+const FARM_WIDE_ENTRY_ID = 'journal-entries-post-http';
+const FARM_WIDE_ENTRY_BODY = {
+  entry_uuid: '00000000-0000-4000-8000-00000000d0f1',
+  base_sync_version: 0,
+  status: 'final',
+  activity_code: 'equipment_maintenance',
+  template_code: 'full_record',
+  template_version: 11,
+  layout_code: 'farm_wide',
+  layout_version: 1,
+  occurred_start_local: '2026-01-05T08:00:00',
+  occurred_timezone: 'UTC',
+  values: [],
+  note: 'Probe farm-wide entry',
+};
+
+async function checkFarmWideCreate(flows, entry, label, probeOptions) {
+  const failures = [];
+  const base = { ...probeOptions, decisions: 'real', snapshot: true, body: FARM_WIDE_ENTRY_BODY };
+  const addsEntry = (trace) => (trace.changes || []).some((change) =>
+    change.table === 'journal_entries' && change.op === 'added');
+  if (addsEntry(await probeEntry(flows, entry, base))) {
+    failures.push(`${label} lets a researcher that is not the farm owner record a farm-wide journal entry`);
+  }
+  const fixture = probeOptions.fixture || {};
+  const linked = await probeEntry(flows, entry, {
+    ...base,
+    fixture: {
+      ...fixture,
+      setupSql: (fixture.setupSql || '') + "\nUPDATE users SET server_url = 'https://cloud.example.test', " +
+        "server_linked_at = '2026-01-02T00:00:00Z' WHERE user_uuid = '" + PROBE_CALLER_UUID + "';",
+    },
+  });
+  if (!addsEntry(linked)) {
+    failures.push(`${label}: the farm-wide control run as the linked farm owner records no entry, so the refusal proves nothing`);
+  }
+  return failures;
+}
+
 // options.only: probe just these entry ids (tests use it; the CLI probes all).
 // options.modulesRoot: the profile's node-red directory for its seam modules.
 async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options = {}) {
@@ -1076,6 +1121,7 @@ async function findFailures(flows, profileLabel, allowlist = ALLOWLIST, options 
     }
 
     const { failures: verdict } = await checkEntry(flows, entry, label, probeOptions);
+    if (entry.id === FARM_WIDE_ENTRY_ID) failures.push(...await checkFarmWideCreate(flows, entry, label, probeOptions));
 
     if (allowlist.has(entry.id)) {
       if (!verdict.length) {

@@ -712,8 +712,9 @@ function scopedWriteHelper(principal, method) {
   return principal.scope;
 }
 
-// Returns the caller's fresh scope (role included) in scoped mode, else null.
-async function assertJournalWriteRole(db, principal) {
+// The caller's fresh scope (role included) in scoped mode, else null. A
+// disabled account is refused by the scope helper.
+async function freshJournalScope(db, principal) {
   const scopeHelper = scopedWriteHelper(principal, 'assertFreshRole');
   if (!scopeHelper) return null;
   const actor = await dbGet(
@@ -722,14 +723,80 @@ async function assertJournalWriteRole(db, principal) {
     [principal.author_principal_uuid]
   );
   if (!actor) throw apiError(401, 'unauthorized', 'Authentication is required');
-  const fresh = await scopeHelper.assertFreshRole(
+  return scopeHelper.assertFreshRole(
     db,
     principal.author_principal_uuid,
     actor.role,
     { scopedMode: true }
   );
-  if (!scopeHelper.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
+}
+
+// Returns the caller's fresh scope (role included) in scoped mode, else null.
+async function assertJournalWriteRole(db, principal) {
+  const fresh = await freshJournalScope(db, principal);
+  if (!fresh) return null;
+  if (!principal.scope.canMutate(fresh.role)) throw apiError(403, 'forbidden', 'Viewers cannot modify journal data');
   return fresh;
+}
+
+// Owner decision 2026-10-05: in scoped mode a farm-wide entry (no plot, no
+// zone) is recorded only by the farm owner or an enabled admin. The farm owner
+// is the account this gateway is linked to the cloud with (the latest link,
+// as the cloud workspace owner), when it is enabled. With scoped access off
+// every signed-in account keeps recording them, as before.
+async function farmWideWritable(db, principal) {
+  if (!principal || !principal.scoped) return true;
+  const fresh = await freshJournalScope(db, principal);
+  if (!principal.scope.canMutate(fresh.role)) return false;
+  if (fresh.role === 'admin') return true;
+  const owner = await dbGet(
+    db,
+    "SELECT user_uuid FROM users WHERE server_url IS NOT NULL AND server_url <> '' AND disabled_at IS NULL " +
+      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
+    []
+  );
+  return Boolean(owner && owner.user_uuid === principal.author_principal_uuid);
+}
+
+// The GUI hint only (catalog response): the same rule read from the account
+// row, without a scope decision, so a refused hint never looks like an
+// ignored refusal. A missing or disabled account gets false.
+async function farmWideOffered(db, principal) {
+  if (!principal || !principal.scoped) return true;
+  const actor = await dbGet(
+    db,
+    'SELECT role,disabled_at FROM users WHERE user_uuid=? LIMIT 1',
+    [principal.author_principal_uuid]
+  );
+  if (!actor || actor.disabled_at != null) return false;
+  if (actor.role === 'admin') return true;
+  if (actor.role !== 'researcher') return false;
+  const owner = await dbGet(
+    db,
+    "SELECT user_uuid FROM users WHERE server_url IS NOT NULL AND server_url <> '' AND disabled_at IS NULL " +
+      'ORDER BY server_linked_at DESC, id DESC LIMIT 1',
+    []
+  );
+  return Boolean(owner && owner.user_uuid === principal.author_principal_uuid);
+}
+
+async function assertFarmWideWrite(db, principal) {
+  if (!(await farmWideWritable(db, principal))) {
+    throw apiError(403, 'forbidden', 'Only the farm owner or an admin may record farm-wide journal entries');
+  }
+}
+
+// A final without a plot is a new farm-wide record when it is created, or
+// when an update turns a draft or a plot entry into one. Changes to an
+// existing farm-wide final keep the #403 rule (its writer or an admin).
+async function createsFarmWideFinal(db, mode, entryUuid) {
+  if (mode !== 'update') return true;
+  const existing = await dbGet(
+    db,
+    'SELECT status,plot_uuid FROM journal_entries WHERE entry_uuid=? LIMIT 1',
+    [entryUuid]
+  );
+  return !(existing && existing.status === 'final' && existing.plot_uuid == null);
 }
 
 async function assertZoneWrite(db, principal, zoneUuid) {
@@ -1398,6 +1465,10 @@ async function saveEntry(db, input, principal, options) {
     plotUuid = await ensureZonePlot(db, zoneUuid, body, principal);
   }
   if (plotUuid) await assertPlotZoneMatch(db, plotUuid, zoneUuid, principal);
+  if (!batchRequest && !plotUuid && body.status === 'final' && principal && principal.scoped &&
+      await createsFarmWideFinal(db, mode, body.entry_uuid)) {
+    await assertFarmWideWrite(db, principal);
+  }
   body.plot_uuid = plotUuid;
   delete body.zone_uuid;
   const catalog = await loadCatalog(db, principal);
@@ -3412,8 +3483,12 @@ async function handleHttpRequest(options) {
     }
     if (method === 'GET' && requestPath === '/api/journal/catalog') {
       const catalogPrincipal = await resolveCatalogPrincipal(db, principal, query);
-      return respond(200, await loadScopedCatalog(db, catalogPrincipal, {
+      const catalogBody = await loadScopedCatalog(db, catalogPrincipal, {
         includeDefinitions: query.include === 'definitions',
+      });
+      // What the capture GUI may offer this caller; the write paths enforce it.
+      return respond(200, Object.assign({}, catalogBody, {
+        capture_permissions: { farm_wide: await farmWideOffered(db, principal) },
       }));
     }
     if (method === 'GET' && requestPath === '/api/journal/entries') {

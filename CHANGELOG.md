@@ -427,6 +427,10 @@ every 0.7.0 entry below.
 - With scoped access on, only the owner of a journal plot group's plots
   may create or change the group. A grant on another user's plot no longer
   lets the grantee create or rewrite that user's group (#418).
+- With scoped access on, a farm-wide journal entry (no plot, no zone) is
+  created or finalized only by the farm owner (the account the gateway is
+  linked to the cloud with) or an enabled admin; others get 403 and the
+  capture screen no longer offers the Farm-wide choice to them.
 - GUI: cached data and in-flight writes belong to one login session. After a
   logout and login as another user in the same tab, the second user no
   longer sees data cached for the first, and the first user's chained writes
