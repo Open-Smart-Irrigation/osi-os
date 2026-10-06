@@ -58,7 +58,9 @@ const BOOKKEEPING_TABLES = new Set(['schema_migrations', 'schema_object_fingerpr
 // explained row by row; larger tables are compared by count and hash only.
 const ROW_KEYS_LIMIT = 250000;
 // Full row values are kept for tables up to this size (validators and the
-// changed-column list need them).
+// changed-column list need them). Tables with a rule for a pending migration
+// (`keepValuesFor`) keep every row's values whatever their size, and a snapshot
+// taken against an earlier one keeps the values of every new or changed row.
 const ROW_VALUES_LIMIT = 20000;
 
 // --- row changes made by design ---------------------------------------------
@@ -269,7 +271,7 @@ function encodeValue(v) {
 // not depend on rowids or on physical column order. `columnsFrom` (an earlier
 // snapshot) makes the hash cover the earlier column list, so a table rebuilt
 // with extra columns still compares equal when no earlier value changed.
-function snapshotTables(dbPath, { columnsFrom = null } = {}) {
+function snapshotTables(dbPath, { columnsFrom = null, keepValuesFor = new Set() } = {}) {
   const db = new DatabaseSync(dbPath);
   try {
     const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_stat%' ORDER BY name").all().map((r) => r.name);
@@ -292,7 +294,8 @@ function snapshotTables(dbPath, { columnsFrom = null } = {}) {
       stmt.setReturnArrays(true);
       const pkIdx = pk.map((c) => columns.indexOf(c));
       const keepKeys = count <= ROW_KEYS_LIMIT;
-      const keepValues = count <= ROW_VALUES_LIMIT;
+      const keepValues = count <= ROW_VALUES_LIMIT || keepValuesFor.has(name);
+      const earlierRows = earlier && earlier.rows;
       const rows = keepKeys ? new Map() : null;
       const hash = crypto.createHash('sha256');
       const seen = new Map();
@@ -306,7 +309,13 @@ function snapshotTables(dbPath, { columnsFrom = null } = {}) {
           seen.set(key, n);
           key += '#' + n;
         }
-        rows.set(key, { h: crypto.createHash('sha256').update(encoded).digest('base64'), v: keepValues ? row : null });
+        const h = crypto.createHash('sha256').update(encoded).digest('base64');
+        let keep = keepValues;
+        if (!keep && earlierRows) {
+          const prior = earlierRows.get(key);
+          keep = !prior || prior.h !== h;
+        }
+        rows.set(key, { h, v: keep ? row : null });
       }
       tables[name] = { columns, pk, count, sha256: hash.digest('hex'), rows, missingColumns, addedColumns };
     }
@@ -318,6 +327,10 @@ function snapshotTables(dbPath, { columnsFrom = null } = {}) {
 
 function summarizeSnapshot(snapshot) {
   return Object.fromEntries(Object.entries(snapshot.tables).map(([name, t]) => [name, { count: t.count, sha256: t.sha256 }]));
+}
+
+function ruleTables(versions) {
+  return new Set([...rulesFor(versions).keys()]);
 }
 
 function rulesFor(appliedVersions) {
@@ -559,11 +572,6 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
     };
   });
 
-  await runStep(pass, 'snapshot-before', log, async () => {
-    snapBefore = snapshotTables(workDb);
-    return { tables: Object.keys(snapBefore.tables).length, rows: summarizeSnapshot(snapBefore) };
-  });
-
   const reconcileLog = [];
   const reconcileReport = await runStep(pass, 'reconcile-report', log, async () => {
     const shaBefore = sha256File(workDb);
@@ -583,6 +591,14 @@ async function runPass({ passNumber, workDb, work, gatewayEui, log, migrations, 
       pendingAfterReconcile,
       log: reconcileLog,
     };
+  });
+
+  // After the report (which writes nothing, checked above): the pending list
+  // says which tables carry a rule, and those keep every row's values.
+  await runStep(pass, 'snapshot-before', log, async () => {
+    const keepValuesFor = ruleTables(pendingAfterReconcile);
+    snapBefore = snapshotTables(workDb, { keepValuesFor });
+    return { tables: Object.keys(snapBefore.tables).length, valuesKeptFor: [...keepValuesFor], rows: summarizeSnapshot(snapBefore) };
   });
 
   await runStep(pass, 'reconcile-apply', log, async () => {
@@ -822,5 +838,6 @@ module.exports = {
   snapshotTables,
   compareSnapshots,
   rulesFor,
+  ruleTables,
   rehearse,
 };

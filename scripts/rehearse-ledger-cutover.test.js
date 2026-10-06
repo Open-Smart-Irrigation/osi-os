@@ -183,6 +183,29 @@ DROP TABLE device_data; ALTER TABLE device_data_next RENAME TO device_data;`);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// A gateway outbox keeps delivered rows for 30 days up to 50,000 rows, so the
+// 0064 ZONE event can land in an outbox far above the row-values limit.
+test('the 0064 change validates in an outbox larger than the row-values limit', () => {
+  const root = scratch();
+  const big = `CREATE TABLE irrigation_zones (id INTEGER PRIMARY KEY AUTOINCREMENT, zone_uuid TEXT, name TEXT, phenological_stage TEXT, sync_version INTEGER, updated_at TEXT, deleted_at TEXT);
+CREATE TABLE sync_outbox (event_uuid TEXT PRIMARY KEY, aggregate_type TEXT, aggregate_key TEXT, op TEXT, payload_json TEXT, sync_version INTEGER, gateway_device_eui TEXT);
+CREATE TABLE sync_link_state (peer_node TEXT PRIMARY KEY, linked INTEGER, gateway_device_eui TEXT);
+INSERT INTO sync_link_state VALUES ('cloud', 1, '0016C001F1000001');
+INSERT INTO irrigation_zones (zone_uuid, name, phenological_stage, sync_version, updated_at) VALUES ('z1', 'A', 'veraison', 3, 't0');
+WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20035)
+INSERT INTO sync_outbox SELECT printf('e%05d', i), 'DEVICE_DATA', 'A840410000000001', 'DEVICE_DATA_APPENDED', '{"i":' || i || '}', 1, '0016C001F1000001' FROM n;`;
+  const before = tinyDb(root, 'before.db', big);
+  const after = tinyDb(root, 'after.db', big + `
+UPDATE irrigation_zones SET phenological_stage='mid_season', sync_version=4, updated_at='t1' WHERE zone_uuid='z1';
+INSERT INTO sync_outbox VALUES ('zone-event', 'ZONE', 'z1', 'ZONE_CONFIG_UPSERTED', '{"zone_uuid":"z1","phenological_stage":"mid_season","sync_version":4}', 4, '0016C001F1000001');`);
+  const snapBefore = snapshotTables(before);
+  const cmp = compareSnapshots(snapBefore, snapshotTables(after, { columnsFrom: snapBefore }), { rules: rulesFor([64]) });
+  assert.equal(cmp.ok, true, JSON.stringify(cmp.unexpected));
+  assert.deepEqual(cmp.changedByDesign.map((c) => [c.table, c.rowsChanged, c.rowsAdded]).sort(),
+    [['irrigation_zones', 1, 0], ['sync_outbox', 0, 1]]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('EXPECTED_CHANGES names real migrations at their versions', () => {
   for (const [version, entry] of Object.entries(EXPECTED_CHANGES)) {
     const m = MIGRATIONS.find((x) => x.version === Number(version));
