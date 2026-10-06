@@ -22,6 +22,7 @@ const SEPARATE_ROUTE_SPECS = [
 ];
 const EXACT_STAGED_JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_ENTRY',
+    'UPSERT_JOURNAL_ENTRY_BATCH',
     'VOID_JOURNAL_ENTRY',
     'UPSERT_JOURNAL_CUSTOM_VOCAB',
     'UPSERT_JOURNAL_PLOT',
@@ -48,11 +49,18 @@ const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS
 // below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
 // this port, so the cloud side is not required to issue them yet.
+// UPSERT_JOURNAL_ENTRY_BATCH: the contract lands before the edge applier
+// (atomic batch apply in osi-journal), so it stays edge-deferred until that
+// applier is wired into the command registry.
 const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [
+    'UPSERT_JOURNAL_ENTRY_BATCH',
 ];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
+    },
+    UPSERT_JOURNAL_ENTRY_BATCH: {
+        effect_key: { prefix: 'journal_entry_batch', uuid_path: 'batch_uuid', version_path: 'base_sync_version' },
     },
     VOID_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry_uuid', version_path: 'base_sync_version' },
@@ -105,6 +113,7 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: { aggregate_key_path: 'payload.custom_field_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_UPSERTED: { aggregate_key_path: 'payload.plot_uuid', sync_version_path: 'payload.sync_version' },
     JOURNAL_PLOT_GROUP_UPSERTED: { aggregate_key_path: 'payload.group_uuid', sync_version_path: 'payload.sync_version' },
+    JOURNAL_CROP_CYCLE_UPSERTED: { aggregate_key_path: 'payload.cycle_uuid', sync_version_path: 'payload.sync_version' },
     USER_UPSERTED: { aggregate_key_path: 'payload.user_uuid', sync_version_path: 'payload.sync_version' },
     USER_ZONE_ASSIGNMENT_UPSERTED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },
     USER_ZONE_ASSIGNMENT_DELETED: { aggregate_key_path: 'payload.assignment_uuid', sync_version_path: 'payload.sync_version' },

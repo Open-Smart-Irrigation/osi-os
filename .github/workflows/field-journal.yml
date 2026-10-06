@@ -38,6 +38,8 @@ jobs:
             scripts/test-journal-v2-media.js \
             scripts/test-journal-v2-replication.js \
             scripts/test-journal-v2-worker.js
+      - name: Journal V2 plot-group migration test
+        run: node scripts/test-journal-v2-plot-group-migration.js
       - name: Journal replication package tests
         run: |
           node --test \

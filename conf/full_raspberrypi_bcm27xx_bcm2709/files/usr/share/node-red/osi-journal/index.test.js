@@ -1323,11 +1323,9 @@ test('assertJournalEntryEffectKey binds UUID and prior version exactly', () => {
 test('loadCatalog reads the seeded catalog into code-indexed maps', async () => {
   const catalog = await loadCatalog(createTestDb('load'));
 
-  // operation-level field/requirement/product scoping plan: the seeded
-  // catalog is now at v10 (full_record@10 adds operation_fields_by_operation/
-  // operation_requirements/operation_product_kinds + restores attr.equipment
-  // for the 9 Agroscope-uncovered activities, 0032).
-  assert.equal(catalog.version, 10);
+  // The seeded catalog is v11 (0070: full_record@11 publishes the
+  // final-entry requirement matrix).
+  assert.equal(catalog.version, 11);
   assert.match(catalog.hash, /^[a-f0-9]{64}$/);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
   assert.equal(catalog.templates.get('farmer_quick').get(1).definition.max_primary_fields, 5);
@@ -1387,7 +1385,7 @@ test('loadCatalog supports the callback sqlite API used by Node-RED', async () =
 
   const catalog = await loadCatalog(callbackDb);
 
-  assert.equal(catalog.version, 10);
+  assert.equal(catalog.version, 11);
   assert.equal(catalog.vocabByCode.get('irrigation').kind, 'activity');
 });
 

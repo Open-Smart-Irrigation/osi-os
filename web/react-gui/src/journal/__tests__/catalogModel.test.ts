@@ -333,14 +333,22 @@ describe('catalog model', () => {
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
     if (!result.ok) return;
-    const full = result.model.templates.get('full_record');
     const farmer = result.model.templates.get('farmer_quick');
     const layout = result.model.layouts.get('agroscope_open_field');
     // Detailed activity vocabulary plan (2026-07-22): farmer_quick's
     // currently-served (latest) version is now v9 — attr.equipment/
     // attr.method dropped from carry_forward, attr.operator kept.
     expect(farmer?.carry_forward).toEqual(['attr.operator']);
-    expect(full?.activity_requirements.fertilization.required_any).toHaveLength(2);
+    const latestFullDefinition = fixture.templates.find((row) =>
+      row.code === 'full_record' && row.version === 11,
+    )?.definition as Record<string, unknown> | undefined;
+    const finalMatrix = latestFullDefinition?.final_requirement_matrix as Record<string, unknown> | undefined;
+    const finalActivities = finalMatrix?.activities as Record<string, { required_any?: unknown }> | undefined;
+    expect(latestFullDefinition?.final_requirement_matrix_version).toBe(11);
+    expect(finalActivities?.fertilization.required_any).toEqual([
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate'],
+    ]);
     expect(layout).toBeDefined();
     if (!layout) return;
 
@@ -357,13 +365,12 @@ describe('catalog model', () => {
       'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
     ]));
     expect(farmer?.quick_fields?.fertilization).not.toContain('attr.irrigation_depth');
-    // Detailed activity vocabulary plan (2026-07-22): open_field's
-    // currently-served version bumps to v9 (activity->operation->device
-    // dependencies scoped to the 7 Agroscope-covered activities plus the
-    // picker_targets depth knob, layered on v8's treated-area-optional plan);
-    // greenhouse/lysimeter are untouched and stay at v3.
+    // Catalog v11 supersedes the old v9/v3 layout split. Every maintained
+    // layout now carries the same latest availability and context contract;
+    // `activeDefinition` must resolve those rows, not silently retain a
+    // historical layout definition.
     const expectedLayoutVersions: Record<string, number> = {
-      open_field: 9, greenhouse: 3, lysimeter: 3,
+      open_field: 11, greenhouse: 11, lysimeter: 11,
     };
     for (const layoutCode of ['open_field', 'greenhouse', 'lysimeter']) {
       const resolved = result.model.layouts.get(layoutCode);
@@ -473,36 +480,17 @@ describe('catalog model', () => {
       expect(lysimeterSampling.some((state) => state.code === readingCode && state.visible)).toBe(true);
     }
 
-    // Regression: full_record resolution against the v3 layout bump differs
-    // from the frozen v1 layout definitions in exactly one, intentional way
-    // — journal capture-followups Slice 1 (Task 1.1b) relaxes a
-    // minimum_fields entry to visible-but-optional whenever it is also
-    // listed in that layout's own static_context_fields. lysimeter@3's
-    // static_context_fields is the *entire* minimum_fields set (experimental
-    // unit/replicate/treatment/surface_area — see journal-catalog-core.js),
-    // so every one of those four flips from required to optional under v3;
-    // field codes/order and every other field's requiredness stay identical
-    // to v1.
-    const rows = fixture.layouts.filter((row) => row.code === 'lysimeter' && row.version === 1);
-    expect(rows).toHaveLength(1);
-    // Re-parse the frozen v1 row directly (bypassing activeDefinition's
-    // "latest version wins" resolution) so this is a true v1-vs-v3 diff.
-    const v1Layout = (() => {
-      const parsed = buildCatalogModel({
-        ...fixture,
-        layouts: fixture.layouts.filter((row) => !(row.code === 'lysimeter' && row.version === 3)),
-      });
-      return parsed.ok ? parsed.model.layouts.get('lysimeter') : undefined;
-    })();
-    expect(v1Layout?.version).toBe(1);
+    // v11 keeps the Lysimeter context fields visible but optional. This is a
+    // latest-definition behavior assertion; it deliberately does not compare
+    // a historic v1 row whose requiredness is no longer served.
     const lysimeterStaticContextFields = new Set(lysimeter.static_context_fields ?? []);
     for (const activityCode of ['irrigation', 'fertilization', 'sampling']) {
       const selections = { activity_code: activityCode };
-      const againstV1 = deriveFieldStates(fullRecord, v1Layout!, selections);
-      const againstV3 = deriveFieldStates(fullRecord, lysimeter, selections);
-      const expectedAgainstV3 = againstV1.map((state) =>
-        lysimeterStaticContextFields.has(state.code) ? { ...state, required: false } : state);
-      expect(againstV3).toEqual(expectedAgainstV3);
+      const states = deriveFieldStates(fullRecord, lysimeter, selections);
+      for (const code of lysimeterStaticContextFields) {
+        expect(states.find((state) => state.code === code), `${activityCode} ${code}`)
+          .toMatchObject({ visible: true, required: false });
+      }
     }
   });
 
@@ -517,105 +505,34 @@ describe('catalog model', () => {
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
 
-    // full_record now resolves to the scoped v10 row (activeDefinition always
-    // picks the highest active version — v10 is the operation-level field/
-    // requirement/product scoping plan, layered on the v5 scoped_by_activity
-    // mechanism this slice introduced), and it still declares the section
-    // this slice narrows.
-    expect(fullRecord.version).toBe(10);
+    // The current full-record definition is v11. Its explicit final
+    // requirement matrix replaces the earlier scoped field/requirement maps.
+    expect(fullRecord.version).toBe(11);
+    const latestFullDefinition = fixture.templates.find((row) =>
+      row.code === 'full_record' && row.version === 11,
+    )?.definition as Record<string, unknown> | undefined;
+    expect(latestFullDefinition?.final_requirement_matrix_version).toBe(11);
     const operationSection = fullRecord.sections.find((section) => section.code === 'operation');
-    expect(operationSection?.scoped_by_activity).toBe(true);
-    expect(fullRecord.operation_fields_by_activity).toBeDefined();
+    expect(operationSection?.fields).toContain('attr.growth_stage_bbch');
 
-    // Full irrigation: shows the irrigation-details fields, excludes
-    // product-mass/nutrient/harvest fields (spec §4-B). Treated-area-optional
-    // plan (2026-07-22): attr.treated_area is visible here (added to
-    // operation_fields_by_activity.irrigation at full_record@8) and never
-    // required for irrigation (irrigation never appeared in
-    // activity_requirements). Detailed activity vocabulary plan (full_record@9):
-    // attr.equipment/attr.method are retired everywhere and irrigation is one
-    // of the 7 Agroscope-covered activities, so attr.agroscope.operation/
-    // attr.agroscope.device are visible instead (optional — irrigation is not
-    // one of the 3 activities requiring a device).
+    // v11 renders its single full-record operation section for every activity;
+    // final requirements are enforced by the immutable matrix, not a stale
+    // activity-specific field map in this presentation model.
     const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
     const irrigationVisible = irrigationStates.filter((state) => state.visible).map((state) => state.code);
-    expect(irrigationVisible).toEqual(expect.arrayContaining([
-      'attr.irrigation_amount_kind', 'attr.measurement_source', 'attr.denominator',
-      'attr.irrigation_depth', 'attr.operator', 'attr.treated_area',
-      'attr.agroscope.operation', 'attr.agroscope.device',
-    ]));
-    for (const excluded of [
-      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
-      'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
-      'attr.amount_count_area', 'attr.amount_biological_count_area',
-      'attr.harvest_area', 'attr.harvest_yield_area', 'attr.crop',
-      'attr.equipment', 'attr.method',
-    ]) {
-      expect(irrigationVisible, `irrigation must exclude ${excluded}`).not.toContain(excluded);
-    }
-    // requiredness (journal capture-followups Slice 1, W1): the
-    // irrigation_details conditional_group still forces amount_kind
-    // required, and the depth/volume/per-plant family stays a required_any
-    // trio; measurement_source/denominator moved to optional (visible, not
-    // required) at full_record@7. treated_area is visible but never required
-    // for irrigation (treated-area-optional plan, full_record@8). The
-    // Agroscope device/operation stay visible-but-optional for irrigation
-    // (decision 2 — irrigation is not one of the 3 required-device
-    // activities).
-    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
-      .toMatchObject({ required: true });
-    expect(irrigationStates.find((state) => state.code === 'attr.measurement_source'))
-      .toMatchObject({ required: false });
-    expect(irrigationStates.find((state) => state.code === 'attr.denominator'))
-      .toMatchObject({ required: false });
-    expect(irrigationStates.find((state) => state.code === 'attr.treated_area'))
-      .toMatchObject({ visible: true, required: false });
-    expect(irrigationStates.find((state) => state.code === 'attr.agroscope.operation'))
-      .toMatchObject({ visible: true, required: false });
-    expect(irrigationStates.find((state) => state.code === 'attr.agroscope.device'))
-      .toMatchObject({ visible: true, required: false });
-    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
-      .toBeGreaterThan(0);
-
-    // Full fertilization: shows product/amount/treated-area/operator fields,
-    // excludes irrigation-depth/plant-count/biological fields (spec §4-B).
     const fertilizationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'fertilization' });
     const fertilizationVisible = fertilizationStates.filter((state) => state.visible).map((state) => state.code);
-    expect(fertilizationVisible).toEqual(expect.arrayContaining([
-      'attr.product_uuid', 'attr.product', 'attr.treated_area',
-      'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
-      'attr.operator', 'attr.agroscope.operation', 'attr.agroscope.device',
+    expect(fertilizationVisible).toEqual(irrigationVisible);
+    expect(irrigationStates.every((state) => state.required === false)).toBe(true);
+    expect(fertilizationStates.every((state) => state.required === false)).toBe(true);
+    expect(irrigationVisible).toEqual(expect.arrayContaining([
+      'attr.product_uuid', 'attr.treated_area', 'attr.harvest_yield_area',
+      'attr.irrigation_depth', 'attr.growth_stage_bbch',
+      'attr.agroscope.operation', 'attr.agroscope.device', 'attr.equipment', 'note',
     ]));
-    for (const excluded of [
-      // NOTE: attr.denominator is deliberately absent from this list — the
-      // open_field layout's own minimum_fields force it visible for every
-      // activity/template regardless of the operation section's scoping, so
-      // its presence here would prove nothing about Slice E.
-      'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
-      'attr.irrigation_amount_kind', 'attr.measurement_source',
-      'attr.actuation_expectation_id', 'attr.amount_count_area', 'attr.amount_biological_count_area',
-      'attr.harvest_area', 'attr.harvest_yield_area', 'attr.crop',
-      'attr.equipment', 'attr.method',
-    ]) {
-      expect(fertilizationVisible, `fertilization must exclude ${excluded}`).not.toContain(excluded);
-    }
-    // Treated-area-optional plan (2026-07-22): attr.treated_area is visible
-    // but no longer required for fertilization at full_record@8 (dropped
-    // from activity_requirements.fertilization.required). Detailed activity
-    // vocabulary plan (full_record@9): the Agroscope device/operation stay
-    // visible-but-optional for fertilization too (decision 2 — fertilization
-    // is not one of the 3 required-device activities).
-    expect(fertilizationStates.find((state) => state.code === 'attr.treated_area'))
-      .toMatchObject({ visible: true, required: false });
-    expect(fertilizationStates.find((state) => state.code === 'attr.agroscope.operation'))
-      .toMatchObject({ visible: true, required: false });
-    expect(fertilizationStates.find((state) => state.code === 'attr.agroscope.device'))
-      .toMatchObject({ visible: true, required: false });
-    expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
-      .toBeGreaterThan(0);
   });
 
-  it('operation-level field/requirement/product scoping plan (2026-07-23): deriveFieldStates resolves the operation map when an operation is selected, the activity map otherwise, and every activity keeps a visible comment (note) state', () => {
+  it('catalog v11 keeps the full-record field list stable when an operation is selected', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -625,115 +542,30 @@ describe('catalog model', () => {
     expect(fullRecord).toBeDefined();
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
-    expect(fullRecord.version).toBe(10);
-    expect(fullRecord.operation_fields_by_operation).toBeDefined();
-    expect(fullRecord.operation_requirements).toBeDefined();
-    expect(fullRecord.operation_product_kinds).toBeDefined();
+    expect(fullRecord.version).toBe(11);
+    const latestFullDefinition = fixture.templates.find((row) =>
+      row.code === 'full_record' && row.version === 11,
+    )?.definition as Record<string, unknown> | undefined;
+    expect(latestFullDefinition?.final_requirement_matrix_version).toBe(11);
 
-    // No operation selected -> activity map (weed_mechanical's activity,
-    // plant_protection_application, still shows the full spray set here).
+    // v11 deliberately has no legacy weather sub-section. Operation selection
+    // changes compatible picker leaves, not the shared full-record field list.
     const noOperation = deriveFieldStates(fullRecord, openField, {
       activity_code: 'plant_protection_application',
     });
-    expect(noOperation.some((state) => state.code === 'attr.wind_speed' && state.visible)).toBe(true);
-
-    // Operation selected AND overridden -> operation map REPLACES it:
-    // weed_mechanical's OWN field list has no product/weather/waiting-period
-    // fields at all (spec §1). Deviation 1 fix (2026-07-23): the
-    // weather_at_application conditional_group — previously ACTIVITY-keyed on
-    // plant_protection_application and additive regardless of which operation
-    // was selected — is removed from full_record@10 entirely. Weather now
-    // reaches `states` only via operation_fields_by_operation on the 5
-    // chemical-spray operations, so weed_mechanical (a non-chemical
-    // operation) must NOT show wind/temp/humidity at all; the comment field
-    // is the escape for drift/compliance notes on lean operations like this.
-    const weedMechanical = deriveFieldStates(fullRecord, openField, {
+    expect(noOperation.some((state) => state.code === 'attr.wind_speed' && state.visible)).toBe(false);
+    const operationSelected = deriveFieldStates(fullRecord, openField, {
       activity_code: 'plant_protection_application',
       'attr.agroscope.operation': 'agroscope.operation.weed_mechanical',
     });
-    const weedMechanicalVisible = weedMechanical.filter((state) => state.visible).map((state) => state.code);
-    expect(weedMechanicalVisible).toEqual(expect.arrayContaining([
-      'attr.agroscope.operation', 'attr.agroscope.device', 'attr.amount_operation_depth',
-      'attr.treated_area', 'attr.growth_stage_bbch', 'attr.operator',
-    ]));
-    for (const excluded of [
-      'attr.product_uuid', 'attr.product', 'attr.amount_mass_area_product',
-      'attr.amount_volume_area_product', 'attr.waiting_period_days',
-      'attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity',
-    ]) {
-      expect(weedMechanicalVisible, `weed_mechanical must exclude ${excluded}`).not.toContain(excluded);
+    expect(operationSelected).toEqual(noOperation);
+    expect(noOperation.every((state) => state.required === false)).toBe(true);
+    for (const code of ['attr.agroscope.operation', 'attr.agroscope.device', 'attr.equipment', 'note']) {
+      expect(noOperation.find((state) => state.code === code), code).toMatchObject({ visible: true });
     }
-    // Nothing in weed_mechanical's OWN operation_requirements is required.
-    expect(weedMechanical.every((state) => state.required === false)).toBe(true);
-
-    // cleaning_cut: no yield field at all, nothing required.
-    const cleaningCut = deriveFieldStates(fullRecord, openField, {
-      activity_code: 'harvest',
-      'attr.agroscope.operation': 'agroscope.operation.cleaning_cut',
-    });
-    expect(cleaningCut.some((state) => state.code === 'attr.harvest_yield_area')).toBe(false);
-    expect(cleaningCut.every((state) => state.required === false)).toBe(true);
-
-    // weed_herbicide keeps the strict chem-spray requirement (device+operation
-    // required, product-or-unregistered family, mass-or-volume dose family).
-    const weedHerbicide = deriveFieldStates(fullRecord, openField, {
-      activity_code: 'plant_protection_application',
-      'attr.agroscope.operation': 'agroscope.operation.weed_herbicide',
-    });
-    expect(weedHerbicide.find((state) => state.code === 'attr.agroscope.device'))
-      .toMatchObject({ visible: true, required: true });
-    expect(weedHerbicide.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
-      .toBeGreaterThan(0);
-    expect(weedHerbicide.find((state) => state.code === 'attr.amount_mass_area_product')?.required_any_groups.length)
-      .toBeGreaterThan(0);
-
-    // §0.5: a value-carried operation (not on the picker leaf's
-    // dependent_selections, just present in selections directly) resolves
-    // identically to a leaf-carried one — the mechanism is generic over where
-    // the value came from.
-    const valueCarried = deriveFieldStates(fullRecord, openField, {
-      activity_code: 'plant_protection_application',
-      'attr.agroscope.operation': ['agroscope.operation.weed_mechanical'],
-    });
-    expect(valueCarried.filter((state) => state.visible).map((state) => state.code))
-      .toEqual(weedMechanicalVisible);
-
-    // §0.4: a comment (note) state is visible for every activity, operation
-    // or not — the top-level `notes` section, unaffected by the operation
-    // scoping mechanism above.
-    for (const activityCode of [
-      'plant_protection_application', 'harvest', 'irrigation', 'fertilization',
-      'pruning', 'mowing', 'equipment_maintenance',
-    ]) {
-      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.find((state) => state.code === 'note'), activityCode)
-        .toMatchObject({ visible: true });
-    }
-
-    // §3: the 9 Agroscope-uncovered activities show the restored Equipment
-    // free text; the 7 covered activities never do (they have a scoped
-    // device dropdown instead).
-    for (const activityCode of ['pruning', 'mowing', 'equipment_maintenance']) {
-      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.some((state) => state.code === 'attr.equipment' && state.visible), activityCode).toBe(true);
-    }
-    for (const activityCode of ['harvest', 'irrigation', 'fertilization']) {
-      const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.some((state) => state.code === 'attr.equipment'), activityCode).toBe(false);
-    }
-
-    // §2: operation_product_kinds spot checks — the frozen 4-value CHECK set,
-    // scoped per operation.
-    expect(fullRecord.operation_product_kinds?.['agroscope.operation.mineral_fertilization'])
-      .toEqual(['mineral']);
-    expect(fullRecord.operation_product_kinds?.['agroscope.operation.organic_fertilization'])
-      .toEqual(['organic_amendment']);
-    expect(fullRecord.operation_product_kinds?.['agroscope.operation.pest_control'])
-      .toEqual(['plant_protection', 'other']);
-    expect(fullRecord.operation_product_kinds?.['agroscope.operation.weed_mechanical']).toBeUndefined();
   });
 
-  it('detailed activity vocabulary plan (2026-07-22): full_record@9 requires attr.agroscope.device + attr.agroscope.operation for tillage_soil_work/seeding/plant_protection_application only', () => {
+  it('catalog v11 keeps station-scoped machinery choices visible only for the supported activity families', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -743,28 +575,31 @@ describe('catalog model', () => {
     expect(fullRecord).toBeDefined();
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
-    expect(fullRecord.version).toBe(10);
+    expect(fullRecord.version).toBe(11);
 
     for (const activityCode of ['tillage_soil_work', 'seeding', 'plant_protection_application']) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
       expect(states.find((state) => state.code === 'attr.agroscope.device'), activityCode)
-        .toMatchObject({ visible: true, required: true });
+        .toMatchObject({ visible: true, required: false });
       expect(states.find((state) => state.code === 'attr.agroscope.operation'), activityCode)
-        .toMatchObject({ visible: true, required: true });
+        .toMatchObject({ visible: true, required: false });
     }
     for (const activityCode of ['fertilization', 'harvest', 'irrigation', 'general_observation']) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
       expect(states.find((state) => state.code === 'attr.agroscope.device'), activityCode)
         .toMatchObject({ visible: true, required: false });
     }
-    // The 9 uncovered activities never render the Agroscope fields at all.
+    // v11 makes the capability vocabulary visible for every activity; the
+    // selected layout later constrains its compatible picker leaves.
     for (const activityCode of [
       'fertigation', 'weed_control_nonchemical', 'planting_transplanting', 'pruning',
       'crop_care', 'mowing', 'sampling', 'pest_disease_observation', 'equipment_maintenance',
     ]) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.some((state) => state.code === 'attr.agroscope.device'), activityCode).toBe(false);
-      expect(states.some((state) => state.code === 'attr.agroscope.operation'), activityCode).toBe(false);
+      expect(states.find((state) => state.code === 'attr.agroscope.device'), activityCode)
+        .toMatchObject({ visible: true, required: false });
+      expect(states.find((state) => state.code === 'attr.agroscope.operation'), activityCode)
+        .toMatchObject({ visible: true, required: false });
     }
     // attr.method never comes back on full_record for ANY activity (decision
     // 3, retired everywhere, permanently). Operation-level field/requirement/
@@ -772,20 +607,17 @@ describe('catalog model', () => {
     // restored, but only for the 9 Agroscope-uncovered activities (spec §3) —
     // the 7 covered activities above stay equipment-free (they have a scoped
     // device dropdown instead).
-    const NINE_UNCOVERED_ACTIVITIES = new Set([
-      'fertigation', 'weed_control_nonchemical', 'planting_transplanting',
-      'pruning', 'crop_care', 'mowing', 'sampling', 'pest_disease_observation',
-      'equipment_maintenance',
-    ]);
-    for (const activityCode of Object.keys(fullRecord.operation_fields_by_activity ?? {})) {
+    for (const activityCode of [
+      'irrigation', 'fertilization', 'tillage_soil_work', 'seeding',
+      'plant_protection_application', 'harvest', 'general_observation',
+    ]) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
       expect(states.some((state) => state.code === 'attr.method'), activityCode).toBe(false);
-      expect(states.some((state) => state.code === 'attr.equipment'), activityCode)
-        .toBe(NINE_UNCOVERED_ACTIVITIES.has(activityCode));
+      expect(states.some((state) => state.code === 'attr.equipment'), activityCode).toBe(true);
     }
   });
 
-  it('detailed activity vocabulary plan (2026-07-22): the picker depth knob stops open_field@9 at the operation (25 operation + 9 bare = 34 leaves) while agroscope_open_field keeps expanding to device depth (unchanged)', () => {
+  it('catalog v11 expands open-field picker leaves through compatible device choices', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -796,8 +628,7 @@ describe('catalog model', () => {
     expect(agroscopeLayout).toBeDefined();
     if (!openField || !agroscopeLayout) return;
 
-    expect(openField.version).toBe(9);
-    expect(openField.picker_targets).toEqual(['attr.agroscope.operation']);
+    expect(openField.version).toBe(11);
     // agroscope_open_field is the frozen v1 research layout: it must declare
     // no picker_targets at all (undeclared => today's deepest-expansion
     // behaviour, unaffected by this plan).
@@ -805,18 +636,18 @@ describe('catalog model', () => {
 
     const openFieldLeaves = deriveActivityLeaves(result.model, openField);
     const operationLeaves = openFieldLeaves.filter((leaf) => leaf.dependent_selections.length === 1);
+    const deviceLeaves = openFieldLeaves.filter((leaf) => leaf.dependent_selections.length === 2);
     const bareLeaves = openFieldLeaves.filter((leaf) => leaf.dependent_selections.length === 0);
-    expect(openFieldLeaves).toHaveLength(34);
-    expect(operationLeaves).toHaveLength(25);
+    expect(openFieldLeaves).toHaveLength(138);
+    expect(operationLeaves).toHaveLength(0);
+    expect(deviceLeaves).toHaveLength(129);
     expect(bareLeaves).toHaveLength(9);
-    // Every operation leaf stops at attr.agroscope.operation — it must never
-    // reach attr.agroscope.device (the knob's entire point). If this ever
-    // regresses to ~137 (25 operations x ~5 avg devices + bare), the knob
-    // isn't being honoured.
-    for (const leaf of operationLeaves) {
-      expect(leaf.dependent_selections[0].attribute_code).toBe('attr.agroscope.operation');
+    for (const leaf of deviceLeaves) {
+      expect(leaf.dependent_selections.map((selection) => selection.attribute_code)).toEqual([
+        'attr.agroscope.operation', 'attr.agroscope.device',
+      ]);
     }
-    const coveredActivities = new Set(operationLeaves.map((leaf) => leaf.activity_code));
+    const coveredActivities = new Set(deviceLeaves.map((leaf) => leaf.activity_code));
     expect([...coveredActivities].sort()).toEqual([
       'fertilization', 'general_observation', 'harvest', 'irrigation',
       'plant_protection_application', 'seeding', 'tillage_soil_work',
@@ -824,11 +655,11 @@ describe('catalog model', () => {
 
     // The picker search lands on a single, specific operation: "seedbed" must
     // match exactly one leaf, and its label must be "Seedbed preparation".
-    const seedbedLeaves = operationLeaves.filter((leaf) => {
+    const seedbedLeaves = deviceLeaves.filter((leaf) => {
       const code = leaf.dependent_selections[0].value;
       return catalogLabel(result.model.vocabByCode.get(code)!, 'en').toLowerCase().includes('seedbed');
     });
-    expect(seedbedLeaves).toHaveLength(1);
+    expect(seedbedLeaves.length).toBeGreaterThan(1);
     expect(catalogLabel(
       result.model.vocabByCode.get(seedbedLeaves[0].dependent_selections[0].value)!, 'en',
     )).toBe('Seedbed Preparation');
@@ -885,9 +716,9 @@ describe('catalog model', () => {
     const frozenFixture = {
       ...fixture,
       templates: fixture.templates.filter((row) =>
-        !(row.code === 'full_record' && (row.version === 8 || row.version === 9 || row.version === 10))),
+        !(row.code === 'full_record' && row.version >= 8)),
       layouts: fixture.layouts.filter((row) =>
-        !(row.code === 'open_field' && (row.version === 8 || row.version === 9))),
+        !(row.code === 'open_field' && row.version >= 8)),
     };
     const result = buildCatalogModel(frozenFixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -940,7 +771,7 @@ describe('catalog model', () => {
     expect(quickStates.some((state) => state.code === 'attr.block_bed_row')).toBe(false);
   });
 
-  it('treated-area-optional plan (2026-07-22): full_record + open_field make attr.treated_area visible-but-optional for irrigation, fertilization, and seeding (current/latest-resolving catalog, now v9)', () => {
+  it('catalog v11 keeps treated area visible-but-optional for the applicable activity families', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -950,14 +781,8 @@ describe('catalog model', () => {
     expect(fullRecord).toBeDefined();
     expect(openField).toBeDefined();
     if (!fullRecord || !openField) return;
-    // The currently-served version is now v10 (operation-level field/
-    // requirement/product scoping plan, layered on top of v9's detailed
-    // activity vocabulary plan and v8's treated-area-optional plan being
-    // tested here) — every assertion below still holds under v10 since it
-    // never touched treated_area. open_field stays at v9 (v10 added no new
-    // layout version).
-    expect(fullRecord.version).toBe(10);
-    expect(openField.version).toBe(9);
+    expect(fullRecord.version).toBe(11);
+    expect(openField.version).toBe(11);
 
     // treated_area is dropped from open_field@8's minimum_fields entirely —
     // no longer force-required anywhere via that mechanism.
@@ -976,31 +801,38 @@ describe('catalog model', () => {
       });
     }
 
-    // amount/amount-kind requiredness is unaffected by this plan: irrigation
-    // still requires amount_kind + the depth/volume/per-plant required_any
-    // trio; fertilization/seeding still require a product/amount pair.
-    const irrigationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'irrigation' });
-    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_amount_kind'))
-      .toMatchObject({ required: true });
-    expect(irrigationStates.find((state) => state.code === 'attr.irrigation_depth')?.required_any_groups.length)
-      .toBeGreaterThan(0);
-    const fertilizationStates = deriveFieldStates(fullRecord, openField, { activity_code: 'fertilization' });
-    expect(fertilizationStates.find((state) => state.code === 'attr.product_uuid')?.required_any_groups.length)
-      .toBeGreaterThan(0);
-    const seedingStates = deriveFieldStates(fullRecord, openField, { activity_code: 'seeding' });
-    expect(seedingStates.find((state) => state.code === 'attr.crop')).toMatchObject({ required: true });
-    expect(seedingStates.find((state) => state.code === 'attr.amount_count_area')?.required_any_groups.length)
-      .toBeGreaterThan(0);
+    // v11 puts final-entry requirements in the immutable matrix rather than
+    // applying the retired v10 UI requirement maps during field derivation.
+    const latestFullDefinition = fixture.templates.find((row) =>
+      row.code === 'full_record' && row.version === 11,
+    )?.definition as Record<string, unknown> | undefined;
+    const matrix = latestFullDefinition?.final_requirement_matrix as {
+      activities?: Record<string, { required?: string[]; required_any?: string[][] }>;
+    } | undefined;
+    expect(matrix?.activities?.irrigation.required_any).toEqual([
+      ['attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume'],
+    ]);
+    expect(matrix?.activities?.fertilization.required_any).toEqual([
+      ['attr.product_uuid', 'attr.product'],
+      ['attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate'],
+    ]);
+    expect(matrix?.activities?.seeding).toMatchObject({
+      required: ['attr.crop'],
+      required_any: [['attr.amount_mass_area_product', 'attr.amount_count_area']],
+    });
 
-    // Non-area activities never gain treated_area (intended visibility
-    // narrowing, not a regression -- Risks section of the plan).
+    // The v11 operation section is shared by every activity, so treated area
+    // remains an optional review field rather than disappearing on lean
+    // activities. The final matrix, asserted above, decides what blocks save.
     for (const activityCode of [
       'pruning', 'crop_care', 'harvest', 'sampling',
       'general_observation', 'pest_disease_observation', 'equipment_maintenance',
     ]) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
-      expect(states.some((state) => state.code === 'attr.treated_area' && state.visible),
-        `${activityCode} must not show attr.treated_area`).toBe(false);
+      expect(states.find((state) => state.code === 'attr.treated_area'),
+        `${activityCode} must retain optional attr.treated_area`).toMatchObject({
+          visible: true, required: false,
+        });
     }
   });
 
@@ -1161,14 +993,19 @@ describe('catalog model', () => {
         visible: true, required: false,
       });
     }
-    for (const activityCode of ['irrigation', 'fertilization', 'tillage_soil_work', 'sampling']) {
+    for (const activityCode of [
+      'irrigation', 'fertilization', 'tillage_soil_work', 'sampling',
+      'seeding', 'plant_protection_application',
+    ]) {
       const states = deriveFieldStates(fullRecord, openField, { activity_code: activityCode });
       const bbchState = states.find((state) => state.code === 'attr.growth_stage_bbch');
-      expect(bbchState?.visible ?? false, `${activityCode} must not show attr.growth_stage_bbch`).toBe(false);
+      expect(bbchState, `${activityCode} must show attr.growth_stage_bbch`).toMatchObject({
+        visible: true, required: false,
+      });
     }
   });
 
-  it("Slice F (F2): the weather-at-application group is visible+optional on plant_protection_application, and withWeatherAtApplicationVisibility hides it when the plot has a weather source", () => {
+  it('catalog v11 never manufactures retired weather fields, while the helper remains exact for supplied states', () => {
     const fixture = shippedCatalog();
     const result = buildCatalogModel(fixture);
     expect(result.ok, result.ok ? '' : result.errors.join('; ')).toBe(true);
@@ -1182,8 +1019,7 @@ describe('catalog model', () => {
     const weatherCodes = ['attr.wind_speed', 'attr.wind_direction', 'attr.air_temperature', 'attr.rel_humidity'];
     const sprayStates = deriveFieldStates(fullRecord, openField, { activity_code: 'plant_protection_application' });
     for (const code of weatherCodes) {
-      expect(sprayStates.find((state) => state.code === code), `sensorless plot must show ${code}`)
-        .toMatchObject({ visible: true, required: false });
+      expect(sprayStates.some((state) => state.code === code), `v11 must not inject ${code}`).toBe(false);
     }
     // No other activity's operation_fields_by_activity ever declares these
     // codes, so a sensorless plot must not show them anywhere else either.
@@ -1192,10 +1028,10 @@ describe('catalog model', () => {
       expect(irrigationStates.some((state) => state.code === code && state.visible)).toBe(false);
     }
 
-    // Weather-source plot (GUI's zoneLinked === true): every weather field
-    // must be forced invisible+not-required, everything else must be
-    // untouched.
-    const zoned = withWeatherAtApplicationVisibility(sprayStates, true);
+    const suppliedWeatherStates = weatherCodes.map((code) => ({
+      code, visible: true, required: false, required_any_groups: [],
+    }));
+    const zoned = withWeatherAtApplicationVisibility([...sprayStates, ...suppliedWeatherStates], true);
     for (const code of weatherCodes) {
       expect(zoned.find((state) => state.code === code)).toMatchObject({ visible: false, required: false });
     }

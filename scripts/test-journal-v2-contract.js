@@ -41,12 +41,12 @@ function assertClosedVariants(definitionName, expectedCount) {
 }
 
 assert.deepEqual(schemaStructureErrors(schema), [], 'journal-v2.schema.json must be valid Draft-07');
-assertClosedVariants('mutationEnvelope', 7);
-assertClosedVariants('replicationEnvelope', 7);
-assertClosedVariants('mutationResult', 4);
+assertClosedVariants('mutationEnvelope', 8);
+assertClosedVariants('replicationEnvelope', 8);
+assertClosedVariants('mutationResult', 5);
 for (const name of [
   'v2Entry', 'entryValue', 'farmProduct', 'customVocabulary', 'vocabMapping',
-  'plotSnapshot', 'plotSettings', 'cutoverBarrierReceipt', 'attachmentDescriptor',
+  'plotSnapshot', 'plotGroupSnapshot', 'plotSettings', 'cutoverBarrierReceipt', 'attachmentDescriptor',
   'cropCycleProjection', 'cropCyclePlot', 'authorityState',
 ]) {
   assert.equal(schema.definitions[name].additionalProperties, false, `${name} must be closed`);
@@ -65,7 +65,7 @@ for (const vector of golden.mutation_vectors) {
   assert.equal(canonicalizer.hashMutation(vector.input), vector.payload_sha256, `${vector.name} hash`);
 }
 
-assert.equal(golden.replication_vectors.length, 7, 'one full positive vector per replication variant');
+assert.equal(golden.replication_vectors.length, 8, 'one full positive vector per replication variant');
 for (const vector of golden.replication_vectors) {
   assert.deepEqual(schemaErrors(vector.input), [], `${vector.name} must satisfy the schema`);
   assert.doesNotThrow(() => canonicalizer.validateReplication(vector.input), `${vector.name} semantic validation`);
@@ -76,7 +76,7 @@ assert.doesNotThrow(
   'the positive replication feed must be numerically ascending'
 );
 
-assert.equal(golden.result_vectors.length, 4, 'one positive vector per typed result variant');
+assert.equal(golden.result_vectors.length, 5, 'one positive vector per typed result variant');
 for (const vector of golden.result_vectors) {
   assert.deepEqual(schemaErrors(vector.input), [], `${vector.name} must satisfy the schema`);
 }

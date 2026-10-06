@@ -16,6 +16,7 @@ const AUDITED_JOURNAL_OUTBOX_EMITTER = {
 };
 const EXACT_STAGED_COMMANDS = [
   'UPSERT_JOURNAL_ENTRY',
+  'UPSERT_JOURNAL_ENTRY_BATCH',
   'VOID_JOURNAL_ENTRY',
   'UPSERT_JOURNAL_CUSTOM_VOCAB',
   'UPSERT_JOURNAL_PLOT',
@@ -39,7 +40,10 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_COMMANDS below:
 // osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
 // port, so the cloud side is not required to issue them yet.
+// UPSERT_JOURNAL_ENTRY_BATCH: contract first, edge applier later; it leaves
+// this list in the commit that wires the applier.
 const EXACT_EDGE_DEFERRED_COMMANDS = [
+  'UPSERT_JOURNAL_ENTRY_BATCH',
 ];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
@@ -52,7 +56,11 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
+// JOURNAL_CROP_CYCLE_UPSERTED: the event contract lands before the edge emitter
+// (crop-cycle projection in osi-journal lifecycle). It leaves this list, and joins
+// EXACT_EDGE_MODULE_OPS, in the commit that adds the audited emitter.
 const EXACT_EDGE_DEFERRED_OPS = [
+  'JOURNAL_CROP_CYCLE_UPSERTED',
 ];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
@@ -91,6 +99,7 @@ const EXACT_SCOPED_ACCESS_EVENT_OPS = [
 // exact field names this repo's triggers emit. No longer cloudDeferred.
 const EXACT_CLOUD_DEFERRED_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
+  ...EXACT_EDGE_DEFERRED_OPS,
   ...EXACT_SCOPED_ACCESS_EVENT_OPS,
 ];
 // The axes are intentionally independent. This fixture is the transition that
@@ -156,6 +165,8 @@ const EXACT_EDGE_STAGED_OPS = [
   'JOURNAL_VOCAB_UPSERTED',
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
+  // Edge-deferred, not yet module-emitted: the cloud applier may land first.
+  'JOURNAL_CROP_CYCLE_UPSERTED',
 ];
 const FLOW_SOURCES = [
   {

@@ -1,9 +1,12 @@
 {
   "version": 1,
   "commands": {
-    "edgeDeferred": [],
+    "edgeDeferred": [
+      "UPSERT_JOURNAL_ENTRY_BATCH"
+    ],
     "cloudDeferred": [
       "UPSERT_JOURNAL_ENTRY",
+      "UPSERT_JOURNAL_ENTRY_BATCH",
       "VOID_JOURNAL_ENTRY",
       "UPSERT_JOURNAL_CUSTOM_VOCAB",
       "UPSERT_JOURNAL_PLOT",
@@ -24,13 +27,16 @@
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED"
     ],
-    "edgeDeferred": [],
+    "edgeDeferred": [
+      "JOURNAL_CROP_CYCLE_UPSERTED"
+    ],
     "edgeStaged": [
       "JOURNAL_ENTRY_UPSERTED",
       "JOURNAL_ENTRY_VOIDED",
       "JOURNAL_VOCAB_UPSERTED",
       "JOURNAL_PLOT_UPSERTED",
-      "JOURNAL_PLOT_GROUP_UPSERTED"
+      "JOURNAL_PLOT_GROUP_UPSERTED",
+      "JOURNAL_CROP_CYCLE_UPSERTED"
     ],
     "cloudDeferred": [
       "JOURNAL_ENTRY_UPSERTED",
@@ -38,6 +44,7 @@
       "JOURNAL_VOCAB_UPSERTED",
       "JOURNAL_PLOT_UPSERTED",
       "JOURNAL_PLOT_GROUP_UPSERTED",
+      "JOURNAL_CROP_CYCLE_UPSERTED",
       "USER_PLOT_ASSIGNMENT_DELETED",
       "USER_PLOT_ASSIGNMENT_UPSERTED",
       "USER_UPSERTED",

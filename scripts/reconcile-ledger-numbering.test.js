@@ -24,6 +24,7 @@ const {
   clearRepairRequired,
   parseArgs,
 } = require('./reconcile-ledger-numbering');
+const { snapshotSchema, compareSchemas } = require('./semantic-schema-compare');
 
 const REPO = path.resolve(__dirname, '..');
 const MAIN_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
@@ -579,7 +580,12 @@ test('parseArgs recognizes --clear-repair-required', () => {
 // (verified byte-identical across all three lineages) + a lineage's own
 // vendored divergent range, so bootstrapFresh can replay the device's FULL,
 // self-consistent, foreign-numbered history through the real runner.
-function buildDeviceMigrationsDir(root, lineage, throughVersion) {
+//
+// `extra` maps a foreign file name to a main file name. It models a foreign
+// version that carries the byte-identical content of a main migration under the
+// foreign lineage's own number (the device holds only the checksum, and the
+// bytes are main's, so no vendored fixture is needed for those rows).
+function buildDeviceMigrationsDir(root, lineage, throughVersion, extra = {}) {
   const dir = path.join(root, `device-${lineage}`);
   fs.mkdirSync(dir);
   for (const m of loadMigrations(MAIN_MIGRATIONS_DIR)) {
@@ -590,7 +596,15 @@ function buildDeviceMigrationsDir(root, lineage, throughVersion) {
     const version = Number(name.slice(0, 4));
     if (version <= throughVersion) fs.copyFileSync(path.join(lineageDir, name), path.join(dir, name));
   }
+  for (const [foreignName, mainName] of Object.entries(extra)) {
+    fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, mainName), path.join(dir, foreignName));
+  }
   return dir;
+}
+
+async function tableDigest(runner, table, orderBy) {
+  const rows = await runner.all(`SELECT * FROM ${table} ORDER BY ${orderBy}`);
+  return { count: rows.length, sha256: sha(JSON.stringify(rows)) };
 }
 
 test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applies cleanly, verifyHead ok', { timeout: 900_000 }, async () => {
@@ -649,20 +663,120 @@ test('AgroLink-lineage fixture: reconcile classifies all 28 foreign rows, applie
   // coverage v1, land/network-observations-v1, the RAK10701 field-tester
   // device type, the WATERMARK LSN50 tables, weather provider store, daily
   // agronomy, FAO-56 stage keys, zone weather_source sync, zone stage start
-  // date, daily agronomy record sync, WATERMARK cloud parity) are also
-  // genuinely new to this device, so pending is {22,23,24,25,54,...,68}.
+  // date, daily agronomy record sync, WATERMARK cloud parity, journal V2
+  // plot-group snapshots, journal catalog v11) are also genuinely new to this
+  // device, so pending is {22,23,24,25,54,...,70}.
   // This list is exact on purpose: extend it when a migration lands, never
   // relax it to a prefix or subset check.
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68]);
+  assert.deepEqual(pending, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]);
 
   // The real applyPending can now carry the device the rest of the way home.
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
-  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68]);
+  assert.deepEqual(carryRes.applied, [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]);
   assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
+});
+
+// The same non-valve lineage, but four versions further: after its own 0049 it
+// applied four migrations whose bytes are identical to main files under other
+// numbers (foreign 0050/0051 = main 0069/0070, foreign 0052 = main 0061,
+// foreign 0053 = main 0068). Reconciliation must remap all four exactly, and
+// the carry-forward must then fill main's holes (including the destructive
+// 0058 trigger rewrite and the destructive 0060 devices rebuild) AFTER the
+// WATERMARK child tables and the journal snapshot objects already exist, an
+// order main itself never runs.
+test('non-valve lineage at version 53: exact remaps for main-carried tail, holes applied after it, schema equals seed', { timeout: 1_800_000 }, async () => {
+  // The vendored lineage that reaches foreign version 49 (the same fixture
+  // directory the 49 case above uses), found by content rather than by name.
+  const lineage = fs.readdirSync(REAL_FIXTURES_DIR).find((dir) =>
+    fs.existsSync(path.join(REAL_FIXTURES_DIR, dir, '0049__sdi12_recipe_deployments.sql')));
+  assert.ok(lineage, 'a vendored lineage must carry foreign 0049');
+  const root = scratch();
+  const deviceDir = buildDeviceMigrationsDir(root, lineage, 49, {
+    '0050__journal_v2_plot_group_snapshot.sql': '0069__journal_v2_plot_group_snapshot.sql',
+    '0051__journal_catalog_v11.sql': '0070__journal_catalog_v11.sql',
+    '0052__watermark_lsn50.sql': '0061__watermark_lsn50.sql',
+    '0053__watermark_cloud_parity.sql': '0068__watermark_cloud_parity.sql',
+  });
+  const db = path.join(root, 'lineage-53-device.db');
+  const boot = await bootstrapFresh(cliRunner(db), { migrationsDir: deviceDir, appVersion: 'lineage-53-fixture' });
+  assert.deepEqual(boot.applied, Array.from({ length: 53 }, (_, i) => i + 1));
+
+  // Rows written while the device still runs the foreign numbering. The
+  // WATERMARK tables reference devices(deveui) ON DELETE CASCADE, so the
+  // later 0060 devices rebuild must keep them (FK fence held across the swap).
+  const runner = cliRunner(db);
+  await runner.exec([
+    'PRAGMA foreign_keys=ON;',
+    "INSERT INTO devices (deveui, name, type_id, created_at, updated_at) VALUES ('A840410000000001', 'test sensor', 'DRAGINO_LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');",
+    'INSERT INTO watermark_calibrations (deveui, pullup_1_ohm, pulldown_1_ohm, series_fwd_1_ohm, series_rev_1_ohm, pullup_2_ohm, pulldown_2_ohm, series_fwd_2_ohm, series_rev_2_ohm, measured_at, method)',
+    "  VALUES ('A840410000000001', 47000, 47000, 100, 100, 47000, 47000, 100, 100, '2026-10-01T00:00:00Z', 'bench');",
+    "INSERT INTO watermark_readings (deveui, recorded_at, payload_hex, frame_status, conversion_version) VALUES ('A840410000000001', '2026-10-01T00:10:00Z', '00', 'accepted', 'test-1');",
+    "INSERT INTO watermark_readings (deveui, recorded_at, payload_hex, frame_status, conversion_version) VALUES ('A840410000000001', '2026-10-01T00:20:00Z', '01', 'accepted', 'test-1');",
+  ].join('\n'));
+  const before = {
+    calibrations: await tableDigest(runner, 'watermark_calibrations', 'deveui'),
+    readings: await tableDigest(runner, 'watermark_readings', 'id'),
+  };
+  assert.equal(before.calibrations.count, 1);
+  assert.equal(before.readings.count, 2);
+
+  const backupDir = path.join(root, 'backups');
+  const applyRes = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: true, writersStopped: true, backupDir });
+  assert.equal(applyRes.refused, false, JSON.stringify(applyRes.summary));
+  // 1-21 common prefix; 18 exact + 10 header-stripped from the vendored
+  // 22-49 range (as in the 49 case above); foreign 50-53 are 4 more exact
+  // remaps onto main 69, 70, 61, 68.
+  assert.equal(applyRes.summary.total, 53);
+  assert.equal(applyRes.summary.match, 21);
+  assert.equal(applyRes.summary.remapExact, 22);
+  assert.equal(applyRes.summary.remapHeaderStripped, 10);
+  assert.equal(applyRes.summary.refused, 0);
+  assert.equal(applyRes.applied, true, JSON.stringify(applyRes.summary));
+  const tail = Object.fromEntries(applyRes.rows
+    .filter((r) => r.version >= 50)
+    .map((r) => [r.version, `${r.decision}->${r.target && r.target.version}`]));
+  assert.deepEqual(tail, { 50: 'remap->69', 51: 'remap->70', 52: 'remap->61', 53: 'remap->68' });
+  assert.deepEqual(await verifyReconciliationConsistency(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
+
+  const appliedRows = await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'");
+  const applied = new Set(appliedRows.map((r) => r.version));
+  const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
+  const expectedPending = [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67];
+  assert.deepEqual(pending, expectedPending);
+
+  const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
+  assert.deepEqual(carryRes.applied, expectedPending);
+  assert.deepEqual(await verifyHead(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR }), { ok: true });
+
+  // Schema equals a fresh database built from main's seed.
+  const seedDb = path.join(root, 'seed.db');
+  await cliRunner(seedDb).exec(fs.readFileSync(path.join(REPO, 'database/seed-blank.sql'), 'utf8'));
+  const cmp = compareSchemas(await snapshotSchema(cliRunner(db)), await snapshotSchema(cliRunner(seedDb)));
+  assert.deepEqual(cmp.diffs, []);
+
+  assert.deepEqual(await cliRunner(db).all('PRAGMA foreign_key_check'), []);
+  assert.deepEqual(await cliRunner(db).all('PRAGMA integrity_check'), [{ integrity_check: 'ok' }]);
+
+  // WATERMARK rows written before the holes survive 0060 unchanged.
+  const after = {
+    calibrations: await tableDigest(cliRunner(db), 'watermark_calibrations', 'deveui'),
+    readings: await tableDigest(cliRunner(db), 'watermark_readings', 'id'),
+  };
+  assert.deepEqual(after, before);
+  const devices = await cliRunner(db).all("SELECT deveui, type_id FROM devices WHERE deveui = 'A840410000000001'");
+  assert.deepEqual(devices, [{ deveui: 'A840410000000001', type_id: 'DRAGINO_LSN50' }]);
+
+  // A second pass is a no-op: every row matches, nothing pending.
+  const again = await runReconcile({ dbPath: db, migrationsDir: MAIN_MIGRATIONS_DIR, fixturesDir: REAL_FIXTURES_DIR, apply: false });
+  assert.equal(again.refused, false);
+  assert.equal(again.summary.match, 70);
+  assert.equal(again.summary.remapExact + again.summary.remapHeaderStripped, 0);
+  const carryAgain = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile-2', writersStopped: true });
+  assert.deepEqual(carryAgain.applied, []);
 });
 
 test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cleanly, verifyHead ok', { timeout: 900_000 }, async () => {
@@ -704,13 +818,14 @@ test('Bovey-lineage fixture: reconcile classifies all 4 foreign rows, applies cl
   // durable valve dispatch intents, the RAK10701 field-tester device type,
   // the WATERMARK LSN50 tables, weather provider store, daily agronomy,
   // FAO-56 stage keys, zone weather_source sync, zone stage start date,
-  // daily agronomy record sync, WATERMARK cloud parity), which landed on
-  // main after this device fixture's throughVersion (25).
+  // daily agronomy record sync, WATERMARK cloud parity, journal V2
+  // plot-group snapshots, journal catalog v11), which landed on main after
+  // this device fixture's throughVersion (25).
   const applied = new Set(
     (await cliRunner(db).all("SELECT version FROM schema_migrations WHERE status='applied'")).map((r) => r.version)
   );
   const pending = loadMigrations(MAIN_MIGRATIONS_DIR).map((m) => m.version).filter((v) => !applied.has(v));
-  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68]);
+  assert.deepEqual(pending, [...Array.from({ length: 53 - 26 + 1 }, (_, i) => 26 + i), 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70]);
 
   const carryRes = await applyPending(cliRunner(db), { migrationsDir: MAIN_MIGRATIONS_DIR, appVersion: 'post-reconcile', writersStopped: true });
   assert.deepEqual(carryRes.applied, pending);

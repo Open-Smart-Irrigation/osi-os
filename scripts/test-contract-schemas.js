@@ -16,6 +16,7 @@ const WATERMARK_FOREIGN_DEVICE_EUI = 'A84041A171000003';
 const COMPACT_UUID = '12345678123442348234123456789abc';
 const JOURNAL_COMMANDS = [
     'UPSERT_JOURNAL_ENTRY',
+    'UPSERT_JOURNAL_ENTRY_BATCH',
     'VOID_JOURNAL_ENTRY',
     'UPSERT_JOURNAL_CUSTOM_VOCAB',
     'UPSERT_JOURNAL_PLOT',
@@ -47,10 +48,14 @@ const JOURNAL_EVENT_BINDINGS = {
     JOURNAL_VOCAB_UPSERTED: ['JOURNAL_VOCAB', 'JournalVocab', 'custom_field_uuid'],
     JOURNAL_PLOT_UPSERTED: ['JOURNAL_PLOT', 'JournalPlot', 'plot_uuid'],
     JOURNAL_PLOT_GROUP_UPSERTED: ['JOURNAL_PLOT_GROUP', 'JournalPlotGroup', 'group_uuid'],
+    JOURNAL_CROP_CYCLE_UPSERTED: ['JOURNAL_CROP_CYCLE', 'JournalCropCycle', 'cycle_uuid'],
 };
 const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
+    },
+    UPSERT_JOURNAL_ENTRY_BATCH: {
+        effect_key: { prefix: 'journal_entry_batch', uuid_path: 'batch_uuid', version_path: 'base_sync_version' },
     },
     VOID_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry_uuid', version_path: 'base_sync_version' },
@@ -510,8 +515,36 @@ function semanticBindingErrors(schema, value) {
     return errors;
 }
 
+function journalBatchCommandErrors(value) {
+    if (!value || value.command_type !== 'UPSERT_JOURNAL_ENTRY_BATCH') return [];
+    const errors = [];
+    let serialized;
+    try {
+        serialized = JSON.stringify(value);
+    } catch (_) {
+        return ['$: journal batch command must be JSON-serializable'];
+    }
+    if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > 256 * 1024) {
+        errors.push('$: journal batch serialized payload exceeds 256 KiB');
+    }
+    if (Array.isArray(value.members)) {
+        let previous = null;
+        for (const member of value.members) {
+            const key = member && `${member.plot_uuid}\u0000${member.entry_uuid}`;
+            if (previous != null && key <= previous) {
+                errors.push('$.members: must use canonical order by plot_uuid then entry_uuid');
+                break;
+            }
+            previous = key;
+        }
+    }
+    return errors;
+}
+
 function contractValidationErrors(schema, value, rootSchema) {
-    return validationErrors(schema, value, rootSchema).concat(semanticBindingErrors(schema, value));
+    return validationErrors(schema, value, rootSchema)
+        .concat(semanticBindingErrors(schema, value))
+        .concat(journalBatchCommandErrors(value));
 }
 
 function reportCheck(condition, success, failure) {
@@ -1122,7 +1155,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     // WATERMARK parity is active now; only the still-deferred journal and
     // scoped-access sets belong in this staging oracle.
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(['UPSERT_JOURNAL_ENTRY_BATCH']) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',
@@ -1131,7 +1164,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(['JOURNAL_CROP_CYCLE_UPSERTED']) &&
         JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
     reportCheck(exactStaging, 'staging manifest pins the exact deferred journal and scoped-access sets', 'staging manifest drifted from the exact deferred journal and scoped-access sets');
 }
@@ -1337,18 +1370,43 @@ const plotGroup = {
     deleted_at: null,
     members: [UUID],
 };
+const cropCycle = {
+    contract_version: 1,
+    cycle_uuid: UUID,
+    owner_user_uuid: COMPACT_UUID,
+    crop_code: 'crop.barley_spring',
+    variety: 'Test variety',
+    group_uuid: null,
+    opened_by_entry_uuid: '12345678-1234-4234-8234-123456789abd',
+    starts_on: '2026-07-13',
+    gateway_device_eui: '0016C001F1000001',
+    created_by_principal_uuid: '12345678-1234-4234-8234-123456789abe',
+    sync_version: 1,
+    created_at: '2026-07-13T08:00:00.000Z',
+    updated_at: '2026-07-13T08:00:00.000Z',
+    deleted_at: null,
+    plots: [{
+        cycle_uuid: UUID,
+        plot_uuid: '12345678-1234-4234-8234-123456789abf',
+        ends_on: null,
+        closed_by_entry_uuid: null,
+        close_reason: null,
+    }],
+};
 
 const resourceSamples = {
     JournalEntry: journalEntry,
     JournalVocab: customVocab,
     JournalPlot: plot,
     JournalPlotGroup: plotGroup,
+    JournalCropCycle: cropCycle,
 };
 const eventResourceSamples = Object.assign({}, resourceSamples, {
     JournalEntry: Object.assign({}, journalEntry),
     JournalVocab: Object.assign({}, customVocab),
     JournalPlot: Object.assign({}, plot),
     JournalPlotGroup: Object.assign({}, plotGroup),
+    JournalCropCycle: Object.assign({}, cropCycle),
 });
 for (const sample of Object.values(eventResourceSamples)) delete sample.base_sync_version;
 
@@ -1486,6 +1544,9 @@ const journalIdentityCases = [
     ['JournalPlotAggregate', eventResourceSamples.JournalPlot, 'plot_uuid'],
     ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'group_uuid'],
     ['JournalPlotGroupAggregate', eventResourceSamples.JournalPlotGroup, 'members.0'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'cycle_uuid'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'plots.0.plot_uuid'],
+    ['JournalCropCycleAggregate', eventResourceSamples.JournalCropCycle, 'opened_by_entry_uuid'],
 ];
 for (const [definitionName, sample, identityPath] of journalIdentityCases) {
     for (const invalidUuid of [
@@ -1676,6 +1737,55 @@ const commandFixtures = [
         plot_group: Object.assign({}, plotGroup, { owner_user_uuid: UUID }),
     },
 ];
+const BATCH_UUID = 'a1111111-1111-4111-8111-111111111111';
+const BATCH_PLOT_UUID = 'a2222222-2222-4222-8222-222222222222';
+const BATCH_ENTRY_UUID = 'a3333333-3333-4333-8333-333333333333';
+const SECOND_BATCH_ENTRY_UUID = 'a4444444-4444-4444-8444-444444444444';
+const journalBatchShared = {
+    activity_code: 'irrigation',
+    template_code: 'farmer_quick',
+    template_version: 1,
+    layout_code: 'open_field',
+    layout_version: 1,
+    catalog_version: 1,
+    occurred_start: '2026-07-13T08:00:00.000Z',
+    occurred_end: null,
+    occurred_timezone: 'Europe/Zurich',
+    occurred_utc_offset_minutes: 120,
+    device_eui: null,
+    season_crop: null,
+    season_variety: null,
+    campaign_uuid: null,
+    protocol_code: null,
+    protocol_version: null,
+    observation_unit_code: null,
+    pass_uuid: null,
+    note: 'Irrigation round',
+    values: journalEntry.values,
+};
+function batchUuidFromIndex(index) {
+    return `b${String(index).padStart(7, '0')}-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+function journalBatchFixture(memberCount = 1) {
+    return {
+        ...trustedCommandIdentity,
+        command_type: 'UPSERT_JOURNAL_ENTRY_BATCH',
+        command_id: UUID,
+        effect_key: `journal_entry_batch:${BATCH_UUID}:0`,
+        contract_version: 1,
+        batch_uuid: BATCH_UUID,
+        base_sync_version: 0,
+        submitted_intent_hash: 'a'.repeat(64),
+        shared: journalBatchShared,
+        members: Array.from({ length: memberCount }, (_, index) => ({
+            entry_uuid: index === 0 ? BATCH_ENTRY_UUID : batchUuidFromIndex(index),
+            base_sync_version: 0,
+            plot_uuid: index === 0 ? BATCH_PLOT_UUID : batchUuidFromIndex(index + 1000),
+            cycle_uuid: null,
+            cycle_action: null,
+        })),
+    };
+}
 for (const [fixtureIndex, payloadKey, identityPaths] of [
     [0, 'entry', ['owner_user_uuid', 'author_principal_uuid']],
     [2, 'custom_vocab', ['owner_user_uuid']],
@@ -1943,6 +2053,103 @@ for (const identityField of ['owner_user_uuid', 'author_principal_uuid', 'author
         cmdSchema,
         missingIdentity,
         new RegExp(`${identityField}.*required`)
+    );
+}
+for (const memberCount of [1, 84, 100]) {
+    const fixture = journalBatchFixture(memberCount);
+    expectValid(
+        `UPSERT_JOURNAL_ENTRY_BATCH accepts ${memberCount} canonical members`,
+        cmdSchema,
+        fixture
+    );
+    reportCheck(
+        Buffer.byteLength(JSON.stringify(fixture), 'utf8') < 256 * 1024,
+        `UPSERT_JOURNAL_ENTRY_BATCH ${memberCount}-member fixture fits below 256 KiB`,
+        `UPSERT_JOURNAL_ENTRY_BATCH ${memberCount}-member fixture exceeds 256 KiB`
+    );
+}
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects zero members',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(), { members: [] }),
+    /members.*(?:few|required)/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects 101 members',
+    cmdSchema,
+    journalBatchFixture(101),
+    /members.*many/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects an unsupported contract version',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(), { contract_version: 2 }),
+    /contract_version.*constant/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects a duplicate entry and plot pair',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(2), {
+        members: [
+            journalBatchFixture().members[0],
+            Object.assign({}, journalBatchFixture().members[0]),
+        ],
+    }),
+    /members.*(?:unique|duplicate)/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects noncanonical member ordering',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(2), {
+        members: journalBatchFixture(2).members.slice().reverse(),
+    }),
+    /members.*canonical order/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects an oversized serialized payload',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(), {
+        shared: Object.assign({}, journalBatchShared, {
+            values: Array.from({ length: 128 }, (_, index) => ({
+                attribute_code: `attr.note_${index}`,
+                group_index: index,
+                value_status: 'observed',
+                value_num: null,
+                value_text: 'x'.repeat(4096),
+                unit_code: null,
+                entered_value_num: null,
+                entered_unit_code: null,
+            })),
+        }),
+    }),
+    /serialized payload exceeds 256 KiB/
+);
+expectInvalid(
+    'UPSERT_JOURNAL_ENTRY_BATCH rejects an invalid cycle action',
+    cmdSchema,
+    Object.assign({}, journalBatchFixture(), {
+        members: [Object.assign({}, journalBatchFixture().members[0], { cycle_action: 'replace' })],
+    }),
+    /cycle_action.*enum/
+);
+for (const missingField of ['batch_uuid', 'base_sync_version', 'submitted_intent_hash']) {
+    const missing = journalBatchFixture();
+    delete missing[missingField];
+    expectInvalid(
+        `UPSERT_JOURNAL_ENTRY_BATCH requires ${missingField}`,
+        cmdSchema,
+        missing,
+        new RegExp(`${missingField}.*required`)
+    );
+}
+for (const missingField of ['entry_uuid', 'base_sync_version', 'plot_uuid']) {
+    const missing = journalBatchFixture();
+    delete missing.members[0][missingField];
+    expectInvalid(
+        `UPSERT_JOURNAL_ENTRY_BATCH member requires ${missingField}`,
+        cmdSchema,
+        missing,
+        new RegExp(`${missingField}.*required`)
     );
 }
 expectValid(
@@ -2310,6 +2517,7 @@ expectInvalid(
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',
+    'journal_entry_batch:{batch_uuid}:0',
     'journal_vocab:{custom_field_uuid}:{base_sync_version}',
     'journal_plot:{plot_uuid}:{base_sync_version}',
     'journal_plot_group:{group_uuid}:{base_sync_version}',
