@@ -4,9 +4,9 @@
  *
  * Creates (or reuses if already present):
  *   • 3 ChirpStack applications:  OSI Sensors, OSI Actuators, OSI Field Tester
- *   • 9 device profiles:          KIWI Sensor, STREGA Valve, STREGA Valve Gen2, Dragino LSN50,
- *                                 RAK Field Tester, SenseCAP S2120, Aqua-Scope LoRain, Milesight UC512,
- *                                 SDI-12 Soil Node
+ *   • 10 device profiles:         KIWI Sensor, CLOVER Sensor, STREGA Valve, STREGA Valve Gen2,
+ *                                 Dragino LSN50, RAK Field Tester, SenseCAP S2120, Aqua-Scope LoRain,
+ *                                 Milesight UC512, SDI-12 Soil Node
  *   • 1 API key:                  osi-nodered  (used by Node-RED function nodes)
  *
  * Writes results to:
@@ -17,6 +17,22 @@
  *
  * Run ONCE on the Pi after first boot:
  *   node /tmp/chirpstack-bootstrap.js
+ *
+ * Repair mode for a gateway that is already provisioned (deploy.sh runs it):
+ *   node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles [--repoint-clover-device=<DevEUI> ...]
+ * Earlier bootstraps created the Kiwi profile without a codec and wrote
+ * CHIRPSTACK_PROFILE_CLOVER as an alias of the RAK field-tester profile, which
+ * has no codec either, so Kiwi and Clover uplinks never decoded. Repair mode
+ * reuses the existing API key and never runs the full provisioning pass. It
+ * attaches the Tektelic codec to the Kiwi and Clover profiles that have none
+ * (a codec already there, also one attached by hand, is left alone), gets or
+ * creates the Clover profile when CLOVER is unset or aliased, and then rewrites
+ * only the chirpstack_profile_clover UCI key and the CHIRPSTACK_PROFILE_CLOVER
+ * env line. Each --repoint-clover-device moves that device from the
+ * field-tester profile to the Clover profile through the ChirpStack API; a
+ * device on any other profile is refused and left alone. Images built before
+ * this mode existed ignore the flag and provision fully: run only the
+ * /srv/node-red copy that deploy.sh installs.
  *
  * Overridable via environment variables:
  *   CHIRPSTACK_API_URL       ChirpStack gRPC API URL       (default: http://localhost:8080)
@@ -34,6 +50,7 @@
  *
  * Profile name overrides (use to reuse an existing device profile):
  *   CS_PROFILE_KIWI_NAME     (default: "OSI KIWI Sensor")
+ *   CS_PROFILE_CLOVER_NAME   (default: "OSI CLOVER Sensor")
  *   CS_PROFILE_STREGA_NAME   (default: "OSI STREGA Valve")
  *   CS_PROFILE_STREGA_GEN2_NAME (default: "OSI STREGA Valve Gen2")
  *   CS_PROFILE_LSN50_NAME    (default: "OSI Dragino LSN50")
@@ -49,6 +66,7 @@
  *   LORAIN_CODEC_PATH        (default: "/srv/node-red/codecs/aquascope_lorain_decoder.js")
  *   UC512_CODEC_PATH         (default: "/srv/node-red/codecs/milesight_uc512_decoder.js")
  *   SDI12_CODEC_PATH         (default: "/srv/node-red/codecs/dragino_sdi12_decoder.js")
+ *   TEKTELIC_CODEC_PATH      (default: "/srv/node-red/codecs/tektelic_agriculture_decoder.js")
  */
 
 'use strict';
@@ -90,6 +108,7 @@ const CFG = {
   appActuatorsName: process.env.CS_APP_ACTUATORS_NAME || 'OSI Actuators',
   appFieldTesterName: process.env.CS_APP_FIELD_TESTER_NAME || 'OSI Field Tester',
   profileKiwiName: process.env.CS_PROFILE_KIWI_NAME || 'OSI KIWI Sensor',
+  profileCloverName: process.env.CS_PROFILE_CLOVER_NAME || 'OSI CLOVER Sensor',
   profileStregaName: process.env.CS_PROFILE_STREGA_NAME || 'OSI STREGA Valve',
   profileStregaGen2Name: process.env.CS_PROFILE_STREGA_GEN2_NAME || 'OSI STREGA Valve Gen2',
   profileLsn50Name: process.env.CS_PROFILE_LSN50_NAME || 'OSI Dragino LSN50',
@@ -104,8 +123,12 @@ const CFG = {
   s2120CodecPath: process.env.S2120_CODEC_PATH || '/srv/node-red/codecs/sensecap_s2120_decoder.js',
   lorainCodecPath: process.env.LORAIN_CODEC_PATH || '/srv/node-red/codecs/aquascope_lorain_decoder.js',
   uc512CodecPath: process.env.UC512_CODEC_PATH || '/srv/node-red/codecs/milesight_uc512_decoder.js',
-  sdi12CodecPath: process.env.SDI12_CODEC_PATH || '/srv/node-red/codecs/dragino_sdi12_decoder.js'
+  sdi12CodecPath: process.env.SDI12_CODEC_PATH || '/srv/node-red/codecs/dragino_sdi12_decoder.js',
+  tektelicCodecPath: process.env.TEKTELIC_CODEC_PATH || '/srv/node-red/codecs/tektelic_agriculture_decoder.js'
 };
+
+const KIWI_PROFILE_DESCRIPTION = 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)';
+const CLOVER_PROFILE_DESCRIPTION = 'TEKTELIC CLOVER agriculture sensor (LoRaWAN 1.0.3 OTAA)';
 
 const ENV_LOADER_MARKER = '// [OSI] chirpstack env loader';
 
@@ -174,6 +197,16 @@ async function getOrCreateProfileWithCodec(client, tenantId, name, description, 
   if (existing) {
     if (desiredCodecScript) {
       const existingProfile = await client.getDeviceProfile(existing.id);
+      // keepExistingCodec: a profile that already runs a JS codec keeps it. Used
+      // for the Kiwi and Clover profiles, which older gateways set up by hand
+      // with the vendor's own decoder; replacing it would change the decoded
+      // field names under devices that already report.
+      if (options.keepExistingCodec && existingProfile
+        && Number(existingProfile.getPayloadCodecRuntime()) === 2
+        && normalizeCodecScript(existingProfile.getPayloadCodecScript())) {
+        console.log(`  ✓ Profile exists: "${name}" (${existing.id}), keeps its own codec`);
+        return existing.id;
+      }
       const existingCodecRuntime = existingProfile && typeof existingProfile.getPayloadCodecRuntime === 'function'
         ? Number(existingProfile.getPayloadCodecRuntime())
         : null;
@@ -424,6 +457,281 @@ function validatePortableFlows() {
   console.log('  ✓ flows.json portable communication contract verified');
 }
 
+const KIWI_ENV_KEY = 'CHIRPSTACK_PROFILE_KIWI';
+const CLOVER_ENV_KEY = 'CHIRPSTACK_PROFILE_CLOVER';
+const RAK10701_ENV_KEY = 'CHIRPSTACK_PROFILE_RAK10701';
+const REPAIR_FLAG = '--repair-soil-profiles';
+const REPOINT_FLAG = '--repoint-clover-device';
+
+function readTektelicCodecScript() {
+  return readCodecScript(CFG.tektelicCodecPath, 'Tektelic KIWI/CLOVER');
+}
+
+// A profile that already runs a JS codec keeps it (keepExistingCodec), so a
+// codec attached by hand is never replaced; a profile without one gets the
+// shipped Tektelic codec.
+async function getOrCreateKiwiProfile(client, tenantId, codecScript) {
+  return getOrCreateProfileWithCodec(client, tenantId, CFG.profileKiwiName, KIWI_PROFILE_DESCRIPTION, codecScript, {
+    keepExistingCodec: true
+  });
+}
+
+async function getOrCreateCloverProfile(client, tenantId, codecScript) {
+  return getOrCreateProfileWithCodec(client, tenantId, CFG.profileCloverName, CLOVER_PROFILE_DESCRIPTION, codecScript, {
+    keepExistingCodec: true
+  });
+}
+
+function assertCloverProfileDistinct(cloverProfileId, rak10701ProfileId) {
+  if (String(cloverProfileId || '').trim() && String(cloverProfileId).trim() === String(rak10701ProfileId || '').trim()) {
+    throw new Error('The Clover and the RAK field-tester profile resolve to the same ChirpStack profile; check CS_PROFILE_CLOVER_NAME and CS_PROFILE_RAK_NAME');
+  }
+}
+
+// --- Repair mode (--repair-soil-profiles) ----------------------------------
+// Never falls through to the full provisioning pass: it creates no tenant,
+// application or API key, and never rewrites the env file wholesale.
+
+function readEnvFileText() {
+  try {
+    return fs.readFileSync(CFG.envFile, 'utf8');
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+// First occurrence wins, as in node-red.init's load_chirpstack_env_value.
+function parseEnvText(text) {
+  const values = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (key && !Object.prototype.hasOwnProperty.call(values, key)) {
+      values[key] = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
+    }
+  }
+  return values;
+}
+
+// Rewrites every line of one key and keeps every other line as it is.
+function setEnvLine(text, key, value) {
+  const lines = String(text).split('\n');
+  let found = false;
+  const out = lines.map((line) => {
+    const eq = line.indexOf('=');
+    if (eq > 0 && line.slice(0, eq).trim() === key) {
+      found = true;
+      return `${key}=${value}`;
+    }
+    return line;
+  });
+  if (!found) {
+    if (out.length > 1 && out[out.length - 1] === '') out.splice(out.length - 1, 0, `${key}=${value}`);
+    else out.push(`${key}=${value}`);
+  }
+  return out.join('\n');
+}
+
+// The env file holds the API key: write a temp file, flush it to disk, then
+// rename it over the old one, so a power cut leaves either file, never an
+// empty one.
+function writeEnvFileAtomic(text) {
+  const mode = fs.statSync(CFG.envFile).mode & 0o777;
+  const tmp = `${CFG.envFile}.soil-repair.tmp`;
+  const fd = fs.openSync(tmp, 'w', mode);
+  try {
+    fs.writeSync(fd, text);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, CFG.envFile);
+}
+
+function readUciValue(envKey) {
+  const uciKey = toUciCloudKey(envKey);
+  if (!uciKey) return '';
+  try {
+    return String(execFileSync('uci', ['-q', 'get', `osi-server.cloud.${uciKey}`], { encoding: 'utf8' }) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function parseRepairArgs(argv) {
+  const options = { repair: false, repointDevEuis: [] };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = String(argv[i]);
+    if (arg === REPAIR_FLAG) {
+      options.repair = true;
+    } else if (arg === REPOINT_FLAG || arg.startsWith(`${REPOINT_FLAG}=`)) {
+      const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[(i += 1)];
+      const parts = String(value === undefined ? '' : value).split(',').map((part) => part.trim()).filter(Boolean);
+      if (!parts.length || parts.some((part) => part.startsWith('--'))) {
+        throw new Error(`${REPOINT_FLAG} needs a DevEUI, e.g. ${REPOINT_FLAG}=<DevEUI>`);
+      }
+      options.repointDevEuis.push(...parts);
+      options.repair = true;
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function profileGetter(profile, getter) {
+  return profile && typeof profile[getter] === 'function' ? profile[getter]() : undefined;
+}
+
+function hasJsCodec(profile) {
+  return Number(profileGetter(profile, 'getPayloadCodecRuntime')) === 2
+    && Boolean(normalizeCodecScript(profileGetter(profile, 'getPayloadCodecScript')));
+}
+
+// Leaves a profile alone when it already runs a JS codec (also one attached by
+// hand); otherwise attaches the shipped codec, keeping the profile's own name,
+// description and intervals. Returns 'kept', 'attached' or 'missing'.
+async function ensureProfileCodec(client, profileId, label, codecScript) {
+  const profile = await client.getDeviceProfile(profileId);
+  if (!profile) return 'missing';
+  if (hasJsCodec(profile)) {
+    console.log(`  ✓ ${label} profile ${profileId} keeps its codec`);
+    return 'kept';
+  }
+  await client.updateDeviceProfile({
+    id: profileId,
+    tenantId: profileGetter(profile, 'getTenantId'),
+    name: profileGetter(profile, 'getName'),
+    description: profileGetter(profile, 'getDescription'),
+    region: CFG.region,
+    uplinkInterval: profileGetter(profile, 'getUplinkInterval') || 3600,
+    deviceStatusReqInterval: profileGetter(profile, 'getDeviceStatusReqInterval') || 1,
+    autoDetectMeasurements: true,
+    payloadCodecScript: normalizeCodecScript(codecScript)
+  });
+  console.log(`  ~ ${label} profile ${profileId}: Tektelic codec attached`);
+  return 'attached';
+}
+
+async function findTenantId(client) {
+  const tenants = listItemsToObjects(await client.listTenants());
+  const tenant = tenants.find((candidate) => candidate.name === CFG.tenantName) || tenants[0];
+  if (!tenant) {
+    throw new Error('no ChirpStack tenant: this gateway is not provisioned; let the osi-bootstrap service provision it');
+  }
+  return tenant.id;
+}
+
+async function repairKiwiProfile(client, envValues, codecScript) {
+  const kiwiProfileId = readUciValue(KIWI_ENV_KEY) || String(envValues[KIWI_ENV_KEY] || '').trim();
+  if (!kiwiProfileId) {
+    console.log('  ⚠ no Kiwi profile id configured; nothing to repair');
+    return;
+  }
+  if ((await ensureProfileCodec(client, kiwiProfileId, 'Kiwi', codecScript)) === 'missing') {
+    console.log(`  ⚠ Kiwi profile ${kiwiProfileId} not found in ChirpStack; left as it is`);
+  }
+}
+
+async function repairCloverProfile(client, envText, envValues, codecScript) {
+  const rak10701ProfileId = readUciValue(RAK10701_ENV_KEY) || String(envValues[RAK10701_ENV_KEY] || '').trim();
+  const uciClover = readUciValue(CLOVER_ENV_KEY);
+  const envClover = String(envValues[CLOVER_ENV_KEY] || '').trim();
+  const usable = (value) => Boolean(value) && !(rak10701ProfileId && value === rak10701ProfileId);
+  // node-red.init resolves UCI first; a distinct id in either store is a
+  // deliberate choice and is kept, also when the other store holds the alias.
+  let cloverProfileId = usable(uciClover) ? uciClover : (usable(envClover) ? envClover : '');
+  // A distinct id alone is not proof: the profile must exist and run a codec.
+  if (cloverProfileId && (await ensureProfileCodec(client, cloverProfileId, 'Clover', codecScript)) === 'missing') {
+    console.log(`  ⚠ configured Clover profile ${cloverProfileId} not found in ChirpStack; using "${CFG.profileCloverName}"`);
+    cloverProfileId = '';
+  }
+  if (!cloverProfileId) {
+    cloverProfileId = await getOrCreateCloverProfile(client, await findTenantId(client), codecScript);
+  }
+  assertCloverProfileDistinct(cloverProfileId, rak10701ProfileId);
+
+  let changed = false;
+  if (uciClover !== cloverProfileId) {
+    writeUciConfig({ [CLOVER_ENV_KEY]: cloverProfileId });
+    changed = true;
+  }
+  if (envClover !== cloverProfileId) {
+    writeEnvFileAtomic(setEnvLine(envText, CLOVER_ENV_KEY, cloverProfileId));
+    console.log(`  ✓ ${CFG.envFile}: ${CLOVER_ENV_KEY}=${cloverProfileId}`);
+    changed = true;
+  }
+  if (changed) {
+    console.log('  Restart Node-RED for the new Clover profile id to take effect (deploy.sh does this).');
+    console.log(`  A Clover registered before this repair stays on the field-tester profile until it is`);
+    console.log(`  re-registered, or moved with: ${REPOINT_FLAG}=<DevEUI>`);
+  } else {
+    console.log(`  ✓ Clover profile ${cloverProfileId} is distinct from the field-tester profile`);
+  }
+  return { cloverProfileId, rak10701ProfileId };
+}
+
+async function repointCloverDevices(client, devEuis, cloverProfileId, rak10701ProfileId) {
+  const problems = [];
+  for (const raw of devEuis) {
+    const devEui = chirpstack.normalizeDevEui(raw);
+    if (!/^[0-9A-F]{16}$/.test(devEui)) {
+      problems.push(`${raw}: not a 16-hex DevEUI`);
+      continue;
+    }
+    const device = await client.getDevice(devEui);
+    if (!device) {
+      problems.push(`${devEui}: not registered in ChirpStack`);
+      continue;
+    }
+    const current = String(device.getDeviceProfileId() || '').trim();
+    if (current === cloverProfileId) {
+      console.log(`  ✓ ${devEui} already on the Clover profile`);
+    } else if (rak10701ProfileId && current === rak10701ProfileId) {
+      await client.setDeviceProfile(devEui, cloverProfileId);
+      console.log(`  ~ ${devEui} moved from the field-tester profile to the Clover profile`);
+    } else {
+      problems.push(`${devEui}: on profile ${current || '(none)'}, not the field-tester profile; left alone`);
+    }
+  }
+  for (const problem of problems) console.log(`  ⚠ ${problem}`);
+  if (problems.length) {
+    throw new Error(`${problems.length} device(s) not repointed`);
+  }
+}
+
+async function repairSoilProfiles(options) {
+  console.log('\n[ repair ] KIWI and CLOVER device profiles');
+  const envText = readEnvFileText();
+  if (envText === null) {
+    throw new Error(`${CFG.envFile} not found: this gateway is not provisioned; let the osi-bootstrap service provision it`);
+  }
+  const envValues = parseEnvText(envText);
+  const apiKey = String(process.env.CHIRPSTACK_API_KEY || envValues.CHIRPSTACK_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('no ChirpStack API key in the environment or the env file; repair mode never creates one');
+  }
+  const codecScript = readTektelicCodecScript();
+  if (!normalizeCodecScript(codecScript)) {
+    throw new Error(`Tektelic codec missing at ${CFG.tektelicCodecPath}; nothing repaired`);
+  }
+  const apiUrl = String(process.env.CHIRPSTACK_API_URL || process.env.CS_URL || envValues.CHIRPSTACK_API_URL || CFG.url).trim();
+  const client = chirpstack.createClient({ apiUrl, apiKey });
+
+  await repairKiwiProfile(client, envValues, codecScript);
+  const { cloverProfileId, rak10701ProfileId } = await repairCloverProfile(client, envText, envValues, codecScript);
+
+  if (options.repointDevEuis.length) {
+    console.log('\n[ repair ] Registered Clover devices');
+    await repointCloverDevices(client, options.repointDevEuis, cloverProfileId, rak10701ProfileId);
+  }
+  console.log('\n  Soil sensor profile repair complete\n');
+}
+
 async function main() {
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   OSI OS  —  ChirpStack Bootstrap            ║');
@@ -452,7 +760,9 @@ async function main() {
   const fieldTesterAppId = await getOrCreateApp(client, tenantId, CFG.appFieldTesterName, 'RAK10701 field coverage testing');
 
   console.log('\n[ 4/5 ] Device profiles');
-  const kiwiProfileId = await getOrCreateProfile(client, tenantId, CFG.profileKiwiName, 'Kiwi soil moisture & temperature (LoRaWAN 1.0.3 OTAA)');
+  const tektelicCodecScript = readTektelicCodecScript();
+  const kiwiProfileId = await getOrCreateKiwiProfile(client, tenantId, tektelicCodecScript);
+  const cloverProfileId = await getOrCreateCloverProfile(client, tenantId, tektelicCodecScript);
   const stregaCodecScript = readCodecScript(CFG.stregaCodecPath, 'STREGA');
   const stregaProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileStregaName, 'Strega smart irrigation valve (LoRaWAN 1.0.3 OTAA)', stregaCodecScript);
   const stregaGen2CodecScript = readCodecScript(CFG.stregaGen2CodecPath, 'STREGA Gen2');
@@ -468,6 +778,7 @@ async function main() {
   const uc512ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileUc512Name, 'Milesight UC512 dual-valve controller (LoRaWAN 1.0.3 OTAA)', uc512CodecScript);
   const sdi12Script = readCodecScript(CFG.sdi12CodecPath, 'SDI12');
   const sdi12ProfileId = await getOrCreateProfileWithCodec(client, tenantId, CFG.profileSdi12Name, 'Dragino SDI-12-LB/LS soil probe converter (LoRaWAN 1.0.3 OTAA)', sdi12Script);
+  assertCloverProfileDistinct(cloverProfileId, rak10701ProfileId);
 
   console.log('\n[ 5/5 ] Writing configuration');
   const gatewayEui = detectGatewayEui();
@@ -486,9 +797,7 @@ async function main() {
     CHIRPSTACK_PROFILE_STREGA: stregaProfileId,
     CHIRPSTACK_PROFILE_STREGA_GEN2: stregaGen2ProfileId,
     CHIRPSTACK_PROFILE_LSN50: lsn50ProfileId,
-    // CLOVER is a compatibility alias for the RAK10701 field tester profile.
-    // Both keys intentionally point to the same ChirpStack device profile ID.
-    CHIRPSTACK_PROFILE_CLOVER: rak10701ProfileId,
+    CHIRPSTACK_PROFILE_CLOVER: cloverProfileId,
     CHIRPSTACK_PROFILE_RAK10701: rak10701ProfileId,
     CHIRPSTACK_PROFILE_S2120: s2120ProfileId,
     CHIRPSTACK_PROFILE_LORAIN: lorainProfileId,
@@ -512,6 +821,7 @@ async function main() {
   console.log(`    ${CFG.appFieldTesterName.padEnd(20)} ${fieldTesterAppId}\n`);
   console.log('  Device profiles:');
   console.log(`    ${CFG.profileKiwiName.padEnd(24)} ${kiwiProfileId}`);
+  console.log(`    ${CFG.profileCloverName.padEnd(24)} ${cloverProfileId}`);
   console.log(`    ${CFG.profileStregaName.padEnd(24)} ${stregaProfileId}`);
   console.log(`    ${CFG.profileStregaGen2Name.padEnd(24)} ${stregaGen2ProfileId}`);
   console.log(`    ${CFG.profileLsn50Name.padEnd(24)} ${lsn50ProfileId}`);
@@ -530,7 +840,16 @@ async function main() {
   console.log('  2. Register devices via the OSI OS UI or OSI Server UI (type + DevEUI + AppKey from device label)\n');
 }
 
-main().catch((error) => {
+async function run(argv) {
+  const options = parseRepairArgs(argv);
+  if (options.repair) {
+    await repairSoilProfiles(options);
+    return;
+  }
+  await main();
+}
+
+run(process.argv.slice(2)).catch((error) => {
   console.error('\nBootstrap failed:', error.message);
   process.exit(1);
 });

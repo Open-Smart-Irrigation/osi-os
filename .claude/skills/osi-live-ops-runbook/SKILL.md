@@ -286,6 +286,29 @@ dev workstation unless noted.
    rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
    ```
 
+   **One exception: the Kiwi/Clover profile repair.** `deploy.sh` runs it
+   itself; rerun it by hand only when the deploy printed its WARN, and only as
+   this exact command:
+   ```bash
+   node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles
+   ```
+   Add `--repoint-clover-device=<DevEUI>` (repeatable) to move a Clover
+   registered before the repair off the field-tester profile.
+   - Only the `/srv/node-red/` copy, which this deploy installed. Never
+     `/usr/share/node-red/chirpstack-bootstrap.js`: an image built before the
+     repair existed ignores the flag and runs a full provisioning pass (second
+     API key, env file rewritten without operator lines, the Clover alias back).
+   - Only with `--repair-soil-profiles` (or `--repoint-clover-device`). With
+     either flag the script never runs the full pass: it fails instead.
+   - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
+     none (a codec already there is left alone), a new `OSI CLOVER Sensor`
+     profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
+     UCI key, the `CHIRPSTACK_PROFILE_CLOVER` env line, and the profile of each
+     DevEUI you name. It reuses the existing API key and writes nothing once
+     all is correct. Node-RED needs a restart to pick up a new Clover id; after
+     a standalone run, request it with
+     `/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60`.
+
 ### What `deploy.sh` actually does end-to-end
 
 Reading straight through the script, in order:

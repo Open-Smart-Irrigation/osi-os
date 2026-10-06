@@ -52,3 +52,22 @@ The water stream, its moving highlight bands and the droplet motion are original
 to the `OSI_OS_valve_icons_v2` package (not Material Symbols), reproduced here
 with the class names renamed into this component's namespace and the animation
 made conditional on a confirmed-open state.
+
+---
+
+## TEKTELIC agriculture sensor codec — KIWI and CLOVER
+
+**Used in:** `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js`
+and its byte-identical bcm2709 copy. `chirpstack-bootstrap.js` attaches it to
+the Kiwi and Clover device profiles in ChirpStack.
+
+- Upstream project: `brocaar/lorawan-devices`, commit
+  `277e69a79347ceba2593e1da08117d0e3329ecda` (the revision the ChirpStack feed
+  pins in `feeds/chirpstack-openwrt-feed/chirpstack/lorawan-devices/Makefile`)
+- Source file: `vendor/tektelic/decoder_agriculture_sensor.js`
+- Upstream licence: **Apache License 2.0** (`LICENSE` at the root of the
+  upstream repository)
+
+The file is unmodified below a comment header that records this provenance;
+`scripts/verify-tektelic-agriculture-codec.js` checks its digest against the
+upstream file.

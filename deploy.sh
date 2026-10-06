@@ -2473,6 +2473,10 @@ fetch_required "SDI12 codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_sdi12_decoder.js" \
     "/srv/node-red/codecs/dragino_sdi12_decoder.js"
 
+fetch_required "Tektelic KIWI/CLOVER codec" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js" \
+    "/srv/node-red/codecs/tektelic_agriculture_decoder.js"
+
 fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
@@ -2517,6 +2521,28 @@ if [ -f /srv/node-red/.chirpstack.env ] && \
             done < "$cs_env_backup"
         fi
         chmod 600 "$cs_env_backup" 2>/dev/null || true
+    fi
+fi
+
+# Earlier bootstraps created the Kiwi profile without a codec and wrote
+# CHIRPSTACK_PROFILE_CLOVER as an alias of the codec-less RAK field-tester
+# profile, so Kiwi and Clover uplinks never decoded. The repair mode reuses the
+# gateway's API key and never provisions: it attaches the Tektelic codec to a
+# Kiwi or Clover profile that has none (a codec already there is left alone),
+# fixes the Clover profile id in one UCI key and one env line, and makes no
+# write once all is correct. Each ChirpStack call is bounded at 20 s. Node-RED
+# picks the id up at its restart later in this deploy. Never fails the deploy;
+# a failure is repeated in the closing banner.
+soil_profile_repair_failed=0
+if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null; then
+    echo "--- Kiwi and Clover device profiles (codec and Clover profile id) ---"
+    if OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
+        echo "OK: Kiwi and Clover device profiles checked"
+    else
+        soil_profile_repair_failed=1
+        echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
+        echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
+        echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
     fi
 fi
 
@@ -2790,4 +2816,10 @@ echo "  Payload:  /srv/node-red/payloads/$DEPLOY_STAMP (flipped + local health s
 echo "  UI:       http://<device-ip>:1880/gui"
 echo "  Rollback: automatic for payload failure; committed DB migration restore is the 1.B1 operator path, not auto."
 echo ""
+if [ "$soil_profile_repair_failed" = 1 ]; then
+    echo "  WARN: the Kiwi/Clover profile repair failed (see above); Kiwi and Clover uplinks"
+    echo "        may stay undecoded. Rerun exactly (the /srv/node-red copy, never /usr/share):"
+    echo "        node $BOOTSTRAP_SCRIPT_FALLBACK --repair-soil-profiles"
+    echo ""
+fi
 print_bootstrap_note

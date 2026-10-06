@@ -270,9 +270,10 @@ mirrored under both hardware profiles'
 and creates-or-reuses:
 
 - 3 ChirpStack applications: **OSI Sensors**, **OSI Actuators**, **OSI Field Tester**
-- 8 device profiles: **KIWI Sensor**, **STREGA Valve**, **STREGA Valve Gen2**,
-  **Dragino LSN50**, **RAK Field Tester**, **SenseCAP S2120**,
-  **Aqua-Scope LoRain**, **OSI Milesight UC512**
+- 10 device profiles: **KIWI Sensor**, **CLOVER Sensor**, **STREGA Valve**,
+  **STREGA Valve Gen2**, **Dragino LSN50**, **RAK Field Tester**,
+  **SenseCAP S2120**, **Aqua-Scope LoRain**, **OSI Milesight UC512**,
+  **SDI-12 Soil Node**
 - 1 API key (`osi-nodered`)
 
 Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
@@ -286,11 +287,11 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 | `CHIRPSTACK_APP_SENSORS` | OSI Sensors app UUID | `chirpstack_app_sensors` |
 | `CHIRPSTACK_APP_ACTUATORS` | OSI Actuators app UUID | `chirpstack_app_actuators` |
 | `CHIRPSTACK_APP_FIELD_TESTER` | OSI Field Tester app UUID | `chirpstack_app_field_tester` |
-| `CHIRPSTACK_PROFILE_KIWI` | KIWI Sensor profile UUID | `chirpstack_profile_kiwi` |
+| `CHIRPSTACK_PROFILE_KIWI` | KIWI Sensor profile UUID (Tektelic agriculture codec, attached only when the profile has none) | `chirpstack_profile_kiwi` |
 | `CHIRPSTACK_PROFILE_STREGA` | STREGA Valve profile UUID (Gen1) | `chirpstack_profile_strega` |
 | `CHIRPSTACK_PROFILE_STREGA_GEN2` | STREGA Valve Gen2 profile UUID | `chirpstack_profile_strega_gen2` |
 | `CHIRPSTACK_PROFILE_LSN50` | Dragino LSN50 profile UUID | `chirpstack_profile_lsn50` |
-| `CHIRPSTACK_PROFILE_CLOVER` | **Alias** — intentionally set to the same UUID as `CHIRPSTACK_PROFILE_RAK10701` (compatibility alias for the RAK10701 field tester profile, not a separate profile) | `chirpstack_profile_clover` |
+| `CHIRPSTACK_PROFILE_CLOVER` | CLOVER Sensor profile UUID (`OSI CLOVER Sensor`, Tektelic agriculture codec `codecs/tektelic_agriculture_decoder.js`). Bootstraps before this profile existed wrote the RAK10701 field-tester UUID here; see the repair note below | `chirpstack_profile_clover` |
 | `CHIRPSTACK_PROFILE_RAK10701` | RAK Field Tester profile UUID | `chirpstack_profile_rak10701` |
 | `CHIRPSTACK_PROFILE_S2120` | SenseCAP S2120 profile UUID | `chirpstack_profile_s2120` |
 | `CHIRPSTACK_PROFILE_LORAIN` | Aqua-Scope LoRain profile UUID | `chirpstack_profile_lorain` — mapped to UCI by `chirpstack-bootstrap.js`, but **not exported by `node-red.init`** (runtime sees it via the env-file path only; see section 1 note) |
@@ -322,6 +323,23 @@ etc. to discriminate device type on uplink. The actual MQTT topic
 subscription rule and the `deviceProfileName`-fallback discrimination pattern
 inside flows.json are mechanics of `osi-flows-json-editing` — not duplicated
 here.
+
+**Kiwi and Clover profiles on existing gateways:** earlier bootstraps created
+the Kiwi profile without a codec and aliased `CHIRPSTACK_PROFILE_CLOVER` to the
+codec-less RAK10701 field-tester profile, so Kiwi and Clover uplinks never
+decoded there (they are decoded only by the profile codec). `deploy.sh` runs
+`node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles` on every
+provisioned gateway: it reuses the existing API key and never provisions; it
+attaches the Tektelic codec to the Kiwi and Clover profiles that have none (a
+codec already there, also one attached by hand, is left alone), gets or
+creates the `OSI CLOVER Sensor` profile when CLOVER is unset or aliased, and
+rewrites only the `chirpstack_profile_clover` UCI key and the
+`CHIRPSTACK_PROFILE_CLOVER` env line. Once everything is correct it makes no
+write; a failure only warns. A Clover registered before the repair stays on
+the field-tester profile until it is re-registered (the registration paths
+repoint an existing device's profile) or moved with
+`--repoint-clover-device=<DevEUI>`, which refuses a device on any other
+profile.
 
 **`CHIRPSTACK_PROFILE_STREGA_GEN2` on existing gateways:** a fresh
 `chirpstack-bootstrap.js` run writes it like any other profile var, but a
@@ -604,10 +622,10 @@ grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-d
   under `feeds/chirpstack-openwrt-feed/apps/node-red/files/` and are shared
   (not profile-specific), unlike flows.json which is genuinely duplicated
   per hardware profile.
-- Treating `CHIRPSTACK_PROFILE_CLOVER` as a distinct profile from
-  `CHIRPSTACK_PROFILE_RAK10701`. They are intentionally the same UUID
-  (compatibility alias) — do not "fix" this by giving CLOVER its own profile
-  without understanding why the alias exists.
+- Pointing `CHIRPSTACK_PROFILE_CLOVER` at the RAK10701 field-tester profile.
+  That profile has no codec, so every Clover uplink arrives without a decoded
+  `object` and Process Data drops it. Older gateways carry this alias until
+  `--repair-soil-profiles` runs (deploy.sh does it).
 - Assuming deploy.sh enforces ChirpStack profile completeness. It doesn't;
   that's a manual operator check (`diagnose-pi-communication.sh`).
 - Assuming deploy.sh never restarts services. Since the payload-flip redesign
