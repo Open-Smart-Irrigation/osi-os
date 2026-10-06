@@ -240,7 +240,9 @@ for (const profile of PROFILES) {
           zoneId: 12, from: '2025-07-01', to: '2026-06-30', granularity, channels: 'swt_1', nowMs: NOW_MS,
         });
         assert.ok(spans.length >= 12, `${granularity}: one read per local month (${spans.length})`);
-        assert.ok(Math.max(...spans) <= 31 + 1 / 24, `${granularity}: no read spans more than a month (${Math.max(...spans)} days)`);
+        // The instant bounds are the month plus a millisecond on each side (SQLite
+        // rounds below the millisecond; the exact range is applied in JS).
+        assert.ok(Math.max(...spans) <= 31 + 1 / 24 + 2 / 86400000, `${granularity}: no read spans more than a month (${Math.max(...spans)} days)`);
         // The same buckets as one aggregation over the whole range.
         const whole = await helper.aggregateDeviceData(facade, {
           device_euis: ['A840410000000001'], sourceFilterActive: true, aggregation: granularity, channels: [channel],
@@ -258,7 +260,7 @@ for (const profile of PROFILES) {
       await helper.buildAllZonesExportCsv(recording, {
         zoneIds: [12], from: '2025-07-01', to: '2026-06-30', granularity: 'daily', nowMs: NOW_MS,
       });
-      assert.ok(spans.length >= 12 && Math.max(...spans) <= 31 + 1 / 24);
+      assert.ok(spans.length >= 12 && Math.max(...spans) <= 31 + 1 / 24 + 2 / 86400000);
     } finally {
       raw.close();
     }
