@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { Device } from '../../types/farming';
@@ -10,6 +10,14 @@ import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue } from '../../utils/swt';
 import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
+import { SensorMonitor } from './SensorMonitor';
+import {
+  FOCUS_VISIBLE_RING,
+  HISTORY_VALUE_CUE,
+  isCardHistorySeriesKey,
+  type CardHistoryRequest,
+  type CardHistorySeries,
+} from './shared/cardHistory';
 
 // Larger than the device's slowest plausible TX interval -- must match
 // Sdi12SettingsModal.tsx's SDI12_IDENTIFY_TIMEOUT_MINUTES. Client-derived
@@ -62,6 +70,27 @@ function channelLabel(kind: SoilChannel): string {
   }
 }
 
+const HISTORY_COLORS: Record<SoilChannel, string> = {
+  vwc: '#0ea5e9',
+  soil_vic: '#8b5cf6',
+  soil_temp: '#f97316',
+  soil_ec: '#ca8a04',
+  swt: '#0f766e',
+};
+
+// One series of the history view: `${kind}_${channel}` in device_data. SWT
+// history is kPa whatever the display unit, as on the other soil cards.
+function historySeries(kind: SoilChannel, index: number, depthText: string): CardHistorySeries {
+  const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
+  return {
+    field: `${kind}_${index}`,
+    label: `${channelLabel(kind)} · ${depthText}`,
+    unit: channel?.unit ?? '',
+    color: HISTORY_COLORS[kind],
+    decimals: channel?.decimals ?? 1,
+  };
+}
+
 function formatChannelValue(kind: SoilChannel, value: number): string | null {
   if (kind === 'swt') {
     const kpa = formatSwtCardValue(value, 'kPa');
@@ -96,6 +125,8 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
     onUpdate?.();
   };
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
+  const [sensorMonitor, setSensorMonitor] = useState<CardHistoryRequest | null>(null);
+  const historyTitle = t('common.viewHistory', { defaultValue: 'View history' });
   const data = device.latest_data ?? {};
   const status = device.sdi12_probe_status ?? 'unknown';
   const statusLabel = status === 'pending_identify' ? 'identifying' : status;
@@ -216,26 +247,52 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 
       {rows.length > 0 ? (
         <div className="space-y-2">
-          {rows.map(({ index, depthCm, values }) => (
-            <div key={index} className="rounded-lg bg-[var(--card)] p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-                Depth {depthCm == null ? depthLabel(device, index) : `${depthCm} cm`}
-              </p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
-                {values.map(({ kind, value }) => (
-                  <span key={kind} className="inline-flex flex-wrap items-center gap-2">
-                    <span>
-                      <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
-                      <span className="tabular-nums">{value == null ? '—' : formatChannelValue(kind, value) ?? '—'}</span>
-                    </span>
-                    {kind === 'swt' && value != null && (
-                      <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(value) : null} />
-                    )}
-                  </span>
-                ))}
+          {rows.map(({ index, depthCm, values }) => {
+            const depthText = depthCm == null ? depthLabel(device, index) : `${depthCm} cm`;
+            const seriesOptions = values
+              .filter(({ kind }) => isCardHistorySeriesKey(`${kind}_${index}`))
+              .map(({ kind }) => historySeries(kind, index, depthText));
+            return (
+              <div key={index} className="rounded-lg bg-[var(--card)] p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
+                  Depth {depthText}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
+                  {values.map(({ kind, value }) => {
+                    const formatted = value == null ? null : formatChannelValue(kind, value);
+                    const opensHistory = formatted != null && isCardHistorySeriesKey(`${kind}_${index}`);
+                    return (
+                      <span key={kind} className="inline-flex flex-wrap items-center gap-2">
+                        <span>
+                          <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
+                          {opensHistory ? (
+                            <button
+                              type="button"
+                              onClick={() => setSensorMonitor({
+                                ...historySeries(kind, index, depthText),
+                                initialField: `${kind}_${index}`,
+                                seriesOptions,
+                              })}
+                              title={historyTitle}
+                              aria-label={`${channelLabel(kind)}, ${depthText}: ${formatted}`}
+                              className={`text-left tabular-nums ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
+                            >
+                              {formatted}
+                            </button>
+                          ) : (
+                            <span className="tabular-nums">{formatted ?? '—'}</span>
+                          )}
+                        </span>
+                        {kind === 'swt' && value != null && (
+                          <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(value) : null} />
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="rounded-lg bg-[var(--card)] px-3 py-4 text-sm text-[var(--text-tertiary)]">
@@ -248,6 +305,21 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         batteryPercent={data.bat_pct}
         batteryVoltage={data.bat_v}
       />
+
+      {sensorMonitor && (
+        <SensorMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          field={sensorMonitor.field}
+          label={sensorMonitor.label}
+          unit={sensorMonitor.unit}
+          color={sensorMonitor.color}
+          decimals={sensorMonitor.decimals}
+          initialField={sensorMonitor.initialField}
+          seriesOptions={sensorMonitor.seriesOptions}
+          onClose={() => setSensorMonitor(null)}
+        />
+      )}
     </div>
   );
 };
