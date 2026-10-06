@@ -1065,7 +1065,9 @@ function runRunnerHarness(root, env = {}, inject = ':') {
 }
 
 test('the real migration runner takes a pre-0068 database to head and activates the ledger', () => {
-  assert.equal(LAST_MIGRATION.slice(0, 4), '0068', 'these tests assume 0068 is the newest migration on this line');
+  // The starting database is stamped at 0067; the deploy under test must carry
+  // 0068 (the migration the ledger activation waits for) and may carry later ones.
+  assert.ok(Number(LAST_VERSION) >= 68, 'these tests need 0068 or a later migration as the newest one on this line');
   withActivationRoot((root) => {
     const result = runRunnerHarness(root);
     assert.equal(result.status, 0, harnessOutput(result));
