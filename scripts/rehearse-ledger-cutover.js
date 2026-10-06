@@ -620,6 +620,44 @@ function storedEqualsLiveFingerprints(dbPath) {
 
 class StepFailed extends Error {}
 
+// Resource use sampled at every step boundary: the size of <work>/tmp (the
+// reconciler's reference chain lives there), MemAvailable, and this
+// process's peak RSS (sqlite3 child processes are short-lived and not counted).
+function dirBytes(dir) {
+  let total = 0;
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return 0; }
+  for (const e of entries) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) total += dirBytes(p);
+    else { try { total += fs.statSync(p).size; } catch (_) { /* removed meanwhile */ } }
+  }
+  return total;
+}
+
+function memAvailableMb() {
+  try {
+    const m = /MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'));
+    return m ? Math.round(Number(m[1]) / 1024) : null;
+  } catch (_) { return null; }
+}
+
+const resources = { workTmp: null, maxRssKb: 0, peakWorkTmpBytes: 0, minMemAvailableMb: null };
+
+function sampleResources() {
+  const sample = {
+    workTmpBytes: resources.workTmp ? dirBytes(resources.workTmp) : 0,
+    memAvailableMb: memAvailableMb(),
+    maxRssKb: process.resourceUsage().maxRSS,
+  };
+  resources.maxRssKb = Math.max(resources.maxRssKb, sample.maxRssKb);
+  resources.peakWorkTmpBytes = Math.max(resources.peakWorkTmpBytes, sample.workTmpBytes);
+  if (sample.memAvailableMb !== null) {
+    resources.minMemAvailableMb = resources.minMemAvailableMb === null ? sample.memAvailableMb : Math.min(resources.minMemAvailableMb, sample.memAvailableMb);
+  }
+  return sample;
+}
+
 function makeLogger(quiet) {
   return (line) => { if (!quiet) process.stderr.write('[rehearsal] ' + line + '\n'); };
 }
@@ -639,6 +677,7 @@ async function runStep(pass, name, log, fn) {
     entry.error = error && error.message ? error.message : String(error);
   }
   entry.durationMs = Date.now() - started;
+  entry.resources = sampleResources();
   log(`pass ${pass.pass} step ${name} ${entry.ok ? (entry.skipped ? 'skipped' : 'ok') : 'FAILED'} ${entry.durationMs} ms${entry.error ? ': ' + entry.error : ''}`);
   if (!entry.ok) throw new StepFailed(`pass ${pass.pass} step ${name} failed`);
   return entry.result;
@@ -842,6 +881,7 @@ async function rehearse(options, { log }) {
   // Every scratch file the reused tools create (reference chains, structural
   // proofs) goes under --work, not the system temporary directory.
   process.env.TMPDIR = path.join(work, 'tmp');
+  resources.workTmp = process.env.TMPDIR;
   const statePath = path.join(work, STATE_NAME);
   fs.writeFileSync(statePath, JSON.stringify({ status: 'running', pid: process.pid, startedAt: startedAt.toISOString() }) + '\n');
 
@@ -918,6 +958,8 @@ async function rehearse(options, { log }) {
   report.finishedAt = finishedAt.toISOString();
   report.durationMs = finishedAt - startedAt;
   report.workingCopySha256 = fs.existsSync(workDb) ? sha256File(workDb) : null;
+  sampleResources();
+  report.resources = { sampledAt: 'step boundaries', maxRssKb: resources.maxRssKb, peakWorkTmpBytes: resources.peakWorkTmpBytes, minMemAvailableMb: resources.minMemAvailableMb };
   fs.rmSync(path.join(work, 'tmp'), { recursive: true, force: true });
   fs.writeFileSync(path.join(work, REPORT_NAME), JSON.stringify(report, null, 2) + '\n');
   fs.writeFileSync(statePath, JSON.stringify({ status: 'finished', verdict: report.verdict, finishedAt: report.finishedAt }) + '\n');

@@ -299,6 +299,11 @@ INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, gateway_device_eui, 
   assert.equal(report.checkout.dirty, DIRTY_ARGS.length > 0);
   assert.equal(report.checkout.checksumsJsonSha256, sha(path.join(REPO, 'database/migrations/ordered/CHECKSUMS.json')));
   assert.equal(stepOf(report, 0, 'checkout').ok, true);
+  // Resource use, sampled at every step boundary.
+  assert.ok(report.resources.maxRssKb > 0);
+  assert.ok(report.resources.peakWorkTmpBytes >= 0);
+  assert.ok(report.resources.minMemAvailableMb > 0);
+  assert.ok(stepOf(report, 1, 'reconcile-report').resources.workTmpBytes >= 0);
   for (const pass of [1, 2]) {
     assert.deepEqual(stepOf(report, pass, 'reconcile-report').result.summary, { total: HEAD, match: HEAD, remapExact: 0, remapHeaderStripped: 0, refused: 0 });
     assert.equal(stepOf(report, pass, 'reconcile-apply').skipped, true);
