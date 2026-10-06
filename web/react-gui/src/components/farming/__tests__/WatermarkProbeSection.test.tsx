@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { WatermarkProbeSection } from '../shared/WatermarkProbeSection';
 import type { WatermarkChannelLatest } from '../../../types/farming';
@@ -77,5 +77,52 @@ describe('WatermarkProbeSection', () => {
   it('says supply, never battery', () => {
     render(<WatermarkProbeSection {...base} probes={[]} />);
     expect(screen.getByText(/watermark\.supply/)).toBeInTheDocument();
+  });
+});
+
+describe('WatermarkProbeSection history', () => {
+  const probes = [
+    { key: 'swt_1', label: 'Probe 1', depthLabel: '20 cm', channel: ch({ kpa: 56.4 }) },
+    { key: 'swt_2', label: 'Probe 2', depthLabel: '40 cm', channel: ch({ status: 'unsettled', kpa: 26.8 }) },
+  ];
+
+  it('marks each probe value as a history control, like the other device cards', () => {
+    render(<WatermarkProbeSection {...base} probes={probes} onOpenHistory={vi.fn()} />);
+    const controls = screen.getAllByTitle(/common\.viewHistory/);
+    // Two probes and the measured soil temperature.
+    expect(controls).toHaveLength(3);
+    for (const control of controls) {
+      expect(control.tagName).toBe('BUTTON');
+      expect(control).toHaveAttribute('type', 'button');
+      expect(control).not.toBeDisabled();
+      expect(control.className).toContain('focus-visible:ring-2');
+    }
+    expect(screen.getByText('56.4 kPa').className).toContain('decoration-dotted');
+  });
+
+  it('opens the probe series, also for an unsettled reading', () => {
+    const onOpenHistory = vi.fn();
+    render(<WatermarkProbeSection {...base} probes={probes} onOpenHistory={onOpenHistory} />);
+    fireEvent.click(screen.getByText('56.4 kPa'));
+    fireEvent.click(screen.getByText('26.8 kPa'));
+    expect(onOpenHistory.mock.calls).toEqual([['swt_1'], ['swt_2']]);
+  });
+
+  it('opens the measured soil temperature series', () => {
+    const onOpenHistory = vi.fn();
+    render(<WatermarkProbeSection {...base} probes={probes} onOpenHistory={onOpenHistory} />);
+    fireEvent.click(screen.getByRole('button', { name: /watermark\.soilTemp/ }));
+    expect(onOpenHistory).toHaveBeenCalledWith('ext_temperature_c');
+  });
+
+  it('offers no soil temperature history when the soil temperature is not measured', () => {
+    render(<WatermarkProbeSection {...base} soilTempMeasured={false} probes={probes} onOpenHistory={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /watermark\.soilTemp/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/watermark\.soilTempNotMeasured/)).toBeInTheDocument();
+  });
+
+  it('shows no history cue without a handler', () => {
+    render(<WatermarkProbeSection {...base} probes={probes} />);
+    expect(screen.queryAllByTitle(/common\.viewHistory/)).toHaveLength(0);
   });
 });

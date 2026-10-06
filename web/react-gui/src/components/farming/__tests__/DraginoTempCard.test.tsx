@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
@@ -26,6 +26,7 @@ afterEach(() => vi.restoreAllMocks());
 
 vi.mock('../../../services/api', () => ({
   devicesAPI: { remove: vi.fn().mockResolvedValue(undefined) },
+  sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
 }));
 
 const chameleonDevice: Device = {
@@ -172,5 +173,28 @@ describe('DraginoTempCard WATERMARK probe section', () => {
   it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {
     render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
     expect(screen.getByText('Chameleon SWT')).toBeInTheDocument();
+  });
+});
+
+describe('DraginoTempCard WATERMARK history', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it('opens the legacy history view for a probe value with its own series', async () => {
+    const { sensorAPI } = await import('../../../services/api');
+    render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
+    fireEvent.click(screen.getByText('0.0 kPa'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'swt_2', 24));
+  });
+
+  it('opens the soil temperature series from the measured soil temperature', async () => {
+    const { sensorAPI } = await import('../../../services/api');
+    render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
+    fireEvent.click(screen.getByRole('button', { name: 'watermark.soilTemp' }));
+    expect(await screen.findByRole('dialog', { name: 'environment.soil.temperature' })).toBeInTheDocument();
+    await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'ext_temperature_c', 24));
   });
 });
