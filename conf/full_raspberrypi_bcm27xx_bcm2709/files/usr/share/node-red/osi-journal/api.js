@@ -863,7 +863,7 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!principal || !principal.scoped) return principal;
   const entry = await dbGet(
     db,
-    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id FROM journal_entries ' +
+    'SELECT plot_uuid,zone_id,zone_uuid,owner_user_uuid,user_id,status FROM journal_entries ' +
       'WHERE entry_uuid=? AND gateway_device_eui=? AND deleted_at IS NULL LIMIT 1',
     [entryUuid, principal.gateway_device_eui]
   );
@@ -871,12 +871,17 @@ async function assertEntryWrite(db, principal, entryUuid) {
   if (!entry.plot_uuid) {
     // #403, owner decisions. An entry with a zone but no plot (no API path
     // creates one) needs the grant on that zone; a zone that cannot be resolved
-    // is refused. A farm-wide entry (no zone, no plot) may be changed only by
-    // the account that wrote it or by an admin; anyone else gets the answer a
-    // missing entry gets.
+    // is refused. A farm-wide final (no zone, no plot) is changed or voided
+    // only by the farm owner or an enabled admin (owner decision 2026-10-05,
+    // which also covers finals written earlier by someone else); a farm-wide
+    // draft stays with the account that wrote it or an admin. Anyone else
+    // gets the answer a missing entry gets.
     const actorScope = await assertJournalWriteRole(db, principal);
     if (entry.zone_uuid == null && entry.zone_id == null) {
-      if (entry.owner_user_uuid !== principal.author_principal_uuid && actorScope.role !== 'admin') {
+      const allowed = entry.status === 'draft'
+        ? entry.owner_user_uuid === principal.author_principal_uuid || actorScope.role === 'admin'
+        : await farmWideWritable(db, principal);
+      if (!allowed) {
         throw apiError(404, 'not_found', 'Journal entry was not found');
       }
     } else {

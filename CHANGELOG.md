@@ -428,9 +428,13 @@ every 0.7.0 entry below.
   may create or change the group. A grant on another user's plot no longer
   lets the grantee create or rewrite that user's group (#418).
 - With scoped access on, a farm-wide journal entry (no plot, no zone) is
-  created or finalized only by the farm owner (the account the gateway is
-  linked to the cloud with) or an enabled admin; others get 403 and the
-  capture screen no longer offers the Farm-wide choice to them.
+  created, finalized, changed or voided only by the farm owner (the account
+  the gateway is linked to the cloud with) or an enabled admin, from the
+  gateway GUI and from cloud commands alike. Others get 403 (404 for an
+  existing entry; `scope_denied` for a cloud command), and the capture screen
+  no longer offers them the Farm-wide choice. Farm-wide finals that another
+  account wrote earlier become read-only for that account; its own
+  farm-wide drafts stay editable.
 - GUI: cached data and in-flight writes belong to one login session. After a
   logout and login as another user in the same tab, the second user no
   longer sees data cached for the first, and the first user's chained writes

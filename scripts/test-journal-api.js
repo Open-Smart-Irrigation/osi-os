@@ -806,7 +806,7 @@ test('#403: a zone-only entry needs the grant on its zone', async () => {
 // #403, by the owner's decision: with scoped access on, a farm-wide entry (no
 // zone, no plot) is voided, updated or discarded only by the account that wrote
 // it or by an admin. Another account gets the answer a missing entry gets.
-test('#403: a farm-wide entry is changed only by its writer or an admin', async () => {
+test('#403: a farm-wide final is changed only by the farm owner or an admin, a draft by its writer', async () => {
   const db = new TestDb('scoped-entry-farm-wide');
   seedIdentity(db);
   const othersFinal = '22160000-0000-4000-8000-000000000001';
@@ -892,12 +892,26 @@ test('#403: a farm-wide entry is changed only by its writer or an admin', async 
   assert.deepEqual(state(), before);
   assert.equal(outbox(), queued);
 
-  // A researcher on its own entries: allowed.
+  // A researcher on its own farm-wide final, written before the owner rule or
+  // with scoped access off: read-only for it now (owner decision 2026-10-05:
+  // farm-wide entries are created, changed and voided by the farm owner or an
+  // admin). Its own private draft can still be discarded.
+  const ownBefore = state();
+  await assert.rejects(update(ownFinal, '2026-07-13T10:00:00', caller, 'My correction'), hidden);
+  await assert.rejects(
+    journal.voidEntry(db, ownFinal, { base_sync_version: 1, reason: 'My correction' }, caller),
+    hidden
+  );
+  assert.deepEqual(state(), ownBefore);
+  // The linked farm owner may change and void it.
+  db.prepare("UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+    'WHERE id=1').run();
   await update(ownFinal, '2026-07-13T10:00:00', caller, 'My correction');
   const ownVoided = await journal.voidEntry(
     db, ownFinal, { base_sync_version: 2, reason: 'My correction' }, caller
   );
   assert.equal(ownVoided.entry_uuid, ownFinal);
+  db.prepare('UPDATE users SET server_url=NULL WHERE id=1').run();
   await journal.discardEntry(db, ownDraft, {}, caller);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries WHERE entry_uuid=?').get(ownDraft).n, 0);
 
