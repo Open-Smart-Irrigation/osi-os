@@ -8,6 +8,8 @@ import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
 import { formatTime } from '../../utils/datetime';
 import ValveCancelButton from './ValveCancelButton';
+import { SensorMonitor } from './SensorMonitor';
+import { FOCUS_VISIBLE_RING, HISTORY_VALUE_CUE, type CardHistoryRequest } from './shared/cardHistory';
 
 interface StregaValveCardProps {
   device: Device;
@@ -796,6 +798,18 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
     enclosureTemp != null ? tv('format.temperature', { value: enclosureTemp, defaultValue: '{{value}} °C' }) : null,
     enclosureHumidity != null ? tv('format.humidity', { value: enclosureHumidity, defaultValue: '{{value}} % RH' }) : null,
   ].filter(Boolean).join(' · ');
+  // The enclosure reading is device_data.ambient_temperature / relative_humidity of
+  // this valve (osi-valve-control/store.js), the same series the history view reads.
+  const [enclosureHistory, setEnclosureHistory] = useState<CardHistoryRequest | null>(null);
+  const openEnclosureHistory = () => {
+    const enclosureLabel = tv('card.enclosureLabel', { defaultValue: 'Enclosure' });
+    const seriesOptions = [
+      { field: 'ambient_temperature', label: `${enclosureLabel} · ${t('environment.metrics.air_temperature_c', { defaultValue: 'Air Temp' })}`, unit: '°C', color: '#ea580c', decimals: 1 },
+      { field: 'relative_humidity', label: `${enclosureLabel} · ${t('environment.metrics.relative_humidity_pct', { defaultValue: 'Humidity' })}`, unit: '%', color: '#0891b2', decimals: 0 },
+    ];
+    const first = enclosureTemp != null ? seriesOptions[0] : seriesOptions[1];
+    setEnclosureHistory({ ...first, initialField: first.field, seriesOptions });
+  };
 
   const handleOpen = async () => {
     const durationMinutes = Number(openDurationMin);
@@ -963,7 +977,16 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
                 ? <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNotMeasured', { defaultValue: 'not measured on Gen2' })}</span>
                 : enclosureTemp == null && enclosureHumidity == null
                   ? <span className="italic text-[var(--text-tertiary)]">{tv('card.enclosureNoReading', { defaultValue: 'no reading yet' })}</span>
-                  : enclosurePair}
+                  : (
+                    <button
+                      type="button"
+                      onClick={openEnclosureHistory}
+                      title={t('common.viewHistory', { defaultValue: 'View history' })}
+                      className={`text-left tabular-nums ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
+                    >
+                      {enclosurePair}
+                    </button>
+                  )}
             </dd>
           </dl>
         )}
@@ -1035,6 +1058,21 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           : t('stregaValve.neverSeen', { defaultValue: 'Never seen' })}
         batteryPercent={device.latest_data?.bat_pct}
       />
+
+      {enclosureHistory && (
+        <SensorMonitor
+          deveui={device.deveui}
+          deviceName={device.name}
+          field={enclosureHistory.field}
+          label={enclosureHistory.label}
+          unit={enclosureHistory.unit}
+          color={enclosureHistory.color}
+          decimals={enclosureHistory.decimals}
+          initialField={enclosureHistory.initialField}
+          seriesOptions={enclosureHistory.seriesOptions}
+          onClose={() => setEnclosureHistory(null)}
+        />
+      )}
     </div>
   );
 };

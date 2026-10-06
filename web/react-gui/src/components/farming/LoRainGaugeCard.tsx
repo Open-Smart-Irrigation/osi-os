@@ -96,9 +96,10 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
     ? `${data.rain_mm_per_10min.toFixed(1)} mm / 10 min`
     : (data.rain_mm_per_hour != null && intervalLabel ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}` : '—');
 
-  const openRainHistory = () => setSensorMonitor({
+  // Each rain value opens its own series first; the other two stay one switch away.
+  const openRainHistory = (initialField: 'rain_mm_delta' | 'rain_mm_today' | 'rain_mm_per_10min') => setSensorMonitor({
     field: 'rain_mm_delta',
-    initialField: 'rain_mm_delta',
+    initialField,
     label: 'Rainfall',
     unit: 'mm',
     color: '#0ea5e9',
@@ -160,7 +161,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">This interval</p>
           <button
             type="button"
-            onClick={openRainHistory}
+            onClick={() => openRainHistory('rain_mm_delta')}
             className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
             title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
@@ -175,7 +176,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Today</p>
           <button
             type="button"
-            onClick={openRainHistory}
+            onClick={() => openRainHistory('rain_mm_today')}
             className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
             title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
@@ -188,7 +189,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rate</p>
           <button
             type="button"
-            onClick={openRainHistory}
+            onClick={() => openRainHistory('rain_mm_per_10min')}
             className={`cursor-pointer text-left text-xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
             title={t('common.viewHistory', { defaultValue: 'View history' })}
           >
@@ -199,9 +200,18 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
 
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Temperature</p>
-          <p className="text-2xl font-bold tabular-nums text-[var(--text)]">
-            {formatNumber(data.ambient_temperature, 1, '°C')}
-          </p>
+          {Number.isFinite(Number(data.ambient_temperature)) && data.ambient_temperature != null ? (
+            <button
+              type="button"
+              onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
+              className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
+              title={t('common.viewHistory', { defaultValue: 'View history' })}
+            >
+              {formatNumber(data.ambient_temperature, 1, '°C')}
+            </button>
+          ) : (
+            <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
+          )}
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">
             Battery {formatNumber(data.bat_v, 1, 'V')}
           </p>

@@ -322,7 +322,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 depthLabel: formatDepthLabel(watermarkDepths[`swt_${n}`]),
                 channel: watermark.channels[n - 1] ?? null,
               }))}
-              onOpenHistory={(field) => setSensorMonitor({
+              onOpenHistory={(field) => setSensorMonitor(field === 'ext_temperature_c' ? {
+                field, label: t('environment.soil.temperature'), unit: '°C', color: '#f97316', decimals: 1,
+              } : {
                 field, initialField: field, label: t('watermark.probe', { n: field === 'swt_1' ? 1 : 2 }),
                 unit: 'kPa', color: field === 'swt_1' ? '#0f766e' : '#2563eb', decimals: 1,
                 seriesOptions: [1, 2].map((n) => ({ field: `swt_${n}`, label: t('watermark.probe', { n }), unit: 'kPa', color: n === 1 ? '#0f766e' : '#2563eb', decimals: 1 })),

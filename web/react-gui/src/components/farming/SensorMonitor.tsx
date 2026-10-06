@@ -179,7 +179,7 @@ export const SensorMonitor: React.FC<Props> = ({
               <div key={item.label} className="bg-[var(--card)] rounded-lg p-3 text-center">
                 <p className="text-[var(--text-tertiary)] text-xs font-semibold">{item.label}</p>
                 <p className="text-xl font-bold text-[var(--text)]">
-                  {item.value !== null ? `${item.value.toFixed(activeDecimals)} ${activeUnit}` : '—'}
+                  {item.value !== null ? `${item.value.toFixed(activeDecimals)} ${activeUnit}`.trim() : '—'}
                 </p>
               </div>
             ))}
@@ -205,7 +205,7 @@ export const SensorMonitor: React.FC<Props> = ({
           {!loading && !error && data.length > 0 && (
             <>
               <div>
-                <h3 className="text-[var(--text)] font-bold mb-3">{activeLabel} ({activeUnit})</h3>
+                <h3 className="text-[var(--text)] font-bold mb-3">{activeUnit ? `${activeLabel} (${activeUnit})` : activeLabel}</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <defs>
