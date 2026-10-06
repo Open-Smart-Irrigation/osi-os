@@ -15,6 +15,7 @@ vi.mock('../../../services/api', () => ({
   devicesAPI: {
     remove: vi.fn().mockResolvedValue(undefined),
   },
+  sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
   getApiErrorMessage: (_err: unknown, fallback: string) => fallback,
 }));
 
@@ -102,5 +103,45 @@ describe('LoRainGaugeCard', () => {
       expect(screen.queryByText('deviceRemoval.confirmFarm')).not.toBeInTheDocument();
     });
     expect(screen.getByTitle('deviceRemoval.buttonFarm')).toBeEnabled();
+  });
+});
+
+describe('LoRainGaugeCard history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function openFrom(text: string) {
+    const { sensorAPI } = await import('../../../services/api');
+    render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
+    fireEvent.click(screen.getByText(text));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    return sensorAPI.getHistory;
+  }
+
+  it('every value on the card is a history control', () => {
+    render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
+    // Interval, today, rate and temperature.
+    expect(screen.getAllByTitle('common.viewHistory')).toHaveLength(4);
+  });
+
+  it('opens the interval series from the interval value', async () => {
+    const getHistory = await openFrom('1.5 mm');
+    await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'rain_mm_delta', 24));
+  });
+
+  it('opens the daily total series from the today value', async () => {
+    const getHistory = await openFrom('2.7 mm');
+    await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'rain_mm_today', 24));
+  });
+
+  it('opens the rate series from the rate value', async () => {
+    const getHistory = await openFrom('1.5 mm / 10 min');
+    await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'rain_mm_per_10min', 24));
+  });
+
+  it('opens the temperature series from the temperature value', async () => {
+    const getHistory = await openFrom('20.5 °C');
+    await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'ambient_temperature', 24));
   });
 });
