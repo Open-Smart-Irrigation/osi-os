@@ -56,11 +56,21 @@ export function LayoutTransitionReviewSheet({
 
   useEffect(() => {
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    headingRef.current?.focus();
     return () => {
       openerRef.current?.focus();
     };
   }, []);
+
+  // A plot/layout change can replace the affected items while this modal
+  // remains mounted. Keep keyboard focus inside the active modal rather than
+  // leaving it on the plot button now hidden beneath the backdrop.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !dialogRef.current?.contains(active)) {
+      openerRef.current = active;
+    }
+    headingRef.current?.focus();
+  }, [items]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

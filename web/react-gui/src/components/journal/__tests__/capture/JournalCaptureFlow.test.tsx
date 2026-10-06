@@ -1748,15 +1748,13 @@ describe('JournalCaptureFlow', () => {
     });
   });
 
-  it('requires an explicit growing setting for farm-level capture', () => {
+  it('does not offer an ordinary growing setting without a selected plot', () => {
     render(<JournalCaptureFlow {...baseProps} plots={[]} />);
     const layout = screen.getByRole('combobox', { name: 'capture.where.layout' });
     expect(layout).toHaveValue('');
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.invalidDefinition');
-    fireEvent.change(layout, { target: { value: 'greenhouse' } });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
-    expect(screen.getByRole('heading', { name: 'capture.picker.title' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'capture.picker.title' })).not.toBeInTheDocument();
     cleanup();
   });
 
@@ -2662,6 +2660,7 @@ describe('JournalCaptureFlow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'capture.carry.useValues' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
     fireEvent.click(screen.getByRole('button', { name: 'East field' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'East field' })).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -3794,6 +3793,18 @@ describe('JournalCaptureFlow', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('closes an unlocked capture with Escape', async () => {
+    const onClose = vi.fn();
+    render(<JournalCaptureFlow {...baseProps} onClose={onClose} initialPlot={plot} />);
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await Promise.resolve();
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('serializes repeated Close clicks while onSaved is still pending', async () => {
     let resolveSaved: (() => void) | undefined;
     const onClose = vi.fn();
@@ -3818,10 +3829,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('opens the layout-transition review sheet for a value the next growing setting would hide, blocks Next until it is resolved, and removes it only once the farmer explicitly says so', async () => {
-    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
-    const layoutSelect = screen.getByRole('combobox', { name: 'capture.where.layout' });
-    fireEvent.change(layoutSelect, { target: { value: 'greenhouse' } });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} initialPlot={plot} plots={[plot, secondPlot]} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'attr.extra' }), {
@@ -3831,9 +3839,14 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /greenhouse/ }));
-    const reopenedLayoutSelect = screen.getByRole('combobox', { name: 'capture.where.layout' });
-    reopenedLayoutSelect.focus();
-    fireEvent.change(reopenedLayoutSelect, { target: { value: 'open_field' } });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => { await Promise.resolve(); });
+    const eastField = screen.getByRole('button', { name: 'East field' });
+    eastField.focus();
+    fireEvent.click(eastField);
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     // The value is never silently dropped: the review sheet opens immediately,
     // names the affected field, and shows its untouched current value.
@@ -3841,7 +3854,7 @@ describe('JournalCaptureFlow', () => {
     expect(dialog).toBeVisible();
     expect(screen.getByText('attr.extra')).toBeInTheDocument();
     expect(screen.getByText('temporary detail')).toBeInTheDocument();
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
 
     // Next is a finalize-gate no-op while the item is unresolved.
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -3851,7 +3864,7 @@ describe('JournalCaptureFlow', () => {
     // Explicit resolution: the farmer removes the stale value themselves.
     fireEvent.click(screen.getByRole('button', { name: /remove.*attr\.extra/i }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(reopenedLayoutSelect);
+    expect(document.activeElement).toBe(eastField);
 
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
@@ -3870,11 +3883,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('preserves a value kept under the old growing setting through to the final payload, even though the new growing setting hides its field', async () => {
-    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'greenhouse' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} initialPlot={plot} plots={[plot, secondPlot]} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'attr.extra' }), {
@@ -3884,9 +3893,9 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /greenhouse/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'open_field' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
 
     fireEvent.click(screen.getByRole('button', { name: /keep.*attr\.extra/i }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -3910,19 +3919,15 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('opens the layout-transition review sheet when picking a plot narrows an already-chosen value out of its allowed choices', async () => {
-    // Farm-level capture first (no plot bound), then the farmer assigns the
-    // entry to a specific plot — a single, atomic selectPlot() transition from
-    // the farm-level "greenhouse" growing setting to plot East's "open_field"
-    // one, exercising the plot-picker leg of the gate (chooseLayout's leg is
-    // covered by the growing-setting-dropdown tests above).
+    // Start on North's greenhouse setting, then move the entry to East's
+    // open-field setting. Plotless ordinary captures are prohibited; this
+    // exercises the same selectPlot transition through a real plot scope.
     render(<JournalCaptureFlow
       {...baseProps}
       catalog={layoutTransitionChoiceCatalog}
       plots={[plot, secondPlot]}
+      initialPlot={plot}
     />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'greenhouse' },
-    });
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -3932,6 +3937,8 @@ describe('JournalCaptureFlow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole('button', { name: 'East field' }));
     await act(async () => {
       await Promise.resolve();
@@ -4021,11 +4028,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('retries a failed finalize after resolving a layout-transition item, keeping the kept value in the retried payload', async () => {
-    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'greenhouse' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} initialPlot={plot} plots={[plot, secondPlot]} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'attr.extra' }), {
@@ -4035,9 +4038,9 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /greenhouse/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'open_field' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
     fireEvent.click(screen.getByRole('button', { name: /keep.*attr\.extra/i }));
 
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
@@ -4062,11 +4065,7 @@ describe('JournalCaptureFlow', () => {
   });
 
   it('reopens the layout-transition review sheet from its pending banner after the farmer dismisses it', async () => {
-    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'greenhouse' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    render(<JournalCaptureFlow {...baseProps} catalog={layoutSanitizationCatalog} initialPlot={plot} plots={[plot, secondPlot]} />);
     fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
     fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'attr.extra' }), {
@@ -4076,9 +4075,9 @@ describe('JournalCaptureFlow', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: /greenhouse/ }));
-    fireEvent.change(screen.getByRole('combobox', { name: 'capture.where.layout' }), {
-      target: { value: 'open_field' },
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'North field' }));
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole('button', { name: 'East field' }));
     expect(screen.getByRole('dialog')).toBeVisible();
 
     fireEvent.click(screen.getByRole('button', { name: /^capture\.transition\.close/ }));
