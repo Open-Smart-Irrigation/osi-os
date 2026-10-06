@@ -10,7 +10,12 @@
 //      after the boot node) -> a second full pass that must change nothing.
 //
 //   node scripts/rehearse-ledger-cutover.js --db <pulled copy of farming.db> --work <scratch directory>
-//       [--gateway-eui <16 hex>] [--json]
+//       [--gateway-eui <16 hex>] [--allow-dirty] [--json]
+//
+// The report records the checkout (HEAD, `git status --porcelain`, and the
+// sha256 of CHECKSUMS.json, the boot node text, seed-blank.sql, the lineage
+// fixture manifests and this tool, plus node and sqlite versions). A dirty
+// checkout fails the rehearsal unless --allow-dirty is given (trial runs).
 //
 // The source file is never opened: it (and a -wal next to it, if any) is
 // copied into <work> first and only the copy is changed. --work must be an
@@ -43,6 +48,7 @@ const MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const FIXTURES_DIR = path.join(REPO, 'scripts/fixtures/lineages');
 const SEED_SQL = path.join(REPO, 'database/seed-blank.sql');
 const DEVICES_REBUILD_CLI = path.join(REPO, 'scripts/rehearse-devices-rebuild.js');
+const BOOT_FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 
 const LIVE_DB_DIR = '/data/db';
 const WORK_MARKER = '.ledger-cutover-rehearsal';
@@ -192,16 +198,17 @@ const EXPECTED_CHANGES = {
 class UsageError extends Error {}
 
 function parseArgs(argv) {
-  const options = { db: null, work: null, gatewayEui: null, json: false };
+  const options = { db: null, work: null, gatewayEui: null, json: false, allowDirty: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--db') options.db = argv[++i];
     else if (arg === '--work') options.work = argv[++i];
     else if (arg === '--gateway-eui') options.gatewayEui = argv[++i];
     else if (arg === '--json') options.json = true;
+    else if (arg === '--allow-dirty') options.allowDirty = true;
     else throw new UsageError('unknown argument ' + arg);
   }
-  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--json]');
+  if (!options.db || !options.work) throw new UsageError('usage: rehearse-ledger-cutover.js --db <copy of farming.db> --work <scratch directory> [--gateway-eui <16 hex>] [--allow-dirty] [--json]');
   if (options.gatewayEui !== null && !/^[0-9A-Fa-f]{16}$/.test(options.gatewayEui)) throw new UsageError('--gateway-eui must be 16 hex digits');
   return options;
 }
@@ -271,6 +278,53 @@ function prepareWork(work) {
   }
   fs.mkdirSync(path.join(work, 'backups'));
   fs.mkdirSync(path.join(work, 'tmp'));
+}
+
+// --- checkout provenance -------------------------------------------------------
+
+// HEAD and the porcelain status (untracked files included: an untracked
+// migration file is read like a tracked one).
+function gitState(dir) {
+  try {
+    const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const porcelain = execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n').filter((l) => l.trim());
+    return { head, dirty: porcelain.length > 0, porcelain: porcelain.slice(0, 200) };
+  } catch (_) {
+    return { head: null, dirty: true, porcelain: ['not a git checkout'] };
+  }
+}
+
+// What the rehearsal actually runs from this working tree, hashed, so a report
+// proves the exact migration set, boot node, seed and tool versions.
+function checkoutProvenance() {
+  const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+  const bootNode = JSON.parse(fs.readFileSync(BOOT_FLOWS, 'utf8')).find((n) => n.id === 'sync-init-fn');
+  const lineageFixtures = {};
+  if (fs.existsSync(FIXTURES_DIR)) {
+    for (const dir of fs.readdirSync(FIXTURES_DIR).sort()) {
+      const manifest = path.join(FIXTURES_DIR, dir, 'CHECKSUMS.json');
+      if (fs.existsSync(manifest)) lineageFixtures[dir] = sha(manifest);
+    }
+  }
+  let nodeSqlite = null;
+  try {
+    const db = new DatabaseSync(':memory:');
+    nodeSqlite = db.prepare('SELECT sqlite_version() AS v').get().v;
+    db.close();
+  } catch (_) { /* reported as null */ }
+  let sqlite3Cli = null;
+  try { sqlite3Cli = execFileSync('sqlite3', ['--version'], { encoding: 'utf8' }).trim(); } catch (_) { /* reported as null */ }
+  return {
+    checksumsJsonSha256: sha(path.join(MIGRATIONS_DIR, 'CHECKSUMS.json')),
+    seedSha256: sha(SEED_SQL),
+    bootNodeSha256: bootNode ? crypto.createHash('sha256').update(bootNode.func).digest('hex') : null,
+    toolSha256: sha(__filename),
+    lineageFixtures,
+    node: process.version,
+    nodeSqlite,
+    sqlite3Cli,
+  };
 }
 
 // --- small helpers ------------------------------------------------------------
@@ -808,15 +862,21 @@ async function rehearse(options, { log }) {
     expectedChanges: Object.fromEntries(Object.entries(EXPECTED_CHANGES).map(([v, e]) => [v, { name: e.name, rules: e.rules.map((r) => ({ table: r.table, columns: r.columns || [], append: r.append || false })) }])),
     passes: [],
   };
-  try {
-    report.checkout.head = execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch (_) { /* not a git checkout */ }
+  Object.assign(report.checkout, gitState(REPO), checkoutProvenance(), { allowDirty: options.allowDirty });
 
   const workDb = path.join(work, WORK_DB_NAME);
   const copyPass = { pass: 0, steps: [] };
   report.passes.push(copyPass);
   const gatewayEui = { value: SYNTHETIC_GATEWAY_EUI, source: 'synthetic' };
   try {
+    // RH-E must run on the exact SHA that will be deployed: a dirty working
+    // tree runs migrations, boot node or tool code that no commit holds.
+    await runStep(copyPass, 'checkout', log, async () => ({
+      ok: !report.checkout.dirty || options.allowDirty,
+      head: report.checkout.head,
+      dirty: report.checkout.dirty,
+      reason: report.checkout.dirty && !options.allowDirty ? 'the checkout has uncommitted or untracked files (git status --porcelain); commit them, or pass --allow-dirty for a trial run' : undefined,
+    }));
     await runStep(copyPass, 'copy-source', log, async () => {
       fs.copyFileSync(source, workDb);
       fs.chmodSync(workDb, 0o600); // a pulled backup is often read-only
@@ -899,5 +959,7 @@ module.exports = {
   compareSnapshots,
   rulesFor,
   ruleTables,
+  gitState,
+  checkoutProvenance,
   rehearse,
 };

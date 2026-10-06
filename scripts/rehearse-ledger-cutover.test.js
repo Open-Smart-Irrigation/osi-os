@@ -17,6 +17,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const {
   parseArgs, checkLedgerShape, snapshotTables, compareSnapshots, rulesFor, EXPECTED_CHANGES, WORK_MARKER, REPORT_NAME,
+  gitState, checkoutProvenance,
 } = require('./rehearse-ledger-cutover');
 const { buildEarlierLineageGatewayDb } = require('./fixtures/earlier-lineage-gateway-db');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
@@ -27,12 +28,17 @@ const BUNDLED_DB = path.join(REPO, 'database/farming.db');
 const MIGRATIONS = loadMigrations(path.join(REPO, 'database/migrations/ordered'));
 const HEAD = MIGRATIONS[MIGRATIONS.length - 1].version;
 
+// The integration runs below use the real default (a dirty checkout fails)
+// in CI, where the checkout is clean, and --allow-dirty only while this
+// checkout has uncommitted work.
+const DIRTY_ARGS = execFileSync('git', ['-C', path.resolve(__dirname, '..'), 'status', '--porcelain'], { encoding: 'utf8' }).trim() ? ['--allow-dirty'] : [];
+
 function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'rehearse-cutover-test-')); }
 function sha(p) { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); }
 function sql(db, text) { execFileSync('sqlite3', ['-bail', db], { input: text, encoding: 'utf8' }); }
 
 function runCli(args) {
-  const r = spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(process.execPath, [CLI, ...args, ...DIRTY_ARGS], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return { status: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
@@ -50,7 +56,42 @@ test('parseArgs requires --db and --work and validates --gateway-eui', () => {
   assert.throws(() => parseArgs(['--db', 'a.db']), /usage/);
   assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--gateway-eui', 'xyz']), /16 hex/);
   assert.throws(() => parseArgs(['--db', 'a.db', '--work', 'w', '--bogus']), /unknown argument/);
-  assert.deepEqual(parseArgs(['--db', 'a.db', '--work', 'w', '--json']), { db: 'a.db', work: 'w', gatewayEui: null, json: true });
+  assert.deepEqual(parseArgs(['--db', 'a.db', '--work', 'w', '--json']), { db: 'a.db', work: 'w', gatewayEui: null, json: true, allowDirty: false });
+  assert.equal(parseArgs(['--db', 'a.db', '--work', 'w', '--allow-dirty']).allowDirty, true);
+});
+
+test('gitState reports the head and whether the checkout is dirty, untracked files included', () => {
+  const root = scratch();
+  const git = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+  git('init', '-q');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+  git('add', 'a.txt');
+  git('-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'a');
+  let st = gitState(root);
+  assert.equal(st.head, git('rev-parse', 'HEAD').trim());
+  assert.equal(st.dirty, false);
+  fs.writeFileSync(path.join(root, 'a.txt'), 'b');
+  st = gitState(root);
+  assert.equal(st.dirty, true);
+  assert.deepEqual(st.porcelain, [' M a.txt']);
+  git('checkout', '-q', 'a.txt');
+  fs.writeFileSync(path.join(root, '0071__new.sql'), '-- risk: additive');
+  assert.equal(gitState(root).dirty, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('checkoutProvenance hashes what the rehearsal runs', () => {
+  const p = checkoutProvenance();
+  const flows = JSON.parse(fs.readFileSync(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'), 'utf8'));
+  const boot = flows.find((n) => n.id === 'sync-init-fn').func;
+  assert.equal(p.checksumsJsonSha256, sha(path.join(REPO, 'database/migrations/ordered/CHECKSUMS.json')));
+  assert.equal(p.seedSha256, sha(path.join(REPO, 'database/seed-blank.sql')));
+  assert.equal(p.bootNodeSha256, crypto.createHash('sha256').update(boot).digest('hex'));
+  assert.equal(p.toolSha256, sha(CLI));
+  assert.equal(p.node, process.version);
+  assert.match(p.sqlite3Cli, /^3\.\d+/);
+  assert.match(p.nodeSqlite, /^3\.\d+/);
+  assert.ok(Object.keys(p.lineageFixtures).length >= 1);
 });
 
 test('a wrong --work or --db path is refused with exit 2 and nothing written', () => {
@@ -254,6 +295,10 @@ INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, gateway_device_eui, 
   assert.equal(report.verdict, 'PASS');
   assert.equal(report.source.sha256After, dbSha);
   assert.deepEqual(report.warnings, ['no cloud link row with a gateway EUI']);
+  assert.equal(report.checkout.head, execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
+  assert.equal(report.checkout.dirty, DIRTY_ARGS.length > 0);
+  assert.equal(report.checkout.checksumsJsonSha256, sha(path.join(REPO, 'database/migrations/ordered/CHECKSUMS.json')));
+  assert.equal(stepOf(report, 0, 'checkout').ok, true);
   for (const pass of [1, 2]) {
     assert.deepEqual(stepOf(report, pass, 'reconcile-report').result.summary, { total: HEAD, match: HEAD, remapExact: 0, remapHeaderStripped: 0, refused: 0 });
     assert.equal(stepOf(report, pass, 'reconcile-apply').skipped, true);
@@ -318,7 +363,7 @@ test('earlier lineage at 53 with data: interrupted run, clean restart, designed 
   const work = path.join(root, 'work');
 
   const killedAt = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI, '--db', db, '--work', work], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(process.execPath, [CLI, '--db', db, '--work', work, ...DIRTY_ARGS], { stdio: ['ignore', 'ignore', 'pipe'] });
     let buf = '';
     let killed = null;
     child.stderr.on('data', (d) => {
