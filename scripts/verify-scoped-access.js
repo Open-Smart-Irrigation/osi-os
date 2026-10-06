@@ -369,6 +369,12 @@ const REQUEST_FIXTURES = {
       group_uuid: '00000000-0000-4000-8000-00000000d004', label: 'Probe new group', resolved: false,
       base_sync_version: 0, members: [FOREIGN_PLOT_UUID],
     }],
+    // #418: the caller holds a grant on the foreign plot. The grant lets it
+    // write entries there, never create a group attributed to the plot's owner.
+    foreignBodySetupSql:
+      'INSERT INTO user_plot_assignments (assignment_uuid, user_uuid, plot_uuid, gateway_device_eui, created_at) ' +
+      "VALUES ('00000000-0000-4000-8000-00000000c418', '" + PROBE_CALLER_UUID + "', '" + FOREIGN_PLOT_UUID +
+      "', '" + PROBE_GATEWAY_EUI + "', '2026-01-01T00:00:00Z');",
   },
   'journal-plots-post-http': {
     // A second zone of the caller's, without a plot yet; and the foreign zone's

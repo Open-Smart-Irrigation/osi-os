@@ -2513,6 +2513,210 @@ async function createPagedEntries(name, note, count) {
   return { db, entryUuids };
 }
 
+test('a farm-wide entry is saved without plot or zone and refuses field context', async () => {
+  const db = new TestDb('farm-wide-entry');
+  seedIdentity(db);
+  const farmWide = function(uuid, overrides) {
+    return entryInput(uuid, null, '2026-07-13T08:00:00', Object.assign({
+      activity_code: 'equipment_maintenance',
+      template_code: 'full_record',
+      template_version: 11,
+      layout_code: 'farm_wide',
+      layout_version: 1,
+      values: [],
+      note: 'Serviced mower',
+    }, overrides || {}));
+  };
+  const created = await journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000001'), principal(),
+    { mode: 'create' });
+  const stored = db.prepare('SELECT plot_uuid,zone_id,layout_code FROM journal_entries WHERE entry_uuid=?')
+    .get(created.entry_uuid);
+  assert.deepEqual(Object.assign({}, stored), { plot_uuid: null, zone_id: null, layout_code: 'farm_wide' });
+  const plotUuid = '22700000-0000-4000-8000-000000000002';
+  await journal.upsertPlot(db, plotInput(plotUuid, 'farm-wide-refused'), principal());
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000003', { plot_uuid: plotUuid }), principal(),
+      { mode: 'create' }),
+    (error) => error && error.code === 'validation_failed' &&
+      error.errors.some((item) => item.code === 'farm_wide_requires_no_plot')
+  );
+  await assert.rejects(
+    journal.saveEntry(db, farmWide('22700000-0000-4000-8000-000000000004', { season_crop: 'barley' }), principal(),
+      { mode: 'create' }),
+    (error) => error && error.code === 'validation_failed' &&
+      error.errors.some((item) => item.code === 'farm_wide_requires_no_context')
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n, 1);
+});
+
+test('station and group entry scopes are exclusive, normalized, and never fall back to all entries', async () => {
+  const { db, entryUuids } = await createPagedEntries('entry-scopes', null, 3);
+  const firstPlot = '61000000-0000-4000-8000-000000000001';
+  const secondPlot = '61000000-0000-4000-8000-000000000002';
+  const groupUuid = '62000000-0000-4000-8000-000000000001';
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-A', firstPlot);
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-B', secondPlot);
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Scope cohort',
+    resolved: false,
+    members: [firstPlot, secondPlot],
+  }, principal());
+
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', plot_uuid: firstPlot, station_code: 'Station-A' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'conflicting_scope_filters'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', group_uuid: 'not-a-uuid' }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_uuid'
+  );
+  await assert.rejects(
+    journal.listEntries(db, { status: 'final', station_code: 'x'.repeat(241) }, principal()),
+    (error) => error && error.statusCode === 400 && error.code === 'invalid_filter'
+  );
+  const station = await journal.listEntries(db, { status: 'final', station_code: ' Station-A ' }, principal());
+  assert.deepEqual(station.entries.map((entry) => entry.entry_uuid), [entryUuids[0]]);
+  const group = await journal.listEntries(db, { status: 'final', group_uuid: groupUuid }, principal());
+  assert.deepEqual(group.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  const selection = { status: 'final', group_uuid: groupUuid };
+  const csvRecords = parseCsvRecords(await journal.exportWideCsv(db, selection, principal()));
+  const uuidColumn = csvRecords[0].findIndex((cell) => cell.value === 'entry_uuid');
+  assert.deepEqual(csvRecords.slice(1).map((record) => record[uuidColumn].value), entryUuids.slice(0, 2));
+  const exported = JSON.parse(await journal.exportJson(db, selection, principal()));
+  assert.deepEqual(exported.entries.map((entry) => entry.entry_uuid), entryUuids.slice(0, 2));
+  for (const scope of [{ station_code: 'missing' }, { group_uuid: '62000000-0000-4000-8000-000000000099' }]) {
+    await assert.rejects(
+      journal.listEntries(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+    await assert.rejects(
+      journal.exportJson(db, Object.assign({ status: 'final' }, scope), principal()),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found'
+    );
+  }
+});
+
+test('entry scopes follow the read rule: owner-only flag-off, account-wide in scoped mode', async () => {
+  const { db, entryUuids } = await createPagedEntries('entry-scope-ownership', null, 2);
+  const firstPlot = '61000000-0000-4000-8000-000000000001';
+  const groupUuid = '62000000-0000-4000-8000-000000000002';
+  db.prepare('UPDATE journal_plots SET station_code=? WHERE plot_uuid=?').run('Station-A', firstPlot);
+  await journal.upsertPlotGroup(db, {
+    group_uuid: groupUuid,
+    base_sync_version: 0,
+    label: 'Owner cohort',
+    resolved: false,
+    members: [firstPlot],
+  }, principal());
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  for (const scope of [{ plot_uuid: firstPlot }, { station_code: 'Station-A' }, { group_uuid: groupUuid }]) {
+    await assert.rejects(
+      journal.listEntries(db, Object.assign({ status: 'final' }, scope), other),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found',
+      JSON.stringify(scope)
+    );
+    await assert.rejects(
+      journal.exportJson(db, Object.assign({ status: 'final' }, scope), other),
+      (error) => error && error.statusCode === 404 && error.code === 'scope_not_found',
+      JSON.stringify(scope)
+    );
+  }
+  const scopedOther = Object.assign({}, other, { scope: scopeHelper, scoped: true });
+  scopeHelper.invalidateScope(OTHER_OWNER_UUID);
+  for (const scope of [{ plot_uuid: firstPlot }, { station_code: 'Station-A' }, { group_uuid: groupUuid }]) {
+    const listed = await journal.listEntries(db, Object.assign({ status: 'final' }, scope), scopedOther);
+    assert.deepEqual(listed.entries.map((entry) => entry.entry_uuid), [entryUuids[0]], JSON.stringify(scope));
+  }
+});
+
+test('#418: in scoped mode a collaborator cannot create or rewrite another user\'s plot group', async () => {
+  const db = new TestDb('scoped-plot-group-ownership');
+  seedIdentity(db);
+  const foreignPlotUuid = '22600000-0000-4000-8000-000000000001';
+  const ownPlotUuid = '22600000-0000-4000-8000-000000000002';
+  const foreignGroupUuid = '22600000-0000-4000-8000-000000000003';
+  const other = principal({
+    user_id: 2,
+    owner_user_uuid: OTHER_OWNER_UUID,
+    author_principal_uuid: OTHER_OWNER_UUID,
+    author_label: 'other-user',
+  });
+  await journal.upsertPlot(db, plotInput(foreignPlotUuid, 'foreign-group-plot'), other);
+  await journal.upsertPlot(db, plotInput(ownPlotUuid, 'own-group-plot'), principal());
+  await journal.upsertPlotGroup(db, {
+    group_uuid: foreignGroupUuid,
+    base_sync_version: 0,
+    label: 'Owner group',
+    resolved: false,
+    members: [foreignPlotUuid],
+  }, other);
+  db.prepare(
+    'INSERT INTO user_plot_assignments ' +
+      '(assignment_uuid,user_uuid,plot_uuid,gateway_device_eui,created_at) VALUES (?,?,?,?,?)'
+  ).run('22600000-0000-4000-8000-000000000004', OWNER_UUID, foreignPlotUuid, GATEWAY_EUI,
+    '2026-07-13T00:00:00.000Z');
+  const scoped = Object.assign({}, principal(), { scope: scopeHelper, scoped: true });
+  const groupsBefore = db.prepare('SELECT * FROM journal_plot_groups ORDER BY group_uuid').all();
+  const outboxBefore = db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n;
+
+  for (const role of ['researcher', 'admin']) {
+    db.prepare('UPDATE users SET role=? WHERE user_uuid=?').run(role, OWNER_UUID);
+    scopeHelper.invalidateScope(OWNER_UUID);
+    await assert.rejects(
+      journal.upsertPlotGroup(db, {
+        group_uuid: '22600000-0000-4000-8000-000000000005',
+        base_sync_version: 0,
+        label: 'Attributed to the plot owner',
+        resolved: false,
+        members: [foreignPlotUuid],
+      }, scoped),
+      (error) => error && error.statusCode === 403 && error.code === 'forbidden',
+      role + ' create'
+    );
+    await assert.rejects(
+      journal.upsertPlotGroup(db, {
+        group_uuid: foreignGroupUuid,
+        base_sync_version: 1,
+        label: 'Rewritten by a collaborator',
+        resolved: false,
+        members: [foreignPlotUuid],
+      }, scoped, foreignGroupUuid),
+      (error) => error && error.statusCode === 403 && error.code === 'forbidden',
+      role + ' update'
+    );
+  }
+  assert.deepEqual(db.prepare('SELECT * FROM journal_plot_groups ORDER BY group_uuid').all(), groupsBefore);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, outboxBefore);
+
+  const own = await journal.upsertPlotGroup(db, {
+    group_uuid: '22600000-0000-4000-8000-000000000006',
+    base_sync_version: 0,
+    label: 'Own group',
+    resolved: false,
+    members: [ownPlotUuid],
+  }, scoped);
+  assert.equal(own.plot_group.owner_user_uuid, OWNER_UUID);
+
+  // Flag-off behaviour is unchanged: the other owner's plot is simply not found.
+  await assert.rejects(
+    journal.upsertPlotGroup(db, {
+      group_uuid: '22600000-0000-4000-8000-000000000007',
+      base_sync_version: 0,
+      label: 'Flag-off foreign',
+      resolved: false,
+      members: [foreignPlotUuid],
+    }, principal()),
+    (error) => error && error.statusCode === 404
+  );
+});
+
 test('entry keyset pagination is stable for equal timestamps and rejects cursor filter reuse', async () => {
   const { db, entryUuids } = await createPagedEntries('pagination');
   const seen = [];
