@@ -3576,6 +3576,7 @@ async function handleHttpRequest(options) {
 
 module.exports = {
   discardEntry,
+  farmWideWritable,
   errorResponse,
   exportJson,
   exportResearchPackage,

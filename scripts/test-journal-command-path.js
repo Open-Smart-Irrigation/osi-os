@@ -11,6 +11,9 @@ const { DatabaseSync } = require('node:sqlite');
 const journal = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
 );
+const scopeHelper = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
+);
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -1060,6 +1063,111 @@ test('UPSERT_JOURNAL_ENTRY_BATCH rolls back members and ledger when ACK persiste
     assert.equal(counts.values, 0);
     assert.equal(counts.outbox, 0);
     assert.equal((await db.get("SELECT COUNT(*) AS n FROM applied_commands WHERE result='APPLIED'")).n, 0);
+  } finally {
+    db.close();
+  }
+});
+
+function withScopedAccess(t) {
+  const previous = process.env.OSI_SCOPED_ACCESS;
+  process.env.OSI_SCOPED_ACCESS = '1';
+  scopeHelper._resetForTests();
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_SCOPED_ACCESS;
+    else process.env.OSI_SCOPED_ACCESS = previous;
+    scopeHelper._resetForTests();
+  });
+}
+
+function addLocalAuthor(db, role) {
+  db.native.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role) VALUES (?,?,?,?,?,?)'
+  ).run(3, 'cloud-researcher', 'unused', '2026-07-12T00:00:00.000Z', ACTOR_UUID, role);
+}
+
+function farmWideCommand(commandId, entryUuid) {
+  const entry = entryAggregate({
+    entry_uuid: entryUuid,
+    plot_uuid: null,
+    zone_uuid: null,
+    season_uuid: null,
+    season_crop: null,
+    season_variety: null,
+  });
+  return commandEnvelope({
+    commandId,
+    payload: Object.assign({}, commandEnvelope().payload, {
+      effect_key: 'journal_entry:' + entryUuid + ':0',
+      entry,
+    }),
+  });
+}
+
+test('scoped mode: a cloud farm-wide entry from an author who is neither farm owner nor admin is refused', async (t) => {
+  withScopedAccess(t);
+  const db = fixtureDb('scoped-farm-wide-command');
+  try {
+    addLocalAuthor(db, 'researcher');
+    const farmWideUuid = 'aaaaaaaa-3333-4333-8333-333333333333';
+    const refusedUuid = 'aaaaaaaa-5555-4555-8555-555555555555';
+    const refused = await journal.applyJournalCommand(db, farmWideCommand(901, refusedUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(refused.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(refused.ack.reason, 'scope_denied');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 0);
+
+    // A plot entry by the same author is unaffected.
+    const plotEntry = await journal.applyJournalCommand(db, commandEnvelope({ commandId: 902 }), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(plotEntry.ack.result, 'APPLIED', JSON.stringify(plotEntry.ack));
+
+    // Once the author is the linked farm owner, a farm-wide entry applies.
+    db.native.prepare(
+      "UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+        'WHERE user_uuid=?'
+    ).run(ACTOR_UUID);
+    const applied = await journal.applyJournalCommand(db, farmWideCommand(903, farmWideUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(applied.ack.result, 'APPLIED', JSON.stringify(applied.ack));
+    const adminVoidUuid = 'aaaaaaaa-6666-4666-8666-666666666666';
+    assert.equal((await journal.applyJournalCommand(db, farmWideCommand(907, adminVoidUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    })).ack.result, 'APPLIED');
+
+    // Its void needs the owner or an admin too.
+    db.native.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(ACTOR_UUID);
+    const voidRefused = await journal.applyJournalCommand(db,
+      pendingCommand(904, 'VOID_JOURNAL_ENTRY', 'journal_entry:' + farmWideUuid + ':1', {
+        entry_uuid: farmWideUuid,
+        base_sync_version: 1,
+        reason: 'Recorded twice',
+      }), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(voidRefused.ack.reason, 'scope_denied');
+    assert.equal((await db.get('SELECT status FROM journal_entries WHERE entry_uuid=?', [farmWideUuid])).status,
+      'final');
+    db.native.prepare("UPDATE users SET role='admin' WHERE user_uuid=?").run(ACTOR_UUID);
+    const voided = await journal.applyJournalCommand(db,
+      pendingCommand(905, 'VOID_JOURNAL_ENTRY', 'journal_entry:' + adminVoidUuid + ':1', {
+        entry_uuid: adminVoidUuid,
+        base_sync_version: 1,
+        reason: 'Recorded twice',
+      }), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(voided.ack.result, 'APPLIED', JSON.stringify(voided.ack));
+  } finally {
+    db.close();
+  }
+});
+
+test('flag off: a cloud farm-wide entry applies as before', async () => {
+  const db = fixtureDb('flag-off-farm-wide-command');
+  try {
+    const applied = await journal.applyJournalCommand(db,
+      farmWideCommand(906, 'aaaaaaaa-4444-4444-8444-444444444444'), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(applied.ack.result, 'APPLIED');
   } finally {
     db.close();
   }

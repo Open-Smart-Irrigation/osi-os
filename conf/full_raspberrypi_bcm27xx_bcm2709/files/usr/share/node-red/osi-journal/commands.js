@@ -5,6 +5,7 @@ const lifecycle = require('./lifecycle');
 const journalApi = require('./api');
 const { aggregateHash } = require('./aggregate');
 const ledger = require('../osi-command-ledger');
+const scopeHelper = require('../osi-scope-helper');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const EUI64 = /^[0-9A-F]{16}$/;
@@ -599,6 +600,51 @@ async function applyBatchInTransaction(tx, catalog, batch, principal, deliveryId
   return ack;
 }
 
+// Owner decision 2026-10-05: with scoped access on, a farm-wide entry (no
+// plot, no zone) is recorded, changed and voided only by the farm owner or an
+// enabled admin. The cloud authorizes a plot-less entry without a plot
+// scope, so the gateway applies the same rule to cloud commands as to its own
+// API, judged on the command's author (the gateway-local identity). Drafts
+// never arrive here (cloud entry commands are final).
+async function assertCommandFarmWideAuthor(db, type, payload) {
+  if (!scopeHelper.isScopedMode()) return;
+  let entryUuid = null;
+  let farmWide = false;
+  if (type === 'UPSERT_JOURNAL_ENTRY') {
+    const entry = payload.entry || {};
+    entryUuid = entry.entry_uuid;
+    farmWide = entry.plot_uuid == null;
+  } else if (type === 'VOID_JOURNAL_ENTRY') {
+    entryUuid = payload.entry_uuid;
+  } else {
+    return;
+  }
+  if (!farmWide && UUID.test(entryUuid || '')) {
+    const stored = await db.get(
+      'SELECT plot_uuid,zone_id,zone_uuid,status FROM journal_entries WHERE entry_uuid=? LIMIT 1',
+      [entryUuid]
+    );
+    farmWide = Boolean(stored && stored.plot_uuid == null && stored.zone_id == null &&
+      stored.zone_uuid == null && stored.status !== 'draft');
+  }
+  if (!farmWide) return;
+  let allowed;
+  try {
+    allowed = await journalApi.farmWideWritable(db, {
+      author_principal_uuid: payload.author_principal_uuid,
+      scoped: true,
+      scope: scopeHelper,
+    });
+  } catch (error) {
+    // A database fault stays retryable; an unknown or disabled author is a no.
+    if (/^SQLITE_/.test(String(error && error.code || ''))) throw error;
+    allowed = false;
+  }
+  if (!allowed) {
+    throw commandError('scope_denied', 'Only the farm owner or an admin may record or change farm-wide journal entries');
+  }
+}
+
 // Thin, signature-identical wrappers over osi-command-ledger's generic
 // pipeline. They inject the two pieces of journal-specific knowledge the
 // ledger cannot have on its own: the identity/effect-key binding rule above,
@@ -734,6 +780,7 @@ async function applyJournalCommandOnce(db, envelope, runtime, recheckReplay) {
       throw commandError('invalid_intent_hash', 'Journal batch submitted intent hash does not match canonical payload');
     }
     const principal = await trustedPrincipal(db, payload, runtime, type, deliveryId, intentHash);
+    await assertCommandFarmWideAuthor(db, type, payload);
     if (type === 'UPSERT_JOURNAL_ENTRY') {
       const catalog = await loadCatalog(db, principal);
       await lifecycle.finalize(db, catalog, entryInput(payload, principal), principal);
