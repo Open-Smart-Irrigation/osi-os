@@ -2431,12 +2431,16 @@ async function createFinalInTransaction(tx, catalog, input, principal, entryInde
     sync_version: finalSyncVersion,
     gateway_device_eui: row.gateway_device_eui,
   };
-  assertCommandJournalEntryEffectKey(principal, terminal);
-  await recordTerminalCommand(tx, principal, terminal);
-  return Object.assign({
+  if (!(options && options.suppressCommandTerminal)) {
+    assertCommandJournalEntryEffectKey(principal, terminal);
+    await recordTerminalCommand(tx, principal, terminal);
+  }
+  const result = Object.assign({
     entry_uuid: row.entry_uuid,
     sync_version: finalSyncVersion,
   }, journalReceipt(emission));
+  if (options && options.includeAggregate) result.aggregate = emission.aggregate;
+  return result;
 }
 
 async function saveDraft(db, catalog, input, principal) {
@@ -2515,6 +2519,12 @@ async function finalizeBatch(db, catalog, input, members, principal) {
   validateRequestLimit(input);
   input = normalizeInputIdentities(input);
   members = normalizeBatchMembers(members, input.pass_uuid);
+  return db.transaction(function(tx) {
+    return finalizeBatchInTransaction(tx, catalog, input, members, principal);
+  });
+}
+
+async function finalizeBatchInTransaction(tx, catalog, input, members, principal, options) {
   const isPassBatch = Boolean(input.pass_uuid);
   const acknowledgementValues = input.duplicate_guard_ack_entry_uuids == null
     ? []
@@ -2525,127 +2535,129 @@ async function finalizeBatch(db, catalog, input, members, principal) {
     throw lifecycleError('invalid_duplicate_ack', 'Batch duplicate acknowledgements are invalid');
   }
   const acknowledgements = new Set(acknowledgementValues);
-  return db.transaction(async function(tx) {
-    const duplicateCandidates = [];
-    const existingEntries = new Map();
-    const newMembers = [];
-    for (const member of members) {
-      const existing = await tx.get(
-        'SELECT * FROM journal_entries WHERE entry_uuid=?',
-        [member.entry_uuid]
-      );
-      if (existing) {
-        assertOwnedEntry(existing, principal);
-        if (existing.deleted_at != null) {
-          throw idempotencyConflict('A batch retry cannot replay a deleted journal entry');
-        }
-        if (existing.plot_uuid !== member.plot_uuid) {
-          throw idempotencyConflict('Entry UUID is already assigned to another plot');
-        }
-        // B1 fix (Slice F, atomic tank-mix pass): a pass member's entry_uuid
-        // — the primary in particular — is very likely already autosaved as
-        // a version-zero draft before the pass is ever finalized. Promoting
-        // it to final here is a fresh write, not a retry of an
-        // already-finalized batch, so it belongs with the brand-new members
-        // below (createFinalInTransaction already knows how to promote a
-        // draft in place) rather than the strict all-existing-or-all-new
-        // retry-matching path, which only ever expects already-FINAL
-        // members.
-        if (existing.status === 'draft') {
-          const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
-          newMembers.push({ member, plot });
-          continue;
-        }
-        existingEntries.set(member.entry_uuid, existing);
-      } else {
+  const duplicateCandidates = [];
+  const existingEntries = new Map();
+  const newMembers = [];
+  for (const member of members) {
+    const existing = await tx.get(
+      'SELECT * FROM journal_entries WHERE entry_uuid=?',
+      [member.entry_uuid]
+    );
+    if (existing) {
+      assertOwnedEntry(existing, principal);
+      if (existing.deleted_at != null) {
+        throw idempotencyConflict('A batch retry cannot replay a deleted journal entry');
+      }
+      if (existing.plot_uuid !== member.plot_uuid) {
+        throw idempotencyConflict('Entry UUID is already assigned to another plot');
+      }
+      // B1 fix (Slice F, atomic tank-mix pass): a pass member's entry_uuid
+      // — the primary in particular — is very likely already autosaved as
+      // a version-zero draft before the pass is ever finalized. Promoting
+      // it to final here is a fresh write, not a retry of an
+      // already-finalized batch, so it belongs with the brand-new members
+      // below (createFinalInTransaction already knows how to promote a
+      // draft in place) rather than the strict all-existing-or-all-new
+      // retry-matching path, which only ever expects already-FINAL
+      // members.
+      if (existing.status === 'draft') {
         const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
         newMembers.push({ member, plot });
+        continue;
       }
+      existingEntries.set(member.entry_uuid, existing);
+    } else {
+      const plot = await resolvePlotContext(tx, member.plot_uuid, principal);
+      newMembers.push({ member, plot });
     }
-    if (existingEntries.size) {
-      if (existingEntries.size !== members.length) {
-        throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
-      }
-      return existingBatchRetry(tx, input, members, existingEntries);
+  }
+  if (existingEntries.size) {
+    if (existingEntries.size !== members.length) {
+      throw idempotencyConflict('A batch retry cannot mix existing and new member UUIDs');
     }
-    for (const item of newMembers) {
-      const member = item.member;
-      const plot = item.plot;
-      const candidateInput = Object.assign({}, input, { plot_uuid: member.plot_uuid });
-      const occurrence = occurrenceFor(candidateInput, plot);
-      const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
-      if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
-    }
-    const candidateUuids = new Set(duplicateCandidates.map(function(candidate) {
-      return candidate.entryUuid;
-    }));
-    for (const acknowledged of acknowledgements) {
-      if (!candidateUuids.has(acknowledged)) {
-        const error = lifecycleError(
-          'invalid_duplicate_ack',
-          'A batch duplicate acknowledgement does not match a current candidate'
-        );
-        error.statusCode = 422;
-        throw error;
-      }
-    }
-    const unacknowledged = duplicateCandidates.filter(function(candidate) {
-      return !acknowledgements.has(candidate.entryUuid);
-    });
-    if (unacknowledged.length) {
+    return existingBatchRetry(tx, input, members, existingEntries);
+  }
+  for (const item of newMembers) {
+    const member = item.member;
+    const plot = item.plot;
+    const candidateInput = Object.assign({}, input, { plot_uuid: member.plot_uuid });
+    const occurrence = occurrenceFor(candidateInput, plot);
+    const candidate = await findDuplicateCandidate(tx, candidateInput, plot, occurrence, null);
+    if (candidate) duplicateCandidates.push(safeDuplicateCandidate(candidate));
+  }
+  const candidateUuids = new Set(duplicateCandidates.map(function(candidate) {
+    return candidate.entryUuid;
+  }));
+  for (const acknowledged of acknowledgements) {
+    if (!candidateUuids.has(acknowledged)) {
       const error = lifecycleError(
-        'duplicate_candidates',
-        'Similar final journal entries already exist'
+        'invalid_duplicate_ack',
+        'A batch duplicate acknowledgement does not match a current candidate'
       );
-      error.statusCode = 409;
-      error.details = { duplicateCandidates: unacknowledged };
+      error.statusCode = 422;
       throw error;
     }
-    const batchUuid = crypto.randomUUID();
-    const contextCache = new Map();
-    const entries = [];
-    for (let index = 0; index < members.length; index += 1) {
-      const member = members[index];
-      const entryInput = Object.assign({}, input, {
-        entry_uuid: member.entry_uuid,
-        plot_uuid: member.plot_uuid,
-        batch_uuid: batchUuid,
-        base_sync_version: 0,
-      });
-      // Pass batch (Slice F): a member's own values (each product line) win
-      // over the batch's shared top-level values; a cross-plot batch never
-      // sets per-member values, so entryInput.values stays exactly what it
-      // always was (the shared top-level values applied to every plot).
-      if (Array.isArray(member.values)) entryInput.values = member.values;
-      // The crop-cycle cascade (open/close) is one agronomic decision for
-      // the whole pass, not one per product line — applying it once per
-      // member on the SAME plot would try to close (or open) the same cycle
-      // N times inside this one transaction and fail on the second attempt.
-      // Restrict it to the pass's first/primary member, matching the
-      // pre-fix behavior where only the primary's create ever carried these
-      // fields at all (the additional members were plain journalApi.
-      // createEntry calls that never included them).
-      if (isPassBatch && index > 0) {
-        delete entryInput.cycle_action;
-        delete entryInput.cycle_uuid;
-        delete entryInput.ends_crop_cycle;
-      }
-      const result = await createFinalInTransaction(
-        tx,
-        catalog,
-        entryInput,
-        principal,
-        index,
-        contextCache,
-        {
-          duplicateAcknowledgements: acknowledgements,
-          outbox_event_uuid: batchMemberEventUuid(input, member),
-        }
-      );
-      entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
-    }
-    return { batch_uuid: batchUuid, entries };
+  }
+  const unacknowledged = duplicateCandidates.filter(function(candidate) {
+    return !acknowledgements.has(candidate.entryUuid);
   });
+  if (unacknowledged.length) {
+    const error = lifecycleError(
+      'duplicate_candidates',
+      'Similar final journal entries already exist'
+    );
+    error.statusCode = 409;
+    error.details = { duplicateCandidates: unacknowledged };
+    throw error;
+  }
+  const batchUuid = input.batch_uuid || crypto.randomUUID();
+  const contextCache = new Map();
+  const entries = [];
+  for (let index = 0; index < members.length; index += 1) {
+    const member = members[index];
+    const entryInput = Object.assign({}, input, {
+      entry_uuid: member.entry_uuid,
+      plot_uuid: member.plot_uuid,
+      batch_uuid: batchUuid,
+      base_sync_version: 0,
+    });
+    // Pass batch (Slice F): a member's own values (each product line) win
+    // over the batch's shared top-level values; a cross-plot batch never
+    // sets per-member values, so entryInput.values stays exactly what it
+    // always was (the shared top-level values applied to every plot).
+    if (Array.isArray(member.values)) entryInput.values = member.values;
+    // A cloud-issued batch names the crop-cycle decision per member plot;
+    // the local API path never carries these member fields.
+    if (member.cycle_action != null) entryInput.cycle_action = member.cycle_action;
+    if (member.cycle_uuid != null) entryInput.cycle_uuid = member.cycle_uuid;
+    // The crop-cycle cascade (open/close) is one agronomic decision for
+    // the whole pass, not one per product line — applying it once per
+    // member on the SAME plot would try to close (or open) the same cycle
+    // N times inside this one transaction and fail on the second attempt.
+    // Restrict it to the pass's first/primary member, matching the
+    // pre-fix behavior where only the primary's create ever carried these
+    // fields at all (the additional members were plain journalApi.
+    // createEntry calls that never included them).
+    if (isPassBatch && index > 0) {
+      delete entryInput.cycle_action;
+      delete entryInput.cycle_uuid;
+      delete entryInput.ends_crop_cycle;
+    }
+    const result = await createFinalInTransaction(
+      tx,
+      catalog,
+      entryInput,
+      principal,
+      index,
+      contextCache,
+      Object.assign({
+        duplicateAcknowledgements: acknowledgements,
+        outbox_event_uuid: batchMemberEventUuid(input, member),
+      }, options || {})
+    );
+    entries.push(Object.assign({ plot_uuid: member.plot_uuid }, result));
+  }
+  return { batch_uuid: batchUuid, entries };
 }
 
 async function void_(db, _catalog, entryUuid, baseSyncVersion, reason, principal, options) {
@@ -2757,6 +2769,7 @@ module.exports = {
   finalize,
   finalizeCreate,
   finalizeBatch,
+  finalizeBatchInTransaction,
   openCyclesCoveringPlot,
   resolveClosedCropCycleOverrides,
   resolveLiveCropOverrides,

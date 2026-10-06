@@ -40,11 +40,9 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_COMMANDS below:
 // osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of this
 // port, so the cloud side is not required to issue them yet.
-// UPSERT_JOURNAL_ENTRY_BATCH: contract first, edge applier later; it leaves
-// this list in the commit that wires the applier.
-const EXACT_EDGE_DEFERRED_COMMANDS = [
-  'UPSERT_JOURNAL_ENTRY_BATCH',
-];
+// UPSERT_JOURNAL_ENTRY_BATCH left this list when the osi-journal batch applier
+// was wired into the command registry.
+const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
   ...EXACT_SCOPED_ACCESS_COMMANDS,

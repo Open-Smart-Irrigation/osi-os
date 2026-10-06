@@ -132,7 +132,7 @@ function exactJournalStaging() {
   return {
     version: 1,
     commands: {
-      edgeDeferred: ['UPSERT_JOURNAL_ENTRY_BATCH'],
+      edgeDeferred: [],
       cloudDeferred: [
         'UPSERT_JOURNAL_ENTRY',
         'UPSERT_JOURNAL_ENTRY_BATCH',

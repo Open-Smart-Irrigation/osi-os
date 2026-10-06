@@ -1155,7 +1155,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     // WATERMARK parity is active now; only the still-deferred journal and
     // scoped-access sets belong in this staging oracle.
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(['UPSERT_JOURNAL_ENTRY_BATCH']) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',

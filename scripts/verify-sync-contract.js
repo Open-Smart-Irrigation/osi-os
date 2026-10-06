@@ -49,12 +49,9 @@ const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
 // these are no longer edge-deferred. They stay in EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS
 // below: osi-server PR #83 (EdgeSyncService command appliers) is open, not merged, as of
 // this port, so the cloud side is not required to issue them yet.
-// UPSERT_JOURNAL_ENTRY_BATCH: the contract lands before the edge applier
-// (atomic batch apply in osi-journal), so it stays edge-deferred until that
-// applier is wired into the command registry.
-const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [
-    'UPSERT_JOURNAL_ENTRY_BATCH',
-];
+// UPSERT_JOURNAL_ENTRY_BATCH: the edge applier (atomic batch apply in
+// osi-journal) is wired into the command registry, so nothing is edge-deferred.
+const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
         effect_key: { prefix: 'journal_entry', uuid_path: 'entry.entry_uuid', version_path: 'entry.base_sync_version' },
