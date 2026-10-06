@@ -41,9 +41,13 @@ function modulesRoot(profile) {
   return path.join(ROOT, 'conf', profile, 'files/usr/share/node-red');
 }
 
-function instants() {
+// The default series crosses Zurich's autumn DST change and two local
+// month starts; SPRING crosses the spring change and 1 April.
+const SPRING_FIRST_MS = Date.parse('2026-03-20T00:00:00.000Z');
+
+function instants(firstMs = FIRST_MS) {
   const out = [];
-  for (let step = 0; step < STEPS; step += 1) out.push(FIRST_MS + step * STEP_MS);
+  for (let step = 0; step < STEPS; step += 1) out.push(firstMs + step * STEP_MS);
   return out;
 }
 
@@ -53,7 +57,7 @@ function shapeFor(step) {
   return SHAPE_NAMES[(step + Math.floor(step / 72)) % SHAPE_NAMES.length];
 }
 
-function seedDb(mode) {
+function seedDb(mode, firstMs = FIRST_MS) {
   const raw = new DatabaseSync(':memory:');
   raw.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
   raw.exec(`
@@ -68,7 +72,7 @@ function seedDb(mode) {
     'INSERT INTO device_data(deveui, recorded_at, swt_1, swt_2, dendro_position_mm, rain_mm_delta) VALUES (?, ?, ?, ?, ?, ?)'
   );
   raw.exec('BEGIN');
-  instants().forEach((ms, step) => {
+  instants(firstMs).forEach((ms, step) => {
     const shape = mode === 'iso' ? 'isoZ' : shapeFor(step);
     insert.run(DEVEUI, SHAPES[shape](ms), 10 + (step % 37), 20 + (step % 11), 5 + (step % 13) / 100, step % 5 === 0 ? 0.2 : 0);
   });
@@ -80,9 +84,9 @@ function sha256(value) {
   return crypto.createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 }
 
-async function withBoth(fn) {
-  const iso = seedDb('iso');
-  const mixed = seedDb('mixed');
+async function withBoth(fn, firstMs = FIRST_MS) {
+  const iso = seedDb('iso', firstMs);
+  const mixed = seedDb('mixed', firstMs);
   try {
     return { iso: await fn(facadeDb(iso)), mixed: await fn(facadeDb(mixed)) };
   } finally {
@@ -144,6 +148,16 @@ for (const profile of PROFILES) {
       }
     });
   }
+
+  test(`${label}: hourly and daily exports across the spring DST change and 1 April equal the pure ISO exports`, async () => {
+    for (const granularity of ['hourly', 'daily']) {
+      const { iso, mixed } = await withBoth((db) => helper.buildZoneExportCsv(db, {
+        zoneId: 12, from: '2026-03-21', to: '2026-04-28', granularity, channels: 'swt_1', nowMs: Date.parse('2026-06-01T00:00:00.000Z'),
+      }), SPRING_FIRST_MS);
+      assert.ok(iso.rows.length > 0, granularity);
+      assert.deepEqual(mixed.rows, iso.rows, granularity);
+    }
+  });
 
   test(`${label}: monthly export windows keep every mixed-shape row once (sample counts equal the whole-range reference)`, async () => {
     const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
