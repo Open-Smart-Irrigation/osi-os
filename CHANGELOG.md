@@ -117,7 +117,23 @@ every 0.7.0 entry below.
   `journal_v2_plot_group_snapshots`; the replication worker validates and
   stores plot-group snapshots. The sync contract defines the
   `UPSERT_JOURNAL_ENTRY_BATCH` command and the `JOURNAL_CROP_CYCLE_UPSERTED`
-  event; both are staged (no edge applier or emitter yet).
+  event.
+- **Journal entry batches and crop-cycle projection.** A cloud-issued
+  `UPSERT_JOURNAL_ENTRY_BATCH` is applied in one transaction: all member
+  entries, the command ledger row and one ACK listing every member's
+  version and payload hash, or nothing. Every crop-cycle change (seeding,
+  harvest, reseed, manual close, correction, void) is sent to the cloud as
+  `JOURNAL_CROP_CYCLE_UPSERTED`, except on a cloud-primary gateway. The
+  replication worker advertises the `journal_entry_batch_v1` release once
+  the cloud accepts the gateway's journal contract.
+- **Journal capture.** Final entries on catalog v11 Full templates are
+  checked against the catalog's final-requirement matrix; a required
+  quantity the matrix allows may be recorded as not observed. A Farm-wide
+  choice records maintenance and observations on the `farm_wide` layout
+  without plot, zone or other field context. Entry lists and exports narrow
+  to a station or a plot group. Capture closes with Escape, the activity
+  grid is one tab stop moved with the arrow keys, and the detail preference
+  falls back to the least detailed template a layout supports.
 - **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
   `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
   and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
@@ -408,6 +424,9 @@ every 0.7.0 entry below.
   token; in 0.7.0 both answered without one.
 - `PUT /api/irrigation-zones/:zone_id/timezone` changes only a zone the
   caller owns; in 0.7.0 any signed-in user could change any zone.
+- With scoped access on, only the owner of a journal plot group's plots
+  may create or change the group. A grant on another user's plot no longer
+  lets the grantee create or rewrite that user's group (#418).
 - GUI: cached data and in-flight writes belong to one login session. After a
   logout and login as another user in the same tab, the second user no
   longer sees data cached for the first, and the first user's chained writes
