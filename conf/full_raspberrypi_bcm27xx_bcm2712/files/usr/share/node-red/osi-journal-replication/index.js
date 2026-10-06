@@ -820,7 +820,9 @@ function entryBatchApplierReady() {
 async function advertiseEntryBatchRelease(httpApi, config, linkKey) {
   const ready = entryBatchApplierReady();
   const previous = entryBatchAdvertisements.get(linkKey);
-  if (previous && previous.ready === ready && Date.now() - previous.at < ENTRY_BATCH_READVERTISE_MS) {
+  if (previous && previous.failedUntil) {
+    if (Date.now() < previous.failedUntil) return 'backoff';
+  } else if (previous && previous.ready === ready && Date.now() - previous.at < ENTRY_BATCH_READVERTISE_MS) {
     return ready ? 'advertised' : 'not_ready';
   }
   try {
@@ -842,9 +844,13 @@ async function advertiseEntryBatchRelease(httpApi, config, linkKey) {
       throw error('invalid_capability', 'Journal entry batch capability response is malformed');
     }
   } catch (cause) {
-    // Reported in the tick result and retried on the next tick; replication
-    // itself does not depend on this release.
-    entryBatchAdvertisements.delete(linkKey);
+    // Reported in the tick result and retried after a backoff (the 403
+    // window: initial doubling to the cap); replication itself does not
+    // depend on this release.
+    const backoffMs = previous && previous.failedUntil
+      ? Math.min(previous.backoffMs * 2, journalV2BackoffCapMs())
+      : journalV2BackoffInitialMs();
+    entryBatchAdvertisements.set(linkKey, { failedUntil: Date.now() + backoffMs, backoffMs });
     return 'failed:' + String(cause && cause.code || 'unknown');
   }
   entryBatchAdvertisements.set(linkKey, { ready, at: Date.now() });

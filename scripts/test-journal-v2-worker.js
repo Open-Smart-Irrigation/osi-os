@@ -779,11 +779,12 @@ test('a rejected journal contract never advertises the entry batch release', asy
   assert.equal(result.entry_batch_capability, 'not_advertised');
 });
 
-test('a failed entry batch advertisement is reported and retried without stopping replication', async (t) => {
+test('a failed entry batch advertisement is reported, backed off and retried without stopping replication', async (t) => {
   const { database } = fixture(t, 'entry-batch-advertisement-failed');
   t.after(() => database.close());
   replication._resetJournalV2BackoffForTests();
   t.after(() => replication._resetJournalV2BackoffForTests());
+  withTinyJournalBackoff(t, { initialMs: 40, capMs: 1000 });
   let answer = () => ({ statusCode: 500, payload: { error: 'unavailable' } });
   const calls = [];
   const http = fakeHttp(database, entryBatchRoutes(acceptedCapability(), (request) => answer(request)), calls);
@@ -793,6 +794,14 @@ test('a failed entry batch advertisement is reported and retried without stoppin
   assert.equal(failed.entry_batch_capability, 'failed:transient_cloud_failure');
   assert.ok(calls.some((request) => request.url.includes('/replication?')), 'replication still ran');
 
+  const batchPosts = () => calls.filter((request) => request.payload &&
+    request.payload.release_id === 'journal_entry_batch_v1').length;
+  const postsAfterFailure = batchPosts();
+  const backedOff = await replication.runReplicationTick(facade(database), http, fs, config());
+  assert.equal(backedOff.entry_batch_capability, 'backoff');
+  assert.equal(batchPosts(), postsAfterFailure, 'no new advertisement inside the backoff window');
+
+  await sleep(60);
   answer = batchCapabilityAnswer;
   const retried = await replication.runReplicationTick(facade(database), http, fs, config());
   assert.equal(retried.entry_batch_capability, 'advertised');
