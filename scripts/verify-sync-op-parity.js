@@ -53,13 +53,11 @@ const EXACT_EDGE_MODULE_OPS = [
   'JOURNAL_VOCAB_UPSERTED',
   'JOURNAL_PLOT_UPSERTED',
   'JOURNAL_PLOT_GROUP_UPSERTED',
-];
-// JOURNAL_CROP_CYCLE_UPSERTED: the event contract lands before the edge emitter
-// (crop-cycle projection in osi-journal lifecycle). It leaves this list, and joins
-// EXACT_EDGE_MODULE_OPS, in the commit that adds the audited emitter.
-const EXACT_EDGE_DEFERRED_OPS = [
+  // Emitted through emitJournalOutbox by the crop-cycle projection in
+  // osi-journal lifecycle (emitCropCycleProjection).
   'JOURNAL_CROP_CYCLE_UPSERTED',
 ];
+const EXACT_EDGE_DEFERRED_OPS = [];
 const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,

@@ -5386,7 +5386,7 @@ test('voiding a harvest refuses with a clear error when a reseed already opened 
 // cascade runs so the returned/ACK'd version always matches the DB.
 
 test(
-  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits one coherent outbox event',
+  'a cycle-closing harvest returns the entry\'s true post-cascade sync_version and emits entry plus crop-cycle projection events',
   async () => {
     const db = createJournalDb('cc-b1-harvest-self-freeze-fix');
     seedJournalTestIdentity(db);
@@ -5423,8 +5423,98 @@ test(
     const membership = readCycleMemberships(db, plot)[0];
     assert.equal(membership.ends_on, '2026-08-01');
     assert.equal(membership.close_reason, 'harvest');
+
+    const cycleOutboxRows = db.prepare(
+      "SELECT aggregate_key,sync_version,payload_json FROM sync_outbox " +
+        "WHERE aggregate_type='JOURNAL_CROP_CYCLE' AND op='JOURNAL_CROP_CYCLE_UPSERTED' ORDER BY sync_version"
+    ).all();
+    assert.equal(cycleOutboxRows.length, 2, 'seeding open and harvest close each project the cycle');
+    assert.equal(cycleOutboxRows[0].sync_version, 1, 'a new cycle projects at version 1');
+    const closedCycle = JSON.parse(cycleOutboxRows[1].payload_json);
+    assert.equal(cycleOutboxRows[1].aggregate_key, membership.cycle_uuid);
+    assert.equal(cycleOutboxRows[1].sync_version, 2, 'closing a membership increments the cycle projection version');
+    assert.equal(closedCycle.plots[0].ends_on, '2026-08-01');
+    assert.equal(closedCycle.plots[0].close_reason, 'harvest');
+    assert.equal(closedCycle.owner_user_uuid, principal.owner_user_uuid);
   }
 );
+
+test('crop-cycle projection payloads carry exactly the JournalCropCycle contract fields', async () => {
+  const resources = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'docs/contracts/sync-schema/resources.schema.json'), 'utf8'
+  ));
+  const cycleShape = resources.definitions.JournalCropCycle;
+  const plotShape = resources.definitions.JournalCropCyclePlot;
+  const db = createJournalDb('cc-projection-contract-shape');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(104);
+  await makeCropCyclePlot(db, principal, plot);
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(104),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const row = db.prepare(
+    "SELECT payload_json FROM sync_outbox WHERE op='JOURNAL_CROP_CYCLE_UPSERTED'"
+  ).get();
+  const payload = JSON.parse(row.payload_json);
+  assert.deepEqual(Object.keys(payload).sort(), Object.keys(cycleShape.properties).sort());
+  assert.deepEqual(cycleShape.required.slice().sort(), Object.keys(cycleShape.properties).sort());
+  assert.deepEqual(Object.keys(payload.plots[0]).sort(), Object.keys(plotShape.properties).sort());
+  assert.equal(payload.contract_version, 1);
+  assert.equal(payload.sync_version, 1);
+  assert.equal(payload.opened_by_entry_uuid, cropCycleEntryUuid(104));
+  assert.equal(payload.plots[0].plot_uuid, plot);
+  assert.equal(payload.deleted_at, null);
+});
+
+test('voiding a seeding projects the deleted crop cycle at a higher version', async () => {
+  const db = createJournalDb('cc-void-seeding-projects');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(105);
+  await makeCropCyclePlot(db, principal, plot);
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(105),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  const { voidEntry } = require('./index');
+  await voidEntry(db, cropCycleEntryUuid(105), { base_sync_version: 1, reason: 'entered by mistake' }, principal);
+  const rows = db.prepare(
+    "SELECT sync_version,payload_json FROM sync_outbox WHERE op='JOURNAL_CROP_CYCLE_UPSERTED' ORDER BY sync_version"
+  ).all();
+  assert.equal(rows.length, 2);
+  assert.ok(rows[1].sync_version > rows[0].sync_version);
+  assert.ok(JSON.parse(rows[1].payload_json).deleted_at, 'the projection carries the soft delete');
+});
+
+test('a cloud-primary gateway keeps crop cycles out of both the V1 outbox and the V2 queue', async () => {
+  const db = createJournalDb('cc-projection-v2-authority');
+  seedJournalTestIdentity(db);
+  const principal = journalTestPrincipal();
+  const plot = cropCyclePlotUuid(106);
+  await makeCropCyclePlot(db, principal, plot);
+  db.prepare(
+    'INSERT INTO journal_authority_state(' +
+      'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
+    ') VALUES(?,?,\'legacy\',\'BARRIER_RECORDED\',?)'
+  ).run('20000000-0000-4000-8000-000000000106', JOURNAL_TEST_GATEWAY_EUI, '2026-08-08T10:11:12.123Z');
+  await saveEntry(db, seedingInput({
+    entry_uuid: cropCycleEntryUuid(106),
+    plot_uuid: plot,
+    occurred_start_local: '2026-04-01T09:00:00',
+  }), principal, { mode: 'create' });
+  assert.equal(readCycleMemberships(db, plot).length, 1, 'the local cycle still opens');
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='JOURNAL_CROP_CYCLE'").get().n,
+    0
+  );
+  const operations = db.prepare('SELECT operation FROM journal_edge_mutations').all()
+    .map(function(row) { return row.operation; });
+  assert.ok(!operations.some(function(operation) { return /CYCLE/.test(operation); }));
+});
 
 test('a batch harvest that closes cycles is idempotently retryable (B1)', async () => {
   const db = createJournalDb('cc-b1-batch-harvest-retry');

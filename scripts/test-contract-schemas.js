@@ -1163,8 +1163,9 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
             'JOURNAL_VOCAB_UPSERTED',
             'JOURNAL_PLOT_UPSERTED',
             'JOURNAL_PLOT_GROUP_UPSERTED',
+            'JOURNAL_CROP_CYCLE_UPSERTED',
         ]) &&
-        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify(['JOURNAL_CROP_CYCLE_UPSERTED']) &&
+        JSON.stringify(staging.eventOps && staging.eventOps.edgeDeferred) === JSON.stringify([]) &&
         JSON.stringify(staging.eventOps && staging.eventOps.cloudDeferred) === JSON.stringify(Object.keys(JOURNAL_EVENT_BINDINGS).concat(SCOPED_ACCESS_EVENT_OPS));
     reportCheck(exactStaging, 'staging manifest pins the exact deferred journal and scoped-access sets', 'staging manifest drifted from the exact deferred journal and scoped-access sets');
 }
