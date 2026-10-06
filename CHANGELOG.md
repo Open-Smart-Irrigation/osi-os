@@ -291,6 +291,15 @@ every 0.7.0 entry below.
   in memory at once.
 
 ### Changed
+- Journal API and capture with scoped access off: a `plot_uuid` filter on a
+  plot the caller does not own, or that does not exist, answers 404
+  `scope_not_found` instead of an empty list; `station_code` and
+  `group_uuid` now narrow entry lists and exports; the catalog response
+  carries `capture_permissions`; with no plot chosen, the capture layout
+  selector offers only the farm-wide layout.
+- A non-admin farm owner loses the farm-wide right when another account
+  links the gateway later: the farm owner is always the latest linked
+  account, the one sync uses.
 - Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
   both revision resources in `resources.schema.json`
   (`DeviceInstallationLocationRevision`, `DeviceRadioConfigurationRevision`)
