@@ -266,6 +266,19 @@ test('compareSnapshots requires pre-existing rows to carry an added column\'s de
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('compareSnapshots allows new tables only empty unless a rule lists them', () => {
+  const root = scratch();
+  const base = "CREATE TABLE t (id INTEGER PRIMARY KEY, a TEXT);";
+  const snapBefore = snapshotTables(tinyDb(root, 'before.db', base));
+  let res = compareSnapshots(snapBefore, snapshotTables(tinyDb(root, 'empty.db', base + 'CREATE TABLE fresh (id INTEGER PRIMARY KEY);'), { columnsFrom: snapBefore }), {});
+  assert.equal(res.ok, true, JSON.stringify(res.unexpected));
+  assert.deepEqual(res.newTables, [{ table: 'fresh', count: 0 }]);
+  res = compareSnapshots(snapBefore, snapshotTables(tinyDb(root, 'filled.db', base + 'CREATE TABLE fresh (id INTEGER PRIMARY KEY); INSERT INTO fresh VALUES (1);'), { columnsFrom: snapBefore }), {});
+  assert.equal(res.ok, false);
+  assert.match(res.unexpected[0].reason, /new table with 1 row/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 // A gateway outbox keeps delivered rows for 30 days up to 50,000 rows, so the
 // 0064 ZONE event can land in an outbox far above the row-values limit.
 test('the 0064 change validates in an outbox larger than the row-values limit', () => {

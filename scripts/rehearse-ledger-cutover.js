@@ -520,7 +520,10 @@ function compareSnapshots(before, after, { rules = new Map(), allowBookkeeping =
     deferred.push({ name, diff, addedRows, removedKeys, changedRows, changedColumns, columns });
   }
   for (const [name, a] of Object.entries(after.tables)) {
-    if (!before.tables[name]) result.newTables.push({ table: name, count: a.count });
+    if (before.tables[name]) continue;
+    result.newTables.push({ table: name, count: a.count });
+    // A new table starts empty unless a migration fills it by design.
+    if (a.count > 0 && !rules.has(name)) result.unexpected.push({ table: name, countBefore: 0, countAfter: a.count, reason: `new table with ${a.count} row(s), no migration fills it by design` });
   }
   // sqlite_sequence follows the tables it counts: a row may change or appear
   // for a table that gained rows by design or is new.
