@@ -425,7 +425,10 @@ test('earlier lineage at 53 with data: interrupted run, clean restart, designed 
   const unchanged = new Set(compare.migrationPhase.unchangedTables);
   for (const table of ['users', 'devices', 'device_data', 'chameleon_readings', 'dendrometer_readings', 'watermark_calibrations',
     'watermark_readings', 'journal_plots', 'journal_entries', 'journal_edge_mutations', 'journal_replication_applied',
-    'user_zone_assignments', 'sync_link_state', 'sync_history_dirty_keys', 'sync_history_cursors', 'irrigation_schedules']) {
+    'user_zone_assignments', 'sync_link_state', 'sync_history_dirty_keys', 'sync_history_cursors', 'irrigation_schedules',
+    'dendro_baselines', 'weather_station_zones', 'weather_station_zone_state', 'zone_valve_assignments', 'sdi12_recipe_deployments',
+    'sdi12_identify_attempts', 'valve_actuation_expectations', 'applied_commands', 'command_ack_outbox', 'dendrometer_daily',
+    'zone_daily_environment', 'zone_daily_recommendations']) {
     assert.ok(unchanged.has(table), `${table} changed`);
     assert.ok(compare.tables[table].before.count > 0, `${table} has no fixture rows`);
   }

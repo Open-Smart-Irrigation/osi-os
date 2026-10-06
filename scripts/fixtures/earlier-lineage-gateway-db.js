@@ -123,6 +123,26 @@ function syntheticRowsSql() {
   s.push(`INSERT INTO journal_replication_applied (workspace_uuid, sequence, kind, payload_sha256, recorded_at, applied_at) VALUES
     ('66666666000000000000000000000001', 1, 'ENTRY_HEAD', '${hex64(3)}', '${T0}', '${iso(2)}'),
     ('66666666000000000000000000000001', 2, 'PLOT_GROUP_SNAPSHOT', '${hex64(4)}', '${T0}', '${iso(3)}');`);
+  // ON DELETE CASCADE children of devices (0060 rebuilds devices under them),
+  // the daily tables whose triggers 0058 rewrites, valve expectations (0022
+  // adds a column) and the command ledger.
+  s.push(`INSERT INTO dendro_baselines (deveui, mds_max_reference_um, mds_mean_um, baseline_days, baseline_complete, computed_at) VALUES ('A840410000000001', 180.5, 92.25, 7, 1, '${iso(30)}');`);
+  s.push(`INSERT INTO weather_station_zones (deveui, zone_id, created_at) VALUES ('A840410000000005', 1, '${T0}'), ('A840410000000005', 2, '${T0}');`);
+  s.push(`INSERT INTO weather_station_zone_state (deveui, sync_version, last_applied_at, updated_at) VALUES ('A840410000000005', 2, '${iso(3)}', '${iso(3)}');`);
+  s.push(`INSERT INTO zone_valve_assignments (id, zone_id, deveui, valve_channel, created_at) VALUES (1, 1, 'A840410000000004', 1, '${T0}');`);
+  s.push(`INSERT INTO sdi12_recipe_deployments (deveui, desired_version, desired_layout_hash, desired_recipe_json, status, observed_count, updated_at) VALUES ('A840410000000003', 2, '${hex64(5)}', '{"recipe":"synthetic"}', 'observed_compatible', 3, '${iso(40)}');`);
+  s.push(`INSERT INTO sdi12_identify_attempts (deveui, stage, discovered_address, requested_at, updated_at) VALUES ('A840410000000003', 'identifying', '0', '${iso(1)}', '${iso(2)}');`);
+  s.push(`INSERT INTO valve_actuation_expectations (expectation_id, device_eui, zone_id, command_id, effect_key, commanded_at, commanded_duration_seconds, expected_close_at, flow_rate_lpm, volume_source, reconciliation_state, created_at, valve_channel) VALUES
+    ('55555555000000000000000000000001', 'A840410000000004', 1, '44444444000000000000000000000001', 'valve:A840410000000004:1', '${iso(100)}', 600, '${iso(110)}', 12.5, 'flow_rate', 'RECONCILED', '${iso(100)}', 1);`);
+  s.push(`INSERT INTO applied_commands (command_id, device_eui, command_type, effect_key, applied_at, result, attempt_count, gateway_device_eui) VALUES
+    ('44444444000000000000000000000001', 'A840410000000004', 'VALVE_COMMAND', 'valve:A840410000000004:1', '${iso(100)}', 'APPLIED', 1, '${GATEWAY_EUI}'),
+    ('44444444000000000000000000000002', 'A840410000000001', 'SET_DEVICE_CONFIG', NULL, '${iso(120)}', 'REJECTED', 1, '${GATEWAY_EUI}');`);
+  s.push(`INSERT INTO command_ack_outbox (id, command_id, payload_json, created_at, delivered_at, retry_count) VALUES
+    (1, '44444444000000000000000000000001', '{"result":"APPLIED"}', '${iso(100)}', '${iso(101)}', 0),
+    (2, '44444444000000000000000000000002', '{"result":"REJECTED"}', '${iso(120)}', '${iso(121)}', 1);`);
+  s.push(`INSERT INTO dendrometer_daily (deveui, date, d_max_um, d_min_um, mds_um, twd_um, stress_level, data_quality, valid_readings_count, computed_at, sync_version) VALUES ('A840410000000001', '2026-09-01', 1015, 1000, 15, 3.5, 'none', 'good', 96, '${iso(1440)}', 1);`);
+  s.push(`INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version) VALUES (1, '2026-09-01', 2.4, 350, 'weather_station', '${iso(1440)}', 1);`);
+  s.push(`INSERT INTO zone_daily_recommendations (zone_id, date, zone_stress_summary, rainfall_mm, irrigation_action, computed_at, sync_version) VALUES (1, '2026-09-01', 'none', 2.4, 'skip', '${iso(1440)}', 1);`);
   // Everything the inserts queued has been delivered (cutover freeze: outbox
   // drained); one older event stays rejected. Then the gateway links.
   s.push(`UPDATE sync_outbox SET delivered_at = '${iso(500)}' WHERE delivered_at IS NULL;`);
