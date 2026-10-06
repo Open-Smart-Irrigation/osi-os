@@ -162,6 +162,19 @@ describe('osi-device-writer', () => {
     assert.equal(row.recorded_at, '2026-01-15T10:00:00.000Z');
   });
 
+  it('writes the uplink time as ISO UTC with Z', () => {
+    const result = writeDeviceData(
+      db,
+      minimalManifest(),
+      { channels: { swt_1: 10 }, unknown: {}, recordedAt: '2026-01-15T09:59:58.123456789+00:00' },
+      { deveui: TEST_DEVEUI },
+      { node: mockNode(), nowMs: Date.parse('2026-01-15T10:00:00Z') }
+    );
+    assert.equal(result.inserted, true);
+    const row = db.prepare('SELECT recorded_at FROM device_data WHERE deveui = ?').get(TEST_DEVEUI);
+    assert.equal(row.recorded_at, '2026-01-15T09:59:58.123Z');
+  });
+
   it('shadow mode returns row without INSERT', () => {
     const result = writeDeviceData(
       db,
@@ -235,10 +248,28 @@ describe('osi-device-writer', () => {
 describe('clampRecordedAt', () => {
   const now = Date.parse('2026-01-15T10:00:00Z');
 
-  it('passes through valid timestamps', () => {
+  it('keeps a valid timestamp, as ISO UTC with milliseconds and Z', () => {
     const r = clampRecordedAt('2026-01-15T09:00:00Z', now);
     assert.equal(r.clamped, false);
-    assert.equal(r.recordedAt, '2026-01-15T09:00:00Z');
+    assert.equal(r.recordedAt, '2026-01-15T09:00:00.000Z');
+    assert.equal(clampRecordedAt('2026-01-15T09:00:00.123Z', now).recordedAt, '2026-01-15T09:00:00.123Z');
+  });
+
+  // device_data.recorded_at is compared as text in places; every writer
+  // stores the one shape toISOString gives.
+  it('stores the uplink RFC 3339 time (nanoseconds, +00:00) as ISO UTC with Z', () => {
+    for (const [input, expected] of [
+      ['2026-01-15T09:00:00.123456789+00:00', '2026-01-15T09:00:00.123Z'],
+      ['2026-01-15T09:00:00.999999+00:00', '2026-01-15T09:00:00.999Z'],
+      ['2026-01-15T09:00:00+00:00', '2026-01-15T09:00:00.000Z'],
+      ['2026-01-15T10:00:00.5+01:00', '2026-01-15T09:00:00.500Z'],
+      ['2026-01-15 09:00:00', '2026-01-15T09:00:00.000Z'],
+      ['2026-01-15T09:00:00', '2026-01-15T09:00:00.000Z'],
+    ]) {
+      const r = clampRecordedAt(input, now);
+      assert.equal(r.clamped, false, input);
+      assert.equal(r.recordedAt, expected, input);
+    }
   });
 
   it('clamps timestamps before floor', () => {
