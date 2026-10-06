@@ -1078,6 +1078,25 @@ test('UPSERT_JOURNAL_ENTRY_BATCH refuses a pass UUID, which would drop member cr
   }
 });
 
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses an effect key that does not name its batch', async () => {
+  const db = fixtureDb('batch-effect-key');
+  try {
+    const wrong = batchCommandEnvelope({ commandId: 833 });
+    wrong.payload.effect_key = 'journal_entry_batch:98989898-9898-4898-8898-989898989898:0';
+    const result = await journal.applyJournalCommand(db, wrong, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'invalid_effect_key');
+    const missing = batchCommandEnvelope({ commandId: 834 });
+    delete missing.payload.effect_key;
+    const second = await journal.applyJournalCommand(db, missing, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(second.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(second.ack.reason, 'invalid_effect_key');
+    assert.equal((await journalRowCounts(db)).entries, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('UPSERT_JOURNAL_ENTRY_BATCH rolls back members and ledger when ACK persistence faults', async () => {
   const db = fixtureDb('batch-ack-fault');
   try {

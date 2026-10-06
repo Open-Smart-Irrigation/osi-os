@@ -501,6 +501,9 @@ function batchInput(payload) {
       !Array.isArray(payload.members) || payload.members.length < 1 || payload.members.length > 100) {
     throw commandError('malformed_command', 'Journal batch identity or members are malformed');
   }
+  if (payload.effect_key !== 'journal_entry_batch:' + payload.batch_uuid + ':0') {
+    throw commandError('invalid_effect_key', 'Command effect key does not match the journal batch');
+  }
   onlyFields(shared, BATCH_SHARED_FIELDS, 'Journal batch shared');
   // A cloud batch has one member per plot, so it is never a tank-mix pass
   // (several products on one plot). A pass UUID would switch the lifecycle to
