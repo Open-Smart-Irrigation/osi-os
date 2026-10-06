@@ -291,3 +291,23 @@ jobs:
       - name: Rename-swap FK fence scan (migrations, ops SQL/generators, flows function nodes)
         run: node scripts/verify-rename-swap-fence.js
       - run: node --test scripts/verify-rename-swap-fence.test.js
+  # scripts/rehearse-ledger-cutover.js end to end: a gateway database on an
+  # earlier lineage's ledger numbering with rows in every table the pending
+  # migrations touch (interrupted once, then restarted), a database already on
+  # main's numbering, and corrupted ledgers. A job of its own so its minutes
+  # stay outside the budget of the job above.
+  cutover-rehearsal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'  # node:sqlite requires Node >=22.5
+      - name: Install sqlite3 CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+      - run: node --test scripts/rehearse-ledger-cutover.test.js
