@@ -106,6 +106,13 @@ every 0.7.0 entry below.
   Tracked in #377.
 
 ### Added
+- **Ledger cutover rehearsal** (`scripts/rehearse-ledger-cutover.js`): runs
+  the schema cutover of a gateway on an earlier lineage's ledger numbering
+  against a copy of its database (reconcile, migrate, verify head,
+  devices-rebuild and boot-node rehearsals, integrity, schema against the
+  seed, per-table row counts and content hashes, and a second pass that must
+  change nothing) and writes a JSON report with each step's result and
+  duration. Workstation tool; nothing on the gateway changes.
 - **Journal catalog v11 and plot-group snapshots**
   (`0069__journal_v2_plot_group_snapshot.sql`,
   `0070__journal_catalog_v11.sql`). Catalog v11 adds `full_record@11` with a
