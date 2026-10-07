@@ -248,7 +248,8 @@ every 0.7.0 entry below.
   `osi-module-defaults`. The Network module is shown only when a RAK10701
   field tester is registered, unless switched on.
 - The cloud MQTT broker URL is configurable with
-  `osi-server.cloud.mqtt_broker_url`.
+  `osi-server.cloud.mqtt_broker_url`; without it, the gateway uses
+  `wss://<osi-server.cloud.server_host>/mqtt` (see Fixed).
 - Persistent system log: `node-red.init` points syslog at
   `/data/log/osi-system.log` (two files of 2 MiB), so boot-node failures
   survive a power cycle.
@@ -349,6 +350,16 @@ every 0.7.0 entry below.
   for `osi-identityd` instead of starting their own Node-RED restart paths.
 
 ### Fixed
+- MQTT (heartbeat, telemetry, status, schedule and command ACKs) goes to the
+  cloud the gateway is linked to. The "OSI Cloud Broker" node had the default
+  cloud's URL as a literal, so a gateway linked to another cloud without
+  `osi-server.cloud.mqtt_broker_url` set published to the default cloud,
+  which refused its credentials, while HTTPS sync worked. The node now reads
+  `${OSI_CLOUD_BROKER_URL}`; `node-red.init` sets it from
+  `osi-server.cloud.mqtt_broker_url`, else `wss://<server_host>/mqtt`, else
+  the previous default `wss://server.opensmartirrigation.org/mqtt`, and logs
+  `cloud MQTT broker <url> source=<key>`. Unlinked gateways and gateways
+  linked to the default cloud connect exactly as before.
 - Deploy: Node-RED is never restarted on the old payload after a migration
   has run, which had let the previous boot node rebuild `devices` against the
   migrated schema and cascade-delete `device_data`. The boot node's `devices`

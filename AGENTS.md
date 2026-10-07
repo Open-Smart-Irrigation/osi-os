@@ -104,7 +104,10 @@ zone update event and both snapshots carry it, null when unset (see "Zone
 
 ## MQTT topics (edge → cloud only)
 
-Broker: `wss://server.opensmartirrigation.org/mqtt`
+Broker: `${OSI_CLOUD_BROKER_URL}` in the "OSI Cloud Broker" node, set by
+`node-red.init` from `osi-server.cloud.mqtt_broker_url`, else
+`wss://<osi-server.cloud.server_host>/mqtt`, else the default
+`wss://server.opensmartirrigation.org/mqtt`.
 
 | Topic | Payload | Cadence |
 |-------|---------|---------|
