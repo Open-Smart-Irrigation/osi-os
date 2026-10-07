@@ -435,6 +435,7 @@ function createAnalysis(deps) {
     localDateKey,
     normalizeDeveui,
     normalizeTimezone,
+    parseRecordedAtMs,
     recordedAtRangeSql,
     resolveAggregation,
     soilDepthCm,
@@ -699,21 +700,20 @@ function createAnalysis(deps) {
         && !(entry.sourceDevice.chameleon_enabled === true || entry.sourceDevice.chameleon_enabled === 1 || String(entry.sourceDevice.chameleon_enabled || '').toLowerCase() === 'true')
       );
       if (needsSwt3Evidence) {
-        let evidenceRows = [];
-        try {
-          evidenceRows = await dbAll(
-            db,
-            'SELECT recorded_at FROM chameleon_readings WHERE deveui = ? AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC LIMIT ?',
-            [group.owner, range.from, range.to, remaining + 1]
-          );
-        } catch (_) {
-          evidenceRows = [];
+        const evidenceRange = recordedAtRangeSql('recorded_at', range.from, range.to, { exact: true });
+        const evidenceRows = await dbAll(
+          db,
+          `SELECT recorded_at FROM chameleon_readings WHERE deveui = ? AND ${evidenceRange.sql} ORDER BY recorded_at ASC LIMIT ?`,
+          [group.owner].concat(evidenceRange.params, [remaining + 1])
+        );
+        if (evidenceRows.length > remaining) {
+          throw tooLarge('range too large', 'Narrow the date range or pick a coarser granularity.');
         }
         const evidenceInstants = new Set(evidenceRows
-          .map((row) => Date.parse(row && row.recorded_at))
+          .map((row) => parseRecordedAtMs(row && row.recorded_at))
           .filter((value) => Number.isFinite(value)));
         qualifiedRows = rows.map((row) => {
-          const instant = Date.parse(row && row.recorded_at);
+          const instant = parseRecordedAtMs(row && row.recorded_at);
           return evidenceInstants.has(instant) ? row : { ...row, swt_3: null };
         });
       } else if (typeof filterSoilRowsForSources === 'function') {

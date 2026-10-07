@@ -40,6 +40,7 @@ function utcDeps() {
     zoneDateStartIso: (date) => `${date}T00:00:00.000Z`,
     normalizeTimezone: (value) => String(value || 'UTC').trim() || 'UTC',
     localDateKey: (value) => new Date(value).toISOString().slice(0, 10),
+    parseRecordedAtMs: hh.parseRecordedAtMs,
   };
 }
 
@@ -96,6 +97,18 @@ function entry(result, zoneId, sourceKind, channelKey) {
 
 async function series(raw, selected, range, aggregation, options = {}) {
   return hh.resolveAnalysisSeries(facade(raw), {
+    userId: 1,
+    deviceEui: HUB,
+    weatherProviderDefault: 'open_meteo',
+    selectors: selected.map((e) => ({ seriesId: e.seriesId })),
+    range,
+    aggregation,
+    ...options,
+  });
+}
+
+async function seriesWithFacade(dbFacade, selected, range, aggregation, options = {}) {
+  return hh.resolveAnalysisSeries(dbFacade, {
     userId: 1,
     deviceEui: HUB,
     weatherProviderDefault: 'open_meteo',
@@ -335,8 +348,8 @@ test('buildAnalysisCatalog exposes assigned non-Chameleon LSN50 as canonical SWT
   const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
   const deviceChannels = catalog.channels.filter((entry) => entry.sourceKind === 'device');
 
-  assert.deepEqual(deviceChannels.filter((entry) => entry.configurationState === 'current').map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
-  assert.deepEqual(deviceChannels.filter((entry) => entry.configurationState === 'current').map((entry) => entry.depthCm), [12, 34]);
+  assert.deepEqual(deviceChannels.filter((entry) => entry.cardType === 'soil' && entry.configurationState === 'current').map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
+  assert.deepEqual(deviceChannels.filter((entry) => entry.cardType === 'soil' && entry.configurationState === 'current').map((entry) => entry.depthCm), [12, 34]);
 });
 
 test('disabled LSN50 Chameleon SWT3 keeps only same-instant proven history', async () => {
@@ -347,9 +360,9 @@ test('disabled LSN50 Chameleon SWT3 keeps only same-instant proven history', asy
       VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
       .run(eui, 'Historical LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
     const addData = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)');
-    addData.run(eui, '2026-10-01T10:00:00Z', 7);
-    addData.run(eui, '2026-10-01T10:01:00Z', 9);
-    raw.prepare('INSERT INTO chameleon_readings (deveui, recorded_at) VALUES (?, ?)').run(eui, '2026-10-01T10:00:00.000Z');
+    addData.run(eui, '2026-10-01 10:00:00', 7);
+    addData.run(eui, '2026-10-01T10:01:00+00:00', 9);
+    raw.prepare('INSERT INTO chameleon_readings (deveui, recorded_at) VALUES (?, ?)').run(eui, '2026-10-01T12:00:00+02:00');
 
     const result = await catalog(raw);
     const swt3 = result.channels.find((channel) => channel.deviceName === 'Historical LSN50' && channel.channelKey === 'swt_3');
@@ -361,6 +374,64 @@ test('disabled LSN50 Chameleon SWT3 keeps only same-instant proven history', asy
     assert.deepEqual(out.series[0].points.map((point) => [point.t, point.value]), [
       ['2026-10-01T10:00:00.000Z', 7],
     ]);
+  } finally {
+    raw.close();
+  }
+});
+
+test('SWT3 evidence query propagates database errors', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556680';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
+      .run(eui, 'Broken evidence LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)').run(eui, '2026-10-01T10:00:00Z', 7);
+    const result = await catalog(raw);
+    const swt3 = result.channels.find((channel) => channel.deviceName === 'Broken evidence LSN50' && channel.channelKey === 'swt_3');
+    const failingFacade = {
+      all(sql, params) {
+        if (sql.includes('FROM chameleon_readings')) throw new Error('evidence database unavailable');
+        return Promise.resolve(raw.prepare(sql).all(...(params || [])));
+      },
+    };
+    await assert.rejects(
+      seriesWithFacade(failingFacade, [swt3], {
+        from: '2026-10-01T09:59:00.000Z',
+        to: '2026-10-01T10:02:00.000Z',
+      }, 'raw'),
+      /evidence database unavailable/
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+test('SWT3 evidence query rejects an over-bound result with 413', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556681';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
+      .run(eui, 'Oversized evidence LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)').run(eui, '2026-10-01T10:00:00Z', 7);
+    const result = await catalog(raw);
+    const swt3 = result.channels.find((channel) => channel.deviceName === 'Oversized evidence LSN50' && channel.channelKey === 'swt_3');
+    const oversizedFacade = {
+      all(sql, params) {
+        if (sql.includes('FROM chameleon_readings')) {
+          return Promise.resolve(Array.from({ length: 30001 }, () => ({ recorded_at: '2026-10-01T10:00:00.000Z' })));
+        }
+        return Promise.resolve(raw.prepare(sql).all(...(params || [])));
+      },
+    };
+    await assert.rejects(
+      seriesWithFacade(oversizedFacade, [swt3], {
+        from: '2026-10-01T09:59:00.000Z',
+        to: '2026-10-01T10:02:00.000Z',
+      }, 'raw'),
+      (error) => error && error.statusCode === 413
+    );
   } finally {
     raw.close();
   }

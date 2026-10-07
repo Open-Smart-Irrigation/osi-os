@@ -52,6 +52,8 @@ test('source identity is stable across names, case and renames', () => {
 test('LSN50 and SDI12 preserve finite historical candidates', () => {
   const lsn50 = describeDeviceSource({ type_id: 'DRAGINO_LSN50', deveui: 'A840410000000066', temp_enabled: 0, rain_gauge_enabled: 0, flow_meter_enabled: 0 });
   assert.ok(lsn50.currentChannelKeys.includes('swt_1'));
+  assert.ok(lsn50.currentChannelKeys.includes('bat_v'));
+  assert.ok(!lsn50.families.flatMap((family) => family.channelKeys).includes('bat_pct'));
   assert.ok(lsn50.families.some((family) => family.channelKeys.includes('swt_3')));
   assert.ok(lsn50.families.some((family) => family.channelKeys.includes('rain_mm_delta')));
 
@@ -64,6 +66,19 @@ test('LSN50 and SDI12 preserve finite historical candidates', () => {
   assert.ok(sdi12.families.some((family) => family.channelKeys.includes('soil_ec_2')));
   assert.ok(!sdi12.families.some((family) => family.channelKeys.includes('soil_ec_3')));
   assert.ok(sdi12.currentChannelKeys.includes('vwc_1'));
+  assert.ok(sdi12.currentChannelKeys.includes('bat_v'));
+});
+
+test('SDI12 battery remains current for unconfigured and malformed profiles', () => {
+  for (const device of [
+    { type_id: 'DRAGINO_SDI12', deveui: 'A840410000000070' },
+    { type_id: 'DRAGINO_SDI12', deveui: 'A840410000000071', sdi12_probe_profile: 'UNKNOWN' },
+    { type_id: 'DRAGINO_SDI12', deveui: 'A840410000000072', sdi12_channel_layout_json: '{bad json' },
+  ]) {
+    const source = describeDeviceSource(device);
+    assert.deepEqual(source.currentChannelKeys, ['bat_v']);
+    assert.deepEqual(source.families.find((family) => family.cardType === 'device_health').channelKeys, ['bat_v']);
+  }
 });
 
 test('UC512 and STREGA expose numeric health while keeping textual states out', () => {

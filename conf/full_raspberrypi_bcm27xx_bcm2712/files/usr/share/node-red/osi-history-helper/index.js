@@ -3198,6 +3198,7 @@ const analysis = createAnalysis({
   localDateKey,
   normalizeDeveui,
   normalizeTimezone,
+  parseRecordedAtMs,
   recordedAtRangeSql,
   resolveAggregation,
   soilDepthCm,
@@ -3212,6 +3213,7 @@ const analysis = createAnalysis({
 
 module.exports = {
   normalizeDeveui,
+  parseRecordedAtMs,
   ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,

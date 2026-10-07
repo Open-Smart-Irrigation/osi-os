@@ -103,6 +103,7 @@ function sdi12Channels(device) {
   if (!current.length && profile === 'TENSIOMARK') addUnique(current, ['swt_1', 'soil_temp_1']);
   if (!current.length && profile === 'IMKO_PICO64') addUnique(current, ['vwc_1', 'soil_temp_1']);
   if (!current.length && profile === 'HYDRASCOUT') addUnique(current, ['vwc_1', 'soil_temp_1', 'soil_ec_1', 'vwc_2', 'soil_temp_2', 'soil_ec_2']);
+  addUnique(current, ['bat_v']);
   return { declared: supported, current };
 }
 
@@ -120,12 +121,13 @@ function lsn50Channels(device) {
   if (rain) addUnique(current, ['rain_count_cumulative', 'rain_tips_delta', 'rain_gauge_cumulative_mm', 'rain_mm_per_hour', 'rain_mm_per_10min', 'rain_mm_today', 'rain_mm_delta']);
   if (flow) addUnique(current, FLOW_CHANNELS);
   if (dendro) addUnique(current, DENDRO_CHANNELS);
+  addUnique(current, ['bat_v']);
   return {
     families: [
       ['soil', ['swt_1', 'swt_2', 'swt_3']],
       ['environment', ['ext_temperature_c', ...WEATHER_CHANNELS.filter((key) => key.startsWith('rain_')), ...FLOW_CHANNELS]],
       ['dendro', DENDRO_CHANNELS],
-      ['device_health', HEALTH_CHANNELS],
+      ['device_health', ['bat_v']],
     ],
     current,
   };
@@ -158,7 +160,7 @@ function describeDeviceSource(device = {}) {
     currentChannelKeys = lsn.current;
   } else if (type === 'DRAGINO_SDI12') {
     const sdi = sdi12Channels(device);
-    families = [['soil', sdi.declared]];
+    families = [['soil', sdi.declared], ['device_health', ['bat_v']]];
     currentChannelKeys = sdi.current;
   } else if (type === 'STREGA_VALVE') {
     const strega = stregaChannels(device);

@@ -30,6 +30,7 @@ const helperPaths = [
     'index.js'
   ),
 ];
+const DEVICE_HEALTH_ALLOWLIST = ['bat_v', 'bat_pct', 'valve_1_pulse', 'valve_2_pulse'];
 
 function readText(filePath) {
   return fs.readFileSync(filePath, 'utf8');
@@ -272,6 +273,38 @@ function assertSameAnalysisChannels(actualEntries, expectedEntries, label) {
   console.log(`OK ${label} exactly matches active analysis channels manifest metadata (${actual.length} channels)`);
 }
 
+function normalizeDeviceHealthChannel(entry) {
+  return {
+    key: entry.key,
+    unit: entry.unit ?? null,
+    edgeField: entry.edgeField ?? null,
+    cardType: entry.cardType,
+    exportable: entry.exportable === true,
+  };
+}
+
+function assertDeviceHealthChannels(actualEntries, manifestEntries, label) {
+  const actual = actualEntries.map(normalizeDeviceHealthChannel);
+  const expected = DEVICE_HEALTH_ALLOWLIST.map((key) => {
+    const manifestEntry = manifestEntries.find((entry) => entry.key === key);
+    if (!manifestEntry) throw new Error(`${label} manifest is missing allowlisted key ${key}`);
+    if (manifestEntry.cardType !== 'gateway' || manifestEntry.exportable !== false) {
+      throw new Error(`${label} manifest entry ${key} must be gateway and exportable:false`);
+    }
+    return {
+      key,
+      unit: manifestEntry.unit ?? null,
+      edgeField: manifestEntry.edgeField ?? null,
+      cardType: 'device_health',
+      exportable: false,
+    };
+  });
+  assertSameAnalysisChannels(actual, expected, `${label} DEVICE_HEALTH_CHANNELS`);
+  if (actual.some((entry) => !DEVICE_HEALTH_ALLOWLIST.includes(entry.key))) {
+    throw new Error(`${label} DEVICE_HEALTH_CHANNELS contains a key outside the four-key allowlist`);
+  }
+}
+
 try {
   const manifest = loadManifestContract();
   for (const helperPath of helperPaths) {
@@ -310,6 +343,11 @@ try {
       extractConstantArray(analysisSource, 'CHANNELS'),
       expectedAnalysisChannels(manifest.entries),
       `${analysisLabel} CHANNELS`
+    );
+    assertDeviceHealthChannels(
+      extractConstantArray(analysisSource, 'DEVICE_HEALTH_CHANNELS'),
+      manifest.entries,
+      analysisLabel
     );
   }
 
