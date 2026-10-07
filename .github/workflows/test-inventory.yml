@@ -52,4 +52,5 @@ jobs:
         run: |
           sh scripts/test-gateway-identity-helper.sh
           sh scripts/test-osi-identityd.sh
+          sh scripts/test-node-red-init-cloud-broker.sh
           sh scripts/deploy-bundle.test.sh

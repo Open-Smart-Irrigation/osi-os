@@ -89,7 +89,30 @@ for (const relativePath of platformFlowPaths) {
   }
 }
 
+// The cloud broker URL is configuration, not code: the "OSI Cloud Broker"
+// node carries only the env placeholder, which Node-RED substitutes at start
+// from the value node-red.init derives from this gateway's UCI. A literal URL
+// here sends a gateway linked to another cloud's MQTT to the wrong host.
+const cloudBrokerPlaceholder = '${OSI_CLOUD_BROKER_URL}';
+// bcm2708's flows have no cloud broker (only a local one).
+const cloudBrokerFlowPaths = platformFlowPaths.filter((p) => /_bcm2712\/|_bcm2709\//.test(p));
+if (cloudBrokerFlowPaths.length !== 2) fail('expected the bcm2712 and bcm2709 flows.json paths for the cloud broker check');
+for (const relativePath of cloudBrokerFlowPaths) {
+  const brokers = parseFlow(relativePath)
+    .filter((node) => node.type === 'mqtt-broker' && node.name === 'OSI Cloud Broker');
+  if (brokers.length !== 1) {
+    fail(`${relativePath}: expected exactly one "OSI Cloud Broker" mqtt-broker node, found ${brokers.length}`);
+    continue;
+  }
+  const broker = brokers[0];
+  if (broker.broker !== cloudBrokerPlaceholder) {
+    fail(`${relativePath}: OSI Cloud Broker "broker" must be exactly ${cloudBrokerPlaceholder} (no literal host); found ${JSON.stringify(broker.broker)}`);
+  }
+}
+
 const nodeRedInit = read(nodeRedInitPath);
+expectIncludes(nodeRedInitPath, nodeRedInit, 'resolve_cloud_broker_url()', 'derives the cloud MQTT broker URL from UCI');
+expectIncludes(nodeRedInitPath, nodeRedInit, 'OSI_CLOUD_BROKER_URL="$CLOUD_BROKER_URL"', 'exports the derived cloud MQTT broker URL to Node-RED');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'load_chirpstack_env_value()', 'defines a per-key .chirpstack.env fallback reader');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'resolve_chirpstack_value()', 'resolves UCI first and env fallback second for ChirpStack IDs');
 expectIncludes(nodeRedInitPath, nodeRedInit, 'CHIRPSTACK_APP_FIELD_TESTER="$cs_app_field_tester"', 'exports the field tester application ID');
