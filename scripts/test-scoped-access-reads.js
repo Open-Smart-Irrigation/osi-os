@@ -542,11 +542,21 @@ test('F3: the sensor export is account-wide and keeps its flag-off behavior', as
     scopeHelper._resetForTests();
   }
 
+  // Flag off: the export needs a signed-in session (it once answered without
+  // one), and a session gets the same unscoped query as before.
   const unscopedDb = seedScopedDb();
   try {
-    const unscoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+    const refused = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
       msg: { req: { headers: {}, params: {}, query: {} } },
-      env: { OSI_SCOPED_ACCESS: '0' },
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db: unscopedDb,
+    });
+    assert.equal(refused.result && refused.result[0], null);
+    assert.equal(refused.result && refused.result[1] && refused.result[1].statusCode, 401);
+
+    const unscoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
       db: unscopedDb,
     });
     const output = unscoped.result && unscoped.result[0];
@@ -616,15 +626,25 @@ test('W1: history of an unclaimed device stays exportable and stays in recent ac
   }
 });
 
-test('F3: today-liters remains callable without auth while the flag is off', async () => {
+// F3 once pinned the opposite: today-liters answered without a token while
+// the flag was off. It now needs a signed-in session in both flag states, like
+// the device history routes (scripts/test-export-routes-require-session.js).
+test('F3: today-liters needs a signed-in session while the flag is off', async () => {
   const db = seedScopedDb();
   try {
-    const response = await executeFunction(loadNode('strega-today-liters-fn'), {
+    const refused = await executeFunction(loadNode('strega-today-liters-fn'), {
       msg: { req: { headers: {}, params: { deveui: 'VALVE1' }, query: {} } },
-      env: { OSI_SCOPED_ACCESS: '0' },
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
       db,
     });
-    assert.equal(response.result && response.result.statusCode, 200);
+    assert.equal(refused.result && refused.result.statusCode, 401);
+
+    const answered = await executeFunction(loadNode('strega-today-liters-fn'), {
+      msg: requestFor(2, 'res1', { deveui: 'VALVE1' }),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(answered.result && answered.result.statusCode, 200);
   } finally {
     db.close();
   }

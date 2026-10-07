@@ -219,6 +219,8 @@ jobs:
         run: node --test scripts/test-scoped-access-writes.js
       - name: Scoped-access read suite (account-wide reads, preserved gates)
         run: node --test scripts/test-scoped-access-reads.js
+      - name: Session required on the sensor export, litres and reference-tree routes (both flag states)
+        run: node --test scripts/test-export-routes-require-session.js
       - name: Scoped-access command-path suite
         run: node --test scripts/test-scoped-access-command-path.js
       - name: Scoped-access command package tests

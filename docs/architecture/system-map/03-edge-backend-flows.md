@@ -123,7 +123,9 @@ radio coverage on-site). Stores its uplinks and per-gateway reception info
 ### Download Sensor Data (3 function nodes)
 
 The raw-data export hatch: `GET /download-sensordata` streams the `device_data`
-table as CSV (**Build SQL + Params**, **Rows → CSV + Download**).
+table as CSV (**Build SQL + Params**, **Rows → CSV + Download**). It needs a
+signed-in session (`Authorization: Bearer <token>`) in both scoped-access flag
+states, like the history exports.
 
 ### OSI-Server Cloud Integration (48 function nodes — the sync hub)
 
