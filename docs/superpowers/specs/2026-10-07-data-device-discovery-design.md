@@ -1,6 +1,8 @@
 # Data-view device discovery correction
 
-Date: 2026-10-07. Status: ready after committee review; no runtime changes.
+Date: 2026-10-07. Status: implemented and independently reviewed; not deployed.
+See the [execution report](../../operations/data-device-discovery-implementation-2026-10-07.md)
+for final behavior and verification boundaries.
 
 Data view must list every active device the current account may read, including
 unassigned devices and devices whose newest uplink contains no measurements. A
@@ -22,7 +24,7 @@ configuration row yielded no history card and no Data-view catalogue entries.
 Combining that row with the existing measurement in memory made the environment
 card appear. No database mutation was used.
 
-The current public base is `06e691e850384b1d5ecbacbe24439a257a70c983`.
+The design-time public base was `06e691e850384b1d5ecbacbe24439a257a70c983`.
 `osi-history-helper/analysis.js` enumerates zone devices, then reuses
 `deriveCardsForZone` and `sourceDevicesForCard` to discover channels.
 `isEnvironmentSource` in `index.js` omits `AQUASCOPE_LORAIN`. The separate

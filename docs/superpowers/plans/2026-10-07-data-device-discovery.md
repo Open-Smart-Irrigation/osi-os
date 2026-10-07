@@ -15,10 +15,14 @@ TypeScript, SWR, Node test runner and Vitest.
 
 **Spec:** [Data-view device discovery correction](../specs/2026-10-07-data-device-discovery-design.md).
 
-Status: public Tasks 0–5 complete after the scoped reviews; Task 6 remains the
-separate private-branch adaptation and authorized deployment preparation.
+Status: public Tasks 0–5 and private Task 6 implementation are complete after
+independent review and verification. Deployment has not occurred. The original
+step checkboxes below preserve the planning record; completed behavior and exact
+verification boundaries are recorded in the
+[execution report](../../operations/data-device-discovery-implementation-2026-10-07.md).
 Review: [findings and dispositions](../reviews/2026-10-07-data-device-discovery-review.md).
-Public base: `06e691e850384b1d5ecbacbe24439a257a70c983`.
+Design base: `06e691e850384b1d5ecbacbe24439a257a70c983`.
+Implementation base: `242ca634961b5305f40197e771e197a5eaa0f61a`.
 
 Accepted UI rulings are part of the delivery record. The nine new Luganda
 source-tray strings remain explicit English fallbacks pending a human
