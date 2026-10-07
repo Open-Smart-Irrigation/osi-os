@@ -163,6 +163,37 @@ resolve_chirpstack_value() {
 # behaviour to the old literal.
 OSI_DEFAULT_CLOUD_BROKER_URL="wss://server.opensmartirrigation.org/mqtt"
 
+# Describes why a configured value was rejected without printing it: the
+# value may be mistyped credentials or a private host name.
+cloud_broker_value_shape() {
+    case "$1" in
+        *://*) printf 'has a URL scheme' ;;
+        *[[:space:]]*) printf 'contains whitespace' ;;
+        *@*) printf 'contains userinfo' ;;
+        */*|*\?*|*#*) printf 'contains a path, query or fragment' ;;
+        *) printf 'contains characters outside host[:port]' ;;
+    esac
+}
+
+# The broker URL for log lines: userinfo (user:password@) is masked.
+cloud_broker_url_for_log() {
+    local url="$1"
+    local scheme
+    local rest
+    local authority
+    case "$url" in
+        *://*) ;;
+        *) printf '%s' "$url"; return 0 ;;
+    esac
+    scheme="${url%%://*}"
+    rest="${url#*://}"
+    authority="${rest%%/*}"
+    case "$authority" in
+        *@*) printf '%s://***@%s%s' "$scheme" "${authority##*@}" "${rest#"$authority"}" ;;
+        *) printf '%s' "$url" ;;
+    esac
+}
+
 # Sets CLOUD_BROKER_URL and CLOUD_BROKER_URL_SOURCE (mqtt_broker_url,
 # server_host or default). Pure apart from logging; no subshell, so the
 # caller sees both variables.
@@ -179,7 +210,10 @@ resolve_cloud_broker_url() {
                 return 0
                 ;;
         esac
-        logger -t node-red.init "ignoring osi-server.cloud.mqtt_broker_url: not a ws/wss/mqtt/mqtts URL"
+        case "$configured_url" in
+            *[[:space:]]*) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (contains whitespace)" ;;
+            *) logger -t node-red.init "WARN: ignoring osi-server.cloud.mqtt_broker_url (not a ws/wss/mqtt/mqtts URL)" ;;
+        esac
     fi
 
     if [ -n "$server_host" ]; then
@@ -192,7 +226,8 @@ resolve_cloud_broker_url() {
                 return 0
                 ;;
         esac
-        logger -t node-red.init "ignoring osi-server.cloud.server_host: not a bare host[:port]"
+        # Falls back to the default broker, like an unlinked gateway.
+        logger -t node-red.init "WARN: ignoring osi-server.cloud.server_host ($(cloud_broker_value_shape "$server_host")); MQTT uses the default broker"
     fi
 
     CLOUD_BROKER_URL="$OSI_DEFAULT_CLOUD_BROKER_URL"
@@ -320,7 +355,11 @@ start_service() {
     local mqtt_broker_url=$(uci -q get osi-server.cloud.mqtt_broker_url 2>/dev/null || echo "")
     local server_host=$(uci -q get osi-server.cloud.server_host 2>/dev/null || echo "")
     resolve_cloud_broker_url "$mqtt_broker_url" "$server_host"
-    logger -t node-red.init "cloud MQTT broker $CLOUD_BROKER_URL source=$CLOUD_BROKER_URL_SOURCE"
+    logger -t node-red.init "cloud MQTT broker $(cloud_broker_url_for_log "$CLOUD_BROKER_URL") source=$CLOUD_BROKER_URL_SOURCE"
+    # Only a URL that came from UCI may replace a literal in an older
+    # flows.json; with nothing usable configured that literal stays.
+    local cloud_broker_patch_url=""
+    [ "$CLOUD_BROKER_URL_SOURCE" = "default" ] || cloud_broker_patch_url="$CLOUD_BROKER_URL"
     local allow_private_server_urls=$(uci -q get osi-server.cloud.allow_private_target 2>/dev/null || echo "0")
     local journal_photo_cache_bytes=$(uci -q get osi-server.cloud.journal_photo_cache_bytes 2>/dev/null || echo "4294967296")
     local journal_min_free_bytes=$(uci -q get osi-server.cloud.journal_min_free_bytes 2>/dev/null || echo "4294967296")
@@ -399,7 +438,7 @@ start_service() {
         CLOUD_BROKER_NODE_ID="$cloud_broker_node_id" \
         DEVICE_EUI_VALUE="$device_eui" \
         DEVICE_MQTT_PASSWORD_VALUE="$mqtt_password" \
-        CLOUD_MQTT_BROKER_URL_VALUE="$CLOUD_BROKER_URL" \
+        CLOUD_MQTT_BROKER_URL_VALUE="$cloud_broker_patch_url" \
         AGROSCOPE_BROKER_NODE_ID="$agroscope_broker_node_id" \
         AGROSCOPE_MQTT_HOST_VALUE="$agroscope_runtime_mqtt_host" \
         AGROSCOPE_MQTT_PORT_VALUE="$agroscope_runtime_mqtt_port" \
@@ -456,7 +495,8 @@ try {
   // Current flows carry the env placeholder and Node-RED substitutes
   // OSI_CLOUD_BROKER_URL at start: leave it alone. An older flows.json with a
   // literal URL (a rollback payload) gets the URL resolve_cloud_broker_url()
-  // derived, so it reaches the same broker.
+  // derived from UCI, so it reaches the same broker. Empty (source=default)
+  // changes nothing, as before.
   if (cloudBroker && cloudMqttBrokerUrl && cloudBroker.broker !== '${OSI_CLOUD_BROKER_URL}'
     && cloudBroker.broker !== cloudMqttBrokerUrl) {
     cloudBroker.broker = cloudMqttBrokerUrl;

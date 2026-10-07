@@ -81,8 +81,9 @@ sed \
 
 # ---------------------------------------------------------------------------
 # Part 2: start_service() exports the derived URL and leaves the placeholder
-# in flows.json alone; an older flows.json with a literal URL (a rollback
-# payload) gets the derived URL written, as the init did before.
+# in flows.json alone. An older flows.json with a literal URL (a rollback
+# payload) gets the derived URL written only when UCI supplied it; with
+# nothing usable in UCI the literal stays, as on main before this change.
 # ---------------------------------------------------------------------------
 cat > "$SANDBOX/harness.sh" <<'HARNESS'
 . "$INIT_PATH"
@@ -173,5 +174,34 @@ assert_eq "wss://cloud.example.org/mqtt" "$(broker_field)" "older flows.json wit
 write_flows "$DEFAULT_URL"
 run_start "" ""
 assert_eq "$DEFAULT_URL" "$(broker_field)" "older flows.json, nothing configured: unchanged"
+
+CUSTOM_LITERAL="wss://custom.example.org/mqtt"
+write_flows "$CUSTOM_LITERAL"
+run_start "" ""
+assert_eq "$CUSTOM_LITERAL" "$(broker_field)" "older flows.json with a custom literal, nothing configured: unchanged"
+
+write_flows "$CUSTOM_LITERAL"
+run_start "" "https://custom.example.org/api"
+assert_eq "$CUSTOM_LITERAL" "$(broker_field)" "older flows.json with a custom literal, unusable server_host: unchanged"
+assert_eq "$DEFAULT_URL" "$(exported_url)" "unusable server_host: exported default"
+grep -q "WARN.*server_host.*has a URL scheme" "$SANDBOX/logger.log" \
+    || fail "unusable server_host logs a WARN naming its shape: $(cat "$SANDBOX/logger.log")"
+if grep -q "custom.example.org" "$SANDBOX/logger.log"; then
+    fail "the WARN must not print the rejected server_host value: $(cat "$SANDBOX/logger.log")"
+fi
+
+write_flows "$CUSTOM_LITERAL"
+run_start "" "cloud example.org"
+grep -q "WARN.*server_host.*contains whitespace" "$SANDBOX/logger.log" \
+    || fail "server_host with a space logs its shape: $(cat "$SANDBOX/logger.log")"
+
+write_flows "$PLACEHOLDER"
+run_start "wss://gwuser:s3cret@broker.example.net/mqtt" ""
+assert_eq "wss://gwuser:s3cret@broker.example.net/mqtt" "$(exported_url)" "URL with userinfo is exported unchanged"
+if grep -q "s3cret\|gwuser" "$SANDBOX/logger.log"; then
+    fail "the start log must not print URL credentials: $(cat "$SANDBOX/logger.log")"
+fi
+grep -q "cloud MQTT broker wss://\*\*\*@broker.example.net/mqtt source=mqtt_broker_url" "$SANDBOX/logger.log" \
+    || fail "the start log masks userinfo: $(cat "$SANDBOX/logger.log")"
 
 printf 'PASS: node-red.init cloud broker URL resolution and export\n'
