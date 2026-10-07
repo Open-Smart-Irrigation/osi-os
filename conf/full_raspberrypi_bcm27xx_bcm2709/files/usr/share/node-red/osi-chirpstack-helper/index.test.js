@@ -773,3 +773,51 @@ test('updateDeviceName treats a blank or whitespace-only stored name as skipped 
     assert.deepEqual(captured.updates, []);
   }
 });
+
+// Each ChirpStackClient owns five gRPC service clients, and grpc-js gives each
+// one its own channel (resolver, load balancer, channelz registration, idle
+// timer). Callers that create a client per run (the 60-second SDI-12 recipe
+// poll, the recipe apply and rollback routes) release them through close().
+const SERVICE_CLIENT_FIELDS = [
+  'deviceClient',
+  'applicationClient',
+  'tenantClient',
+  'deviceProfileClient',
+  'gatewayClient'
+];
+
+function channelState(serviceClient) {
+  return grpc.getClientChannel(serviceClient).getConnectivityState(false);
+}
+
+test('close() shuts down the channel of every gRPC service client and reports no errors', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  for (const field of SERVICE_CLIENT_FIELDS) {
+    assert.notEqual(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} starts open`);
+  }
+  assert.equal(typeof client.close, 'function');
+  assert.deepEqual(client.close(), []);
+  for (const field of SERVICE_CLIENT_FIELDS) {
+    assert.equal(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} must be shut down`);
+  }
+});
+
+test('close() can be called twice without throwing', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  assert.deepEqual(client.close(), []);
+  assert.deepEqual(client.close(), []);
+});
+
+test('close() returns a failing service close as an error and still closes the others', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  const realClose = client.tenantClient.close.bind(client.tenantClient);
+  client.tenantClient.close = () => { throw new Error('tenant channel close failed'); };
+  let errors;
+  assert.doesNotThrow(() => { errors = client.close(); });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /tenant channel close failed/);
+  for (const field of SERVICE_CLIENT_FIELDS.filter((name) => name !== 'tenantClient')) {
+    assert.equal(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} must be shut down`);
+  }
+  realClose();
+});

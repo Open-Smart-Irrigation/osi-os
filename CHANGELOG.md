@@ -19,6 +19,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   position that an earlier build already moved past unsent readings is not
   moved back; those readings still arrive through the history comparison.
   Refs #432.
+- **SDI-12 recipe poll: no "client close failed" warning every minute.** The
+  60-second recipe poll and the recipe apply and rollback routes closed their
+  ChirpStack client in a `finally` block, but the client in
+  `osi-chirpstack-helper` had no `close()`. On every gateway with a
+  `DRAGINO_SDI12` device the poll logged `SDI12 recipe poll client close
+  failed` once a minute and left the client's five gRPC channels open. The
+  client now has `close()`, which shuts down all five channels and returns any
+  close error instead of throwing. Polling behaves as before. (Recipe apply
+  and rollback still fail on real gateways for a separate reason, #469.)
 
 ### Security
 - **The raw sensor export, the valve litres read and the reference-tree switch
