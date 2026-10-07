@@ -48,7 +48,9 @@
       "legendWeak": "Fraco",
       "noPosition": "Não há nenhuma posição registada do gateway; o percurso é desenhado sem ponto de referência.",
       "noPoints": "Nenhuma observação deste intervalo tem posição.",
-      "captureOff": "A captura de rádio está desligada neste gateway; não são registados pontos de cobertura."
+      "captureOff": "A captura de rádio está desligada neste gateway; não são registados pontos de cobertura.",
+      "noGpsFix": "Sem posição GPS",
+      "noGpsFixHint": "O testador de campo ainda não tem posição GPS, por isso os seus uplinks não são desenhados. Leve-o para o exterior com céu limpo e aguarde até mostrar satélites. Os pontos aparecem assim que chegarem posições."
     }
   }
 }

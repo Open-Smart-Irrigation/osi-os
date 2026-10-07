@@ -66,6 +66,8 @@ jobs:
           node scripts/test-radio-flow.js
           node scripts/test-radio-history-flow-integration.js
           node scripts/test-radio-history.js
+          node scripts/test-radio-restore-guards.js
+          node scripts/test-radio-store.js
           node scripts/test-sdi12-recipe-flow.js
           node scripts/test-sdi12-recipe-schema.js
           node scripts/test-sdi12-registration.js
@@ -85,6 +87,9 @@ jobs:
           node scripts/verify-lsn50-chameleon-persistence.js
           node scripts/verify-module-file-deploy-coverage.js
           node scripts/verify-s2120-gust-fix.js
+      # Both tests open SQLite through node:sqlite, so they need no native addon (#392).
+      - name: Radio and network API module tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js
       # WATERMARK protected configuration commands (SET/DELETE_WATERMARK_CALIBRATION,
       # SET_CHAMELEON_CONFIG, UPSERT_DEVICE_SOIL_DEPTHS): the receiver and the command
       # ledger on the seed schema, including a rejected or conflicting command that
