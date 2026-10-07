@@ -469,9 +469,12 @@ test('device measurement statistics preserve interval totals, means, and final c
     raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, rain_gauge_enabled, created_at, updated_at)
       VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 1, ?, ?)`)
       .run(lsnEui, 'Counter LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES (?, ?, 'AQUASCOPE_LORAIN', 1, 1, ?, ?)`)
+      .run('0011223344556683', 'Old Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
     raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, deleted_at, created_at, updated_at)
       VALUES (?, ?, 'AQUASCOPE_LORAIN', 1, 1, ?, ?, ?)`)
-      .run('0011223344556683', 'Stale Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      .run('0011223344556684', 'Deleted Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
 
     const rain = raw.prepare(`INSERT INTO device_data
       (deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_today)
@@ -482,6 +485,7 @@ test('device measurement statistics preserve interval totals, means, and final c
     // The newest row is configuration-only. It must keep the source visible
     // and must not become a measured zero or increase the bucket count.
     rain.run('0011223344556677', '2026-10-01T10:50:00Z', null, null, null, null, null);
+    rain.run('0011223344556683', '2026-09-30T10:00:00Z', 8, 1.5, 4, 2, 2);
 
     const counter = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_count_cumulative) VALUES (?, ?, ?)');
     // Insert out of order and use all timestamp forms accepted by the reader.
@@ -490,13 +494,16 @@ test('device measurement statistics preserve interval totals, means, and final c
     counter.run(lsnEui, '2026-10-01T10:00:00+00:00', 10);
 
     const result = await catalog(raw);
-    assert.equal(result.sources.some((source) => source.name === 'Stale Rain'), false);
+    const oldRainSource = result.sources.find((source) => source.name === 'Old Rain');
+    assert.ok(oldRainSource, 'active source with an out-of-range report remains discoverable');
+    assert.equal(result.sources.some((source) => source.name === 'Deleted Rain'), false);
     const rainDelta = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_delta');
     const rainTemp = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'ambient_temperature');
     const rainBattery = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'bat_v');
     const rainToday = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_today');
     const counterLatest = result.channels.find((channel) => channel.deviceName === 'Counter LSN50' && channel.channelKey === 'rain_count_cumulative');
-    assert.ok(rainDelta && rainTemp && rainBattery && rainToday && counterLatest);
+    const oldRainDelta = result.channels.find((channel) => channel.deviceName === 'Old Rain' && channel.channelKey === 'rain_mm_delta');
+    assert.ok(rainDelta && rainTemp && rainBattery && rainToday && counterLatest && oldRainDelta);
 
     const range = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
     const rawRain = await series(raw, [rainDelta], range, 'raw');
@@ -513,6 +520,10 @@ test('device measurement statistics preserve interval totals, means, and final c
     const empty = await series(raw, [rainDelta], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
     assert.deepEqual(empty.series[0].points, [{
       t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown',
+    }]);
+    const oldRainRange = await series(raw, [oldRainDelta], range, 'hourly');
+    assert.deepEqual(oldRainRange.series[0].points, [{
+      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown',
     }]);
   } finally {
     raw.close();

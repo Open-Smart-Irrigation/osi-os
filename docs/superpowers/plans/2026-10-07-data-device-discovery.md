@@ -386,15 +386,17 @@ zoneName becomes string|null wherever the catalogue can return it.
 Status: complete in the public worktree. The device reader now uses sum for
 interval deltas, mean for instantaneous values, and the final finite
 chronological observation for counters and daily-running totals. The test
-fixture covers zero, 1.5, and 6 mm rows, mixed timestamp forms, a
-configuration-only row, a stale device, and an empty bucket. Catalogue query
-count stays independent of declared channel count and never reads
+fixture covers zero, 1.5, and 6 mm rows, mixed timestamp forms, a newest
+configuration-only row, an active LoRain source whose only report is outside
+the queried range, a separately deleted device, and an empty bucket. Catalogue
+query count stays independent of declared channel count and never reads
 `device_data`.
 
 Files: analysis.js and tests, new router discovery test, CI workflow, docs.
 
 - [x] Add real SQLite fixtures for rain deltas [0, 1.5, 6], a configuration-only
-  row, a stale gauge, and mixed SQLite/ISO/offset timestamps. Raw values must be
+  row, an active reporting-gap gauge with only out-of-range data, a separately
+  deleted gauge, and mixed SQLite/ISO/offset timestamps. Raw values must be
   [0, 1.5, 6] at their normalized times; an hourly bucket covering them is 7.5 mm.
   An empty bucket is null. Rates/temperatures/voltage use means; cumulative and
   daily-running totals must not be summed.
