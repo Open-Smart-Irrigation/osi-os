@@ -12,17 +12,18 @@ const {
   seedScopedDb,
 } = require('./lib/scoped-access-harness');
 const hh = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper');
+const scopeHelper = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper');
 
 const SECRET = 'scoped-access-test-secret';
 const SCOPED = { AUTH_TOKEN_SECRET: SECRET, OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F1000002' };
 const FLAG_OFF = { AUTH_TOKEN_SECRET: SECRET, OSI_SCOPED_ACCESS: '0', DEVICE_EUI: '0016C001F1000002' };
 
-function request(userId, username, method, path, body = {}) {
+function request(userId, username, method, path, body = {}, query = {}) {
   return {
     req: {
       method,
       path,
-      query: {},
+      query,
       params: {},
       body,
       headers: { authorization: makeAuthHeader({ userId, username, secret: SECRET }) },
@@ -31,9 +32,9 @@ function request(userId, username, method, path, body = {}) {
   };
 }
 
-async function route(db, userId, username, method, path, env, body = {}) {
+async function route(db, userId, username, method, path, env, body = {}, query = {}) {
   return executeFunction(loadNode('analysis-api-router-fn'), {
-    msg: request(userId, username, method, path, body),
+    msg: request(userId, username, method, path, body, query),
     env,
     db,
   });
@@ -47,7 +48,8 @@ function addDiscoveryRows(db) {
       ('A8404100000000D2', 'Foreign unassigned', 'KIWI_SENSOR', 1, NULL, '2026-01-01', '2026-01-01'),
       ('A8404100000000D3', 'Unclaimed', 'KIWI_SENSOR', NULL, NULL, '2026-01-01', '2026-01-01'),
       ('A8404100000000D4', 'Cloud assigned', 'KIWI_SENSOR', NULL, 1, '2026-01-01', '2026-01-01'),
-      ('A8404100000000D5', 'Deleted unassigned', 'KIWI_SENSOR', 2, NULL, '2026-01-01', '2026-01-01');
+      ('A8404100000000D5', 'Deleted unassigned', 'KIWI_SENSOR', 2, NULL, '2026-01-01', '2026-01-01'),
+      ('A8404100000000D6', 'Reassigned unassigned', 'KIWI_SENSOR', 2, NULL, '2026-01-01', '2026-01-01');
     UPDATE devices SET deleted_at = '2026-01-03T00:00:00.000Z' WHERE deveui = 'A8404100000000D5';
     INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES
       ('A8404100000000D1', '2026-01-02T08:00:00.000Z', 12),
@@ -157,6 +159,28 @@ test('analysis authentication rejects missing and forged bearer tokens', async (
   }
 });
 
+test('disabled scoped accounts receive 403 for analysis channels, series, and views', async () => {
+  const db = seedScopedDb();
+  db.prepare("UPDATE users SET disabled_at = '2026-01-03T00:00:00.000Z' WHERE id = 3").run();
+  scopeHelper._resetForTests();
+  try {
+    for (const [method, path, body] of [
+      ['GET', '/api/analysis/channels', {}],
+      ['POST', '/api/analysis/series', {
+        selectors: [{ seriesId: 'unknown' }],
+        range: { from: '2026-01-02T07:00:00.000Z', to: '2026-01-02T09:00:00.000Z' },
+      }],
+      ['GET', '/api/analysis/views', {}],
+    ]) {
+      const response = await route(db, 3, 'view1', method, path, SCOPED, body);
+      assert.equal(response.result.statusCode, 403, `${method} ${path}`);
+    }
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
 test('default helper options and an empty zone UUID list do not widen to unassigned devices', async () => {
   const db = seedScopedDb();
   addDiscoveryRows(db);
@@ -185,7 +209,7 @@ test('flag-off selector and request options cannot forge another owner unassigne
     });
     const foreign = accountCatalog.channels.find((entry) => entry.deviceName === 'Foreign unassigned' && entry.channelKey === 'swt_1');
     assert.ok(foreign);
-    const catalog = await route(db, 2, 'res1', 'GET', '/api/analysis/channels', FLAG_OFF, { unassignedAccess: 'account' });
+    const catalog = await route(db, 2, 'res1', 'GET', '/api/analysis/channels', FLAG_OFF, { unassignedAccess: 'account' }, { unassignedAccess: 'account' });
     assert.equal(catalog.result.statusCode, 200);
     assert.equal(channelByDevice(catalog.result.payload, 'Foreign unassigned'), undefined);
     const series = await route(db, 2, 'res1', 'POST', '/api/analysis/series', FLAG_OFF, {
@@ -221,6 +245,45 @@ test('saved unassigned selectors become dropped after reassignment and remain st
     assert.deepEqual(listed.result.payload.views[0].droppedSeriesIds, [original.seriesId]);
     assert.equal(listed.result.payload.views[0].id, viewId);
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_views').get().n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('fresh series and view resolution drop selectors after soft deletion, and series drops after reassignment', async () => {
+  const db = seedScopedDb();
+  addDiscoveryRows(db);
+  try {
+    const catalog = await route(db, 2, 'res1', 'GET', '/api/analysis/channels', FLAG_OFF);
+    const deleted = channelByDevice(catalog.result.payload, 'Owner unassigned');
+    const reassigned = channelByDevice(catalog.result.payload, 'Reassigned unassigned');
+    assert.ok(deleted);
+    assert.ok(reassigned);
+
+    const save = await route(db, 2, 'res1', 'POST', '/api/analysis/views', FLAG_OFF, {
+      name: 'Deleted selector',
+      selectors: [{ seriesId: deleted.seriesId }],
+    });
+    assert.equal(save.result.statusCode, 200);
+
+    db.prepare("UPDATE devices SET deleted_at = '2026-01-03T00:00:00.000Z' WHERE deveui = 'A8404100000000D1'").run();
+    const deletedSeries = await route(db, 2, 'res1', 'POST', '/api/analysis/series', FLAG_OFF, {
+      selectors: [{ seriesId: deleted.seriesId }],
+      range: { from: '2026-01-02T07:00:00.000Z', to: '2026-01-02T09:00:00.000Z' },
+    });
+    assert.deepEqual(deletedSeries.result.payload.series, []);
+    assert.deepEqual(deletedSeries.result.payload.dropped, [{ seriesId: deleted.seriesId, reason: 'unknown' }]);
+    const deletedViews = await route(db, 2, 'res1', 'GET', '/api/analysis/views', FLAG_OFF);
+    assert.deepEqual(deletedViews.result.payload.views[0].selectors, []);
+    assert.deepEqual(deletedViews.result.payload.views[0].droppedSeriesIds, [deleted.seriesId]);
+
+    db.prepare('UPDATE devices SET irrigation_zone_id = 1, user_id = 1 WHERE deveui = ?').run('A8404100000000D6');
+    const reassignedSeries = await route(db, 2, 'res1', 'POST', '/api/analysis/series', FLAG_OFF, {
+      selectors: [{ seriesId: reassigned.seriesId }],
+      range: { from: '2026-01-02T07:00:00.000Z', to: '2026-01-02T09:00:00.000Z' },
+    });
+    assert.deepEqual(reassignedSeries.result.payload.series, []);
+    assert.deepEqual(reassignedSeries.result.payload.dropped, [{ seriesId: reassigned.seriesId, reason: 'unknown' }]);
   } finally {
     db.close();
   }
