@@ -105,7 +105,7 @@ const ANALYSIS_VIEWS_SCHEMA = `CREATE TABLE IF NOT EXISTS analysis_views (
 function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
   return crypto
     .createHash('sha256')
-    .update(`${zoneId}|${cardType}|${sourceKey}|${channelKey}`)
+    .update(`${zoneId == null ? 'unassigned' : zoneId}|${cardType}|${sourceKey}|${channelKey}`)
     .digest('hex')
     .slice(0, 16);
 }
@@ -114,11 +114,12 @@ function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
 // addWeatherSource() channel (final review, queue T3 N2): both built the
 // same twelve-field shape by hand.
 function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, sourceKind, deviceSourceId: sourceId, configurationState }) {
+  const zoneId = zone && zone.id != null ? zone.id : 'unassigned';
   return {
-    seriesId: analysisSeriesId(zone.id, cardType, sourceKey, channelKey),
+    seriesId: analysisSeriesId(zoneId, cardType, sourceKey, channelKey),
     hubEui,
-    zoneId: zone.id,
-    zoneName: zone.name || null,
+    zoneId: zone ? zone.id : null,
+    zoneName: zone ? (zone.name || null) : null,
     cardType,
     sourceKey,
     channelKey,
@@ -131,6 +132,14 @@ function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta
     deviceSourceId: sourceId || null,
     configurationState: configurationState || 'current',
   };
+}
+
+function resolveUnassignedAccess(value) {
+  const access = value === undefined || value === null || value === '' ? 'none' : String(value).trim().toLowerCase();
+  if (!['none', 'owner', 'account'].includes(access)) {
+    throw badRequest('unassignedAccess must be one of none, owner, account');
+  }
+  return access;
 }
 
 // One series envelope, shared by the device path and weatherSeries() (final
@@ -469,6 +478,7 @@ function createAnalysis(deps) {
     const hubEui = String(options.deviceEui || options.device_eui || '').trim().toUpperCase();
     const userId = userIdFor(options);
     const zoneUuids = Array.isArray(options.zoneUuids) ? options.zoneUuids : null;
+    const unassignedAccess = resolveUnassignedAccess(options.unassignedAccess);
     const zones = zoneUuids === null
       ? await dbAll(
         db,
@@ -505,25 +515,10 @@ function createAnalysis(deps) {
       ? await loadZoneStations(db, zones.map((zone) => zone.id), userId, zoneUuids === null)
       : new Map();
 
-    for (const zone of zones) {
-      const timezone = normalizeTimezone(zone.timezone);
+    const appendDeviceSources = (zone, loadedDevices, timezone) => {
       // Production wiring (osi-history-helper index.js) always injects the
       // annotator; structural tests that omit it see the raw rows.
-      const loadedDevices = zoneUuids === null
-        ? await dbAll(
-          db,
-          "SELECT d.*, COALESCE(vs.strega_generation, 'GEN1') AS strega_generation FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deleted_at IS NULL AND d.irrigation_zone_id = ? AND d.user_id = ? ORDER BY d.deveui ASC",
-          [zone.id, userId]
-        )
-        : await dbAll(
-          db,
-          "SELECT d.*, COALESCE(vs.strega_generation, 'GEN1') AS strega_generation FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deleted_at IS NULL AND d.irrigation_zone_id = ? ORDER BY d.deveui ASC",
-          [zone.id]
-        );
-      const devices = typeof annotateWatermarkEvidence === 'function'
-        ? await annotateWatermarkEvidence(db, loadedDevices)
-        : loadedDevices;
-      devices.slice().sort((left, right) =>
+      loadedDevices.slice().sort((left, right) =>
         String(normalizeDeveui(left.deveui || left.device_eui) || '').localeCompare(String(normalizeDeveui(right.deveui || right.device_eui) || ''))
       ).forEach((device, index) => {
         const deveui = normalizeDeveui(device.deveui || device.device_eui || device.deviceEui);
@@ -534,8 +529,8 @@ function createAnalysis(deps) {
         const source = {
           id: sourceId,
           hubEui: hubEui || null,
-          zoneId: Number(zone.id),
-          zoneName: zone.name || null,
+          zoneId: zone ? Number(zone.id) : null,
+          zoneName: zone ? (zone.name || null) : null,
           name: deviceName,
           typeId: String(device.type_id || device.typeId || '').trim().toUpperCase(),
           channelIds: [],
@@ -571,6 +566,25 @@ function createAnalysis(deps) {
           }
         }
       });
+    };
+
+    for (const zone of zones) {
+      const timezone = normalizeTimezone(zone.timezone);
+      const loadedDevices = zoneUuids === null
+        ? await dbAll(
+          db,
+          "SELECT d.*, COALESCE(vs.strega_generation, 'GEN1') AS strega_generation FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deleted_at IS NULL AND d.irrigation_zone_id = ? AND d.user_id = ? ORDER BY d.deveui ASC",
+          [zone.id, userId]
+        )
+        : await dbAll(
+          db,
+          "SELECT d.*, COALESCE(vs.strega_generation, 'GEN1') AS strega_generation FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deleted_at IS NULL AND d.irrigation_zone_id = ? ORDER BY d.deveui ASC",
+          [zone.id]
+        );
+      const devices = typeof annotateWatermarkEvidence === 'function'
+        ? await annotateWatermarkEvidence(db, loadedDevices)
+        : loadedDevices;
+      appendDeviceSources(zone, devices, timezone);
 
       if (!weatherAvailable) continue;
 
@@ -624,6 +638,20 @@ function createAnalysis(deps) {
         zone.id,
         null
       );
+    }
+
+    if (unassignedAccess !== 'none') {
+      const ownerClause = unassignedAccess === 'owner' ? 'AND d.user_id = ?' : 'AND d.user_id IS NOT NULL';
+      const ownerParams = unassignedAccess === 'owner' ? [userId] : [];
+      const loadedUnassignedDevices = await dbAll(
+        db,
+        "SELECT d.*, COALESCE(vs.strega_generation, 'GEN1') AS strega_generation FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deleted_at IS NULL AND d.irrigation_zone_id IS NULL " + ownerClause + " ORDER BY d.deveui ASC",
+        ownerParams
+      );
+      const unassignedDevices = typeof annotateWatermarkEvidence === 'function'
+        ? await annotateWatermarkEvidence(db, loadedUnassignedDevices)
+        : loadedUnassignedDevices;
+      appendDeviceSources(null, unassignedDevices, 'UTC');
     }
 
     return { generatedAt: new Date().toISOString(), sources, channels, entriesById, weatherAvailable };

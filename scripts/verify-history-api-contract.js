@@ -273,6 +273,8 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
   assertContains(failures, source, "osiLib.require('scope')", 'analysis reads load the shared scope module');
   assertContains(failures, source, 'assertEnabledAccount(db, ownerUuid, { scopedMode: true })', 'analysis reads gate on an enabled account (P1)');
+  assertContains(failures, source, "let unassignedAccess = 'owner'", 'analysis flag-off owner unassigned policy');
+  assertContains(failures, source, "unassignedAccess = 'account'", 'analysis scoped account unassigned policy');
   assertContains(failures, source, 'null is the legacy owner-only path in osi-history-helper', 'analysis null sentinel stays legacy owner-only');
   assertContains(failures, source, 'SELECT zone_uuid FROM irrigation_zones WHERE deleted_at IS NULL AND zone_uuid IS NOT NULL ORDER BY id ASC', 'scoped analysis reads load an explicit account-wide zone array');
   assertContains(failures, source, 'scopeZoneUuids = accountZoneRows', 'scoped analysis reads pass the explicit zone array');
@@ -280,11 +282,14 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   // Wave 3 scoped-access port (AgroLink d49e1cd28): buildAnalysisCatalog also
   // threads zoneUuids through when OSI_SCOPED_ACCESS=1 (osi-scope-helper's
   // listScopeZoneUuids); the literal call site gained a trailing property.
-  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user and owned-plus-granted zones');
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids, unassignedAccess: unassignedAccess })', 'analysis /channels scopes catalog and unassigned devices from authenticated server policy');
+  assertContains(failures, source, 'channels: catalog.channels, sources: catalog.sources', 'analysis /channels explicitly projects public sources');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
   assertContains(failures, source, 'zoneUuids: scopeZoneUuids', 'analysis /series scopes resolver to owned-plus-granted zones');
+  assertContains(failures, source, 'unassignedAccess: unassignedAccess', 'analysis /series uses server-derived unassigned policy');
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
   assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids', 'analysis /views filters saved selectors to owned-plus-granted zones');
+  assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids, unassignedAccess: unassignedAccess', 'analysis /views uses server-derived unassigned policy');
   assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
