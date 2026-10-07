@@ -93,6 +93,20 @@ every 0.7.0 entry below.
   `/etc/init.d/osi-bootstrap start` provisions at once. Do not run
   `chirpstack-bootstrap.js` directly: it writes no stamp, so the next boot
   runs it again and creates a second API key.
+- **Cloud MQTT broker URL.** `node-red.init` and `flows.json` ship
+  together: the new flows read the broker from `OSI_CLOUD_BROKER_URL`, which
+  only the new init sets. `deploy.sh` and images install both; a flows.json
+  copied by hand under an old init, with `osi-server.cloud.mqtt_broker_url`
+  empty, leaves MQTT disconnected (`Connection failed to broker:
+  device_<EUI>@mqtt://${OSI_CLOUD_BROKER_URL}:443` every 15 s). A gateway
+  with `server_host` set to another host and no `mqtt_broker_url` switches
+  its MQTT to `wss://<server_host>/mqtt` at the first start after the
+  upgrade. `mqtt_broker_url` wins when set; it is the cloud's
+  `MQTT_DEVICE_PUBLIC_BROKER_URL` at link time, so each cloud's environment
+  must name its own host. A malformed `server_host` is logged as a WARN
+  (shape only) and the default broker is used, as for an unlinked gateway.
+  Before rolling out, compare per gateway (production first) the predicted
+  URL with the host in its last `Connected to broker` log line.
 
 ### Known limitations
 - Journal entries written by a user whose gateway-local id is 32 hex digits
