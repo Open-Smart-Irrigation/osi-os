@@ -193,9 +193,16 @@ function describeDeviceSource(device = {}) {
   };
 }
 
+function normalizeDeviceEui(value) {
+  const normalized = String(value || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  return /^[0-9A-F]{16}$/.test(normalized) ? normalized : null;
+}
+
 function deviceSourceId(device = {}) {
-  const eui = String(device.deveui || device.device_eui || device.deviceEui || '').trim().toUpperCase();
-  if (!eui) throw new Error('cannot create device source for empty EUI');
+  const rawEui = device && (device.deveui || device.device_eui || device.deviceEui);
+  if (!String(rawEui || '').trim()) throw new Error('cannot create device source for empty EUI');
+  const eui = normalizeDeviceEui(rawEui);
+  if (!eui) throw new Error('cannot create device source for invalid EUI');
   return `device-${crypto.createHash('sha256').update(eui).digest('hex').slice(0, 12)}`;
 }
 

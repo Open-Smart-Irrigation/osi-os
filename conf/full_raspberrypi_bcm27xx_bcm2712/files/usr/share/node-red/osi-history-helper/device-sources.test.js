@@ -46,7 +46,11 @@ test('source identity is stable across names, case and renames', () => {
   const first = { deveui: 'a8404100000000bb', name: 'Same name', type_id: 'KIWI_SENSOR' };
   assert.equal(deviceSourceId(first), deviceSourceId({ ...first, name: 'Renamed' }));
   assert.equal(deviceSourceId(first), deviceSourceId({ ...first, deveui: 'A8404100000000BB' }));
+  assert.equal(deviceSourceId({ deveui: 'A8-40-41-00-00-00-00-77' }), deviceSourceId({ deveui: 'A840410000000077' }));
+  assert.equal(deviceSourceId({ deveui: 'A8:40:41:00:00:00:00:77' }), deviceSourceId({ deveui: 'A840410000000077' }));
   assert.throws(() => deviceSourceId({ name: 'missing eui' }), /empty EUI/);
+  assert.throws(() => deviceSourceId({ deveui: '001122334455667' }), /invalid EUI/);
+  assert.throws(() => deviceSourceId({ deveui: 'gggggggggggggggg' }), /invalid EUI/);
 });
 
 test('LSN50 and SDI12 preserve finite historical candidates', () => {
