@@ -204,6 +204,13 @@ statistics retain their meanings (mean remains mean); this does not redesign
 legacy charts or rewrite rollups. Other devices' legacy CSV behavior stays
 unchanged. Regression tests cover LoRain raw, aggregate and rollup-present paths.
 
+The public implementation keeps nine new source-tray strings in Luganda as
+explicit English fallbacks until a human translation is reviewed. The pending
+keys are tracked in `docs/i18n/pending-luganda-translations.md` and enforced by
+the locale test. Chart builders also disambiguate duplicate display labels in
+`series.name`; ECharts uses that name for legend selection even when each
+series has a distinct stable ID.
+
 ## Boundaries and delivery
 
 No schema migration, device re-registration, seed rewrite, or history backfill.

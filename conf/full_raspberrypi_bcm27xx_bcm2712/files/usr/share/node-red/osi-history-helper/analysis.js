@@ -72,6 +72,17 @@ const CHANNELS = [
 ];
 
 const CHANNELS_BY_KEY = new Map(CHANNELS.map((channel) => [channel.key, channel]));
+const DEVICE_CHANNEL_AGGREGATION = Object.freeze({
+  rain_mm_delta: 'sum',
+  rain_tips_delta: 'sum',
+  flow_liters_delta: 'sum',
+  flow_pulses_delta: 'sum',
+  rain_mm_today: 'latest',
+  rain_count_cumulative: 'latest',
+  rain_gauge_cumulative_mm: 'latest',
+  flow_liters_today: 'latest',
+  flow_count_cumulative: 'latest',
+});
 const DEVICE_HEALTH_CHANNELS = [
   { key: 'bat_v', unit: 'V', label: 'Battery voltage', cardType: 'device_health', edgeField: 'bat_v', exportable: false, deprecated: false, aggregation: 'mean' },
   { key: 'bat_pct', unit: '%', label: 'Battery', cardType: 'device_health', edgeField: 'bat_pct', exportable: false, deprecated: false, aggregation: 'mean' },
@@ -240,7 +251,7 @@ function channelMeta(channelKey) {
     unit: meta.unit,
     edgeField: meta.edgeField,
     cardType: meta.cardType,
-    aggregation: meta.aggregation || 'mean',
+    aggregation: DEVICE_CHANNEL_AGGREGATION[key] || meta.aggregation || 'mean',
   };
 }
 
@@ -310,12 +321,9 @@ function normalizeRange(range = {}) {
   };
 }
 
-// Without `spec` this is the device path, unchanged: the bucket mean, the
-// bucket's sample count and the cadence confidence. With `spec` (the weather
-// kinds) a 'sum' channel reports the bucket total, a 'mean' channel the
-// bucket mean, and EVERY channel -- final review I2 -- is marked partial
-// when the bucket holds fewer rows than `expected` (a daily mean of 9 of 24
-// hours is a partial mean, not a full day's mean).
+// Device callers pass `{ device: true, stat }` so interval channels can sum and
+// running counters can keep their final chronological observation. Weather
+// callers pass `expected` as well, which retains their partial-bucket contract.
 function aggToPoints(aggregate, channelKey, spec) {
   const rawPoints = aggregate && aggregate.series && aggregate.series[channelKey] && aggregate.series[channelKey].points;
   if (Array.isArray(rawPoints)) {
@@ -328,11 +336,11 @@ function aggToPoints(aggregate, channelKey, spec) {
   }
   return (aggregate && aggregate.buckets || []).map((bucket) => {
     const stats = bucket.series && bucket.series[channelKey] || {};
-    if (!spec) {
-      const aggregation = channelMeta(channelKey).aggregation || 'mean';
+    if (!spec || spec.device) {
+      const aggregation = (spec && spec.stat) || channelMeta(channelKey).aggregation || 'mean';
       return {
         t: bucket.bucketStart,
-        value: (aggregation === 'latest' ? stats.latest : stats.mean) ?? null,
+        value: (aggregation === 'sum' ? stats.sum : aggregation === 'latest' ? stats.latest : stats.mean) ?? null,
         count: Number(stats.sampleCount || 0),
         quality: bucket.coverageConfidence || null,
       };
@@ -341,7 +349,7 @@ function aggToPoints(aggregate, channelKey, spec) {
     const expected = Number.isInteger(spec.expected) ? spec.expected : null;
     return {
       t: bucket.bucketStart,
-      value: (spec.stat === 'sum' ? stats.sum : stats.mean) ?? null,
+      value: (spec.stat === 'sum' ? stats.sum : spec.stat === 'latest' ? stats.latest : stats.mean) ?? null,
       count,
       expected,
       quality: expected !== null && count > 0 && count < expected ? 'partial' : null,
@@ -761,7 +769,7 @@ function createAnalysis(deps) {
         });
         series.push(buildSeriesEnvelope(entry, {
           unit: entry.unit,
-          points: aggToPoints(aggregate, entry.channelKey),
+          points: aggToPoints(aggregate, entry.channelKey, { stat: meta.aggregation, device: true }),
           cadence: 'hourly',
         }));
       }
@@ -863,6 +871,7 @@ module.exports = {
   ANALYSIS_VIEWS_SCHEMA,
   CHANNELS,
   DEVICE_HEALTH_CHANNELS,
+  DEVICE_CHANNEL_AGGREGATION,
   ANALYSIS_EDGE_FIELDS,
   DEVICE_EXCLUDED_CHANNELS,
   SOURCE_KINDS,

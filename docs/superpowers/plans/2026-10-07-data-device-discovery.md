@@ -15,10 +15,18 @@ TypeScript, SWR, Node test runner and Vitest.
 
 **Spec:** [Data-view device discovery correction](../specs/2026-10-07-data-device-discovery-design.md).
 
-Status: ready after all three committee reviewers cleared the revision.
-Implementation has not started.
+Status: public Tasks 0–5 complete after the scoped reviews; Task 6 remains the
+separate private-branch adaptation and authorized deployment preparation.
 Review: [findings and dispositions](../reviews/2026-10-07-data-device-discovery-review.md).
 Public base: `06e691e850384b1d5ecbacbe24439a257a70c983`.
+
+Accepted UI rulings are part of the delivery record. The nine new Luganda
+source-tray strings remain explicit English fallbacks pending a human
+translation; their keys are listed in
+[`docs/i18n/pending-luganda-translations.md`](../../i18n/pending-luganda-translations.md)
+and guarded by the locale test. ECharts legend identity uses disambiguated
+display labels as well as stable series IDs, because ECharts groups legend
+controls by `series.name`.
 
 ## Global constraints
 
@@ -375,14 +383,22 @@ zoneName becomes string|null wherever the catalogue can return it.
 
 ## Task 5: Verify measurement values, deployment and coverage in CI
 
+Status: complete in the public worktree. The device reader now uses sum for
+interval deltas, mean for instantaneous values, and the final finite
+chronological observation for counters and daily-running totals. The test
+fixture covers zero, 1.5, and 6 mm rows, mixed timestamp forms, a
+configuration-only row, a stale device, and an empty bucket. Catalogue query
+count stays independent of declared channel count and never reads
+`device_data`.
+
 Files: analysis.js and tests, new router discovery test, CI workflow, docs.
 
-- [ ] Add real SQLite fixtures for rain deltas [0, 1.5, 6], a configuration-only
+- [x] Add real SQLite fixtures for rain deltas [0, 1.5, 6], a configuration-only
   row, a stale gauge, and mixed SQLite/ISO/offset timestamps. Raw values must be
   [0, 1.5, 6] at their normalized times; an hourly bucket covering them is 7.5 mm.
   An empty bucket is null. Rates/temperatures/voltage use means; cumulative and
   daily-running totals must not be summed.
-- [ ] For the Data-view device reader pass channel-specific statistic metadata to
+- [x] For the Data-view device reader pass channel-specific statistic metadata to
   aggToPoints: sum for rain_mm_delta/rain_tips_delta/flow_liters_delta and pulse
   deltas, mean for instantaneous measurements, last observation for counters.
   Add the explicit latest branch to aggToPoints (currently only sum vs mean).
@@ -390,14 +406,14 @@ Files: analysis.js and tests, new router discovery test, CI workflow, docs.
   final finite observation, never a maximum or sum. Preserve weather-source
   aggregation and legacy history statistic meanings; Task 1 separately selects the
   correct statistic for LoRain legacy CSV.
-- [ ] Add a catalogue query-count assertion: increasing declared channel count
+- [x] Add a catalogue query-count assertion: increasing declared channel count
   must not increase database calls. Guard against reads of all device_data history.
-- [ ] Add the new tests to CI and add the source-coverage check to the onboarding
+- [x] Add the new tests to CI and add the source-coverage check to the onboarding
   checklist. Register only files that are shipped; new internal modules must pass
   verify-module-file-deploy-coverage. The offline bundle is generated from
   deploy.sh's fetch list, so no separate manifest edit is required. No npm
   dependency or schema addition.
-- [ ] Run these gates from the repo root, capturing each exit code:
+- [x] Run these gates from the repo root, capturing each exit code:
 
 ```bash
 node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.test.js
@@ -422,10 +438,10 @@ Run `npm run typecheck`, `npm run test:unit`, `npm run build` in web/react-gui.
 Run `git diff --check` and the prose checker on changed docs. Pin stack-base
 variables only when the branch actually uses a different reviewed base.
 
-- [ ] Use the browser skill to check the mounted Data view at desktop and mobile
+- [x] Use the browser skill to check the mounted Data view at desktop and mobile
   sizes, two same-name devices, search, selecting rain, source-only rows, saved
   views and CSV. Verify real zero and unavailable states separately.
-- [ ] Commit: `test(analysis): enforce device discovery and rain value contracts`.
+- [x] Commit: `test(analysis): enforce device discovery and rain value contracts`.
 
 ## Task 6: Private-branch adaptation and independent verification
 

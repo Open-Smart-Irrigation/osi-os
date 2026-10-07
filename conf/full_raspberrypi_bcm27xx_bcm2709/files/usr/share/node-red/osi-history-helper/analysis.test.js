@@ -461,6 +461,102 @@ test('device-health pulse channels use latest values in bucketed series', async 
   }
 });
 
+test('device measurement statistics preserve interval totals, means, and final counters', async () => {
+  const raw = weatherDb();
+  const lsnEui = '0011223344556682';
+  try {
+    raw.prepare('DELETE FROM device_data WHERE deveui = ?').run('0011223344556677');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, rain_gauge_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 1, ?, ?)`)
+      .run(lsnEui, 'Counter LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, deleted_at, created_at, updated_at)
+      VALUES (?, ?, 'AQUASCOPE_LORAIN', 1, 1, ?, ?, ?)`)
+      .run('0011223344556683', 'Stale Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+
+    const rain = raw.prepare(`INSERT INTO device_data
+      (deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_today)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    rain.run('0011223344556677', '2026-10-01 10:00:00', 10, 2, 0, 0, 0);
+    rain.run('0011223344556677', '2026-10-01T10:20:00+00:00', 20, 3, 1, 1.5, 1.5);
+    rain.run('0011223344556677', '2026-10-01T10:40:00Z', 30, 4, 2, 6, 0);
+    // The newest row is configuration-only. It must keep the source visible
+    // and must not become a measured zero or increase the bucket count.
+    rain.run('0011223344556677', '2026-10-01T10:50:00Z', null, null, null, null, null);
+
+    const counter = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_count_cumulative) VALUES (?, ?, ?)');
+    // Insert out of order and use all timestamp forms accepted by the reader.
+    counter.run(lsnEui, '2026-10-01T10:40:00Z', 7);
+    counter.run(lsnEui, '2026-10-01 10:10:00', 5);
+    counter.run(lsnEui, '2026-10-01T10:00:00+00:00', 10);
+
+    const result = await catalog(raw);
+    assert.equal(result.sources.some((source) => source.name === 'Stale Rain'), false);
+    const rainDelta = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_delta');
+    const rainTemp = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'ambient_temperature');
+    const rainBattery = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'bat_v');
+    const rainToday = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_today');
+    const counterLatest = result.channels.find((channel) => channel.deviceName === 'Counter LSN50' && channel.channelKey === 'rain_count_cumulative');
+    assert.ok(rainDelta && rainTemp && rainBattery && rainToday && counterLatest);
+
+    const range = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
+    const rawRain = await series(raw, [rainDelta], range, 'raw');
+    assert.deepEqual(rawRain.series[0].points.map((point) => [point.t, point.value]), [
+      ['2026-10-01T10:00:00.000Z', 0],
+      ['2026-10-01T10:20:00.000Z', 1.5],
+      ['2026-10-01T10:40:00.000Z', 6],
+    ]);
+
+    const hourly = await series(raw, [rainDelta, rainTemp, rainBattery, rainToday, counterLatest], range, 'hourly');
+    assert.deepEqual(hourly.series.map((item) => item.points[0].value), [7.5, 20, 3, 0, 7]);
+    assert.deepEqual(hourly.series.map((item) => item.points[0].count), [3, 3, 3, 3, 3]);
+
+    const empty = await series(raw, [rainDelta], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
+    assert.deepEqual(empty.series[0].points, [{
+      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown',
+    }]);
+  } finally {
+    raw.close();
+  }
+});
+
+test('device catalogue query count does not depend on declared channel count or read history', async () => {
+  const device = { deveui: '0011223344556684', name: 'Configuration only', type_id: 'KIWI_SENSOR', user_id: 1 };
+  const run = async (declaredCount) => {
+    const calls = [];
+    const analysis = analysisModule.createAnalysis({
+      aggregateRows: () => ({ series: {}, buckets: [] }),
+      dbAll: async (_db, sql) => {
+        calls.push(sql);
+        if (sql.includes('FROM irrigation_zones')) return [];
+        if (sql.includes('FROM devices')) return [device];
+        return [];
+      },
+      displayDeviceName: () => device.name,
+      normalizeDeveui: (value) => value,
+      sourceKeyForCsv: () => 'configuration-only-source',
+      deviceSourceId: () => 'device-configuration-only',
+      describeDeviceSource: () => ({
+        families: [{ cardType: 'environment', channelKeys: analysisModule.CHANNELS.slice(0, declaredCount).map((channel) => channel.key) }],
+        currentChannelKeys: [],
+        presentation: 'timeseries',
+        destination: null,
+        limitation: null,
+      }),
+      ...utcDeps(),
+    });
+    const catalogResult = await analysis.buildAnalysisCatalog({}, { userId: 1, unassignedAccess: 'owner' });
+    return { calls, catalogResult };
+  };
+
+  const narrow = await run(1);
+  const wide = await run(analysisModule.CHANNELS.length);
+  assert.equal(wide.calls.length, narrow.calls.length);
+  assert.equal(wide.calls.some((sql) => /FROM\s+device_data/i.test(sql)), false);
+  assert.equal(narrow.calls.some((sql) => /FROM\s+device_data/i.test(sql)), false);
+  assert.equal(wide.catalogResult.sources.length, narrow.catalogResult.sources.length);
+  assert.equal(wide.catalogResult.channels.length, analysisModule.CHANNELS.length);
+});
+
 test('device entries keep their pre-weather catalogue and never list a weather-only channel', async () => {
   const raw = weatherDb();
   try {
