@@ -124,7 +124,7 @@ function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
 // One catalogue entry literal, shared by the device path and every
 // addWeatherSource() channel (final review, queue T3 N2): both built the
 // same twelve-field shape by hand.
-function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, sourceKind, deviceSourceId: sourceId, configurationState }) {
+function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, depthReference, sourceKind, deviceSourceId: sourceId, configurationState }) {
   const zoneId = zone && zone.id != null ? zone.id : 'unassigned';
   return {
     seriesId: analysisSeriesId(zoneId, cardType, sourceKey, channelKey),
@@ -139,6 +139,7 @@ function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta
     availability,
     deviceName,
     depthCm,
+    depthReference: depthReference === undefined ? null : depthReference,
     sourceKind,
     deviceSourceId: sourceId || null,
     configurationState: configurationState || 'current',
@@ -554,6 +555,7 @@ function createAnalysis(deps) {
           for (const channelKey of family.channelKeys) {
             const meta = channelMeta(channelKey);
             const configurationState = description.currentChannelKeys.includes(channelKey) ? 'current' : 'other_supported';
+            const depthCm = family.cardType === 'soil' ? soilDepthCm(device, channelKey) : null;
             const entry = buildCatalogEntry({
               zone,
               hubEui,
@@ -563,7 +565,8 @@ function createAnalysis(deps) {
               meta,
               deviceName,
               availability: meta.edgeField ? 'available' : 'unsupported',
-              depthCm: family.cardType === 'soil' ? soilDepthCm(device, channelKey) : null,
+              depthCm,
+              depthReference: depthCm == null ? null : 'current_layout',
               sourceKind: 'device',
               deviceSourceId: sourceId,
               configurationState,

@@ -352,6 +352,45 @@ test('buildAnalysisCatalog exposes assigned non-Chameleon LSN50 as canonical SWT
   assert.deepEqual(deviceChannels.filter((entry) => entry.cardType === 'soil' && entry.configurationState === 'current').map((entry) => entry.depthCm), [12, 34]);
 });
 
+test('qualifies current SDI12 depths while preserving historical selectors and removed null depths', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556679';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, sdi12_probe_profile, soil_moisture_probe_depths_json, created_at, updated_at)
+      VALUES (?, 'Historical SDI12', 'DRAGINO_SDI12', 1, 1, 'SENTEK_ENVIROSCAN', ?, ?, ?)`)
+      .run(eui, JSON.stringify({ vwc_1: 10, vwc_2: 30 }), '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, vwc_1, vwc_2) VALUES (?, ?, ?, ?)')
+      .run(eui, '2026-10-01T10:00:00Z', 25, 35);
+
+    const before = await catalog(raw);
+    const beforeVwc1 = before.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_1');
+    const beforeVwc2 = before.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_2');
+    assert.equal(beforeVwc1.depthCm, 10);
+    assert.equal(beforeVwc1.depthReference, 'current_layout');
+    assert.equal(beforeVwc2.depthReference, 'current_layout');
+
+    raw.prepare('UPDATE devices SET soil_moisture_probe_depths_json = ? WHERE deveui = ?')
+      .run(JSON.stringify({ vwc_1: 20 }), eui);
+    const after = await catalog(raw);
+    const afterVwc1 = after.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_1');
+    const afterVwc2 = after.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_2');
+    assert.equal(afterVwc1.seriesId, beforeVwc1.seriesId);
+    assert.equal(afterVwc1.depthCm, 20);
+    assert.equal(afterVwc1.depthReference, 'current_layout');
+    assert.equal(afterVwc2.configurationState, 'other_supported');
+    assert.equal(afterVwc2.depthCm, null);
+    assert.equal(afterVwc2.depthReference, null);
+
+    const out = await series(raw, [afterVwc1, afterVwc2], {
+      from: '2026-10-01T09:59:00.000Z',
+      to: '2026-10-01T10:01:00.000Z',
+    }, 'raw');
+    assert.deepEqual(out.series.map((item) => item.points[0].value), [25, 35]);
+  } finally {
+    raw.close();
+  }
+});
+
 test('disabled LSN50 Chameleon SWT3 keeps only same-instant proven history', async () => {
   const raw = weatherDb();
   const eui = '0011223344556678';

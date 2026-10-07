@@ -140,6 +140,14 @@ describe('computeCorrelation', () => {
     ]);
   });
 
+  it('uses insufficient fallback when one correlation axis has no candidate', () => {
+    const x = series(8, 'soil', [1, 2]);
+    const result = computeCorrelation([x], 'soil', 'dendro', { minSamples: 1 });
+    expect(result.groups).toEqual([
+      expect.objectContaining({ groupId: 'zone:8', suppressed: true, suppressionReason: undefined }),
+    ]);
+  });
+
   it('excludes ambiguous groups from pooled output while retaining valid groups', () => {
     const ambiguousX = series(1, 'soil', [1, 2]);
     const ambiguousX2 = { ...series(1, 'soil', [2, 3]), seriesId: '1-soil-second' };

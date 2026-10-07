@@ -18,7 +18,7 @@ const catalog = new Map<string, AnalysisCatalogEntry>([
     seriesId: 'abc', hubEui: 'HUB-1', zoneId: 12, zoneName: 'North, Plot A',
     cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1',
     displayName: 'Chameleon 1: SWT 5cm', unit: 'kPa', availability: 'available',
-    deviceName: 'Chameleon 1', depthCm: 5, sourceKind: 'device',
+    deviceName: 'Chameleon 1', depthCm: 5, depthReference: 'current_layout', sourceKind: 'device',
   }],
 ]);
 
@@ -37,10 +37,28 @@ describe('toTidyCsv', () => {
   it('emits one row per bucket with header and null as empty', () => {
     const csv = toTidyCsv([series], catalog);
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value');
+    expect(lines[0]).toBe('timestamp,site,zone,series_label,card_type,source_key,channel_key,depth_cm,array_id,unit,value,depth_reference');
     // zoneName has a comma -> must be quoted
-    expect(lines[1]).toBe('2026-06-18T00:00:00Z,HUB-1,"North, Plot A",Chameleon 1: SWT 5cm,soil,root-zone,swt_1,5,,kPa,41.2');
-    expect(lines[2]).toBe('2026-06-18T01:00:00Z,HUB-1,"North, Plot A",Chameleon 1: SWT 5cm,soil,root-zone,swt_1,5,,kPa,');
+    expect(lines[1]).toBe('2026-06-18T00:00:00Z,HUB-1,"North, Plot A",Chameleon 1: SWT 5cm,soil,root-zone,swt_1,5,,kPa,41.2,current_layout');
+    expect(lines[2]).toBe('2026-06-18T01:00:00Z,HUB-1,"North, Plot A",Chameleon 1: SWT 5cm,soil,root-zone,swt_1,5,,kPa,,current_layout');
+  });
+
+  it('qualifies current depth, labels legacy depth unspecified, and leaves null depth blank', () => {
+    const legacy: AnalysisSeries = { ...series, seriesId: 'legacy', resolved: { ...series.resolved, channelKey: 'vwc_1' }, points: [series.points[0]] };
+    const missing: AnalysisSeries = { ...series, seriesId: 'missing', resolved: { ...series.resolved, channelKey: 'vwc_2' }, points: [series.points[0]] };
+    const rows = new Map<string, AnalysisCatalogEntry>([
+      ['legacy', { ...catalog.get('abc')!, seriesId: 'legacy', depthCm: 10, depthReference: undefined }],
+      ['missing', { ...catalog.get('abc')!, seriesId: 'missing', depthCm: null, depthReference: null }],
+    ]);
+    const lines = toTidyCsv([legacy, missing], rows).split('\n');
+    expect(lines[1]).toContain(',vwc_1,10,,kPa,41.2,unspecified');
+    expect(lines[2]).toContain(',vwc_2,,,kPa,41.2,');
+  });
+
+  it('keeps an observed zero distinct from a null point', () => {
+    const zero: AnalysisSeries = { ...series, seriesId: 'zero', points: [{ ...series.points[0], value: 0 }] };
+    const zeroCatalog = new Map([['zero', { ...catalog.get('abc')!, seriesId: 'zero', depthCm: null, depthReference: null }]]);
+    expect(toTidyCsv([zero], zeroCatalog).split('\n')[1]).toContain(',swt_1,,,kPa,0,');
   });
 
   it('falls back to zoneId when the catalog lacks the series', () => {
@@ -64,8 +82,8 @@ describe('toTidyCsv', () => {
       truncated: false, cadence: 'hourly', timezone: 'Europe/Zurich',
     };
     const lines = toTidyCsv([daily, provider], new Map()).split('\n');
-    expect(lines[1]).toBe('2026-09-25,HUB-1,1,North daily agronomy - Reference ET (ET0),environment,agronomy-src-zone,et0_mm,,,mm/d,3.1');
-    expect(lines[2]).toBe('2026-09-24T22:00:00.000Z,HUB-1,1,Open-Meteo 46.80°N 6.95°E - Rain rate,environment,weather-src-0123456789ab,rain_mm_per_hour,,,mm/h,0.4');
+    expect(lines[1]).toBe('2026-09-25,HUB-1,1,North daily agronomy - Reference ET (ET0),environment,agronomy-src-zone,et0_mm,,,mm/d,3.1,');
+    expect(lines[2]).toBe('2026-09-24T22:00:00.000Z,HUB-1,1,Open-Meteo 46.80°N 6.95°E - Rain rate,environment,weather-src-0123456789ab,rain_mm_per_hour,,,mm/h,0.4,');
     const invalidZone = toTidyCsv([{ ...daily, timezone: 'Not/AZone' }], new Map()).split('\n');
     expect(invalidZone[1].startsWith('2026-09-24,')).toBe(true);
   });

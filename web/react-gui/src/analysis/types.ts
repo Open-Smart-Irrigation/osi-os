@@ -30,6 +30,7 @@ export interface AnalysisCatalogEntry {
   availability: AnalysisAvailabilityValue;
   deviceName: string | null;
   depthCm: number | null;
+  depthReference?: 'current_layout' | null;
   /** 'device', 'weather_provider', 'weather_station' or 'zone_daily_agronomy'. */
   sourceKind: string;
   deviceSourceId?: string | null;

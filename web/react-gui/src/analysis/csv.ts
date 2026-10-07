@@ -12,6 +12,7 @@ const HEADER = [
   'array_id',
   'unit',
   'value',
+  'depth_reference',
 ];
 
 // A daily-cadence point stands for one zone-local day, so its row carries
@@ -59,6 +60,7 @@ export function toTidyCsv(
         '',
         item.unit ?? '',
         point.value === null ? '' : String(point.value),
+        entry?.depthCm == null ? '' : entry.depthReference === 'current_layout' ? 'current_layout' : 'unspecified',
       ].map((cell) => escape(String(cell)));
       lines.push(row.join(','));
     }

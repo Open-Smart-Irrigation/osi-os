@@ -153,7 +153,11 @@ export function computeCorrelation(
   for (const entry of byGroup.values()) {
     const selected = validPair(entry);
     if (!selected) {
-      const suppressionReason: CorrelationSuppressionReason = entry.missingDeviceSource ? 'missing_device_source' : 'ambiguous';
+      const suppressionReason: CorrelationSuppressionReason | undefined = entry.missingDeviceSource
+        ? 'missing_device_source'
+        : entry.x.length > 1 || entry.y.length > 1
+          ? 'ambiguous'
+          : undefined;
       if (entry.x.length > 0 || entry.y.length > 0) {
         groups.push({ groupId: entry.groupId, zoneId: entry.zoneId, label: entry.label, n: 0, droppedPairs: 0, r: null, suppressed: true, suppressionReason });
       }

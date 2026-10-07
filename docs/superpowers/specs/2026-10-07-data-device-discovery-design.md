@@ -182,7 +182,12 @@ Source visibility does not depend on the selected chart time range.
 The timeline, saved views, correlation, and Data-view CSV export accept unassigned
 entries. CSV uses the stable label `Unassigned devices` when resolved.zoneId is null,
 even without a catalogue entry; assigned missing-entry rows retain their numeric
-zone fallback. Existing assigned IDs remain unchanged.
+zone fallback. Existing assigned IDs remain unchanged. The additive
+`depth_reference` column is appended after `value`: `current_layout` means the value
+in `depth_cm` comes from the device's current configured layout and does not
+reconstruct the physical depth of an older sample; `unspecified` preserves the
+value from a legacy response that has no provenance qualifier, and an empty cell
+accompanies a null depth.
 
 Correlation needs explicit grouping. Preserve pairing across different devices in
 one assigned zone only when exactly one selected X and one selected Y exist for
