@@ -370,6 +370,9 @@ until the stack is rebased onto the current `origin/main`.
 5. Add React card/component and render in dashboard.
 6. Regenerate the bundled DB copies with `node scripts/build-seed-db.js` (it replays the ordered migrations into a fresh image, so the shipped ledger advances with the schema); verify with `scripts/verify-db-schema-consistency.js` and `scripts/verify-seed-db-ledger.js`.
 7. Map ChirpStack app + profile; update `osi-bootstrap` if profile is new.
+8. For Data-view support, update the finite source policy in both payload
+   profiles and run the source matrix, manifest parity, and deploy-file coverage
+   checks documented in [docs/channel-manifest.md](docs/channel-manifest.md).
 
 ---
 

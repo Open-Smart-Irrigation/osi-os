@@ -37,6 +37,7 @@ import { AppHeader } from '../components/AppHeader';
 import { HelpTip } from '../components/farming/shared/HelpTip';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
+import { useGatewayModules } from '../hooks/useGatewayModules';
 
 function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   if (ws.selectors.length === 0) return null;
@@ -47,6 +48,7 @@ export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
   const { isAdmin, loading: scopeLoading } = useScope();
+  const gatewayModules = useGatewayModules();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
@@ -77,7 +79,11 @@ export function CrossZoneAnalysisPage() {
     [catalog],
   );
   const zoneNameById = useMemo(
-    () => new Map((catalog?.channels ?? []).map((c) => [c.zoneId, c.zoneName])),
+    () => new Map(
+      (catalog?.channels ?? [])
+        .filter((c): c is typeof c & { zoneId: number; zoneName: string } => c.zoneId !== null && c.zoneName !== null)
+        .map((c) => [c.zoneId, c.zoneName]),
+    ),
     [catalog],
   );
   const displayedSeries = useMemo(
@@ -129,6 +135,7 @@ export function CrossZoneAnalysisPage() {
       .filter((channel) => (
         channel.sourceKind === 'device'
         && channel.availability === 'available'
+        && channel.zoneId !== null
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -174,6 +181,8 @@ export function CrossZoneAnalysisPage() {
         <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
           <AnalysisSeriesTray
             channels={catalog?.channels ?? []}
+            sources={catalog?.sources}
+            gatewayModules={gatewayModules}
             selectedIds={selectedIds}
             onAdd={(id) => updateWorkspace((currentWorkspace) => addSeries(currentWorkspace, id))}
             onRemove={(id) => updateWorkspace((currentWorkspace) => removeSeries(currentWorkspace, id))}

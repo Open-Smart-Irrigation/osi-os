@@ -30,14 +30,14 @@ test('analysis contract rejects removal of zone-scope propagation', () => {
   const router = flows.find((node) => node.id === 'analysis-api-router-fn');
   assert.ok(router);
   router.func = router.func.replace(
-    'zoneUuids: scopeZoneUuids',
+    'zoneUuids: scopeZoneUuids, unassignedAccess: unassignedAccess',
     'zoneUuids: null'
   );
 
   const failures = [];
   verifyAnalysisRouterImplementation(flows, failures);
   assert.ok(
-    failures.some((failure) => failure.includes('owned-plus-granted zones')),
+    failures.some((failure) => failure.includes('analysis /channels')),
     failures.join('\n')
   );
 });

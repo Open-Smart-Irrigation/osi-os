@@ -2073,6 +2073,10 @@ fetch_required "osi-history-helper analysis-sources.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis-sources.js" \
     "/srv/node-red/osi-history-helper/analysis-sources.js"
 
+fetch_required "osi-history-helper device-sources.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.js" \
+    "/srv/node-red/osi-history-helper/device-sources.js"
+
 fetch_required "osi-history-router package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/package.json" \
     "/srv/node-red/osi-history-router/package.json"

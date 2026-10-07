@@ -244,6 +244,23 @@ test('deriveCardsForZone returns no cards for a zone with no matching devices', 
   assert.deepEqual(hh.deriveCardsForZone({ zone_uuid: '' }, []), []);
 });
 
+test('LoRain configuration alone creates a history source', () => {
+  const cards = hh.deriveCardsForZone({ id: 1, zone_uuid: 'test-zone' }, [{
+    deveui: '0011223344556677', name: 'Rain', type_id: 'AQUASCOPE_LORAIN',
+    irrigation_zone_id: 1,
+  }]);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].cardType, 'environment');
+  assert.equal(cards[0].sourceDevices[0].typeId, 'AQUASCOPE_LORAIN');
+});
+
+test('isEnvironmentSource keeps measurement fallback opt-in at the helper boundary', () => {
+  const measuredUnknown = { type_id: 'UNKNOWN_DEVICE', ambient_temperature: 0 };
+  assert.equal(hh.isEnvironmentSource(measuredUnknown), true);
+  assert.equal(hh.isEnvironmentSource(measuredUnknown, { allowMeasurementFallback: false }), false);
+  assert.equal(hh.isEnvironmentSource({ type_id: 'UNKNOWN_DEVICE', ambient_temperature: null }), false);
+});
+
 test('deriveCardsForZone treats a plain LSN50 as a soil source before samples arrive', () => {
   const watermark = {
     deveui: '6666666666666666',

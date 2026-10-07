@@ -51,6 +51,15 @@
       "title": "Séries",
       "search": "Pesquisar zonas ou dispositivos",
       "unknownSite": "Local desconhecido",
+      "unassigned": "Dispositivos não atribuídos",
+      "emptySource": "Não há canais de gráfico disponíveis para este dispositivo.",
+      "otherSupported": "Outros canais compatíveis",
+      "otherSupportedHelp": "Podem existir amostras históricas; a disponibilidade não foi verificada.",
+      "valveEvents": "Os eventos e controlos das válvulas não estão disponíveis na vista Dados.",
+      "unsupportedType": "As medições deste tipo de dispositivo não são suportadas na vista Dados.",
+      "openNetwork": "Abrir vista de rede",
+      "networkDisabled": "A vista de rede está desativada neste gateway.",
+      "networkLoading": "A disponibilidade da vista de rede ainda está a carregar.",
       "reason": {
         "unsupported": "Não suportado",
         "available_no_recent_data": "Sem dados recentes disponíveis"
@@ -112,6 +121,8 @@
       "zone": "Zona",
       "droppedPairs": "Descartados",
       "insufficient": "insuficiente (n={{n}})",
+      "ambiguous": "Suprimido: foi encontrado mais de um canal candidato.",
+      "missingSource": "Suprimido: falta a identidade da fonte do dispositivo.",
       "exploratory": "Apenas exploratório — r de Pearson sobre intervalos alinhados; não é um teste de significância."
     },
     "tooltip": {

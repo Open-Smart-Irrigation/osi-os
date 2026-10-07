@@ -51,6 +51,15 @@
       "title": "Ennyiriri",
       "search": "Noonya zoozi oba ebyuma",
       "unknownSite": "Ekifo tekimanyiddwa",
+      "unassigned": "Unassigned devices",
+      "emptySource": "No chart channels are available for this device.",
+      "otherSupported": "Other supported channels",
+      "otherSupportedHelp": "Historical samples may exist; availability has not been checked.",
+      "valveEvents": "Valve events and controls are not available in Data view.",
+      "unsupportedType": "Measurements from this device type are not supported in Data view.",
+      "openNetwork": "Open Network view",
+      "networkDisabled": "Network view is disabled on this gateway.",
+      "networkLoading": "Network view availability is still loading.",
       "reason": {
         "unsupported": "Tewagirwa",
         "available_no_recent_data": "Tewali biwandiiko bipya"
@@ -112,6 +121,8 @@
       "zone": "Ekitundu",
       "droppedPairs": "Ebisuliddwa",
       "insufficient": "tekimala (n={{n}})",
+      "ambiguous": "Suppressed: more than one candidate channel was found.",
+      "missingSource": "Suppressed: the device source identity is missing.",
       "exploratory": "Kya kugezesa kyokka — Pearson r ku buckets ezitereezeddwa; si kugezesa kwa significance."
     },
     "tooltip": {

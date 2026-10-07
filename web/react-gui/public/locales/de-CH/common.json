@@ -51,6 +51,15 @@
       "title": "Reihen",
       "search": "Nach Zonen oder Geräten suchen",
       "unknownSite": "Unbekannter Standort",
+      "unassigned": "Nicht zugewiesene Geräte",
+      "emptySource": "Für dieses Gerät sind keine Diagrammkanäle verfügbar.",
+      "otherSupported": "Weitere unterstützte Kanäle",
+      "otherSupportedHelp": "Historische Messwerte sind möglicherweise vorhanden; die Verfügbarkeit wurde nicht geprüft.",
+      "valveEvents": "Ventilereignisse und Ventilsteuerung sind in der Datenansicht nicht verfügbar.",
+      "unsupportedType": "Messwerte dieses Gerätetyps werden in der Datenansicht nicht unterstützt.",
+      "openNetwork": "Netzwerkansicht öffnen",
+      "networkDisabled": "Netzwerkansicht ist auf diesem Gateway deaktiviert.",
+      "networkLoading": "Verfügbarkeit der Netzwerkansicht wird noch geladen.",
       "reason": {
         "unsupported": "Nicht unterstützt",
         "available_no_recent_data": "Keine aktuellen Daten verfügbar"
@@ -112,6 +121,8 @@
       "zone": "Zone",
       "droppedPairs": "Verworfen",
       "insufficient": "unzureichend (n={{n}})",
+      "ambiguous": "Unterdrückt: Mehr als ein passender Kanal wurde gefunden.",
+      "missingSource": "Unterdrückt: Die Gerätequellen-Identität fehlt.",
       "exploratory": "Nur explorativ — Pearson-r über ausgerichtete Buckets; kein Signifikanztest."
     },
     "tooltip": {

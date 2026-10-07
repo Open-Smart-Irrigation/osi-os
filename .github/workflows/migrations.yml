@@ -89,6 +89,8 @@ jobs:
         run: node --test scripts/test-history-all-zones-export.js
       - name: History readers select by instant across recorded_at shapes, both profiles
         run: node --test scripts/test-history-recorded-at-formats.js
+      - name: History source guards (soil depth export, filtered mixed-device exports), both profiles
+        run: node --test scripts/test-history-source-guards.js
       - run: node --test scripts/test-health-helper.js
       - run: node --test scripts/test-timestamp-clamp.js
       - run: node --test scripts/test-scheduler-clock-jump.js
@@ -153,7 +155,7 @@ jobs:
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/et0.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/index.test.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/facade-contract.test.js
-      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.test.js
+      - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.test.js scripts/test-analysis-device-discovery.js scripts/verify-channel-manifest-parity.test.js
       - run: |
           node scripts/run-module-tests.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.test.js \

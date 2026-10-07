@@ -1,10 +1,27 @@
 export type AnalysisAvailabilityValue = 'available' | 'unsupported';
 
+export type AnalysisSourcePresentation = 'timeseries' | 'specialized' | 'unsupported';
+export type AnalysisSourceDestination = 'network' | null;
+export type AnalysisSourceLimitation = 'valve_events' | 'unsupported_type' | null;
+
+export interface DeviceSource {
+  id: string;
+  hubEui: string | null;
+  zoneId: number | null;
+  zoneName: string | null;
+  name: string;
+  typeId: string;
+  channelIds: string[];
+  presentation: AnalysisSourcePresentation;
+  destination: AnalysisSourceDestination;
+  limitation: AnalysisSourceLimitation;
+}
+
 export interface AnalysisCatalogEntry {
   seriesId: string;
   hubEui: string | null;
-  zoneId: number;
-  zoneName: string;
+  zoneId: number | null;
+  zoneName: string | null;
   cardType: string;
   sourceKey: string;
   channelKey: string;
@@ -13,13 +30,17 @@ export interface AnalysisCatalogEntry {
   availability: AnalysisAvailabilityValue;
   deviceName: string | null;
   depthCm: number | null;
+  depthReference?: 'current_layout' | null;
   /** 'device', 'weather_provider', 'weather_station' or 'zone_daily_agronomy'. */
   sourceKind: string;
+  deviceSourceId?: string | null;
+  configurationState?: 'current' | 'other_supported';
 }
 
 export interface AnalysisCatalogResponse {
   generatedAt: string;
   channels: AnalysisCatalogEntry[];
+  sources?: DeviceSource[];
 }
 
 export interface AnalysisSelector {
@@ -50,10 +71,11 @@ export interface AnalysisPoint {
 
 export interface AnalysisResolved {
   hubEui: string | null;
-  zoneId: number;
+  zoneId: number | null;
   cardType: string;
   sourceKey: string;
   channelKey: string;
+  deviceSourceId?: string | null;
 }
 
 export interface AnalysisSeries {

@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
+const { deviceSourceId, describeDeviceSource } = require('./device-sources');
 // The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
 // as in the repo; osi-weather-provider requires nothing back, so there is no cycle.
 const { zoneLocations } = require('../osi-weather-provider');
@@ -569,11 +570,19 @@ async function annotateWatermarkEvidence(db, devices) {
   });
 }
 
-function isEnvironmentSource(device) {
-  const type = String(device && device.type_id || '').toUpperCase();
-  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'SENSECAP_S2120'].includes(type)
+const ENVIRONMENT_SOURCE_TYPES = new Set([
+  'KIWI_SENSOR',
+  'TEKTELIC_CLOVER',
+  'SENSECAP_S2120',
+  'AQUASCOPE_LORAIN',
+]);
+
+function isEnvironmentSource(device, options = {}) {
+  const type = deviceTypeId(device);
+  return ENVIRONMENT_SOURCE_TYPES.has(type)
     || (type === 'DRAGINO_LSN50' && Number(device && device.temp_enabled || 0) === 1)
-    || hasNumber(device, ['ambient_temperature', 'relative_humidity', 'ext_temperature_c', 'light_lux', 'rain_mm_today']);
+    || (options.allowMeasurementFallback !== false
+      && hasNumber(device, ['ambient_temperature', 'relative_humidity', 'ext_temperature_c', 'light_lux', 'rain_mm_today']));
 }
 
 function isIrrigationSource(device) {
@@ -655,6 +664,7 @@ function channelsForCard(card, sourceDevices) {
       { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust' },
       { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure' },
       { id: 'uv_index', field: 'uv_index', unit: null, label: 'UV index' },
+      { id: 'rain_tips_delta', field: 'rain_tips_delta', unit: 'count', label: 'Rain tips delta' },
     ];
   }
   if (cardType === 'dendro') {
@@ -1979,6 +1989,8 @@ async function aggregateLegacyDendroHistory(db, options = {}) {
     .sort((left, right) => String(left.t).localeCompare(String(right.t)));
 }
 
+const LEGACY_INTERVAL_FIELDS = new Set(['rain_mm_delta', 'rain_tips_delta', 'flow_liters_delta', 'flow_pulses_delta']);
+
 async function legacySensorHistory(db, options = {}) {
   const hoursRaw = toFiniteNumber(options.hours);
   const hours = hoursRaw !== null && hoursRaw > 0 ? hoursRaw : 24;
@@ -1999,6 +2011,9 @@ async function legacySensorHistory(db, options = {}) {
     throw error;
   }
   if (hours <= 24) return rawLegacySensorHistory(db, scopedOptions);
+  // Rollups keep no bucket sum, and their latest value is one uplink's
+  // interval, so interval channels stay on raw rows at every range.
+  if (LEGACY_INTERVAL_FIELDS.has(canonicalHistoryField(field))) return rawLegacySensorHistory(db, scopedOptions);
 
   const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
   if (!key) return rawLegacySensorHistory(db, scopedOptions);
@@ -2255,9 +2270,13 @@ function exportChannelsForCard(card, scope) {
 
 function exportChannelsForDevice(card, device, scope) {
   const channels = channelsForCard(card, [device]);
+  const type = deviceTypeId(device);
+  const deviceChannels = type === 'AQUASCOPE_LORAIN'
+    ? channels
+    : channels.filter((channel) => channel.id !== 'rain_tips_delta');
   return scope && scope.requestedChannelKeys
-    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
-    : channels;
+    ? deviceChannels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : deviceChannels;
 }
 
 async function rawZoneExportRows(db, scope) {
@@ -2386,6 +2405,7 @@ async function aggregateZoneExportRows(db, scope) {
           channels,
           timezone: scope.timezone,
           nowMs: scope.nowMs,
+          useRollups: deviceTypeId(device) === 'AQUASCOPE_LORAIN' ? false : undefined,
         });
         for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
           site: scope.site,
@@ -2686,6 +2706,13 @@ async function resolveDeviceArrayIds(db, deveuis, start, end) {
 
 function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
   const rows = [];
+  const isLoRain = deviceTypeId(device) === 'AQUASCOPE_LORAIN';
+  const valueForChannel = (stats, channel) => {
+    if (!isLoRain) return stats.mean;
+    if (channel.id === 'rain_mm_delta' || channel.id === 'rain_tips_delta') return stats.sum;
+    if (channel.id === 'rain_mm_today') return stats.latest;
+    return stats.mean;
+  };
   for (const bucket of aggregate.buckets || []) {
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
@@ -2701,7 +2728,7 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
         depth_cm: soilDepthCm(device, channel.id),
         array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
-        value: stats.mean,
+        value: valueForChannel(stats, channel),
       };
       rows.push(csvRow);
       if (isSwtKpaChannel(channel)) {
@@ -3176,20 +3203,27 @@ const analysis = createAnalysis({
   localDateKey,
   normalizeDeveui,
   normalizeTimezone,
+  parseRecordedAtMs,
   recordedAtRangeSql,
   resolveAggregation,
   soilDepthCm,
   sourceDevicesForCard,
   sourceKeyForCsv,
+  deviceSourceId,
+  describeDeviceSource,
+  filterSoilRowsForSources,
   zoneDateStartIso,
   zoneLocations,
 });
 
 module.exports = {
   normalizeDeveui,
+  parseRecordedAtMs,
   ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  deviceSourceId,
+  describeDeviceSource,
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   saveAnalysisView: analysis.saveAnalysisView,
@@ -3227,6 +3261,7 @@ module.exports = {
   filterSoilChannelsForSources,
   filterSoilRowsForSources,
   isSoilSource,
+  isEnvironmentSource,
   isWatermarkNode,
   annotateWatermarkEvidence,
   isLsn50Swt3Eligible,

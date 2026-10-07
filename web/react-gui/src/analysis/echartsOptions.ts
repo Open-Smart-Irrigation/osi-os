@@ -129,6 +129,46 @@ const TIME_AXIS_LABEL = {
 
 const EXPORT_LEGEND = { bottom: 8, type: 'scroll' as const };
 
+interface DisplayLabelItem {
+  identity: string;
+  label: string;
+}
+
+/** ECharts uses series.name as the legend key, so duplicate labels need stable display names. */
+function uniqueDisplayLabels(items: DisplayLabelItem[]): Map<string, string> {
+  const byLabel = new Map<string, DisplayLabelItem[]>();
+  for (const item of items) {
+    const group = byLabel.get(item.label) ?? [];
+    group.push(item);
+    byLabel.set(item.label, group);
+  }
+
+  const used = new Set(
+    Array.from(byLabel.entries())
+      .filter(([, group]) => group.length === 1)
+      .map(([label]) => label),
+  );
+  const displayLabels = new Map<string, string>();
+  for (const [label, group] of byLabel) {
+    if (group.length === 1) {
+      displayLabels.set(group[0].identity, label);
+      continue;
+    }
+    let suffix = 1;
+    for (const item of [...group].sort((a, b) => a.identity.localeCompare(b.identity))) {
+      let candidate = `${label} (${suffix})`;
+      while (used.has(candidate)) {
+        suffix += 1;
+        candidate = `${label} (${suffix})`;
+      }
+      displayLabels.set(item.identity, candidate);
+      used.add(candidate);
+      suffix += 1;
+    }
+  }
+  return displayLabels;
+}
+
 function seriesData(series: AnalysisSeries, normalize: boolean): [string, number | null][] {
   if (!normalize) return series.points.map((p) => [p.t, p.value]);
   const values = series.points.map((p) => p.value).filter((v): v is number => v !== null);
@@ -148,9 +188,10 @@ function lineSeries(
   axisIndex: number,
   stacked: boolean,
   color: string,
+  displayName: string,
 ): Record<string, unknown> {
   return {
-    name: s.label,
+    name: displayName,
     type: 'line',
     color,
     ...symbolSpec(s),
@@ -163,6 +204,7 @@ function lineSeries(
 
 export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<string, unknown> {
   const { panels, series, normalize, multiAxis, includeLegend } = input;
+  const displayLabels = uniqueDisplayLabels(series.map((item) => ({ identity: item.seriesId, label: item.label })));
   const byId = new Map(series.map((s) => [s.seriesId, s]));
   const indexById = new Map(series.map((s, i) => [s.seriesId, i]));
   const singleGrid = panels.length <= 1 || multiAxis;
@@ -177,7 +219,7 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
     const echSeries = series.map((s, i) => {
       const panelIndex = panels.findIndex((p) => p.seriesIds.includes(s.seriesId));
       const yIndex = multiAxis && !normalize ? Math.max(0, panelIndex) : 0;
-      return lineSeries(s, normalize, yIndex, false, seriesColor(i));
+      return lineSeries(s, normalize, yIndex, false, seriesColor(i), displayLabels.get(s.seriesId) ?? s.label);
     });
     return {
       color: SERIES_PALETTE,
@@ -211,6 +253,7 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
       i,
       true,
       seriesColor(indexById.get(id) ?? 0),
+      displayLabels.get(id) ?? byId.get(id)?.label ?? id,
     )),
   );
   const drawn = panels.flatMap((panel) => panel.seriesIds.map((id) => byId.get(id) as AnalysisSeries));
@@ -232,6 +275,7 @@ export function buildSmallMultiplesOption(
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string,
   formatPartial?: PartialFormatter,
 ): Record<string, unknown> {
+  const displayLabels = uniqueDisplayLabels(series.map((item) => ({ identity: item.seriesId, label: item.label })));
   const count = series.length;
   const cols = count === 0 ? 1 : Math.ceil(Math.sqrt(count));
   const rows = count === 0 ? 0 : Math.ceil(count / cols);
@@ -255,7 +299,7 @@ export function buildSmallMultiplesOption(
       : { type: 'value', gridIndex: i, ...axisNameSpec([s], false, i, resolveAxisLabel) }
   ));
   const echSeries = series.map((s, i) => ({
-    name: s.label,
+    name: displayLabels.get(s.seriesId) ?? s.label,
     type: 'line',
     color: seriesColor(i),
     ...symbolSpec(s),
@@ -281,6 +325,7 @@ export interface CorrelationOptionInput {
 }
 
 export function buildCorrelationOption(input: CorrelationOptionInput): Record<string, unknown> {
+  const displayLabels = uniqueDisplayLabels(input.zonePairs.map((zone) => ({ identity: zone.groupId, label: zone.label })));
   return {
     color: SERIES_PALETTE,
     tooltip: { trigger: 'item', valueFormatter: tooltipValueFormatter },
@@ -294,7 +339,8 @@ export function buildCorrelationOption(input: CorrelationOptionInput): Record<st
     }],
     yAxis: [{ type: 'value', name: input.channelYLabel, nameLocation: 'middle', nameRotate: 90, nameGap: 48 }],
     series: input.zonePairs.map((zone) => ({
-      name: zone.label,
+      id: zone.groupId,
+      name: displayLabels.get(zone.groupId) ?? zone.label,
       type: 'scatter',
       symbolSize: 7,
       data: zone.points,

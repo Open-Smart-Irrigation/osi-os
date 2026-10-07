@@ -51,6 +51,15 @@
       "title": "Séries",
       "search": "Rechercher des zones ou appareils",
       "unknownSite": "Site inconnu",
+      "unassigned": "Appareils non affectés",
+      "emptySource": "Aucun canal graphique n’est disponible pour cet appareil.",
+      "otherSupported": "Autres canaux pris en charge",
+      "otherSupportedHelp": "Des échantillons historiques peuvent exister ; la disponibilité n’a pas été vérifiée.",
+      "valveEvents": "Les événements et commandes de vanne ne sont pas disponibles dans la vue Données.",
+      "unsupportedType": "Les mesures de ce type d’appareil ne sont pas prises en charge dans la vue Données.",
+      "openNetwork": "Ouvrir la vue Réseau",
+      "networkDisabled": "La vue Réseau est désactivée sur cette passerelle.",
+      "networkLoading": "La disponibilité de la vue Réseau est encore en cours de chargement.",
       "reason": {
         "unsupported": "Non pris en charge",
         "available_no_recent_data": "Aucune donnée récente disponible"
@@ -112,6 +121,8 @@
       "zone": "Zone",
       "droppedPairs": "Ignorés",
       "insufficient": "insuffisant (n={{n}})",
+      "ambiguous": "Supprimé : plusieurs canaux candidats ont été trouvés.",
+      "missingSource": "Supprimé : l’identité de la source de l’appareil est absente.",
       "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
     },
     "tooltip": {

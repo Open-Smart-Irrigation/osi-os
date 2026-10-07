@@ -152,6 +152,13 @@ afterEach(() => {
 });
 
 describe('CrossZoneAnalysisPage', () => {
+  it('passes catalogue sources through to the mounted Data tree', () => {
+    const source = { id: 'device-rain-1', hubEui: 'HUB-1', zoneId: null, zoneName: null, name: 'Rain', typeId: 'AQUASCOPE_LORAIN', channelIds: [], presentation: 'timeseries', destination: null, limitation: null };
+    catalogState = { ...loadedCatalogState(), catalog: { ...loadedCatalogState().catalog, sources: [source] } } as never;
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    expect(screen.getByText('Rain')).toBeInTheDocument();
+  });
+
   it('keeps the admin menu visible for an admin when scoped access is flag-off', () => {
     catalogState = loadedCatalogState();
     render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });

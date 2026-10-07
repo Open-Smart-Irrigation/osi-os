@@ -40,6 +40,7 @@ function utcDeps() {
     zoneDateStartIso: (date) => `${date}T00:00:00.000Z`,
     normalizeTimezone: (value) => String(value || 'UTC').trim() || 'UTC',
     localDateKey: (value) => new Date(value).toISOString().slice(0, 10),
+    parseRecordedAtMs: hh.parseRecordedAtMs,
   };
 }
 
@@ -96,6 +97,18 @@ function entry(result, zoneId, sourceKind, channelKey) {
 
 async function series(raw, selected, range, aggregation, options = {}) {
   return hh.resolveAnalysisSeries(facade(raw), {
+    userId: 1,
+    deviceEui: HUB,
+    weatherProviderDefault: 'open_meteo',
+    selectors: selected.map((e) => ({ seriesId: e.seriesId })),
+    range,
+    aggregation,
+    ...options,
+  });
+}
+
+async function seriesWithFacade(dbFacade, selected, range, aggregation, options = {}) {
+  return hh.resolveAnalysisSeries(dbFacade, {
     userId: 1,
     deviceEui: HUB,
     weatherProviderDefault: 'open_meteo',
@@ -261,13 +274,10 @@ test('buildAnalysisCatalog exposes only configured Sentek soil channels', async 
 
   const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
 
-  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), [
-    'vwc_1',
-    'vwc_8',
-    'et0_mm',
-    'etc_mm',
-  ]);
-  assert.ok(catalog.channels.every((entry) => !entry.channelKey.startsWith('swt_')));
+  assert.deepEqual(catalog.channels.filter((entry) => entry.configurationState === 'current' && entry.cardType === 'soil').map((entry) => entry.channelKey), ['vwc_1', 'vwc_8']);
+  assert.ok(catalog.channels
+    .filter((entry) => entry.sourceKind === 'device' && entry.cardType === 'soil' && entry.configurationState === 'current')
+    .every((entry) => !entry.channelKey.startsWith('swt_')));
 });
 
 test('buildAnalysisCatalog keeps explicit Chameleon SWT capability ahead of other configuration', async () => {
@@ -292,7 +302,7 @@ test('buildAnalysisCatalog keeps explicit Chameleon SWT capability ahead of othe
 
   const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
 
-  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), ['swt_1', 'swt_2', 'swt_3', 'et0_mm', 'etc_mm']);
+  assert.deepEqual(catalog.channels.filter((entry) => entry.configurationState === 'current' && entry.cardType === 'soil').map((entry) => entry.channelKey), ['swt_1', 'swt_2', 'swt_3']);
 });
 
 test('buildAnalysisCatalog uses the two canonical Kiwi SWT channels without state', async () => {
@@ -312,7 +322,7 @@ test('buildAnalysisCatalog uses the two canonical Kiwi SWT channels without stat
 
   const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
 
-  assert.deepEqual(catalog.channels.map((entry) => entry.channelKey), ['swt_1', 'swt_2', 'et0_mm', 'etc_mm']);
+  assert.deepEqual(catalog.channels.filter((entry) => entry.configurationState === 'current' && entry.cardType === 'soil').map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
 });
 
 test('buildAnalysisCatalog exposes assigned non-Chameleon LSN50 as canonical SWT1/SWT2 with generic depths', async () => {
@@ -338,19 +348,308 @@ test('buildAnalysisCatalog exposes assigned non-Chameleon LSN50 as canonical SWT
   const catalog = await analysis.buildAnalysisCatalog({}, { userId: 7 });
   const deviceChannels = catalog.channels.filter((entry) => entry.sourceKind === 'device');
 
-  assert.deepEqual(deviceChannels.map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
-  assert.deepEqual(deviceChannels.map((entry) => entry.depthCm), [12, 34]);
+  assert.deepEqual(deviceChannels.filter((entry) => entry.cardType === 'soil' && entry.configurationState === 'current').map((entry) => entry.channelKey), ['swt_1', 'swt_2']);
+  assert.deepEqual(deviceChannels.filter((entry) => entry.cardType === 'soil' && entry.configurationState === 'current').map((entry) => entry.depthCm), [12, 34]);
+});
+
+test('qualifies current SDI12 depths while preserving historical selectors and removed null depths', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556679';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, sdi12_probe_profile, soil_moisture_probe_depths_json, created_at, updated_at)
+      VALUES (?, 'Historical SDI12', 'DRAGINO_SDI12', 1, 1, 'SENTEK_ENVIROSCAN', ?, ?, ?)`)
+      .run(eui, JSON.stringify({ vwc_1: 10, vwc_2: 30 }), '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, vwc_1, vwc_2) VALUES (?, ?, ?, ?)')
+      .run(eui, '2026-10-01T10:00:00Z', 25, 35);
+
+    const before = await catalog(raw);
+    const beforeVwc1 = before.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_1');
+    const beforeVwc2 = before.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_2');
+    assert.equal(beforeVwc1.depthCm, 10);
+    assert.equal(beforeVwc1.depthReference, 'current_layout');
+    assert.equal(beforeVwc2.depthReference, 'current_layout');
+
+    raw.prepare('UPDATE devices SET soil_moisture_probe_depths_json = ? WHERE deveui = ?')
+      .run(JSON.stringify({ vwc_1: 20 }), eui);
+    const after = await catalog(raw);
+    const afterVwc1 = after.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_1');
+    const afterVwc2 = after.channels.find((channel) => channel.deviceName === 'Historical SDI12' && channel.channelKey === 'vwc_2');
+    assert.equal(afterVwc1.seriesId, beforeVwc1.seriesId);
+    assert.equal(afterVwc1.depthCm, 20);
+    assert.equal(afterVwc1.depthReference, 'current_layout');
+    assert.equal(afterVwc2.configurationState, 'other_supported');
+    assert.equal(afterVwc2.depthCm, null);
+    assert.equal(afterVwc2.depthReference, null);
+
+    const out = await series(raw, [afterVwc1, afterVwc2], {
+      from: '2026-10-01T09:59:00.000Z',
+      to: '2026-10-01T10:01:00.000Z',
+    }, 'raw');
+    assert.deepEqual(out.series.map((item) => item.points[0].value), [25, 35]);
+  } finally {
+    raw.close();
+  }
+});
+
+test('disabled LSN50 Chameleon SWT3 keeps only same-instant proven history', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556678';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
+      .run(eui, 'Historical LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    const addData = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)');
+    addData.run(eui, '2026-10-01 10:00:00', 7);
+    addData.run(eui, '2026-10-01T10:01:00+00:00', 9);
+    raw.prepare('INSERT INTO chameleon_readings (deveui, recorded_at) VALUES (?, ?)').run(eui, '2026-10-01T12:00:00+02:00');
+
+    const result = await catalog(raw);
+    const swt3 = result.channels.find((channel) => channel.deviceName === 'Historical LSN50' && channel.channelKey === 'swt_3');
+    assert.equal(swt3.configurationState, 'other_supported');
+    const out = await series(raw, [swt3], {
+      from: '2026-10-01T09:59:00.000Z',
+      to: '2026-10-01T10:02:00.000Z',
+    }, 'raw');
+    assert.deepEqual(out.series[0].points.map((point) => [point.t, point.value]), [
+      ['2026-10-01T10:00:00.000Z', 7],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+test('SWT3 evidence query propagates database errors', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556680';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
+      .run(eui, 'Broken evidence LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)').run(eui, '2026-10-01T10:00:00Z', 7);
+    const result = await catalog(raw);
+    const swt3 = result.channels.find((channel) => channel.deviceName === 'Broken evidence LSN50' && channel.channelKey === 'swt_3');
+    const failingFacade = {
+      all(sql, params) {
+        if (sql.includes('FROM chameleon_readings')) throw new Error('evidence database unavailable');
+        return Promise.resolve(raw.prepare(sql).all(...(params || [])));
+      },
+    };
+    await assert.rejects(
+      seriesWithFacade(failingFacade, [swt3], {
+        from: '2026-10-01T09:59:00.000Z',
+        to: '2026-10-01T10:02:00.000Z',
+      }, 'raw'),
+      /evidence database unavailable/
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+test('SWT3 evidence query rejects an over-bound result with 413', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556681';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 0, ?, ?)`)
+      .run(eui, 'Oversized evidence LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_3) VALUES (?, ?, ?)').run(eui, '2026-10-01T10:00:00Z', 7);
+    const result = await catalog(raw);
+    const swt3 = result.channels.find((channel) => channel.deviceName === 'Oversized evidence LSN50' && channel.channelKey === 'swt_3');
+    const oversizedFacade = {
+      all(sql, params) {
+        if (sql.includes('FROM chameleon_readings')) {
+          return Promise.resolve(Array.from({ length: 30001 }, () => ({ recorded_at: '2026-10-01T10:00:00.000Z' })));
+        }
+        return Promise.resolve(raw.prepare(sql).all(...(params || [])));
+      },
+    };
+    await assert.rejects(
+      seriesWithFacade(oversizedFacade, [swt3], {
+        from: '2026-10-01T09:59:00.000Z',
+        to: '2026-10-01T10:02:00.000Z',
+      }, 'raw'),
+      (error) => error && error.statusCode === 413
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+test('device-health pulse channels use latest values in bucketed series', async () => {
+  const raw = weatherDb();
+  const eui = '0011223344556679';
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES (?, ?, 'MILESIGHT_UC512', 1, 1, ?, ?)`)
+      .run(eui, 'Valve controller', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    const addData = raw.prepare('INSERT INTO device_data (deveui, recorded_at, valve_1_pulse) VALUES (?, ?, ?)');
+    addData.run(eui, '2026-10-01T10:00:00Z', 2);
+    addData.run(eui, '2026-10-01T10:30:00Z', 4);
+
+    const result = await catalog(raw);
+    const pulse = result.channels.find((channel) => channel.deviceName === 'Valve controller' && channel.channelKey === 'valve_1_pulse');
+    assert.equal(pulse.cardType, 'device_health');
+    const out = await series(raw, [pulse], {
+      from: '2026-10-01T10:00:00.000Z',
+      to: '2026-10-01T11:00:00.000Z',
+    }, 'hourly');
+    assert.equal(out.series[0].points[0].value, 4);
+  } finally {
+    raw.close();
+  }
+});
+
+test('device measurement statistics preserve interval totals, means, and final counters', async () => {
+  const raw = weatherDb();
+  const lsnEui = '0011223344556682';
+  try {
+    raw.prepare('DELETE FROM device_data WHERE deveui = ?').run('0011223344556677');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, rain_gauge_enabled, created_at, updated_at)
+      VALUES (?, ?, 'DRAGINO_LSN50', 1, 1, 1, ?, ?)`)
+      .run(lsnEui, 'Counter LSN50', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES (?, ?, 'AQUASCOPE_LORAIN', 1, 1, ?, ?)`)
+      .run('0011223344556683', 'Old Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, deleted_at, created_at, updated_at)
+      VALUES (?, ?, 'AQUASCOPE_LORAIN', 1, 1, ?, ?, ?)`)
+      .run('0011223344556684', 'Deleted Rain', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+
+    const rain = raw.prepare(`INSERT INTO device_data
+      (deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_today)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    rain.run('0011223344556677', '2026-10-01 10:00:00', 10, 2, 0, 0, 0);
+    rain.run('0011223344556677', '2026-10-01T10:20:00+00:00', 20, 3, 1, 1.5, 1.5);
+    rain.run('0011223344556677', '2026-10-01T10:40:00Z', 30, 4, 2, 6, 0);
+    // The newest row is configuration-only. It must keep the source visible
+    // and must not become a measured zero or increase the bucket count.
+    rain.run('0011223344556677', '2026-10-01T10:50:00Z', null, null, null, null, null);
+    rain.run('0011223344556683', '2026-09-30T10:00:00Z', 8, 1.5, 4, 2, 2);
+
+    const counter = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_count_cumulative) VALUES (?, ?, ?)');
+    // Insert out of order and use all timestamp forms accepted by the reader.
+    counter.run(lsnEui, '2026-10-01T10:40:00Z', 7);
+    counter.run(lsnEui, '2026-10-01 10:10:00', 5);
+    counter.run(lsnEui, '2026-10-01T10:00:00+00:00', 10);
+
+    const result = await catalog(raw);
+    const oldRainSource = result.sources.find((source) => source.name === 'Old Rain');
+    assert.ok(oldRainSource, 'active source with an out-of-range report remains discoverable');
+    assert.equal(result.sources.some((source) => source.name === 'Deleted Rain'), false);
+    const rainDelta = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_delta');
+    const rainTemp = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'ambient_temperature');
+    const rainBattery = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'bat_v');
+    const rainToday = result.channels.find((channel) => channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_today');
+    const counterLatest = result.channels.find((channel) => channel.deviceName === 'Counter LSN50' && channel.channelKey === 'rain_count_cumulative');
+    const oldRainDelta = result.channels.find((channel) => channel.deviceName === 'Old Rain' && channel.channelKey === 'rain_mm_delta');
+    assert.ok(rainDelta && rainTemp && rainBattery && rainToday && counterLatest && oldRainDelta);
+
+    const range = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
+    const rawRain = await series(raw, [rainDelta], range, 'raw');
+    assert.deepEqual(rawRain.series[0].points.map((point) => [point.t, point.value]), [
+      ['2026-10-01T10:00:00.000Z', 0],
+      ['2026-10-01T10:20:00.000Z', 1.5],
+      ['2026-10-01T10:40:00.000Z', 6],
+    ]);
+
+    const hourly = await series(raw, [rainDelta, rainTemp, rainBattery, rainToday, counterLatest], range, 'hourly');
+    assert.deepEqual(hourly.series.map((item) => item.points[0].value), [7.5, 20, 3, 0, 7]);
+    assert.deepEqual(hourly.series.map((item) => item.points[0].count), [3, 3, 3, 3, 3]);
+
+    const empty = await series(raw, [rainDelta], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
+    assert.deepEqual(empty.series[0].points, [{
+      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown',
+    }]);
+    const oldRainRange = await series(raw, [oldRainDelta], range, 'hourly');
+    assert.deepEqual(oldRainRange.series[0].points, [{
+      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown',
+    }]);
+  } finally {
+    raw.close();
+  }
+});
+
+test('device catalogue query count does not depend on declared channel count or read history', async () => {
+  const device = { deveui: '0011223344556684', name: 'Configuration only', type_id: 'KIWI_SENSOR', user_id: 1 };
+  const run = async (declaredCount) => {
+    const calls = [];
+    const analysis = analysisModule.createAnalysis({
+      aggregateRows: () => ({ series: {}, buckets: [] }),
+      dbAll: async (_db, sql) => {
+        calls.push(sql);
+        if (sql.includes('FROM irrigation_zones')) return [];
+        if (sql.includes('FROM devices')) return [device];
+        return [];
+      },
+      displayDeviceName: () => device.name,
+      normalizeDeveui: (value) => value,
+      sourceKeyForCsv: () => 'configuration-only-source',
+      deviceSourceId: () => 'device-configuration-only',
+      describeDeviceSource: () => ({
+        families: [{ cardType: 'environment', channelKeys: analysisModule.CHANNELS.slice(0, declaredCount).map((channel) => channel.key) }],
+        currentChannelKeys: [],
+        presentation: 'timeseries',
+        destination: null,
+        limitation: null,
+      }),
+      ...utcDeps(),
+    });
+    const catalogResult = await analysis.buildAnalysisCatalog({}, { userId: 1, unassignedAccess: 'owner' });
+    return { calls, catalogResult };
+  };
+
+  const narrow = await run(1);
+  const wide = await run(analysisModule.CHANNELS.length);
+  assert.equal(wide.calls.length, narrow.calls.length);
+  assert.equal(wide.calls.some((sql) => /FROM\s+device_data/i.test(sql)), false);
+  assert.equal(narrow.calls.some((sql) => /FROM\s+device_data/i.test(sql)), false);
+  assert.equal(wide.catalogResult.sources.length, narrow.catalogResult.sources.length);
+  assert.equal(wide.catalogResult.channels.length, analysisModule.CHANNELS.length);
 });
 
 test('device entries keep their pre-weather catalogue and never list a weather-only channel', async () => {
   const raw = weatherDb();
   try {
     const result = await catalog(raw);
-    const devices = result.channels.filter((c) => c.sourceKind === 'device').map(({ sourceKind, ...rest }) => rest);
-    assert.deepEqual(devices, DEVICE_SNAPSHOT);
+    const devices = result.channels.filter((c) => c.sourceKind === 'device' && c.deviceName !== 'Rain');
+    assert.ok(devices.some((entry) => entry.cardType === 'device_health'), 'source-first catalogue adds health channels');
+    const stableAssigned = DEVICE_SNAPSHOT.filter((expected) =>
+      expected.deviceName === 'Kiwi North' || expected.channelKey === 'wind_speed_mps'
+    );
+    assert.ok(stableAssigned.every((expected) => devices.some((actual) => actual.seriesId === expected.seriesId)), 'assigned series IDs remain stable');
     for (const c of result.channels.filter((e) => e.sourceKind === 'device')) {
       assert.ok(!analysisModule.DEVICE_EXCLUDED_CHANNELS.has(c.channelKey), `device source lists ${c.channelKey}`);
+      assert.ok(c.deviceSourceId, `device channel ${c.seriesId} has no source identity`);
+      assert.ok(result.sources.some((source) => source.id === c.deviceSourceId && source.channelIds.includes(c.seriesId)), `device channel ${c.seriesId} is orphaned`);
     }
+    for (const source of result.sources) {
+      for (const seriesId of source.channelIds) {
+        assert.equal(result.entriesById.get(seriesId).deviceSourceId, source.id, `source ${source.id} has an unmapped channel`);
+      }
+    }
+  } finally {
+    raw.close();
+  }
+});
+
+test('LoRain catalogue survives a newer configuration-only row and reads its raw interval', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((channel) =>
+      channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_delta'
+    );
+    assert.ok(rain, 'Rain interval channel remains in the catalogue');
+    const out = await series(raw, [rain], {
+      from: '2026-10-01T09:55:00.000Z',
+      to: '2026-10-01T10:10:00.000Z',
+    }, 'raw');
+    assert.deepEqual(out.series[0].points, [{
+      t: '2026-10-01T10:00:00.000Z',
+      value: 6,
+      count: 1,
+      quality: null,
+    }]);
   } finally {
     raw.close();
   }

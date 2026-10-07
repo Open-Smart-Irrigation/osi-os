@@ -2,15 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { computeCorrelation, zonePairs, MIN_CORRELATION_SAMPLES } from '../correlation';
 import type { AnalysisSeries, AnalysisPoint } from '../types';
 
-function series(zoneId: number, channelKey: string, values: (number | null)[]): AnalysisSeries {
+function series(zoneId: number | null, channelKey: string, values: (number | null)[], deviceSourceId?: string): AnalysisSeries {
   const points: AnalysisPoint[] = values.map((v, i) => ({
     t: `2026-06-18T${String(i).padStart(2, '0')}:00:00Z`,
     value: v, count: v === null ? 0 : 1, quality: v === null ? 'gap' : 'ok',
   }));
   return {
     seriesId: `${zoneId}-${channelKey}`,
-    resolved: { hubEui: null, zoneId, cardType: 'soil', sourceKey: 'root-zone', channelKey },
-    label: `Zone ${zoneId} ${channelKey}`, unit: 'x', coveragePct: 100, points, truncated: false, cadence: 'hourly', timezone: null,
+    resolved: { hubEui: null, zoneId, cardType: 'soil', sourceKey: 'root-zone', channelKey, deviceSourceId },
+    label: zoneId === null ? `Unassigned device - ${channelKey}` : `Zone ${zoneId} ${channelKey}`,
+    unit: 'x', coveragePct: 100, points, truncated: false, cadence: 'hourly', timezone: null,
   };
 }
 
@@ -65,6 +66,33 @@ function mkSeries(
 }
 
 describe('zonePairs', () => {
+  it('pairs unassigned channels only within the same device source', () => {
+    const x = { ...series(1, 'soil', [1]), resolved: { ...series(1, 'soil', [1]).resolved, zoneId: null, deviceSourceId: 'device-a' } };
+    const y = { ...series(1, 'dendro', [2]), resolved: { ...series(1, 'dendro', [2]).resolved, zoneId: null, deviceSourceId: 'device-b' } };
+    expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([]);
+  });
+
+  it('pairs unassigned channels when they share one device source', () => {
+    const x = series(null, 'soil', [1, 2], 'device-a');
+    const y = series(null, 'dendro', [3, 4], 'device-a');
+
+    expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([
+      { groupId: 'device:device-a', zoneId: null, label: 'Unassigned device', points: [[1, 3], [2, 4]] },
+    ]);
+  });
+
+  it('keeps same-name unassigned device sources as separate groups', () => {
+    const xA = { ...series(null, 'soil', [1, 2], 'device-a'), seriesId: 'device-a-soil', label: 'Rain - soil' };
+    const yA = { ...series(null, 'dendro', [3, 4], 'device-a'), seriesId: 'device-a-dendro', label: 'Rain - dendro' };
+    const xB = { ...series(null, 'soil', [5, 6], 'device-b'), seriesId: 'device-b-soil', label: 'Rain - soil' };
+    const yB = { ...series(null, 'dendro', [7, 8], 'device-b'), seriesId: 'device-b-dendro', label: 'Rain - dendro' };
+
+    expect(zonePairs([xA, yA, xB, yB], 'soil', 'dendro')).toEqual([
+      { groupId: 'device:device-a', zoneId: null, label: 'Rain', points: [[1, 3], [2, 4]] },
+      { groupId: 'device:device-b', zoneId: null, label: 'Rain', points: [[5, 7], [6, 8]] },
+    ]);
+  });
+
   it('labels groups by the catalog zone name, falling back to "Zone {id}"', () => {
     const series = [
       mkSeries('x', 'dendro_stem_change_um', 'um', { zoneId: 9 }),
@@ -81,7 +109,7 @@ describe('zonePairs', () => {
     const y = timestampedSeries(1, 'dendro', [['01', 20], ['02', 30], ['03', 40]]);
 
     expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([
-      { zoneId: 1, label: 'Zone 1', points: [[2, 20], [3, 30]] },
+      { groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[2, 20], [3, 30]] },
     ]);
 
     const result = computeCorrelation([x, y], 'soil', 'dendro', { minSamples: 1 });
@@ -91,6 +119,55 @@ describe('zonePairs', () => {
 });
 
 describe('computeCorrelation', () => {
+  it('suppresses unassigned channels without a device source identity', () => {
+    const x = series(null, 'soil', [1, 2]);
+    const y = series(null, 'dendro', [3, 4]);
+    const result = computeCorrelation([x, y], 'soil', 'dendro', { minSamples: 1 });
+
+    expect(result.groups).toHaveLength(2);
+    expect(result.groups.every((group) => group.suppressed && group.suppressionReason === 'missing_device_source')).toBe(true);
+    expect(result.pooled).toBeNull();
+  });
+
+  it('suppresses an assigned group with multiple candidate channels', () => {
+    const x1 = series(7, 'soil', [1, 2]);
+    const x2 = { ...series(7, 'soil', [2, 3]), seriesId: '7-soil-second' };
+    const y = series(7, 'dendro', [3, 4]);
+    const result = computeCorrelation([x1, x2, y], 'soil', 'dendro', { minSamples: 1 });
+
+    expect(result.groups).toEqual([
+      expect.objectContaining({ groupId: 'zone:7', zoneId: 7, suppressed: true, suppressionReason: 'ambiguous' }),
+    ]);
+  });
+
+  it('uses insufficient fallback when one correlation axis has no candidate', () => {
+    const x = series(8, 'soil', [1, 2]);
+    const result = computeCorrelation([x], 'soil', 'dendro', { minSamples: 1 });
+    expect(result.groups).toEqual([
+      expect.objectContaining({ groupId: 'zone:8', suppressed: true, suppressionReason: undefined }),
+    ]);
+  });
+
+  it('excludes ambiguous groups from pooled output while retaining valid groups', () => {
+    const ambiguousX = series(1, 'soil', [1, 2]);
+    const ambiguousX2 = { ...series(1, 'soil', [2, 3]), seriesId: '1-soil-second' };
+    const ambiguousY = series(1, 'dendro', [3, 4]);
+    const validX = series(2, 'soil', [4, 5]);
+    const validY = series(2, 'dendro', [8, 10]);
+    const result = computeCorrelation(
+      [ambiguousX, ambiguousX2, ambiguousY, validX, validY],
+      'soil',
+      'dendro',
+      { pooled: true, minSamples: 1 },
+    );
+
+    expect(result.groups).toEqual([
+      expect.objectContaining({ groupId: 'zone:1', suppressed: true, suppressionReason: 'ambiguous' }),
+      expect.objectContaining({ groupId: 'zone:2', n: 2, suppressed: false }),
+    ]);
+    expect(result.pooled).toEqual(expect.objectContaining({ groupId: 'pooled', n: 2, suppressed: false }));
+  });
+
   it('reports r=1 for a perfectly linear zone with enough samples', () => {
     const n = MIN_CORRELATION_SAMPLES;
     const x = series(1, 'soil', ramp(n, (i) => i));

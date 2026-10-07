@@ -16,6 +16,7 @@ INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, latitude, 
 INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at) VALUES
   ('A840410000000001', 'Kiwi North', 'KIWI_SENSOR', 1, 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
   ('A840410000002120', 'demo-s2120', 'SENSECAP_S2120', 1, 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
+  ('0011223344556677', 'Rain', 'AQUASCOPE_LORAIN', 1, 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z'),
   ('A840410000002121', 'foreign-s2120', 'SENSECAP_S2120', 2, 1, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z');
 INSERT INTO weather_station_zones (deveui, zone_id) VALUES
   ('A840410000002120', 1),
@@ -23,3 +24,6 @@ INSERT INTO weather_station_zones (deveui, zone_id) VALUES
 INSERT INTO weather_locations (location_key, provider, latitude, longitude, timezone, station_id, station_name, station_distance_km) VALUES
   ('open_meteo:46.80:6.95', 'open_meteo', 46.8, 6.95, 'Europe/Zurich', NULL, NULL, NULL),
   ('meteoswiss:46.81:6.94', 'meteoswiss', 46.81, 6.94, 'Europe/Zurich', 'PAY', 'Payerne', 12.4);
+INSERT INTO device_data (deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_today) VALUES
+  ('0011223344556677', '2026-10-01T10:00:00Z', 25.2, 2.9, 12, 6, 6),
+  ('0011223344556677', '2026-10-01T10:05:00Z', NULL, NULL, NULL, NULL, NULL);

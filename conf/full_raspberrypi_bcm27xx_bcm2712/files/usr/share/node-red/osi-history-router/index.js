@@ -249,8 +249,7 @@ function isSoilSource(device) {
 }
 
 function isEnvironmentSource(device) {
-  const typeId = String(device && device.type_id || '').toUpperCase();
-  return typeId === 'KIWI_SENSOR' || typeId === 'TEKTELIC_CLOVER' || typeId === 'SENSECAP_S2120' || (typeId === 'DRAGINO_LSN50' && Number(device && device.temp_enabled || 0) === 1);
+  return historyHelper.isEnvironmentSource(device, { allowMeasurementFallback: false });
 }
 
 function isIrrigationSource(device) {

@@ -221,9 +221,19 @@ for (const profile of PROFILES) {
   test(`${label}: data view series of mixed shapes equal the pure ISO series`, async () => {
     const run = async (db) => {
       const catalog = await helper.buildAnalysisCatalog(db, { userId: 1, deviceEui: '0016C001F1000001', weatherProviderDefault: 'open_meteo' });
-      const selectors = catalog.channels
-        .filter((entry) => entry.sourceKind === 'device' && entry.zoneId === 12)
-        .map((entry) => ({ seriesId: entry.seriesId }));
+      const deviceEntries = catalog.channels.filter((entry) => entry.sourceKind === 'device' && entry.zoneId === 12);
+      const expectedFiniteChannelKeys = [
+        'swt_1', 'swt_2', 'swt_3',
+        'ext_temperature_c', 'rain_count_cumulative', 'rain_tips_delta',
+        'rain_gauge_cumulative_mm', 'rain_mm_per_hour', 'rain_mm_per_10min',
+        'rain_mm_today', 'rain_mm_delta', 'flow_liters_per_min',
+        'flow_liters_per_10min', 'flow_liters_today', 'flow_liters_delta',
+        'flow_count_cumulative', 'flow_pulses_delta', 'dendro_stem_change_um',
+        'dendro_position_mm', 'dendro_position_raw_mm', 'dendro_delta_mm',
+        'dendro_ratio', 'adc_ch0v', 'adc_ch1v', 'bat_v',
+      ];
+      assert.deepEqual(deviceEntries.map((entry) => entry.channelKey), expectedFiniteChannelKeys);
+      const selectors = deviceEntries.map((entry) => ({ seriesId: entry.seriesId }));
       const out = {};
       for (const aggregation of ['raw', 'hourly', 'daily']) {
         out[aggregation] = await helper.resolveAnalysisSeries(db, {
@@ -234,8 +244,15 @@ for (const profile of PROFILES) {
       return out;
     };
     const { iso, mixed } = await withBoth(run);
-    assert.equal(iso.raw.series.length, 2);
+    assert.equal(iso.raw.series.length, 25);
     assert.equal(iso.raw.series[0].points.length, 3 * 72);
+    assert.deepEqual(iso.raw.series[0].points.slice(0, 2), [
+      { t: '2025-10-30T23:00:00.000Z', value: 46, count: 1, quality: null },
+      { t: '2025-10-30T23:20:00.000Z', value: 10, count: 1, quality: null },
+    ]);
+    assert.deepEqual(iso.raw.series[0].points.at(-1), {
+      t: '2025-11-02T22:40:00.000Z', value: 39, count: 1, quality: null,
+    });
     assert.deepEqual(mixed, iso);
   });
 

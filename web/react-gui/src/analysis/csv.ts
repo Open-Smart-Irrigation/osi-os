@@ -12,6 +12,7 @@ const HEADER = [
   'array_id',
   'unit',
   'value',
+  'depth_reference',
 ];
 
 // A daily-cadence point stands for one zone-local day, so its row carries
@@ -42,7 +43,9 @@ export function toTidyCsv(
   for (const item of series) {
     const entry = catalogById.get(item.seriesId);
     const site = entry?.hubEui ?? item.resolved.hubEui ?? '';
-    const zone = entry?.zoneName ?? String(item.resolved.zoneId);
+    const zone = item.resolved.zoneId === null
+      ? 'Unassigned devices'
+      : (entry?.zoneName ?? String(item.resolved.zoneId));
     const label = entry?.displayName ?? item.label;
     for (const point of item.points) {
       const row = [
@@ -57,6 +60,7 @@ export function toTidyCsv(
         '',
         item.unit ?? '',
         point.value === null ? '' : String(point.value),
+        entry?.depthCm == null ? '' : entry.depthReference === 'current_layout' ? 'current_layout' : 'unspecified',
       ].map((cell) => escape(String(cell)));
       lines.push(row.join(','));
     }
