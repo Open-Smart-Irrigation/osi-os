@@ -346,11 +346,34 @@ test('device entries keep their pre-weather catalogue and never list a weather-o
   const raw = weatherDb();
   try {
     const result = await catalog(raw);
-    const devices = result.channels.filter((c) => c.sourceKind === 'device').map(({ sourceKind, ...rest }) => rest);
+    const devices = result.channels.filter((c) => c.sourceKind === 'device' && c.deviceName !== 'Rain').map(({ sourceKind, ...rest }) => rest);
     assert.deepEqual(devices, DEVICE_SNAPSHOT);
     for (const c of result.channels.filter((e) => e.sourceKind === 'device')) {
       assert.ok(!analysisModule.DEVICE_EXCLUDED_CHANNELS.has(c.channelKey), `device source lists ${c.channelKey}`);
     }
+  } finally {
+    raw.close();
+  }
+});
+
+test('LoRain catalogue survives a newer configuration-only row and reads its raw interval', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((channel) =>
+      channel.deviceName === 'Rain' && channel.channelKey === 'rain_mm_delta'
+    );
+    assert.ok(rain, 'Rain interval channel remains in the catalogue');
+    const out = await series(raw, [rain], {
+      from: '2026-10-01T09:55:00.000Z',
+      to: '2026-10-01T10:10:00.000Z',
+    }, 'raw');
+    assert.deepEqual(out.series[0].points, [{
+      t: '2026-10-01T10:00:00.000Z',
+      value: 6,
+      count: 1,
+      quality: null,
+    }]);
   } finally {
     raw.close();
   }

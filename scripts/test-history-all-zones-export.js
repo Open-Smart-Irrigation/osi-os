@@ -60,6 +60,25 @@ function seedDb() {
   return raw;
 }
 
+function addLoRainFixture(raw) {
+  raw.exec(`
+    INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES ('0011223344556677', 'Rain', 'AQUASCOPE_LORAIN', 1, 13, 'x', 'x');
+    INSERT INTO device_data(deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_today, rain_mm_per_hour, rain_mm_per_10min) VALUES
+      ('0011223344556677', '2026-07-01T00:00:00.000Z', 20, 2.9, 0, 0, 0, 0, 0),
+      ('0011223344556677', '2026-07-01T00:15:00.000Z', 21, NULL, 3, 1.5, 1.5, 6, 1.5),
+      ('0011223344556677', '2026-07-01T00:30:00.000Z', 25.2, NULL, 12, 6, 6, 24, 6),
+      ('0011223344556677', '2026-07-01T00:45:00.000Z', NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    INSERT INTO history_channel_rollups(
+      zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+      min_value, max_value, mean_value, median_value, latest_value, dominant_status,
+      coverage_pct, coverage_confidence, sample_count, unit
+    ) VALUES
+      (13, 'environment', 'microclimate', 'rain_mm_delta', 'hourly', '2026-07-01T00:00:00.000Z', '2026-07-01T01:00:00.000Z',
+       0, 6, 2.5, 1.5, 6, NULL, 100, 'configured', 3, 'mm');
+  `);
+}
+
 function parseCsv(text) {
   const lines = text.trimEnd().split('\n');
   const header = lines.shift().split(',');
@@ -110,6 +129,55 @@ for (const profile of PROFILES) {
       assert.ok(rows.every((row) => row.site === '0016C001F1000001'));
       assert.ok(!rows.some((row) => row.zone === 'Other owner' || row.zone === 'Retired'));
     } finally {
+      raw.close();
+    }
+  });
+
+  test(`${label}: LoRain raw and aggregate exports keep interval totals and latest counters`, async () => {
+    const raw = seedDb();
+    try {
+      addLoRainFixture(raw);
+      const options = {
+        zoneIds: [13], from: '2026-07-01', to: '2026-07-01',
+        site: '0016C001F1000001', nowMs: NOW_MS,
+        channels: 'rain_mm_delta,rain_tips_delta,rain_mm_today,ambient_temperature,rain_mm_per_hour,rain_mm_per_10min',
+      };
+      const rawRows = parseCsv((await helper.buildAllZonesExportCsv(facadeDb(raw), { ...options, granularity: 'raw' })).csv);
+      assert.deepEqual(rawRows.filter((row) => row.channel_key === 'rain_mm_delta').map((row) => Number(row.value)), [0, 1.5, 6]);
+      assert.deepEqual(rawRows.filter((row) => row.channel_key === 'rain_tips_delta').map((row) => Number(row.value)), [0, 3, 12]);
+
+      for (const granularity of ['hourly', 'daily']) {
+        const rows = parseCsv((await helper.buildAllZonesExportCsv(facadeDb(raw), { ...options, granularity })).csv);
+        const value = (channel) => Number(rows.find((row) => row.channel_key === channel).value);
+        assert.equal(value('rain_mm_delta'), 7.5, `${granularity} interval mm is summed from device_data`);
+        assert.equal(value('rain_tips_delta'), 15, `${granularity} interval tips are summed from device_data`);
+        assert.equal(value('rain_mm_today'), 6, `${granularity} running total uses latest observation`);
+        assert.equal(value('ambient_temperature'), 22.067, `${granularity} temperature uses mean`);
+        assert.equal(value('rain_mm_per_hour'), 10, `${granularity} rate uses mean`);
+      }
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${label}: nightly LoRain CSV generation remains range-bounded with stored rollups`, async () => {
+    const raw = seedDb();
+    const exportDir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-lorain-csv-'));
+    try {
+      addLoRainFixture(raw);
+      const summary = await helper.runRollupJob(facadeDb(raw), {
+        exportDir,
+        nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
+        levels: ['daily'],
+      });
+      assert.equal(summary.errors.length, 0, JSON.stringify(summary.errors));
+      const dailyPath = path.join(exportDir, 'z-coast', 'daily.csv');
+      const rows = parseCsv(fs.readFileSync(dailyPath, 'utf8'));
+      const delta = rows.find((row) => row.channel_key === 'rain_mm_delta');
+      assert.ok(delta);
+      assert.equal(Number(delta.value), 7.5);
+    } finally {
+      fs.rmSync(exportDir, { recursive: true, force: true });
       raw.close();
     }
   });
