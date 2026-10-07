@@ -81,6 +81,18 @@ describe('zonePairs', () => {
     ]);
   });
 
+  it('keeps same-name unassigned device sources as separate groups', () => {
+    const xA = { ...series(null, 'soil', [1, 2], 'device-a'), seriesId: 'device-a-soil', label: 'Rain - soil' };
+    const yA = { ...series(null, 'dendro', [3, 4], 'device-a'), seriesId: 'device-a-dendro', label: 'Rain - dendro' };
+    const xB = { ...series(null, 'soil', [5, 6], 'device-b'), seriesId: 'device-b-soil', label: 'Rain - soil' };
+    const yB = { ...series(null, 'dendro', [7, 8], 'device-b'), seriesId: 'device-b-dendro', label: 'Rain - dendro' };
+
+    expect(zonePairs([xA, yA, xB, yB], 'soil', 'dendro')).toEqual([
+      { groupId: 'device:device-a', zoneId: null, label: 'Rain', points: [[1, 3], [2, 4]] },
+      { groupId: 'device:device-b', zoneId: null, label: 'Rain', points: [[5, 7], [6, 8]] },
+    ]);
+  });
+
   it('labels groups by the catalog zone name, falling back to "Zone {id}"', () => {
     const series = [
       mkSeries('x', 'dendro_stem_change_um', 'um', { zoneId: 9 }),

@@ -53,6 +53,26 @@ describe('buildTimeSeriesOption', () => {
     expect(colorByName.get('c')).toBe(seriesColor(2));
   });
 
+  it('disambiguates duplicate labels in timeline and small-multiples legends', () => {
+    const s = [series('device-a', 'kPa', [1]), series('device-b', 'kPa', [2]), series('device-c', 'kPa', [3])];
+    s[0].label = 'Rain';
+    s[1].label = 'Rain';
+    s[2].label = 'Rain (1)';
+
+    const options = [
+      buildTimeSeriesOption({ panels: groupByUnit(s), series: s, normalize: false, multiAxis: false }),
+      buildSmallMultiplesOption(s, false),
+    ];
+    for (const option of options) {
+      const names = (option.series as Array<{ name: string }>).reduce<Record<string, string>>((byId, item, index) => {
+        byId[s[index].seriesId] = item.name;
+        return byId;
+      }, {});
+      expect(names).toEqual({ 'device-a': 'Rain (2)', 'device-b': 'Rain (3)', 'device-c': 'Rain (1)' });
+      expect(new Set(Object.values(names)).size).toBe(3);
+    }
+  });
+
   it('multiAxis collapses mixed units to one grid with a y-axis per unit', () => {
     const s = [series('a', 'kPa', [1]), series('b', 'C', [20])];
     const option = buildTimeSeriesOption({ panels: groupByUnit(s), series: s, normalize: false, multiAxis: true });
