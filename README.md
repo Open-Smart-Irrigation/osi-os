@@ -10,13 +10,13 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 
 ## Features
 
-- **LoRaWAN integration** — Flexible device support, continious addition of sensors and acutators
+- **LoRaWAN integration** — Flexible device support, continuous addition of sensors and actuators
 - **Automated irrigation scheduling** — threshold-based triggers on soil moisture or dendrometers
 - **Irrigation zones** — group devices into zones with per-zone schedules
 - **Web dashboard** — React-based UI accessible on local Wi-Fi at `http://<device-ip>:1880/gui`
 - **Multi-user support** — individual user accounts per device
 - **Offline-first** — fully functional without internet; cloud sync optional
-- **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
+- **OSI Cloud integration** — remote monitoring and control via OSI Server
 - **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
 - **Forecast** — Weather forecast,agronomic indicators and irrigation prediction (experimental)
 
@@ -34,7 +34,7 @@ Node-RED  (localhost:1880)
         ↕ SQLite  (/data/db/farming.db)
 ChirpStack  (LoRaWAN network server, localhost:8080)
         ↕ LoRa radio
-Field devices  (KIWI soil sensors, Strega valves, Dragino LSN50V2)
+Field devices  (e.g.KIWI soil sensors, Strega valves, Dragino LSN50V2)
 
         ↕ MQTT over WebSocket (wss, port 443)
 OSI Server  (optional cloud — remote monitoring & control)
