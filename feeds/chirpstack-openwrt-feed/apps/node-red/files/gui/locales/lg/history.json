@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Ebyafaayo",
+      "admin": "Admin",
       "legacyDashboard": "Dashboard enkadde",
       "logout": "Fuluma"
     },
@@ -18,30 +19,34 @@
       "cardsFailed": "Amakaadi g'ebyafaayo tegasobodde kutikkibwa.",
       "retryCards": "Gezaako amakaadi nate"
     },
+    "export": {
+      "open": "Fulumya",
+      "title": "Fulumya data"
+    },
     "desktop": {
-      "toolbarTitle": "Ebikozesebwa",
-      "maxPanels": "Ebitundu by'okugeraageranya okutuuka ku {{count}}",
-      "singleMode": "Ekimu",
-      "comparisonMode": "Okugeraageranya",
-      "addPanel": "Yongera ekitundu {{title}}",
-      "removePanel": "Ggyawo ekitundu",
-      "panelLimitWarning": "Bitundu {{count}} byokka eby'okugeraageranya bye bisobola okulagibwa ku Gateway eno.",
-      "selectedTimestampNone": "Tewali kiseera kirondeddwa",
-      "selectedTimestamp": "Ekiseera ekirondeddwa: {{timestamp}}",
-      "inspectorTitle": "Ebikwata",
-      "inspectorPlaceholder": "Londa ekiseera oba akasanduuko ka kalendaa okulaba okutegeera, ebikolwa, omutindo gwa data, n'ebikwata ebisingawo.",
       "railLabel": "Amakaadi",
+      "toolbarTitle": "Ebikozesebwa",
       "modeLabel": "Enkola ya Desktop",
       "modeFocus": "Kwolekera",
       "modeCompare": "Kugeraageranya",
       "viewSelectorLabel": "Endaba y'akaadi",
       "compareViewSelectorLabel": "Endaba y'okugeraageranya",
       "sourceSelectorLabel": "Ensibuko",
-      "rangeOverviewLabel": "Endaba y'ekiseera kyonna",
       "chartSurfaceLabel": "Chart y'ebyafaayo. Kozesa obufunzo obulaga obuko okutambuza, ate + oba - okugaziya oba okufunza",
       "zoomIn": "Gaziya",
       "zoomOut": "Funza",
-      "resetZoom": "Zzaawo obunene obw'olubereberye"
+      "resetZoom": "Zzaawo obunene obw'olubereberye",
+      "maxPanels": "Ebitundu by'okugeraageranya okutuuka ku {{count}}",
+      "singleMode": "Ekimu",
+      "comparisonMode": "Okugeraageranya",
+      "addPanel": "Yongera ekitundu {{title}}",
+      "removePanel": "Ggyawo ekitundu",
+      "panelLimitWarning": "Ebipande by’okugeraageranya {{count}} byokka bye biyinza okulagibwa omulundi gumu.",
+      "selectedTimestampNone": "Tewali kiseera kirondeddwa",
+      "selectedTimestamp": "Ekiseera ekirondeddwa: {{timestamp}}",
+      "inspectorTitle": "Ebikwata",
+      "inspectorPlaceholder": "Londa ekiseera oba akasanduuko ka kalendaa okulaba okutegeera, ebikolwa, omutindo gwa data, n'ebikwata ebisingawo.",
+      "rangeOverviewLabel": "Endaba y'ekiseera kyonna"
     },
     "mobile": {
       "zoneLabel": "Ekitundu",
@@ -113,7 +118,7 @@
       "timelineBrush": "Eddirisa ly'olunyiriri lw'ebiseera",
       "timelineBrushKeyboardHelp": "Kozesa obufunzo obulaga obuko okutambuza, + oba - okugaziya oba okufunza, ne Home oba Enter okuzzaawo.",
       "aggregationBadge": "Okugatta data: {{aggregation}}",
-      "placeholderBody": "Data za chart ne kalendaa zijja kulabikira wano nga API za data za kaadi zisobozesezza.",
+      "placeholderBody": "Ebifaananyi n’akalenda bijja kulabika wano nga kaadi eno efunye ebipimo.",
       "cardDataLoading": "Data za kaadi zitikkibwa...",
       "cardDataError": "Data za kaadi tezisobodde kutikkibwa: {{message}}",
       "cardDataUnknownError": "Ensobi etamanyiddwa"
@@ -197,11 +202,15 @@
       "emptyBody": "Ebikolwa by'okusukkulirira n'ebiseera by'okuddamu bijja kulabikira wano nga data w'ebyafaayo eriwo.",
       "eventsCount": "Ebikolwa {{count}}",
       "eventLabel": {
+        "serviceAction": "Omulimu gw’obuweereza",
         "irrigation": "Ekikolwa ky'okusukkulirira",
-        "scheduled": "Okusukkulirira okutegekeddwa",
+        "scheduled": "Okufukirira okusinziira ku ssensa",
         "manualOverride": "Okukozesa n'omukono",
         "possibleIneffective": "Okusukkulirira okuyinza obutagasa",
-        "responseWindow": "Ekiseera ky'okuddamu"
+        "responseWindow": "Ekiseera ky'okuddamu",
+        "onValveSchedule": "Enteekateeka (ku valve)",
+        "oneTime": "Okuggula omulundi gumu",
+        "unexplained": "Eggulwa ku valve"
       },
       "detail": {
         "duration": "Ebanga: {{value}}",
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Ensibuko",
       "menuLabel": "Ensibuko za kaadi"
-    },
-    "export": {
-      "open": "Fulumya",
-      "title": "Fulumya data"
     }
   }
 }

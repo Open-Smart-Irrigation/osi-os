@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Historial",
+      "admin": "Admin",
       "legacyDashboard": "Panel heredado",
       "logout": "Cerrar sesión"
     },
@@ -18,19 +19,13 @@
       "cardsFailed": "Error al cargar las tarjetas de historial.",
       "retryCards": "Reintentar tarjetas"
     },
+    "export": {
+      "open": "Exportar",
+      "title": "Exportar datos"
+    },
     "desktop": {
-      "toolbarTitle": "Barra de herramientas",
-      "maxPanels": "Hasta {{count}} paneles de comparación",
-      "singleMode": "Individual",
-      "comparisonMode": "Comparación",
-      "addPanel": "Añadir panel {{title}}",
-      "removePanel": "Quitar panel",
-      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación en esta pasarela edge.",
-      "selectedTimestampNone": "Ninguna marca de tiempo seleccionada",
-      "selectedTimestamp": "Marca de tiempo seleccionada: {{timestamp}}",
-      "inspectorTitle": "Inspector",
-      "inspectorPlaceholder": "Seleccione una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados.",
       "railLabel": "Tarjetas",
+      "toolbarTitle": "Barra de herramientas",
       "modeLabel": "Modo de escritorio",
       "modeFocus": "Enfoque",
       "modeCompare": "Comparar",
@@ -41,7 +36,17 @@
       "chartSurfaceLabel": "Gráfico de historial, use las flechas para desplazar y más o menos para acercar",
       "zoomIn": "Acercar",
       "zoomOut": "Alejar",
-      "resetZoom": "Restablecer zoom"
+      "resetZoom": "Restablecer zoom",
+      "maxPanels": "Hasta {{count}} paneles de comparación",
+      "singleMode": "Individual",
+      "comparisonMode": "Comparación",
+      "addPanel": "Añadir panel {{title}}",
+      "removePanel": "Quitar panel",
+      "panelLimitWarning": "Solo se pueden mostrar {{count}} paneles de comparación a la vez.",
+      "selectedTimestampNone": "Ninguna marca de tiempo seleccionada",
+      "selectedTimestamp": "Marca de tiempo seleccionada: {{timestamp}}",
+      "inspectorTitle": "Inspector",
+      "inspectorPlaceholder": "Seleccione una marca de tiempo o celda del calendario para ver interpretación, eventos, calidad de datos y metadatos avanzados."
     },
     "mobile": {
       "zoneLabel": "Zona",
@@ -113,7 +118,7 @@
       "timelineBrush": "Ventana de la línea de tiempo",
       "timelineBrushKeyboardHelp": "Usa las flechas para desplazar, más o menos para acercar, e Inicio o Intro para restablecer.",
       "aggregationBadge": "Agregación: {{aggregation}}",
-      "placeholderBody": "Los datos del gráfico y del calendario se cargarán aquí cuando las API de datos de la tarjeta estén habilitadas.",
+      "placeholderBody": "Los gráficos y el calendario aparecerán aquí cuando esta tarjeta tenga lecturas.",
       "cardDataLoading": "Cargando datos de la tarjeta...",
       "cardDataError": "Error al cargar los datos de la tarjeta: {{message}}",
       "cardDataUnknownError": "Error desconocido"
@@ -197,11 +202,15 @@
       "emptyBody": "Las acciones de riego y las ventanas de respuesta aparecerán aquí cuando haya datos de historial disponibles.",
       "eventsCount": "{{count}} eventos",
       "eventLabel": {
+        "serviceAction": "Acción de servicio",
         "irrigation": "Evento de riego",
-        "scheduled": "Riego programado",
+        "scheduled": "Riego activado por sensor",
         "manualOverride": "Anulación manual",
         "possibleIneffective": "Posible riego ineficaz",
-        "responseWindow": "Ventana de respuesta"
+        "responseWindow": "Ventana de respuesta",
+        "onValveSchedule": "Programado (en la válvula)",
+        "oneTime": "Apertura única",
+        "unexplained": "Abierta en la válvula"
       },
       "detail": {
         "duration": "Duración: {{value}}",
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Fuentes",
       "menuLabel": "Fuentes de la tarjeta"
-    },
-    "export": {
-      "open": "Exportar",
-      "title": "Exportar datos"
     }
   }
 }

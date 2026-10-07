@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Historique",
+      "admin": "Admin",
       "legacyDashboard": "Tableau de bord existant",
       "logout": "Déconnexion"
     },
@@ -18,19 +19,13 @@
       "cardsFailed": "Échec du chargement des cartes d’historique.",
       "retryCards": "Réessayer les cartes"
     },
+    "export": {
+      "open": "Exporter",
+      "title": "Exporter les données"
+    },
     "desktop": {
-      "toolbarTitle": "Barre d’outils",
-      "maxPanels": "Jusqu’à {{count}} panneaux de comparaison",
-      "singleMode": "Individuel",
-      "comparisonMode": "Comparaison",
-      "addPanel": "Ajouter le panneau {{title}}",
-      "removePanel": "Retirer le panneau",
-      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés sur cette passerelle edge.",
-      "selectedTimestampNone": "Aucun horodatage sélectionné",
-      "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
-      "inspectorTitle": "Inspecteur",
-      "inspectorPlaceholder": "Sélectionnez un horodatage ou une cellule du calendrier pour voir l’interprétation, les événements, la qualité des données et les métadonnées avancées.",
       "railLabel": "Cartes",
+      "toolbarTitle": "Barre d’outils",
       "modeLabel": "Mode bureau",
       "modeFocus": "Focus",
       "modeCompare": "Comparer",
@@ -41,7 +36,17 @@
       "chartSurfaceLabel": "Graphique d’historique, utilisez les flèches pour déplacer et plus ou moins pour zoomer",
       "zoomIn": "Zoom avant",
       "zoomOut": "Zoom arrière",
-      "resetZoom": "Réinitialiser le zoom"
+      "resetZoom": "Réinitialiser le zoom",
+      "maxPanels": "Jusqu’à {{count}} panneaux de comparaison",
+      "singleMode": "Individuel",
+      "comparisonMode": "Comparaison",
+      "addPanel": "Ajouter le panneau {{title}}",
+      "removePanel": "Retirer le panneau",
+      "panelLimitWarning": "Seuls {{count}} panneaux de comparaison peuvent être affichés à la fois.",
+      "selectedTimestampNone": "Aucun horodatage sélectionné",
+      "selectedTimestamp": "Horodatage sélectionné : {{timestamp}}",
+      "inspectorTitle": "Inspecteur",
+      "inspectorPlaceholder": "Sélectionnez un horodatage ou une cellule du calendrier pour voir l’interprétation, les événements, la qualité des données et les métadonnées avancées."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -113,7 +118,7 @@
       "timelineBrush": "Fenêtre de la chronologie",
       "timelineBrushKeyboardHelp": "Utilisez les flèches pour déplacer, plus ou moins pour zoomer, et Origine ou Entrée pour réinitialiser.",
       "aggregationBadge": "Agrégation : {{aggregation}}",
-      "placeholderBody": "Les données du graphique et du calendrier s’afficheront ici lorsque les API de données de carte seront activées.",
+      "placeholderBody": "Les graphiques et le calendrier apparaîtront ici dès que cette carte aura des relevés.",
       "cardDataLoading": "Chargement des données de la carte...",
       "cardDataError": "Échec du chargement des données de la carte : {{message}}",
       "cardDataUnknownError": "Erreur inconnue"
@@ -192,16 +197,20 @@
       }
     },
     "irrigationTimeline": {
-      "title": "Chronologie des événements d’irrigation",
-      "emptyTitle": "Aucun événement d’irrigation",
-      "emptyBody": "Les actions d’irrigation et les fenêtres de réponse s’afficheront ici lorsque les données d’historique seront disponibles.",
-      "eventsCount": "{{count}} événements",
+      "title": "Chronologie des irrigations",
+      "emptyTitle": "Aucun événement d'irrigation",
+      "emptyBody": "Les irrigations et les fenêtres de réponse apparaîtront ici dès que des données d'historique seront disponibles.",
+      "eventsCount": "Événements : {{count}}",
       "eventLabel": {
-        "irrigation": "Événement d’irrigation",
-        "scheduled": "Irrigation planifiée",
-        "manualOverride": "Forçage manuel",
-        "possibleIneffective": "Irrigation potentiellement inefficace",
-        "responseWindow": "Fenêtre de réponse"
+        "serviceAction": "Intervention de service",
+        "irrigation": "Événement d'irrigation",
+        "scheduled": "Irrigation déclenchée par capteur",
+        "manualOverride": "Commande manuelle",
+        "possibleIneffective": "Irrigation peut-être inefficace",
+        "responseWindow": "Fenêtre de réponse",
+        "onValveSchedule": "Programme sur la vanne",
+        "oneTime": "Ouverture ponctuelle",
+        "unexplained": "Ouverture hors programme"
       },
       "detail": {
         "duration": "Durée : {{value}}",
@@ -212,7 +221,7 @@
         "info": "Info",
         "warning": "Avertissement",
         "critical": "Critique",
-        "success": "Succès",
+        "success": "Réussite",
         "unknown": "Info"
       }
     },
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Sources",
       "menuLabel": "Sources de la carte"
-    },
-    "export": {
-      "open": "Exporter",
-      "title": "Exporter les données"
     }
   }
 }

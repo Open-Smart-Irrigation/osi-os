@@ -1,9 +1,21 @@
 {
+  "languageSwitcher": {
+    "change": "Changer de langue"
+  },
   "cancel": "Annuler",
+  "close": "Fermer",
   "loading": "Chargement...",
   "delete": "Supprimer",
   "na": "N/A",
   "retry": "Réessayer",
+  "adminOnly": "Réservé aux administrateurs",
+  "scope": {
+    "loadError": "Les autorisations n’ont pas pu être chargées."
+  },
+  "readOnly": {
+    "farm": "Vous avez un accès en lecture seule à cette ferme. Vous pouvez tout consulter ici ; les modifications sont effectuées par le propriétaire de la ferme.",
+    "section": "Ces réglages sont gérés par le propriétaire de la ferme. Vos propres préférences d’affichage ci-dessus restent modifiables par vous."
+  },
   "analysis": {
     "title": "Analyse des données",
     "axis": {
@@ -27,7 +39,9 @@
       "fifteenMinute": "15 minutes",
       "hourly": "Horaire",
       "daily": "Quotidienne",
-      "weekly": "Hebdomadaire"
+      "weekly": "Hebdomadaire",
+      "helpLabel": "À propos de l'agrégation",
+      "help": "En agrégation brute, chaque point est à l'heure de la mesure ; en agrégation de 15 minutes, horaire, quotidienne ou hebdomadaire, il est au début de sa période, et pour les sources météo un jour est le jour local de la zone. La pluie, l'ET0 et l'ETc d'un fournisseur météo, des valeurs horaires d'une station ou de « daily agronomy » sont des totaux pour cette période ; les autres valeurs sont des moyennes. La température, l'humidité et le vent horaires d'Open-Meteo sont des valeurs à l'heure affichée. Les sources météo ont une résolution d'une heure au mieux, d'un jour pour « daily agronomy »."
     },
     "preset": {
       "metricLabel": "Métrique entre zones"
@@ -37,6 +51,15 @@
       "title": "Séries",
       "search": "Rechercher des zones ou appareils",
       "unknownSite": "Site inconnu",
+      "unassigned": "Appareils non affectés",
+      "emptySource": "Aucun canal graphique n’est disponible pour cet appareil.",
+      "otherSupported": "Autres canaux pris en charge",
+      "otherSupportedHelp": "Des échantillons historiques peuvent exister ; la disponibilité n’a pas été vérifiée.",
+      "valveEvents": "Les événements et commandes de vanne ne sont pas disponibles dans la vue Données.",
+      "unsupportedType": "Les mesures de ce type d’appareil ne sont pas prises en charge dans la vue Données.",
+      "openNetwork": "Ouvrir la vue Réseau",
+      "networkDisabled": "La vue Réseau est désactivée sur cette passerelle.",
+      "networkLoading": "La disponibilité de la vue Réseau est encore en cours de chargement.",
       "reason": {
         "unsupported": "Non pris en charge",
         "available_no_recent_data": "Aucune donnée récente disponible"
@@ -66,7 +89,15 @@
     },
     "export": {
       "csv": "Exporter CSV",
-      "png": "Exporter PNG"
+      "png": "Exporter PNG",
+      "allZonesCsv": "Exporter toutes les zones CSV",
+      "allZonesCsvBusy": "Exportation…",
+      "errors": {
+        "tooLarge": "Cet export est trop volumineux. Choisissez une période plus courte ou une agrégation plus grossière.",
+        "busy": "Un autre export est en cours. Réessayez dans un instant.",
+        "invalidRange": "Cette période ne peut pas être exportée. Vérifiez les dates de début et de fin.",
+        "failed": "L'export a échoué. Réessayez."
+      }
     },
     "legend": {
       "label": "Légende du graphique",
@@ -77,7 +108,8 @@
       "save": "Enregistrer la vue",
       "namePlaceholder": "Nommer cette vue",
       "delete": "Supprimer la vue",
-      "empty": "Aucune vue enregistrée pour le moment."
+      "empty": "Aucune vue enregistrée pour le moment.",
+      "confirmDelete": "Supprimer la vue enregistrée « {{name}} » ?"
     },
     "droppedNotice": "{{count}} séries n'ont pas pu être chargées",
     "correlation": {
@@ -89,7 +121,21 @@
       "zone": "Zone",
       "droppedPairs": "Ignorés",
       "insufficient": "insuffisant (n={{n}})",
+      "ambiguous": "Supprimé : plusieurs canaux candidats ont été trouvés.",
+      "missingSource": "Supprimé : l’identité de la source de l’appareil est absente.",
       "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} sur {{expected}} h)",
+      "partialDays": " ({{count}} sur {{expected}} j)"
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Identité de la passerelle mise à jour. Les services redémarreront dans {{count}} s.",
+    "chirpstack_bootstrap": "Configuration LoRaWAN terminée. Les services redémarreront dans {{count}} s.",
+    "account_link": "Compte associé. Les services redémarreront dans {{count}} s.",
+    "account_unlink": "Compte dissocié. Les services redémarreront dans {{count}} s.",
+    "generic": "Les services de la passerelle redémarreront dans {{count}} s.",
+    "in_progress": "Les services de la passerelle redémarrent maintenant…"
   }
 }

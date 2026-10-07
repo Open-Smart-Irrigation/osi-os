@@ -1,9 +1,21 @@
 {
+  "languageSwitcher": {
+    "change": "Change language"
+  },
   "cancel": "Cancel",
+  "close": "Close",
   "loading": "Loading...",
   "delete": "Delete",
   "na": "N/A",
   "retry": "Retry",
+  "adminOnly": "Admin only",
+  "scope": {
+    "loadError": "Permissions could not be loaded."
+  },
+  "readOnly": {
+    "farm": "You have read-only access to this farm. You can view everything here; changes are made by the farm owner.",
+    "section": "These settings are managed by the farm owner. Your own display preferences above are yours to change."
+  },
   "analysis": {
     "title": "Data analysis",
     "axis": {
@@ -27,7 +39,9 @@
       "fifteenMinute": "15 minutes",
       "hourly": "Hourly",
       "daily": "Daily",
-      "weekly": "Weekly"
+      "weekly": "Weekly",
+      "helpLabel": "About aggregation",
+      "help": "Raw points sit at the reading's time; at 15-minute, hourly, daily and weekly aggregation each point sits at the start of its period, and for weather sources a day is the zone's local day. Rain, ET0 and ETc from a weather provider, a station's hourly record or daily agronomy are totals for that period, and other values are means. Open-Meteo hourly temperature, humidity and wind are values at the time shown. Weather sources show no finer detail than one hour, or one day for daily agronomy."
     },
     "preset": {
       "metricLabel": "Metric across zones"
@@ -37,6 +51,15 @@
       "title": "Series",
       "search": "Search for zones or devices",
       "unknownSite": "Unknown site",
+      "unassigned": "Unassigned devices",
+      "emptySource": "No chart channels are available for this device.",
+      "otherSupported": "Other supported channels",
+      "otherSupportedHelp": "Historical samples may exist; availability has not been checked.",
+      "valveEvents": "Valve events and controls are not available in Data view.",
+      "unsupportedType": "Measurements from this device type are not supported in Data view.",
+      "openNetwork": "Open Network view",
+      "networkDisabled": "Network view is disabled on this gateway.",
+      "networkLoading": "Network view availability is still loading.",
       "reason": {
         "unsupported": "Unsupported",
         "available_no_recent_data": "No recent data available"
@@ -57,8 +80,8 @@
     },
     "layout": {
       "label": "Layout",
-      "stacked": "Stacked",
-      "overlaid": "Overlaid",
+      "stacked": "Stack",
+      "overlaid": "Overlay",
       "smallMultiples": "Small multiples"
     },
     "toggle": {
@@ -66,7 +89,15 @@
     },
     "export": {
       "csv": "Export CSV",
-      "png": "Export PNG"
+      "png": "Export PNG",
+      "allZonesCsv": "Export all zones CSV",
+      "allZonesCsvBusy": "Exporting…",
+      "errors": {
+        "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
+        "busy": "Another export is running. Try again in a moment.",
+        "invalidRange": "This range cannot be exported. Check the start and end dates.",
+        "failed": "The export failed. Try again."
+      }
     },
     "legend": {
       "label": "Chart legend",
@@ -77,7 +108,8 @@
       "save": "Save view",
       "namePlaceholder": "Name this view",
       "delete": "Delete view",
-      "empty": "No saved views yet."
+      "empty": "No saved views yet.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series could not be loaded",
     "correlation": {
@@ -89,7 +121,21 @@
       "zone": "Zone",
       "droppedPairs": "Dropped",
       "insufficient": "insufficient (n={{n}})",
+      "ambiguous": "Suppressed: more than one candidate channel was found.",
+      "missingSource": "Suppressed: the device source identity is missing.",
       "exploratory": "Exploratory only — Pearson r over aligned buckets; not a significance test."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} of {{expected}} h)",
+      "partialDays": " ({{count}} of {{expected}} d)"
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Gateway identity updated. Services will restart in {{count}} s.",
+    "chirpstack_bootstrap": "LoRaWAN setup completed. Services will restart in {{count}} s.",
+    "account_link": "Account linked. Services will restart in {{count}} s.",
+    "account_unlink": "Account unlinked. Services will restart in {{count}} s.",
+    "generic": "Gateway services will restart in {{count}} s.",
+    "in_progress": "Gateway services are restarting now…"
   }
 }

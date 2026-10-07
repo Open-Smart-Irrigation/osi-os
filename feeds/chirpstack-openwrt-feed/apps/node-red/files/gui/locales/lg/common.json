@@ -1,9 +1,21 @@
 {
+  "languageSwitcher": {
+    "change": "Change language"
+  },
   "cancel": "Lekawo",
+  "close": "Ggalawo",
   "loading": "Tikuyitamu...",
   "delete": "Sazaamu",
   "na": "Tebaawo",
   "retry": "Gezaako nate",
+  "adminOnly": "Admin only",
+  "scope": {
+    "loadError": "Permissions could not be loaded."
+  },
+  "readOnly": {
+    "farm": "Olina okukozesa kwa kusoma kwokka ku nnimiro eno. Osobola okulaba byonna wano; enkyukakyuka zikolebwa nannyini nnimiro.",
+    "section": "Ebiteekateeka bino bifugibwa nannyini nnimiro. Ebyo by'osaanidde okulaba ebyo waggulu bisobola okukyusibwa gwe wekka."
+  },
   "analysis": {
     "title": "Okwekenneenya kwa data",
     "axis": {
@@ -27,7 +39,9 @@
       "fifteenMinute": "Ddakiika 15",
       "hourly": "Buli saawa",
       "daily": "Buli lunaku",
-      "weekly": "Buli wiiki"
+      "weekly": "Buli wiiki",
+      "helpLabel": "About aggregation",
+      "help": "Raw points sit at the reading's time; at 15-minute, hourly, daily and weekly aggregation each point sits at the start of its period, and for weather sources a day is the zone's local day. Rain, ET0 and ETc from a weather provider, a station's hourly record or daily agronomy are totals for that period, and other values are means. Open-Meteo hourly temperature, humidity and wind are values at the time shown. Weather sources show no finer detail than one hour, or one day for daily agronomy."
     },
     "preset": {
       "metricLabel": "Ekigero mu zone zonna"
@@ -37,6 +51,15 @@
       "title": "Ennyiriri",
       "search": "Noonya zoozi oba ebyuma",
       "unknownSite": "Ekifo tekimanyiddwa",
+      "unassigned": "Unassigned devices",
+      "emptySource": "No chart channels are available for this device.",
+      "otherSupported": "Other supported channels",
+      "otherSupportedHelp": "Historical samples may exist; availability has not been checked.",
+      "valveEvents": "Valve events and controls are not available in Data view.",
+      "unsupportedType": "Measurements from this device type are not supported in Data view.",
+      "openNetwork": "Open Network view",
+      "networkDisabled": "Network view is disabled on this gateway.",
+      "networkLoading": "Network view availability is still loading.",
       "reason": {
         "unsupported": "Tewagirwa",
         "available_no_recent_data": "Tewali biwandiiko bipya"
@@ -66,7 +89,15 @@
     },
     "export": {
       "csv": "Gyamu CSV",
-      "png": "Gyamu PNG"
+      "png": "Gyamu PNG",
+      "allZonesCsv": "Gyamu CSV ya zone zonna",
+      "allZonesCsvBusy": "Exporting…",
+      "errors": {
+        "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
+        "busy": "Another export is running. Try again in a moment.",
+        "invalidRange": "This range cannot be exported. Check the start and end dates.",
+        "failed": "The export failed. Try again."
+      }
     },
     "legend": {
       "label": "Ekiraga ebiri ku chart",
@@ -77,7 +108,8 @@
       "save": "Tereka endaba",
       "namePlaceholder": "Tuuma endaba eno erinnya",
       "delete": "Sangula endaba",
-      "empty": "Tewali ndaba ziterekeddwa."
+      "empty": "Tewali ndaba ziterekeddwa.",
+      "confirmDelete": "Delete the saved view \"{{name}}\"?"
     },
     "droppedNotice": "{{count}} series tezaasobola kusomebwa",
     "correlation": {
@@ -89,7 +121,21 @@
       "zone": "Ekitundu",
       "droppedPairs": "Ebisuliddwa",
       "insufficient": "tekimala (n={{n}})",
+      "ambiguous": "Suppressed: more than one candidate channel was found.",
+      "missingSource": "Suppressed: the device source identity is missing.",
       "exploratory": "Kya kugezesa kyokka — Pearson r ku buckets ezitereezeddwa; si kugezesa kwa significance."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} of {{expected}} h)",
+      "partialDays": " ({{count}} of {{expected}} d)"
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Endagamuntu ya getwaya etereezeddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "chirpstack_bootstrap": "Okuteekateeka LoRaWAN kuwedde. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_link": "Akawunti eyungiddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "account_unlink": "Akawunti eggyiddwa ku kuyungibwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
+    "generic": "Empeereza za getwaya zijja kuddamu okutandika mu sikonda {{count}}.",
+    "in_progress": "Empeereza za getwaya ziddamu okutandika kati…"
   }
 }

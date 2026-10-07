@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Kigambiddwa",
-    "message": "Oluvannyuma lw'okuyunga, oteekwa okukozesa ebintu by'okuyingira ebya OSI Server okuyingira. OSI OS etereka ekikakasa ekitali kuyintaneeti ekya Gateway eno, olw'okuyingira okuyungiddwa.",
+    "message": "After linking, you must use your OSI Server credentials to log in. OSI OS stores a gateway-specific offline verifier for linked login.",
     "proceed": "Komezagana"
   },
   "success": {
@@ -46,16 +46,32 @@
     "title": "Okusinkroniza ku mukono",
     "description": "Kola okusinkroniza kw'okuddaabiriza kaakano ne OSI Server.",
     "button": "Sinkroniza Kaakano",
-    "running": "Tikusinkroniza...",
+    "running": "Kirimu okusinkroniza...",
     "successTitle": "Okusinkroniza ku mukono kuwedde",
     "partialTitle": "Okusinkroniza ku mukono kuwedde n'ebizibu",
     "refreshed": "Token y'okusinkroniza ezze obuggya nga tonnasinkroniza.",
     "usedCurrentToken": "Kikozesa token y'okusinkroniza ekiriwo kaakano.",
     "bootstrap": "Bootstrap ekozesebbwa: {{applied}}, eyasaziddwaawo: {{skipped}}",
-    "outbox": "Outbox etuusiddwa: {{delivered}} ({{before}} -> {{after}} birindiridde)",
+    "outbox": "Enkyukakyuka {{delivered}} ziweereddwa e OSI Server ({{after}} zikyalindirira)",
+    "outboxCounts": {
+      "title": "Outbox result",
+      "selected": "Selected: {{count}}",
+      "applied": "Applied: {{count}}",
+      "duplicate": "Duplicate: {{count}}",
+      "retryable": "Retryable: {{count}}",
+      "rejected": "Rejected: {{count}}",
+      "protocolErrors": "Protocol errors: {{count}}",
+      "pendingAfter": "Pending after sync: {{count}}",
+      "rejectedCode": "Rejected {{code}}: {{count}}"
+    },
     "pending": "Ebiragiro ebirindiridde ebifunibbwa: {{fetched}}, ebiterekeddwa okukozesebwa mu kitundu: {{queued}}",
     "pendingAfterResponse": "Okukozesa mu kitundu kugenda mu maaso oluvannyuma lw'okuddamu kuno.",
     "lastError": "Ensobi esembayo okuva ku {{source}}: {{message}}"
+  },
+  "rejected": {
+    "title": "Rejected by OSI Server",
+    "count": "{{total}} update(s) were permanently rejected and will not be retried ({{last24h}} in the last 24 hours).",
+    "lastReason": "Most recent: {{op}} rejected as {{reason}} on {{date}}"
   },
   "reauth": {
     "title": "Token y'okusinkroniza ewedde ekiseera",
@@ -64,6 +80,7 @@
     "username": "Erinnya ery'omukozesa ku server",
     "password": "Ekigambo ky'okulinda ekya OSI Server",
     "submit": "Zzaawo Okuyunga",
-    "running": "Tikuzzaawo..."
+    "running": "Kirimu okuzzaawo...",
+    "detected": "Cloud link needs re-authentication. The last sync attempt was refused with HTTP {{statusCode}}."
   }
 }
