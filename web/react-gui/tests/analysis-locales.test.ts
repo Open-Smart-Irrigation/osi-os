@@ -102,3 +102,45 @@ test('the all-zones export messages and the saved-view delete confirmation resol
     }
   }
 });
+
+test('the new data source tray messages are translated outside the Luganda fallback', () => {
+  const keys = [
+    'tray.unassigned',
+    'tray.emptySource',
+    'tray.otherSupported',
+    'tray.otherSupportedHelp',
+    'tray.valveEvents',
+    'tray.unsupportedType',
+    'tray.openNetwork',
+    'tray.networkDisabled',
+    'tray.networkLoading',
+  ];
+  // These new data-view tray messages stay in English in lg until a human Luganda
+  // pass. Remove a key here and from docs/i18n/pending-luganda-translations.md
+  // when that pass supplies its translation.
+  const PENDING_HUMAN_LUGANDA = new Set(keys);
+  const pick = (tree: unknown, key: string) => key.split('.').reduce<unknown>(
+    (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
+    tree,
+  );
+  const placeholders = (value: string) => (value.match(/\{\{\w+\}\}/g) ?? []).sort().join('|');
+  const analysisOf = (language: string) => JSON.parse(readFileSync(join(localesRoot, language, 'common.json'), 'utf8')).analysis;
+  const english = analysisOf('en');
+  for (const language of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+    const analysis = analysisOf(language);
+    for (const key of keys) {
+      const value = pick(analysis, key);
+      const source = pick(english, key);
+      assert.equal(typeof value, 'string', `${language} analysis.${key} is missing`);
+      assert.ok((value as string).trim().length > 0, `${language} analysis.${key} is empty`);
+      assert.equal(placeholders(value as string), placeholders(source as string), `${language} analysis.${key} placeholders`);
+      if (language === 'lg' && PENDING_HUMAN_LUGANDA.has(key)) {
+        assert.equal(value, source, `lg analysis.${key} changed; drop it from PENDING_HUMAN_LUGANDA and from docs/i18n/pending-luganda-translations.md`);
+      }
+      if (language !== 'en' && language !== 'lg') {
+        assert.notEqual(value, source, `${language} analysis.${key} is untranslated`);
+      }
+      if (language === 'de-CH') assert.ok(!(value as string).includes('ß'), `de-CH analysis.${key} uses ß`);
+    }
+  }
+});
