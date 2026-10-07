@@ -1,9 +1,21 @@
 {
+  "languageSwitcher": {
+    "change": "Sprache wechseln"
+  },
   "cancel": "Abbrechen",
+  "close": "Schliessen",
   "loading": "Laden...",
   "delete": "Löschen",
   "na": "N/A",
   "retry": "Erneut versuchen",
+  "adminOnly": "Nur für Administratoren",
+  "scope": {
+    "loadError": "Berechtigungen konnten nicht geladen werden."
+  },
+  "readOnly": {
+    "farm": "Sie haben nur Lesezugriff auf diesen Betrieb. Sie können hier alles einsehen; Änderungen werden vom Betriebsinhaber vorgenommen.",
+    "section": "Diese Einstellungen werden vom Betriebsinhaber verwaltet. Ihre eigenen Anzeigeeinstellungen oben können Sie selbst ändern."
+  },
   "analysis": {
     "title": "Datenanalyse",
     "axis": {
@@ -27,7 +39,9 @@
       "fifteenMinute": "15 Minuten",
       "hourly": "Stündlich",
       "daily": "Täglich",
-      "weekly": "Wöchentlich"
+      "weekly": "Wöchentlich",
+      "helpLabel": "Über die Aggregation",
+      "help": "Ohne Aggregation (Rohdaten) liegt jeder Punkt beim Zeitpunkt der Messung; bei 15-Minuten-Aggregation, stündlicher Aggregation, täglicher Aggregation und wöchentlicher Aggregation liegt er am Anfang seines Zeitraums, und bei Wetterquellen ist ein Tag der lokale Tag der Zone. Regen, ET0 und ETc von einem Wetteranbieter, aus den Stundenwerten einer Station oder aus «daily agronomy» sind Summen für diesen Zeitraum, alle anderen Werte sind Mittelwerte. Stündliche Temperatur, Luftfeuchtigkeit und Wind von Open-Meteo sind Werte zum angezeigten Zeitpunkt. Wetterquellen sind höchstens stündlich aufgelöst, «daily agronomy» täglich."
     },
     "preset": {
       "metricLabel": "Metrik über Zonen"
@@ -37,6 +51,15 @@
       "title": "Reihen",
       "search": "Nach Zonen oder Geräten suchen",
       "unknownSite": "Unbekannter Standort",
+      "unassigned": "Nicht zugewiesene Geräte",
+      "emptySource": "Für dieses Gerät sind keine Diagrammkanäle verfügbar.",
+      "otherSupported": "Weitere unterstützte Kanäle",
+      "otherSupportedHelp": "Historische Messwerte sind möglicherweise vorhanden; die Verfügbarkeit wurde nicht geprüft.",
+      "valveEvents": "Ventilereignisse und Ventilsteuerung sind in der Datenansicht nicht verfügbar.",
+      "unsupportedType": "Messwerte dieses Gerätetyps werden in der Datenansicht nicht unterstützt.",
+      "openNetwork": "Netzwerkansicht öffnen",
+      "networkDisabled": "Netzwerkansicht ist auf diesem Gateway deaktiviert.",
+      "networkLoading": "Verfügbarkeit der Netzwerkansicht wird noch geladen.",
       "reason": {
         "unsupported": "Nicht unterstützt",
         "available_no_recent_data": "Keine aktuellen Daten verfügbar"
@@ -66,7 +89,15 @@
     },
     "export": {
       "csv": "CSV exportieren",
-      "png": "PNG exportieren"
+      "png": "PNG exportieren",
+      "allZonesCsv": "CSV für alle Zonen exportieren",
+      "allZonesCsvBusy": "Wird exportiert…",
+      "errors": {
+        "tooLarge": "Dieser Export ist zu gross. Wählen Sie einen kürzeren Zeitraum oder eine gröbere Aggregation.",
+        "busy": "Ein anderer Export läuft. Versuchen Sie es gleich noch einmal.",
+        "invalidRange": "Dieser Zeitraum kann nicht exportiert werden. Prüfen Sie Start- und Enddatum.",
+        "failed": "Der Export ist fehlgeschlagen. Versuchen Sie es erneut."
+      }
     },
     "legend": {
       "label": "Diagrammlegende",
@@ -77,7 +108,8 @@
       "save": "Ansicht speichern",
       "namePlaceholder": "Diese Ansicht benennen",
       "delete": "Ansicht löschen",
-      "empty": "Noch keine gespeicherten Ansichten."
+      "empty": "Noch keine gespeicherten Ansichten.",
+      "confirmDelete": "Gespeicherte Ansicht «{{name}}» löschen?"
     },
     "droppedNotice": "{{count}} Serien konnten nicht geladen werden",
     "correlation": {
@@ -89,7 +121,21 @@
       "zone": "Zone",
       "droppedPairs": "Verworfen",
       "insufficient": "unzureichend (n={{n}})",
+      "ambiguous": "Unterdrückt: Mehr als ein passender Kanal wurde gefunden.",
+      "missingSource": "Unterdrückt: Die Gerätequellen-Identität fehlt.",
       "exploratory": "Nur explorativ — Pearson-r über ausgerichtete Buckets; kein Signifikanztest."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} von {{expected}} h)",
+      "partialDays": " ({{count}} von {{expected}} Tagen)"
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Gateway-Identität aktualisiert. Die Dienste starten in {{count}} s neu.",
+    "chirpstack_bootstrap": "LoRaWAN-Einrichtung abgeschlossen. Die Dienste starten in {{count}} s neu.",
+    "account_link": "Konto verknüpft. Die Dienste starten in {{count}} s neu.",
+    "account_unlink": "Kontoverknüpfung aufgehoben. Die Dienste starten in {{count}} s neu.",
+    "generic": "Die Gateway-Dienste starten in {{count}} s neu.",
+    "in_progress": "Die Gateway-Dienste werden jetzt neu gestartet…"
   }
 }

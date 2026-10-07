@@ -1,9 +1,21 @@
 {
+  "languageSwitcher": {
+    "change": "Cambiar idioma"
+  },
   "cancel": "Cancelar",
+  "close": "Cerrar",
   "loading": "Cargando...",
   "delete": "Eliminar",
   "na": "N/D",
   "retry": "Reintentar",
+  "adminOnly": "Solo administradores",
+  "scope": {
+    "loadError": "No se pudieron cargar los permisos."
+  },
+  "readOnly": {
+    "farm": "Tienes acceso de solo lectura a esta finca. Puedes ver todo aquí; los cambios los realiza el propietario de la finca.",
+    "section": "Estos ajustes los gestiona el propietario de la finca. Tus propias preferencias de visualización de arriba puedes cambiarlas tú."
+  },
   "analysis": {
     "title": "Análisis de datos",
     "axis": {
@@ -27,7 +39,9 @@
       "fifteenMinute": "15 minutos",
       "hourly": "Por hora",
       "daily": "Diaria",
-      "weekly": "Semanal"
+      "weekly": "Semanal",
+      "helpLabel": "Acerca de la agregación",
+      "help": "Sin agregación, cada punto está en el momento de la medición; con agregación de 15 minutos, por hora, diaria o semanal, está al inicio de su periodo, y para las fuentes meteorológicas un día es el día local de la zona. La lluvia, la ET0 y la ETc de un proveedor meteorológico, de los valores horarios de una estación o de «daily agronomy» son totales del periodo; los demás valores son medias. La temperatura, la humedad y el viento horarios de Open-Meteo son valores a la hora indicada. Las fuentes meteorológicas tienen como máximo una resolución horaria, y «daily agronomy» diaria."
     },
     "preset": {
       "metricLabel": "Métrica entre zonas"
@@ -37,6 +51,15 @@
       "title": "Series",
       "search": "Buscar zonas o dispositivos",
       "unknownSite": "Sitio desconocido",
+      "unassigned": "Dispositivos sin asignar",
+      "emptySource": "No hay canales de gráficos disponibles para este dispositivo.",
+      "otherSupported": "Otros canales compatibles",
+      "otherSupportedHelp": "Puede haber muestras históricas; no se ha comprobado la disponibilidad.",
+      "valveEvents": "Los eventos y controles de válvulas no están disponibles en la vista de datos.",
+      "unsupportedType": "Las mediciones de este tipo de dispositivo no son compatibles con la vista de datos.",
+      "openNetwork": "Abrir vista de red",
+      "networkDisabled": "La vista de red está desactivada en esta pasarela.",
+      "networkLoading": "La disponibilidad de la vista de red todavía se está cargando.",
       "reason": {
         "unsupported": "No compatible",
         "available_no_recent_data": "No hay datos recientes disponibles"
@@ -66,7 +89,15 @@
     },
     "export": {
       "csv": "Exportar CSV",
-      "png": "Exportar PNG"
+      "png": "Exportar PNG",
+      "allZonesCsv": "Exportar CSV de todas las zonas",
+      "allZonesCsvBusy": "Exportando…",
+      "errors": {
+        "tooLarge": "Esta exportación es demasiado grande. Elige un periodo más corto o una agregación más amplia.",
+        "busy": "Hay otra exportación en curso. Inténtalo de nuevo en un momento.",
+        "invalidRange": "Este periodo no se puede exportar. Revisa las fechas de inicio y fin.",
+        "failed": "La exportación ha fallado. Inténtalo de nuevo."
+      }
     },
     "legend": {
       "label": "Leyenda del gráfico",
@@ -77,7 +108,8 @@
       "save": "Guardar vista",
       "namePlaceholder": "Nombre esta vista",
       "delete": "Eliminar vista",
-      "empty": "Aún no hay vistas guardadas."
+      "empty": "Aún no hay vistas guardadas.",
+      "confirmDelete": "¿Eliminar la vista guardada «{{name}}»?"
     },
     "droppedNotice": "{{count}} series no se pudieron cargar",
     "correlation": {
@@ -89,7 +121,21 @@
       "zone": "Zona",
       "droppedPairs": "Descartados",
       "insufficient": "insuficiente (n={{n}})",
+      "ambiguous": "Suprimido: se encontró más de un canal candidato.",
+      "missingSource": "Suprimido: falta la identidad de la fuente del dispositivo.",
       "exploratory": "Solo exploratorio — r de Pearson sobre intervalos alineados; no es una prueba de significancia."
+    },
+    "tooltip": {
+      "partialHours": " ({{count}} de {{expected}} h)",
+      "partialDays": " ({{count}} de {{expected}} d)"
     }
+  },
+  "restart": {
+    "gateway_identity_change": "Identidad de la puerta de enlace actualizada. Los servicios se reiniciarán en {{count}} s.",
+    "chirpstack_bootstrap": "Configuración de LoRaWAN completada. Los servicios se reiniciarán en {{count}} s.",
+    "account_link": "Cuenta vinculada. Los servicios se reiniciarán en {{count}} s.",
+    "account_unlink": "Cuenta desvinculada. Los servicios se reiniciarán en {{count}} s.",
+    "generic": "Los servicios de la puerta de enlace se reiniciarán en {{count}} s.",
+    "in_progress": "Los servicios de la puerta de enlace se están reiniciando…"
   }
 }

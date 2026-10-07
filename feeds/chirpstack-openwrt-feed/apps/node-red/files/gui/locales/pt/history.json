@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Histórico",
+      "admin": "Admin",
       "legacyDashboard": "Painel legado",
       "logout": "Terminar sessão"
     },
@@ -18,30 +19,34 @@
       "cardsFailed": "Falha ao carregar os cartões de histórico.",
       "retryCards": "Tentar novamente os cartões"
     },
+    "export": {
+      "open": "Exportar",
+      "title": "Exportar dados"
+    },
     "desktop": {
-      "toolbarTitle": "Barra de ferramentas",
-      "maxPanels": "Até {{count}} painéis de comparação",
-      "singleMode": "Único",
-      "comparisonMode": "Comparação",
-      "addPanel": "Adicionar painel {{title}}",
-      "removePanel": "Remover painel",
-      "panelLimitWarning": "Só é possível mostrar {{count}} painéis de comparação neste gateway local.",
-      "selectedTimestampNone": "Nenhuma data/hora selecionada",
-      "selectedTimestamp": "Data/hora selecionada: {{timestamp}}",
-      "inspectorTitle": "Inspetor",
-      "inspectorPlaceholder": "Selecione uma data/hora ou uma célula do calendário para ver a interpretação, os eventos, a qualidade dos dados e os metadados avançados.",
       "railLabel": "Cartões",
+      "toolbarTitle": "Barra de ferramentas",
       "modeLabel": "Modo de ambiente de trabalho",
       "modeFocus": "Foco",
       "modeCompare": "Comparar",
       "viewSelectorLabel": "Vista do cartão",
       "compareViewSelectorLabel": "Vista de comparação",
       "sourceSelectorLabel": "Fontes",
-      "rangeOverviewLabel": "Vista geral do intervalo de tempo",
       "chartSurfaceLabel": "Gráfico de histórico; use as teclas de seta para deslocar e mais ou menos para ampliar ou reduzir",
       "zoomIn": "Aumentar zoom",
       "zoomOut": "Reduzir zoom",
-      "resetZoom": "Repor zoom"
+      "resetZoom": "Repor zoom",
+      "maxPanels": "Até {{count}} painéis de comparação",
+      "singleMode": "Único",
+      "comparisonMode": "Comparação",
+      "addPanel": "Adicionar painel {{title}}",
+      "removePanel": "Remover painel",
+      "panelLimitWarning": "Só é possível mostrar {{count}} painéis de comparação de cada vez.",
+      "selectedTimestampNone": "Nenhuma data/hora selecionada",
+      "selectedTimestamp": "Data/hora selecionada: {{timestamp}}",
+      "inspectorTitle": "Inspetor",
+      "inspectorPlaceholder": "Selecione uma data/hora ou uma célula do calendário para ver a interpretação, os eventos, a qualidade dos dados e os metadados avançados.",
+      "rangeOverviewLabel": "Vista geral do intervalo de tempo"
     },
     "mobile": {
       "zoneLabel": "Zona",
@@ -113,7 +118,7 @@
       "timelineBrush": "Área visível da linha do tempo",
       "timelineBrushKeyboardHelp": "Use as teclas de seta para deslocar, mais ou menos para ampliar ou reduzir, e Home ou Enter para repor.",
       "aggregationBadge": "Agregação: {{aggregation}}",
-      "placeholderBody": "Os dados do gráfico e do calendário serão carregados aqui quando as APIs de dados do cartão estiverem ativadas.",
+      "placeholderBody": "Os gráficos e o calendário aparecem aqui quando este cartão tiver leituras.",
       "cardDataLoading": "A carregar dados do cartão...",
       "cardDataError": "Falha ao carregar os dados do cartão: {{message}}",
       "cardDataUnknownError": "Erro desconhecido"
@@ -197,11 +202,15 @@
       "emptyBody": "As ações de rega e as janelas de resposta aparecerão aqui quando houver dados de histórico disponíveis.",
       "eventsCount": "{{count}} eventos",
       "eventLabel": {
+        "serviceAction": "Ação de serviço",
         "irrigation": "Evento de rega",
-        "scheduled": "Rega programada",
+        "scheduled": "Irrigação acionada por sensor",
         "manualOverride": "Substituição manual",
         "possibleIneffective": "Possível rega ineficaz",
-        "responseWindow": "Janela de resposta"
+        "responseWindow": "Janela de resposta",
+        "onValveSchedule": "Agendado (na válvula)",
+        "oneTime": "Abertura única",
+        "unexplained": "Aberta na válvula"
       },
       "detail": {
         "duration": "Duração: {{value}}",
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Fontes",
       "menuLabel": "Fontes do cartão"
-    },
-    "export": {
-      "open": "Exportar",
-      "title": "Exportar dados"
     }
   }
 }
