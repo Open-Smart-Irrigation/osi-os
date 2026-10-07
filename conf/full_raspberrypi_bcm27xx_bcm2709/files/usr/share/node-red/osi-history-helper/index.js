@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
+const { deviceSourceId, describeDeviceSource } = require('./device-sources');
 // The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
 // as in the repo; osi-weather-provider requires nothing back, so there is no cycle.
 const { zoneLocations } = require('../osi-weather-provider');
@@ -3202,6 +3203,9 @@ const analysis = createAnalysis({
   soilDepthCm,
   sourceDevicesForCard,
   sourceKeyForCsv,
+  deviceSourceId,
+  describeDeviceSource,
+  filterSoilRowsForSources,
   zoneDateStartIso,
   zoneLocations,
 });
@@ -3211,6 +3215,8 @@ module.exports = {
   ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  deviceSourceId,
+  describeDeviceSource,
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   saveAnalysisView: analysis.saveAnalysisView,
