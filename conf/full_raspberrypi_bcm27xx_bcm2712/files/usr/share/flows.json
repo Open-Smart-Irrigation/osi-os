@@ -3572,13 +3572,13 @@
     "type": "tab",
     "label": "OSI-Server Cloud Integration",
     "disabled": false,
-    "info": "Connects OSI-OS Pi to OSI-Server cloud backend via MQTT TLS.\nRequired env vars: DEVICE_EUI, DEVICE_TYPE, DEVICE_MQTT_PASSWORD, OSI_SERVER_HOST, FIRMWARE_VERSION"
+    "info": "Connects OSI-OS Pi to OSI-Server cloud backend via MQTT TLS.\nRequired env vars: DEVICE_EUI, DEVICE_TYPE, DEVICE_MQTT_PASSWORD, OSI_SERVER_HOST, OSI_CLOUD_BROKER_URL, FIRMWARE_VERSION"
   },
   {
     "id": "ec43625ea99685a6",
     "type": "mqtt-broker",
     "name": "OSI Cloud Broker",
-    "broker": "wss://server.opensmartirrigation.org/mqtt",
+    "broker": "${OSI_CLOUD_BROKER_URL}",
     "port": "443",
     "clientid": "device_${DEVICE_EUI}",
     "autoConnect": true,
