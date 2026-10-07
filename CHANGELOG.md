@@ -7,11 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] — 2026-10-07
+
 Ordered schema migrations `0017__zone_key_fallback_parity.sql` to
 `0070__journal_catalog_v11.sql` (54 migrations) are new since 0.7.0. Two
 new device types: `DRAGINO_SDI12` and `RAK10701_FIELD_TESTER`. The last
 pre-built image was 0.6.5, so a gateway upgraded from that image also takes
-every 0.7.0 entry below.
+every 0.7.0 entry below. Some entries fix behaviour that only builds from
+`main` made between 0.7.0 and this release had; a gateway upgraded from 0.7.0
+never saw those defects.
 
 ### Upgrade notes
 - **Cloud before edge.** This edge emits sync events that an OSI Server
@@ -24,7 +30,7 @@ every 0.7.0 entry below.
   Before upgrading a linked gateway, deploy an OSI Server revision whose
   `EdgeSyncService.java` passes `scripts/verify-sync-op-parity.js` (set
   `OSI_SERVER_EDGE_SYNC_SERVICE` to that file); osi-server `main` at
-  `51de5829` passes. A rejected event stays rejected; recovery is the manual
+  `b6752126` passes. A rejected event stays rejected; recovery is the manual
   path under Fixed below. Gateways that are not linked to a cloud are not
   affected.
 - **Gateways before the cloud for the 32-hex actor id.** The contract now
@@ -43,11 +49,31 @@ every 0.7.0 entry below.
   recreates the gateway-attribution triggers, `0069` rebuilds the journal V2
   queue and replay tables and copies their rows) and need the writers-stopped
   state that only the deploy provides.
-- **Journal catalog v11, cloud first.** The cloud compares the catalog
-  version and hash a gateway advertises with the catalog it vendors, and
-  disables cloud journal capture for a gateway whose catalog differs. Deploy
-  an OSI Server revision that vendors catalog v11 before upgrading a linked
-  gateway, or cloud capture stays off for that gateway until it does.
+- **Journal catalog v11 and migrations 0069/0070: cloud first, then
+  gateways.** The cloud compares the catalog version and hash a gateway
+  advertises with the catalog it vendors, and disables cloud journal capture
+  for a gateway whose catalog differs. Deploy an OSI Server revision that
+  vendors catalog v11 (osi-server `main` at `b6752126` does), then upgrade
+  the gateways soon after: until a gateway runs this release it still
+  advertises catalog v10, and cloud capture for it reports a catalog mismatch
+  (`gateway_catalog_mismatch`). The cloud accepts
+  the journal V2 contract fingerprint of both releases, so replication keeps
+  running in between. `0069` rebuilds two journal tables during the deploy
+  (see the previous note); `0070` only adds catalog rows.
+- **Cloud MQTT broker URL.** `node-red.init` and `flows.json` ship
+  together: the new flows read the broker from `OSI_CLOUD_BROKER_URL`, which
+  only the new init sets. `deploy.sh` and images install both; a flows.json
+  copied by hand under an old init, with `osi-server.cloud.mqtt_broker_url`
+  empty, leaves MQTT disconnected (`Connection failed to broker:
+  device_<EUI>@mqtt://${OSI_CLOUD_BROKER_URL}:443` every 15 s). A gateway
+  with `server_host` set to another host and no `mqtt_broker_url` switches
+  its MQTT to `wss://<server_host>/mqtt` at the first start after the
+  upgrade. `mqtt_broker_url` wins when set; it is the cloud's
+  `MQTT_DEVICE_PUBLIC_BROKER_URL` at link time, so each cloud's environment
+  must name its own host. A malformed `server_host` is logged as a WARN
+  (shape only) and the default broker is used, as for an unlinked gateway.
+  Before rolling out, compare per gateway (production first) the predicted
+  URL with the host in its last `Connected to broker` log line.
 - A gateway whose database has no `schema_migrations` ledger (installed from
   the 0.6.5 image and never upgraded since) takes the pre-ledger path on its
   first deploy: `repair-sync-outbox-v2.js`, then `baseline-existing-db.js`,
@@ -57,7 +83,7 @@ every 0.7.0 entry below.
   the backup directory has free space of twice the database size plus 128 MB
   (`MIGRATE_MIN_FREE_MARGIN_MB`). Pre-migration backups are pruned to the
   newest three (`MIGRATE_BACKUP_KEEP`).
-- A gateway that once ran a private product line, and whose ledger numbers
+- A gateway that once ran a customer line, and whose ledger numbers
   collide with main's, is reconciled automatically by
   `scripts/reconcile-ledger-numbering.js` during the deploy; the deploy
   aborts before the payload flip when a row cannot be proven equivalent.
@@ -92,21 +118,57 @@ every 0.7.0 entry below.
   `osi-bootstrap`, which provisions ChirpStack at the next boot;
   `/etc/init.d/osi-bootstrap start` provisions at once. Do not run
   `chirpstack-bootstrap.js` directly: it writes no stamp, so the next boot
-  runs it again and creates a second API key.
-- **Cloud MQTT broker URL.** `node-red.init` and `flows.json` ship
-  together: the new flows read the broker from `OSI_CLOUD_BROKER_URL`, which
-  only the new init sets. `deploy.sh` and images install both; a flows.json
-  copied by hand under an old init, with `osi-server.cloud.mqtt_broker_url`
-  empty, leaves MQTT disconnected (`Connection failed to broker:
-  device_<EUI>@mqtt://${OSI_CLOUD_BROKER_URL}:443` every 15 s). A gateway
-  with `server_host` set to another host and no `mqtt_broker_url` switches
-  its MQTT to `wss://<server_host>/mqtt` at the first start after the
-  upgrade. `mqtt_broker_url` wins when set; it is the cloud's
-  `MQTT_DEVICE_PUBLIC_BROKER_URL` at link time, so each cloud's environment
-  must name its own host. A malformed `server_host` is logged as a WARN
-  (shape only) and the default broker is used, as for an unlinked gateway.
-  Before rolling out, compare per gateway (production first) the predicted
-  URL with the host in its last `Connected to broker` log line.
+  runs it again and creates a second API key. The one exception is the
+  Kiwi and Clover profile repair in the next note.
+- **Kiwi and Clover profile repair runs during the deploy.** On a gateway
+  that is already provisioned, `deploy.sh` runs
+  `chirpstack-bootstrap.js --repair-soil-profiles`: it attaches the Tektelic
+  codec to a Kiwi or Clover profile that has none, creates the
+  `OSI CLOVER Sensor` profile with its UCI key and env line where Clover was
+  unset or shared the field tester's profile, and changes nothing else. A
+  codec already on a profile is left alone, and a second deploy writes
+  nothing. A failed repair is logged as a `WARN` and does not fail the
+  deploy. Rerun it by hand only after that `WARN`, and only as
+  `node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles`, never
+  the copy under `/usr/share/node-red/` (an older image ignores the flag and
+  runs a full provisioning pass).
+- **Operator action for a Clover registered before the repair.** The deploy
+  does not move an existing Clover device off the field tester's profile.
+  Re-point each one with
+  `node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles --repoint-clover-device=<DevEUI>`
+  (repeatable). When a hand-run repair created the Clover profile, Node-RED
+  needs a restart to pick up the new profile id:
+  `/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60`.
+  The full procedure is in `.claude/skills/osi-live-ops-runbook/SKILL.md`.
+- **Check `recorded_at` before the upgrade.** History readers now select
+  rows by the instant SQLite reads from `recorded_at`, so both stored shapes
+  (ISO UTC with `Z`, and the `+00:00` offset that earlier builds wrote for
+  WATERMARK, SDI-12 and UC512 rows) are included. A row whose `recorded_at`
+  SQLite cannot read as a time falls out of every export and series. Count
+  such rows on the gateway first:
+  `sqlite3 /data/db/farming.db "SELECT COUNT(*) FROM device_data WHERE strftime('%s', recorded_at) IS NULL;"`.
+  A non-zero count means those rows will be missing after the upgrade.
+- **Raw export timestamps change shape.** The per-zone raw CSV export and
+  the raw series print every timestamp as ISO UTC with milliseconds and `Z`
+  (`2026-10-06T08:35:00.000Z`). Before, rows from WATERMARK, SDI-12 and
+  UC512 nodes printed the `+00:00` form. A script that parses raw exports as
+  text must accept the `Z` form. Stored rows are not rewritten, because a
+  rewrite would queue one cloud correction per row.
+- **WATERMARK readings stored without a value.** A gateway that ran a
+  WATERMARK build from `main` before this release stored no tension value
+  for readings flagged `unsettled` (see Added). `scripts/repair-watermark-unsettled.js`
+  fills them. The deploy never runs it; stage it on the gateway with
+  `lib/osi-migrate/runner-iface.js` in the same relative layout (the
+  script header shows how). It runs as a dry run by default with the
+  database opened read-only, and `--apply` fills only rows with no value
+  whose only problem was the flag, in one transaction. It refuses while
+  sync events for those rows are still unsent, because such an event would
+  overwrite the corrected value in the cloud with an empty one.
+- **Gateway clock and cloud valve commands.** The gateway now answers a
+  cloud valve open `EXPIRED` once the command's expiry has passed by the
+  gateway clock, so a gateway whose clock runs ahead refuses opens that are
+  still valid. Stop commands are never refused. Check the gateway's time
+  source after the upgrade if cloud opens come back `EXPIRED`.
 
 ### Known limitations
 - Journal entries written by a user whose gateway-local id is 32 hex digits
@@ -118,15 +180,91 @@ every 0.7.0 entry below.
   per-request values in shared flow context, so overlapping requests of
   these kinds can exchange values (overlapping device adds can cross).
   Tracked in #377.
+- A Clover on the repaired profile stores temperature, humidity and light,
+  but not yet soil moisture or soil temperature. With the vendor codec, the
+  MQTT telemetry message carries no Kiwi soil tension because the field
+  names differ; the stored readings and the sync to the cloud are correct.
+- The cloud receives WATERMARK tension values from unsettled readings but
+  not the `unsettled` flag itself, which stays on the gateway.
+- GUI strings added in this release ship in English in the Luganda locale
+  until a native speaker translates them (eleven new ones from the Data
+  view among them); `docs/i18n/pending-luganda-translations.md` lists them.
 
 ### Added
-- **Ledger cutover rehearsal** (`scripts/rehearse-ledger-cutover.js`): runs
-  the schema cutover of a gateway on an earlier lineage's ledger numbering
-  against a copy of its database (reconcile, migrate, verify head,
-  devices-rebuild and boot-node rehearsals, integrity, schema against the
-  seed, per-table row counts and content hashes, and a second pass that must
-  change nothing) and writes a JSON report with each step's result and
-  duration. Workstation tool; nothing on the gateway changes.
+- **WATERMARK soil tension on the Dragino LSN50**
+  (`0061__watermark_lsn50.sql`): FPort 11 profile 3 frames are validated
+  (anything else on that port is rejected with a raw row), resistance is
+  converted to temperature-compensated kPa, raw readings stay in the
+  edge-local `watermark_readings` table and canonical kPa lands in
+  `device_data`. Calibration routes (GET, PUT, DELETE), probe display,
+  calibration and depth settings on the LSN50 card. The node needs custom
+  LSN50 firmware that is not shipped in this repository. WATERMARK values are
+  recorded and displayed only and do not drive automated irrigation: the
+  scheduler skips every `device_data` row linked to `watermark_readings`.
+  A reading whose only problem is the node's `unsettled` flag (two samples
+  further apart than the firmware tolerance, common on a wet channel) is
+  converted and stored like any other, appears in the card, history, charts
+  and CSV export, and keeps the "Reading not settled" status. A reading with
+  a real fault (invalid sample, open circuit, short, out of range, missing
+  calibration or temperature) stores no value and shows its own status.
+- **WATERMARK cloud parity** (`0068__watermark_cloud_parity.sql`): calibration
+  rows sync as events and in bootstrap and force-sync snapshots. The edge
+  accepts four protected cloud commands (`SET_WATERMARK_CALIBRATION`,
+  `DELETE_WATERMARK_CALIBRATION`, `SET_CHAMELEON_CONFIG`,
+  `UPSERT_DEVICE_SOIL_DEPTHS`) through `osi-command-ledger` with an exact-base
+  check, command-id and effect-key dedupe, and one transaction per command,
+  behind the capabilities `watermark_v1`, `chameleon_config_commands_v1` and
+  `device_soil_depth_commands_v1`.
+- Water-status pill on current SWT readings (Wet under 20 kPa, Moist 20 to
+  50 kPa, Dry above 50 up to 300 kPa) on the KIWI, SDI-12 and zone water
+  cards and in the LSN50 Chameleon and WATERMARK sections; no status for
+  missing, stale, faulted or out-of-range readings.
+- **Scoped multi-user access** (`0044__scoped_access_schema.sql`,
+  `0045__scoped_access_backfill.sql`): account-wide reads, grant-gated writes,
+  admin screens for users and grants. Off by default
+  (`osi-server.cloud.scoped_access_enabled=0`); with it off, auth routes do
+  not load the scope helper.
+- **All-zones history export and saved-view delete.**
+  `GET /api/history/export.csv?scope=allZones` returns one CSV over every
+  zone the caller may read: their own zones, or every zone with scoped access
+  on. Units and columns are the same as the per-zone export. The export is
+  bounded to 200,000 rows and to the per-granularity ranges, and only one
+  runs at a time (otherwise 413 or 429 with a suggestion).
+  `DELETE /api/analysis/views/:id` deletes one of the caller's saved views.
+  The analysis page gets an "Export all zones CSV" action with a busy state
+  and error messages, and a confirmed delete for saved views. Daily CSV
+  exports, the per-zone one included, are now limited to 3,660 days, and CSV
+  text cells that start with a tab or a carriage return are neutralised like
+  formula prefixes. Hourly and daily CSV exports (both routes) aggregate one
+  local month at a time, so a long range no longer holds every raw reading
+  in memory at once.
+- **Every device card value opens its history.** WATERMARK probe rows
+  (unsettled readings included) and soil temperature, every SDI-12 value
+  per depth (VWC, VIC, soil temperature, EC, tension), the LoRain
+  temperature, today and rate values, and the STREGA Gen1 enclosure reading
+  open the same history view as the older cards, with the same cue (dotted
+  underline, hover colour, focus ring). A card offers only keys the
+  gateway's history API serves, so a click never opens an empty chart.
+- Durable history batches (`0051__durable_history_batch.sql`), installation
+  identity with a v2 offline verifier keyed on the installation UUID
+  (`0052`, `0053`), and per-device installation-location and
+  radio-configuration revisions synced as protected events (`0054` to
+  `0056`).
+- **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
+  `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
+  and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
+  registry that includes Sentek EnviroSCAN and TriSCAN (scaled frequency to
+  VWC), multi-segment uplink reassembly with a durable quarantine, per-depth
+  VWC, VIC, soil temperature and EC channels, a commissioning state machine
+  and Sentek acquisition-recipe deployment. Cloud `SET_SDI12_IDENTIFY`
+  commands dispatch to the identify path.
+- **RAK10701 field tester** (`RAK10701_FIELD_TESTER`,
+  `0060__add_rak10701_field_tester_type.sql`): its own ChirpStack
+  application; the gateway answers the tester's fPort 1 frame with the
+  six-byte coverage reply, and the Network page shows the measured track with
+  GeoJSON and CSV export. Reply and capture run only with radio capture
+  switched on (`osi-server.cloud.radio_capture_enabled=1`), which is off by
+  default.
 - **Journal catalog v11 and plot-group snapshots**
   (`0069__journal_v2_plot_group_snapshot.sql`,
   `0070__journal_catalog_v11.sql`). Catalog v11 adds `full_record@11` with a
@@ -155,31 +293,15 @@ every 0.7.0 entry below.
   to a station or a plot group. Capture closes with Escape, the activity
   grid is one tab stop moved with the arrow keys, and the detail preference
   falls back to the least detailed template a layout supports.
-- **Dragino SDI-12 soil node** (`DRAGINO_SDI12`, migrations
-  `0026__sdi12_columns.sql` to `0030__sdi12_recipe_deployments.sql`): codec
-  and ChirpStack profile, `aI!` auto-identify over FPort 100, a probe-profile
-  registry that includes Sentek EnviroSCAN and TriSCAN (scaled frequency to
-  VWC), multi-segment uplink reassembly with a durable quarantine, per-depth
-  VWC, VIC, soil temperature and EC channels, a commissioning state machine
-  and Sentek acquisition-recipe deployment. Cloud `SET_SDI12_IDENTIFY`
-  commands dispatch to the identify path.
-- **WATERMARK soil tension on the Dragino LSN50**
-  (`0061__watermark_lsn50.sql`): FPort 11 profile 3 frames are validated
-  (anything else on that port is rejected with a raw row), resistance is
-  converted to temperature-compensated kPa, raw readings stay in the
-  edge-local `watermark_readings` table and canonical kPa lands in
-  `device_data`. Calibration routes (GET, PUT, DELETE), probe display,
-  calibration and depth settings on the LSN50 card. The node needs custom
-  LSN50 firmware that is not shipped in this repository. WATERMARK values are
-  recorded and displayed only and do not drive automated irrigation: the
-  scheduler skips every `device_data` row linked to `watermark_readings`.
-- **RAK10701 field tester** (`RAK10701_FIELD_TESTER`,
-  `0060__add_rak10701_field_tester_type.sql`): its own ChirpStack
-  application; the gateway answers the tester's fPort 1 frame with the
-  six-byte coverage reply, and the Network page shows the measured track with
-  GeoJSON and CSV export. Reply and capture run only with radio capture
-  switched on (`osi-server.cloud.radio_capture_enabled=1`), which is off by
-  default.
+- **Field Journal** (`0018__field_journal.sql` to
+  `0021__journal_plot_lookup_indexes.sql`, `0031__journal_catalog_v2.sql` to
+  `0043__journal_v2_media.sql`): typed field activities against plots and
+  zones, catalog v10, plot context and crop cycles, capture and desktop GUI,
+  exports, and cloud-primary replication over its own channel
+  (`osi-journal-replication`) with media caching under
+  `osi-server.cloud.journal_media_root`. On by default; replication needs a
+  linked OSI Server that offers Journal V2 and accepts this gateway's journal
+  schema.
 - **STREGA valve control** (`0022__valve_control.sql` to
   `0025__valve_settings_sync_triggers.sql`): a valve panel across zones;
   weekly schedules compiled into the valve's own scheduler (Gen1 FPort 14 to
@@ -190,6 +312,12 @@ every 0.7.0 entry below.
   `valve_schedule_pushes`; a gateway time zone in `app_settings`; enclosure
   temperature and humidity telemetry. The threshold scheduler is now labelled
   "Trigger-based irrigation"; its behaviour is unchanged.
+- **Valve sync contract**: resources `VALVE_SCHEDULE`, `VALVE_SETTINGS`,
+  `VALVE_RUNTIME` and `VALVE_ACTUATION`, and cloud commands
+  `UPSERT_VALVE_SCHEDULE`, `DELETE_VALVE_SCHEDULE`, `UPSERT_VALVE_SETTINGS`,
+  `SET_VALVE_SCHEDULER_STATUS`, `RESEND_VALVE_PLAN` and
+  `CANCEL_VALVE_ACTUATION` (which fails closed when ChirpStack is
+  unavailable).
 - **Provider weather and daily agronomy** (`0062__weather_provider_store.sql`
   to `0067__zone_daily_agronomy_sync.sql`): hourly weather per farm location,
   which the gateway fetches over the internet every 30 minutes from
@@ -200,20 +328,6 @@ every 0.7.0 entry below.
   `zone_daily_agronomy`, a Water tab with seven days of demand, and provider,
   station and agronomy series in the Data view. A SenseCAP S2120 assigned to a
   zone supplies hourly station inputs.
-- **Valve sync contract**: resources `VALVE_SCHEDULE`, `VALVE_SETTINGS`,
-  `VALVE_RUNTIME` and `VALVE_ACTUATION`, and cloud commands
-  `UPSERT_VALVE_SCHEDULE`, `DELETE_VALVE_SCHEDULE`, `UPSERT_VALVE_SETTINGS`,
-  `SET_VALVE_SCHEDULER_STATUS`, `RESEND_VALVE_PLAN` and
-  `CANCEL_VALVE_ACTUATION` (which fails closed when ChirpStack is
-  unavailable).
-- **WATERMARK cloud parity** (`0068__watermark_cloud_parity.sql`): calibration
-  rows sync as events and in bootstrap and force-sync snapshots. The edge
-  accepts four protected cloud commands (`SET_WATERMARK_CALIBRATION`,
-  `DELETE_WATERMARK_CALIBRATION`, `SET_CHAMELEON_CONFIG`,
-  `UPSERT_DEVICE_SOIL_DEPTHS`) through `osi-command-ledger` with an exact-base
-  check, command-id and effect-key dedupe, and one transaction per command,
-  behind the capabilities `watermark_v1`, `chameleon_config_commands_v1` and
-  `device_soil_depth_commands_v1`.
 - **Versioned zone sync** (`0046__zone_insert_outbox.sql` to
   `0050__weather_station_zone_backfill.sql`): a zone insert emits
   `ZONE_UPSERTED`; versioned `UPSERT_ZONE`, `DELETE_ZONE` and
@@ -224,25 +338,6 @@ every 0.7.0 entry below.
   `UPSERT_DEVICE_NAME` behind `entity_name_commands_v1`, one name rule in
   `osi-entity-name` for every write path, the ChirpStack device name updated
   best effort, and an inline name editor on eight cards.
-- **Field Journal** (`0018__field_journal.sql` to
-  `0021__journal_plot_lookup_indexes.sql`, `0031__journal_catalog_v2.sql` to
-  `0043__journal_v2_media.sql`): typed field activities against plots and
-  zones, catalog v10, plot context and crop cycles, capture and desktop GUI,
-  exports, and cloud-primary replication over its own channel
-  (`osi-journal-replication`) with media caching under
-  `osi-server.cloud.journal_media_root`. On by default; replication needs a
-  linked OSI Server that offers Journal V2 and accepts this gateway's journal
-  schema.
-- **Scoped multi-user access** (`0044__scoped_access_schema.sql`,
-  `0045__scoped_access_backfill.sql`): account-wide reads, grant-gated writes,
-  admin screens for users and grants. Off by default
-  (`osi-server.cloud.scoped_access_enabled=0`); with it off, auth routes do
-  not load the scope helper.
-- Durable history batches (`0051__durable_history_batch.sql`), installation
-  identity with a v2 offline verifier keyed on the installation UUID
-  (`0052`, `0053`), and per-device installation-location and
-  radio-configuration revisions synced as protected events (`0054` to
-  `0056`).
 - Terra zone-selection commands apply atomically and acknowledge with the
   full correlation envelope the cloud expects.
 - Repairable sync rejections (`0059__sync_rejection_recovery.sql`): rejected
@@ -253,10 +348,14 @@ every 0.7.0 entry below.
   counts.
 - Per-event exponential backoff for retryable outbox failures (60 s after the
   first failure, doubling to a 1 h cap) instead of a resend every cycle.
-- Water-status pill on current SWT readings (Wet under 20 kPa, Moist 20 to
-  50 kPa, Dry above 50 up to 300 kPa) on the KIWI, SDI-12 and zone water
-  cards and in the LSN50 Chameleon and WATERMARK sections; no status for
-  missing, stale, faulted or out-of-range readings.
+- Live gateway identity convergence: `osi-identityd` reconciles provisional
+  boot identity to concentratord's authoritative EUI, persists it through the
+  shared helper, warns operators for 60 seconds, and restarts Node-RED once so
+  `DEVICE_EUI`, MQTT credentials/client ID, sync triggers, link requests, and
+  sync requests switch together.
+- Global GUI restart banner: `/api/system/stats` now exposes a filtered
+  `restartPending` object and the React GUI shows a localized countdown or
+  in-progress message before the daemon restarts Node-RED.
 - Settings → Modules: Data view, Network, Gateway hub and Field Journal can
   be switched off per gateway (`app_settings`), with defaults from
   `osi-module-defaults`. The Network module is shown only when a RAK10701
@@ -267,10 +366,22 @@ every 0.7.0 entry below.
 - Persistent system log: `node-red.init` points syslog at
   `/data/log/osi-system.log` (two files of 2 MiB), so boot-node failures
   survive a power cycle.
+- **Ledger cutover rehearsal** (`scripts/rehearse-ledger-cutover.js`): runs
+  the schema cutover of a gateway on an earlier lineage's ledger numbering
+  against a copy of its database (reconcile, migrate, verify head,
+  devices-rebuild and boot-node rehearsals, integrity, schema against the
+  seed, per-table row counts and content hashes, and a second pass that must
+  change nothing) and writes a JSON report with each step's result and
+  duration. Workstation tool; nothing on the gateway changes.
 - Operator tools: `scripts/reconcile-ledger-numbering.js`,
   `scripts/restamp-fingerprints.js --report`,
   `scripts/requeue-rejected-outbox.js` (dry run by default), the
-  `osi-sync-protocol-state` CLI, and the offline deploy bundle scripts.
+  `osi-sync-protocol-state` CLI, the offline deploy bundle scripts,
+  `scripts/repair-watermark-unsettled.js` (dry run by default),
+  `scripts/rehearse-history-queue-drain.js` (runs the history correction
+  drain against a copy of a database), and the
+  `--repair-soil-profiles` and `--repoint-clover-device=<DevEUI>` modes of
+  `chirpstack-bootstrap.js`.
 - CI and developer tooling: workflows for doc hygiene, Field Journal, journal
   catalog parity, ui-core vendor parity and the test inventory
   (`scripts/verify-test-inventory.js` fails on a test file no workflow can
@@ -289,30 +400,40 @@ every 0.7.0 entry below.
   vendored ui-core GUI primitives; an offline WATERMARK dry-down analyzer; a
   presentation simulator (`npm run demo:build`) built separately from the
   gateway GUI.
-- Live gateway identity convergence: `osi-identityd` reconciles provisional
-  boot identity to concentratord's authoritative EUI, persists it through the
-  shared helper, warns operators for 60 seconds, and restarts Node-RED once so
-  `DEVICE_EUI`, MQTT credentials/client ID, sync triggers, link requests, and
-  sync requests switch together.
-- Global GUI restart banner: `/api/system/stats` now exposes a filtered
-  `restartPending` object and the React GUI shows a localized countdown or
-  in-progress message before the daemon restarts Node-RED.
-- **All-zones history export and saved-view delete.**
-  `GET /api/history/export.csv?scope=allZones` returns one CSV over every
-  zone the caller may read: their own zones, or every zone with scoped access
-  on. Units and columns are the same as the per-zone export. The export is
-  bounded to 200,000 rows and to the per-granularity ranges, and only one
-  runs at a time (otherwise 413 or 429 with a suggestion).
-  `DELETE /api/analysis/views/:id` deletes one of the caller's saved views.
-  The analysis page gets an "Export all zones CSV" action with a busy state
-  and error messages, and a confirmed delete for saved views. Daily CSV
-  exports, the per-zone one included, are now limited to 3,660 days, and CSV
-  text cells that start with a tab or a carriage return are neutralised like
-  formula prefixes. Hourly and daily CSV exports (both routes) aggregate one
-  local month at a time, so a long range no longer holds every raw reading
-  in memory at once.
 
 ### Changed
+- An assigned LSN50 counts as a soil source when it is a Chameleon node, a
+  WATERMARK node, or has none of the dendrometer, temperature, rain-gauge and
+  flow-meter modes; a plain LSN50's third SWT channel is no longer shown.
+- **Command ledger safety.** A cloud command that can move a valve is
+  answered `EXPIRED` and not sent to the valve once its expiry has passed;
+  `CLOSE` and `CANCEL_VALVE_ACTUATION` are exempt and always run, so a stop
+  is never refused because of the gateway clock. A command without an
+  expiry (from an older cloud) runs as before. Each command is acknowledged
+  to the cloud once: queued answers that disagree about one command are
+  held back and dead-lettered after 20 attempts instead of blocking the
+  queue. When the cloud answers one command twice, the gateway keeps it
+  pending (`AMBIGUOUS_RESULT`) and never sends the valve command again.
+- The heartbeat carries `sync_rejected_recent`, the count of rejections in
+  the last 24 h, and `health_state` uses it instead of the all-time count.
+  Health and heartbeat also report `sync_dirty_rejected` (history rows the
+  cloud refused and the gateway set aside) and `command_ack_dead_lettered`
+  (command acknowledgements given up after 20 attempts).
+- Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
+  both revision resources in `resources.schema.json`
+  (`DeviceInstallationLocationRevision`, `DeviceRadioConfigurationRevision`)
+  accept 32 lower-case hex digits as well as the hyphenated UUID, matched
+  exactly and never converted; `watermark-cloud-parity-v1.json` gains the
+  `gateway-local-hex-actor` binding vector and a list of rejected actor forms.
+- The cloud sync token is refreshed once less than half its lifetime remains,
+  instead of only in its last 24 h.
+- Rejected outbox rows are pruned after 14 days.
+- A local zone create or delete, or an applied cloud zone command, flushes the
+  outbox at once instead of waiting for the 30 s tick; only one flush runs at a
+  time.
+- Every ChirpStack gRPC call carries a deadline: 20 s by default,
+  `OSI_CHIRPSTACK_GRPC_DEADLINE_MS` to override.
+- Cloud command registration also maps `MILESIGHT_UC512`.
 - Journal API and capture with scoped access off: a `plot_uuid` filter on a
   plot the caller does not own, or that does not exist, answers 404
   `scope_not_found` instead of an empty list; `station_code` and
@@ -322,15 +443,6 @@ every 0.7.0 entry below.
 - A non-admin farm owner loses the farm-wide right when another account
   links the gateway later: the farm owner is always the latest linked
   account, the one sync uses.
-- Sync contract: `actor_user_uuid` in `commands.schema.json` and the actor on
-  both revision resources in `resources.schema.json`
-  (`DeviceInstallationLocationRevision`, `DeviceRadioConfigurationRevision`)
-  accept 32 lower-case hex digits as well as the hyphenated UUID, matched
-  exactly and never converted; `watermark-cloud-parity-v1.json` gains the
-  `gateway-local-hex-actor` binding vector and a list of rejected actor forms.
-- An assigned LSN50 counts as a soil source when it is a Chameleon node, a
-  WATERMARK node, or has none of the dendrometer, temperature, rain-gauge and
-  flow-meter modes; a plain LSN50's third SWT channel is no longer shown.
 - GUI: a language switcher in the dashboard header; dialogs keep keyboard
   focus inside and close on Escape; sensor chart axes and tooltips use the
   app date format; a newly created zone scrolls into view with focus; valve
@@ -349,31 +461,85 @@ every 0.7.0 entry below.
 - The migration runner skips an `ADD COLUMN` whose column already exists with
   a matching definition, and its fingerprints ignore the gateway EUI literal
   in trigger fallbacks (normalizer v3).
-- The cloud sync token is refreshed once less than half its lifetime remains,
-  instead of only in its last 24 h.
-- The heartbeat carries `sync_rejected_recent`, the count of rejections in
-  the last 24 h, and `health_state` uses it instead of the all-time count.
-- Rejected outbox rows are pruned after 14 days.
-- Every ChirpStack gRPC call carries a deadline: 20 s by default,
-  `OSI_CHIRPSTACK_GRPC_DEADLINE_MS` to override.
-- A local zone create or delete, or an applied cloud zone command, flushes the
-  outbox at once instead of waiting for the 30 s tick; only one flush runs at a
-  time.
-- Cloud command registration also maps `MILESIGHT_UC512`.
 - `osi-bootstrap`, account link, and account unlink publish restart requests
   for `osi-identityd` instead of starting their own Node-RED restart paths.
+- `firmware_version` UCI default bumped `0.7.0` → `0.8.0`; the GUI login
+  screen, `README.md`, the `node-red.init` and `flows.json` fallbacks and
+  `scripts/verify-sync-flow.js` updated to match.
 
 ### Fixed
-- MQTT (heartbeat, telemetry, status, schedule and command ACKs) goes to the
-  cloud the gateway is linked to. The "OSI Cloud Broker" node had the default
-  cloud's URL as a literal, so a gateway linked to another cloud without
-  `osi-server.cloud.mqtt_broker_url` set published to the default cloud,
-  which refused its credentials, while HTTPS sync worked. The node now reads
-  `${OSI_CLOUD_BROKER_URL}`; `node-red.init` sets it from
-  `osi-server.cloud.mqtt_broker_url`, else `wss://<server_host>/mqtt`, else
-  the previous default `wss://server.opensmartirrigation.org/mqtt`, and logs
-  `cloud MQTT broker <url> source=<key>`. Unlinked gateways and gateways
-  linked to the default cloud connect exactly as before.
+- **pF never below 0.** Soil water tension is stored and synced in kPa, and
+  pF is derived for display. A reading between 0 and 0.1 kPa used to show a
+  negative pF in the GUI and the zone CSV export (-0.301 for 0.05 kPa). It
+  now shows `0.00 pF` and exports 0; a missing reading still shows no value,
+  and kPa values, stored data and sync payloads are unchanged.
+- Scoped access: the owner of a soil sensor that is in no zone, or an
+  enabled admin of the gateway, can set its depths and WATERMARK calibration.
+  Before, no rule covered a sensor without a zone and both were refused.
+  Researchers, viewers and disabled admins are still refused.
+- History time ranges: rows stored with a `+00:00` offset could be ordered
+  wrongly at a range bound, because readers compared the timestamp text.
+  Exports, aggregates, rollups, raw, dendrometer, rain and data-view series
+  now compare the actual time, and the device writer for WATERMARK, SDI-12
+  and UC512 stores ISO UTC with `Z` like the other writers.
+- **Data view finds every device the caller may read.** Discovery
+  enumerated only devices with a history card, so LoRain rain gauges and
+  unassigned devices were missing. It now lists every authorized device:
+  with scoped access off, the caller's zones, their devices and the
+  caller's unassigned devices; with it on, the account's zones and claimed
+  unassigned devices. A disabled account gets 403. Saved selectors keep
+  working. Card history for rain and flow interval channels reads raw rows
+  at every range, so the total shown equals the stored total (a 7-day
+  LoRain history showed a third of the stored rain before).
+- **History corrections to the cloud keep flowing.** The queue that sends
+  corrected history rows stopped for a whole table when one key could never
+  complete. A key whose row no longer exists is now dropped and logged (a
+  read error or a locked database never drops one), and a row the cloud
+  rejects is set aside as `rejected` with its reason while the rest of the
+  table continues; the next change to that row queues it again. Keys queued
+  under an earlier gateway identifier complete, radio rows included.
+- Valves: the card shows the state the valve reported, not the commanded
+  target; deleting a valve clears its on-valve plan; cloud schedule commands
+  are keyed by schedule UUID and valve; a soft-deleted schedule revives on a
+  matching upsert; a one-time open keeps its dispatch intent across a restart
+  and is never sent twice (`0057__valve_once_dispatch_intents.sql`); archived
+  actuation events have stable IDs; push state breaks timestamp ties by row
+  id; a cloud STREGA command runs the expectation writer once.
+- Valve schedules after a backward step of the gateway clock: reverting a
+  weekday to an earlier plan pushed nothing, so the valve kept the later
+  plan, and the push state could show acknowledged for a slot whose current
+  push was still queued. The schedule push ledger is now read in the order
+  rows were written, not by timestamp.
+- Overlapping requests on the manual valve route
+  (`POST /api/valve/:deveui`), the zone schedule route
+  (`PUT /api/irrigation-zones/:id/schedule`) and zone delete could exchange
+  target, duration and response, or leave a deleted zone's schedule enabled:
+  request values now travel on the message. A manual or scheduled valve open
+  no longer acknowledges the last unrelated cloud command as applied.
+- Protected cloud commands (WATERMARK calibration, Chameleon configuration,
+  soil depths), rename commands, the Terra owner check and local
+  installation-location and radio edits accept the 32-hex form of a
+  gateway-local user id, which a gateway gives its first admin and backfilled
+  users; before, such a user's commands were refused and its local edits
+  failed with a 400.
+- **Kiwi and Clover device profiles.** Provisioning created the Kiwi profile
+  without a payload codec and put Clover on the field tester's profile,
+  which has none. Node-RED drops an uplink that ChirpStack did not decode, so
+  a Kiwi reported only where someone had attached a codec by hand, and a
+  Clover never reported. New installs create both profiles with the Tektelic
+  codec (shipped unmodified from the vendor repository the ChirpStack feed
+  pins), Clover with its own `OSI CLOVER Sensor` profile. `deploy.sh`
+  repairs gateways that are already provisioned (see Upgrade notes).
+- UC512 and SDI-12 uplinks wrote no `device_data` row because the writer
+  called `db.prepare` on a database facade that has none.
+- SenseCAP S2120 wind gust read the wrong measurement; STREGA Gen2 battery
+  percent was derived from a raw voltage. Missing STREGA climate and battery
+  values stay null instead of becoming 0.
+- A republished ChirpStack uplink no longer creates a second `device_data`
+  row (bounded in-memory dedup on `deduplicationId`).
+- A ChirpStack 4.12 unset key read back as 32 zeros is treated as unset.
+- Journal replication and the SDI-12 recipe poll stay quiet on gateways and
+  clouds without those capabilities.
 - Deploy: Node-RED is never restarted on the old payload after a migration
   has run, which had let the previous boot node rebuild `devices` against the
   migrated schema and cascade-delete `device_data`. The boot node's `devices`
@@ -387,21 +553,16 @@ every 0.7.0 entry below.
   a later failure the deploy restores the retained flows and GUI pair when the
   schema is still compatible with it; the ledger reconciliation probe
   compares every applied row, not only the lowest.
-- UC512 and SDI-12 uplinks wrote no `device_data` row because the writer
-  called `db.prepare` on a database facade that has none.
-- SenseCAP S2120 wind gust read the wrong measurement; STREGA Gen2 battery
-  percent was derived from a raw voltage. Missing STREGA climate and battery
-  values stay null instead of becoming 0.
-- A republished ChirpStack uplink no longer creates a second `device_data`
-  row (bounded in-memory dedup on `deduplicationId`).
-- A ChirpStack 4.12 unset key read back as 32 zeros is treated as unset.
-- Valves: the card shows the state the valve reported, not the commanded
-  target; deleting a valve clears its on-valve plan; cloud schedule commands
-  are keyed by schedule UUID and valve; a soft-deleted schedule revives on a
-  matching upsert; a one-time open keeps its dispatch intent across a restart
-  and is never sent twice (`0057__valve_once_dispatch_intents.sql`); archived
-  actuation events have stable IDs; push state breaks timestamp ties by row
-  id; a cloud STREGA command runs the expectation writer once.
+- MQTT (heartbeat, telemetry, status, schedule and command ACKs) goes to the
+  cloud the gateway is linked to. The "OSI Cloud Broker" node had the default
+  cloud's URL as a literal, so a gateway linked to another cloud without
+  `osi-server.cloud.mqtt_broker_url` set published to the default cloud,
+  which refused its credentials, while HTTPS sync worked. The node now reads
+  `${OSI_CLOUD_BROKER_URL}`; `node-red.init` sets it from
+  `osi-server.cloud.mqtt_broker_url`, else `wss://<server_host>/mqtt`, else
+  the previous default `wss://server.opensmartirrigation.org/mqtt`, and logs
+  `cloud MQTT broker <url> source=<key>`. Unlinked gateways and gateways
+  linked to the default cloud connect exactly as before.
 - Sync: rejected events no longer count as delivery successes, and the
   account-link page shows rejected events and the re-authentication path when
   the token has expired; the outbox marker treats a missing result or status
@@ -420,24 +581,10 @@ every 0.7.0 entry below.
   `sync_version` for dendrometer daily, zone recommendation and zone
   environment rows; the dendrometer node's fallback table DDL includes
   `sync_version`, which had crashed the first rewrite on an older database.
-- Overlapping requests on the manual valve route
-  (`POST /api/valve/:deveui`), the zone schedule route
-  (`PUT /api/irrigation-zones/:id/schedule`) and zone delete could exchange
-  target, duration and response, or leave a deleted zone's schedule enabled:
-  request values now travel on the message. A manual or scheduled valve open
-  no longer acknowledges the last unrelated cloud command as applied.
-- Protected cloud commands (WATERMARK calibration, Chameleon configuration,
-  soil depths), rename commands, the Terra owner check and local
-  installation-location and radio edits accept the 32-hex form of a
-  gateway-local user id, which a gateway gives its first admin and backfilled
-  users; before, such a user's commands were refused and its local edits
-  failed with a 400.
 - Gateway attribution triggers fall back to the persisted link identifier,
   and linking commits account state and blank gateway identifiers in one
   transaction (`0058__gateway_eui_fallback.sql`).
 - Account link works against a cloud that predates installation identity.
-- Journal replication and the SDI-12 recipe poll stay quiet on gateways and
-  clouds without those capabilities.
 - API: assigning an unknown DevEUI to a zone answered nothing (the client
   hung); deleting an unknown device answers 404; zone time zones are
   validated.
@@ -465,17 +612,33 @@ every 0.7.0 entry below.
   token; in 0.7.0 both answered without one.
 - `PUT /api/irrigation-zones/:zone_id/timezone` changes only a zone the
   caller owns; in 0.7.0 any signed-in user could change any zone.
-- With scoped access on, only the owner of a journal plot group's plots
-  may create or change the group. A grant on another user's plot no longer
-  lets the grantee create or rewrite that user's group (#418).
-- With scoped access on, a farm-wide journal entry (no plot, no zone) is
-  created, finalized, changed or voided only by the farm owner (the account
-  the gateway is linked to the cloud with) or an enabled admin, from the
-  gateway GUI and from cloud commands alike. Others get 403 (404 for an
-  existing entry; `scope_denied` for a cloud command), and the capture screen
-  no longer offers them the Farm-wide choice. Farm-wide finals that another
-  account wrote earlier become read-only for that account; its own
-  farm-wide drafts stay editable.
+- **Scoped access** (applies only with
+  `osi-server.cloud.scoped_access_enabled=1`; with it off nothing changes):
+  - Account link and unlink (`POST` and `DELETE /api/account-link`), Force
+    Sync (`POST /api/sync/force`), the manual rollup run
+    (`POST /api/history/rollups/run`), reboot, fan control and gateway
+    settings need an enabled admin; before, any signed-in member could call
+    them. The GUI disables the reboot, fan and time-zone controls for
+    non-admins with an "Admin only" hint. The cloud force-sync command and
+    the rollup timer work as before.
+  - Improvement requests and the journal catalog refuse a disabled account
+    before reading or writing anything.
+  - A farm-wide journal entry (no plot, no zone) is created, finalized,
+    changed or voided only by the farm owner (the account the gateway is
+    linked to the cloud with) or an enabled admin, from the gateway GUI and
+    from cloud commands alike. Others get 403 (404 for an existing entry;
+    `scope_denied` for a cloud command), and the capture screen no longer
+    offers them the Farm-wide choice. Farm-wide finals that another account
+    wrote earlier become read-only for that account; its own farm-wide
+    drafts stay editable. An entry that belongs to a zone but to no plot
+    also needs the grant on that zone. Another user's entry answers like a
+    missing one.
+  - Only the owner of a journal plot group's plots may create or change the
+    group. A grant on another user's plot no longer lets the grantee create
+    or rewrite that user's group (#418).
+  - Replacing a weather station's zones changes only assignments to zones
+    the caller owns or holds a grant on. A zone outside the caller's scope
+    that is already assigned stays as it is; naming a new one is refused.
 - GUI: cached data and in-flight writes belong to one login session. After a
   logout and login as another user in the same tab, the second user no
   longer sees data cached for the first, and the first user's chained writes
