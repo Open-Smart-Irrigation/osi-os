@@ -73,6 +73,27 @@ function sourceKey(cardType, deveui) {
   return `${cardType}-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
 }
 
+// 72 h of 20-minute LoRain uplinks at 0.5 mm each: 216 rows, 108 mm.
+const RAIN_NOW_MS = Date.parse('2026-01-10T12:00:00.000Z');
+const RAIN_DEVEUI = 'A840410000000021';
+function seedIntervalRain(db) {
+  db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES (?, 'Rain gauge', 'AQUASCOPE_LORAIN', 2, 1, '2026-01-01', '2026-01-01')`).run(RAIN_DEVEUI);
+  const insert = db.prepare('INSERT INTO device_data (deveui, recorded_at, rain_mm_delta, rain_tips_delta) VALUES (?, ?, 0.5, 1)');
+  for (let index = 0; index < 216; index += 1) {
+    insert.run(RAIN_DEVEUI, new Date(RAIN_NOW_MS - (index * 20 + 10) * 60 * 1000).toISOString());
+  }
+}
+
+function storedRainTotal(db, hours) {
+  const start = new Date(RAIN_NOW_MS - hours * 60 * 60 * 1000).toISOString();
+  return db.prepare('SELECT SUM(rain_mm_delta) AS total FROM device_data WHERE deveui = ? AND recorded_at >= ?').get(RAIN_DEVEUI, start).total;
+}
+
+function pointTotal(points) {
+  return Math.round(points.reduce((total, point) => total + point.value, 0) * 1000) / 1000;
+}
+
 for (const profile of PROFILES) {
   const helper = require(path.join(ROOT, 'conf', profile, 'files/usr/share/node-red/osi-history-helper'));
   const router = require(path.join(ROOT, 'conf', profile, 'files/usr/share/node-red/osi-history-router'));
@@ -217,6 +238,25 @@ for (const profile of PROFILES) {
       assert.match(routeResponse.result.payload, /swt_3/);
       assert.match(routeResponse.result.payload, new RegExp(sourceKey('soil', 'A840410000000012')));
       assert.doesNotMatch(routeResponse.result.payload, new RegExp(sourceKey('soil', 'A840410000000011')));
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: card history of an interval rain channel keeps the stored total beyond 24 h`, async () => {
+    const db = seedScopedDb();
+    seedIntervalRain(db);
+    try {
+      await helper.runRollupJob(facadeDb(db), { nowMs: RAIN_NOW_MS, exportDir: null });
+      for (const field of ['rain_mm_delta', 'rain_tips_delta']) {
+        for (const hours of [48, 168]) {
+          const points = await helper.legacySensorHistory(facadeDb(db), { deveui: RAIN_DEVEUI, field, hours, nowMs: RAIN_NOW_MS });
+          const expected = field === 'rain_mm_delta' ? storedRainTotal(db, hours) : storedRainTotal(db, hours) * 2;
+          assert.equal(pointTotal(points), expected, `${field} over ${hours} h`);
+        }
+      }
+      assert.equal(storedRainTotal(db, 48), 72);
+      assert.equal(storedRainTotal(db, 168), 108);
     } finally {
       db.close();
     }

@@ -1989,6 +1989,8 @@ async function aggregateLegacyDendroHistory(db, options = {}) {
     .sort((left, right) => String(left.t).localeCompare(String(right.t)));
 }
 
+const LEGACY_INTERVAL_FIELDS = new Set(['rain_mm_delta', 'rain_tips_delta', 'flow_liters_delta', 'flow_pulses_delta']);
+
 async function legacySensorHistory(db, options = {}) {
   const hoursRaw = toFiniteNumber(options.hours);
   const hours = hoursRaw !== null && hoursRaw > 0 ? hoursRaw : 24;
@@ -2009,6 +2011,9 @@ async function legacySensorHistory(db, options = {}) {
     throw error;
   }
   if (hours <= 24) return rawLegacySensorHistory(db, scopedOptions);
+  // Rollups keep no bucket sum, and their latest value is one uplink's
+  // interval, so interval channels stay on raw rows at every range.
+  if (LEGACY_INTERVAL_FIELDS.has(canonicalHistoryField(field))) return rawLegacySensorHistory(db, scopedOptions);
 
   const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
   if (!key) return rawLegacySensorHistory(db, scopedOptions);
