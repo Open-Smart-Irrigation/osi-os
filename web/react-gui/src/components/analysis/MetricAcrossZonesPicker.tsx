@@ -27,7 +27,7 @@ function availableMetricOptions(channels: AnalysisCatalogEntry[]): MetricOption[
   const seen = new Set<string>();
   for (const channel of channels) {
     // Weather sources would add identical series for zones on one location.
-    if (channel.sourceKind !== 'device' || channel.availability !== 'available') continue;
+    if (channel.sourceKind !== 'device' || channel.availability !== 'available' || channel.zoneId === null) continue;
     const channelKey = canonicalize(channel.channelKey);
     if (seen.has(channelKey)) continue;
     seen.add(channelKey);

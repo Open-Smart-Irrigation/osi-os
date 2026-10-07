@@ -75,7 +75,7 @@ describe('buildTimeSeriesOption', () => {
       buildTimeSeriesOption({ panels: groupByUnit(s), series: s, normalize: false, multiAxis: false }),
       buildSmallMultiplesOption(s, false),
       buildCorrelationOption({
-        zonePairs: [{ zoneId: 1, label: 'Zone 1', points: [[62.2545, 3]] }],
+        zonePairs: [{ groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[62.2545, 3]] }],
         channelXLabel: 'Soil tension',
         channelYLabel: 'Stem change',
       }),

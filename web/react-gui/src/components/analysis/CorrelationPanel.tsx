@@ -116,13 +116,17 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
           </thead>
           <tbody className="divide-y divide-[var(--border)]">
             {rows.map((group) => (
-              <tr key={group.zoneId ?? 'pooled'}>
+              <tr key={group.groupId}>
                 <td className="px-3 py-2 font-medium text-[var(--text)]">{group.label}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{group.n}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{group.droppedPairs}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">
                   {group.suppressed
-                    ? t('analysis.correlation.insufficient', { n: group.n })
+                    ? group.suppressionReason === 'ambiguous'
+                      ? t('analysis.correlation.ambiguous')
+                      : group.suppressionReason === 'missing_device_source'
+                        ? t('analysis.correlation.missingSource')
+                        : t('analysis.correlation.insufficient', { n: group.n })
                     : group.r?.toFixed(2)}
                 </td>
               </tr>

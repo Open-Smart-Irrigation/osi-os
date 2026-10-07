@@ -42,7 +42,9 @@ export function toTidyCsv(
   for (const item of series) {
     const entry = catalogById.get(item.seriesId);
     const site = entry?.hubEui ?? item.resolved.hubEui ?? '';
-    const zone = entry?.zoneName ?? String(item.resolved.zoneId);
+    const zone = item.resolved.zoneId === null
+      ? 'Unassigned devices'
+      : (entry?.zoneName ?? String(item.resolved.zoneId));
     const label = entry?.displayName ?? item.label;
     for (const point of item.points) {
       const row = [

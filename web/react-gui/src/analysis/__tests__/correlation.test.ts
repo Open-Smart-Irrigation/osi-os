@@ -65,6 +65,12 @@ function mkSeries(
 }
 
 describe('zonePairs', () => {
+  it('pairs unassigned channels only within the same device source', () => {
+    const x = { ...series(1, 'soil', [1]), resolved: { ...series(1, 'soil', [1]).resolved, zoneId: null, deviceSourceId: 'device-a' } };
+    const y = { ...series(1, 'dendro', [2]), resolved: { ...series(1, 'dendro', [2]).resolved, zoneId: null, deviceSourceId: 'device-b' } };
+    expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([]);
+  });
+
   it('labels groups by the catalog zone name, falling back to "Zone {id}"', () => {
     const series = [
       mkSeries('x', 'dendro_stem_change_um', 'um', { zoneId: 9 }),
@@ -81,7 +87,7 @@ describe('zonePairs', () => {
     const y = timestampedSeries(1, 'dendro', [['01', 20], ['02', 30], ['03', 40]]);
 
     expect(zonePairs([x, y], 'soil', 'dendro')).toEqual([
-      { zoneId: 1, label: 'Zone 1', points: [[2, 20], [3, 30]] },
+      { groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[2, 20], [3, 30]] },
     ]);
 
     const result = computeCorrelation([x, y], 'soil', 'dendro', { minSamples: 1 });

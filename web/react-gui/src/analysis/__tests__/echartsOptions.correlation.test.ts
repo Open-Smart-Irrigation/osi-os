@@ -6,8 +6,8 @@ describe('buildCorrelationOption', () => {
   it('builds one scatter series per zone with named axes', () => {
     const option = buildCorrelationOption({
       zonePairs: [
-        { zoneId: 1, label: 'Zone 1', points: [[1, 2], [3, 4]] },
-        { zoneId: 2, label: 'Zone 2', points: [[5, 6]] },
+        { groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[1, 2], [3, 4]] },
+        { groupId: 'zone:2', zoneId: 2, label: 'Zone 2', points: [[5, 6]] },
       ],
       channelXLabel: 'Soil tension',
       channelYLabel: 'Dendro shrinkage',

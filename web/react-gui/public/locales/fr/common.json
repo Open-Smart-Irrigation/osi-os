@@ -51,6 +51,15 @@
       "title": "Séries",
       "search": "Rechercher des zones ou appareils",
       "unknownSite": "Site inconnu",
+      "unassigned": "Unassigned devices",
+      "emptySource": "No chart channels are available for this device.",
+      "otherSupported": "Other supported channels",
+      "otherSupportedHelp": "Historical samples may exist; availability has not been checked.",
+      "valveEvents": "Valve events and controls are not available in Data view.",
+      "unsupportedType": "Measurements from this device type are not supported in Data view.",
+      "openNetwork": "Open Network view",
+      "networkDisabled": "Network view is disabled on this gateway.",
+      "networkLoading": "Network view availability is still loading.",
       "reason": {
         "unsupported": "Non pris en charge",
         "available_no_recent_data": "Aucune donnée récente disponible"
@@ -112,6 +121,8 @@
       "zone": "Zone",
       "droppedPairs": "Ignorés",
       "insufficient": "insuffisant (n={{n}})",
+      "ambiguous": "Supprimé : plusieurs canaux candidats ont été trouvés.",
+      "missingSource": "Supprimé : l’identité de la source de l’appareil est absente.",
       "exploratory": "Exploratoire uniquement — r de Pearson sur des buckets alignés ; pas un test de signification."
     },
     "tooltip": {

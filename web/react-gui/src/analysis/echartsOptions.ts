@@ -294,6 +294,7 @@ export function buildCorrelationOption(input: CorrelationOptionInput): Record<st
     }],
     yAxis: [{ type: 'value', name: input.channelYLabel, nameLocation: 'middle', nameRotate: 90, nameGap: 48 }],
     series: input.zonePairs.map((zone) => ({
+      id: zone.groupId,
       name: zone.label,
       type: 'scatter',
       symbolSize: 7,

@@ -23,6 +23,17 @@ const catalog = new Map<string, AnalysisCatalogEntry>([
 ]);
 
 describe('toTidyCsv', () => {
+  it('labels unassigned null-zone samples explicitly even without catalogue metadata', () => {
+    const unassigned: AnalysisSeries = {
+      ...series,
+      seriesId: 'unassigned-rain',
+      resolved: { ...series.resolved, zoneId: null, deviceSourceId: 'device-rain-1', channelKey: 'rain_mm_delta' },
+      label: 'Rain gauge - Rain',
+      points: [{ ...series.points[0], value: 6 }],
+    };
+    expect(toTidyCsv([unassigned], new Map()).split('\n')[1]).toContain(',Unassigned devices,');
+  });
+
   it('emits one row per bucket with header and null as empty', () => {
     const csv = toTidyCsv([series], catalog);
     const lines = csv.split('\n');
