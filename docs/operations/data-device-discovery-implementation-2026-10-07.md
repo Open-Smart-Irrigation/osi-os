@@ -33,3 +33,10 @@ A later review found a shared source-identity edge case: separator variants of t
 ## Carried branch
 
 `fix/data-device-coverage-main` adds `scripts/test-history-source-guards.js` (eight tests, both profiles, registered in CI). Two of them fail if the history helper stops exporting `soilDepthCm` (the extracted history route returns 500 instead of a soil profile) or if a filtered zone export stops skipping a device whose eligible channel list is empty (hourly and daily mixed-device exports fail). The other tests pin WATERMARK evidence, Chameleon SWT3 and the raw fallback for soil cards with an SWT3-ineligible LSN50 source. Plan Task 6, the adaptation for a separate deployment line, is no longer needed: that line now follows main.
+
+## Known limits
+
+- Card history beyond 24 h reads raw rows for interval channels (`rain_mm_delta`, `rain_tips_delta`, `flow_liters_delta`, `flow_pulses_delta`). Rollups store min, max, mean and latest but no sum, so a bucket's latest value is one uplink's interval and not the bucket total. `scripts/test-history-source-guards.js` checks that 48 h and 7 d card histories equal the stored total.
+- LoRain tip totals can exceed rainfall divided by 0.5 mm. When the LoRain writer marks an uplink `duplicate_or_out_of_order` or `error`, it clears `rain_mm_delta` but keeps `rain_tips_delta`, and Data view sums both channels as stored. `rain_mm_delta` is the authoritative rainfall. The tip value should be cleared in the writer; that ingest change is outside this work.
+- Saved views that selected a zone-device channel that the device type never writes (for example rain or flow on a Clover, flow or pipe pressure on an S2120) now resolve as `dropped: unknown`. Before, they returned an empty series. Data view counts them in its existing "series could not be loaded" notice. No stored values are lost, because those channels never had any.
+- Data view sums `rain_mm_delta` per bucket for every device type. The zone CSV export sums it only for LoRain and writes the mean for other rain-gauge sources. That export behaviour predates this work.
