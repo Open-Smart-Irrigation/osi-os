@@ -121,8 +121,8 @@
       "zone": "Ekitundu",
       "droppedPairs": "Ebisuliddwa",
       "insufficient": "tekimala (n={{n}})",
-      "ambiguous": "Kisiddwa: wasangiddwa omukutu ogusukka mu gumu.",
-      "missingSource": "Kisiddwa: endagamuntu y’ekyuma ebula.",
+      "ambiguous": "Suppressed: more than one candidate channel was found.",
+      "missingSource": "Suppressed: the device source identity is missing.",
       "exploratory": "Kya kugezesa kyokka — Pearson r ku buckets ezitereezeddwa; si kugezesa kwa significance."
     },
     "tooltip": {

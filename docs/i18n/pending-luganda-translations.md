@@ -211,6 +211,16 @@ Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the data
 source test's `PENDING_HUMAN_LUGANDA` set. A human Luganda pass
 must drop each key from that set and from this table in the same change.
 
+## `common.json` — correlation suppression reasons for device sources
+
+| Keys | Reason |
+|---|---|
+| `analysis.correlation.ambiguous`, `analysis.correlation.missingSource` (2 keys in `common.json`) | Added by the data-device discovery view (2026-10-07). de-CH/es/fr/it/pt carry translations. No human Luganda pass has reviewed them, so `lg` keeps the English source text. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the
+correlation test's `PENDING_HUMAN_LUGANDA` set. A human Luganda pass must drop
+each key from that set and from this table in the same change.
+
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

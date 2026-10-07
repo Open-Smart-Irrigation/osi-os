@@ -144,3 +144,31 @@ test('the new data source tray messages are translated outside the Luganda fallb
     }
   }
 });
+
+test('the correlation suppression reasons for device sources keep the Luganda fallback', () => {
+  const keys = ['correlation.ambiguous', 'correlation.missingSource'];
+  // lg ships the English text until a human pass; a translated key leaves this
+  // set and docs/i18n/pending-luganda-translations.md in the same change.
+  const PENDING_HUMAN_LUGANDA = new Set(keys);
+  const pick = (tree: unknown, key: string) => key.split('.').reduce<unknown>(
+    (node, part) => (node && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
+    tree,
+  );
+  const analysisOf = (language: string) => JSON.parse(readFileSync(join(localesRoot, language, 'common.json'), 'utf8')).analysis;
+  const english = analysisOf('en');
+  for (const language of ['en', 'de-CH', 'fr', 'it', 'es', 'pt', 'lg']) {
+    const analysis = analysisOf(language);
+    for (const key of keys) {
+      const value = pick(analysis, key);
+      const source = pick(english, key);
+      assert.equal(typeof value, 'string', `${language} analysis.${key} is missing`);
+      assert.ok((value as string).trim().length > 0, `${language} analysis.${key} is empty`);
+      if (language === 'lg' && PENDING_HUMAN_LUGANDA.has(key)) {
+        assert.equal(value, source, `lg analysis.${key} changed; drop it from PENDING_HUMAN_LUGANDA and from docs/i18n/pending-luganda-translations.md`);
+      }
+      if (language !== 'en' && language !== 'lg') {
+        assert.notEqual(value, source, `${language} analysis.${key} is untranslated`);
+      }
+    }
+  }
+});
