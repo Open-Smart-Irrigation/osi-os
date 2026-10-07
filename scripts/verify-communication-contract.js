@@ -94,7 +94,10 @@ for (const relativePath of platformFlowPaths) {
 // from the value node-red.init derives from this gateway's UCI. A literal URL
 // here sends a gateway linked to another cloud's MQTT to the wrong host.
 const cloudBrokerPlaceholder = '${OSI_CLOUD_BROKER_URL}';
-for (const relativePath of platformFlowPaths.slice(0, 2)) {
+// bcm2708's flows have no cloud broker (only a local one).
+const cloudBrokerFlowPaths = platformFlowPaths.filter((p) => /_bcm2712\/|_bcm2709\//.test(p));
+if (cloudBrokerFlowPaths.length !== 2) fail('expected the bcm2712 and bcm2709 flows.json paths for the cloud broker check');
+for (const relativePath of cloudBrokerFlowPaths) {
   const brokers = parseFlow(relativePath)
     .filter((node) => node.type === 'mqtt-broker' && node.name === 'OSI Cloud Broker');
   if (brokers.length !== 1) {
