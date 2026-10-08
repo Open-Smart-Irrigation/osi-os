@@ -1106,9 +1106,11 @@ if (silentCatchBaseline) {
   // 87: sync-health honesty (fix/sync-health-honesty) -- sync-outbox-mark's error-path
   // DB-close catch(_){} gains a visible node.warn while the node stops counting terminally
   // rejected events as delivery successes: 88 -> 87.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 87 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 87,
-    'silent-catch baseline records 87 for both maintained profiles',
-    'silent-catch baseline must be 87 for both maintained profiles');
+  // 86: session check on the reference-tree route -- dendro-ref-tree-fn's error-path
+  // DB-close catch(_){} gains a visible node.warn while the node gets its verifyBearer: 87 -> 86.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 86 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 86,
+    'silent-catch baseline records 86 for both maintained profiles',
+    'silent-catch baseline must be 86 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1595,9 +1597,13 @@ if (sizeAllowances) {
   // stack's flow changes touch disjoint nodes except sync-init-fn, whose two changes sit on
   // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc is
   // re-written from the same tree (1616019).
-  expectCondition(sizeAllowances.total_allowance?.delta === 35601,
-    'size total allowance: exact cumulative delta 35601',
-    'size total allowance: expected exact cumulative delta 35601');
+  // 35603: session check on the sensor export, today-liters and reference-tree routes.
+  // origin/main stood 1640381 (24362 above the committed baseline 1616019); this change
+  // measures origin/main 1640381 -> HEAD 1651622 = +11241, so the baseline plus the delta
+  // must cover 24362 + 11241 = 35603. The baseline doc is unchanged.
+  expectCondition(sizeAllowances.total_allowance?.delta === 35603,
+    'size total allowance: exact cumulative delta 35603',
+    'size total allowance: expected exact cumulative delta 35603');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

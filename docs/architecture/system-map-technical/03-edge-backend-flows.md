@@ -233,7 +233,8 @@ have their own delivery ledger, `valve_schedule_pushes`.
 ### Field testing, Download Sensor Data, Simulations, Dendro Live Sim
 
 RAK10701 field-tester ingest and CSV export (`GET /download-fieldtest`);
-`device_data` CSV export (`GET /download-sensordata`); developer-only
+`device_data` CSV export (`GET /download-sensordata`, session required in both
+flag states); developer-only
 uplink/command simulators (fake KIWI/dendro uplinks, 10-minute dendro sim).
 
 ## Shared helper modules
