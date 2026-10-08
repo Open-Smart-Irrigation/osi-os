@@ -9,25 +9,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 - **The raw sensor export, the valve litres read and the reference-tree switch
-  need a signed-in session with scoped access off.** With
-  `OSI_SCOPED_ACCESS` off, `GET /download-sensordata` (every `device_data` row
-  as CSV) and `GET /api/v1/devices/:deveui/today-liters` answered without any
-  token, and `PUT /api/devices/:deveui/reference-tree` accepted any
-  `Authorization` header that started with `Bearer `. Node-RED listens on
-  port 1880 on every interface, so anyone who could reach the gateway could
-  download its data. All three now check the session token the way the history and export
-  routes beside them do, in both flag states, and answer 401 without one. This
-  is a deliberate change for gateways with the flag off: a script or bookmark
-  that fetched `/download-sensordata` without logging in now gets 401 and has
-  to send `Authorization: Bearer <token>` from `POST /auth/login`. The
-  dashboard already sends the session on both routes it calls (litres and
-  reference tree) and does not call the sensor export. With the flag on, the
-  answer without a session is unchanged (401); a signed-in session on the
-  export and litres routes now works on gateways that keep the token secret in
-  `/data/db/osi_auth_token_secret` (the usual case), where it used to get 500.
-  The other routes were checked the same way: with the flag off, only the login
-  and registration routes, the CORS preflights, `GET /api/catalog` (the static
-  device-type list) and `GET /api/system/features` answer without a session.
+  need a signed-in session with scoped access off.** With `OSI_SCOPED_ACCESS`
+  off, `GET /download-sensordata` (every `device_data` row as CSV) and
+  `GET /api/v1/devices/:deveui/today-liters` answered without any token, and
+  `PUT /api/devices/:deveui/reference-tree` accepted any `Authorization`
+  header that started with `Bearer `. Node-RED listens on port 1880 on every
+  interface, so anyone who could reach the gateway could download its data
+  without logging in. All three now check the session token the way the
+  history and export routes beside them do, in both flag states, and answer
+  401 without one. This is a deliberate change for gateways with the flag off:
+  a script or bookmark that fetched `/download-sensordata` without logging in
+  now gets 401 and has to send `Authorization: Bearer <token>` from
+  `POST /auth/login`. The dashboard already sends the session on both routes
+  it calls (litres and reference tree) and does not call the sensor export.
+  With the flag on, the answer without a session is unchanged (401); a
+  signed-in session on the export and litres routes now works on gateways that
+  keep the token secret in `/data/db/osi_auth_token_secret` (the usual case),
+  where it used to get 500. The other routes were checked the same way: with
+  the flag off, only the login and registration routes, the CORS preflights,
+  `GET /api/catalog` (the static device-type list) and
+  `GET /api/system/features` answer without a session. **This narrows the
+  exposure; it does not close it.** With the flag off, `POST /auth/register`
+  still creates an account for anyone who can reach the gateway, and that
+  account's session reaches all three routes. Closing that needs scoped access
+  on, or registration closed once the first account exists (follow-up).
 
 ---
 
