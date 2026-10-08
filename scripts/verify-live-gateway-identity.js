@@ -1601,9 +1601,12 @@ if (sizeAllowances) {
   // origin/main stood 1640381 (24362 above the committed baseline 1616019); this change
   // measures origin/main 1640381 -> HEAD 1651622 = +11241, so the baseline plus the delta
   // must cover 24362 + 11241 = 35603. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 35603,
-    'size total allowance: exact cumulative delta 35603',
-    'size total allowance: expected exact cumulative delta 35603');
+  // 36403: history tail cursor (sync-history-mark moves the cursor only on backfill/tail
+  // answers and only forward). origin/main 1651622 -> HEAD 1652422 = +800, so the baseline
+  // plus the delta must cover 35603 + 800 = 36403. The baseline doc is unchanged.
+  expectCondition(sizeAllowances.total_allowance?.delta === 36403,
+    'size total allowance: exact cumulative delta 36403',
+    'size total allowance: expected exact cumulative delta 36403');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

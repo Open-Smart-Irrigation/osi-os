@@ -7,6 +7,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **History upload position no longer jumps.** A linked gateway uploads its
+  history to the cloud in order and remembers how far the cloud has
+  confirmed. The confirmation of a repair or correction batch also moved
+  that position. A repair of an old reading moved it back, so the gateway
+  sent every newer reading again (the cloud recognised them as duplicates).
+  A correction of a newer reading moved it forward, so readings in between
+  were skipped, and only the periodic history comparison could bring them
+  back. Now only the ordered upload moves the position, and only forward. A
+  position that an earlier build already moved past unsent readings is not
+  moved back; those readings still arrive through the history comparison.
+  Refs #432.
+
 ### Security
 - **The raw sensor export, the valve litres read and the reference-tree switch
   need a signed-in session with scoped access off.** With `OSI_SCOPED_ACCESS`
