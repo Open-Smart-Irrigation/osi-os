@@ -157,6 +157,135 @@ test('a correction batch is sent in ascending row id order whatever the queue or
   assert.deepEqual(Array.from(built.payload.rows, (row) => Number(row.payload.id)), [999, 1000, 1001, 6129]);
 });
 
+// The tail cursor (last_acked_id / last_acked_key) records how far the ordered
+// stream has been acknowledged. Only backfill and tail answers may move it, and
+// only forward. A repair, correction or derived batch carries arbitrary rows: its
+// ACK below the cursor would make the tail re-send everything above it, and its
+// ACK above the cursor would make the tail skip rows it never sent.
+function cursorRow(db, table) {
+  return db.prepare('SELECT last_acked_id, last_acked_key, state FROM sync_history_cursors WHERE table_name=?').get(table);
+}
+
+function lateAck(table, phase, boundary) {
+  const batchId = 'late-' + phase + '-' + table;
+  return {
+    statusCode: 200,
+    _historyBatch: { batchId, tableName: table, phase, dirtyKeys: [], dirtyRowKeysByHistoryKey: {} },
+    payload: Object.assign({ batchId, tableName: table, phase, durableMirrorConfirmed: true, results: [] }, boundary)
+  };
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: repair and correction ACKs leave the tail cursor in place and the tail resumes right after it`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    const cursor = seed(db);
+    const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+    for (const id of [584, 1000, 1001, 1002, 1200]) insert.run(id, SENSOR, `2026-08-13T00:${String(id % 60).padStart(2, '0')}:00.000Z`);
+    cursor.run('device_data', '1000', null, '1000', null);
+    link(db);
+    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    dirty(db, 'device_data', key(584), 'repair', T_DEAD);
+    await h.tick();
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 1000, 'a repair ACK below the cursor does not rewind it');
+    dirty(db, 'device_data', key(1200), 'correction', '2026-10-05T09:00:00.000Z');
+    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    await h.tick();
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 1000, 'a correction ACK above the cursor does not advance it');
+    assert.deepEqual(statusCounts(db, 'device_data'), { done: 2 });
+    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    await h.tick();
+    const batches = h.cloud.batches.filter((batch) => batch.tableName === 'device_data');
+    assert.deepEqual(batches.map((batch) => batch.phase), ['repair', 'correction', 'tail']);
+    assert.deepEqual(batches[2].keys, [key(1001), key(1002), key(1200)], 'the tail sends every row above the cursor, none skipped');
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 1200);
+  });
+
+  test(`${profile}: derived ACKs below and above a key cursor leave it in place`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    const cursor = seed(db);
+    const daily = db.prepare('INSERT INTO dendrometer_daily(deveui,date,mds_um,twd_um,stress_level,computed_at) VALUES(?,?,30.5,12.25,?,?)');
+    daily.run(DENDROS[0], '2026-07-01', 'low', '2026-07-01T23:00:00.000Z');
+    const current = `DENDRO_DAILY|${DENDROS[0]}|2026-10-01`;
+    cursor.run('dendrometer_daily', null, current, null, current);
+    link(db);
+    const h = createHarness({ db, profile, lastTable: 'dendrometer_readings', env: { DEVICE_EUI: GATEWAY } });
+    dirty(db, 'dendrometer_daily', `DENDRO_DAILY|${DENDROS[0]}|2026-07-01`, 'derived', T_DEAD);
+    await h.tick();
+    assert.equal(cursorRow(db, 'dendrometer_daily').last_acked_key, current, 'an older derived ACK does not rewind the key cursor');
+    daily.run(DENDROS[0], '2026-12-01', 'low', '2026-12-01T23:00:00.000Z');
+    h.memory.set('history_sync_last_table', 'dendrometer_readings');
+    await h.tick();
+    assert.equal(cursorRow(db, 'dendrometer_daily').last_acked_key, current, 'a newer derived ACK does not advance the key cursor');
+    assert.deepEqual(statusCounts(db, 'dendrometer_daily'), { done: 2 });
+    assert.deepEqual(h.cloud.batches.filter((batch) => batch.tableName === 'dendrometer_daily').map((batch) => batch.phase), ['derived', 'derived']);
+  });
+
+  test(`${profile}: a tail ACK advances the cursor and a late older tail ACK does not move it back`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    const cursor = seed(db);
+    const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+    for (const id of [1001, 1002]) insert.run(id, SENSOR, `2026-08-13T00:${String(id % 60).padStart(2, '0')}:00.000Z`);
+    cursor.run('device_data', '1000', null, '1000', null);
+    const daily = db.prepare('INSERT INTO dendrometer_daily(deveui,date,mds_um,twd_um,stress_level,computed_at) VALUES(?,?,30.5,12.25,?,?)');
+    for (const date of ['2026-07-02', '2026-07-03']) daily.run(DENDROS[0], date, 'low', `${date}T23:00:00.000Z`);
+    // Seeded in the tail query's cursor form (deveui|date); the cloud answers the prefixed history key.
+    cursor.run('dendrometer_daily', null, `${DENDROS[0]}|2026-07-01`, null, `${DENDROS[0]}|2026-07-01`);
+    link(db);
+    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    await h.tick();
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 1002);
+    await h.invoke('sync-history-mark', lateAck('device_data', 'tail', { ackedThroughId: 1000, ackedThroughKey: key(1000) }));
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 1002, 'a late numeric tail ACK does not rewind');
+    h.memory.set('history_sync_last_table', 'dendrometer_readings');
+    await h.tick();
+    const newest = `DENDRO_DAILY|${DENDROS[0]}|2026-07-03`;
+    assert.equal(cursorRow(db, 'dendrometer_daily').last_acked_key, newest);
+    await h.invoke('sync-history-mark', lateAck('dendrometer_daily', 'tail', { ackedThroughKey: `DENDRO_DAILY|${DENDROS[0]}|2026-07-02` }));
+    assert.equal(cursorRow(db, 'dendrometer_daily').last_acked_key, newest, 'a late key tail ACK does not rewind');
+  });
+
+  test(`${profile}: a backfill ACK still advances the cursor and completes the backfill`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    seed(db);
+    const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1) VALUES(?,?,?,21)');
+    for (const id of [1001, 1002]) insert.run(id, SENSOR, `2026-08-13T00:${String(id % 60).padStart(2, '0')}:00.000Z`);
+    db.prepare("INSERT INTO sync_history_cursors(peer_node,table_name,state,shadow_completed_at,durable_enabled_at,snapshot_high_id,last_acked_id) VALUES('cloud','device_data','backfill','2026-08-05T00:00:00.000Z','2026-08-05T00:00:00.000Z','1002','1000')").run();
+    link(db);
+    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    await h.tick();
+    assert.deepEqual(h.cloud.batches.map((batch) => [batch.tableName, batch.phase]), [['device_data', 'backfill']]);
+    const after = cursorRow(db, 'device_data');
+    assert.deepEqual([after.last_acked_id, after.state], [1002, 'tail']);
+  });
+
+  test(`${profile}: the tail cursor write stays monotonic when a newer value lands after the mark read it`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    t.after(() => db.close());
+    const cursor = seed(db);
+    cursor.run('device_data', '1000', null, '1000', null);
+    link(db);
+    let raced = false;
+    const h = createHarness({
+      db,
+      profile,
+      env: { DEVICE_EUI: GATEWAY },
+      afterAll: (sql, params, _rows, raw) => {
+        if (!raced && /SELECT \* FROM sync_history_cursors/.test(sql) && String(params[0]) === 'device_data') {
+          raced = true;
+          raw.prepare("UPDATE sync_history_cursors SET last_acked_id='2000' WHERE table_name='device_data'").run();
+        }
+      }
+    });
+    await h.invoke('sync-history-mark', lateAck('device_data', 'tail', { ackedThroughId: 1500, ackedThroughKey: key(1500) }));
+    assert.equal(raced, true, 'the concurrent write ran between the read and the update');
+    assert.equal(cursorRow(db, 'device_data').last_acked_id, 2000);
+  });
+}
+
 test('a queued key whose row no longer exists is dropped with a counted, logged reason', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
@@ -313,7 +442,8 @@ test('a retryable answer mid-batch completes the rows before it and leaves the r
   const row = (id) => db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
   assert.equal(row(31).status, 'done');
   for (const id of [32, 33]) assert.deepEqual([row(id).status, row(id).attempts, row(id).last_error], ['pending', 0, null], `key ${id} stays queued`);
-  const cur = db.prepare("SELECT next_attempt_at, retry_count, last_error FROM sync_history_cursors WHERE table_name='device_data'").get();
+  const cur = db.prepare("SELECT last_acked_id, next_attempt_at, retry_count, last_error FROM sync_history_cursors WHERE table_name='device_data'").get();
+  assert.equal(cur.last_acked_id, 33, 'a partial correction ACK (through row 31) leaves the tail cursor at 33');
   assert.deepEqual([cur.next_attempt_at, cur.retry_count, cur.last_error], [null, 0, null], 'the table is not backed off or parked');
   // The cloud recovers: the next visit sends the two keys and both complete.
   retryable.clear();
@@ -515,7 +645,8 @@ test('radio_uplinks: dead keys are dropped, a rejected key is set aside, an old-
     assert.deepEqual(batch.keys, batch.keys.slice().sort((a, b) => h.helper.compareHistoryKeys('radio_uplinks', a, b)));
     assert.ok(!batch.rejected || batch.rejected === 'hash_mismatch', 'only the set-aside row is rejected: ' + batch.rejected);
   }
-  const cur = db.prepare("SELECT next_attempt_at, retry_count FROM sync_history_cursors WHERE table_name='radio_uplinks'").get();
+  const cur = db.prepare("SELECT last_acked_id, next_attempt_at, retry_count FROM sync_history_cursors WHERE table_name='radio_uplinks'").get();
+  assert.equal(cur.last_acked_id, 10, 'radio correction ACKs leave the tail cursor at 10');
   assert.ok(!cur.next_attempt_at || cur.next_attempt_at < '9999', 'radio history is not parked');
   assert.ok(h.warnings.some((w) => /dropped 2 queued radio_uplinks key\(s\): source row missing/.test(w)), h.warnings.join('\n'));
 });
