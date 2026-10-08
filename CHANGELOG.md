@@ -8,6 +8,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Deploy keeps the newest three pre-migration backups, not three files.**
+  The retention step of `deploy.sh` (and of every migrating run) counted the
+  `-wal`, `-shm` and `-journal` files that SQLite leaves next to a backup
+  that was once opened in place. Those side files took slots in the kept
+  window, so real backups were deleted even when no migration ran. Retention
+  now counts only backup files, removes a backup together with its side
+  files, never touches the newest `MIGRATE_BACKUP_KEEP` backups, and logs
+  every file it removes. Side files whose backup is already gone are left in
+  place. Fixes #474.
 - **History upload position no longer jumps.** A linked gateway uploads its
   history to the cloud in order and remembers how far the cloud has
   confirmed. The confirmation of a repair or correction batch also moved

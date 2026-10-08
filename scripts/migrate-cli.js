@@ -76,7 +76,7 @@ function resolveKeep() {
 function pruneOldPremigrateBackups(backupDir, dbPath, keep, log, exclude) {
   const prefix = `${path.basename(dbPath)}.premigrate-`;
   try {
-    const removed = pruneByPrefix(backupDir, prefix, keep, exclude);
+    const removed = pruneByPrefix(backupDir, prefix, keep, exclude, log);
     if (removed) log(`[migrate] pruned ${removed} old pre-migration backup(s), keeping newest ${keep}`);
     return removed;
   } catch (err) {
