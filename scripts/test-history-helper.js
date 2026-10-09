@@ -48,6 +48,8 @@ const expectedExports = [
   'resolveDeviceFieldRollupKey',
   'legacySensorHistory',
   'legacyRainDailyHistory',
+  'resolveDeviceTimezones',
+  'resolveDeviceTimezone',
   'buildZoneExportCsv',
   'buildAllZonesExportCsv',
   'toCsv',
@@ -1968,6 +1970,45 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
     assert.strictEqual(db.lastQuery.params[0], '840 minutes');
     assert.strictEqual(db.lastQuery.params[3], '2025-07-01');
     assert.strictEqual(db.lastQuery.params[5], '2025-07-02T10:00:00.000Z');
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveDeviceTimezones: zone, weather-station zone, unassigned, abbreviation, invalid, foreign', async () => {
+  const db = createCliSqliteDb();
+  try {
+    db.runSql(`
+      INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01','2026-01-01'),(2,'o','h','2026-01-01','2026-01-01');
+      INSERT INTO irrigation_zones(id,name,user_id,timezone) VALUES(1,'A',1,'Europe/Zurich'),(2,'B',1,'CET'),(3,'C',1,'Mars/Olympus'),(4,'D',1,'America/Chicago');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at) VALUES
+        ('A840410000000001','g1','AQUASCOPE_LORAIN',1,1,'2026-01-01','2026-01-01'),
+        ('A840410000000002','g2','AQUASCOPE_LORAIN',1,2,'2026-01-01','2026-01-01'),
+        ('A840410000000003','g3','AQUASCOPE_LORAIN',1,3,'2026-01-01','2026-01-01'),
+        ('A840410000000004','wx','SENSECAP_S2120',1,NULL,'2026-01-01','2026-01-01'),
+        ('A840410000000005','g5','AQUASCOPE_LORAIN',1,NULL,'2026-01-01','2026-01-01'),
+        ('A840410000000006','g6','AQUASCOPE_LORAIN',2,4,'2026-01-01','2026-01-01');
+      INSERT INTO weather_station_zones(deveui,zone_id) VALUES('A840410000000004',4),('A840410000000004',1);
+    `);
+    const map = await helper.resolveDeviceTimezones(db, [
+      'A840410000000001', 'A840410000000002', 'A840410000000003', 'A840410000000004', 'A840410000000005', 'A840410000000006'], { userId: 1 });
+    assert.deepStrictEqual(map.get('A840410000000001'), { timezone: 'Europe/Zurich', basis: 'zone' });
+    assert.deepStrictEqual(map.get('A840410000000002'), { timezone: 'CET', basis: 'abbreviation' });
+    assert.deepStrictEqual(map.get('A840410000000003'), { timezone: 'UTC', basis: 'invalid' });
+    assert.deepStrictEqual(map.get('A840410000000004'), { timezone: 'Europe/Zurich', basis: 'weather_station_zone' });
+    assert.deepStrictEqual(map.get('A840410000000005'), { timezone: 'UTC', basis: 'unassigned_default' });
+    assert.deepStrictEqual(map.get('A840410000000006'), { timezone: 'UTC', basis: 'unassigned_default' }, 'no leak for a foreign device');
+
+    // The single-device form answers the same, and a deleted zone no longer counts.
+    assert.deepStrictEqual(await helper.resolveDeviceTimezone(db, 'a8:40:41:00:00:00:00:01', { userId: 1 }),
+      { timezone: 'Europe/Zurich', basis: 'zone' });
+    db.runSql(`UPDATE irrigation_zones SET deleted_at='2026-02-01' WHERE id=1;`);
+    assert.deepStrictEqual(await helper.resolveDeviceTimezone(db, 'A840410000000001', { userId: 1 }),
+      { timezone: 'UTC', basis: 'unassigned_default' });
+    assert.deepStrictEqual(await helper.resolveDeviceTimezone(db, 'A840410000000004', { userId: 1 }),
+      { timezone: 'America/Chicago', basis: 'weather_station_zone' }, 'lowest-id non-deleted station zone');
+    assert.deepStrictEqual(await helper.resolveDeviceTimezone(db, 'not-a-eui', { userId: 1 }),
+      { timezone: 'UTC', basis: 'unassigned_default' });
   } finally {
     db.close();
   }

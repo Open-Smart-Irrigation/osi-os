@@ -2033,6 +2033,68 @@ async function legacySensorHistory(db, options = {}) {
   return flattenLegacyAggregate(result, key.channelId);
 }
 
+// A device's farm timezone: its zone's, else the lowest-id live zone it is a
+// weather station for, else UTC. Never the gateway host's or the viewer's.
+// `basis` says where the answer came from: 'zone', 'weather_station_zone',
+// 'unassigned_default' (no zone, or a device the caller does not own, which
+// answers like an unassigned one), 'abbreviation' (a valid zone value that is
+// not a region name, e.g. CET: kept as stored, flagged so the zone settings
+// can prompt for a region) or 'invalid' (not a timezone; answered in UTC).
+const UNASSIGNED_TIMEZONE = Object.freeze({ timezone: 'UTC', basis: 'unassigned_default' });
+
+function classifyTimezone(raw) {
+  const tz = String(raw == null ? '' : raw).trim();
+  if (!tz) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+  } catch (_) {
+    return { timezone: 'UTC', basis: 'invalid' };
+  }
+  const upper = tz.toUpperCase();
+  if (upper === 'UTC' || upper === 'ETC/UTC' || tz.includes('/')) return { timezone: tz, basis: null };
+  return { timezone: tz, basis: 'abbreviation' };
+}
+
+async function resolveDeviceTimezones(db, deveuis, options = {}) {
+  const list = Array.from(new Set((deveuis || []).map(normalizeDeveui).filter(Boolean)));
+  const out = new Map();
+  for (const eui of list) out.set(eui, { ...UNASSIGNED_TIMEZONE });
+  if (!list.length) return out;
+  const ownerFilter = optionalUserFilter(options, 'd');
+  const placeholders = list.map(() => '?').join(',');
+  const rows = await dbAll(db, `
+    SELECT d.deveui,
+           iz.timezone AS zone_tz,
+           (SELECT iz2.timezone
+              FROM weather_station_zones w
+              JOIN irrigation_zones iz2 ON iz2.id = w.zone_id AND iz2.deleted_at IS NULL
+             WHERE w.deveui = d.deveui
+             ORDER BY w.zone_id
+             LIMIT 1) AS station_tz
+      FROM devices d
+      LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+     WHERE d.deveui IN (${placeholders}) AND d.deleted_at IS NULL${ownerFilter.sql}
+  `, list.concat(ownerFilter.params));
+  for (const row of rows) {
+    const eui = normalizeDeveui(row.deveui);
+    if (!eui) continue;
+    const fromZone = classifyTimezone(row.zone_tz);
+    const fromStation = classifyTimezone(row.station_tz);
+    const pick = fromZone ? { timezone: fromZone.timezone, basis: fromZone.basis || 'zone' }
+      : fromStation ? { timezone: fromStation.timezone, basis: fromStation.basis || 'weather_station_zone' }
+        : { ...UNASSIGNED_TIMEZONE };
+    out.set(eui, pick);
+  }
+  return out;
+}
+
+async function resolveDeviceTimezone(db, deveui, options = {}) {
+  const eui = normalizeDeveui(deveui);
+  if (!eui) return { ...UNASSIGNED_TIMEZONE };
+  const map = await resolveDeviceTimezones(db, [eui], options);
+  return map.get(eui) || { ...UNASSIGNED_TIMEZONE };
+}
+
 const RAIN_HISTORY_MAX_DAYS = 366;
 const RAIN_HISTORY_MAX_TZ_OFFSET_MIN = 840;
 const RAIN_DAY_MS = 24 * 60 * 60 * 1000;
@@ -3242,6 +3304,8 @@ module.exports = {
   deriveExpectedCadenceSeconds,
   legacySensorHistory,
   legacyRainDailyHistory,
+  resolveDeviceTimezones,
+  resolveDeviceTimezone,
   resolveDeviceFieldRollupKey,
   runRollupJob,
   upsertRollups,
