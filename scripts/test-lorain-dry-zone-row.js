@@ -84,10 +84,12 @@ test('a dry report after rain keeps the day total, refreshes computed_at, and do
   assert.ok(after.computed_at > before.computed_at, 'dry evidence refreshes computed_at');
 });
 
-test('repeated dry reports on a linked gateway emit one outbox event and one dirty key per zone day', async () => {
+// The installed gauges send nothing while dry and a heartbeat (0 tips) every 4 hours;
+// each heartbeat writes its zero at its own time and implies nothing about the gap before it.
+test('repeated dry heartbeats on a linked gateway emit one outbox event and one dirty key per zone day', async () => {
   const db = seed('UTC');
   db.exec("INSERT INTO sync_link_state(peer_node, linked, updated_at) VALUES ('cloud', 1, '2026-01-01T00:00:00.000Z');");
-  for (const time of ['2026-10-08T10:00:00.000Z', '2026-10-08T10:15:00.000Z', '2026-10-08T10:30:00.000Z', '2026-10-08T10:45:00.000Z']) {
+  for (const time of ['2026-10-08T00:30:00.000Z', '2026-10-08T04:30:00.000Z', '2026-10-08T08:30:00.000Z', '2026-10-08T12:30:00.000Z']) {
     await ingest(db, time, 0);
   }
   const outbox = db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='ZONE_ENVIRONMENT'").get();
