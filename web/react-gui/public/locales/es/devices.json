@@ -921,5 +921,10 @@
       "invalidField": "Revise {{field}}: fuera de rango.",
       "loadFailed": "No se pudo cargar la calibración."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} días · totales diarios ({{timezone}})",
+    "soFar": "hasta ahora",
+    "timezoneCheck": "Revise la zona horaria de la zona en su configuración."
   }
 }

@@ -42,7 +42,7 @@ import type {
   HistoryWorkspaceRecord,
 } from '../history/types';
 import { migrateHistoryWorkspace } from '../history/workspaceModel';
-import type { RainDay } from '../utils/rain';
+import { parseRainHistory, type RainHistory } from '../utils/rain';
 import type {
   Device,
   LoginRequest,
@@ -1301,23 +1301,11 @@ export const sensorAPI = {
     );
     return response.data;
   },
-  // Daily rainfall totals bucketed by local calendar day on the edge.
-  // tzOffsetMin: minutes east of UTC (use localTzOffsetMinutes()).
-  getDailyRainHistory: async (deveui: string, days: number, tzOffsetMin: number): Promise<RainDay[]> => {
-    const response = await api.get<unknown>(
-      `/api/devices/${deveui}/rain-history`,
-      { params: { days, tz_offset_min: tzOffsetMin } }
-    );
-    const rows = Array.isArray(response.data) ? response.data : [];
-    return rows.flatMap((row): RainDay[] => {
-      if (typeof row !== 'object' || row === null) return [];
-      const record = row as Record<string, unknown>;
-      const day = String(record.day ?? '');
-      const totalMm = Number(record.total_mm);
-      const samples = Number(record.samples);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(totalMm)) return [];
-      return [{ day, total_mm: totalMm, samples: Number.isFinite(samples) ? samples : 0 }];
-    });
+  // Daily rainfall totals over the farm's own days: the gateway buckets them
+  // in the device's zone timezone. No browser offset is sent.
+  getDailyRainHistory: async (deveui: string, days: number): Promise<RainHistory> => {
+    const response = await api.get<unknown>(`/api/devices/${deveui}/rain-history`, { params: { days } });
+    return parseRainHistory(response.data);
   },
 };
 

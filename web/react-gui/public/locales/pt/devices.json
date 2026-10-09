@@ -921,5 +921,10 @@
       "invalidField": "Verifique {{field}}: fora do intervalo.",
       "loadFailed": "Não foi possível carregar a calibração."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} dias · totais diários ({{timezone}})",
+    "soFar": "até agora",
+    "timezoneCheck": "Verifique o fuso horário da zona nas suas definições."
   }
 }
