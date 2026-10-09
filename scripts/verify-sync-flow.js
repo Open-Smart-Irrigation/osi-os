@@ -683,7 +683,7 @@ function createMockOsiDb(queryHandler) {
       all(sql, params, callback) {
         const cb = typeof params === 'function' ? params : callback;
         Promise.resolve()
-          .then(() => queryHandler(String(sql)))
+          .then(() => queryHandler(String(sql), Array.isArray(params) ? params : undefined))
           .then((rows) => cb(null, rows || []))
           .catch((error) => cb(error));
       }
@@ -2657,6 +2657,8 @@ expectIncludesById('lorain-sql-fn', 'rain_tips_delta', 'persists LoRain tip delt
 expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone rainfall source');
 expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('lorain-rain-agg-fn', 'osiHistory', 'osi-history-helper', 'imports osi-history-helper for the zone-local day window');
+expectIncludesById('lorain-rain-agg-fn', "WHERE ? > 0 OR zone_daily_environment.rain_source = 'aquascope_lorain'", 'never lets a zero report take over a zone day another source owns');
 
 // F83-V5: static pins so a future flows.json edit cannot silently drop the
 // uplink-dedup guard from any of the 7 device_data-writing decode functions
@@ -4630,48 +4632,66 @@ if (!dendroHelperPath) {
       fail(`failed to execute LoRain SQL fixture: ${error.message}`);
     }));
 
-    pendingChecks.push((async () => {
-      const writes = [];
-      const queryHandler = (sql) => {
-        if (sql.includes('SELECT d.irrigation_zone_id AS zone_id')) {
-          return [{ zone_id: 7, timezone: 'Europe/Zurich' }];
-        }
-        return [];
-      };
-      queryHandler.run = (sql) => {
-        writes.push(sql);
-      };
-      await executeFunctionNodeById(
-        'lorain-rain-agg-fn',
-        {
-          formattedData: {
-            devEui: 'ABC123',
-            timestamp: '2026-04-21T10:00:00.000Z',
-            rainDeltaStatus: 'ok',
-            rainMmDelta: 1.5,
-            rainMmToday: 2.7,
+    // LoRain zone rain: the day total comes from this device's ok deltas inside the
+    // zone's own local day (here CEST, so the window opens at 22:00Z the day before),
+    // and a valid zero report writes too.
+    for (const rainMmDelta of [1.5, 0]) {
+      pendingChecks.push((async () => {
+        const writes = [];
+        const windows = [];
+        const queryHandler = (sql, params) => {
+          if (sql.includes('SELECT d.irrigation_zone_id AS zone_id')) {
+            return [{ zone_id: 7, timezone: 'Europe/Zurich' }];
+          }
+          if (sql.includes('SUM(rain_mm_delta)')) {
+            windows.push(params || []);
+            return [{ mm: 1.2 }];
+          }
+          return [];
+        };
+        queryHandler.run = (sql, params) => {
+          writes.push({ sql, params: params || [] });
+        };
+        await executeFunctionNodeById(
+          'lorain-rain-agg-fn',
+          {
+            formattedData: {
+              devEui: 'ABC123',
+              timestamp: '2026-04-21T10:00:00.000Z',
+              rainDeltaStatus: 'ok',
+              rainMmDelta,
+              rainMmToday: 9.9,
+            },
           },
-        },
-        {
-          scope: {
-            osiDb: createMockOsiDb(queryHandler),
-          },
-        }
-      );
-      const sql = writes.join('\n');
-      expectCondition(
-        sql.includes('zone_daily_environment') && sql.includes('aquascope_lorain'),
-        'LoRain zone aggregate writes source aquascope_lorain',
-        'LoRain zone aggregate did not write aquascope_lorain source'
-      );
-      expectCondition(
-        sql.includes('MAX(COALESCE(rainfall_mm,0)+1.5, 2.7)'),
-        'LoRain zone aggregate adds deltas while honoring device daily total',
-        'LoRain zone aggregate did not preserve delta-plus-daily total behavior'
-      );
-    })().catch((error) => {
-      fail(`failed to execute LoRain zone aggregate fixture: ${error.message}`);
-    }));
+          {
+            scope: {
+              osiDb: createMockOsiDb(queryHandler),
+              osiHistory: require(historyHelperPath),
+            },
+          }
+        );
+        const label = `LoRain zone aggregate (${rainMmDelta} mm)`;
+        const write = writes[0] || { sql: '', params: [] };
+        const expectedTotal = Math.round((1.2 + rainMmDelta) * 10) / 10;
+        expectCondition(
+          writes.length === 1 && write.sql.includes('zone_daily_environment') && write.params.includes('aquascope_lorain'),
+          `${label} writes source aquascope_lorain`,
+          `${label} did not write one aquascope_lorain row`
+        );
+        expectCondition(
+          JSON.stringify(windows[0]) === JSON.stringify(['ABC123', '2026-04-20T22:00:00.000Z', '2026-04-21T10:00:00.000Z']),
+          `${label} sums the zone-local day window`,
+          `${label} summed the wrong window: ${JSON.stringify(windows[0])}`
+        );
+        expectCondition(
+          write.sql.includes('MAX(COALESCE(rainfall_mm,0)+?, ?)') && write.params[2] === expectedTotal && write.params[5] === rainMmDelta && write.params[6] === expectedTotal && !write.params.includes(9.9),
+          `${label} adds the delta while honoring the zone-day total, never the host-day total`,
+          `${label} params ${JSON.stringify(write.params)} do not carry delta ${rainMmDelta} and zone-day total ${expectedTotal}`
+        );
+      })().catch((error) => {
+        fail(`failed to execute LoRain zone aggregate fixture: ${error.message}`);
+      }));
+    }
 
     pendingChecks.push((async () => {
       const processedMsg = await executeFunctionNodeById(
