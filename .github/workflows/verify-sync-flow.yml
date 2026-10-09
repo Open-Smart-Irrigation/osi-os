@@ -53,6 +53,7 @@ jobs:
           node scripts/test-command-ack-mark-delivered.js
           node scripts/test-delete-device-flow.js
           node scripts/test-deploy-init-log-check.js
+          node scripts/test-device-list-rain-day.js
           node scripts/test-improvement-requests-schema.js
           node scripts/test-installation-helper.js
           node scripts/test-installation-recovery-flow.js
