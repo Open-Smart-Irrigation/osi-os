@@ -220,6 +220,7 @@
         "nullReason": null
       }
     ],
+    "rainTodayStatus": "observed",
     "irrigationTodayLiters": 15,
     "irrigationTodayNetMm": 0.23,
     "irrigationTodayMeasuredLiters": 15,

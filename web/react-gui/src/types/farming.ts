@@ -583,6 +583,11 @@ export interface WaterEnvironment {
   areaM2: number | null;
   irrigationEfficiencyPct: number | null;
   rainTodayMm: number | null;
+  /**
+   * 'unknown' when no rain gauge observed today (rainTodayMm is then null, never 0);
+   * a measured zero is 'observed'. Sent by the gateway; absent in a cloud bundle.
+   */
+  rainTodayStatus?: 'observed' | 'unknown';
   irrigationTodayLiters: number | null;
   irrigationTodayNetMm: number | null;
   irrigationTodayMeasuredLiters?: number | null;

@@ -643,6 +643,31 @@ function addUtcDays(dateIso, days) {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * The `rain_source` labels the edge's rain writers stamp on a
+ * zone_daily_environment row (LoRain, S2120, LSN50 MOD9 gauge). Any other
+ * label, including the column default 'none' that a flow-only row keeps, is
+ * not rain evidence.
+ */
+const GAUGE_RAIN_SOURCES = ['aquascope_lorain', 'sensecap_s2120', 'local_gauge'];
+
+/**
+ * A zone_daily_environment row's rain in mm, or null when the row is no
+ * evidence (unknown, never zero). A non-zero amount from a gauge source, or
+ * from a legacy row without a source, is a measurement; an exact zero counts
+ * only while a rain-measuring device is configured for the zone. Same rule as
+ * the cloud's ZoneRainEvidence.trustedRainMm, so a linked gateway and the
+ * cloud read one row the same way. A measured 0 from a gauge is observed.
+ */
+function resolveRainTodayMm(row, rainGaugePresent) {
+  if (!row) return null;
+  const mm = toFiniteNumber(row.rainfall_mm);
+  if (mm == null) return null;
+  if (row.rain_source != null && GAUGE_RAIN_SOURCES.indexOf(String(row.rain_source).trim().toLowerCase()) < 0) return null;
+  if (mm === 0 && !rainGaugePresent) return null;
+  return round(mm, 2);
+}
+
 function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyPct) {
   const liters = toFiniteNumber(irrigationLiters);
   const area = toFiniteNumber(areaM2);
@@ -660,9 +685,10 @@ function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyP
  * (`todayAgronomic`, i.e. `agronomic.current`), and `nullReason
  * 'demand_unknown'` when there is no forecast demand. A station name is the
  * devices.name of a deveui; a MeteoSwiss id has no devices row and shows as
- * itself.
+ * itself. A day's rain follows resolveRainTodayMm; `rainGaugePresent`
+ * undefined (an older caller) counts a zero as measured, as before.
  */
-function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIso, waterNeededTodayMm, kcSourceToday, todayAgronomic, stationNames }) {
+function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIso, waterNeededTodayMm, kcSourceToday, todayAgronomic, stationNames, rainGaugePresent }) {
   const startIso = addUtcDays(todayIso, -6) || todayIso;
   const byDate = {};
   for (const row of envRows || []) if (row && row.date) byDate[String(row.date)] = row;
@@ -673,7 +699,7 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
   const daily = [];
   for (let dateIso = startIso; dateIso && dateIso <= todayIso; dateIso = addUtcDays(dateIso, 1)) {
     const row = byDate[dateIso] || null;
-    const rainMm = row && row.rainfall_mm != null ? round(row.rainfall_mm, 2) : null;
+    const rainMm = resolveRainTodayMm(row, rainGaugePresent === undefined ? true : rainGaugePresent);
     const measuredIrrigationLiters = round(row ? row.flow_liters : 0, 2) || 0;
     const estimatedIrrigationLiters = round(estimated[dateIso] || 0, 2) || 0;
     const measuredIrrigationNetMm = toEffectiveIrrigationMm(measuredIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
@@ -887,6 +913,7 @@ function overlayLocalWaterIrrigationSplit(sharedWater, localWater, todayIso) {
   // of the tile comes from the gateway, so the tile shows one day.
   const today = bundleCurrent || !todayIso ? {} : {
     rainTodayMm: localWater.rainTodayMm,
+    rainTodayStatus: localWater.rainTodayStatus,
     rainSource: localWater.rainSource != null ? localWater.rainSource : null,
     balanceTodayMm: localWater.balanceTodayMm,
     next24hRainMm: localWater.next24hRainMm,
@@ -951,6 +978,8 @@ module.exports = {
   buildAgronomic,
   localDateIso,
   addUtcDays,
+  GAUGE_RAIN_SOURCES,
+  resolveRainTodayMm,
   toEffectiveIrrigationMm,
   buildWaterDaily,
   buildSensorHealth,

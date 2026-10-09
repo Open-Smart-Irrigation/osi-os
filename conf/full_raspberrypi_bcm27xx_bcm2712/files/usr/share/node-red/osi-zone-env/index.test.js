@@ -656,3 +656,44 @@ test('parseOpenMeteoForecast: empty or missing data gives null; hours without an
   assert.equal(parsed.source, 'open_meteo');
   assert.equal(parsed.observedAt, new Date(NOW_MS).toISOString());
 });
+
+test('resolveRainTodayMm: unknown stays null, measured zero needs a gauge', () => {
+  assert.equal(ZE.resolveRainTodayMm(null, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: null, rain_source: 'aquascope_lorain' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'none' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 3, rain_source: 'none' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'local_gauge' }, false), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'aquascope_lorain' }, true), 0, 'a measured zero from a configured gauge is observed');
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 4.256, rain_source: 'sensecap_s2120' }, false), 4.26);
+  // A legacy row without a source keeps the cloud's rule (ZoneRainEvidence.trustedRainMm).
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 1.2 }, false), 1.2);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: null }, false), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: null }, true), 0);
+  assert.deepEqual(ZE.GAUGE_RAIN_SOURCES, ['aquascope_lorain', 'sensecap_s2120', 'local_gauge']);
+});
+
+test('buildWaterDaily: a flow-only zero day without a gauge is null, not dry', () => {
+  const args = {
+    envRows: [
+      { date: '2026-10-07', rainfall_mm: 0, flow_liters: 0, rain_source: 'aquascope_lorain' },
+      { date: '2026-10-08', rainfall_mm: 0, flow_liters: 50, rain_source: 'local_gauge' },
+    ],
+    estimatedByDate: {}, agronomyRows: [], zone: { area_m2: 100, irrigation_efficiency_pct: 90 },
+    todayIso: '2026-10-08', waterNeededTodayMm: 4, todayAgronomic: {},
+  };
+  const noGauge = ZE.buildWaterDaily({ ...args, rainGaugePresent: false });
+  assert.deepEqual(noGauge.slice(-2).map((d) => d.rainMm), [null, null]);
+  assert.equal(noGauge.at(-1).totalWaterMm, null);
+  const withGauge = ZE.buildWaterDaily({ ...args, rainGaugePresent: true });
+  assert.deepEqual(withGauge.slice(-2).map((d) => d.rainMm), [0, 0]);
+  const noneRow = ZE.buildWaterDaily({ ...args, envRows: [{ date: '2026-10-08', rainfall_mm: 0, flow_liters: 5, rain_source: 'none' }], rainGaugePresent: true });
+  assert.equal(noneRow.at(-1).rainMm, null);
+  assert.equal(noneRow.at(-1).measuredIrrigationLiters, 5, 'the flow of a flow-only row is kept');
+});
+
+test('overlay: a stale bundle takes today\'s rain status from the gateway too', () => {
+  const local = { available: true, rainTodayMm: null, rainTodayStatus: 'unknown', balanceTodayMm: null, next24hRainMm: null, action: null, daily: [] };
+  const shared = { available: true, rainTodayMm: 2, balanceTodayMm: 1, daily: [{ date: '2026-10-07', rainMm: 2 }] };
+  const stale = ZE.overlayLocalWaterIrrigationSplit(shared, local, '2026-10-08');
+  assert.deepEqual([stale.rainTodayMm, stale.rainTodayStatus], [null, 'unknown']);
+});

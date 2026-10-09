@@ -14,6 +14,7 @@
     "areaM2": 50,
     "irrigationEfficiencyPct": 75,
     "rainTodayMm": 0.8,
+    "rainTodayStatus": "observed",
     "irrigationTodayLiters": 15,
     "irrigationTodayNetMm": 0.23,
     "irrigationTodayMeasuredLiters": 15,
