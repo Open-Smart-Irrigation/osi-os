@@ -59,6 +59,7 @@ jobs:
           node scripts/test-installation-recovery-flow.js
           node scripts/test-installation-recovery-schema.js
           node scripts/test-installation-revision-command.js
+          node scripts/test-lsn50-flow-only-zone-row.js
           node scripts/test-migration-helpers.js
           node scripts/test-node-red-admin-root-off.js
           node scripts/test-protected-command-replay-chain.js

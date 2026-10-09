@@ -270,8 +270,8 @@
       "reason": "fix(export): PUT /api/devices/:deveui/reference-tree requires a signed-in session in both flag states; it accepted any header starting with 'Bearer ' when the flag was off. origin/main 1491 -> HEAD 6700 = +5209. Both byte-identical maintained profiles (bcm2712/bcm2709) measure the same with verify-flows-size-ratchet nodeSizes (func.length). The growth is the session check copied verbatim from sensor-history-fn (getAuthSecret, toBase64Url, fromBase64Url, verifyBearer with its _osiAuthFailure tags, sourceId substituted): flag off it resolves the token secret inline (env, then the stored secret file) and never loads the scope helper; flag on it resolves it through osi-scope-helper resolveAuthSecret like every other gated route. Also converts the node's empty close() catch to a node.warn (silent-catch ratchet), and the node gains the crypto and osiLib libs the block needs. Supersedes the prior +46 entry (issue #15 sync_version bump), which origin/main already measures in full."
     },
     "lsn50-zone-agg-fn": {
-      "delta": 70,
-      "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
+      "delta": 290,
+      "reason": "Supersedes the prior entry (70, issue #10: the upsert bumps sync_version), which origin/main already measures in full. fix(lsn50): a flow-only uplink writes flow, never a rain value. Measured with verify-flows-size-ratchet nodeSizes (func.length) over both byte-identical maintained profiles (bcm2712/bcm2709): origin/main 2633 -> HEAD 2923 = +290. The node used to insert rainfall_mm = 0 with rain_source 'local_gauge' for an uplink whose rain counter had no valid delta, so the zone day read as a measured dry day. The growth is the rainOk test, NULL and 'none' for a flow-only insert, the conditional rain/source SET on conflict (a flow-only update leaves both untouched), COALESCE so rain on a NULL row counts, and a two-line comment. Pinned by scripts/test-lsn50-flow-only-zone-row.js."
     },
     "s2120-rain-agg-fn": {
       "delta": 70,
