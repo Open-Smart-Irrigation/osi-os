@@ -7,7 +7,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+- **SenseCAP S2120 rain totals stored before this release are not validated
+  measurements.** Earlier ingest read the rain intensity (measurement 4113,
+  mm/h) as a rain counter, so the stored S2120 increments, daily totals,
+  zone rain from an S2120 and the rain rates derived from them are wrong in
+  both directions: steady rain was stored as zero, and a fall in intensity
+  was read as a counter reset. These rows are not rewritten by the upgrade
+  and still reach the history, the zone water balance and the cloud mirror.
+  `scripts/assess-s2120-rain-history.js <copy of farming.db> [--uplinks
+  <events.jsonl>]` reports, per device and day, the stored increments next
+  to what the cumulative rainfall (4213) gives where raw uplinks were kept,
+  and marks every other day unverifiable. It opens the copy read-only and
+  refuses `/data/db/farming.db`. After the upgrade, the first S2120 uplink
+  that carries 4213 starts a new counter baseline (status
+  `cumulative_baseline`) and has no increment, so the rain of that one
+  interval is not counted.
+
 ### Fixed
+- **S2120 rain comes from the cumulative rainfall, not the intensity.** The
+  SenseCAP S2120 sends two rain values: 4113, rain intensity in mm/h (six
+  times the rain of the past ten minutes), and, from firmware v2.0, 4213,
+  cumulative rainfall in mm. Ingest differenced 4113 as if it were the
+  counter and never read 4213. With a steady 0.254 mm/h intensity and the
+  cumulative value rising from 1.778 to 2.032 mm, the gateway stored no
+  rain instead of 0.254 mm, and every fall in intensity was logged as a
+  counter reset. Now 4213 is stored as `rain_gauge_cumulative_mm` and
+  differenced; 4113 is stored as `rain_mm_per_hour` and is never a counter.
+  Rows written before the upgrade are never used as a counter baseline. For
+  firmware without 4213, an interval gets 4113 / 6 as its rain only when it
+  is the vendor's ten-minute window (600 s, with 60 s tolerance); any other
+  interval (a lost uplink, another reporting interval) keeps the amount
+  empty with status `intensity_only`, and the zone shows "the rain amount for
+  this interval is unknown". A device that has sent 4213 never adds
+  intensity, so no rain is counted twice. Increments, daily totals and hourly
+  station rain keep 0.001 mm; values are rounded only for display.
 - **Deploy keeps the newest three pre-migration backups, not three files.**
   The retention step of `deploy.sh` (and of every migrating run) counted the
   `-wal`, `-shm` and `-journal` files that SQLite leaves next to a backup
