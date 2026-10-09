@@ -727,3 +727,46 @@ test('buildForecastSection: an all-null horizon has null totals and says so', ()
   assert.equal(partial.rainFocus.totalNext24hMm, 1.5, 'a partly covered horizon keeps the sum of its known hours');
   assert.deepEqual(partial.rainFocus.next24hCoverage, { coveredHours: 1, expectedHours: 24 });
 });
+
+test('rain unknown: the default policy is warn (owner decision D2), as on the cloud', () => {
+  assert.equal(ZE.RAIN_UNKNOWN_POLICY, 'warn');
+});
+
+test('resolveWaterAction: unknown rain still gives the verdict on zero rain, flagged rain_unknown', () => {
+  const pick = (a) => ({ code: a.code, source: a.source, reasonCode: a.reasonCode });
+  // Probe: nothing irrigated, 4 mm demand, dry forecast. Zero rain is a lower bound on supply.
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 0)),
+    { code: 'irrigate_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 3.5)),
+    { code: 'monitor_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 5)),
+    { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 10, 4, false, 0)),
+    { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_unknown' });
+  // Two unknowns (rain today and the forecast) never add up to a verdict.
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, null, 4, false, 0)),
+    { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown' });
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 0).recommendationDate, '2026-10-08');
+});
+
+test('resolveWaterAction: a missing zone setup or demand is named before unknown rain; old callers keep their codes', () => {
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, null).reasonCode, 'balance_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, null, false, 0).reasonCode, 'demand_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4).reasonCode, 'balance_unknown', 'callers without the rain flag keep the old code');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, true, 0).reasonCode, 'balance_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, -4, 0, 4, true, 0).reasonCode, 'demand_exceeds_supply', 'known rain is unchanged');
+});
+
+test('resolveRainUnknownWaterAction: withhold answers insufficient_data; a dendrometer verdict passes either way', () => {
+  const pick = (a) => ({ code: a.code, source: a.source, reasonCode: a.reasonCode });
+  assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction('withhold', '2026-10-08', null, -4, 0)),
+    { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction('warn', '2026-10-08', null, -4, 0)),
+    { code: 'irrigate_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  const dendro = { irrigation_action: 'decrease_10', action_reasoning: 'Tree stress low', date: '2026-10-08' };
+  for (const policy of ['warn', 'withhold']) {
+    assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction(policy, '2026-10-08', dendro, -4, 0)),
+      { code: 'decrease_10', source: 'dendro', reasonCode: null });
+  }
+  assert.equal(ZE.resolveWaterAction('2026-10-08', dendro, null, 0, 4, false, 0).source, 'dendro');
+});

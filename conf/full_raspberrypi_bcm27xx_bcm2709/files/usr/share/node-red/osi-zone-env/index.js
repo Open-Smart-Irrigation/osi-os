@@ -836,8 +836,12 @@ function buildSensorHealth(deviceRows, local) {
  *
  * The reason travels as a code rather than as an English sentence: the GUI
  * serves seven languages and cannot translate prose the edge invented.
+ *
+ * `rainTodayKnown === false` with a known irrigation (`irrigationNetMm`) and
+ * demand hands the verdict to resolveRainUnknownWaterAction under
+ * RAIN_UNKNOWN_POLICY. A caller that omits it keeps the old codes.
  */
-function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm, waterNeededTodayMm) {
+function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm, waterNeededTodayMm, rainTodayKnown, irrigationNetMm) {
   if (recommendationRow) {
     return {
       code: trimToNull(recommendationRow.irrigation_action),
@@ -861,6 +865,11 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   });
 
   const balance = toFiniteNumber(balanceTodayMm);
+  const irrigation = toFiniteNumber(irrigationNetMm);
+  const demand = toFiniteNumber(waterNeededTodayMm);
+  if (balance == null && rainTodayKnown === false && irrigation != null && demand != null) {
+    return resolveRainUnknownWaterAction(RAIN_UNKNOWN_POLICY, todayIso, null, round(irrigation - demand, 2), next24hRainMm);
+  }
   // No demand for today is the cloud's demand_unknown; balance_unknown stays
   // for the missing zone area or efficiency ("set up the zone"). A caller
   // that does not pass the demand keeps the old code.
@@ -876,6 +885,36 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   if (forecastRain >= shortfallMm) return heuristic('delay_irrigation', 'forecast_rain_covers_demand');
   if (balance <= -1) return heuristic('irrigate_today', 'demand_exceeds_supply');
   return heuristic('monitor_today', 'balance_neutral');
+}
+
+/**
+ * What a rain-dependent water verdict does while today's rain is unknown
+ * (owner decision D2, 2026-10-09): 'warn' computes it on zero rain and flags
+ * it rain_unknown; 'withhold' answers insufficient_data / rain_unknown. The
+ * cloud has the same switch under the same name (ZoneRainEvidence in the
+ * backend, engine.py in the prediction service): flip all three together, so
+ * a linked and an unlinked gateway answer alike. Unknown rain never starts
+ * dendrometer rain suppression under either value.
+ */
+const RAIN_UNKNOWN_POLICY = 'warn';
+
+/**
+ * The water verdict while today's rain is unknown and irrigation and demand
+ * are known. `supplyWithoutRainMm` is irrigation minus demand, the balance at
+ * zero rain and so a lower bound on the real one. Under 'warn' the usual
+ * branch order runs on that bound and the verdict carries reasonCode
+ * rain_unknown in place of its own; when the verdict still needs a missing
+ * forecast, or under 'withhold', the answer is insufficient_data /
+ * rain_unknown. A dendrometer verdict passes unchanged: it does not depend on
+ * rain. Mirrors the cloud's ZoneEnvironmentService.resolveRainUnknownWaterAction.
+ */
+function resolveRainUnknownWaterAction(policy, todayIso, recommendationRow, supplyWithoutRainMm, next24hRainMm) {
+  if (recommendationRow) return resolveWaterAction(todayIso, recommendationRow, null, next24hRainMm);
+  const insufficient = { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown', recommendationDate: todayIso };
+  if (policy !== 'warn') return insufficient;
+  const verdict = resolveWaterAction(todayIso, null, supplyWithoutRainMm, next24hRainMm);
+  if (verdict.code == null) return insufficient;
+  return { ...verdict, reasonCode: 'rain_unknown' };
 }
 
 const DEMAND_FIELDS = ['demandMm', 'demandSource', 'demandComputedBy', 'et0Mm', 'et0Source', 'et0Tier', 'et0StationId', 'et0StationName', 'kc', 'kcSource', 'cropType', 'phenologicalStage', 'stageOverrun', 'hoursPresent', 'expectedHours', 'nullReason'];
@@ -999,6 +1038,8 @@ module.exports = {
   buildWaterDaily,
   buildSensorHealth,
   resolveWaterAction,
+  RAIN_UNKNOWN_POLICY,
+  resolveRainUnknownWaterAction,
   mergeDailyIrrigationSplit,
   overlayLocalWaterIrrigationSplit,
 };

@@ -186,3 +186,19 @@ test('a dry forecast is a covered 0 mm, not unknown', async () => {
   assert.equal(rf.totalNext24hMm, 0);
   assert.deepEqual(rf.next24hCoverage, { coveredHours: 24, expectedHours: 24 });
 });
+
+// Owner decision D2 (rain_unknown policy 'warn'): the verdict is still shown,
+// computed on zero rain (a lower bound on supply) and flagged rain_unknown.
+test('review probe: no rain observations, a demand, dry forecast -> the verdict is flagged rain_unknown', async () => {
+  forecastRain = 'dry';
+  const water = (await zoneWater({ rainGauge: true })).water;
+  assert.equal(water.rainTodayMm, null);
+  assert.equal(water.balanceTodayMm, null);
+  assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], ['irrigate_today', 'heuristic', 'rain_unknown']);
+});
+
+test('unknown rain today and no forecast rain values give no verdict', async () => {
+  forecastRain = 'no-rain-values';
+  const water = (await zoneWater({ rainGauge: true })).water;
+  assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], [null, 'insufficient_data', 'rain_unknown']);
+});

@@ -467,6 +467,31 @@ describe('water card reason line', () => {
     expect(card).not.toHaveTextContent('Daily rain, irrigation, and crop demand summary');
   });
 
+  it('shows a verdict flagged rain_unknown with its action, the reason, and no rain value', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      water: {
+        ...summary.water,
+        rainTodayMm: null,
+        rainTodayStatus: 'unknown',
+        balanceTodayMm: null,
+        action: {
+          code: 'irrigate_today',
+          source: 'heuristic',
+          reasonCode: 'rain_unknown',
+          recommendationDate: '2026-07-08',
+        },
+      },
+    });
+    await openCard([sensor({ type_id: 'AQUASCOPE_LORAIN', name: 'Rain', last_seen: FRESH })]);
+
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent('No rain measurement for today');
+    expect(screen.getByTestId('water-action-tile')).toHaveTextContent('Irrigate today');
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('—');
+    expect(screen.getByTestId('water-rain-tile')).not.toHaveTextContent('0.0 mm');
+  });
+
   it('keeps the stored dendrometer reasoning, which is data and not prose the edge wrote', async () => {
     apiMocks.getSummary.mockResolvedValue({
       ...summary,
