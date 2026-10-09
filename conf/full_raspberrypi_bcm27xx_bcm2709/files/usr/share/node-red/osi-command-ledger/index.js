@@ -318,6 +318,12 @@ function protectedBindingMatches(row, context) {
     row.operation === context.operation;
 }
 
+const PHYSICAL_ACTION_SETTINGS = {
+  SET_STREGA_TIMED_ACTION: 'timed_action',
+  SET_STREGA_PARTIAL_OPENING: 'partial_opening',
+  SET_STREGA_FLUSHING: 'flushing',
+};
+
 function validNonJournalEffectBinding(envelope, runtime) {
   if (!runtime || runtime.command_type_recognized !== true) return false;
   const payload = envelope.payload;
@@ -350,6 +356,14 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
       .trim().toUpperCase();
     return deviceEui === match[1];
+  }
+  // STREGA physical actions: one key per cloud issuance, bound to the valve
+  // the payload names and to the action its command type performs.
+  match = /^action:([0-9A-F]{16}):(timed_action|partial_opening|flushing):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
+  if (match) {
+    const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
+      .trim().toUpperCase();
+    return deviceEui === match[1] && PHYSICAL_ACTION_SETTINGS[type] === match[2];
   }
   if (isZoneCommandType(type)) {
     const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
@@ -425,7 +439,7 @@ function journalEffectProvenanceMatches(row, payload, gatewayDeviceEui, type, in
 // type it defers entirely to opts.extraEffectBindingValidator (osi-journal's
 // validJournalEffectBinding, injected by the caller); every other type is
 // validated against the built-in irrigation:scheduler / irrigation:manual /
-// config: grammar.
+// config: / action: grammar.
 async function validEffectBinding(envelope, opts) {
   opts = opts || {};
   const type = commandType(envelope);

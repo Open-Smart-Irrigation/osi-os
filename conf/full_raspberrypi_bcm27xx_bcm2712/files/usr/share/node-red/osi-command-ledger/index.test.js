@@ -1730,7 +1730,7 @@ test('an elapsed delivery of an effect that already ran replays the stored answe
   assert.equal(replay.ack.duplicate, true);
 });
 
-test('expiry fence still answers an elapsed action whose effect key this ledger does not bind', async () => {
+test('expiry fence still answers an elapsed action with an action: key that never ran', async () => {
   const db = new TestDb();
   const envelope = valveEnvelope(905, 'SET_STREGA_TIMED_ACTION', '2026-07-29T09:59:00.000Z');
   envelope.payload.effect_key = 'action:' + FENCE_VALVE_EUI + ':timed_action:44444444-4444-4444-8444-000000000905';
@@ -1738,4 +1738,58 @@ test('expiry fence still answers an elapsed action whose effect key this ledger 
   const result = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
   assert.equal(result.handled, true);
   assert.equal(result.ack.result, 'EXPIRED');
+});
+
+// The cloud mints action:<device_eui>:<setting>:<event_uuid> for the STREGA
+// physical actions (osi-server CommandService PHYSICAL_ACTION_EFFECTS). A
+// second delivery of one issuance under another command id replays the
+// stored answer instead of moving the valve again.
+const ACTION_SETTINGS = {
+  SET_STREGA_TIMED_ACTION: 'timed_action',
+  SET_STREGA_PARTIAL_OPENING: 'partial_opening',
+  SET_STREGA_FLUSHING: 'flushing',
+};
+
+function actionEnvelope(commandId, commandType, key, extraPayload = {}) {
+  const payload = Object.assign({ effect_key: key, deviceEui: FENCE_VALVE_EUI }, extraPayload);
+  return {
+    commandId, commandType, eventUuid: '55555555-5555-4555-8555-' + String(commandId).padStart(12, '0'),
+    aggregateType: 'DEVICE', aggregateKey: FENCE_VALVE_EUI, effectKey: key, payload,
+  };
+}
+
+test('an action: effect key that already ran replays its answer under a new command id', async () => {
+  for (const [type, setting] of Object.entries(ACTION_SETTINGS)) {
+    const db = new TestDb();
+    const key = 'action:' + FENCE_VALVE_EUI + ':' + setting + ':44444444-4444-4444-8444-000000000950';
+    insertAppliedCommand(db, {
+      commandId: '950', deviceEui: FENCE_VALVE_EUI, commandType: type, effectKey: key,
+      appliedAt: '2026-07-29T09:55:00.000Z', result: 'APPLIED',
+      resultDetail: { commandId: 950, status: 'ACKED', result: 'APPLIED', duplicate: false },
+    });
+    const replay = await ledger.deduplicatePendingCommand(db, actionEnvelope(951, type, key), fenceRuntime());
+    assert.equal(replay.handled, true, type + ' must not be dispatched twice');
+    assert.equal(replay.ack.commandId, 951);
+    assert.equal(replay.ack.result, 'APPLIED');
+    assert.equal(replay.ack.duplicate, true);
+  }
+});
+
+test('an action: effect key binds only its own device and its own action', async () => {
+  const key = 'action:' + FENCE_VALVE_EUI + ':flushing:44444444-4444-4444-8444-000000000960';
+  const otherDevice = actionEnvelope(961, 'SET_STREGA_FLUSHING', key, { deviceEui: 'A840410000000002' });
+  const otherAction = actionEnvelope(962, 'SET_STREGA_PARTIAL_OPENING', key);
+  const upperUuid = actionEnvelope(963, 'SET_STREGA_FLUSHING', 'action:' + FENCE_VALVE_EUI + ':flushing:ABCDEF00-4444-4444-8444-000000000963');
+  assert.equal(await ledger.validEffectBinding(actionEnvelope(960, 'SET_STREGA_FLUSHING', key), fenceRuntime()), true);
+  for (const envelope of [otherDevice, otherAction, upperUuid]) {
+    assert.equal(await ledger.validEffectBinding(envelope, fenceRuntime()), false, JSON.stringify(envelope.payload));
+  }
+  const db = new TestDb();
+  insertAppliedCommand(db, {
+    commandId: '960', deviceEui: FENCE_VALVE_EUI, commandType: 'SET_STREGA_FLUSHING', effectKey: key,
+    appliedAt: '2026-07-29T09:55:00.000Z', result: 'APPLIED',
+    resultDetail: { commandId: 960, status: 'ACKED', result: 'APPLIED', duplicate: false },
+  });
+  const result = await ledger.deduplicatePendingCommand(db, otherDevice, fenceRuntime());
+  assert.equal(result.handled, false, 'a key that names another valve is not this valve\'s replay');
 });

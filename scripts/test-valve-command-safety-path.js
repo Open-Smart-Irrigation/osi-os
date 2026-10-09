@@ -13,7 +13,8 @@
 // - the duration a VALVE_COMMAND carries in any accepted field is the one sent;
 // - every pending command the gate refuses is answered, never dropped;
 // - stop commands (CLOSE, CANCEL_VALVE_ACTUATION) still execute when the
-//   gateway clock is ahead of their expiry.
+//   gateway clock is ahead of their expiry;
+// - a cloud `action:` effect key replays instead of acting twice.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -347,6 +348,33 @@ test('the STREGA builder never turns a bare OPEN into a downlink', async () => {
     });
     assert.deepEqual(stregaDownlinks(outputs), []);
     assert.equal(ackRows(db, 581)[0].result, 'REJECTED_PERMANENT');
+  } finally {
+    db.close();
+  }
+});
+
+test('a second delivery of one STREGA physical action under a new command id replays its action: effect key', async () => {
+  const db = seedDb();
+  try {
+    const key = `action:${VALVE}:flushing:1b4e28ba-2fa1-41d2-883f-0016c0000591`;
+    const payload = { deviceEui: VALVE, returnPosition: 'CLOSE', percentage: 50, effect_key: key, expires_at: soon(300000) };
+    const first = await deliver(db, [pendingCommand(591, 'SET_STREGA_FLUSHING', payload)]);
+    assert.deepEqual(stregaDownlinks(first.outputs), [{ fPort: 28, bytes: [0x30, 50] }]);
+    assert.equal(db.prepare('SELECT effect_key FROM applied_commands WHERE command_id = ?').get('591').effect_key, key,
+      'the terminal ledger remembers the effect it applied');
+
+    const second = await deliver(db, [pendingCommand(592, 'SET_STREGA_FLUSHING', payload)]);
+    assert.deepEqual(stregaDownlinks(second.outputs), [], 'the same effect is not applied twice');
+    const replay = second.outputs.find((o) => o.nodeId === ACK_OUT);
+    assert.ok(replay, 'the replay is answered');
+    const ack = JSON.parse(replay.msg.payload);
+    assert.equal(ack.commandId, 592);
+    assert.equal(ack.duplicate, true);
+    assert.equal(ack.result, 'APPLIED');
+
+    const otherValve = await deliver(db, [pendingCommand(593, 'SET_STREGA_FLUSHING', Object.assign({}, payload, { deviceEui: 'A840410000000002' }))]);
+    assert.equal(otherValve.outputs.some((o) => o.nodeId === ACK_OUT && JSON.parse(o.msg.payload).duplicate === true), false,
+      'a key naming another valve is not a replay of this one');
   } finally {
     db.close();
   }
