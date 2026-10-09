@@ -227,6 +227,11 @@ jobs:
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync
         run: node --test scripts/test-zone-agronomy-sync-triggers.js
+      # Rain finding 13: the dendro rolling rain covers the seven calendar days ending on
+      # the zone-local analytics date; missing or unknown days are counted, never zero
+      # days, and unknown rain warns without starting rain suppression. Both profiles.
+      - name: Dendro rolling 7-day rain
+        run: node --test scripts/test-dendro-rolling-7d-rain.js
       # osi-os #377: the valve, zone-schedule and zone-delete routes keep each
       # request's target, duration and identity on msg. Runs the shipped function
       # bodies with two requests interleaved at every sqlite boundary, flag off and
