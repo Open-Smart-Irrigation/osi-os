@@ -92,9 +92,12 @@ function queueItem(id, fPort, bytes, extra) {
 function fakeQueue(items) {
   const queue = items.slice();
   const calls = { flush: 0, enqueued: [] };
+  const counters = { nFCntDown: 0, aFCntDown: 40 };
   return {
     queue,
     calls,
+    counters,
+    readFrameCounter: async () => Object.assign({}, counters),
     flushQueue: async () => { calls.flush += 1; queue.splice(0, queue.length); return { statusCode: 200 }; },
     readQueue: async () => queue.map((item) => Object.assign({}, item)),
     enqueue: async (item) => { calls.enqueued.push(item); queue.push(queueItem('re-' + calls.enqueued.length, item.fPort, [...Buffer.from(item.data, 'base64')], { confirmed: item.confirmed })); return {}; },
@@ -112,7 +115,7 @@ test('cancelActuation takes only the named actuation\'s open out of the queue an
     queueItem('q-b', 2, [0x41, 15]),
     queueItem('q-cfg', 11, [0x00, 0x0f, 0x00, 0x02], { confirmed: true }),
   ]);
-  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue });
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue, readFrameCounter: q.readFrameCounter });
   assert.equal(out.ok, true);
   assert.equal(out.queueScope, 'target_only');
   assert.equal(out.queueItemsKept, 3);
@@ -406,5 +409,66 @@ test('cancelActuation flushes BEFORE marking CANCELLED: a flush failure propagat
   assert.equal(row.cancel_reason, null);
   const device = await db.get('SELECT target_state FROM devices WHERE UPPER(deveui)=?', [EUI]);
   assert.notEqual(device.target_state, 'CLOSED');
+  db.close();
+});
+
+// Fix round (F2): ChirpStack may send a queued item between the cancel's queue read and its
+// flush. The item is still in the list read before, so queueing it again would send it
+// twice; for another actuation's open that is a second watering the ledger never sees.
+function racingQueue(items, sendDuringFlush) {
+  const q = fakeQueue(items);
+  const flush = q.flushQueue;
+  q.flushQueue = async (eui) => {
+    if (sendDuringFlush) q.counters.aFCntDown += 1;
+    return flush(eui);
+  };
+  return q;
+}
+
+test('cancelActuation does not queue another open again when a downlink was sent during the cancel', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-b', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  const q = racingQueue([
+    queueItem('q-a', 2, [0x41, 15]),
+    queueItem('q-plan', 10, [0x01, 0x02, 0x03]),
+    queueItem('q-b', 2, [0x41, 15]),
+  ], true);
+  const warnings = [];
+  const out = await cancelActuation({
+    db, deviceEui: EUI, expectationId: 'e-a', reason: null, warn: (m) => warnings.push(m),
+    flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue, readFrameCounter: q.readFrameCounter,
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'target_only_degraded');
+  assert.deepEqual(q.queue.map((item) => [item.fPort, Buffer.from(item.data, 'base64').toString('hex')]), [[10, '010203']],
+    'the plan push is queued again; B\'s open, possibly already sent, is not');
+  assert.ok(warnings.some((w) => /not queued again/.test(w)));
+  db.close();
+});
+
+test('cancelActuation queues other opens again only when the frame counter can be compared', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-b', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  const q = racingQueue([queueItem('q-a', 2, [0x41, 15]), queueItem('q-b', 2, [0x41, 15])], false);
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue });
+  assert.equal(out.queueScope, 'target_only_degraded', 'no counter reader: the safe side');
+  assert.equal(q.queue.length, 0);
+  db.close();
+});
+
+// Fix round (F3): an open the cancel cannot place in the queue is flushed, as main did,
+// instead of being left queued under a CANCELLED actuation.
+test('cancelActuation flushes the whole queue when the queue holds an open it cannot account for', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  // e-a is 900 s = [0x41, 15]; the queued open is 20 minutes, from no known actuation.
+  const q = fakeQueue([queueItem('q-x', 2, [0x41, 20]), queueItem('q-y', 2, [0x41, 21]), queueItem('q-plan', 10, [0x01])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue, readFrameCounter: q.readFrameCounter });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'full_flush');
+  assert.equal(q.calls.flush, 1);
+  assert.equal(q.queue.length, 0);
   db.close();
 });

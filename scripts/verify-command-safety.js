@@ -242,13 +242,13 @@ function assertCancelPath() {
     // CLOSE) against cancel.js directly rather than against this node's source text.
     // #428: a cancel names its actuation and keeps every other queued downlink, so both
     // entry points hand cancel.js the queue reader and writer next to the flush.
-    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)']) {
+    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'getDownlinkFrameCounters(deveui)']) {
         if (!fn.func.includes(required)) {
             throw new Error(`Cancel function must pass the named actuation and the queue reader/writer to cancel.js (${required})`);
         }
     }
     const bridge = assertFunctionNode('Valve Cloud Command Bridge');
-    for (const required of ['client.getDeviceQueue(eui)', 'client.enqueueDownlink(item)', 'readQueue: readQueue, enqueue: enqueue', "'REJECTED_PERMANENT'"]) {
+    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'"]) {
         if (!bridge.func.includes(required)) {
             throw new Error(`Valve Cloud Command Bridge must pass the queue reader/writer and answer permanent refusals (${required})`);
         }
@@ -260,7 +260,8 @@ function assertCancelPath() {
     if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
         throw new Error('cancel.js must set reconciliation_state = CANCELLED');
     }
-    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN']) {
+    // Fix round F2: never queue another open again after a downlink may have been sent.
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', 'countersAfter !== countersBefore', "'target_only_degraded'"]) {
         if (!cancelJsSrc.includes(required)) {
             throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
         }

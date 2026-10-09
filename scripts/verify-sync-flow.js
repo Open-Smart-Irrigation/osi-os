@@ -3109,7 +3109,7 @@ expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes t
 // CANCELLED-marking and the named-actuation targeting (#428) directly.
 expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark the named actuation CANCELLED, keep other queue items) to cancel.js');
 expectIncludes('Cancel STREGA Actuation', 'expectationId: body.expectation_id', 'passes the actuation the caller names to cancel.js');
-expectIncludes('Valve Cloud Command Bridge', 'readQueue: readQueue, enqueue: enqueue', 'lets a cloud cancel keep the queue items of other commands');
+expectIncludes('Valve Cloud Command Bridge', 'queueClient: queueClient', 'lets a cloud cancel keep the queue items of other commands');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 // --- System Stats fan detection: hwmon preferred, raw PWM fallback ---

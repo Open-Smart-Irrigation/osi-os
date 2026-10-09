@@ -15,8 +15,10 @@
 //
 // Which queue items (#428): the device queue is read, the cancelled actuation's open
 // downlink is taken out and every other item (plan pushes, configuration, other
-// actuations' opens) is put back in its order. A stop must not fail on a queue that cannot
-// be read: then the whole queue is flushed, as before this change, and the result says so.
+// actuations' opens) is put back in its order. Other opens are put back only when the
+// downlink frame counter shows nothing was sent during the cancel. A stop must not fail on
+// a queue that cannot be read, nor leave an open it cannot recognise: then the whole queue
+// is flushed, as before this change, and the result says so.
 //
 // Behavior note: when there is no active expectation to cancel, this matches the REST
 // route's existing behavior exactly rather than the alternative "flush anyway, succeed
@@ -117,11 +119,30 @@ async function resolveTarget(db, eui, expectationId) {
   return { target: active[0], active };
 }
 
+// An open downlink of any duration: fPort 2, first byte 0x21, 0x41 or 0x81.
+function isOpenItem(item) {
+  const signature = itemSignature(item);
+  return !!signature && ['21', '41', '81'].includes(signature.slice(0, 2));
+}
+
+async function frameCounters(readFrameCounter, eui, warn) {
+  if (typeof readFrameCounter !== 'function') return null;
+  try {
+    const counters = await readFrameCounter(eui);
+    return counters ? JSON.stringify([counters.nFCntDown, counters.aFCntDown]) : null;
+  } catch (e) {
+    warn && warn('[valve-control] cancelActuation: downlink frame counter unreadable for ' + eui + ': ' + (e && e.message ? e.message : e));
+    return null;
+  }
+}
+
 // Takes the target's open out of the device queue and puts every other item back.
-async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue, enqueue, warn }) {
+async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue, enqueue, readFrameCounter, warn }) {
   let items = null;
+  let countersBefore = null;
   if (typeof readQueue === 'function' && typeof enqueue === 'function') {
     try {
+      countersBefore = await frameCounters(readFrameCounter, eui, warn);
       items = await readQueue(eui);
       if (!Array.isArray(items)) throw new Error('device queue is not a list');
     } catch (e) {
@@ -134,10 +155,36 @@ async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue
     return { scope: 'full_flush', flushed, kept: 0, lost: 0 };
   }
   const index = targetQueueIndex(items, active, target);
-  // The target's open has already been sent (or was never queued): nothing to take out.
-  if (index < 0) return { scope: 'not_queued', flushed: null, kept: items.length, lost: 0 };
-  const keep = items.filter((item, i) => i !== index && !item.isPending);
+  if (index < 0) {
+    // The target's open cannot be told apart in the queue (its duration gives no known
+    // downlink, or the queue holds more opens than the active actuations account for):
+    // flush the whole queue, as before this change, rather than leave it queued.
+    const opens = items.filter(isOpenItem).length;
+    if (openSignatures(target.commanded_duration_seconds).size === 0 || opens > active.length) {
+      warn && warn('[valve-control] cancelActuation: the cancelled open is not recognisable in the queue of ' + eui + '; flushing all of it');
+      const flushed = await flushQueue(eui);
+      return { scope: 'full_flush', flushed, kept: 0, lost: 0 };
+    }
+    // The target's open has already been sent: nothing to take out.
+    return { scope: 'not_queued', flushed: null, kept: items.length, lost: 0 };
+  }
+  let keep = items.filter((item, i) => i !== index && !item.isPending);
   const flushed = await flushQueue(eui);
+  // An item ChirpStack sent between the queue read and the flush is still in the list
+  // read above; queueing it again would send it twice (for another actuation's open, a
+  // second watering the ledger never sees). When the downlink frame counter moved, or
+  // cannot be compared, opens are not queued again; other items are.
+  let scope = 'target_only';
+  const countersAfter = countersBefore === null ? null : await frameCounters(readFrameCounter, eui, warn);
+  if (countersBefore === null || countersAfter !== countersBefore) {
+    const dropped = keep.filter(isOpenItem).length;
+    keep = keep.filter((item) => !isOpenItem(item));
+    scope = 'target_only_degraded';
+    if (dropped) {
+      warn && warn('[valve-control] cancelActuation: ' + dropped + ' other open(s) for ' + eui +
+        ' not queued again: a downlink may have been sent during the cancel');
+    }
+  }
   let kept = 0;
   let lost = 0;
   for (const item of keep) {
@@ -154,12 +201,12 @@ async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue
       warn && warn('[valve-control] cancelActuation: could not queue an item again for ' + eui + ': ' + (e && e.message ? e.message : e));
     }
   }
-  return { scope: 'target_only', flushed, kept, lost };
+  return { scope, flushed, kept, lost };
 }
 
 // all: true is for a valve leaving this gateway (unclaim.js): every active actuation is
 // cancelled and the whole device queue flushed, since nothing queued for it stays wanted.
-async function cancelActuation({ db, deviceEui, expectationId, all, reason, flushQueue, readQueue, enqueue, now, warn }) {
+async function cancelActuation({ db, deviceEui, expectationId, all, reason, flushQueue, readQueue, enqueue, readFrameCounter, now, warn }) {
   // Fail closed BEFORE any write. The cloud CANCEL_VALVE_ACTUATION path (Valve Cloud
   // Command Bridge) builds flushQueue inside its own try/catch and passes null when
   // createProvisioningClientFromEnv throws - without this guard, a broken ChirpStack
@@ -205,7 +252,7 @@ async function cancelActuation({ db, deviceEui, expectationId, all, reason, flus
   // nothing mutated).
   const queue = all === true
     ? { scope: 'full_flush', flushed: await flushQueue(eui), kept: 0, lost: 0 }
-    : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, warn });
+    : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, readFrameCounter, warn });
 
   await db.transaction(async (tx) => {
     for (const target of targets) {
