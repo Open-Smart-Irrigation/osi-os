@@ -25,6 +25,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   interval is not counted.
 
 ### Fixed
+- **Dendrometer advice counts rain over seven calendar days.** The rolling
+  rain behind the "No stress + heavy recent rain (>20mm/7d)" rule added the
+  seven most recent stored days to the analytics day, so with complete
+  history it covered eight days, and with gaps it could reach back months.
+  It now covers the seven calendar days ending on the zone's analytics day,
+  and the recommendation records the window and how many of its days had a
+  rain value. A day without a rain value counts as missing, never as a dry
+  day. When the analytics day's rain is unknown (no local gauge amount and no
+  provider precipitation value), the recommendation is still given and
+  carries a `rain_unknown` warning; unknown rain never starts rain
+  suppression. **Behaviour change on the first run after the update:** a
+  zone without stress that had more than 20 mm over the old eight days but
+  20 mm or less over the seven calendar days moves from `decrease_20` to
+  `decrease_10`, and so does a zone whose sparse history reached outside the
+  week.
 - **S2120 rain comes from the cumulative rainfall, not the intensity.** The
   SenseCAP S2120 sends two rain values: 4113, rain intensity in mm/h (six
   times the rain of the past ten minutes), and, from firmware v2.0, 4213,
