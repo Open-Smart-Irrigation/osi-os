@@ -729,7 +729,11 @@ function addCounterWarning(warnings, rawStatus, label) {
   if (!status || status.toLowerCase() === 'ok') return;
   switch (status.toLowerCase()) {
     case 'first_sample':
+    case 'cumulative_baseline':
       warnings.push(label + ' is waiting for the next reading');
+      break;
+    case 'intensity_only':
+      warnings.push(label + ' reported intensity only; the rain amount for this interval is unknown');
       break;
     case 'counter_reset':
       warnings.push(label + " restarted; today's total may be incomplete");
