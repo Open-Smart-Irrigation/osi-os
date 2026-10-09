@@ -145,6 +145,82 @@ function toIsoTime(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+// Open-Meteo times. With `timeformat=unixtime` a time is an instant in
+// seconds. Otherwise it is a label without suffix under ONE fixed offset for
+// the whole response (`utc_offset_seconds`, the requested zone's offset at the
+// start of the response, kept across a DST change): never UTC, and not the
+// zone's wall clock after a DST change. A label without a known offset is an
+// unknown instant.
+const NAIVE_LOCAL_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/;
+
+function openMeteoInstantIso(value, utcOffsetSeconds) {
+  let ms = NaN;
+  if (typeof value === 'number') {
+    ms = value * 1000;
+  } else {
+    const raw = trimToNull(value);
+    if (!raw) return null;
+    const offset = toFiniteNumber(utcOffsetSeconds);
+    if (/Z$|[+-]\d{2}:\d{2}$/.test(raw)) ms = Date.parse(raw);
+    else if (NAIVE_LOCAL_TIME.test(raw) && offset != null) ms = Date.parse(raw + 'Z') - offset * 1000;
+  }
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+// A daily time is the provider's date label, or (unixtime) the instant of
+// that day's start under the response offset. Without the offset, the
+// requested zone dates the day's noon, which keeps the date for any offset
+// error under 12 hours.
+function openMeteoDateIso(value, utcOffsetSeconds, timezone) {
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
+  const seconds = typeof value === 'number' ? value : NaN;
+  if (!Number.isFinite(seconds)) return null;
+  const offset = toFiniteNumber(utcOffsetSeconds);
+  if (offset != null) return new Date((seconds + offset) * 1000).toISOString().slice(0, 10);
+  return localDateIso(seconds * 1000 + 12 * 3600000, timezone);
+}
+
+// Maps an Open-Meteo forecast response (hourly + daily) to the cached
+// forecast shape. An hourly time stays the END of its interval: precipitation
+// at T is the provider's sum for T-1h..T.
+function parseOpenMeteoForecast(response, opts = {}) {
+  const observedAtMs = opts.observedAtMs != null ? opts.observedAtMs : Date.now();
+  const offset = response ? response.utc_offset_seconds : null;
+  const hourly = (response && response.hourly) || {};
+  const daily = (response && response.daily) || {};
+  const at = (series, index) => (Array.isArray(series) ? series[index] : null);
+  const hours = (Array.isArray(hourly.time) ? hourly.time : []).map((time, index) => ({
+    time: openMeteoInstantIso(time, offset),
+    airTemperatureC: round(at(hourly.temperature_2m, index), 2),
+    relativeHumidityPct: round(at(hourly.relative_humidity_2m, index), 1),
+    rainMm: round(at(hourly.precipitation, index), 2),
+    precipitationProbabilityPct: round(at(hourly.precipitation_probability, index), 1),
+    windSpeedMps: round(at(hourly.wind_speed_10m, index), 2),
+    windDirectionDeg: round(at(hourly.wind_direction_10m, index), 1)
+  })).filter((hour) => hour.time);
+  const days = (Array.isArray(daily.time) ? daily.time : []).map((time, index) => {
+    const probability = round(at(daily.precipitation_probability_max, index), 1);
+    const minC = round(at(daily.temperature_2m_min, index), 2);
+    const maxC = round(at(daily.temperature_2m_max, index), 2);
+    const code = at(daily.weather_code, index);
+    return {
+      date: openMeteoDateIso(time, offset, opts.timezone),
+      description: null,
+      weatherCode: code != null ? Number(code) : null,
+      rainMm: round(at(daily.precipitation_sum, index), 2),
+      precipitationProbabilityPct: probability,
+      rainProbabilityPct: probability,
+      et0MmDay: round(at(daily.et0_fao_evapotranspiration, index), 2),
+      temperatureMinC: minC,
+      temperatureMaxC: maxC,
+      minTempC: minC,
+      maxTempC: maxC
+    };
+  }).filter((day) => day.date);
+  if (!hours.length && !days.length) return null;
+  return { source: 'open_meteo', observedAt: new Date(observedAtMs).toISOString(), hours, days };
+}
+
 function cacheStatus(nowIso, expiresAtIso) {
   if (!expiresAtIso) return 'miss';
   return new Date(nowIso).getTime() < new Date(expiresAtIso).getTime() ? 'live' : 'stale';
@@ -844,6 +920,9 @@ module.exports = {
   maxInstant,
   safeJsonParse,
   toIsoTime,
+  openMeteoInstantIso,
+  openMeteoDateIso,
+  parseOpenMeteoForecast,
   cacheStatus,
   extractFirstMetric,
   extractMetrics,
