@@ -267,14 +267,17 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
 
 // Cloud->edge cancel: reuses the SAME core (cancel.js) the REST cancel route uses - one
 // code path, two entry points, same as the four schedule appliers above. No downlink is
-// ever sent to the valve here; cancellation is a ChirpStack queue flush plus marking the
-// newest active expectation CANCELLED (see cancel.js for the no-active-expectation
-// behavior note, which deliberately matches the REST route rather than always succeeding).
-async function applyCancelValveActuation({ db, cmd, flushQueue, now, warn }) {
+// ever sent to the valve here; cancellation takes the named actuation's open out of the
+// ChirpStack queue and marks it CANCELLED (see cancel.js). expectation_id names the
+// actuation; a cancel without one is accepted only while exactly one actuation is active.
+// ambiguous_actuation and actuation_not_active are permanent refusals (permanent: true),
+// answered REJECTED_PERMANENT by the caller.
+async function applyCancelValveActuation({ db, cmd, flushQueue, readQueue, enqueue, now, warn }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
-  const result = await cancelActuation({ db, deviceEui: eui, reason: cmd.reason, flushQueue, now, warn });
-  return { ok: result.ok, error: result.error, downlinks: result.downlinks || [] };
+  const expectationId = cmd.expectation_id != null ? cmd.expectation_id : cmd.expectationId;
+  const result = await cancelActuation({ db, deviceEui: eui, expectationId, reason: cmd.reason, flushQueue, readQueue, enqueue, now, warn });
+  return { ok: result.ok, error: result.error, permanent: !!result.permanent, downlinks: result.downlinks || [] };
 }
 
 const APPLIERS = {
@@ -290,13 +293,13 @@ const APPLIERS = {
 // { ok, error, downlinks } rather than throwing or writing an HTTP response - the caller
 // (flows.json's "Valve Cloud Command Bridge") turns this into a command ACK plus MQTT
 // downlink messages via the existing command-ack path.
-async function applyCloudCommand({ db, cmd, appId, flushQueue, warn, now }) {
+async function applyCloudCommand({ db, cmd, appId, flushQueue, readQueue, enqueue, warn, now }) {
   const body = cmd || {};
   const commandType = String(body.commandType || body.command_type || '').trim().toUpperCase();
   const applier = APPLIERS[commandType];
   if (!applier) return { ok: false, error: 'unknown_command_type' };
   const tzFallback = (await store.getGatewaySetting(db, 'gateway_timezone', warn)) || 'UTC';
-  return applier({ db, cmd: body, appId, flushQueue, warn, now: now || new Date(), tzFallback });
+  return applier({ db, cmd: body, appId, flushQueue, readQueue, enqueue, warn, now: now || new Date(), tzFallback });
 }
 
 module.exports = { applyCloudCommand };

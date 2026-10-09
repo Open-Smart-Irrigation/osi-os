@@ -14,7 +14,8 @@
 // - every pending command the gate refuses is answered, never dropped;
 // - stop commands (CLOSE, CANCEL_VALVE_ACTUATION) still execute when the
 //   gateway clock is ahead of their expiry;
-// - a cloud `action:` effect key replays instead of acting twice.
+// - a cloud `action:` effect key replays instead of acting twice;
+// - a cancel stops the actuation it names and leaves other queued downlinks.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -392,6 +393,73 @@ test('a cloud timed action that carries no duration field is answered, not dropp
     assert.equal(acks.length, 1);
     assert.equal(acks[0].result, 'REJECTED_PERMANENT');
     assert.equal(acks[0].reason, 'missing_or_invalid_duration');
+  } finally {
+    db.close();
+  }
+});
+
+test('a cancel for actuation A leaves actuation B running and its downlink queued', async () => {
+  const db = seedDb();
+  try {
+    const insert = db.prepare(
+      "INSERT INTO valve_actuation_expectations (expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) " +
+      "VALUES (?, ?, ?, ?, 600, ?, 'unknown', 'PENDING_OBSERVATION', ?)"
+    );
+    insert.run('701', VALVE, '701', '2026-10-01T10:00:00.000Z', '2026-10-01T10:12:00.000Z', '2026-10-01T10:00:00.000Z');
+    insert.run('702', VALVE, '702', '2026-10-01T10:01:00.000Z', '2026-10-01T10:13:00.000Z', '2026-10-01T10:01:00.000Z');
+    const open = Buffer.from([0x41, 10]).toString('base64');
+    const plan = Buffer.from([0x01, 0x02, 0x03]).toString('base64');
+    const queue = [
+      { id: 'q-a', fPort: 2, data: open, confirmed: false, isPending: false, isEncrypted: false },
+      { id: 'q-plan', fPort: 10, data: plan, confirmed: false, isPending: false, isEncrypted: false },
+      { id: 'q-b', fPort: 2, data: open, confirmed: false, isPending: false, isEncrypted: false },
+    ];
+    const fake = fakeChirpstack(queue);
+    await deliver(db, [pendingCommand(703, 'CANCEL_VALVE_ACTUATION', {
+      device_eui: VALVE, expectation_id: '701', reason: 'operator_cancel', expires_at: soon(300000),
+    })], { chirpstack: fake.lib });
+
+    const states = Object.fromEntries(db.prepare('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations').all()
+      .map((r) => [r.expectation_id, r.reconciliation_state]));
+    assert.deepEqual(states, { 701: 'CANCELLED', 702: 'PENDING_OBSERVATION' });
+    assert.deepEqual(queue.map((item) => [item.fPort, item.data]), [[10, plan], [2, open]],
+      'only the cancelled open left the queue; the plan push and the other open stay, in order');
+    assert.equal(ackRows(db, 703)[0].result, 'APPLIED');
+  } finally {
+    db.close();
+  }
+});
+
+test('a cancel that names no actuation is refused while two are active', async () => {
+  const db = seedDb();
+  try {
+    const insert = db.prepare(
+      "INSERT INTO valve_actuation_expectations (expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) " +
+      "VALUES (?, ?, ?, ?, 600, ?, 'unknown', 'PENDING_OBSERVATION', ?)"
+    );
+    insert.run('711', VALVE, '711', '2026-10-01T10:00:00.000Z', '2026-10-01T10:12:00.000Z', '2026-10-01T10:00:00.000Z');
+    insert.run('712', VALVE, '712', '2026-10-01T10:01:00.000Z', '2026-10-01T10:13:00.000Z', '2026-10-01T10:01:00.000Z');
+    const queue = [{ id: 'q-a', fPort: 2, data: Buffer.from([0x41, 10]).toString('base64'), confirmed: false, isPending: false, isEncrypted: false }];
+    const fake = fakeChirpstack(queue);
+    await deliver(db, [pendingCommand(713, 'CANCEL_VALVE_ACTUATION', { device_eui: VALVE, reason: 'operator_cancel' })], { chirpstack: fake.lib });
+    const acks = ackRows(db, 713);
+    assert.equal(acks[0].result, 'REJECTED_PERMANENT');
+    assert.match(String(acks[0].reason), /ambiguous_actuation/);
+    assert.equal(fake.calls.flush, 0, 'nothing is flushed');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE reconciliation_state = 'CANCELLED'").get().n, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('a cloud open is tracked under its command id as text, the id a cancel names', async () => {
+  const db = seedDb();
+  try {
+    await deliver(db, [pendingCommand(721, 'OPEN_FOR_DURATION', {
+      device_eui: VALVE, duration_seconds: 600, expires_at: soon(300000),
+    })]);
+    const row = db.prepare('SELECT expectation_id FROM valve_actuation_expectations').get();
+    assert.equal(row && row.expectation_id, '721');
   } finally {
     db.close();
   }

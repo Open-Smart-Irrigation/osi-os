@@ -140,6 +140,25 @@ test('an in-flight actuation is cancelled through the shared cancel path, never 
   t.db.close();
 });
 
+// #428: a cancel that names no actuation is refused while two are active, but a valve that
+// leaves this gateway keeps none of them: unclaim cancels every active actuation.
+test('unclaiming a valve with two in-flight actuations cancels both and flushes the queue', async () => {
+  const t = await seedProgrammedValve();
+  for (const [id, at] of [['e-1', '2026-09-17T05:50:00.000Z'], ['e-2', '2026-09-17T05:51:00.000Z']]) {
+    await t.db.run(
+      "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) " +
+      "VALUES (?, ?, ?, 900, ?, 'unknown', 'PENDING_OBSERVATION', 'manual', ?)", [id, EUI, at, at, at]);
+  }
+  await unclaim(t.db);
+  const flushQueue = countingFlush();
+  const out = await clearValveOnUnclaim({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue, now: NOW, warn: noop });
+  assert.equal(out.cancelled.ok, true);
+  const states = (await t.db.all('SELECT reconciliation_state FROM valve_actuation_expectations ORDER BY expectation_id')).map((r) => r.reconciliation_state);
+  assert.deepEqual(states, ['CANCELLED', 'CANCELLED']);
+  assert.ok(flushQueue.calls.includes(EUI));
+  t.db.close();
+});
+
 test('unclaiming a non-valve device has no valve side effects', async () => {
   const t = await seedProgrammedValve();
   await t.db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000002','Soil probe','DRAGINO_LSN50',NULL,datetime('now'),datetime('now'))");

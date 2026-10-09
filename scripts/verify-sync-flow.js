@@ -3106,8 +3106,10 @@ expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes t
 // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points - see
 // cloud-commands.js's header comment). This node now delegates instead of inlining the
 // SQL, so the pin checks the delegation call; cancel.js's own cancel.test.js pins the
-// CANCELLED-marking and latest-active-only targeting behavior directly.
-expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark CANCELLED, latest-active-only) to cancel.js');
+// CANCELLED-marking and the named-actuation targeting (#428) directly.
+expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark the named actuation CANCELLED, keep other queue items) to cancel.js');
+expectIncludes('Cancel STREGA Actuation', 'expectationId: body.expectation_id', 'passes the actuation the caller names to cancel.js');
+expectIncludes('Valve Cloud Command Bridge', 'readQueue: readQueue, enqueue: enqueue', 'lets a cloud cancel keep the queue items of other commands');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 // --- System Stats fan detection: hwmon preferred, raw PWM fallback ---

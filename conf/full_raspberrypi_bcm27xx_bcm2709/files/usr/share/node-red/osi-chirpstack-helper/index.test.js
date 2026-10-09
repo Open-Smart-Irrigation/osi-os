@@ -821,3 +821,36 @@ test('close() returns a failing service close as an error and still closes the o
   }
   realClose();
 });
+
+// #428: a cancel reads the device queue so it can take out only the cancelled
+// actuation's open and queue every other item again unchanged.
+test('getDeviceQueue lists the queue oldest first with base64 data, through DeviceService.GetQueue', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  const seen = [];
+  function item(id, fPort, bytes, pending) {
+    const queueItem = new devicePb.DeviceQueueItem();
+    queueItem.setId(id);
+    queueItem.setFPort(fPort);
+    queueItem.setData(Uint8Array.from(bytes));
+    queueItem.setConfirmed(false);
+    queueItem.setIsPending(!!pending);
+    return queueItem;
+  }
+  client.deviceClient = {
+    getQueue: (request, metadata, options, callback) => {
+      seen.push({ devEui: request.getDevEui(), deadline: options.deadline });
+      const response = new devicePb.GetDeviceQueueItemsResponse();
+      response.setTotalCount(2);
+      response.setResultList([item('q-1', 2, [0x41, 10], false), item('q-2', 10, [0x01, 0x02], true)]);
+      callback(null, response);
+    },
+  };
+  const queue = await client.getDeviceQueue('a840410000000001');
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0].deadline instanceof Date, 'the call carries a deadline');
+  assert.deepEqual(queue, [
+    { id: 'q-1', fPort: 2, data: Buffer.from([0x41, 10]).toString('base64'), confirmed: false, isPending: false, isEncrypted: false },
+    { id: 'q-2', fPort: 10, data: Buffer.from([0x01, 0x02]).toString('base64'), confirmed: false, isPending: true, isEncrypted: false },
+  ]);
+  await assert.rejects(client.getDeviceQueue(''), /DevEUI is required/);
+});

@@ -232,12 +232,33 @@ function assertCancelPath() {
     // node now delegates instead of inlining the SQL, so verify the delegation call here
     // and check the actual safety invariants (CANCELLED state, cancel_reason, no bare
     // CLOSE) against cancel.js directly rather than against this node's source text.
+    // #428: a cancel names its actuation and keeps every other queued downlink, so both
+    // entry points hand cancel.js the queue reader and writer next to the flush.
+    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)']) {
+        if (!fn.func.includes(required)) {
+            throw new Error(`Cancel function must pass the named actuation and the queue reader/writer to cancel.js (${required})`);
+        }
+    }
+    const bridge = assertFunctionNode('Valve Cloud Command Bridge');
+    for (const required of ['client.getDeviceQueue(eui)', 'client.enqueueDownlink(item)', 'readQueue: readQueue, enqueue: enqueue', "'REJECTED_PERMANENT'"]) {
+        if (!bridge.func.includes(required)) {
+            throw new Error(`Valve Cloud Command Bridge must pass the queue reader/writer and answer permanent refusals (${required})`);
+        }
+    }
     if (!fn.func.includes('VC.cancelActuation(')) {
         throw new Error('Cancel function must delegate to cancel.js cancelActuation() (shared with the CANCEL_VALVE_ACTUATION cloud command applier)');
     }
     const cancelJsSrc = fs.readFileSync(CANCEL_JS, 'utf8');
     if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
         throw new Error('cancel.js must set reconciliation_state = CANCELLED');
+    }
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN']) {
+        if (!cancelJsSrc.includes(required)) {
+            throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
+        }
+    }
+    if (/ORDER BY commanded_at DESC LIMIT 1/.test(cancelJsSrc)) {
+        throw new Error('cancel.js must not pick the newest active actuation');
     }
     if (!cancelJsSrc.includes('cancel_reason')) {
         throw new Error('cancel.js must record cancel_reason');
@@ -274,7 +295,12 @@ function assertQueueFlushUsesGrpc() {
             throw new Error(`ChirpStack helper must not use REST for queue flush (${forbidden})`);
         }
     }
-    console.log('  ok ChirpStack queue flush uses DeviceService.FlushQueue gRPC');
+    for (const required of ['new devicePb.GetDeviceQueueItemsRequest()', "grpcInvoke(this.deviceClient, 'getQueue'"]) {
+        if (!helper.includes(required)) {
+            throw new Error(`ChirpStack helper must read the queue through DeviceService.GetQueue (${required})`);
+        }
+    }
+    console.log('  ok ChirpStack queue flush uses DeviceService.FlushQueue gRPC; queue read uses GetQueue');
 }
 
 function assertFrontendValveControls() {
@@ -391,9 +417,9 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     'RESEND_VALVE_PLAN',
     'SET_VALVE_SCHEDULER_STATUS',
     // cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
-    // but never itself opens or closes a valve - it flushes the ChirpStack downlink queue
-    // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
-    // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
+    // but never itself opens or closes a valve - it takes the named actuation's open out of
+    // the ChirpStack downlink queue and marks that valve_actuation_expectations row CANCELLED
+    // (cancel.js's cancelActuation, shared with the REST cancel route). Correctly actuator=false.
     'CANCEL_VALVE_ACTUATION',
     // cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
     // ever writes valve_settings columns (strega_generation, flow_rate_lpm/source,

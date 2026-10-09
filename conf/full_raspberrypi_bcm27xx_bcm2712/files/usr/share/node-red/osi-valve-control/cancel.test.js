@@ -21,7 +21,9 @@ function countingFlush() {
   return fn;
 }
 
-test('cancelActuation cancels the newest active expectation, sets cancel_reason, and flushes the queue exactly once', async () => {
+// #428: a cancel stops the actuation it names, never "the newest". Without a name it is
+// accepted only while exactly one actuation is active.
+test('cancelActuation without an expectation id refuses while two actuations are active: no flush, nothing changed', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e-old', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
   await insertExpectation(db, { id: 'e-new', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:05:00.000Z' });
@@ -29,16 +31,126 @@ test('cancelActuation cancels the newest active expectation, sets cancel_reason,
 
   const out = await cancelActuation({ db, deviceEui: EUI, reason: 'field_visit', flushQueue, now: new Date('2026-08-25T10:06:00.000Z') });
 
-  assert.equal(out.ok, true);
-  assert.deepEqual(out.downlinks, []);
-  assert.equal(flushQueue.calls.length, 1, 'flushQueue must be called exactly once');
-  assert.equal(flushQueue.calls[0], EUI);
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'ambiguous_actuation');
+  assert.equal(out.permanent, true, 'the refusal is final for this command');
+  assert.equal(flushQueue.calls.length, 0, 'nothing is flushed');
+  const states = (await db.all('SELECT reconciliation_state FROM valve_actuation_expectations ORDER BY expectation_id')).map((r) => r.reconciliation_state);
+  assert.deepEqual(states, ['OBSERVED_RUNNING', 'PENDING_OBSERVATION']);
+  db.close();
+});
 
-  const rows = await db.all('SELECT expectation_id, reconciliation_state, cancel_reason FROM valve_actuation_expectations ORDER BY expectation_id');
+test('cancelActuation with an expectation id cancels that actuation, not the newest, and sets cancel_reason', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-old', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-new', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:05:00.000Z' });
+  const flushQueue = countingFlush();
+
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-old', reason: 'field_visit', flushQueue, now: new Date('2026-08-25T10:06:00.000Z') });
+
+  assert.equal(out.ok, true);
+  assert.equal(out.expectationId, 'e-old');
+  assert.deepEqual(out.downlinks, []);
+  const rows = await db.all('SELECT expectation_id, reconciliation_state, cancel_reason FROM valve_actuation_expectations');
   const byId = Object.fromEntries(rows.map((r) => [r.expectation_id, r]));
-  assert.equal(byId['e-new'].reconciliation_state, 'CANCELLED', 'the newest active row must be cancelled');
-  assert.equal(byId['e-new'].cancel_reason, 'field_visit');
-  assert.equal(byId['e-old'].reconciliation_state, 'PENDING_OBSERVATION', 'an older row must not be touched');
+  assert.equal(byId['e-old'].reconciliation_state, 'CANCELLED');
+  assert.equal(byId['e-old'].cancel_reason, 'field_visit');
+  assert.equal(byId['e-new'].reconciliation_state, 'OBSERVED_RUNNING', 'the other actuation keeps running');
+  const device = await db.get('SELECT target_state FROM devices WHERE deveui=?', [EUI]);
+  assert.notEqual(device.target_state, 'CLOSED', 'a valve with another active actuation is not marked closed');
+  db.close();
+});
+
+test('cancelActuation with the id of an actuation that already ended refuses actuation_not_active, permanently', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-done', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-live', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:05:00.000Z' });
+  const flushQueue = countingFlush();
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-done', reason: null, flushQueue });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'actuation_not_active');
+  assert.equal(out.permanent, true);
+  assert.equal(flushQueue.calls.length, 0);
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-live'")).reconciliation_state, 'PENDING_OBSERVATION');
+  db.close();
+});
+
+test('cancelActuation with an id this gateway does not know answers no_active_actuation, not a permanent refusal', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-live', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:05:00.000Z' });
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-unknown', reason: null, flushQueue: countingFlush() });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'no_active_actuation');
+  assert.equal(out.permanent, false);
+  db.close();
+});
+
+function queueItem(id, fPort, bytes, extra) {
+  return Object.assign({ id, fPort, data: Buffer.from(bytes).toString('base64'), confirmed: false, isPending: false, isEncrypted: false }, extra || {});
+}
+
+function fakeQueue(items) {
+  const queue = items.slice();
+  const calls = { flush: 0, enqueued: [] };
+  return {
+    queue,
+    calls,
+    flushQueue: async () => { calls.flush += 1; queue.splice(0, queue.length); return { statusCode: 200 }; },
+    readQueue: async () => queue.map((item) => Object.assign({}, item)),
+    enqueue: async (item) => { calls.enqueued.push(item); queue.push(queueItem('re-' + calls.enqueued.length, item.fPort, [...Buffer.from(item.data, 'base64')], { confirmed: item.confirmed })); return {}; },
+  };
+}
+
+test('cancelActuation takes only the named actuation\'s open out of the queue and puts the rest back in order', async () => {
+  const { db } = await tempDb();
+  // Both opens are 900 s = [0x41, 15]; A was commanded first, so its open is the first one queued.
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-b', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  const q = fakeQueue([
+    queueItem('q-a', 2, [0x41, 15]),
+    queueItem('q-plan', 10, [0x01, 0x02, 0x03]),
+    queueItem('q-b', 2, [0x41, 15]),
+    queueItem('q-cfg', 11, [0x00, 0x0f, 0x00, 0x02], { confirmed: true }),
+  ]);
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'target_only');
+  assert.equal(out.queueItemsKept, 3);
+  assert.equal(out.queueItemsLost, 0);
+  assert.deepEqual(q.queue.map((item) => [item.fPort, Buffer.from(item.data, 'base64').toString('hex'), item.confirmed]),
+    [[10, '010203', false], [2, '410f', false], [11, '000f0002', true]]);
+  db.close();
+});
+
+test('cancelActuation does not touch the queue when the named actuation\'s open has already been sent', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e-b', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  // Only one matching open is still queued: first in, first out, so it is B's.
+  const q = fakeQueue([queueItem('q-b', 2, [0x41, 15]), queueItem('q-plan', 10, [0x01])]);
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'not_queued');
+  assert.equal(q.calls.flush, 0, 'B\'s open and the plan push stay queued');
+  assert.equal(q.queue.length, 2);
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-a'")).reconciliation_state, 'CANCELLED');
+  db.close();
+});
+
+test('cancelActuation still stops the actuation when the queue cannot be read: it flushes the whole queue and says so', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const q = fakeQueue([queueItem('q-a', 2, [0x41, 15])]);
+  const warnings = [];
+  const out = await cancelActuation({
+    db, deviceEui: EUI, reason: null, flushQueue: q.flushQueue, enqueue: q.enqueue,
+    readQueue: async () => { throw new Error('unavailable'); }, warn: (m) => warnings.push(m),
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'full_flush');
+  assert.equal(q.calls.flush, 1);
+  assert.equal(q.queue.length, 0);
+  assert.ok(warnings.some((w) => /device queue unreadable/.test(w)));
   db.close();
 });
 
