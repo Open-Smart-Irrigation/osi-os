@@ -29,6 +29,7 @@ const flows = JSON.parse(fs.readFileSync(path.join(shareDir, 'flows.json'), 'utf
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
 
 const DEV_EUI = 'A840410000000001';
+const DEV_EUI_2 = 'A840410000000002';
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 function loadCodec() {
@@ -61,6 +62,7 @@ function createDb() {
     ddl('zone_daily_environment').replace(/,\s*FOREIGN KEY[^\n]*\n/, '\n'),
   ].join('\n'));
   db.prepare("INSERT INTO devices VALUES (?, 'SENSECAP_S2120', 1, NULL)").run(DEV_EUI);
+  db.prepare("INSERT INTO devices VALUES (?, 'SENSECAP_S2120', 1, NULL)").run(DEV_EUI_2);
   db.prepare("INSERT INTO irrigation_zones VALUES (1, 'UTC', NULL)").run();
   return db;
 }
@@ -86,7 +88,17 @@ function decode(rawHex) {
 
 function harness(db) {
   const facade = facadeDb(db);
-  const osiDb = { Database: function Database() { return facade; } };
+  const stats = { markerLookups: 0 };
+  const counting = Object.assign({}, facade, {
+    all(sql, ...rest) {
+      if (/rain_delta_status = 'cumulative_baseline'/.test(sql)) stats.markerLookups += 1;
+      return facade.all(sql, ...rest);
+    },
+  });
+  const osiDb = { Database: function Database() { return counting; } };
+  // Node context persists across messages within one Node-RED run.
+  const store = new Map();
+  const context = { get: (key) => store.get(key), set: (key, value) => store.set(key, value) };
   const osiLib = {
     require(name) {
       if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
@@ -98,20 +110,20 @@ function harness(db) {
   const sqlFn = new AsyncFunction('msg', 'node', nodeBody('s2120-sql-fn'));
   const aggFn = new AsyncFunction('msg', 'osiDb', 'node', nodeBody('s2120-rain-agg-fn'));
 
-  async function uplink(time, rawHex) {
-    const msg = { payload: { deviceInfo: { devEui: DEV_EUI }, time, object: decode(rawHex) } };
-    const [stored, rainOut] = await processFn(msg, osiDb, osiLib, node, {});
+  async function uplink(time, rawHex, devEui = DEV_EUI) {
+    const msg = { payload: { deviceInfo: { devEui }, time, object: decode(rawHex) } };
+    const [stored, rainOut] = await processFn(msg, osiDb, osiLib, node, context);
     assert.ok(stored && stored.formattedData, 'process node dropped the uplink');
     const sqlMsg = await sqlFn({ formattedData: stored.formattedData }, node);
     db.exec(sqlMsg.topic);
     if (rainOut) await aggFn(rainOut, osiDb, node);
-    return { formatted: stored.formattedData, rainOut, row: lastRow(db) };
+    return { formatted: stored.formattedData, rainOut, row: lastRow(db, devEui) };
   }
-  return { uplink };
+  return { uplink, stats };
 }
 
-function lastRow(db) {
-  return db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY recorded_at DESC, id DESC LIMIT 1').get(DEV_EUI);
+function lastRow(db, devEui = DEV_EUI) {
+  return db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY recorded_at DESC, id DESC LIMIT 1').get(devEui);
 }
 
 const v2 = (intensity, cumulative) => intensityFrame('4B', intensity) + cumulativeFrame(cumulative);
@@ -265,8 +277,16 @@ test('a duplicate timestamp is skipped for counter and legacy uplinks', async ()
   const { uplink } = harness(db);
   await uplink('2026-10-08T10:00:00.000Z', legacy(0));
   const dup = await uplink('2026-10-08T10:00:00.000Z', legacy(1.524));
-  assert.equal(dup.formatted.rainDeltaStatus, 'duplicate_timestamp');
+  assert.equal(dup.formatted.rainDeltaStatus, 'duplicate_timestamp', 'legacy path');
   assert.equal(dup.formatted.rainMmDelta, null);
+  assert.equal(dup.rainOut, null);
+
+  await uplink('2026-10-08T10:00:00.000Z', v2(0, 7), DEV_EUI_2);
+  await uplink('2026-10-08T10:10:00.000Z', v2(1.524, 7.254), DEV_EUI_2);
+  const counterDup = await uplink('2026-10-08T10:10:00.000Z', v2(3.048, 7.508), DEV_EUI_2);
+  assert.equal(counterDup.formatted.rainDeltaStatus, 'duplicate_timestamp', 'counter path');
+  assert.equal(counterDup.formatted.rainMmDelta, null);
+  assert.equal(counterDup.rainOut, null);
 });
 
 test('an out-of-order counter uplink is skipped and does not move the baseline', async () => {
@@ -278,6 +298,10 @@ test('an out-of-order counter uplink is skipped and does not move the baseline',
   assert.equal(late.formatted.rainDeltaStatus, 'out_of_order');
   assert.equal(late.formatted.rainMmDelta, null);
   assert.equal(late.rainOut, null);
+  const next = await uplink('2026-10-08T10:30:00.000Z', v2(1.524, 4.762));
+  assert.equal(next.row.rain_delta_status, 'ok');
+  assert.equal(next.row.rain_mm_delta, 0.254, 'differenced against 4.508 at 10:20, not the late 4.254 row');
+  assert.equal(next.row.counter_interval_seconds, 600);
 });
 
 test('upgrade of a legacy device: the interval to an older row still sets the cadence', async () => {
@@ -290,4 +314,54 @@ test('upgrade of a legacy device: the interval to an older row still sets the ca
   assert.equal(next.row.rain_delta_status, 'ok');
   assert.equal(next.row.rain_mm_delta, 0.508, 'amount comes from the intensity, never from the older stored value');
   assert.equal(next.row.rain_gauge_cumulative_mm, null);
+});
+
+test('legacy tolerance boundary: 660 s integrates, 661 s does not', async () => {
+  const db = createDb();
+  const { uplink } = harness(db);
+  await uplink('2026-10-08T10:00:00.000Z', legacy(0));
+  const edge = await uplink('2026-10-08T10:11:00.000Z', legacy(1.524));
+  assert.equal(edge.row.rain_delta_status, 'ok');
+  assert.equal(edge.row.rain_mm_delta, 0.254);
+  const beyond = await uplink('2026-10-08T10:22:01.000Z', legacy(1.524));
+  assert.equal(beyond.row.rain_delta_status, 'intensity_only');
+  assert.equal(beyond.row.rain_mm_delta, null);
+});
+
+test('a dry counter interval is a valid zero and reaches the zone aggregation', async () => {
+  const db = createDb();
+  const { uplink } = harness(db);
+  await uplink('2026-10-08T10:00:00.000Z', v2(0, 12));
+  const dry = await uplink('2026-10-08T10:10:00.000Z', v2(0, 12));
+  assert.equal(dry.row.rain_delta_status, 'ok');
+  assert.equal(dry.row.rain_mm_delta, 0);
+  assert.ok(dry.rainOut, 'a measured zero is emitted, not dropped');
+  const zone = db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1').get();
+  assert.equal(zone.rainfall_mm, 0);
+});
+
+test('intensity-only uplinks before the first 4213 are not counted again by the counter', async () => {
+  const db = createDb();
+  const { uplink } = harness(db);
+  await uplink('2026-10-08T10:00:00.000Z', intensityFrame('4B', 0));
+  const integrated = await uplink('2026-10-08T10:10:00.000Z', intensityFrame('4B', 1.524));
+  assert.equal(integrated.row.rain_mm_delta, 0.254);
+  const baseline = await uplink('2026-10-08T10:20:00.000Z', v2(1.524, 30));
+  assert.equal(baseline.row.rain_delta_status, 'cumulative_baseline');
+  assert.equal(baseline.row.rain_mm_delta, null);
+  const next = await uplink('2026-10-08T10:30:00.000Z', v2(1.524, 30.254));
+  assert.equal(next.row.rain_mm_delta, 0.254);
+  assert.equal(next.row.rain_mm_today, 0.508, 'one integrated interval plus one counter interval');
+});
+
+test('a deleted counter baseline row starts a new baseline after a restart, never a phantom increment', async () => {
+  const db = createDb();
+  const first = harness(db);
+  await first.uplink('2026-10-08T10:00:00.000Z', v2(0, 40));
+  await first.uplink('2026-10-08T10:10:00.000Z', v2(0, 40.254));
+  db.prepare("DELETE FROM device_data WHERE rain_delta_status = 'cumulative_baseline'").run();
+  const restarted = harness(db);
+  const next = await restarted.uplink('2026-10-08T10:20:00.000Z', v2(0, 40.508));
+  assert.equal(next.row.rain_delta_status, 'cumulative_baseline');
+  assert.equal(next.row.rain_mm_delta, null);
 });
