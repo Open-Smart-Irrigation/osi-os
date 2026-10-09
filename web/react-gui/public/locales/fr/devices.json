@@ -921,5 +921,10 @@
       "invalidField": "Vérifiez {{field}} : hors plage.",
       "loadFailed": "Impossible de charger l'étalonnage."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} jours · totaux journaliers ({{timezone}})",
+    "soFar": "jusqu'ici",
+    "timezoneCheck": "Vérifiez le fuseau horaire de la zone dans ses paramètres."
   }
 }

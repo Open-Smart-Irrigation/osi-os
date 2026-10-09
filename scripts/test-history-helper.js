@@ -50,6 +50,7 @@ const expectedExports = [
   'legacyRainDailyHistory',
   'resolveDeviceTimezones',
   'resolveDeviceTimezone',
+  'rainDailyHistory',
   'buildZoneExportCsv',
   'buildAllZonesExportCsv',
   'toCsv',
@@ -1908,13 +1909,18 @@ test('mixed Watermark and Chameleon exports isolate SWT3 per device', async () =
   }
 });
 
-test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', async () => {
+// Rewritten with the farm-timezone change: the deprecated wrapper now takes
+// its days from rainDailyHistory (the device's zone timezone, here Zurich in
+// summer, +120) and ignores tzOffsetMin; it still answers the old array of
+// days that have samples. The old offset clamp is gone; the days clamp stays.
+test('legacyRainDailyHistory keeps the old array shape, with the farm timezone and no offset', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
       INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
-      INSERT INTO devices(deveui,name,type_id,user_id,created_at,updated_at)
-        VALUES('AA00000000000002','Weather','SENSECAP_S2120',1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
+      INSERT INTO irrigation_zones(id,name,user_id,timezone) VALUES(1,'A',1,'Europe/Zurich');
+      INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
+        VALUES('AA00000000000002','Weather','SENSECAP_S2120',1,1,'2026-05-20T00:00:00.000Z','2026-05-20T00:00:00.000Z');
       INSERT INTO device_data(deveui,recorded_at,rain_mm_delta) VALUES
         ('AA00000000000002','2026-06-20T12:00:00.000Z',9.9),
         ('AA00000000000002','2026-06-30T22:30:00.000Z',1.2),
@@ -1924,14 +1930,15 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
         ('AA00000000000002','2026-07-02T11:00:00.000Z',NULL);
     `);
 
-    // At UTC+2: 06-30T22:30Z and 07-01T05:00Z land on local 2026-07-01;
-    // 07-01T23:00Z and 07-02T10:00Z land on local 2026-07-02.
-    // NULL deltas are excluded; the 06-20 row is outside the 7-day window
-    // (window start = 2026-06-25T22:00:00Z for now=07-02T12:00Z, tz +120).
+    // In Zurich (CEST): 06-30T22:30Z and 07-01T05:00Z land on 2026-07-01;
+    // 07-01T23:00Z and 07-02T10:00Z land on 2026-07-02. NULL deltas are
+    // excluded; the 06-20 row is outside the 7-day window (window start =
+    // 2026-06-25T22:00:00Z for now=07-02T12:00Z). A viewer offset of -600
+    // changes nothing.
     const week = await helper.legacyRainDailyHistory(db, {
       deveui: 'AA00000000000002',
       days: 7,
-      tzOffsetMin: 120,
+      tzOffsetMin: -600,
       userId: 1,
       nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
     });
@@ -1943,7 +1950,6 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
     const today = await helper.legacyRainDailyHistory(db, {
       deveui: 'AA00000000000002',
       days: 1,
-      tzOffsetMin: 120,
       userId: 1,
       nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
     });
@@ -1952,13 +1958,12 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
     const otherUser = await helper.legacyRainDailyHistory(db, {
       deveui: 'AA00000000000002',
       days: 7,
-      tzOffsetMin: 120,
       userId: 999,
       nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
     });
     assert.deepStrictEqual(otherUser, []);
 
-    // Clamping: days -> 366, tz offset -> +840 minutes; start param proves both.
+    // Clamping: days -> 366; the window starts at Zurich midnight 365 days back.
     const clamped = await helper.legacyRainDailyHistory(db, {
       deveui: 'AA00000000000002',
       days: 99999,
@@ -1966,10 +1971,9 @@ test('legacyRainDailyHistory sums rain deltas per local day with a tz offset', a
       userId: 1,
       nowMs: Date.parse('2026-07-02T12:00:00.000Z'),
     });
-    assert.ok(Array.isArray(clamped));
-    assert.strictEqual(db.lastQuery.params[0], '840 minutes');
-    assert.strictEqual(db.lastQuery.params[3], '2025-07-01');
-    assert.strictEqual(db.lastQuery.params[5], '2025-07-02T10:00:00.000Z');
+    assert.deepStrictEqual(clamped.map((d) => d.day), ['2026-06-20', '2026-07-01', '2026-07-02']);
+    assert.ok(db.lastQuery.params.includes('2025-07-01T22:00:00.000Z'), JSON.stringify(db.lastQuery.params));
+    assert.ok(db.lastQuery.params.includes('2026-07-02T12:00:00.000Z'), JSON.stringify(db.lastQuery.params));
   } finally {
     db.close();
   }
@@ -2009,6 +2013,146 @@ test('resolveDeviceTimezones: zone, weather-station zone, unassigned, abbreviati
       { timezone: 'America/Chicago', basis: 'weather_station_zone' }, 'lowest-id non-deleted station zone');
     assert.deepStrictEqual(await helper.resolveDeviceTimezone(db, 'not-a-eui', { userId: 1 }),
       { timezone: 'UTC', basis: 'unassigned_default' });
+  } finally {
+    db.close();
+  }
+});
+
+// User 1, zone 1 in `timezone`, LoRain A840410000000001 in zone 1 owned by
+// user 1, and device_data(recorded_at, rain_mm_delta) rows.
+function seededRainDb(timezone, rows) {
+  const db = createCliSqliteDb();
+  const values = rows.map(([recordedAt, mm]) => `('A840410000000001',${sqliteEscape(recordedAt)},${sqliteEscape(mm)})`);
+  db.runSql(`
+    INSERT INTO users(id,username,password_hash,created_at,updated_at) VALUES(1,'u','h','2026-01-01','2026-01-01');
+    INSERT INTO irrigation_zones(id,name,user_id,timezone) VALUES(1,'A',1,${sqliteEscape(timezone)});
+    INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,created_at,updated_at)
+      VALUES('A840410000000001','g1','AQUASCOPE_LORAIN',1,1,'2026-01-01','2026-01-01');
+    ${values.length ? `INSERT INTO device_data(deveui,recorded_at,rain_mm_delta) VALUES ${values.join(',')};` : ''}
+  `);
+  return db;
+}
+
+function rainDays(history) {
+  return history.days.map((d) => [d.day, d.total_mm, d.samples]);
+}
+
+test('rainDailyHistory: Zurich days with the summer offset, whatever the viewer', async () => {
+  // A sample at 2026-07-01T22:30Z is 00:30 on 2026-07-02 in Zurich (CEST, +120).
+  // finding 9: a winter offset of +60 put it on 07-01.
+  const db = seededRainDb('Europe/Zurich', [['2026-07-01T22:30:00.000Z', 1.0], ['2026-07-01T21:30:00.000Z', 0.5]]);
+  try {
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 2, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.strictEqual(h.version, 2);
+    assert.strictEqual(h.deveui, 'A840410000000001');
+    assert.strictEqual(h.timezone, 'Europe/Zurich');
+    assert.strictEqual(h.timezone_basis, 'zone');
+    assert.deepStrictEqual(rainDays(h), [['2026-07-01', 0.5, 1], ['2026-07-02', 1, 1]]);
+    assert.strictEqual(h.days[0].so_far, false);
+    assert.strictEqual(h.days[1].so_far, true);
+    assert.strictEqual(h.days[0].period_start, '2026-06-30T22:00:00.000Z');
+    assert.strictEqual(h.days[0].period_end, '2026-07-01T22:00:00.000Z');
+    assert.strictEqual(h.days[1].period_start, '2026-07-01T22:00:00.000Z');
+    assert.strictEqual(h.days[1].period_end, '2026-07-02T10:00:00.000Z', 'the last day ends at the request time');
+    assert.strictEqual(h.period_start, '2026-06-30T22:00:00.000Z');
+    assert.strictEqual(h.period_end, '2026-07-02T10:00:00.000Z');
+  } finally {
+    db.close();
+  }
+});
+
+test('rainDailyHistory: the 25-hour day of 2026-10-25 and the 23-hour day of 2026-03-29', async () => {
+  const db = seededRainDb('Europe/Zurich', [['2026-10-25T23:30:00.000Z', 0.5], ['2026-03-28T23:30:00.000Z', 0.5]]);
+  try {
+    const oct = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 3, userId: 1, nowMs: Date.parse('2026-10-26T12:00:00Z') });
+    assert.deepStrictEqual(oct.days.map((d) => d.day), ['2026-10-24', '2026-10-25', '2026-10-26']);
+    const d25 = oct.days.find((d) => d.day === '2026-10-25');
+    assert.strictEqual(d25.period_start, '2026-10-24T22:00:00.000Z', 'summer side: CEST, +120');
+    assert.strictEqual(d25.period_end, '2026-10-25T23:00:00.000Z', 'winter side: CET, +60');
+    assert.strictEqual(Date.parse(d25.period_end) - Date.parse(d25.period_start), 25 * 3600000);
+    assert.strictEqual(oct.days.find((d) => d.day === '2026-10-26').total_mm, 0.5, '23:30Z on the 25th is 00:30 on the 26th (CET)');
+    assert.strictEqual(d25.total_mm, null);
+    const mar = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 3, userId: 1, nowMs: Date.parse('2026-03-30T12:00:00Z') });
+    const d29 = mar.days.find((d) => d.day === '2026-03-29');
+    assert.strictEqual(d29.period_start, '2026-03-28T23:00:00.000Z', 'winter side: CET, +60');
+    assert.strictEqual(d29.period_end, '2026-03-29T22:00:00.000Z', 'summer side: CEST, +120');
+    assert.strictEqual(Date.parse(d29.period_end) - Date.parse(d29.period_start), 23 * 3600000);
+    assert.strictEqual(d29.total_mm, 0.5);
+    assert.strictEqual(mar.days.find((d) => d.day === '2026-03-28').total_mm, null, '23:30Z on the 28th is 00:30 on the 29th (CET)');
+  } finally {
+    db.close();
+  }
+});
+
+test('rainDailyHistory: Kampala, Sao Paulo and Kolkata days', async () => {
+  const cases = [
+    // Kampala: UTC+3, no DST. 21:30Z is 00:30 the next day.
+    ['Africa/Kampala', '2026-07-01T21:30:00.000Z', '2026-07-01T20:30:00.000Z', '2026-06-30T21:00:00.000Z'],
+    // Sao Paulo: UTC-3, no DST. 02:30Z on 07-02 is 23:30 on 07-01.
+    ['America/Sao_Paulo', '2026-07-02T03:30:00.000Z', '2026-07-02T02:30:00.000Z', '2026-07-01T03:00:00.000Z'],
+    // Kolkata: UTC+5:30. 18:45Z is 00:15 the next day, 18:15Z is 23:45.
+    ['Asia/Kolkata', '2026-07-01T18:45:00.000Z', '2026-07-01T18:15:00.000Z', '2026-06-30T18:30:00.000Z'],
+  ];
+  for (const [timezone, secondDayRow, firstDayRow, firstDayStart] of cases) {
+    const db = seededRainDb(timezone, [[secondDayRow, 2], [firstDayRow, 0.25]]);
+    try {
+      const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 2, userId: 1, nowMs: Date.parse('2026-07-02T12:00:00Z') });
+      assert.strictEqual(h.timezone, timezone);
+      assert.deepStrictEqual(rainDays(h), [['2026-07-01', 0.25, 1], ['2026-07-02', 2, 1]], timezone);
+      assert.strictEqual(h.days[0].period_start, firstDayStart, timezone);
+      assert.strictEqual(Date.parse(h.days[0].period_end) - Date.parse(h.days[0].period_start), 24 * 3600000, timezone);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('rainDailyHistory: empty days are null, not zero; dry days are zero', async () => {
+  const db = seededRainDb('UTC', [['2026-07-01T10:00:00.000Z', 0]]);
+  try {
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 3, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.deepStrictEqual(h.days.map((d) => [d.day, d.total_mm, d.samples, d.quality]),
+      [['2026-06-30', null, 0, 'received_only'], ['2026-07-01', 0, 1, 'received_only'], ['2026-07-02', null, 0, 'received_only']]);
+  } finally {
+    db.close();
+  }
+});
+
+test('rainDailyHistory: a SQLite-shaped recorded_at is read as UTC, not the host zone', async () => {
+  const db = seededRainDb('Europe/Zurich', [['2026-07-01 22:30:00', 1.5], ['2026-07-01T22:10:00.000+01:00', 0.5]]);
+  try {
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 2, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.deepStrictEqual(rainDays(h), [['2026-07-01', 0.5, 1], ['2026-07-02', 1.5, 1]]);
+  } finally {
+    db.close();
+  }
+});
+
+test('rainDailyHistory: a foreign device leaks nothing', async () => {
+  const db = seededRainDb('Europe/Zurich', [['2026-07-01T10:00:00.000Z', 3]]);
+  try {
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 2, userId: 999, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.strictEqual(h.timezone, 'UTC');
+    assert.strictEqual(h.timezone_basis, 'unassigned_default');
+    assert.strictEqual(h.days.length, 2);
+    assert.ok(h.days.every((d) => d.samples === 0 && d.total_mm === null));
+  } finally {
+    db.close();
+  }
+});
+
+test('rainDailyHistory: an abbreviation zone keeps its value and its flag; days clamp to 1..366', async () => {
+  const db = seededRainDb('CET', [['2026-07-01T22:30:00.000Z', 1]]);
+  try {
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 99999, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.strictEqual(h.timezone, 'CET');
+    assert.strictEqual(h.timezone_basis, 'abbreviation');
+    assert.strictEqual(h.days.length, 366);
+    assert.strictEqual(h.days[0].day, '2025-07-02');
+    assert.strictEqual(h.days[365].day, '2026-07-02');
+    assert.strictEqual(h.days[365].total_mm, 1);
+    const one = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 0, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.strictEqual(one.days.length, 1);
   } finally {
     db.close();
   }

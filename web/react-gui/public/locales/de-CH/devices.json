@@ -921,5 +921,10 @@
       "invalidField": "Prüfen Sie {{field}}: ausserhalb des Bereichs.",
       "loadFailed": "Die Kalibrierung konnte nicht geladen werden."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
+    "soFar": "bisher",
+    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
   }
 }
