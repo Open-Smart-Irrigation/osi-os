@@ -489,3 +489,161 @@ test('shared mode: the gateway\'s day replaces the cloud\'s where it has a deman
   const older = ZE.overlayLocalWaterIrrigationSplit({ available: true, waterNeededTodayMm: 3.3, daily: days.map((d) => ({ date: d.date, rainMm: d.rainMm })) }, local, '2026-09-25');
   assert.deepEqual([older.daily.find((d) => d.date === '2026-09-23').demandMm, older.daily.find((d) => d.date === '2026-09-23').demandComputedBy], [null, null]);
 });
+
+// Open-Meteo forecast times. With a named timezone, Open-Meteo labels every
+// time of one response with a single fixed offset (`utc_offset_seconds`, the
+// zone's offset at the start of the response), also across a DST change; with
+// `timeformat=unixtime` it returns instants. A label is never UTC, and it is
+// not the zone's wall-clock time after a DST change inside the response.
+const HOUR_S = 3600;
+const unix = (iso) => Date.parse(iso) / 1000;
+function openMeteoResponse({ offsetSeconds, timezone, hourTimes, rain, dayTimes = [] }) {
+  return {
+    utc_offset_seconds: offsetSeconds,
+    timezone,
+    hourly: {
+      time: hourTimes,
+      temperature_2m: hourTimes.map(() => 12.5),
+      relative_humidity_2m: hourTimes.map(() => 80),
+      precipitation: rain,
+      precipitation_probability: hourTimes.map(() => 50),
+      wind_speed_10m: hourTimes.map(() => 3),
+      wind_direction_10m: hourTimes.map(() => 200),
+    },
+    daily: {
+      time: dayTimes,
+      weather_code: dayTimes.map(() => 61),
+      precipitation_sum: dayTimes.map(() => 4.2),
+      precipitation_probability_max: dayTimes.map(() => 70),
+      et0_fao_evapotranspiration: dayTimes.map(() => 1.1),
+      temperature_2m_min: dayTimes.map(() => 6),
+      temperature_2m_max: dayTimes.map(() => 14),
+    },
+  };
+}
+
+test('forecast instants: a Zurich 12:00 label is 10:00Z, never 12:00Z (review probe)', () => {
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', 7200), '2026-10-08T10:00:00.000Z');
+  assert.equal(ZE.openMeteoInstantIso(unix('2026-10-08T10:00:00Z'), 7200), '2026-10-08T10:00:00.000Z');
+  // The defect this replaces: the generic helper reads a label as UTC.
+  assert.equal(ZE.toIsoTime('2026-10-08T12:00'), '2026-10-08T12:00:00.000Z');
+  // A label without a known offset is an unknown instant, not UTC.
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', null), null);
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', undefined), null);
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00Z', null), '2026-10-08T12:00:00.000Z');
+  assert.equal(ZE.openMeteoInstantIso('', 7200), null);
+  assert.equal(ZE.openMeteoInstantIso(null, 7200), null);
+  assert.equal(ZE.openMeteoInstantIso(Number.NaN, 7200), null);
+  assert.equal(ZE.openMeteoInstantIso('garbage', 7200), null);
+
+  const parsed = ZE.parseOpenMeteoForecast(openMeteoResponse({
+    offsetSeconds: 7200, timezone: 'Europe/Zurich', hourTimes: [unix('2026-10-08T10:00:00Z')], rain: [1.2],
+  }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  // The stamp stays the end of the provider's interval: precipitation at T is the hour T-1h..T.
+  assert.equal(parsed.hours[0].time, '2026-10-08T10:00:00.000Z');
+  assert.equal(parsed.hours[0].rainMm, 1.2);
+});
+
+test('forecast instants: labels and unixtime of a recorded Zurich response across the 2025-10-26 DST end agree', () => {
+  // Shape recorded from the Open-Meteo archive API for 2025-10-25..26,
+  // timezone=Europe/Zurich: utc_offset_seconds 7200 for the whole response,
+  // 48 consecutive labels with no repeated hour, and unixtime starting at
+  // 1761343200 in steps of 3600.
+  const labels = [];
+  for (let i = 0; i < 48; i++) labels.push(`2025-10-${i < 24 ? 25 : 26}T${String(i % 24).padStart(2, '0')}:00`);
+  const unixTimes = labels.map((_, i) => 1761343200 + i * HOUR_S);
+  const rain = labels.map((_, i) => (i % 5) / 10);
+  const fromLabels = ZE.parseOpenMeteoForecast(openMeteoResponse({ offsetSeconds: 7200, timezone: 'Europe/Zurich', hourTimes: labels, rain }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  const fromUnix = ZE.parseOpenMeteoForecast(openMeteoResponse({ offsetSeconds: 7200, timezone: 'Europe/Zurich', hourTimes: unixTimes, rain }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  assert.deepEqual(fromLabels.hours, fromUnix.hours);
+  assert.equal(fromUnix.hours.length, 48);
+  assert.equal(new Set(fromUnix.hours.map((h) => h.time)).size, 48);
+  assert.equal(fromUnix.hours[0].time, '2025-10-24T22:00:00.000Z');
+  // After the change the label runs one hour ahead of Zurich wall time:
+  // '2025-10-26T12:00' is 10:00Z (12:00 GMT+2), which is 11:00 CET.
+  assert.equal(fromLabels.hours[36].time, '2025-10-26T10:00:00.000Z');
+});
+
+test('forecast instants: hours stay one hour apart across the 2026-03-29 DST start', () => {
+  // A response requested on 2026-03-28 for Europe/Zurich: offset +01:00 throughout.
+  const unixTimes = Array.from({ length: 6 }, (_, i) => unix('2026-03-28T23:00:00Z') + i * HOUR_S);
+  const parsed = ZE.parseOpenMeteoForecast(openMeteoResponse({ offsetSeconds: 3600, timezone: 'Europe/Zurich', hourTimes: unixTimes, rain: [0, 0, 0.4, 0, 0, 0] }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  assert.deepEqual(parsed.hours.map((h) => h.time), [
+    '2026-03-28T23:00:00.000Z', '2026-03-29T00:00:00.000Z', '2026-03-29T01:00:00.000Z',
+    '2026-03-29T02:00:00.000Z', '2026-03-29T03:00:00.000Z', '2026-03-29T04:00:00.000Z',
+  ]);
+  // The label '2026-03-29T03:00' in this response is GMT+1, so 02:00Z (04:00 CEST).
+  assert.equal(ZE.openMeteoInstantIso('2026-03-29T03:00', 3600), '2026-03-29T02:00:00.000Z');
+});
+
+test('forecast days: unixtime day starts map to the provider\'s dates across both DST changes', () => {
+  // Day starts at local midnight under the response's fixed offset.
+  const spring = [unix('2026-03-28T23:00:00Z'), unix('2026-03-29T23:00:00Z'), unix('2026-03-30T23:00:00Z')];
+  const autumn = [unix('2026-10-24T22:00:00Z'), unix('2026-10-25T22:00:00Z'), unix('2026-10-26T22:00:00Z')];
+  assert.deepEqual(spring.map((t) => ZE.openMeteoDateIso(t, 3600, 'Europe/Zurich')), ['2026-03-29', '2026-03-30', '2026-03-31']);
+  assert.deepEqual(autumn.map((t) => ZE.openMeteoDateIso(t, 7200, 'Europe/Zurich')), ['2026-10-25', '2026-10-26', '2026-10-27']);
+  // Without an offset, the requested zone dates a day start; an error of an
+  // hour either way (fixed offset or wall-clock midnight) keeps the date.
+  assert.deepEqual(autumn.map((t) => ZE.openMeteoDateIso(t, null, 'Europe/Zurich')), ['2026-10-25', '2026-10-26', '2026-10-27']);
+  assert.deepEqual([unix('2026-03-29T22:00:00Z'), unix('2026-10-25T23:00:00Z')].map((t) => ZE.openMeteoDateIso(t, null, 'Europe/Zurich')), ['2026-03-30', '2026-10-26']);
+  // A date label is already the provider's date.
+  assert.equal(ZE.openMeteoDateIso('2026-10-25', 7200, 'Europe/Zurich'), '2026-10-25');
+  assert.equal(ZE.openMeteoDateIso('', 7200, 'Europe/Zurich'), null);
+  assert.equal(ZE.openMeteoDateIso(null, 7200, 'Europe/Zurich'), null);
+
+  const parsed = ZE.parseOpenMeteoForecast(openMeteoResponse({ offsetSeconds: 7200, timezone: 'Europe/Zurich', hourTimes: [], rain: [], dayTimes: autumn }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  assert.deepEqual(parsed.days.map((d) => d.date), ['2026-10-25', '2026-10-26', '2026-10-27']);
+  assert.deepEqual(parsed.days[0], {
+    date: '2026-10-25', description: null, weatherCode: 61, rainMm: 4.2, precipitationProbabilityPct: 70, rainProbabilityPct: 70,
+    et0MmDay: 1.1, temperatureMinC: 6, temperatureMaxC: 14, minTempC: 6, maxTempC: 14,
+  });
+});
+
+test('forecast instants: offsets outside Europe, including a half hour and a negative offset', () => {
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', 10800), '2026-10-08T09:00:00.000Z'); // Africa/Kampala +03:00
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', 19800), '2026-10-08T06:30:00.000Z'); // Asia/Kolkata +05:30
+  assert.equal(ZE.openMeteoInstantIso('2026-10-08T12:00', -10800), '2026-10-08T15:00:00.000Z'); // America/Sao_Paulo -03:00
+  // Local midnight of 2026-10-08 is 2026-10-07T21:00Z in Kampala and 18:30Z in Kolkata.
+  assert.equal(ZE.openMeteoDateIso(unix('2026-10-07T21:00:00Z'), 10800, 'Africa/Kampala'), '2026-10-08');
+  assert.equal(ZE.openMeteoDateIso(unix('2026-10-07T18:30:00Z'), 19800, 'Asia/Kolkata'), '2026-10-08');
+  assert.equal(ZE.openMeteoDateIso(unix('2026-10-07T18:30:00Z'), null, 'Asia/Kolkata'), '2026-10-08');
+  assert.equal(ZE.openMeteoDateIso(unix('2026-10-08T03:00:00Z'), -10800, 'America/Sao_Paulo'), '2026-10-08');
+
+  const kolkata = ZE.parseOpenMeteoForecast(openMeteoResponse({
+    offsetSeconds: 19800, timezone: 'Asia/Kolkata', hourTimes: ['2026-10-08T12:00', '2026-10-08T13:00'], rain: [0.5, 0],
+  }), { timezone: 'Asia/Kolkata', observedAtMs: NOW_MS });
+  assert.deepEqual(kolkata.hours.map((h) => h.time), ['2026-10-08T06:30:00.000Z', '2026-10-08T07:30:00.000Z']);
+});
+
+test('forecast instants: next-24-hour rain and onset use true instants (Zurich, before and after)', () => {
+  const nowIso = '2026-10-08T10:30:00.000Z'; // 12:30 in Zurich
+  const labels = ['2026-10-08T12:00', '2026-10-08T13:00', '2026-10-09T12:00', '2026-10-09T13:00'];
+  const rain = [3, 1, 2, 4];
+  const response = openMeteoResponse({ offsetSeconds: 7200, timezone: 'Europe/Zurich', hourTimes: labels, rain });
+
+  // Before: labels read as UTC. The 12:00 hour (ended 10:00Z, in the past)
+  // counted and the next day's 12:00 hour (ends 10:00Z, inside 24 h) did not.
+  const before = { source: 'open_meteo', observedAt: nowIso, days: [], hours: labels.map((label, i) => ({ time: ZE.toIsoTime(label), rainMm: rain[i] })) };
+  const beforeSection = ZE.buildForecastSection(before, 'live', null, null, nowIso);
+  assert.equal(beforeSection.rainFocus.totalNext24hMm, 4);
+  assert.equal(beforeSection.rainFocus.nextRainEta, '2026-10-08T12:00:00.000Z');
+
+  // After: the hour ending 11:00Z and the one ending 10:00Z tomorrow.
+  for (const hourTimes of [labels, labels.map((label) => ZE.openMeteoInstantIso(label, 7200)).map((iso) => Date.parse(iso) / 1000)]) {
+    const parsed = ZE.parseOpenMeteoForecast({ ...response, hourly: { ...response.hourly, time: hourTimes } }, { timezone: 'Europe/Zurich', observedAtMs: Date.parse(nowIso) });
+    const section = ZE.buildForecastSection(parsed, 'live', null, null, nowIso);
+    assert.equal(section.rainFocus.totalNext24hMm, 3);
+    assert.equal(section.rainFocus.nextRainEta, '2026-10-08T11:00:00.000Z');
+    assert.deepEqual(section.rainFocus.hourly.map((h) => h.time), ['2026-10-08T11:00:00.000Z', '2026-10-09T10:00:00.000Z']);
+    assert.equal(section.rainFocus.maxHourlyRainAt, '2026-10-09T11:00:00.000Z');
+  }
+});
+
+test('parseOpenMeteoForecast: empty or missing data gives null; hours without an instant are dropped', () => {
+  assert.equal(ZE.parseOpenMeteoForecast(null, { timezone: 'UTC', observedAtMs: NOW_MS }), null);
+  assert.equal(ZE.parseOpenMeteoForecast({}, { timezone: 'UTC', observedAtMs: NOW_MS }), null);
+  const parsed = ZE.parseOpenMeteoForecast(openMeteoResponse({ offsetSeconds: undefined, timezone: 'Europe/Zurich', hourTimes: ['2026-10-08T12:00', unix('2026-10-08T11:00:00Z')], rain: [1, 2] }), { timezone: 'Europe/Zurich', observedAtMs: NOW_MS });
+  assert.deepEqual(parsed.hours.map((h) => [h.time, h.rainMm]), [['2026-10-08T11:00:00.000Z', 2]]);
+  assert.equal(parsed.source, 'open_meteo');
+  assert.equal(parsed.observedAt, new Date(NOW_MS).toISOString());
+});
