@@ -161,6 +161,13 @@ function assertRouteHandlesSafeValveCommands() {
     if (!valveBranch.includes("action: 'OPEN_FOR_DURATION'") || valveBranch.includes('action: cmd.action')) {
         throw new Error('"Route Command" must send a VALVE_COMMAND only as OPEN_FOR_DURATION, never with the cloud action verbatim');
     }
+    // A partial opening or flushing ([0x31, pct]) on fPort 2 would be an open: the ports are pinned.
+    for (const [type, next, port] of [['SET_STREGA_PARTIAL_OPENING', 'SET_STREGA_FLUSHING', 27], ['SET_STREGA_FLUSHING', 'SET_SDI12_IDENTIFY', 28]]) {
+        const branch = node.func.slice(node.func.indexOf(`if (commandType === '${type}')`), node.func.indexOf(`if (commandType === '${next}')`));
+        if (!branch.includes(`fPort: ${port},`) || branch.includes('cmd.fPort')) {
+            throw new Error(`"Route Command" must send ${type} on fPort ${port} whatever the command names`);
+        }
+    }
     const timedBranch = node.func.slice(node.func.indexOf("if (commandType === 'SET_STREGA_TIMED_ACTION')"), node.func.indexOf("if (commandType === 'SET_STREGA_MAGNET_MODE')"));
     if (!timedBranch.includes("action: 'OPEN_FOR_DURATION'") || timedBranch.includes("action: 'TIMED_ACTION'")) {
         throw new Error('"Route Command" must send a cloud SET_STREGA_TIMED_ACTION as OPEN_FOR_DURATION');

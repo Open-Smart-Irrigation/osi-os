@@ -1634,9 +1634,11 @@ if (sizeAllowances) {
   // 47644: cancel frame-counter guard (Cancel STREGA Actuation +99, Valve Cloud Command
   // Bridge -151): 47696 - 52 = 47644.
   // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
-  expectCondition(sizeAllowances.total_allowance?.delta === 47644,
-    'size total allowance: exact cumulative delta 47644',
-    'size total allowance: expected exact cumulative delta 47644');
+  // 47589: partial-opening and flushing ports pinned (Route Command -54); re-measured on
+  // 7157ef0fa: origin/main 1658111 -> HEAD 1663608 = +5497, so 42092 + 5497 = 47589.
+  expectCondition(sizeAllowances.total_allowance?.delta === 47589,
+    'size total allowance: exact cumulative delta 47589',
+    'size total allowance: expected exact cumulative delta 47589');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

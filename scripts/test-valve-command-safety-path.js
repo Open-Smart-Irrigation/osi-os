@@ -567,3 +567,23 @@ test('the local cancel route reports the other open it took out of the queue', a
     db.close();
   }
 });
+
+// A partial opening ([0x31, pct]) or a flushing sent on fPort 2 would be read by the valve as
+// an open; the cloud fPort is not trusted for these two types.
+async function assertPortPinned(commandId, type, fields, downlink) {
+  const db = seedDb();
+  try {
+    const { outputs } = await deliver(db, [pendingCommand(commandId, type, Object.assign({ deviceEui: VALVE, expires_at: soon(300000) }, fields))]);
+    assert.deepEqual(stregaDownlinks(outputs), [downlink], type);
+  } finally {
+    db.close();
+  }
+}
+
+test('a cloud partial opening naming fPort 2 still goes out on fPort 27', async () => {
+  await assertPortPinned(741, 'SET_STREGA_PARTIAL_OPENING', { action: 'OPEN', percentage: 50, fPort: 2 }, { fPort: 27, bytes: [0x31, 50] });
+});
+
+test('a cloud flushing naming fPort 2 still goes out on fPort 28', async () => {
+  await assertPortPinned(742, 'SET_STREGA_FLUSHING', { returnPosition: 'OPEN', percentage: 40, fPort: 2 }, { fPort: 28, bytes: [0x31, 40] });
+});
