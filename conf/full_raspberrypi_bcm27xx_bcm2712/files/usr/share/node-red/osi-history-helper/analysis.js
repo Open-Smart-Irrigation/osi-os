@@ -769,6 +769,9 @@ function createAnalysis(deps) {
           channels: [{ id: entry.channelKey, field: meta.edgeField, unit: entry.unit }],
           from: range.from,
           to: range.to,
+          // Daily and weekly buckets start at the zone's local midnight (farm
+          // day), as the weather series beside them do; unassigned devices are UTC.
+          timezone: entry.timezone,
         });
         series.push(buildSeriesEnvelope(entry, {
           unit: entry.unit,

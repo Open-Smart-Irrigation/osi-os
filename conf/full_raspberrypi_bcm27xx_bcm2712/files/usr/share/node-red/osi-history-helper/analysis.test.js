@@ -713,6 +713,73 @@ test('LoRain rain_mm_delta: two rows 0.5 and 1.0 inside one hour give 1.5, never
   }
 });
 
+// Farm day = the zone's timezone: a device's daily bucket starts at the zone's
+// local midnight, as the weather series beside it already do, and the autumn
+// clock change gives a 25-hour day. Zone 1 is Europe/Zurich.
+test('device daily buckets are zone-local days, including the 25-hour autumn day', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_mm_delta) VALUES (?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-24T22:30:00Z', 0.5); // 00:30 local on 2026-10-25
+    insert.run(fixtureRainEui(raw), '2026-10-25T22:30:00Z', 1.0); // 23:30 local, still 2026-10-25
+    insert.run(fixtureRainEui(raw), '2026-10-25T23:30:00Z', 2.0); // 00:30 local on 2026-10-26
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    const daily = await series(raw, [rain], { from: '2026-10-24T22:00:00.000Z', to: '2026-10-26T23:00:00.000Z' }, 'daily');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-10-24T22:00:00.000Z', 1.5, 2],
+      ['2026-10-25T23:00:00.000Z', 2, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+// The same rule for a mean channel on the 23-hour spring day: every device
+// channel moved to the zone's local day, not only rain sums.
+test('a device mean channel uses zone-local days across the 23-hour spring day', async () => {
+  const raw = weatherDb();
+  try {
+    const kiwi = raw.prepare("SELECT deveui FROM devices WHERE name = 'Kiwi North'").get().deveui;
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+    insert.run(kiwi, '2026-03-28T23:30:00Z', 10); // 00:30 local on 2026-03-29
+    insert.run(kiwi, '2026-03-29T21:30:00Z', 20); // 23:30 local, still 2026-03-29
+    insert.run(kiwi, '2026-03-29T22:30:00Z', 40); // 00:30 local on 2026-03-30
+    const result = await catalog(raw);
+    const swt = result.channels.find((c) => c.deviceName === 'Kiwi North' && c.channelKey === 'swt_1');
+    const daily = await series(raw, [swt], { from: '2026-03-28T23:00:00.000Z', to: '2026-03-30T22:00:00.000Z' }, 'daily');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-03-28T23:00:00.000Z', 15, 2],
+      ['2026-03-29T22:00:00.000Z', 40, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+// A device without a zone has no farm timezone: its daily buckets stay UTC days.
+test('an unassigned device keeps UTC daily buckets', async () => {
+  const raw = weatherDb();
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A840410000000002', 'Loose gauge', 'AQUASCOPE_LORAIN', 1, NULL, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')`).run();
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_mm_delta) VALUES (?, ?, ?)');
+    insert.run('A840410000000002', '2026-10-24T22:30:00Z', 0.5);
+    insert.run('A840410000000002', '2026-10-25T23:30:00Z', 2.0);
+    const result = await catalog(raw, { unassignedAccess: 'owner' });
+    const loose = result.channels.find((c) => c.deviceName === 'Loose gauge' && c.channelKey === 'rain_mm_delta');
+    assert.ok(loose && loose.zoneId === null, 'unassigned rain entry');
+    const daily = await series(raw, [loose], { from: '2026-10-24T00:00:00.000Z', to: '2026-10-26T00:00:00.000Z' }, 'daily', { unassignedAccess: 'owner' });
+    assert.equal(daily.series[0].timezone, 'UTC');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-10-24T00:00:00.000Z', 0.5, 1],
+      ['2026-10-25T00:00:00.000Z', 2, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
 // Acceptance A18: a rain bucket with no raw rows is null. A mean rollup of the
 // same hour is never read back as the amount (not 0.75, not 0.75 x 2).
 test('LoRain rain bucket with only a mean rollup and no raw rows is null', async () => {
