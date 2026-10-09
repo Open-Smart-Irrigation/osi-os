@@ -248,6 +248,13 @@ function seedDb(dbPath, seedRows) {
   db.close();
 }
 
+// The fixture zone is UTC, so Open-Meteo's response offset is 0 and a label
+// is UTC. Times come back as Unix seconds when the request asks for them.
+function openMeteoTime(url, label) {
+  if (!url.includes('timeformat=unixtime')) return label;
+  return Date.parse(label.length === 10 ? `${label}T00:00:00Z` : `${label}:00Z`) / 1000;
+}
+
 function responseFor(url) {
   if (url.includes('/environment-bundles')) {
     if (!currentBundle) throw new Error(`unexpected HTTP URL in zone-env vector harness: ${url}`);
@@ -255,8 +262,9 @@ function responseFor(url) {
   }
   if (url.includes('current=')) {
     return {
+      utc_offset_seconds: 0,
       current: {
-        time: '2026-07-11T10:00',
+        time: openMeteoTime(url, '2026-07-11T10:00'),
         temperature_2m: 25.1,
         relative_humidity_2m: 58,
         precipitation: 0.2,
@@ -269,8 +277,9 @@ function responseFor(url) {
   }
   if (url.includes('hourly=')) {
     return {
+      utc_offset_seconds: 0,
       hourly: {
-        time: ['2026-07-11T10:00', '2026-07-11T13:00', '2026-07-11T16:00'],
+        time: ['2026-07-11T10:00', '2026-07-11T13:00', '2026-07-11T16:00'].map((label) => openMeteoTime(url, label)),
         temperature_2m: [25.1, 27.2, 26.5],
         relative_humidity_2m: [58, 54, 57],
         precipitation: [0.2, 1.4, 0],
@@ -279,7 +288,7 @@ function responseFor(url) {
         wind_direction_10m: [175, 190, 160],
       },
       daily: {
-        time: ['2026-07-11', '2026-07-12'],
+        time: ['2026-07-11', '2026-07-12'].map((label) => openMeteoTime(url, label)),
         weather_code: [61, 3],
         precipitation_sum: [1.6, 0.4],
         precipitation_probability_max: [80, 35],

@@ -80,6 +80,7 @@ jobs:
           node scripts/test-watermark-cloud-command-path.js
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
+          node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-timezone-route.js
           node scripts/verify-chameleon-calibration.js
           node scripts/verify-lsn50-chameleon-persistence.js
