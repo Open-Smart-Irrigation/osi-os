@@ -86,3 +86,20 @@ describe('SenseCapWeatherCard history wiring (issue #33 regression net)', () => 
     expect(screen.queryByTestId('sensor-monitor')).not.toBeInTheDocument();
   });
 });
+
+describe('SenseCapWeatherCard rain counter status labels', () => {
+  const withStatus = (status: string, extra: Record<string, unknown> = {}) => ({
+    ...s2120Device,
+    latest_data: { ...s2120Device.latest_data, rain_delta_status: status, rain_mm_per_10min: null, rain_mm_delta: null, ...extra },
+  }) as unknown as Device;
+
+  it('explains the first cumulative-rainfall uplink as a counter baseline', () => {
+    render(<SenseCapWeatherCard device={withStatus('cumulative_baseline')} removeContext="farm" />);
+    expect(screen.getByText('Rain counter baseline set; waiting for the next uplink to calculate a delta.')).toBeInTheDocument();
+  });
+
+  it('says the rain amount is unknown when only the intensity was reported', () => {
+    render(<SenseCapWeatherCard device={withStatus('intensity_only', { counter_interval_seconds: 1200 })} removeContext="farm" />);
+    expect(screen.getByText('Rain amount unknown for this interval; only the intensity was reported.')).toBeInTheDocument();
+  });
+});

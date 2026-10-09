@@ -2611,7 +2611,15 @@ expectIncludesById('merge-device-data', 'bat_pct: latest.bat_pct', 'merges S2120
 expectIncludesById('s2120-process-fn', 'data.object?.messages', 'accepts live decoded S2120 message shape');
 expectIncludesById('s2120-process-fn', 'data.object?.data?.messages', 'accepts nested decoded S2120 message shape');
 expectIncludesById('s2120-process-fn', "normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID');
-expectIncludesById('s2120-process-fn', "measurements['4113']", 'uses the Seeed cumulative-rain measurement ID');
+// SenseCAP S2120 user guide 10.3.1 and 13.3: 4113 is rainfall INTENSITY (mm/h,
+// six times the rain of the past ten minutes); 4213 (frame 4C, firmware v2.0+)
+// is CUMULATIVE rainfall (mm). Only 4213 is a counter; 4113 is a rate.
+expectIncludesById('s2120-process-fn', "rainGaugeCumulativeMm: finiteOrNull(measurements['4213'])", 'differences only the Seeed cumulative-rainfall measurement 4213 as the rain counter');
+expectIncludesById('s2120-process-fn', "const rainMmPerHour = finiteOrNull(measurements['4113'])", 'stores the Seeed rain-intensity measurement 4113 as the rain rate, never as a counter');
+expectIncludesById('s2120-process-fn', "const COUNTER_BASELINE = 'cumulative_baseline'", 'marks the first 4213 row so rows written under the old 4113 interpretation never become a counter baseline');
+expectIncludesById('s2120-process-fn', 'const LEGACY_WINDOW_S = 600', 'integrates legacy intensity only over the vendor ten-minute window');
+expectIncludesById('s2120-process-fn', "rainDeltaStatus = 'intensity_only'", 'leaves the legacy rain amount unknown when the cadence does not match the ten-minute window');
+expectIncludesById('s2120-process-fn', "const MARKER_KEY = 's2120CounterBaseline'", 'caches the counter-baseline marker per device in node context instead of scanning the history on every uplink');
 expectIncludesById('s2120-process-fn', "windGustMps: measurements['4191'] ?? null", "reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)");
 expectIncludesById('s2120-process-fn', "measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field');
 expectIncludesById('s2120-process-fn', 'duplicate_timestamp', 'skips duplicate S2120 rain-counter uplinks');
@@ -4353,14 +4361,15 @@ if (!dendroHelperPath) {
               { measurementId: 4103, measurementValue: options.batteryPct ?? 84 },
               { measurementId: 4104, measurementValue: 182.4 },
               { measurementId: 4105, measurementValue: 3.2 },
-              { measurementId: 4113, measurementValue: options.rainGaugeCumulativeMm ?? 12.4 },
+              // 4113 = rain intensity (mm/h); 4213 = cumulative rainfall (mm).
+              { measurementId: 4113, measurementValue: options.rainIntensityMmH ?? 8.4 },
               { measurementId: 4190, measurementValue: 2.7 },
-              // 4191 is the real Peak Wind Gust id; 4213 (Rain Accumulation) is included
-              // as a same-uplink distractor with a deliberately different value so this
-              // fixture also proves windGustMps never reads it (PR-I regression: s2120-process-fn
-              // used to prefer 4213 over 4191 for windGustMps).
+              // 4191 is the real Peak Wind Gust id; 4213 (Rain Accumulation) carries a
+              // deliberately different value so this fixture also proves windGustMps never
+              // reads it (PR-I regression: s2120-process-fn used to prefer 4213 over 4191
+              // for windGustMps).
               { measurementId: 4191, measurementValue: options.windGustMps ?? 7.6 },
-              { measurementId: 4213, measurementValue: options.rainAccumulationMm ?? 99.9 },
+              { measurementId: 4213, measurementValue: options.rainCumulativeMm ?? 12.4 },
             ]],
           },
         },
@@ -4372,11 +4381,17 @@ if (!dendroHelperPath) {
         if (sql.includes('SELECT type_id FROM devices')) {
           return [{ type_id: options.deviceType || 'SENSECAP_S2120' }];
         }
+        if (sql.includes("rain_delta_status = 'cumulative_baseline'")) {
+          return options.counterBaseline ? [options.counterBaseline] : [];
+        }
         if (sql.includes('SELECT recorded_at, rain_gauge_cumulative_mm')) {
           return options.previousSample ? [options.previousSample] : [];
         }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_gauge_cumulative_mm IS NOT NULL')) {
+        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_mm_per_hour IS NOT NULL')) {
           return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
+        }
+        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at <') && sql.includes('rain_mm_per_hour IS NOT NULL')) {
+          return options.previousRainRow ? [options.previousRainRow] : [];
         }
         if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
           return [{ rain_mm_today: options.todayTotal ?? 0 }];
@@ -4746,11 +4761,13 @@ if (!dendroHelperPath) {
         }
       );
       const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4113 to cumulative rain');
+      expectEqual(formatted.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4213 to cumulative rain');
+      expectEqual(formatted.rainMmPerHour, 8.4, 'S2120 fixture keeps measurement 4113 as the reported rain intensity');
       expectEqual(formatted.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
       expectEqual(formatted.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
       expectApprox(formatted.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
-      expectEqual(formatted.rainDeltaStatus, 'first_sample', 'S2120 fixture marks the first rain sample without fabricating a delta');
+      expectEqual(formatted.rainDeltaStatus, 'cumulative_baseline', 'S2120 fixture marks the first cumulative-rain sample as the counter baseline without fabricating a delta');
+      expectEqual(formatted.rainMmDelta, null, 'S2120 first-sample fixture stores no rain increment');
       expectEqual(formatted.rainMmPer10Min, null, 'S2120 first-sample fixture leaves the normalized rain rate empty');
       expectEqual(rainOut, null, 'S2120 first-sample fixture does not emit a zone-rain update');
     })().catch((error) => {
@@ -4760,10 +4777,11 @@ if (!dendroHelperPath) {
     pendingChecks.push((async () => {
       const [processedMsg, rainOut] = await executeFunctionNodeById(
         's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainGaugeCumulativeMm: 11.4 }),
+        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainCumulativeMm: 11.4 }),
         {
           scope: {
             osiDb: createMockOsiDb(createS2120QueryHandler({
+              counterBaseline: { recorded_at: '2026-04-21T09:00:00.000Z' },
               previousSample: {
                 recorded_at: '2026-04-21T09:50:00.000Z',
                 rain_gauge_cumulative_mm: 10.0,
@@ -4776,7 +4794,7 @@ if (!dendroHelperPath) {
       const formatted = processedMsg.formattedData || {};
       expectEqual(formatted.rainDeltaStatus, 'ok', 'S2120 fixture marks increasing cumulative rain as valid');
       expectApprox(formatted.rainMmDelta, 1.4, 0.000001, 'S2120 fixture computes rain deltas from cumulative rain');
-      expectApprox(formatted.rainMmPerHour, 8.4, 0.000001, 'S2120 fixture computes hourly rain rate from elapsed time');
+      expectApprox(formatted.rainMmPerHour, 8.4, 0.000001, 'S2120 fixture stores the reported 4113 intensity as the hourly rain rate');
       expectApprox(formatted.rainMmPer10Min, 1.4, 0.000001, 'S2120 fixture computes normalized rain per 10 minutes');
       expectApprox(formatted.rainMmToday, 2.6, 0.000001, 'S2120 fixture accumulates local-day rain totals');
       expectEqual(formatted.counterIntervalSeconds, 600, 'S2120 fixture stores the elapsed rain-counter interval in seconds');
@@ -4788,10 +4806,11 @@ if (!dendroHelperPath) {
     pendingChecks.push((async () => {
       const [processedMsg, rainOut] = await executeFunctionNodeById(
         's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainGaugeCumulativeMm: 11.4 }),
+        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainCumulativeMm: 11.4 }),
         {
           scope: {
             osiDb: createMockOsiDb(createS2120QueryHandler({
+              counterBaseline: { recorded_at: '2026-04-21T09:00:00.000Z' },
               previousSample: {
                 recorded_at: '2026-04-21T09:50:00.000Z',
                 rain_gauge_cumulative_mm: 10.0,

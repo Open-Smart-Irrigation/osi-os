@@ -75,6 +75,10 @@ function formatCounterStatus(status: string | null | undefined): string | null {
       return 'Counter reset detected; interval delta skipped.';
     case 'invalid_interval':
       return 'Invalid uplink interval; delta skipped.';
+    case 'cumulative_baseline':
+      return 'Rain counter baseline set; waiting for the next uplink to calculate a delta.';
+    case 'intensity_only':
+      return 'Rain amount unknown for this interval; only the intensity was reported.';
     default:
       return null;
   }

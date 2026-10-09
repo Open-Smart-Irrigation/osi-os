@@ -330,6 +330,15 @@ test('known balances keep their shipped verdicts and carry a reason code, not pr
   );
 });
 
+test('S2120 rain statuses: a counter baseline waits, an intensity-only interval is an unknown amount', () => {
+  const warnings = (status) => ZE.buildSensorHealth(
+    [{ type_id: 'SENSECAP_S2120', rain_delta_status: status }],
+    { sensorCount: 1, freshSensorCount: 1, staleSensorCount: 0 },
+  ).warnings;
+  assert.deepEqual(warnings('cumulative_baseline'), ['Rain gauge is waiting for the next reading']);
+  assert.deepEqual(warnings('intensity_only'), ['Rain gauge reported intensity only; the rain amount for this interval is unknown']);
+});
+
 test('a weather station and a LoRain gauge count as rain sources', () => {
   // rain_gauge_enabled is the opt-in LSN50 MOD9 input. A SenseCAP S2120 and an
   // Aqua-Scope LoRain measure rain without it, and the zone summary reported
