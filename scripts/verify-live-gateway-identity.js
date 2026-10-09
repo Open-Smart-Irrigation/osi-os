@@ -1629,10 +1629,12 @@ if (sizeAllowances) {
   // 45088 + 233 = 45321.
   // 46109: targeted valve cancel (#428): write-strega-expectation +47, Cancel STREGA
   // Actuation +745, Valve Cloud Command Bridge -4: 45321 + 788 = 46109.
+  // 47696: timed action as a timed open (reject-indefinite-open +647, Route Command +903,
+  // STREGA builder +41, Build Status + ACK -4): 46109 + 1587 = 47696.
   // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
-  expectCondition(sizeAllowances.total_allowance?.delta === 46109,
-    'size total allowance: exact cumulative delta 46109',
-    'size total allowance: expected exact cumulative delta 46109');
+  expectCondition(sizeAllowances.total_allowance?.delta === 47696,
+    'size total allowance: exact cumulative delta 47696',
+    'size total allowance: expected exact cumulative delta 47696');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

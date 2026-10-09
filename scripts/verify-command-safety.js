@@ -118,6 +118,10 @@ function assertIndefiniteOpenRejection() {
     if (node.outputs !== 2 || !Array.isArray(node.wires) || !(node.wires[1] || []).includes('command-ack-queue-rest')) {
         throw new Error('"Reject Indefinite Open" must answer refusals on a second output wired to command-ack-queue-rest');
     }
+    // Fix round F1: a cloud SET_STREGA_TIMED_ACTION is sent as a timed open; its close is refused.
+    if (!node.func.includes("timedAction && String(cmd.action || cmd.valveAction || '').trim().toUpperCase() !== 'OPEN'")) {
+        throw new Error('"Reject Indefinite Open" must refuse a SET_STREGA_TIMED_ACTION that does not open');
+    }
     console.log('  ok Indefinite-open rejection node present; VALVE_COMMAND admits only OPEN_FOR_DURATION; refusals are answered');
 }
 
@@ -156,6 +160,10 @@ function assertRouteHandlesSafeValveCommands() {
     const valveBranch = node.func.slice(node.func.indexOf("if (commandType === 'VALVE_COMMAND')"), node.func.indexOf("if (commandType === 'SET_LSN50_MODE')"));
     if (!valveBranch.includes("action: 'OPEN_FOR_DURATION'") || valveBranch.includes('action: cmd.action')) {
         throw new Error('"Route Command" must send a VALVE_COMMAND only as OPEN_FOR_DURATION, never with the cloud action verbatim');
+    }
+    const timedBranch = node.func.slice(node.func.indexOf("if (commandType === 'SET_STREGA_TIMED_ACTION')"), node.func.indexOf("if (commandType === 'SET_STREGA_MAGNET_MODE')"));
+    if (!timedBranch.includes("action: 'OPEN_FOR_DURATION'") || timedBranch.includes("action: 'TIMED_ACTION'")) {
+        throw new Error('"Route Command" must send a cloud SET_STREGA_TIMED_ACTION as OPEN_FOR_DURATION');
     }
     console.log('  ok Route Command handles duration-bound valve registry commands');
 }

@@ -48,7 +48,11 @@ const ENV = { DEVICE_EUI: GATEWAY, CHIRPSTACK_APP_ACTUATORS: 'app-actuators' };
 // output. The appliers between the ledger and Route Command (journal, Terra,
 // zone, weather, installation, entity-name, scoped-access, WATERMARK) pass a
 // valve command through unchanged; their own suites cover them, so their
-// entry is short-circuited to Route Command here.
+// entry is short-circuited to Route Command here. Likewise the actuator_log
+// write after the STREGA builder is short-circuited to Build Status + ACK,
+// the node that answers an open once its log context is written.
+const STATUS_ACK = idOf('Build Status + ACK');
+const LOG_WRITE = idOf('Zone id known?');
 const EXECUTED = new Set([
   'sync-pending-split',
   'reject-indefinite-open',
@@ -58,6 +62,7 @@ const EXECUTED = new Set([
   STREGA_BUILDER,
   'command-ack-queue-rest',
   idOf('Valve Cloud Command Bridge'),
+  STATUS_ACK,
 ]);
 const PASS_THROUGH_TO_ROUTE = 'journal-command-apply-fn';
 
@@ -85,6 +90,9 @@ function fakeChirpstack(queue) {
       queue.splice(0, queue.length);
       return { devEui: eui, method: 'DeviceService.FlushQueue' };
     },
+    async getDownlinkFrameCounters() {
+      return { nFCntDown: 0, aFCntDown: 40 };
+    },
     async getDeviceQueue() {
       return queue.map((item) => Object.assign({}, item));
     },
@@ -105,7 +113,7 @@ async function drive(db, startId, msg, options = {}) {
   const queue = [{ nodeId: startId, msg }];
   while (queue.length) {
     const { nodeId, msg: current } = queue.shift();
-    const targetId = nodeId === PASS_THROUGH_TO_ROUTE ? ROUTE : nodeId;
+    const targetId = nodeId === PASS_THROUGH_TO_ROUTE ? ROUTE : (nodeId === LOG_WRITE ? STATUS_ACK : nodeId);
     const node = byId[targetId];
     if (!EXECUTED.has(targetId)) {
       outputs.push({ nodeId: targetId, msg: current });
@@ -240,7 +248,7 @@ test('VALVE_COMMAND OPEN_FOR_DURATION opens for the duration it carries, in any 
         deviceEui: VALVE, devEui: VALVE, action: 'OPEN_FOR_DURATION', expires_at: soon(300000),
       }, duration))]);
       assert.deepEqual(stregaDownlinks(outputs), [{ fPort: 2, bytes: [0x41, minutes] }], JSON.stringify(duration));
-      assert.equal(ackRows(db, commandId).length, 0, 'an accepted open is not refused');
+      assert.deepEqual(ackRows(db, commandId).map((a) => a.result), ['APPLIED'], 'an accepted open is answered APPLIED, not refused');
       const expectation = db.prepare('SELECT COUNT(*) AS n FROM valve_actuation_expectations').get();
       assert.equal(expectation.n, 1, 'the open is tracked as an actuation');
     } finally {
@@ -381,18 +389,78 @@ test('a second delivery of one STREGA physical action under a new command id rep
   }
 });
 
-test('a cloud timed action that carries no duration field is answered, not dropped', async () => {
+// Fix round (F1, owner decision): a cloud SET_STREGA_TIMED_ACTION opens for the duration it
+// carries (duration_seconds, then durationMinutes, then duration_minutes, then amount x
+// unit), sent as OPEN_FOR_DURATION for 1..255 minutes. A timed close is refused.
+function timedAction(commandId, extra) {
+  return pendingCommand(commandId, 'SET_STREGA_TIMED_ACTION', Object.assign({
+    deviceEui: VALVE, action: 'OPEN', payloadHex: '4105', fPort: 2, expires_at: soon(300000),
+    effect_key: `action:${VALVE}:timed_action:1b4e28ba-2fa1-41d2-883f-0016c0000${commandId}`,
+  }, extra));
+}
+
+test('a cloud timed action opens for its duration, by field precedence, as OPEN_FOR_DURATION', async () => {
+  const cases = [
+    [601, { unit: 'MINUTES', amount: 10 }, 10],
+    [602, { unit: 'SECONDS', amount: 90 }, 2],
+    [603, { unit: 'HOURS', amount: 4 }, 240],
+    [604, { duration_seconds: 600, durationMinutes: 7, duration_minutes: 3, unit: 'MINUTES', amount: 5 }, 10],
+    [605, { durationMinutes: 7, duration_minutes: 3, unit: 'MINUTES', amount: 5 }, 7],
+    [606, { duration_minutes: 3, unit: 'MINUTES', amount: 5 }, 3],
+  ];
+  for (const [commandId, fields, minutes] of cases) {
+    const db = seedDb();
+    try {
+      const { outputs } = await deliver(db, [timedAction(commandId, fields)]);
+      assert.deepEqual(stregaDownlinks(outputs), [{ fPort: 2, bytes: [0x41, minutes] }], JSON.stringify(fields));
+      const expectation = db.prepare('SELECT expectation_id, commanded_duration_seconds FROM valve_actuation_expectations').get();
+      assert.equal(expectation.expectation_id, String(commandId), 'the open is tracked as an actuation');
+      const stored = db.prepare('SELECT result, effect_key FROM applied_commands WHERE command_id = ?').get(String(commandId));
+      assert.equal(stored.result, 'APPLIED');
+      assert.equal(stored.effect_key, `action:${VALVE}:timed_action:1b4e28ba-2fa1-41d2-883f-0016c0000${commandId}`,
+        'the terminal ACK carries the action: key, so a redelivery replays');
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('a cloud timed action without a usable duration, over 255 minutes, or closing is refused', async () => {
+  const cases = [
+    [611, { unit: 'HOURS', amount: 5 }, 'duration_out_of_range'],
+    [612, { duration_seconds: 15360 }, 'duration_out_of_range'],
+    [613, { action: 'CLOSE', unit: 'MINUTES', amount: 10 }, 'valve_action_not_allowed'],
+    [614, {}, 'missing_or_invalid_duration'],
+    [615, { unit: 'MINUTES', amount: 0 }, 'missing_or_invalid_duration'],
+    [616, { unit: 'DAYS', amount: 2 }, 'missing_or_invalid_duration'],
+    [617, { unit: 'MINUTES', amount: 256 }, 'missing_or_invalid_duration'],
+  ];
+  for (const [commandId, fields, reason] of cases) {
+    const db = seedDb();
+    try {
+      const { outputs } = await deliver(db, [timedAction(commandId, fields)]);
+      assert.deepEqual(stregaDownlinks(outputs), [], JSON.stringify(fields));
+      const acks = ackRows(db, commandId);
+      assert.equal(acks.length, 1, JSON.stringify(fields));
+      assert.equal(acks[0].result, 'REJECTED_PERMANENT');
+      assert.equal(acks[0].reason, reason, JSON.stringify(fields));
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('a second delivery of one cloud timed action under a new command id replays instead of opening again', async () => {
   const db = seedDb();
   try {
-    const { outputs } = await deliver(db, [pendingCommand(595, 'SET_STREGA_TIMED_ACTION', {
-      deviceEui: VALVE, action: 'OPEN', unit: 'MINUTES', amount: 5,
-      effect_key: `action:${VALVE}:timed_action:1b4e28ba-2fa1-41d2-883f-0016c0000595`,
-    })]);
-    assert.deepEqual(stregaDownlinks(outputs), []);
-    const acks = ackRows(db, 595);
-    assert.equal(acks.length, 1);
-    assert.equal(acks[0].result, 'REJECTED_PERMANENT');
-    assert.equal(acks[0].reason, 'missing_or_invalid_duration');
+    const key = `action:${VALVE}:timed_action:1b4e28ba-2fa1-41d2-883f-0016c0000621`;
+    const first = await deliver(db, [timedAction(621, { unit: 'MINUTES', amount: 10, effect_key: key })]);
+    assert.deepEqual(stregaDownlinks(first.outputs), [{ fPort: 2, bytes: [0x41, 10] }]);
+    const second = await deliver(db, [timedAction(622, { unit: 'MINUTES', amount: 10, effect_key: key })]);
+    assert.deepEqual(stregaDownlinks(second.outputs), [], 'the same issuance does not open twice');
+    const replay = second.outputs.find((o) => o.nodeId === ACK_OUT && JSON.parse(o.msg.payload).commandId === 622);
+    assert.ok(replay);
+    assert.equal(JSON.parse(replay.msg.payload).duplicate, true);
   } finally {
     db.close();
   }
