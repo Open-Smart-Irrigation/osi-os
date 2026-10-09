@@ -37,6 +37,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   client now has `close()`, which shuts down all five channels and returns any
   close error instead of throwing. Polling behaves as before. (Recipe apply
   and rollback still fail on real gateways for a separate reason, #469.)
+- **Zone forecast: rain hours are no longer shifted by the zone's UTC
+  offset.** The zone environment summary asked Open-Meteo for the zone's
+  timezone, which returns local times without an offset, and then read
+  those times as UTC. In a zone two hours ahead of UTC, rain forecast for
+  12:00 local was shown at 14:00 local. The next rain time, the hourly rain
+  chart and the next-24-hour and next-72-hour rain sums took the wrong
+  hours, and so did the delay-irrigation advice that uses the next-24-hour
+  sum. The time of the current online weather had the same shift. The
+  gateway now asks Open-Meteo for exact timestamps. Daily forecast values
+  and the hourly weather history used for ET0 were not affected. A forecast
+  cached before the upgrade is replaced at the next successful fetch
+  (within two hours while online).
 
 ### Security
 - **The raw sensor export, the valve litres read and the reference-tree switch
