@@ -1,0 +1,91 @@
+{
+  "id": "delayed-distinct",
+  "truthRows": [
+    "T6"
+  ],
+  "description": "fCnt 61 arrives after fCnt 62 with an older time and its own deduplicationId. It is a distinct report, counted once; the expectations give the state after recomputation.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000012",
+      "devAddr": "01000001",
+      "fCnt": 60,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000013",
+      "devAddr": "01000001",
+      "fCnt": 62,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100021221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000014",
+      "devAddr": "01000001",
+      "fCnt": 61,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 2,
+        "amount_mm": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 2,
+        "state": "dry",
+        "reason": null
+      },
+      {
+        "fromFrameIndex": 2,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

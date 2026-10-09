@@ -1,0 +1,117 @@
+{
+  "id": "alarm-then-ordinary",
+  "truthRows": [
+    "T9"
+  ],
+  "description": "An alarm, then the ordinary report that carries the same tips, then a zero report with the alarm-clear block appended. Only the ordinary reports carry amounts.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000021",
+      "devAddr": "01000001",
+      "fCnt": 90,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000022",
+      "devAddr": "01000001",
+      "fCnt": 91,
+      "time": "2026-10-08T10:08:00.000Z",
+      "fPort": 2,
+      "bytesHex": "0b01030050"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000023",
+      "devAddr": "01000001",
+      "fCnt": 92,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100051221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000024",
+      "devAddr": "01000001",
+      "fCnt": 93,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a0b00030000"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": false,
+        "tips": null,
+        "amount_mm": null,
+        "frame_kind": "alarm",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "alarm_event",
+        "alarm_value": 80
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 5,
+        "amount_mm": 2.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 3,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null,
+        "alarm_value": 0
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      },
+      {
+        "fromFrameIndex": 1,
+        "toFrameIndex": 2,
+        "state": "dry",
+        "reason": null
+      },
+      {
+        "fromFrameIndex": 2,
+        "toFrameIndex": 3,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

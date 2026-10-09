@@ -20,6 +20,7 @@ jobs:
       - run: node scripts/verify-lsn50-chameleon-codec.js
       - run: node scripts/verify-lsn50-watermark-codec.js
       - run: node scripts/verify-lorain-codec.js
+      - run: node --test scripts/test-lorain-rain-contract.js
       - run: node scripts/verify-s2120-codec.js
       - run: node scripts/verify-sdi12-codec.js
       - run: node scripts/verify-tektelic-agriculture-codec.js
