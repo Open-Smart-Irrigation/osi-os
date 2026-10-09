@@ -42,7 +42,7 @@ Do NOT use this skill for (route instead):
 | `KIWI_SENSOR` | Sensors | Vendor — `tektelic_agriculture_decoder.js` (upstream TEKTELIC agriculture codec, shared with CLOVER; a codec attached by hand is kept) | `swt_1`, `swt_2` (via legacy `swt_wm1/2` aliasing), `light_lux`, `ambient_temperature`, `relative_humidity` | kPa, lux, °C, %RH |
 | `TEKTELIC_CLOVER` | Sensors | Vendor — `tektelic_agriculture_decoder.js` (upstream TEKTELIC agriculture codec, shared with KIWI) | same shape as KIWI; VWC is **typed but not populated** (see VWC note below) | °C, %RH; VWC not stored |
 | `DRAGINO_LSN50` | Sensors | Yes — `dragino_lsn50_decoder.js` | `ext_temperature_c` (DS18B20), `adc_ch0v/adc_ch1v`, `bat_v`, plus MOD-specific: `dendro_position_mm`/`dendro_*` (dendrometer), `rain_*` (rain gauge), `flow_*` (flow meter), and Chameleon `swt_1/2/3` when a VIA Chameleon module is attached over I2C | °C, V, mm, µm, L |
-| `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_gauge_cumulative_mm` → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm |
+| `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_mm_per_hour` (4113 intensity), `rain_gauge_cumulative_mm` (4213 counter) → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm/h, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
 | `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v`, plus Gen1-only `ambient_temperature`/`relative_humidity` (enclosure climate, see below) | °C, %RH |
 | `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
@@ -353,22 +353,46 @@ AGENTS.md); AppKey is fetched from Aqua-Scope with DevEUI + email and must
 never be stored in this repo. Assigned LoRain gauges update
 `zone_daily_environment` with `rain_source='aquascope_lorain'`.
 
-**SENSECAP_S2120:** reports a **cumulative** rain gauge counter
-(measurementId `4113`, "Rain Gauge", and `4213`/"Rain Accumulation" on an
-alternate frame), unlike LoRain's interval reporting. The edge computes the
-delta itself in `flows.json` node `s2120-process-fn` ("Process S2120") by
-comparing the new cumulative value against the most recent prior
-`device_data.rain_gauge_cumulative_mm` for that DevEUI, with explicit status
-handling exposed as `rain_delta_status`: `first_sample` (no prior row),
-`counter_reset` (new cumulative value is lower than the previous one),
-`duplicate_timestamp`/`out_of_order` (a same-or-later prior row already
-exists at/after this timestamp), `invalid_interval`, or `ok`. Only `ok`
-samples produce a non-null `rain_mm_delta`/`rain_mm_per_hour`/`rain_mm_per_10min`
-and only those flow into `zone_daily_environment` aggregation
-(`s2120-rain-agg-fn`, "Aggregate Zone Rain"), which upserts
-`rain_source='sensecap_s2120'` and accumulates `rainfall_mm` per zone/day
-(multi-zone via the `weather_station_zones` junction table, since one S2120
-can serve multiple zones).
+**SENSECAP_S2120:** two different rain quantities (SenseCAP S2120 user
+guide, sections 10.2, 10.3.1 and 13.3):
+- measurementId `4113` ("Rain Gauge", frame `02` before firmware v2.0, `4B`
+  from v2.0) is rainfall **intensity** in mm/h, resolution 0.001. The device
+  derives it as six times the rainfall of the past ten minutes. It is a
+  rate, never a counter: a drop in intensity is not a reset.
+- measurementId `4213` ("Rain Accumulation", frame `4C`, firmware v2.0 and
+  later) is **cumulative** rainfall in mm.
+
+`flows.json` node `s2120-process-fn` ("Process S2120") stores `4113` as
+`device_data.rain_mm_per_hour` and `4213` as
+`device_data.rain_gauge_cumulative_mm`, and derives the interval amount
+`rain_mm_delta` (kept to 0.001 mm; round only for display):
+- **4213 present:** counter differencing against the previous stored
+  `rain_gauge_cumulative_mm` of that DevEUI. The first `4213` row of a device
+  gets `rain_delta_status='cumulative_baseline'`; only rows from that marker
+  on are a counter baseline, because older rows may hold `4113` values that
+  ingest before this contract stored in `rain_gauge_cumulative_mm`. A lower
+  `4213` is `counter_reset` and becomes the new baseline.
+- **4213 absent (firmware before v2.0):** `rain_gauge_cumulative_mm` stays
+  NULL. `4113 / 6` is the interval amount only when the time since the
+  previous rain uplink of the device is the vendor's 10-minute window
+  (600 s ± 60 s); then the windows tile without gap or overlap. Any other
+  interval (lost uplink, 5/15/30/60-minute cadence) or the first uplink
+  leaves the amount NULL with `intensity_only` or `first_sample`.
+- A device that has a `cumulative_baseline` row never integrates intensity:
+  an uplink without `4213` gets `intensity_only`, and the next `4213` uplink
+  counts that rain once.
+
+`rain_delta_status` values: `cumulative_baseline`, `first_sample`,
+`counter_reset`, `intensity_only`, `duplicate_timestamp`/`out_of_order` (a
+same-or-later rain row already exists), `invalid_interval`, `error`, or `ok`.
+Only `ok` samples have a non-null `rain_mm_delta`/`rain_mm_per_10min`, and only
+those flow into `zone_daily_environment` aggregation (`s2120-rain-agg-fn`,
+"Aggregate Zone Rain"), which upserts `rain_source='sensecap_s2120'` and
+accumulates `rainfall_mm` per zone/day (multi-zone via the
+`weather_station_zones` junction table, since one S2120 can serve multiple
+zones). S2120 totals stored before this contract (ingest that differenced
+`4113`) are not validated measurements; `scripts/assess-s2120-rain-history.js`
+reports them per device and day against a DB copy.
 
 ## LoRaWAN / ChirpStack model (as used here)
 
@@ -580,8 +604,11 @@ on Gen2" for a payload that cannot carry it.
   should write zero.
 - Confusing LoRain's interval rain (`rain_mm_delta` computed directly from
   a raw step count, no history lookup needed) with S2120's cumulative-counter
-  delta (computed against the previous stored `rain_gauge_cumulative_mm` row,
-  with explicit `first_sample`/`counter_reset`/`duplicate_timestamp` guards).
+  delta (`4213` differenced against the previous stored
+  `rain_gauge_cumulative_mm` row from the device's `cumulative_baseline` on,
+  with explicit `counter_reset`/`duplicate_timestamp` guards).
+- Treating S2120 measurement `4113` as cumulative rain. It is intensity in
+  mm/h (six times the rain of the past ten minutes); only `4213` is a counter.
 - Sending a bare `CLOSE` to a STREGA valve for any reason, including test
   cleanup — always use a short `OPEN_FOR_DURATION` or the cancel endpoint.
 - Assuming the DRAGINO_LSN50 battery footer is always hidden because the
