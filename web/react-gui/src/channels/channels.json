@@ -155,8 +155,8 @@
   {
     "key": "rain_mm_delta",
     "unit": "mm",
-    "label": "Rain delta",
-    "displayName": "Rain delta",
+    "label": "Rainfall amount",
+    "displayName": "Rainfall amount",
     "cardType": "environment",
     "category": "weather",
     "edgeField": "rain_mm_delta",

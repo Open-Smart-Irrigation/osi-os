@@ -38,10 +38,34 @@ export function axisLabel(channelKey: string, meta: ChannelMeta): string {
   return unit ? `${entry.displayName} (${unit})` : entry.displayName;
 }
 
-export function axisQuantityLabel(channelKey: string, unit: string | null): string {
+export function axisQuantityLabel(channelKey: string, unit: string | null, aggregation?: string): string {
   const key = canonicalize(channelKey);
-  const display = DISPLAY_NAMES.get(key) ?? key;
+  const display = (aggregation ? rainfallLabel(key, aggregation) : null) ?? DISPLAY_NAMES.get(key) ?? key;
   const quantity = display.replace(SENSOR_SUFFIX, '').trim() || display;
   const u = prettyUnit(unit);
   return u ? `${quantity} (${u})` : quantity;
+}
+
+/** The Data view's applied aggregation levels (`aggregation.applied` of a series response). */
+export type AnalysisAggregationLevel = 'raw' | '15m' | 'hourly' | 'daily' | 'weekly';
+
+const RAINFALL_AMOUNT_KEYS = new Set(['rain_mm_delta']);
+
+/**
+ * What a rain amount point means at an aggregation: a raw sample is what one report
+ * collected, a bucket is a summed amount. Null for any other channel. English, like
+ * the gateway's catalogue names it replaces (osi-history-helper RAW_SERIES_LABELS).
+ */
+export function rainfallLabel(channelKey: string, aggregation: string): string | null {
+  if (!RAINFALL_AMOUNT_KEYS.has(canonicalize(channelKey))) return null;
+  return aggregation === 'raw' ? 'Rainfall this interval' : 'Rainfall amount';
+}
+
+type RainfallNameEntry = Pick<AnalysisCatalogEntry, 'channelKey' | 'deviceName' | 'displayName' | 'sourceKind'>;
+
+/** A catalogue display name with a device rain amount named for the applied aggregation. */
+export function presentRainfallName(entry: RainfallNameEntry, aggregation: string | undefined): string {
+  const label = aggregation && entry.sourceKind === 'device' ? rainfallLabel(entry.channelKey, aggregation) : null;
+  if (!label) return entry.displayName;
+  return [entry.deviceName, label].filter(Boolean).join(' - ');
 }

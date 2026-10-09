@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnalysisCatalog } from '../analysis/useAnalysisCatalog';
 import { useAnalysisSeries } from '../analysis/useAnalysisSeries';
 import { useAnalysisViews } from '../analysis/useAnalysisViews';
-import { axisQuantityLabel, channelMetaFromCatalog } from '../analysis/channelLabels';
+import { axisQuantityLabel, channelMetaFromCatalog, presentRainfallName } from '../analysis/channelLabels';
 import { applyLabelOverrides } from '../analysis/labelOverrides';
 import { loadWorkspace, migrateWorkspaceSeriesIds, saveWorkspace } from '../analysis/analysisWorkspaceStorage';
 import {
@@ -86,9 +86,21 @@ export function CrossZoneAnalysisPage() {
     ),
     [catalog],
   );
+  const appliedAggregation = data?.aggregation.applied;
+  // A rain amount is named for the applied aggregation ("this interval" raw,
+  // "amount" summed); a user's rename still wins.
+  const presentedSeries = useMemo(
+    () => (data?.series ?? []).map((item) => {
+      const entry = catalogById.get(item.seriesId);
+      if (!entry) return item;
+      const label = presentRainfallName(entry, appliedAggregation);
+      return label === entry.displayName ? item : { ...item, label };
+    }),
+    [appliedAggregation, catalogById, data],
+  );
   const displayedSeries = useMemo(
-    () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
-    [activeWorkspace.labelOverrides, data],
+    () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
+    [activeWorkspace.labelOverrides, presentedSeries],
   );
   const resolvedExportRange = useMemo(
     () => exportRangeFor(data?.range),
@@ -122,7 +134,7 @@ export function CrossZoneAnalysisPage() {
         : setLabelOverride(currentWorkspace, seriesId, label)
     ));
   const resolveAxisLabel = (channelKey: string, unit: string | null) =>
-    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit);
+    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit, appliedAggregation);
   const renameAxis = (channelKey: string, label: string | null) =>
     updateWorkspace((currentWorkspace) => (
       label === null

@@ -43,7 +43,7 @@ const CHANNELS = [
   { key: 'rain_mm_per_hour', unit: 'mm/h', label: 'Rain rate', cardType: 'environment', edgeField: 'rain_mm_per_hour', exportable: true, deprecated: false },
   { key: 'rain_mm_per_10min', unit: 'mm/10min', label: 'Rain (10 min)', cardType: 'environment', edgeField: 'rain_mm_per_10min', exportable: true, deprecated: false },
   { key: 'rain_mm_today', unit: 'mm', label: 'Rain today', cardType: 'environment', edgeField: 'rain_mm_today', exportable: true, deprecated: false },
-  { key: 'rain_mm_delta', unit: 'mm', label: 'Rain delta', cardType: 'environment', edgeField: 'rain_mm_delta', exportable: true, deprecated: false },
+  { key: 'rain_mm_delta', unit: 'mm', label: 'Rainfall amount', cardType: 'environment', edgeField: 'rain_mm_delta', exportable: true, deprecated: false },
   { key: 'wind_speed_mps', unit: 'm/s', label: 'Wind speed', cardType: 'environment', edgeField: 'wind_speed_mps', exportable: true, deprecated: false },
   { key: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust', cardType: 'environment', edgeField: 'wind_gust_mps', exportable: true, deprecated: false },
   { key: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure', cardType: 'environment', edgeField: 'barometric_pressure_hpa', exportable: true, deprecated: false },

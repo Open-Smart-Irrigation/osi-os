@@ -459,6 +459,43 @@ test('buildZoneExportCsv accepts et0_mm but never queries it and exports no rows
   assert.deepEqual(queries.filter((sql) => /et0_mm/.test(sql)), []);
 });
 
+// Rain presentation (D4): a raw rain row is the amount of one reporting
+// interval, a bucket is a summed amount; the columns are unchanged.
+test('zone export labels a raw rain row "Rainfall this interval" and a summed one "Rainfall amount"', async () => {
+  const db = {
+    all: async (sql) => {
+      if (sql.includes('FROM irrigation_zones')) return [{ id: 12, name: 'Zone B', zone_uuid: 'zb', timezone: 'UTC' }];
+      if (sql.includes('FROM devices')) return [{ deveui: 'A840410000000001', name: 'Gauge', type_id: 'AQUASCOPE_LORAIN', irrigation_zone_id: 12 }];
+      if (sql.includes('FROM device_data')) {
+        return [
+          { deveui: 'A840410000000001', recorded_at: '2026-06-01T06:00:00.000Z', rain_mm_delta: 0.5, rain_tips_delta: 2 },
+          { deveui: 'A840410000000001', recorded_at: '2026-06-01T06:15:00.000Z', rain_mm_delta: 1, rain_tips_delta: 4 },
+        ];
+      }
+      return [];
+    },
+  };
+  const exportFor = (granularity) => hh.buildZoneExportCsv(db, {
+    zoneId: 12,
+    from: '2026-06-01',
+    to: '2026-06-01',
+    granularity,
+    channels: 'rain_mm_delta',
+    nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+  });
+  const raw = await exportFor('raw');
+  assert.deepEqual(raw.columns, hh.RAW_CSV_COLUMNS);
+  assert.deepEqual(raw.rows.map((row) => [row.series_label, row.channel_key, row.value]), [
+    ['Gauge - Rainfall this interval', 'rain_mm_delta', 0.5],
+    ['Gauge - Rainfall this interval', 'rain_mm_delta', 1],
+  ]);
+  const daily = await exportFor('daily');
+  assert.deepEqual(daily.columns, hh.AGG_CSV_COLUMNS);
+  const rainRows = daily.rows.filter((row) => row.channel_key === 'rain_mm_delta' && row.value !== '' && row.value != null);
+  assert.ok(rainRows.length > 0, 'a daily rain row');
+  assert.ok(rainRows.every((row) => row.series_label === 'Gauge - Rainfall amount'), JSON.stringify(rainRows));
+});
+
 test('aggregateRows reports the bucket sum beside the mean, null for an empty bucket', () => {
   const rows = [
     { recorded_at: '2026-07-10T00:00:00.000Z', rain: 0.1 },

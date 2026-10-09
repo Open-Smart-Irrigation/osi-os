@@ -655,6 +655,34 @@ test('LoRain catalogue survives a newer configuration-only row and reads its raw
   }
 });
 
+// Rain presentation (D4): the summed amount reads as an amount; the channel
+// key, the unit and the series id a saved view stores are unchanged (the id
+// hashes zone, card, source and channel key, never the label).
+test('LoRain rain amount is labelled "Rainfall amount" under its unchanged key and series id', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    assert.ok(rain, 'LoRain rain amount entry');
+    assert.equal(rain.displayName, 'Rain - Rainfall amount');
+    assert.equal(rain.unit, 'mm');
+    const savedAmountId = analysisModule.analysisSeriesId(1, 'environment', rain.sourceKey, 'rain_mm_delta');
+    assert.equal(rain.seriesId, savedAmountId);
+    const rate = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_per_hour');
+    const savedRateId = analysisModule.analysisSeriesId(1, 'environment', rate.sourceKey, 'rain_mm_per_hour');
+    assert.equal(rate.seriesId, savedRateId);
+
+    raw.exec(analysisModule.ANALYSIS_VIEWS_SCHEMA);
+    raw.prepare('INSERT INTO analysis_views (user_id, name, view_json) VALUES (1, ?, ?)')
+      .run('rain-before-relabel', JSON.stringify({ schemaVersion: 1, name: 'rain-before-relabel', selectors: [{ seriesId: savedAmountId }, { seriesId: savedRateId }] }));
+    const [view] = await hh.listAnalysisViews(facade(raw), { userId: 1, deviceEui: HUB, weatherProviderDefault: 'open_meteo' });
+    assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId, savedRateId]);
+    assert.deepEqual(view.droppedSeriesIds, []);
+  } finally {
+    raw.close();
+  }
+});
+
 test('a located zone lists its provider, station and daily agronomy sources in order', async () => {
   const raw = weatherDb();
   try {
