@@ -100,6 +100,12 @@ jobs:
       # temperature-enabled WATERMARK node kept as a soil source (cards, series, CSV).
       - name: Soil history source and rollup rule
         run: node --test scripts/test-history-router-soil-projection.js
+      # S2120 rain contract through the shipped codec and the shipped Process
+      # S2120 / Build SQL INSERT / Aggregate Zone Rain bodies (node:sqlite, real
+      # device_data DDL): 4213 is the counter, 4113 is a rate, legacy intensity
+      # is integrated only over the vendor ten-minute window.
+      - name: S2120 rain ingest contract
+        run: node --test scripts/test-s2120-rain-ingest.js
       # History correction queue (shipped Build / POST / Mark History Batch and
       # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
       # the cloud's ordering, hash, row-index and manifest rules): batches go out
