@@ -266,6 +266,8 @@ export function CrossZoneAnalysisPage() {
               username={username}
               exportRange={resolvedExportRange}
               exportGranularity={exportGranularity(data?.aggregation.applied)}
+              aggregation={appliedAggregation}
+              rangeEnd={data?.range?.to}
             />
           </div>
           {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}

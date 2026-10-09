@@ -93,6 +93,7 @@
       "png": "Gyamu PNG",
       "allZonesCsv": "Gyamu CSV ya zone zonna",
       "allZonesCsvBusy": "Exporting…",
+      "qualityColumns": "Include quality columns",
       "errors": {
         "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
         "busy": "Another export is running. Try again in a moment.",

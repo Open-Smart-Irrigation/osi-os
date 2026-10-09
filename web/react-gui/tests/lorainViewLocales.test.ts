@@ -5,7 +5,7 @@ import test from 'node:test';
 
 /**
  * Rain presentation strings (LoRain card "Last report" tile, the Data view's legacy-estimate
- * switch and suffix, the "reports received" tooltip note): present in all seven bundles with
+ * switch and suffix, the "reports received" tooltip note, the CSV quality-columns switch): present in all seven bundles with
  * the English placeholders, translated in the five European locales, and English in Luganda
  * until the human pass (docs/i18n/pending-luganda-translations.md).
  */
@@ -22,6 +22,7 @@ const KEYS: Array<[string, string]> = [
   ['common', 'analysis.legacyEstimate'],
   ['common', 'analysis.tooltip.reportsReceived_one'],
   ['common', 'analysis.tooltip.reportsReceived_other'],
+  ['common', 'analysis.export.qualityColumns'],
 ];
 // A human Luganda pass drops a key from this set and from the pending table in the same change.
 const PENDING_HUMAN_LUGANDA = new Set(KEYS.map(([ns, key]) => `${ns}:${key}`));

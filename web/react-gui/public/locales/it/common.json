@@ -93,6 +93,7 @@
       "png": "Esporta PNG",
       "allZonesCsv": "Esporta CSV di tutte le zone",
       "allZonesCsvBusy": "Esportazione…",
+      "qualityColumns": "Includi le colonne di qualità",
       "errors": {
         "tooLarge": "Questa esportazione è troppo grande. Scegli un periodo più breve o un'aggregazione più ampia.",
         "busy": "È in corso un'altra esportazione. Riprova tra poco.",

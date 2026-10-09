@@ -93,6 +93,7 @@
       "png": "Export PNG",
       "allZonesCsv": "Export all zones CSV",
       "allZonesCsvBusy": "Exporting…",
+      "qualityColumns": "Include quality columns",
       "errors": {
         "tooLarge": "This export is too large. Choose a shorter range or a coarser aggregation.",
         "busy": "Another export is running. Try again in a moment.",

@@ -225,7 +225,7 @@ each key from that set and from this table in the same change.
 
 | Keys | Reason |
 |---|---|
-| `loRain.intervalRainfall`, `loRain.lastReport`, `loRain.tips_one`, `loRain.tips_other`, `loRain.tipsUnavailable` (5 keys in `devices.json`); `analysis.tray.showLegacy`, `analysis.legacyEstimate`, `analysis.tooltip.reportsReceived_one`, `analysis.tooltip.reportsReceived_other` (4 keys in `common.json`) | Added when the LoRain card and the Data view started to present rain as amounts (the elapsed-time rate became a legacy estimate, offered on request). de-CH/es/fr/it/pt carry translations. No human Luganda pass yet, so `lg` ships the English source text. |
+| `loRain.intervalRainfall`, `loRain.lastReport`, `loRain.tips_one`, `loRain.tips_other`, `loRain.tipsUnavailable` (5 keys in `devices.json`); `analysis.tray.showLegacy`, `analysis.legacyEstimate`, `analysis.tooltip.reportsReceived_one`, `analysis.tooltip.reportsReceived_other`, `analysis.export.qualityColumns` (5 keys in `common.json`) | Added when the LoRain card and the Data view started to present rain as amounts (the elapsed-time rate became a legacy estimate, offered on request) and the Data view CSV gained an opt-in version 2 with quality columns. de-CH/es/fr/it/pt carry translations. No human Luganda pass yet, so `lg` ships the English source text. |
 
 Tracked in code at `web/react-gui/tests/lorainViewLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
