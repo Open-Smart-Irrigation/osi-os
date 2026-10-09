@@ -1495,7 +1495,7 @@ expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc Chi
 expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
-expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.device_eui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from deviceEui, device_eui or devEui');
 expectIncludes('Route Command', 'device: { devEui: valveTargetEui }', 'routes normalized valve commands to the STREGA actuator path');
 expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
 expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
@@ -3118,12 +3118,15 @@ expectIncludes('System Stats', '/sys/class/pwm/pwmchip2', 'falls back to raw PWM
 expectIncludes('System Stats', 'fanAvailable = false', 'fan defaults to unavailable when neither path found');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
+  // #427: a VALVE_COMMAND is dispatched only as a timed open, so the fixture carries
+  // OPEN_FOR_DURATION with the duration Reject Indefinite Open normalises into duration_seconds.
   const gatewayEui = '0016C001F151B1D6';
   const valveEui = '70B3D57708000334';
   const fixture = {
     commandId: 193,
     commandType: 'VALVE_COMMAND',
-    action: 'CLOSE',
+    action: 'OPEN_FOR_DURATION',
+    duration_seconds: 600,
     deviceEui: valveEui,
     devEui: valveEui,
     gatewayDeviceEui: gatewayEui,
@@ -3141,12 +3144,22 @@ pendingChecks.push((async () => {
     commandType: fixture.commandType,
   };
 
+  const closeResult = await executeFunctionNodeById(findNodeByName('Route Command').id, { payload: Object.assign({}, fixture, { action: 'CLOSE' }) });
+  const closeAck = Array.isArray(closeResult) && closeResult[2] && typeof closeResult[2].payload === 'string'
+    ? JSON.parse(closeResult[2].payload) : null;
+  if (!Array.isArray(closeResult) || closeResult[0] || !closeAck || closeAck.result !== 'REJECTED_PERMANENT') {
+    fail('VALVE_COMMAND with action CLOSE must produce no actuator payload and a REJECTED_PERMANENT ACK');
+  }
+
   const routeResult = await executeFunctionNodeById('934bf2bc19a8ce22', { payload: fixture });
   const valveMsg = Array.isArray(routeResult) ? routeResult[0] : null;
   const routeData = valveMsg && valveMsg.payload && valveMsg.payload.data;
   if (!routeData) {
     fail('VALVE_COMMAND route did not produce an actuator_command payload');
     return;
+  }
+  if (routeData.action !== 'OPEN_FOR_DURATION' || routeData.duration_minutes !== 10) {
+    fail('VALVE_COMMAND route must send OPEN_FOR_DURATION for the normalised duration');
   }
   for (const [key, value] of Object.entries(expectedContext)) {
     if (routeData[key] !== value) {

@@ -1621,9 +1621,13 @@ if (sizeAllowances) {
   // resolveRainTodayMm and flags the verdict rain_unknown; lsn50-zone-agg-fn writes flow only
   // for a flow-only uplink). origin/main 1657501 -> HEAD 1658111 = +610, so the baseline plus
   // the delta must cover 1658111 - 1616019 = 42092. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 42092,
-    'size total allowance: exact cumulative delta 42092',
-    'size total allowance: expected exact cumulative delta 42092');
+  // 45088: valve command safety (#427): refused commands answered, VALVE_COMMAND only a
+  // bounded timed open. origin/main 1652422 -> HEAD 1655418 = +2996 (reject-indefinite-open
+  // +1664, Route Command +1422, Build STREGA downlink -90), so 42092 + 2996 = 45088.
+  // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
+  expectCondition(sizeAllowances.total_allowance?.delta === 45088,
+    'size total allowance: exact cumulative delta 45088',
+    'size total allowance: expected exact cumulative delta 45088');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

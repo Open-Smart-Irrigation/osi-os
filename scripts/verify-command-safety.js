@@ -107,7 +107,26 @@ function assertIndefiniteOpenRejection() {
     if (node.func.indexOf("command_type === 'OPEN'") > node.func.indexOf('const entry = types')) {
         throw new Error('"Reject Indefinite Open" must reject OPEN before registry lookup so the explicit safety log is reachable');
     }
-    console.log('  ok Indefinite-open rejection node present');
+    // #427: a VALVE_COMMAND reaches the STREGA builder with its action verbatim, so the gate
+    // admits only the timed open, and every refusal is answered on a second output wired to
+    // the durable ACK queue instead of being dropped.
+    for (const required of ["cmd.command_type === 'VALVE_COMMAND'", "!== 'OPEN_FOR_DURATION'", "refuse('valve_action_not_allowed')", "result: 'REJECTED_PERMANENT'"]) {
+        if (!node.func.includes(required)) {
+            throw new Error(`"Reject Indefinite Open" must refuse VALVE_COMMAND actions other than OPEN_FOR_DURATION with a REJECTED_PERMANENT ACK (${required})`);
+        }
+    }
+    if (node.outputs !== 2 || !Array.isArray(node.wires) || !(node.wires[1] || []).includes('command-ack-queue-rest')) {
+        throw new Error('"Reject Indefinite Open" must answer refusals on a second output wired to command-ack-queue-rest');
+    }
+    console.log('  ok Indefinite-open rejection node present; VALVE_COMMAND admits only OPEN_FOR_DURATION; refusals are answered');
+}
+
+function assertStregaBuilderHasNoBareOpen() {
+    const node = assertFunctionNode('Build STREGA downlink + emit log ctx');
+    if (/case\s+'OPEN'\s*:/.test(node.func)) {
+        throw new Error('"Build STREGA downlink" must not encode a bare OPEN (0x31 on fPort 1): a STREGA valve opens only for a duration');
+    }
+    console.log('  ok STREGA downlink builder has no bare OPEN');
 }
 
 function assertValveRestRejectsIndefiniteOpen() {
@@ -133,6 +152,10 @@ function assertRouteHandlesSafeValveCommands() {
         if (!node.func.includes(required)) {
             throw new Error(`"Route Command" must preserve and route registry valve commands (${required})`);
         }
+    }
+    const valveBranch = node.func.slice(node.func.indexOf("if (commandType === 'VALVE_COMMAND')"), node.func.indexOf("if (commandType === 'SET_LSN50_MODE')"));
+    if (!valveBranch.includes("action: 'OPEN_FOR_DURATION'") || valveBranch.includes('action: cmd.action')) {
+        throw new Error('"Route Command" must send a VALVE_COMMAND only as OPEN_FOR_DURATION, never with the cloud action verbatim');
     }
     console.log('  ok Route Command handles duration-bound valve registry commands');
 }
@@ -482,6 +505,7 @@ function assertBareOpenNotInRegistry(registry) {
 function main() {
     checkSchema();
     assertIndefiniteOpenRejection();
+    assertStregaBuilderHasNoBareOpen();
     assertValveRestRejectsIndefiniteOpen();
     assertRouteHandlesSafeValveCommands();
     assertWriteExpectation();
