@@ -1608,9 +1608,12 @@ if (sizeAllowances) {
   // rate, caches the counter-baseline marker in node context). origin/main 1650480 -> HEAD
   // 1653128 = +2648; the baseline 1616019 plus the delta must cover 1653128, so the delta
   // rises from 36403 to 37109. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 37109,
-    'size total allowance: exact cumulative delta 37109',
-    'size total allowance: expected exact cumulative delta 37109');
+  // 38076: LoRain dry reports reach the zone table (lorain-process-fn +165,
+  // lorain-rain-agg-fn +802). origin/main 1653128 -> HEAD 1654095 = +967; the baseline
+  // 1616019 plus the delta must cover 1654095, so the delta rises from 37109 to 38076.
+  expectCondition(sizeAllowances.total_allowance?.delta === 38076,
+    'size total allowance: exact cumulative delta 38076',
+    'size total allowance: expected exact cumulative delta 38076');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

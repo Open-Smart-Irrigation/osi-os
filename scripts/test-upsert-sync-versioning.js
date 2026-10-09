@@ -123,9 +123,13 @@ test('the shipped writers use version-bumping upserts, not INSERT OR REPLACE', (
   assert.ok(dendroCompute.includes('sync_version=dendrometer_daily.sync_version+1'));
   assert.ok(dendroCompute.includes('sync_version=zone_daily_recommendations.sync_version+1'));
 
-  for (const id of ['lsn50-zone-agg-fn', 's2120-rain-agg-fn', 'lorain-rain-agg-fn']) {
+  for (const id of ['lsn50-zone-agg-fn', 's2120-rain-agg-fn']) {
     assert.ok(fnOf(id).includes('sync_version=zone_daily_environment.sync_version+1'), `${id} must bump zone_daily_environment.sync_version`);
   }
+  // LoRain bumps only when rainfall_mm or rain_source changes, so a repeated dry heartbeat
+  // refreshes computed_at without an outbox event (behaviour: test-lorain-dry-zone-row.js).
+  assert.ok(fnOf('lorain-rain-agg-fn').includes('THEN zone_daily_environment.sync_version+1 ELSE zone_daily_environment.sync_version END'),
+    'lorain-rain-agg-fn must bump zone_daily_environment.sync_version when its values change');
 
   const sim = fnOf('sim-dendro-fn-setup');
   assert.ok(!/INSERT OR REPLACE INTO (dendrometer_daily|zone_daily_recommendations)/.test(sim));
