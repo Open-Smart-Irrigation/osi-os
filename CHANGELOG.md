@@ -46,9 +46,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   hours, and so did the delay-irrigation advice that uses the next-24-hour
   sum. The time of the current online weather had the same shift. The
   gateway now asks Open-Meteo for exact timestamps. Daily forecast values
-  and the hourly weather history used for ET0 were not affected. A forecast
-  cached before the upgrade is replaced at the next successful fetch
-  (within two hours while online).
+  and the hourly weather history used for ET0 were not affected. Forecasts
+  and current weather cached before the upgrade are no longer used, also
+  not as the offline fallback.
 
 ### Security
 - **The raw sensor export, the valve litres read and the reference-tree switch

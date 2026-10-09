@@ -127,9 +127,16 @@ function fixedDate(RealDate) {
   };
 }
 
-async function zoneEnvironment(timezone) {
+async function zoneEnvironment(timezone, { preUpgradeCache = false } = {}) {
   const db = seedTestDb();
   db.prepare('UPDATE irrigation_zones SET timezone = ?, latitude = 47.37, longitude = 8.54 WHERE id = 1').run(timezone);
+  if (preUpgradeCache) {
+    // Live entries under the keys of builds that read local labels as UTC.
+    const shifted = { source: 'open_meteo', observedAt: NOW_ISO, hours: [{ time: '2026-10-08T12:00:00.000Z', rainMm: 9 }], days: [] };
+    const insert = db.prepare('INSERT INTO zone_weather_cache(zone_id,cache_key,source,payload_json,observed_at,fetched_at,expires_at) VALUES(1,?,?,?,?,?,?)');
+    insert.run('forecast', 'open_meteo', JSON.stringify(shifted), NOW_ISO, NOW_ISO, '2026-10-08T12:00:00.000Z');
+    insert.run('online_current', 'open_meteo', JSON.stringify({ observedAt: '2026-10-08T12:30:00.000Z' }), '2026-10-08T12:30:00.000Z', NOW_ISO, '2026-10-08T12:00:00.000Z');
+  }
   const requests = [];
   const stub = httpStub(requests);
   const RealDate = global.Date;
@@ -184,3 +191,13 @@ for (const [timezone, expected] of CASES) {
     assert.equal(payload.online.observedAt, NOW_ISO);
   });
 }
+
+test('a forecast cached before the upgrade (local times read as UTC) is never served', async () => {
+  currentCase = WHOLE_HOUR;
+  const { payload, requests } = await zoneEnvironment('Europe/Zurich', { preUpgradeCache: true });
+  assert.ok(requests.some((url) => url.includes('hourly=')), 'the forecast is fetched again');
+  assert.ok(requests.some((url) => url.includes('current=')), 'current weather is fetched again');
+  assert.equal(payload.forecast.rainFocus.nextRainEta, WHOLE_HOUR.eta);
+  assert.equal(payload.forecast.rainFocus.totalNext24hMm, 3);
+  assert.equal(payload.online.observedAt, NOW_ISO);
+});
