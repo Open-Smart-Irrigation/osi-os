@@ -123,6 +123,11 @@ function sha12(value) {
   return crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+// The fixture's LoRain gauge, looked up by name so the tests spell out no device identifier.
+function fixtureRainEui(raw) {
+  return raw.prepare("SELECT deveui FROM devices WHERE name = 'Rain'").get().deveui;
+}
+
 test('analysisSeriesId is a deterministic sha256-based id', () => {
   const idA = analysisModule.analysisSeriesId(1, 'soil', 'soil-src-abc123', 'swt_1');
   const idB = analysisModule.analysisSeriesId(1, 'soil', 'soil-src-abc123', 'swt_1');
@@ -678,6 +683,62 @@ test('LoRain rain amount is labelled "Rainfall amount" under its unchanged key a
     const [view] = await hh.listAnalysisViews(facade(raw), { userId: 1, deviceEui: HUB, weatherProviderDefault: 'open_meteo' });
     assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId, savedRateId]);
     assert.deepEqual(view.droppedSeriesIds, []);
+  } finally {
+    raw.close();
+  }
+});
+
+// Acceptance A1: rain amounts are summed, never averaged.
+test('LoRain rain_mm_delta: two rows 0.5 and 1.0 inside one hour give 1.5, never 0.75', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_tips_delta, rain_mm_delta) VALUES (?, ?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:10:00Z', 2, 0.5);
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:40:00Z', 4, 1.0);
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+
+    const hourly = await series(raw, [rain], { from: '2026-10-02T08:00:00.000Z', to: '2026-10-02T09:00:00.000Z' }, 'hourly');
+    assert.equal(hourly.aggregation.applied, 'hourly');
+    assert.equal(hourly.series[0].points.length, 1);
+    assert.equal(hourly.series[0].points[0].value, 1.5);
+    assert.equal(hourly.series[0].points[0].count, 2);
+
+    const daily = await series(raw, [rain], { from: '2026-10-02T00:00:00.000Z', to: '2026-10-03T00:00:00.000Z' }, 'daily');
+    assert.equal(daily.aggregation.applied, 'daily');
+    const filled = daily.series[0].points.filter((point) => point.value !== null);
+    assert.deepEqual(filled.map((point) => [point.value, point.count]), [[1.5, 2]]);
+  } finally {
+    raw.close();
+  }
+});
+
+// Acceptance A18: a rain bucket with no raw rows is null. A mean rollup of the
+// same hour is never read back as the amount (not 0.75, not 0.75 x 2).
+test('LoRain rain bucket with only a mean rollup and no raw rows is null', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    const facadeDb = { ...facade(raw), run: (sql, params) => Promise.resolve(raw.prepare(sql).run(...(params || []))) };
+    for (const [level, start, end] of [
+      ['hourly', '2026-10-03T08:00:00.000Z', '2026-10-03T09:00:00.000Z'],
+      ['daily', '2026-10-02T22:00:00.000Z', '2026-10-03T22:00:00.000Z'],
+    ]) {
+      await hh.upsertRollups(facadeDb, [{
+        zone_id: 1, card_type: 'environment', logical_source_key: rain.sourceKey, channel_id: 'rain_mm_delta',
+        bucket_level: level, bucket_start: start, bucket_end: end,
+        min_value: 0.5, max_value: 1.0, mean_value: 0.75, median_value: 0.75, latest_value: 1.0,
+        dominant_status: null, coverage_pct: 50, coverage_confidence: 'derived', sample_count: 2, event_count: 0, threshold_crossing_count: 0, unit: 'mm',
+      }]);
+    }
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM history_channel_rollups').get().n, 2);
+
+    const hourly = await series(raw, [rain], { from: '2026-10-03T08:00:00.000Z', to: '2026-10-03T09:00:00.000Z' }, 'hourly');
+    assert.deepEqual(hourly.series[0].points.map((point) => [point.value, point.count]), [[null, 0]]);
+    const daily = await series(raw, [rain], { from: '2026-10-02T22:00:00.000Z', to: '2026-10-03T22:00:00.000Z' }, 'daily');
+    assert.ok(daily.series[0].points.length >= 1);
+    assert.ok(daily.series[0].points.every((point) => point.value === null && point.count === 0), JSON.stringify(daily.series[0].points));
   } finally {
     raw.close();
   }
