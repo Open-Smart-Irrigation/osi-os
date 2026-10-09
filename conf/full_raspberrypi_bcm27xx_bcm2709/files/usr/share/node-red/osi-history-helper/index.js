@@ -2962,9 +2962,21 @@ function startOfLocalDayMs(nowMs, timezone) {
     return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
   };
   const targetDay = dayNumberAt(instantMs);
+  // Fast path: derive the offset at the naive midnight, then confirm the
+  // candidate is the first instant of the date. Bisect only if that fails.
+  const { dateTimeFormat } = zoneFormatterEntry(timezone);
+  const offsetAt = (ms) => {
+    const q = partsOf(dateTimeFormat, ms);
+    return Date.UTC(Number(q.year), Number(q.month) - 1, Number(q.day), Number(q.hour) % 24, Number(q.minute), Number(q.second)) - Math.floor(ms / 1000) * 1000;
+  };
+  const guess = targetDay - offsetAt(targetDay);
+  const candidate = targetDay - offsetAt(guess);
+  if (dayNumberAt(candidate) === targetDay && dayNumberAt(candidate - 1000) < targetDay) return candidate;
   // Local offsets lie within -12h..+14h, so 15h before the date's UTC midnight
-  // is always on an earlier local date. The local date never decreases over
-  // time, which makes "date >= target" a monotone predicate for bisection.
+  // is always on an earlier local date. Dates can step back briefly at a
+  // fall-back transition at 00:00, but instants before the first instant of
+  // the date stay on earlier dates, so bisection on "date >= target" still
+  // lands on the first instant of the date.
   let lowSec = Math.floor((targetDay - 15 * 3600000) / 1000);
   let highSec = Math.floor(instantMs / 1000);
   while (highSec - lowSec > 1) {

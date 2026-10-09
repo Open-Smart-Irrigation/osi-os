@@ -758,6 +758,20 @@ test('startOfLocalDayMs returns the first instant of the local date across DST e
   assert.strictEqual(start('2026-04-24T20:59:59.999Z', 'Africa/Cairo'), '2026-04-23T22:00:00.000Z');
 });
 
+test('startOfLocalDayMs is the first instant of its local date in 14 zones', () => {
+  const zones = ['Africa/Cairo', 'Asia/Beirut', 'Europe/Zurich', 'Asia/Kolkata', 'UTC', 'America/Sao_Paulo', 'America/Havana',
+    'America/Santiago', 'Pacific/Apia', 'Pacific/Kiritimati', 'Australia/Lord_Howe', 'America/St_Johns', 'Asia/Tehran', 'Pacific/Chatham'];
+  for (const tz of zones) {
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const dateOf = (ms) => fmt.format(new Date(ms));
+    for (let ms = Date.parse('2018-01-01T05:00:00Z'); ms < Date.parse('2026-12-31T00:00:00Z'); ms += 37 * 86400000 + 3600000) {
+      const s = helper.startOfLocalDayMs(ms, tz);
+      assert.strictEqual(dateOf(s), dateOf(ms), tz);
+      assert.notStrictEqual(dateOf(s - 1000), dateOf(ms), tz);
+    }
+  }
+});
+
 test('startOfLocalDayMs returns the UTC instant of zone-local midnight', () => {
   const ms = helper.startOfLocalDayMs(Date.parse('2026-06-02T10:00:00Z'), 'Europe/Zurich');
   assert.strictEqual(new Date(ms).toISOString(), '2026-06-01T22:00:00.000Z');
