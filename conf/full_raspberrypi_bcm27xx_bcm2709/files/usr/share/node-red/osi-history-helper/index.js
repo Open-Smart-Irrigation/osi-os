@@ -2096,51 +2096,95 @@ async function resolveDeviceTimezone(db, deveui, options = {}) {
 }
 
 const RAIN_HISTORY_MAX_DAYS = 366;
-const RAIN_HISTORY_MAX_TZ_OFFSET_MIN = 840;
-const RAIN_DAY_MS = 24 * 60 * 60 * 1000;
+// Every current UTC offset is a whole number of quarter hours, so rows summed
+// per UTC quarter hour in SQL fall into one farm day each.
+const RAIN_SLOT_SECONDS = 15 * 60;
 
-// Daily rainfall totals for one device, bucketed by *local* calendar day.
-// tzOffsetMin = minutes to ADD to UTC to get local wall time (JS convention:
-// -new Date().getTimezoneOffset()). Uses SUM over rain_mm_delta because the
-// stored rollups (history_channel_rollups) keep no sum column and their
-// latest-per-bucket reduction under-reports interval deltas.
-async function legacyRainDailyHistory(db, options = {}) {
-  const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
-  if (!normalizedDeveui) return [];
+// Daily rainfall totals for one device over the farm's own calendar days:
+// the device's zone timezone (resolveDeviceTimezone), midnight to midnight
+// per date, so 23- and 25-hour DST days are exact. Never the gateway host's
+// zone or the viewer's offset. Every day of the window is listed; a day
+// without rows has total_mm null and samples 0 (no data, not a dry day); the
+// last day ends at the request time (so_far). Sums rain_mm_delta because the
+// stored rollups keep no sum column. quality is 'received_only': legacy rows
+// carry no interval provenance, so a total is what arrived, not a certified
+// day amount. A device the caller does not own answers in UTC with no data.
+async function rainDailyHistory(db, options = {}) {
+  const deveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   const daysRaw = toFiniteNumber(options.days);
   const days = Math.max(1, Math.min(RAIN_HISTORY_MAX_DAYS, Math.round(daysRaw === null ? 7 : daysRaw)));
-  const offsetRaw = toFiniteNumber(options.tzOffsetMin ?? options.tz_offset_min);
-  const tzOffsetMin = Math.max(
-    -RAIN_HISTORY_MAX_TZ_OFFSET_MIN,
-    Math.min(RAIN_HISTORY_MAX_TZ_OFFSET_MIN, Math.round(offsetRaw === null ? 0 : offsetRaw))
-  );
-  const nowMs = options.nowMs ?? Date.now();
-  const offsetMs = tzOffsetMin * 60 * 1000;
-  // Start of the local day (days - 1) days back, converted back to UTC.
-  const localTodayStartMs = Math.floor((nowMs + offsetMs) / RAIN_DAY_MS) * RAIN_DAY_MS - offsetMs;
-  const start = new Date(localTodayStartMs - (days - 1) * RAIN_DAY_MS).toISOString();
-  const end = new Date(nowMs).toISOString();
-  const ownerFilter = optionalUserFilter(options, 'dv');
-  const range = recordedAtRangeSql('dd.recorded_at', start, end, { exact: true });
-  const rows = await dbAll(db, `
-    SELECT
-      date(dd.recorded_at, ?) AS day,
-      SUM(dd.rain_mm_delta) AS total_mm,
-      COUNT(*) AS samples
-    FROM device_data dd
-    JOIN devices dv ON dv.deveui = dd.deveui
-    WHERE dd.deveui = ?
-      ${ownerFilter.sql}
-      AND dd.rain_mm_delta IS NOT NULL
-      AND ${range.sql}
-    GROUP BY day
-    ORDER BY day ASC
-  `, [`${tzOffsetMin} minutes`, normalizedDeveui].concat(ownerFilter.params, range.params));
-  return rows.map((row) => ({
-    day: String(row.day),
-    total_mm: roundTo(row.total_mm, 3) ?? 0,
-    samples: Number(row.samples || 0) || 0,
-  }));
+  const nowRaw = toFiniteNumber(options.nowMs);
+  const nowMs = nowRaw === null ? Date.now() : nowRaw;
+  const { timezone, basis } = deveui
+    ? await resolveDeviceTimezone(db, deveui, options)
+    : UNASSIGNED_TIMEZONE;
+  const todayKey = localDateKey(nowMs, timezone);
+  const firstKey = addUtcDays(todayKey, -(days - 1));
+  const periodStart = zoneDateStartIso(firstKey, timezone);
+  const periodEnd = new Date(nowMs).toISOString();
+  const buckets = new Map();
+  for (let key = firstKey; key && key <= todayKey; key = addUtcDays(key, 1)) {
+    const soFar = key === todayKey;
+    buckets.set(key, {
+      day: key,
+      period_start: zoneDateStartIso(key, timezone),
+      period_end: soFar ? periodEnd : zoneDateStartIso(addUtcDays(key, 1), timezone),
+      total_mm: null,
+      samples: 0,
+      quality: 'received_only',
+      so_far: soFar,
+    });
+  }
+  if (deveui) {
+    const ownerFilter = optionalUserFilter(options, 'dv');
+    const range = recordedAtRangeSql('dd.recorded_at', periodStart, periodEnd, { exact: true });
+    const rows = await dbAll(db, `
+      SELECT
+        CAST(strftime('%s', dd.recorded_at) AS INTEGER) / ${RAIN_SLOT_SECONDS} AS slot,
+        SUM(dd.rain_mm_delta) AS total_mm,
+        COUNT(*) AS samples
+      FROM device_data dd
+      JOIN devices dv ON dv.deveui = dd.deveui
+      WHERE dd.deveui = ?
+        ${ownerFilter.sql}
+        AND dd.rain_mm_delta IS NOT NULL
+        AND ${range.sql}
+      GROUP BY slot
+    `, [deveui].concat(ownerFilter.params, range.params));
+    for (const row of rows) {
+      const slot = toFiniteNumber(row.slot);
+      const mm = toFiniteNumber(row.total_mm);
+      const samples = Number(row.samples || 0) || 0;
+      if (slot === null || mm === null || samples <= 0) continue;
+      const bucket = buckets.get(localDateKey(slot * RAIN_SLOT_SECONDS * 1000, timezone));
+      if (!bucket) continue;
+      bucket.total_mm = (bucket.total_mm || 0) + mm;
+      bucket.samples += samples;
+    }
+  }
+  for (const bucket of buckets.values()) {
+    if (bucket.total_mm !== null) bucket.total_mm = roundTo(bucket.total_mm, 3);
+  }
+  return {
+    version: 2,
+    deveui,
+    timezone,
+    timezone_basis: basis,
+    period_start: periodStart,
+    period_end: periodEnd,
+    days: Array.from(buckets.values()),
+  };
+}
+
+// Deprecated: the pre-v2 array of { day, total_mm, samples } for days with
+// samples, now taken from rainDailyHistory (farm timezone). tzOffsetMin is
+// ignored. Kept for any caller still on the old shape.
+async function legacyRainDailyHistory(db, options = {}) {
+  if (!normalizeDeveui(options.deveui || options.deviceEui || options.device_eui)) return [];
+  const history = await rainDailyHistory(db, options);
+  return history.days
+    .filter((day) => day.samples > 0)
+    .map((day) => ({ day: day.day, total_mm: day.total_mm, samples: day.samples }));
 }
 
 function csvCell(value) {
@@ -3304,6 +3348,7 @@ module.exports = {
   deriveExpectedCadenceSeconds,
   legacySensorHistory,
   legacyRainDailyHistory,
+  rainDailyHistory,
   resolveDeviceTimezones,
   resolveDeviceTimezone,
   resolveDeviceFieldRollupKey,

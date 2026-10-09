@@ -213,8 +213,10 @@ for (const profile of PROFILES) {
 
   test(`${label}: daily rain totals of mixed shapes equal the pure ISO totals`, async () => {
     const nowMs = Date.parse('2025-11-04T23:59:00.000Z');
-    const rain = await withBoth((db) => helper.legacyRainDailyHistory(db, { deveui: DEVEUI, days: 40, tzOffsetMin: 60, nowMs }));
-    assert.ok(rain.iso.length >= 39);
+    const rain = await withBoth((db) => helper.rainDailyHistory(db, { deveui: DEVEUI, days: 40, nowMs }));
+    assert.equal(rain.iso.timezone, 'Europe/Zurich');
+    assert.equal(rain.iso.days.length, 40);
+    assert.ok(rain.iso.days.filter((day) => day.samples > 0).length >= 39);
     assert.deepEqual(rain.mixed, rain.iso);
   });
 
