@@ -1,9 +1,9 @@
 {
-  "id": "wet-ordinary",
+  "id": "multi-block",
   "truthRows": [
-    "T1"
+    "T16"
   ],
-  "description": "Two rain reports on consecutive 15-minute wakes, fCnt continuous. Each covers the wake window that ends at the report.",
+  "description": "The 10:15 send failed before transmission and consumed no fCnt; its blocks stayed in the buffer, so the 10:30 frame carries two rain blocks (3 and 1 tips). The probable amount is the sum; the current codec reports only the last block.",
   "config": {
     "conf_interval": null,
     "conf_heartbeat": null,
@@ -16,20 +16,20 @@
   },
   "frames": [
     {
-      "deduplicationId": "00000000-0000-4000-8000-000000000001",
+      "deduplicationId": "00000000-0000-4000-8000-000000000048",
       "devAddr": "01000001",
-      "fCnt": 10,
+      "fCnt": 160,
       "time": "2026-10-08T10:00:00.000Z",
       "fPort": 2,
-      "bytesHex": "06030005060100b8068100021221000a"
+      "bytesHex": "06030005060100b8068100011221000a"
     },
     {
-      "deduplicationId": "00000000-0000-4000-8000-000000000002",
+      "deduplicationId": "00000000-0000-4000-8000-000000000049",
       "devAddr": "01000001",
-      "fCnt": 11,
-      "time": "2026-10-08T10:15:01.000Z",
+      "fCnt": 161,
+      "time": "2026-10-08T10:30:02.000Z",
       "fPort": 2,
-      "bytesHex": "06030005060100b8068100011221000a"
+      "bytesHex": "06030005060100b8068100031221000a06030005060100b8068100011221000a"
     }
   ],
   "expect": {
@@ -37,8 +37,8 @@
       {
         "frameIndex": 0,
         "counted": true,
-        "tips": 2,
-        "amount_mm": 1,
+        "tips": 1,
+        "amount_mm": 0.5,
         "frame_kind": "ordinary",
         "interval_basis": "unknown",
         "interval_basis_promoted": "protocol_verified",
@@ -47,20 +47,21 @@
       {
         "frameIndex": 1,
         "counted": true,
-        "tips": 1,
-        "amount_mm": 0.5,
+        "tips": 4,
+        "amount_mm": 2,
+        "codec_tips": 1,
         "frame_kind": "ordinary",
         "interval_basis": "unknown",
-        "interval_basis_promoted": "protocol_verified",
-        "reason": null
+        "interval_basis_promoted": "unknown",
+        "reason": "multi_block"
       }
     ],
     "spans": [
       {
         "fromFrameIndex": 0,
         "toFrameIndex": 1,
-        "state": "dry",
-        "reason": null
+        "state": "unknown",
+        "reason": "multi_block"
       }
     ]
   }

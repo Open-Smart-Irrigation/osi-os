@@ -1,9 +1,9 @@
 {
-  "id": "button-then-ordinary",
+  "id": "button-same-slot",
   "truthRows": [
     "T10"
   ],
-  "description": "A button press at 10:09 sends the current count (2 tips) without clearing it; the 10:15 ordinary report repeats those 2 tips plus 1 new tip. Only the ordinary report is additive, and neither is certified.",
+  "description": "A button press 30 seconds before the 10:15 wake: two rain frames in one wake slot, which the bytes cannot tell apart. Neither is additive; the next loop frame keeps its amount but is not certified.",
   "config": {
     "conf_interval": null,
     "conf_heartbeat": null,
@@ -16,28 +16,36 @@
   },
   "frames": [
     {
-      "deduplicationId": "00000000-0000-4000-8000-000000000025",
+      "deduplicationId": "00000000-0000-4000-8000-000000000050",
       "devAddr": "01000001",
-      "fCnt": 100,
+      "fCnt": 170,
       "time": "2026-10-08T10:00:00.000Z",
       "fPort": 2,
       "bytesHex": "06030005060100b8068100011221000a"
     },
     {
-      "deduplicationId": "00000000-0000-4000-8000-000000000026",
+      "deduplicationId": "00000000-0000-4000-8000-000000000051",
       "devAddr": "01000001",
-      "fCnt": 101,
-      "time": "2026-10-08T10:09:12.000Z",
+      "fCnt": 171,
+      "time": "2026-10-08T10:14:31.000Z",
       "fPort": 2,
       "bytesHex": "06030005060100b8068100021221000a"
     },
     {
-      "deduplicationId": "00000000-0000-4000-8000-000000000027",
+      "deduplicationId": "00000000-0000-4000-8000-000000000052",
       "devAddr": "01000001",
-      "fCnt": 102,
+      "fCnt": 172,
       "time": "2026-10-08T10:15:01.000Z",
       "fPort": 2,
       "bytesHex": "06030005060100b8068100031221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000053",
+      "devAddr": "01000001",
+      "fCnt": 173,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
     }
   ],
   "expect": {
@@ -57,16 +65,26 @@
         "counted": false,
         "tips": 2,
         "amount_mm": null,
-        "frame_kind": "button",
+        "frame_kind": "ordinary",
         "interval_basis": "unknown",
         "interval_basis_promoted": "unknown",
         "reason": "overlap_unqualified"
       },
       {
         "frameIndex": 2,
-        "counted": true,
+        "counted": false,
         "tips": 3,
-        "amount_mm": 1.5,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "overlap_unqualified"
+      },
+      {
+        "frameIndex": 3,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
         "frame_kind": "ordinary",
         "interval_basis": "unknown",
         "interval_basis_promoted": "unknown",

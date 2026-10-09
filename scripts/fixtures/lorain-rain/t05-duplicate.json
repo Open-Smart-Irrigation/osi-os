@@ -3,11 +3,16 @@
   "truthRows": [
     "T5"
   ],
-  "description": "The same uplink delivered twice (same deduplicationId); it counts once.",
+  "description": "The same uplink delivered twice with one deduplicationId, then a late retransmission of fCnt 50 with a new deduplicationId (same session, fCnt and payload): both repeats are duplicates. A frame with fCnt 51 and a different payload is an identity conflict.",
   "config": {
     "conf_interval": null,
     "conf_heartbeat": null,
     "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
   },
   "frames": [
     {
@@ -33,6 +38,22 @@
       "time": "2026-10-08T10:15:01.000Z",
       "fPort": 2,
       "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000042",
+      "devAddr": "01000001",
+      "fCnt": 50,
+      "time": "2026-10-08T10:15:04.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100031221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000043",
+      "devAddr": "01000001",
+      "fCnt": 51,
+      "time": "2026-10-08T10:15:09.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100041221000a"
     }
   ],
   "expect": {
@@ -66,6 +87,26 @@
         "interval_basis": "unknown",
         "interval_basis_promoted": "protocol_verified",
         "reason": null
+      },
+      {
+        "frameIndex": 3,
+        "counted": false,
+        "tips": 3,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": "duplicate"
+      },
+      {
+        "frameIndex": 4,
+        "counted": false,
+        "tips": 4,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "identity_conflict"
       }
     ],
     "spans": [

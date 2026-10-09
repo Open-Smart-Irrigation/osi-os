@@ -10,6 +10,11 @@
     "conf_heartbeat": null,
     "firmwareRevision": "unknown"
   },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
   "frames": [
     {
       "deduplicationId": "00000000-0000-4000-8000-000000000008",
