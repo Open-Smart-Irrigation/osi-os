@@ -133,3 +133,29 @@ test('a zero heartbeat with no zone day inserts 0 mm owned by the gauge', async 
   assert.equal(row.rain_source, 'aquascope_lorain');
   assert.equal(row.sync_version, 0);
 });
+
+test('a positive report still overwrites another source\'s zone day (pinned until R-ZONE)', async () => {
+  const db = seed('UTC');
+  seedOwnedRow(db, 'sensecap_s2120', 3.2);
+  await ingest(db, '2026-10-08T10:00:00.000Z', 2);
+  const row = zoneDay(db);
+  assert.equal(row.rainfall_mm, 1);
+  assert.equal(row.rain_source, 'aquascope_lorain');
+  assert.equal(row.sync_version, 5);
+});
+
+test('an invalid zone timezone falls back to UTC for both the date and the day window', async () => {
+  const db = seed('Mars/Olympus');
+  await ingest(db, '2026-10-07T23:00:00.000Z', 1);
+  await ingest(db, '2026-10-08T00:30:00.000Z', 0);
+  const rows = db.prepare('SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1 ORDER BY date').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ date: '2026-10-07', rainfall_mm: 0.5 }, { date: '2026-10-08', rainfall_mm: 0 }]);
+});
+
+test('the day date and the day window read the zone timezone the same way', async () => {
+  const db = seed(' Europe/Zurich');
+  // 22:30Z on 2026-10-08 is 00:30 local on the 9th.
+  await ingest(db, '2026-10-08T22:30:00.000Z', 1);
+  const rows = db.prepare('SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ date: '2026-10-09', rainfall_mm: 0.5 }]);
+});
