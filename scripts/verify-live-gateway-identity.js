@@ -1611,12 +1611,12 @@ if (sizeAllowances) {
   // 38394: LoRain dry reports reach the zone table (lorain-process-fn +165,
   // lorain-rain-agg-fn +1120). origin/main 1653128 -> HEAD 1654413 = +1285; the baseline
   // 1616019 plus the delta must cover 1654413, so the delta rises from 37109 to 38394.
-  // 39309: rolling 7-day rain over seven calendar days (dendro-compute-fn). origin/main
-  // 1654283 -> HEAD 1655328 = +1045, so the baseline plus the delta must cover
-  // 1655328 - 1616019 = 39309. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 39309,
-    'size total allowance: exact cumulative delta 39309',
-    'size total allowance: expected exact cumulative delta 39309');
+  // 39859: rolling 7-day rain over seven calendar days (dendro-compute-fn). origin/main
+  // 1654283 -> HEAD 1655878 = +1595, so the baseline plus the delta must cover
+  // 1655878 - 1616019 = 39859. The baseline doc is unchanged.
+  expectCondition(sizeAllowances.total_allowance?.delta === 39859,
+    'size total allowance: exact cumulative delta 39859',
+    'size total allowance: expected exact cumulative delta 39859');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');
