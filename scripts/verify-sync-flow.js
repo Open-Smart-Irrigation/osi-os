@@ -2619,6 +2619,7 @@ expectIncludesById('s2120-process-fn', "const rainMmPerHour = finiteOrNull(measu
 expectIncludesById('s2120-process-fn', "const COUNTER_BASELINE = 'cumulative_baseline'", 'marks the first 4213 row so rows written under the old 4113 interpretation never become a counter baseline');
 expectIncludesById('s2120-process-fn', 'const LEGACY_WINDOW_S = 600', 'integrates legacy intensity only over the vendor ten-minute window');
 expectIncludesById('s2120-process-fn', "rainDeltaStatus = 'intensity_only'", 'leaves the legacy rain amount unknown when the cadence does not match the ten-minute window');
+expectIncludesById('s2120-process-fn', "const MARKER_KEY = 's2120CounterBaseline'", 'caches the counter-baseline marker per device in node context instead of scanning the history on every uplink');
 expectIncludesById('s2120-process-fn', "windGustMps: measurements['4191'] ?? null", "reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)");
 expectIncludesById('s2120-process-fn', "measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field');
 expectIncludesById('s2120-process-fn', 'duplicate_timestamp', 'skips duplicate S2120 rain-counter uplinks');

@@ -365,3 +365,34 @@ test('a deleted counter baseline row starts a new baseline after a restart, neve
   assert.equal(next.row.rain_delta_status, 'cumulative_baseline');
   assert.equal(next.row.rain_mm_delta, null);
 });
+
+test('the counter-baseline lookup runs once per device, not once per uplink', async () => {
+  const db = createDb();
+  const { uplink, stats } = harness(db);
+  for (let i = 0; i < 4; i += 1) {
+    const time = new Date(Date.parse('2026-10-08T10:00:00.000Z') + i * 600000).toISOString();
+    await uplink(time, v2(1.524, 50 + i * 0.254), DEV_EUI);
+    await uplink(time, legacy(1.524), DEV_EUI_2);
+  }
+  assert.equal(stats.markerLookups, 2, 'one lookup per device: the counter device and the legacy device');
+  const last = lastRow(db, DEV_EUI);
+  assert.equal(last.rain_mm_delta, 0.254);
+  assert.equal(lastRow(db, DEV_EUI_2).rain_mm_delta, 0.254);
+});
+
+test('a cached baseline whose rows are gone is looked up again', async () => {
+  const db = createDb();
+  const { uplink, stats } = harness(db);
+  await uplink('2026-10-08T10:00:00.000Z', v2(0, 60));
+  await uplink('2026-10-08T10:10:00.000Z', v2(0, 60.254));
+  // The device is removed and added again: its rows cascade away, the node context stays.
+  db.prepare('DELETE FROM device_data WHERE deveui = ?').run(DEV_EUI);
+  const before = stats.markerLookups;
+  const fresh = await uplink('2026-10-08T10:20:00.000Z', v2(0, 3));
+  assert.equal(fresh.row.rain_delta_status, 'cumulative_baseline', 'no phantom increment against a vanished baseline');
+  assert.equal(fresh.row.rain_mm_delta, null);
+  assert.equal(stats.markerLookups, before + 1);
+  const next = await uplink('2026-10-08T10:30:00.000Z', v2(0, 3.254));
+  assert.equal(next.row.rain_mm_delta, 0.254);
+  assert.equal(stats.markerLookups, before + 1, 'the new baseline is cached again');
+});
