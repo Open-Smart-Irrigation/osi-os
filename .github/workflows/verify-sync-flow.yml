@@ -214,6 +214,11 @@ jobs:
       # legacy command path, each against the shipped source.
       - name: Zone weather provider round trip
         run: node --test scripts/test-zone-weather-source.js
+      # LoRain zone rain: a valid dry report writes a 0 mm zone row, a non-ok one does
+      # not, and a new zone day starts from the zone's own day window, never the host
+      # day. TZ pins the host clock the old 'localtime' path depended on.
+      - name: LoRain dry reports and zone day window
+        run: TZ=UTC node --test scripts/test-lorain-dry-zone-row.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
