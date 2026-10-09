@@ -124,6 +124,12 @@ function droppedOpens(items, removed, active, target, eui, warn) {
   const ids = [];
   let count = 0;
   items.forEach((item, index) => {
+    if (removed(index) && isUnboundedMoveItem(item)) {
+      count += 1;
+      warn && warn('[valve-control] cancelActuation: the cancel of ' + target.expectation_id + ' on ' + eui +
+        ' took out a queued partial-opening or flushing downlink (fPort ' + Number(item.fPort) + '); it is not sent');
+      return;
+    }
     if (!removed(index) || !isOpenItem(item) || owners.get(index) === target.expectation_id) return;
     count += 1;
     const id = owners.get(index);
@@ -164,6 +170,16 @@ function isOpenItem(item) {
   return !!signature && ['21', '41', '81'].includes(signature.slice(0, 2));
 }
 
+// A partial opening ([0x31, pct] on fPort 27) or a flushing (fPort 28): the valve moves open
+// with no end time, so such an item is never queued again either.
+function isUnboundedMoveItem(item) {
+  if (!item || item.isPending || item.isEncrypted) return false;
+  if (Number(item.fPort) === 28) return true;
+  if (Number(item.fPort) !== 27) return false;
+  try { return Buffer.from(String(item.data || ''), 'base64')[0] === 0x31; }
+  catch (_) { return false; }
+}
+
 // Takes the target's open out of the device queue and puts plan pushes and configuration
 // back. Another actuation's open is never queued again: ChirpStack may have sent it after
 // the queue read, and queueing it again would water twice. Each one is reported instead.
@@ -198,7 +214,7 @@ async function removeTargetDownlink({ eui, target, active, flushQueue, readQueue
   }
   const flushed = await flushQueue(eui);
   const dropped = droppedOpens(items, (i) => i !== index, active, target, eui, warn);
-  const keep = items.filter((item, i) => i !== index && !item.isPending && !isOpenItem(item));
+  const keep = items.filter((item, i) => i !== index && !item.isPending && !isOpenItem(item) && !isUnboundedMoveItem(item));
   let kept = 0;
   let lost = 0;
   for (const item of keep) {

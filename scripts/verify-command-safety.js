@@ -262,7 +262,7 @@ function assertCancelPath() {
     }
     // Fix rounds: another actuation's open is never queued again (it may already have been
     // sent), and the cancel reports it.
-    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item)', 'droppedOpens: queue.dropped']) {
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item) && !isUnboundedMoveItem(item)', 'droppedOpens: queue.dropped']) {
         if (!cancelJsSrc.includes(required)) {
             throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
         }

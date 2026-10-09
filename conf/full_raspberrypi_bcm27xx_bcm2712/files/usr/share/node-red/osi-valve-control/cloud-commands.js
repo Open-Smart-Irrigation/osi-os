@@ -274,7 +274,9 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
 // answered REJECTED_PERMANENT by the caller.
 // queueClient is the ChirpStack client (getDeviceQueue, enqueueDownlink); the bridge passes
 // it whole to keep its own body small. When the cancel took other actuations' opens out of
-// the queue, detail names them for the command ACK (the cloud stores it, up to 255 chars).
+// the queue, detail names them for the command ACK reason (stored by the cloud as free
+// text; capped here at 255 chars, which can cut the id list short), or says unknown when
+// the queue could not be read.
 async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, now, warn }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
@@ -286,9 +288,9 @@ async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, now
     enqueue: q && ((item) => q.enqueueDownlink(item)),
   });
   const dropped = result.droppedOpens;
-  const detail = dropped && dropped.count
-    ? ('dropped_opens=' + dropped.count + ' expectation_ids=' + dropped.expectationIds.join(',')).slice(0, 255)
-    : null;
+  let detail = null;
+  if (result.ok && dropped === null) detail = 'dropped_opens=unknown';
+  else if (dropped && dropped.count) detail = ('dropped_opens=' + dropped.count + ' expectation_ids=' + dropped.expectationIds.join(',')).slice(0, 255);
   return { ok: result.ok, error: result.error, permanent: !!result.permanent, detail, downlinks: result.downlinks || [] };
 }
 

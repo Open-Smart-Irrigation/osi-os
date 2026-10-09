@@ -640,6 +640,17 @@ test('CANCEL_VALVE_ACTUATION with expectation_id cancels that actuation and read
   assert.deepEqual(states, { e1: 'CANCELLED', e2: 'PENDING_OBSERVATION' });
 });
 
+test('CANCEL_VALVE_ACTUATION says dropped_opens=unknown when the queue cannot be read', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI }, {
+    flushQueue: async () => ({}),
+    queueClient: { getDeviceQueue: async () => { throw new Error('unavailable'); }, enqueueDownlink: async () => ({}) },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.detail, 'dropped_opens=unknown');
+});
+
 test('CANCEL_VALVE_ACTUATION without expectation_id and two active actuations is a permanent refusal', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });

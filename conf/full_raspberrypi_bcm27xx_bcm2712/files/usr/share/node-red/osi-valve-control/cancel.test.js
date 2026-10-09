@@ -415,6 +415,28 @@ test('cancelActuation flushes BEFORE marking CANCELLED: a flush failure propagat
   db.close();
 });
 
+// Fix round 3 (R3): a partial opening ([0x31, pct] on fPort 27) or a flushing (fPort 28) moves
+// the valve open with no end time; like an open, it is never queued again after the flush.
+test('cancelActuation never queues a partial opening or a flushing again, and counts it as dropped', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e-a', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const q = fakeQueue([
+    queueItem('q-a', 2, [0x41, 15]),
+    queueItem('q-partial', 27, [0x31, 50]),
+    queueItem('q-partial-close', 27, [0x30, 50]),
+    queueItem('q-flush', 28, [0x30, 40]),
+    queueItem('q-cfg', 11, [0x00, 0x0f, 0x00, 0x02]),
+  ]);
+  const warnings = [];
+  const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-a', reason: null, flushQueue: q.flushQueue, readQueue: q.readQueue, enqueue: q.enqueue, warn: (m) => warnings.push(m) });
+  assert.equal(out.ok, true);
+  assert.equal(out.queueScope, 'target_only', 'partial opening and flushing do not count as opens for the full-flush rule');
+  assert.deepEqual(q.queue.map((item) => [item.fPort, Buffer.from(item.data, 'base64').toString('hex')]), [[27, '3032'], [11, '000f0002']]);
+  assert.deepEqual(out.droppedOpens, { count: 2, expectationIds: [] });
+  assert.equal(warnings.filter((w) => /partial-opening or flushing/.test(w)).length, 2);
+  db.close();
+});
+
 // Fix round (F3): an open the cancel cannot place in the queue is flushed, as main did,
 // instead of being left queued under a CANCELLED actuation.
 test('cancelActuation flushes the whole queue when the queue holds an open it cannot account for', async () => {
