@@ -2949,35 +2949,30 @@ function normalizeTimezone(value) {
   return zoneFormatterEntry(value).timezone;
 }
 
+// First instant of the zone-local calendar date that contains `nowMs`. Local
+// midnight may not exist (DST starting at 00:00) or occur twice, so this finds
+// the earliest instant whose local date is that date instead of solving for a
+// wall-clock 00:00.
 function startOfLocalDayMs(nowMs, timezone) {
   const instantMs = typeof nowMs === 'number' ? nowMs : parseTime(nowMs);
   if (instantMs === null) throw new Error('startOfLocalDayMs requires a valid instant');
-  const { dateTimeFormat } = zoneFormatterEntry(timezone);
-  const parts = partsOf(dateTimeFormat, instantMs);
-  const targetWallClockMs = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    0,
-    0,
-    0
-  );
-  let candidateMs = targetWallClockMs;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidateParts = partsOf(dateTimeFormat, candidateMs);
-    const candidateWallClockMs = Date.UTC(
-      Number(candidateParts.year),
-      Number(candidateParts.month) - 1,
-      Number(candidateParts.day),
-      Number(candidateParts.hour) % 24,
-      Number(candidateParts.minute),
-      Number(candidateParts.second)
-    );
-    const deltaMs = candidateWallClockMs - targetWallClockMs;
-    if (deltaMs === 0) return candidateMs;
-    candidateMs -= deltaMs;
+  const { dateFormat } = zoneFormatterEntry(timezone);
+  const dayNumberAt = (ms) => {
+    const parts = partsOf(dateFormat, ms);
+    return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  };
+  const targetDay = dayNumberAt(instantMs);
+  // Local offsets lie within -12h..+14h, so 15h before the date's UTC midnight
+  // is always on an earlier local date. The local date never decreases over
+  // time, which makes "date >= target" a monotone predicate for bisection.
+  let lowSec = Math.floor((targetDay - 15 * 3600000) / 1000);
+  let highSec = Math.floor(instantMs / 1000);
+  while (highSec - lowSec > 1) {
+    const midSec = lowSec + Math.floor((highSec - lowSec) / 2);
+    if (dayNumberAt(midSec * 1000) >= targetDay) highSec = midSec;
+    else lowSec = midSec;
   }
-  return candidateMs;
+  return highSec * 1000;
 }
 
 function localDateKey(value, timezone) {
