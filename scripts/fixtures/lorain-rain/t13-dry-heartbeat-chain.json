@@ -1,0 +1,87 @@
+{
+  "id": "dry-heartbeat-chain",
+  "truthRows": [
+    "T3",
+    "T13"
+  ],
+  "description": "Reference configuration on a dry day: only the 4-hour heartbeats arrive (16 wakes of 900 s, about 1 s drift per wake). fCnt is continuous, so both silent spans are measured zero.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000037",
+      "devAddr": "01000001",
+      "fCnt": 130,
+      "time": "2026-10-08T00:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000038",
+      "devAddr": "01000001",
+      "fCnt": 131,
+      "time": "2026-10-08T04:00:16.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000039",
+      "devAddr": "01000001",
+      "fCnt": 132,
+      "time": "2026-10-08T08:00:32.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      },
+      {
+        "fromFrameIndex": 1,
+        "toFrameIndex": 2,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

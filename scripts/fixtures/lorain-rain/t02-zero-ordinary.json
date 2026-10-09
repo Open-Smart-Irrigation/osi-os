@@ -1,0 +1,86 @@
+{
+  "id": "zero-ordinary",
+  "truthRows": [
+    "T2"
+  ],
+  "description": "Other configurations only: a device set to report at every wake sends zero reports after a wet one. The reference configuration sends nothing when dry.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000003",
+      "devAddr": "01000001",
+      "fCnt": 20,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000004",
+      "devAddr": "01000001",
+      "fCnt": 21,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000005",
+      "devAddr": "01000001",
+      "fCnt": 22,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      },
+      {
+        "fromFrameIndex": 1,
+        "toFrameIndex": 2,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

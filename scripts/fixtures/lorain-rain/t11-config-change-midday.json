@@ -1,0 +1,119 @@
+{
+  "id": "config-change-midday",
+  "truthRows": [
+    "T11"
+  ],
+  "description": "Configuration replies ride in rain reports: conf_interval 900 and conf_heartbeat 16 at 06:00, then conf_interval 600 at 09:45. The new 600-second interval is observed twice (09:45 to 09:55, 09:55 to 10:05) before reports are verified again.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000028",
+      "devAddr": "01000001",
+      "fCnt": 110,
+      "time": "2026-10-08T06:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "040403840402001006030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000029",
+      "devAddr": "01000001",
+      "fCnt": 111,
+      "time": "2026-10-08T06:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000030",
+      "devAddr": "01000001",
+      "fCnt": 112,
+      "time": "2026-10-08T09:45:14.000Z",
+      "fPort": 2,
+      "bytesHex": "0404025806030005060100b8068100021221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000031",
+      "devAddr": "01000001",
+      "fCnt": 113,
+      "time": "2026-10-08T09:55:15.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000032",
+      "devAddr": "01000001",
+      "fCnt": 114,
+      "time": "2026-10-08T10:05:16.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null,
+        "conf_interval": 900,
+        "conf_heartbeat": 16
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 2,
+        "amount_mm": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "config_change",
+        "conf_interval": 600
+      },
+      {
+        "frameIndex": 3,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "config_change"
+      },
+      {
+        "frameIndex": 4,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 1,
+        "toFrameIndex": 2,
+        "state": "unknown",
+        "reason": "config_change"
+      }
+    ]
+  }
+}

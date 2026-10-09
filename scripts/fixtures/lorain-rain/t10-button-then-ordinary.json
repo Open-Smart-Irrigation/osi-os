@@ -1,0 +1,73 @@
+{
+  "id": "button-then-ordinary",
+  "truthRows": [
+    "T10"
+  ],
+  "description": "A button press at 10:09 sends the current count (2 tips) without clearing it; the 10:15 ordinary report repeats those 2 tips plus 1 new tip. Only the ordinary report is additive, and neither is certified.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000025",
+      "devAddr": "01000001",
+      "fCnt": 100,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000026",
+      "devAddr": "01000001",
+      "fCnt": 101,
+      "time": "2026-10-08T10:09:12.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100021221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000027",
+      "devAddr": "01000001",
+      "fCnt": 102,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100031221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": false,
+        "tips": 2,
+        "amount_mm": null,
+        "frame_kind": "button",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "overlap_unqualified"
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 3,
+        "amount_mm": 1.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "overlap_unqualified"
+      }
+    ],
+    "spans": []
+  }
+}

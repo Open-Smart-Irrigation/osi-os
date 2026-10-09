@@ -1,0 +1,63 @@
+{
+  "id": "missed-frame",
+  "truthRows": [
+    "T4",
+    "T14"
+  ],
+  "description": "fCnt 41 never arrived. It was encoded at 10:15 and cleared the counter, so its tips are lost; the frame after the gap is not certified.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000008",
+      "devAddr": "01000001",
+      "fCnt": 40,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100021221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000009",
+      "devAddr": "01000001",
+      "fCnt": 42,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 2,
+        "amount_mm": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "frame_gap"
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "unknown",
+        "reason": "frame_gap"
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "id": "invalid-tips",
+  "truthRows": [
+    "T12"
+  ],
+  "description": "Decoded objects with a tip count that is negative, fractional, a string or null. The codec cannot emit these, so each frame gives the decoded object instead of bytes.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000033",
+      "devAddr": "01000001",
+      "fCnt": 120,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": null,
+      "object": {
+        "rain_tips_delta": -1,
+        "rain_mm_delta": -0.5
+      }
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000034",
+      "devAddr": "01000001",
+      "fCnt": 121,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": null,
+      "object": {
+        "rain_tips_delta": 1.5
+      }
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000035",
+      "devAddr": "01000001",
+      "fCnt": 122,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": null,
+      "object": {
+        "rain_tips_delta": "2"
+      }
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000036",
+      "devAddr": "01000001",
+      "fCnt": 123,
+      "time": "2026-10-08T10:45:03.000Z",
+      "fPort": 2,
+      "bytesHex": null,
+      "object": {
+        "rain_tips_delta": null,
+        "rainlevel": null
+      }
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": false,
+        "tips": -1,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "invalid_tips"
+      },
+      {
+        "frameIndex": 1,
+        "counted": false,
+        "tips": 1.5,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "invalid_tips"
+      },
+      {
+        "frameIndex": 2,
+        "counted": false,
+        "tips": "2",
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "invalid_tips"
+      },
+      {
+        "frameIndex": 3,
+        "counted": false,
+        "tips": null,
+        "amount_mm": null,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "invalid_tips"
+      }
+    ],
+    "spans": []
+  }
+}
