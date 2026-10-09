@@ -2658,6 +2658,7 @@ expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone
 expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
 expectLibById('lorain-rain-agg-fn', 'osiHistory', 'osi-history-helper', 'imports osi-history-helper for the zone-local day window');
+expectIncludesById('lorain-rain-agg-fn', "WHERE ? > 0 OR zone_daily_environment.rain_source = 'aquascope_lorain'", 'never lets a zero report take over a zone day another source owns');
 
 // F83-V5: static pins so a future flows.json edit cannot silently drop the
 // uplink-dedup guard from any of the 7 device_data-writing decode functions
