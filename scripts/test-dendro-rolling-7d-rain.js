@@ -79,6 +79,14 @@ function openMeteoDay(rainTotalMm) {
   };
 }
 
+// A provider answer with temperature and humidity but no usable precipitation hour:
+// the key absent, or present with only nulls.
+function openMeteoTemperatureOnly({ nullPrecipitation = false } = {}) {
+  const hourly = { temperature_2m: Array(24).fill(18), relative_humidity_2m: Array(24).fill(70) };
+  if (nullPrecipitation) hourly.precipitation = Array(24).fill(null);
+  return { status: 200, body: { hourly } };
+}
+
 function seedDb({ timezone = 'UTC', withLocation = true } = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync(SEED, 'utf8'));
@@ -124,7 +132,7 @@ function addUnstressedTreeDay(db, date) {
   for (const [position, time] of readings) insert.run(TREE, position, `${date}T${time}.000Z`);
 }
 
-async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0] } = {}) {
+async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO } = {}) {
   const flowsPath = path.join(ROOT, profile, 'flows.json');
   const moduleDir = path.join(ROOT, profile, 'node-red/osi-dendro-analytics');
   const node = loadNode('dendro-compute-fn', flowsPath);
@@ -147,10 +155,10 @@ async function runDendro(db, { weather = { status: 500, body: null }, profile = 
   };
   const http = stubHttp(weather, calls);
   const fakeRequire = (name) => (name === 'http' || name === 'https' ? http : require(name)); // eslint-disable-line global-require
-  const env = { get: () => '' };
+  const env = { get: (key) => (Object.prototype.hasOwnProperty.call(envVars, key) ? envVars[key] : '') };
   // eslint-disable-next-line no-new-func
   const fn = new Function('osiDb', 'osiLib', 'env', 'node', 'msg', 'require', 'Date', node.func);
-  const result = await fn(osiDb, osiLib, env, fakeNode, {}, fakeRequire, makeFixedDate(NOW_ISO));
+  const result = await fn(osiDb, osiLib, env, fakeNode, {}, fakeRequire, makeFixedDate(now));
   assert.deepEqual(errors, [], 'dendro-compute-fn reported errors');
   return { result, calls, warnings };
 }
@@ -262,4 +270,69 @@ for (const profile of PROFILES) {
     assert.equal(json.rain.rolling7d, 18.2);
     db.close();
   });
+  for (const variant of [{ nullPrecipitation: false, label: 'no precipitation key' }, { nullPrecipitation: true, label: 'only null precipitation' }]) {
+    test(`[${tag}] an Open-Meteo day with ${variant.label} is unknown rain, not 0 mm`, async () => {
+      const db = seedDb();
+      addRecommendation(db, '2026-10-07', 1);
+      await runDendro(db, { weather: openMeteoTemperatureOnly(variant), profile });
+      const { row, json } = recommendation(db, '2026-10-08');
+      assert.equal(json.rain.daily_status, 'unknown');
+      assert.deepEqual(json.rain.warnings, ['rain_unknown']);
+      assert.equal(json.rain.source, 'none');
+      assert.equal(json.rain.rolling7d_days_present, 1);
+      // The temperature data still serves VPD.
+      assert.equal(json.vpd.vpd_source, 'open_meteo');
+      assert.equal(row.rain_suppression_active, 0);
+      db.close();
+    });
+  }
+
+  test(`[${tag}] an OpenAgri day without precipitation values is unknown rain, not 0 mm`, async () => {
+    const db = seedDb();
+    const weather = {
+      status: 200,
+      body: { data: [{ values: { temperature_2m: 18, relative_humidity_2m: 70 } }, { values: { temperature_2m: 21, relative_humidity_2m: 60, precipitation: null } }] },
+    };
+    const { calls } = await runDendro(db, {
+      weather,
+      profile,
+      envVars: { OPENAGRI_WEATHER_URL: 'https://weather.example.invalid', OPENAGRI_WEATHER_BEARER_TOKEN: 'test-token' },
+    });
+    assert.ok(calls.some((url) => url.includes('/api/v1/history/hourly/')), 'the OpenAgri history route was asked (stubbed)');
+    const { json } = recommendation(db, '2026-10-08');
+    assert.equal(json.rain.daily_status, 'unknown');
+    assert.deepEqual(json.rain.warnings, ['rain_unknown']);
+    assert.equal(json.vpd.vpd_source, 'openagri');
+    db.close();
+  });
+
+  test(`[${tag}] a provider day with a precipitation value of 0 is a known dry day`, async () => {
+    const db = seedDb();
+    await runDendro(db, { weather: openMeteoDay(0), profile });
+    const { json } = recommendation(db, '2026-10-08');
+    assert.equal(json.rain.daily_status, 'observed');
+    assert.equal(json.rain.source, 'open_meteo');
+    assert.equal(json.rain.rolling7d_days_present, 1);
+    db.close();
+  });
+
+  // Zurich DST: the analytics date is zone-local and the window is seven calendar days,
+  // whatever the length of the analytics day (23 h in spring, 25 h in autumn).
+  for (const dst of [
+    { label: 'spring (23-hour day)', now: '2026-03-30T01:00:00.000Z', date: '2026-03-29', from: '2026-03-23', outside: '2026-03-22', inside: ['2026-03-23', '2026-03-28'] },
+    { label: 'autumn (25-hour day)', now: '2026-10-26T03:00:00.000Z', date: '2026-10-25', from: '2026-10-19', outside: '2026-10-18', inside: ['2026-10-19', '2026-10-24'] },
+  ]) {
+    test(`[${tag}] Europe/Zurich DST ${dst.label}: the window is the seven calendar days ending on the local analytics date`, async () => {
+      const db = seedDb({ timezone: 'Europe/Zurich' });
+      addRecommendation(db, dst.outside, 5);
+      for (const date of dst.inside) addRecommendation(db, date, 2);
+      addLocalRain(db, dst.date, 1);
+      await runDendro(db, { weather: openMeteoDay(0), profile, now: dst.now });
+      const { json } = recommendation(db, dst.date);
+      assert.deepEqual(json.rain.rolling7d_window, { from: dst.from, to: dst.date });
+      assert.equal(json.rain.rolling7d, 5);
+      assert.equal(json.rain.rolling7d_days_present, 3);
+      db.close();
+    });
+  }
 }
