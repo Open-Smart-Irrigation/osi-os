@@ -926,5 +926,10 @@
     "dailyFooter": "{{days}} jours · totaux journaliers ({{timezone}})",
     "soFar": "jusqu'ici",
     "timezoneCheck": "Vérifiez le fuseau horaire de la zone dans ses paramètres."
+  },
+  "rain": {
+    "recordedToday": "Pluie mesurée aujourd'hui",
+    "soFar": "jusqu'ici",
+    "lastReportOn": "Dernier relevé {{date}} : {{value}} mm"
   }
 }

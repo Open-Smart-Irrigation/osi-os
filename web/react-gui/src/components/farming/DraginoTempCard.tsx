@@ -7,6 +7,7 @@ import { DraginoSettingsModal } from './DraginoSettingsModal';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
+import { RainTodayLine } from './shared/RainTodayTile';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
@@ -336,12 +337,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
         {rainEnabled && (
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Gauge</p>
-            <p className="mb-2 text-xs text-[var(--text-secondary)]">
-              Today:{' '}
-              <span className="font-semibold text-[var(--text)]">
-                {data?.rain_mm_today != null ? `${data.rain_mm_today.toFixed(1)} mm` : '—'}
-              </span>
-            </p>
+            <RainTodayLine data={data} />
             <button
               onClick={() => setSensorMonitor({
                 field: 'rain_mm_delta',

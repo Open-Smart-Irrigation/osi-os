@@ -926,5 +926,10 @@
     "dailyFooter": "{{days}} días · totales diarios ({{timezone}})",
     "soFar": "hasta ahora",
     "timezoneCheck": "Revise la zona horaria de la zona en su configuración."
+  },
+  "rain": {
+    "recordedToday": "Lluvia registrada hoy",
+    "soFar": "hasta ahora",
+    "lastReportOn": "Último registro {{date}}: {{value}} mm"
   }
 }

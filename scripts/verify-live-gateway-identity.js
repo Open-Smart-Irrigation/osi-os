@@ -1614,9 +1614,12 @@ if (sizeAllowances) {
   // 39859: rolling 7-day rain over seven calendar days (dendro-compute-fn). origin/main
   // 1654283 -> HEAD 1655878 = +1595, so the baseline plus the delta must cover
   // 1655878 - 1616019 = 39859. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 39859,
-    'size total allowance: exact cumulative delta 39859',
-    'size total allowance: expected exact cumulative delta 39859');
+  // 41482: rain farm day on the device list (merge-device-data dates the latest rain value
+  // in the farm timezone). origin/main 1655878 -> HEAD 1657501 = +1623, so the baseline plus
+  // the delta must cover 1657501 - 1616019 = 41482. The baseline doc is unchanged.
+  expectCondition(sizeAllowances.total_allowance?.delta === 41482,
+    'size total allowance: exact cumulative delta 41482',
+    'size total allowance: expected exact cumulative delta 41482');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

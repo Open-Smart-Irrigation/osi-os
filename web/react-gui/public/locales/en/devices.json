@@ -923,5 +923,10 @@
     "dailyFooter": "{{days}} days · daily totals ({{timezone}})",
     "soFar": "so far",
     "timezoneCheck": "Check the zone time zone in its settings."
+  },
+  "rain": {
+    "recordedToday": "Rain recorded today",
+    "soFar": "so far",
+    "lastReportOn": "Last report {{date}}: {{value}} mm"
   }
 }

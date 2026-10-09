@@ -6,6 +6,7 @@ import { devicesAPI } from '../../services/api';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
+import { RainTodayTile } from './shared/RainTodayTile';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 
@@ -172,18 +173,13 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           </p>
         </div>
 
-        <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Today</p>
-          <button
-            type="button"
-            onClick={() => openRainHistory('rain_mm_today')}
-            className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-            title={t('common.viewHistory', { defaultValue: 'View history' })}
-          >
-            {formatNumber(data.rain_mm_today, 1, 'mm')}
-          </button>
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel ?? 'Accumulated locally'}</p>
-        </div>
+        <RainTodayTile
+          data={data}
+          onOpenHistory={() => openRainHistory('rain_mm_today')}
+          valueClassName={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
+        >
+          {statusLabel && <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel}</p>}
+        </RainTodayTile>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rate</p>

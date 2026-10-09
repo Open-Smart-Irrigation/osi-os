@@ -33,6 +33,8 @@ export interface SentekChannelLayout {
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
+/** How the gateway chose the timezone of `latest_data.rain_day` (see osi-history-helper resolveDeviceTimezone). */
+export type RainDayTimezoneBasis = 'zone' | 'weather_station_zone' | 'unassigned_default' | 'abbreviation' | 'invalid';
 
 export type WatermarkChannelStatus =
   | 'ok' | 'saturated' | 'wet_offset_clipped' | 'short' | 'short_suspected' | 'open'
@@ -176,6 +178,11 @@ export interface Device {
     rain_mm_per_hour?: number | null;
     rain_mm_per_10min?: number | null;
     rain_mm_today?: number | null;
+    // Farm-local day (YYYY-MM-DD) of the latest rain value, set by GET /api/devices for rain
+    // gauges; the "today" tiles show rain_mm_today as today only when this is the farm's date.
+    rain_day?: string | null;
+    rain_day_timezone?: string | null;
+    rain_day_timezone_basis?: RainDayTimezoneBasis | null;
     rain_delta_status?: string | null;
     flow_count_cumulative?: number | null;
     flow_pulses_delta?: number | null;
