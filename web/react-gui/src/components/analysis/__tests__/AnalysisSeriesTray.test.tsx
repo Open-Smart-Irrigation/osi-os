@@ -256,4 +256,31 @@ describe('AnalysisSeriesTray', () => {
     expect(within(device).getByRole('button', { name: /Air temperature/ })).toBeInTheDocument();
     expect(within(provider).getByRole('button', { name: /Air temperature/ })).toBeInTheDocument();
   });
+
+  it('offers a legacy estimate only on request, but always shows one a saved view selected', () => {
+    const base = { hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'environment', sourceKey: 'environment-src-1', availability: 'available' as const, deviceName: 'Gauge', depthCm: null, sourceKind: 'device', deviceSourceId: 'device-gauge' };
+    const rain: AnalysisCatalogEntry[] = [
+      { ...base, seriesId: 'amount', channelKey: 'rain_mm_delta', displayName: 'Gauge - Rainfall amount', unit: 'mm', legacy: false },
+      { ...base, seriesId: 'rate', channelKey: 'rain_mm_per_hour', displayName: 'Gauge - Rain rate', unit: 'mm/h', legacy: true },
+      { ...base, seriesId: 'ten', channelKey: 'rain_mm_per_10min', displayName: 'Gauge - Rain (10 min)', unit: 'mm/10min', legacy: true },
+    ];
+    const view = render(<AnalysisSeriesTray channels={rain} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.getByText('Rainfall amount')).toBeInTheDocument();
+    expect(screen.queryByText(/Rain rate/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rain \(10 min\)/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'analysis.tray.showLegacy' }));
+    expect(screen.getByText('Rain rate (analysis.legacyEstimate)')).toBeInTheDocument();
+    expect(screen.getByText('Rain (10 min) (analysis.legacyEstimate)')).toBeInTheDocument();
+
+    view.unmount();
+    render(<AnalysisSeriesTray channels={rain} selectedIds={['rate']} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /Rain rate \(analysis.legacyEstimate\)/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText(/Rain \(10 min\)/)).not.toBeInTheDocument();
+  });
+
+  it('shows no legacy switch when the catalogue has no legacy entry', () => {
+    render(<AnalysisSeriesTray channels={channels} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.queryByRole('checkbox', { name: 'analysis.tray.showLegacy' })).not.toBeInTheDocument();
+  });
 });

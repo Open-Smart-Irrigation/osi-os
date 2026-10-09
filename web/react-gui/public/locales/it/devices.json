@@ -931,5 +931,12 @@
     "recordedToday": "Pioggia registrata oggi",
     "soFar": "finora",
     "lastReportOn": "Ultima rilevazione {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Pioggia dell’intervallo",
+    "lastReport": "Ultima rilevazione",
+    "tips_one": "{{count}} ribaltamento",
+    "tips_other": "{{count}} ribaltamenti",
+    "tipsUnavailable": "Numero di ribaltamenti non disponibile"
   }
 }

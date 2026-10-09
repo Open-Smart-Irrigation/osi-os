@@ -14,7 +14,7 @@ const entry = (seriesId: string, channelKey: string, label: string, unit: string
   sourceKind: 'device', deviceSourceId: 'device-gauge', configurationState: 'current', ...extra,
 });
 const amount = entry('amount', 'rain_mm_delta', 'Rainfall amount', 'mm');
-const rate = entry('rate', 'rain_mm_per_hour', 'Rain rate', 'mm/h');
+const rate = entry('rate', 'rain_mm_per_hour', 'Rain rate', 'mm/h', { legacy: true });
 
 const seriesOf = (e: AnalysisCatalogEntry): AnalysisSeries => ({
   seriesId: e.seriesId,
@@ -52,5 +52,13 @@ describe('CrossZoneAnalysisPage rain amounts', () => {
     render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
     expect(screen.getByRole('button', { name: 'Gauge - Rainfall amount' })).toBeInTheDocument();
     expect(screen.queryByText(/Rain delta/)).not.toBeInTheDocument();
+  });
+
+  it('a saved view holding a legacy rate still opens and marks it', () => {
+    state.series = [seriesOf(amount), seriesOf(rate)];
+    state.applied = 'hourly';
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    expect(screen.getByRole('button', { name: 'Gauge - Rainfall amount' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Gauge - Rain rate (analysis.legacyEstimate)' })).toBeInTheDocument();
   });
 });

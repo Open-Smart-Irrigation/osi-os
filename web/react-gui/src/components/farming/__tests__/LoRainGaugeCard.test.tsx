@@ -1,14 +1,17 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { devicesAPI } from '../../../services/api';
 import type { Device } from '../../../types/farming';
 import { LoRainGaugeCard } from '../LoRainGaugeCard';
 
-// t() returns the key itself, matching this codebase's convention.
+// t() returns the key itself, matching this codebase's convention; a count is appended
+// so the tip line can be asserted.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { count?: number }) => (options && options.count != null ? `${options.count} ${key}` : key),
+  }),
 }));
 
 vi.mock('../../../services/api', () => ({
@@ -69,9 +72,33 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getByText('70B3D5E75E004201')).toBeInTheDocument();
     expect(screen.getByText('1.5 mm')).toBeInTheDocument();
     expect(screen.getByText('2.7 mm')).toBeInTheDocument();
-    expect(screen.getByText('1.5 mm / 10 min')).toBeInTheDocument();
     expect(screen.getByText('20.5 °C')).toBeInTheDocument();
     expect(screen.getByText(/3\.3 V/)).toBeInTheDocument();
+  });
+
+  it('leads with amounts: no elapsed-time rate; the interval tile has amount and tips, "Last report" the time', () => {
+    const { container } = render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
+
+    expect(container.textContent).not.toMatch(/mm\/h|10 min/);
+    const interval = screen.getByText('loRain.intervalRainfall').parentElement as HTMLElement;
+    expect(interval).toHaveTextContent('1.5 mm');
+    expect(interval).toHaveTextContent('3 loRain.tips');
+    const tile = screen.getByTestId('lorain-last-report');
+    expect(within(tile).getByText('loRain.lastReport')).toBeInTheDocument();
+    expect(tile).not.toHaveTextContent('1.5 mm');
+    expect(tile).not.toHaveTextContent('loRain.tips');
+    expect(within(tile).getByTestId('lorain-last-report-time')).toHaveTextContent(/12:00/);
+    expect(within(tile).getByTestId('lorain-last-report-time')).toHaveTextContent(/UTC/);
+  });
+
+  it('the interval tile says when the tip count is unavailable; the last report shows a dash without a report', () => {
+    const noTips = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_tips_delta: null } } as Device;
+    const view = render(<LoRainGaugeCard device={noTips} removeContext="farm" />);
+    expect(screen.getByText('loRain.intervalRainfall').parentElement).toHaveTextContent('loRain.tipsUnavailable');
+    view.unmount();
+
+    render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: null, latest_data: {} } as unknown as Device} removeContext="farm" />);
+    expect(screen.getByTestId('lorain-last-report-time')).toHaveTextContent('—');
   });
 
   it('never labels a previous day\'s total as today', () => {
@@ -147,8 +174,16 @@ describe('LoRainGaugeCard history', () => {
 
   it('every value on the card is a history control', () => {
     render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
-    // Interval, today, rate and temperature.
-    expect(screen.getAllByTitle('common.viewHistory')).toHaveLength(4);
+    // Interval, today and temperature; the last report is a time, not a series.
+    expect(screen.getAllByTitle('common.viewHistory')).toHaveLength(3);
+  });
+
+  it('the rain history offers the interval amount and the daily total only', async () => {
+    await openFrom('1.5 mm');
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).not.toMatch(/10 min|mm\/h/);
+    expect(within(dialog).getAllByText('loRain.intervalRainfall').length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText('rain.recordedToday').length).toBeGreaterThan(0);
   });
 
   it('opens the interval series from the interval value', async () => {
@@ -159,11 +194,6 @@ describe('LoRainGaugeCard history', () => {
   it('opens the daily total series from the today value', async () => {
     const getHistory = await openFrom('2.7 mm');
     await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'rain_mm_today', 24));
-  });
-
-  it('opens the rate series from the rate value', async () => {
-    const getHistory = await openFrom('1.5 mm / 10 min');
-    await waitFor(() => expect(getHistory).toHaveBeenCalledWith(lorainDevice.deveui, 'rain_mm_per_10min', 24));
   });
 
   it('opens the temperature series from the temperature value', async () => {

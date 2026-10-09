@@ -48,17 +48,19 @@ function lastSeenLabel(lastSeen: string | null | undefined): string {
   return `Last seen: ${Math.floor(diff / 60)} hours ago`;
 }
 
-function formatCounterInterval(seconds: number | null | undefined): string | null {
-  const value = Number(seconds);
-  if (!Number.isFinite(value) || value <= 0) return null;
-  const minutes = value / 60;
-  if (minutes >= 1 && Math.abs(minutes - Math.round(minutes)) < 1e-9) {
-    return `${Math.round(minutes)} min interval`;
+/**
+ * Reception time of the last report in the farm's timezone (the gateway's `rain_day_timezone`),
+ * with the zone named ("UTC" when the gateway gave none), so a UTC time is not read as farm time.
+ */
+function formatReportTime(lastSeen: string | null | undefined, timeZone: unknown, locale: string | undefined): string {
+  const timestamp = lastSeen ? new Date(lastSeen).getTime() : NaN;
+  if (!Number.isFinite(timestamp)) return '—';
+  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
+  try {
+    return new Date(timestamp).toLocaleString(locale, { ...options, timeZone: typeof timeZone === 'string' && timeZone ? timeZone : 'UTC' });
+  } catch {
+    return new Date(timestamp).toLocaleString(locale, { ...options, timeZone: 'UTC' });
   }
-  if (minutes >= 1) {
-    return `${minutes.toFixed(minutes >= 10 ? 1 : 2)} min interval`;
-  }
-  return `${Math.round(value)} s interval`;
 }
 
 function formatCounterStatus(status: string | null | undefined): string | null {
@@ -81,7 +83,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   readOnly = false,
   removeContext,
 }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -91,14 +93,15 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
   const [sensorMonitor, setSensorMonitor] = useState<SensorMonitorConfig | null>(null);
 
-  const intervalLabel = formatCounterInterval(data.counter_interval_seconds);
   const statusLabel = formatCounterStatus(data.rain_delta_status);
-  const rateLabel = data.rain_mm_per_10min != null
-    ? `${data.rain_mm_per_10min.toFixed(1)} mm / 10 min`
-    : (data.rain_mm_per_hour != null && intervalLabel ? `${data.rain_mm_per_hour.toFixed(3)} mm/h over ${intervalLabel}` : '—');
+  const intervalRainfall = t('loRain.intervalRainfall', { defaultValue: 'Rainfall this interval' });
+  const tipsLine = data.rain_tips_delta != null
+    ? t('loRain.tips', { count: data.rain_tips_delta, defaultValue: '{{count}} tips' })
+    : t('loRain.tipsUnavailable', { defaultValue: 'Tip count unavailable' });
 
-  // Each rain value opens its own series first; the other two stay one switch away.
-  const openRainHistory = (initialField: 'rain_mm_delta' | 'rain_mm_today' | 'rain_mm_per_10min') => setSensorMonitor({
+  // Rain is shown as amounts (owner decision D4): the interval amount and the farm-day
+  // total. The elapsed-time rate and 10-minute value stay in the Data view and export.
+  const openRainHistory = (initialField: 'rain_mm_delta' | 'rain_mm_today') => setSensorMonitor({
     field: 'rain_mm_delta',
     initialField,
     label: 'Rainfall',
@@ -106,9 +109,8 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
     color: '#0ea5e9',
     decimals: 1,
     seriesOptions: [
-      { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#0ea5e9', decimals: 1 },
-      { field: 'rain_mm_per_10min', label: 'Per 10 min', unit: 'mm', color: '#0369a1', decimals: 1 },
-      { field: 'rain_mm_today', label: 'Today', unit: 'mm', color: '#0284c7', decimals: 1 },
+      { field: 'rain_mm_delta', label: intervalRainfall, unit: 'mm', color: '#0ea5e9', decimals: 1 },
+      { field: 'rain_mm_today', label: t('rain.recordedToday', { defaultValue: 'Rain recorded today' }), unit: 'mm', color: '#0284c7', decimals: 1 },
     ],
   });
 
@@ -159,7 +161,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
 
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">This interval</p>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{intervalRainfall}</p>
           <button
             type="button"
             onClick={() => openRainHistory('rain_mm_delta')}
@@ -168,30 +170,23 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           >
             {formatNumber(data.rain_mm_delta, 1, 'mm')}
           </button>
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-            {data.rain_tips_delta != null ? `${data.rain_tips_delta} tips` : 'Tip count unavailable'}
-          </p>
+          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{tipsLine}</p>
         </div>
 
         <RainTodayTile
           data={data}
           onOpenHistory={() => openRainHistory('rain_mm_today')}
           valueClassName={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-        >
-          {statusLabel && <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel}</p>}
-        </RainTodayTile>
+        />
 
-        <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rate</p>
-          <button
-            type="button"
-            onClick={() => openRainHistory('rain_mm_per_10min')}
-            className={`cursor-pointer text-left text-xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
-            title={t('common.viewHistory', { defaultValue: 'View history' })}
-          >
-            {rateLabel}
-          </button>
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">{intervalLabel ?? 'Waiting for interval'}</p>
+        <div data-testid="lorain-last-report" className="rounded-lg bg-[var(--card)] p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+            {t('loRain.lastReport', { defaultValue: 'Last report' })}
+          </p>
+          <p data-testid="lorain-last-report-time" className="text-xl font-bold tabular-nums text-[var(--text)]">
+            {formatReportTime(device.last_seen, data.rain_day_timezone, i18n?.language)}
+          </p>
+          {statusLabel && <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel}</p>}
         </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">

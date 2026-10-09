@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Non pris en charge",
         "available_no_recent_data": "Aucune donnée récente disponible"
-      }
+      },
+      "showLegacy": "Afficher les estimations de l’ancienne méthode"
     },
     "range": {
       "label": "Période d'analyse",
@@ -127,8 +128,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} sur {{expected}} h)",
-      "partialDays": " ({{count}} sur {{expected}} j)"
-    }
+      "partialDays": " ({{count}} sur {{expected}} j)",
+      "reportsReceived_one": " · {{count}} relevé reçu",
+      "reportsReceived_other": " · {{count}} relevés reçus"
+    },
+    "legacyEstimate": "estimation, ancienne méthode"
   },
   "restart": {
     "gateway_identity_change": "Identité de la passerelle mise à jour. Les services redémarreront dans {{count}} s.",

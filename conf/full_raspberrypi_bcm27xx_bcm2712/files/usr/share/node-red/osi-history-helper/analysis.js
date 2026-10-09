@@ -90,6 +90,22 @@ const DEVICE_HEALTH_CHANNELS = [
   { key: 'valve_2_pulse', unit: 'count', label: 'Valve 2 pulse', cardType: 'device_health', edgeField: 'valve_2_pulse', exportable: false, deprecated: false, aggregation: 'latest' },
 ];
 const CHANNEL_META_BY_KEY = new Map([...CHANNELS, ...DEVICE_HEALTH_CHANNELS].map((channel) => [channel.key, channel]));
+// D4 (rain presentation): a LoRain's rate and 10-minute value are estimates over
+// the time since the previous report, not measurements. They stay listed under
+// their keys, so saved views and exports resolve them, flagged legacy so the Data
+// view offers them only on request. Other devices' rates are not affected.
+const LEGACY_DEVICE_CHANNELS = Object.freeze({
+  AQUASCOPE_LORAIN: new Set(['rain_mm_per_hour', 'rain_mm_per_10min']),
+});
+// Rain amounts arrive as sparse event reports: a bucket is never graded against
+// a presumed cadence, so its points carry the received count and expected: null.
+const RAIN_AMOUNT_CHANNELS = new Set(['rain_mm_delta', 'rain_tips_delta']);
+
+function isLegacyDeviceChannel(typeId, channelKey) {
+  const legacy = LEGACY_DEVICE_CHANNELS[String(typeId || '').trim().toUpperCase()];
+  return Boolean(legacy && legacy.has(channelKey));
+}
+
 const ANALYSIS_EDGE_FIELDS = new Set([...CHANNELS, ...DEVICE_HEALTH_CHANNELS].map((channel) => channel.edgeField).filter(Boolean));
 const MAX_SELECTED_SERIES = 25;
 const MAX_RAW_ROWS = 30000;
@@ -124,7 +140,7 @@ function analysisSeriesId(zoneId, cardType, sourceKey, channelKey) {
 // One catalogue entry literal, shared by the device path and every
 // addWeatherSource() channel (final review, queue T3 N2): both built the
 // same twelve-field shape by hand.
-function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, depthReference, sourceKind, deviceSourceId: sourceId, configurationState }) {
+function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta, deviceName, availability, depthCm, depthReference, sourceKind, deviceSourceId: sourceId, configurationState, legacy }) {
   const zoneId = zone && zone.id != null ? zone.id : 'unassigned';
   return {
     seriesId: analysisSeriesId(zoneId, cardType, sourceKey, channelKey),
@@ -143,6 +159,7 @@ function buildCatalogEntry({ zone, hubEui, cardType, sourceKey, channelKey, meta
     sourceKind,
     deviceSourceId: sourceId || null,
     configurationState: configurationState || 'current',
+    legacy: legacy === true,
   };
 }
 
@@ -570,6 +587,7 @@ function createAnalysis(deps) {
               sourceKind: 'device',
               deviceSourceId: sourceId,
               configurationState,
+              legacy: isLegacyDeviceChannel(source.typeId, channelKey),
             });
             channels.push(entry);
             source.channelIds.push(entry.seriesId);
@@ -773,9 +791,10 @@ function createAnalysis(deps) {
           // day), as the weather series beside them do; unassigned devices are UTC.
           timezone: entry.timezone,
         });
+        const points = aggToPoints(aggregate, entry.channelKey, { stat: meta.aggregation, device: true });
         series.push(buildSeriesEnvelope(entry, {
           unit: entry.unit,
-          points: aggToPoints(aggregate, entry.channelKey, { stat: meta.aggregation, device: true }),
+          points: RAIN_AMOUNT_CHANNELS.has(entry.channelKey) ? points.map((point) => ({ ...point, expected: null })) : points,
           cadence: 'hourly',
         }));
       }
@@ -880,6 +899,8 @@ module.exports = {
   DEVICE_CHANNEL_AGGREGATION,
   ANALYSIS_EDGE_FIELDS,
   DEVICE_EXCLUDED_CHANNELS,
+  LEGACY_DEVICE_CHANNELS,
+  RAIN_AMOUNT_CHANNELS,
   SOURCE_KINDS,
   analysisSeriesId,
   createAnalysis,

@@ -1,4 +1,4 @@
-import type { AnalysisPoint, AnalysisSeries } from './types';
+import { DAILY_AGRONOMY_SOURCE_KEY, type AnalysisPoint, type AnalysisSeries } from './types';
 import type { ZonePairs } from './correlation';
 import type { UnitPanel } from './unitGrouping';
 import { SERIES_PALETTE, seriesColor } from './seriesColors';
@@ -17,6 +17,25 @@ export interface TimeSeriesOptionInput {
 
 /** Text appended to a tooltip value, e.g. " (23 of 24 h)" for a partial sum; '' for none. */
 export type PartialFormatter = (point: AnalysisPoint, series: AnalysisSeries) => string;
+
+export type PointNoteTranslate = (key: string, options: Record<string, unknown>) => string;
+
+// Rain amounts are sparse event reports: the gateway sends `expected: null` for them
+// and the tooltip states the received count, never a coverage percentage.
+const RAIN_AMOUNT_KEYS = new Set(['rain_mm_delta', 'rain_tips_delta']);
+
+/**
+ * The tooltip note of one point: " · 2 reports received" for a rain amount, " (23 of 24 h)"
+ * for a partial weather sum (days for a weekly agronomy bucket), '' otherwise.
+ */
+export function formatPointNote(point: AnalysisPoint, item: AnalysisSeries, t: PointNoteTranslate): string {
+  if (RAIN_AMOUNT_KEYS.has(canonicalize(item.resolved.channelKey)) && point.expected === null) {
+    return t('analysis.tooltip.reportsReceived', { count: point.count });
+  }
+  if (point.quality !== 'partial' || point.expected == null) return '';
+  const key = item.resolved.sourceKey === DAILY_AGRONOMY_SOURCE_KEY ? 'analysis.tooltip.partialDays' : 'analysis.tooltip.partialHours';
+  return t(key, { count: point.count, expected: point.expected });
+}
 
 const tooltipValueFormatter = (value: number | null | undefined) => (
   value == null ? '–' : Number(value).toFixed(1)

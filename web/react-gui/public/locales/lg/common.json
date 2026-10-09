@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Tewagirwa",
         "available_no_recent_data": "Tewali biwandiiko bipya"
-      }
+      },
+      "showLegacy": "Show legacy estimates"
     },
     "range": {
       "label": "Ekiseera ky'okwekenneenya",
@@ -127,8 +128,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} of {{expected}} h)",
-      "partialDays": " ({{count}} of {{expected}} d)"
-    }
+      "partialDays": " ({{count}} of {{expected}} d)",
+      "reportsReceived_one": " · {{count}} report received",
+      "reportsReceived_other": " · {{count}} reports received"
+    },
+    "legacyEstimate": "legacy estimate"
   },
   "restart": {
     "gateway_identity_change": "Endagamuntu ya getwaya etereezeddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",

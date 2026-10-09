@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Unsupported",
         "available_no_recent_data": "No recent data available"
-      }
+      },
+      "showLegacy": "Show legacy estimates"
     },
     "range": {
       "label": "Analysis range",
@@ -127,8 +128,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} of {{expected}} h)",
-      "partialDays": " ({{count}} of {{expected}} d)"
-    }
+      "partialDays": " ({{count}} of {{expected}} d)",
+      "reportsReceived_one": " · {{count}} report received",
+      "reportsReceived_other": " · {{count}} reports received"
+    },
+    "legacyEstimate": "legacy estimate"
   },
   "restart": {
     "gateway_identity_change": "Gateway identity updated. Services will restart in {{count}} s.",

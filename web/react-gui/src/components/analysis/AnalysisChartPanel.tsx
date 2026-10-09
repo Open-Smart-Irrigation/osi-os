@@ -1,8 +1,8 @@
 import { lazy, Suspense, useCallback, useMemo, useState, type Ref } from 'react';
 import { useTranslation } from 'react-i18next';
-import { DAILY_AGRONOMY_SOURCE_KEY, type AnalysisPoint, type AnalysisSeries, type AnalysisWorkspaceMode, type TimelineLayout } from '../../analysis/types';
+import type { AnalysisPoint, AnalysisSeries, AnalysisWorkspaceMode, TimelineLayout } from '../../analysis/types';
 import { groupByUnit } from '../../analysis/unitGrouping';
-import { buildSmallMultiplesOption, buildTimeSeriesOption } from '../../analysis/echartsOptions';
+import { buildSmallMultiplesOption, buildTimeSeriesOption, formatPointNote } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
 import type { EChartHandle } from './EChart';
 
@@ -54,12 +54,11 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   };
 
   // A summed weather bucket with missing rows: " (23 of 24 h)", or days for
-  // a weekly bucket of daily agronomy.
-  const formatPartial = useCallback((point: AnalysisPoint, item: AnalysisSeries) => {
-    if (point.quality !== 'partial' || point.expected == null) return '';
-    const key = item.resolved.sourceKey === DAILY_AGRONOMY_SOURCE_KEY ? 'analysis.tooltip.partialDays' : 'analysis.tooltip.partialHours';
-    return t(key, { count: point.count, expected: point.expected });
-  }, [t]);
+  // a weekly bucket of daily agronomy; a rain amount: " · 2 reports received".
+  const formatPartial = useCallback(
+    (point: AnalysisPoint, item: AnalysisSeries) => formatPointNote(point, item, t),
+    [t],
+  );
 
   const timeSeriesPanels = useMemo(() => {
     if (series.length === 0 || mode === 'correlation' || layout === 'small-multiples') return [];

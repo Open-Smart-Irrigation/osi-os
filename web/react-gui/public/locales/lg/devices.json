@@ -931,5 +931,12 @@
     "recordedToday": "Rain recorded today",
     "soFar": "so far",
     "lastReportOn": "Last report {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Rainfall this interval",
+    "lastReport": "Last report",
+    "tips_one": "{{count}} tip",
+    "tips_other": "{{count}} tips",
+    "tipsUnavailable": "Tip count unavailable"
   }
 }

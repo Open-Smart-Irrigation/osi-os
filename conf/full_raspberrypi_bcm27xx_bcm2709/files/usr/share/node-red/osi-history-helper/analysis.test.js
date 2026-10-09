@@ -563,11 +563,11 @@ test('device measurement statistics preserve interval totals, means, and final c
 
     const empty = await series(raw, [rainDelta], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
     assert.deepEqual(empty.series[0].points, [{
-      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown',
+      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown', expected: null,
     }]);
     const oldRainRange = await series(raw, [oldRainDelta], range, 'hourly');
     assert.deepEqual(oldRainRange.series[0].points, [{
-      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown',
+      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown', expected: null,
     }]);
   } finally {
     raw.close();
@@ -654,6 +654,7 @@ test('LoRain catalogue survives a newer configuration-only row and reads its raw
       value: 6,
       count: 1,
       quality: null,
+      expected: null,
     }]);
   } finally {
     raw.close();
@@ -683,6 +684,54 @@ test('LoRain rain amount is labelled "Rainfall amount" under its unchanged key a
     const [view] = await hh.listAnalysisViews(facade(raw), { userId: 1, deviceEui: HUB, weatherProviderDefault: 'open_meteo' });
     assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId, savedRateId]);
     assert.deepEqual(view.droppedSeriesIds, []);
+  } finally {
+    raw.close();
+  }
+});
+
+// D4: a LoRain's rate and 10-minute value are elapsed-time estimates. They stay
+// in the catalogue under their keys (saved views and exports resolve them) but
+// are flagged legacy; the S2120's intensity is a measured channel and is not.
+test('LoRain rate and 10-minute value are catalogued as legacy; the S2120 ones are not', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const flag = (deviceName, channelKey) => {
+      const found = result.channels.find((c) => c.deviceName === deviceName && c.channelKey === channelKey);
+      assert.ok(found, `${deviceName} ${channelKey}`);
+      return found.legacy;
+    };
+    assert.equal(flag('Rain', 'rain_mm_per_hour'), true);
+    assert.equal(flag('Rain', 'rain_mm_per_10min'), true);
+    assert.equal(flag('Rain', 'rain_mm_delta'), false);
+    assert.equal(flag('Rain', 'rain_mm_today'), false);
+    assert.equal(flag('demo-s2120', 'rain_mm_per_hour'), false);
+    assert.equal(flag('demo-s2120', 'rain_mm_per_10min'), false);
+    assert.ok(result.channels.filter((c) => c.sourceKind !== 'device').every((c) => c.legacy === false));
+  } finally {
+    raw.close();
+  }
+});
+
+// Rain reports are sparse events: a bucket is not graded against a presumed
+// cadence, so rain points carry the received count and expected: null.
+test('rain series points carry expected: null at every aggregation', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_tips_delta, rain_mm_delta) VALUES (?, ?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:10:00Z', 2, 0.5);
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:40:00Z', 4, 1.0);
+    const result = await catalog(raw);
+    const pick = (key) => result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === key);
+    const range = { from: '2026-10-02T07:00:00.000Z', to: '2026-10-02T10:00:00.000Z' };
+    for (const aggregation of ['raw', 'hourly', 'daily']) {
+      const out = await series(raw, [pick('rain_mm_delta'), pick('rain_tips_delta'), pick('ambient_temperature')], range, aggregation);
+      const [amount, tips, temperature] = out.series;
+      assert.ok(amount.points.length > 0 && tips.points.length > 0, aggregation);
+      assert.ok(amount.points.every((point) => point.expected === null && !('coveragePct' in point)), `${aggregation} amount`);
+      assert.ok(tips.points.every((point) => point.expected === null), `${aggregation} tips`);
+      assert.ok(temperature.points.every((point) => !('expected' in point)), `${aggregation} temperature unchanged`);
+    }
   } finally {
     raw.close();
   }

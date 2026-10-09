@@ -931,5 +931,12 @@
     "recordedToday": "Chuva registada hoje",
     "soFar": "até agora",
     "lastReportOn": "Último registo {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Chuva do intervalo",
+    "lastReport": "Último registo",
+    "tips_one": "{{count}} basculamento",
+    "tips_other": "{{count}} basculamentos",
+    "tipsUnavailable": "Número de basculamentos indisponível"
   }
 }

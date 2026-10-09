@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildCorrelationOption, buildSmallMultiplesOption, buildTimeSeriesOption } from '../echartsOptions';
+import { buildCorrelationOption, buildSmallMultiplesOption, buildTimeSeriesOption, formatPointNote } from '../echartsOptions';
+import enCommon from '../../../public/locales/en/common.json';
 import { groupByUnit } from '../unitGrouping';
 import { SERIES_PALETTE, seriesColor } from '../seriesColors';
 import type { AnalysisPoint, AnalysisSeries } from '../types';
@@ -267,5 +268,47 @@ describe('weather series', () => {
     );
     expect(hover(2, 'b', 4.2)).toBe('b4.2 (23 of 24 h)');
     expect(hover(1, 'c', 12)).toBe('c12.0');
+  });
+});
+
+describe('rain amount tooltips', () => {
+  // The English bundle with i18next's plural suffixes, so the test reads the shipped copy.
+  const tooltip = (enCommon as { analysis: { tooltip: Record<string, string> } }).analysis.tooltip;
+  const t = (key: string, options: Record<string, unknown> = {}) => {
+    const leaf = key.replace('analysis.tooltip.', '');
+    const count = Number(options.count);
+    const template = tooltip[`${leaf}_${count === 1 ? 'one' : 'other'}`] ?? tooltip[leaf] ?? key;
+    return template.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => String(options[name]));
+  };
+  const visibleText = (html: string) => html.replace(/<[^>]*>/g, '');
+  const rainSeries = (channelKey: string): AnalysisSeries => ({
+    seriesId: channelKey,
+    resolved: { hubEui: null, zoneId: 1, cardType: 'environment', sourceKey: 'environment-src-1', channelKey },
+    label: 'Gauge - Rainfall amount', unit: 'mm', coveragePct: null,
+    points: [
+      { t: '2026-06-18T00:00:00Z', value: 1.5, count: 2, expected: null, quality: null },
+      { t: '2026-06-18T01:00:00Z', value: 0.2, count: 1, expected: null, quality: null },
+    ],
+    truncated: false, cadence: 'hourly', timezone: 'UTC',
+  });
+
+  it('a rain point says how many reports were received, never a percentage', () => {
+    const rain = rainSeries('rain_mm_delta');
+    const option = buildTimeSeriesOption({ panels: groupByUnit([rain]), series: [rain], normalize: false, multiAxis: false, formatPartial: (p, s) => formatPointNote(p, s, t) });
+    const formatter = (option.tooltip as { formatter: (params: unknown) => string }).formatter;
+    const two = visibleText(formatter([{ seriesIndex: 0, dataIndex: 0, marker: '', seriesName: rain.label, value: [rain.points[0].t, 1.5] }]));
+    expect(two).toContain('2 reports received');
+    expect(two).not.toContain('%');
+    const one = visibleText(formatter([{ seriesIndex: 0, dataIndex: 1, marker: '', seriesName: rain.label, value: [rain.points[1].t, 0.2] }]));
+    expect(one).toContain('1 report received');
+  });
+
+  it('keeps the partial-hours note for weather sums and adds nothing to other series', () => {
+    const weather: AnalysisSeries = { ...series('rain', 'mm', [4.2]), cadence: 'daily' };
+    weather.points[0] = { ...weather.points[0], count: 23, expected: 24, quality: 'partial' };
+    expect(formatPointNote(weather.points[0], weather, t)).toBe(' (23 of 24 h)');
+    const soil = series('swt_1', 'kPa', [10]);
+    expect(formatPointNote(soil.points[0], soil, t)).toBe('');
+    expect(formatPointNote(rainSeries('rain_tips_delta').points[0], rainSeries('rain_tips_delta'), t)).toContain('2 reports received');
   });
 });

@@ -35,6 +35,11 @@ export interface AnalysisCatalogEntry {
   sourceKind: string;
   deviceSourceId?: string | null;
   configurationState?: 'current' | 'other_supported';
+  /**
+   * An estimate kept for saved views and exports but not offered by default (a LoRain's
+   * elapsed-time rate and 10-minute value). The series tray lists it on request.
+   */
+  legacy?: boolean;
 }
 
 export interface AnalysisCatalogResponse {

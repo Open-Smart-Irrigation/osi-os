@@ -78,6 +78,8 @@ export function CrossZoneAnalysisPage() {
     () => new Map((catalog?.channels ?? []).map((c) => [c.seriesId, c])),
     [catalog],
   );
+  // Legacy estimates are not offered as presets; the tray lists them on request.
+  const offeredChannels = useMemo(() => (catalog?.channels ?? []).filter((c) => !c.legacy), [catalog]);
   const zoneNameById = useMemo(
     () => new Map(
       (catalog?.channels ?? [])
@@ -88,15 +90,16 @@ export function CrossZoneAnalysisPage() {
   );
   const appliedAggregation = data?.aggregation.applied;
   // A rain amount is named for the applied aggregation ("this interval" raw,
-  // "amount" summed); a user's rename still wins.
+  // "amount" summed) and a legacy estimate says so; a user's rename still wins.
   const presentedSeries = useMemo(
     () => (data?.series ?? []).map((item) => {
       const entry = catalogById.get(item.seriesId);
       if (!entry) return item;
-      const label = presentRainfallName(entry, appliedAggregation);
-      return label === entry.displayName ? item : { ...item, label };
+      const name = presentRainfallName(entry, appliedAggregation);
+      const label = entry.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
+      return label === item.label ? item : { ...item, label };
     }),
-    [appliedAggregation, catalogById, data],
+    [appliedAggregation, catalogById, data, t],
   );
   const displayedSeries = useMemo(
     () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
@@ -148,6 +151,7 @@ export function CrossZoneAnalysisPage() {
         channel.sourceKind === 'device'
         && channel.availability === 'available'
         && channel.zoneId !== null
+        && !channel.legacy
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -250,7 +254,7 @@ export function CrossZoneAnalysisPage() {
               ) : null}
               {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
                 <MetricAcrossZonesPicker
-                  channels={catalog?.channels ?? []}
+                  channels={offeredChannels}
                   onApply={applyMetricPreset}
                 />
               ) : null}

@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Não suportado",
         "available_no_recent_data": "Sem dados recentes disponíveis"
-      }
+      },
+      "showLegacy": "Mostrar estimativas do método anterior"
     },
     "range": {
       "label": "Intervalo de análise",
@@ -127,8 +128,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} de {{expected}} h)",
-      "partialDays": " ({{count}} de {{expected}} d)"
-    }
+      "partialDays": " ({{count}} de {{expected}} d)",
+      "reportsReceived_one": " · {{count}} registo recebido",
+      "reportsReceived_other": " · {{count}} registos recebidos"
+    },
+    "legacyEstimate": "estimativa, método anterior"
   },
   "restart": {
     "gateway_identity_change": "Identidade do gateway atualizada. Os serviços serão reiniciados dentro de {{count}} s.",
