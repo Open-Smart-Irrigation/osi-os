@@ -242,13 +242,13 @@ function assertCancelPath() {
     // CLOSE) against cancel.js directly rather than against this node's source text.
     // #428: a cancel names its actuation and keeps every other queued downlink, so both
     // entry points hand cancel.js the queue reader and writer next to the flush.
-    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'getDownlinkFrameCounters(deveui)']) {
+    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'dropped_opens: result.droppedOpens']) {
         if (!fn.func.includes(required)) {
             throw new Error(`Cancel function must pass the named actuation and the queue reader/writer to cancel.js (${required})`);
         }
     }
     const bridge = assertFunctionNode('Valve Cloud Command Bridge');
-    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'"]) {
+    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'", 'out.detail']) {
         if (!bridge.func.includes(required)) {
             throw new Error(`Valve Cloud Command Bridge must pass the queue reader/writer and answer permanent refusals (${required})`);
         }
@@ -260,8 +260,9 @@ function assertCancelPath() {
     if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
         throw new Error('cancel.js must set reconciliation_state = CANCELLED');
     }
-    // Fix round F2: never queue another open again after a downlink may have been sent.
-    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', 'countersAfter !== countersBefore', "'target_only_degraded'"]) {
+    // Fix rounds: another actuation's open is never queued again (it may already have been
+    // sent), and the cancel reports it.
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item)', 'droppedOpens: queue.dropped']) {
         if (!cancelJsSrc.includes(required)) {
             throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
         }

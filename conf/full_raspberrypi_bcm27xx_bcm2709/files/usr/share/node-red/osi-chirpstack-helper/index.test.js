@@ -854,26 +854,3 @@ test('getDeviceQueue lists the queue oldest first with base64 data, through Devi
   ]);
   await assert.rejects(client.getDeviceQueue(''), /DevEUI is required/);
 });
-
-// #428 fix round: a cancel compares the downlink frame counters before its queue read and
-// after its flush, so it never queues again an item ChirpStack sent in between.
-test('getDownlinkFrameCounters reads both downlink counters through DeviceService.GetActivation, null when not activated', async () => {
-  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
-  let activated = true;
-  client.deviceClient = {
-    getActivation: (request, metadata, options, callback) => {
-      assert.ok(options.deadline instanceof Date, 'the call carries a deadline');
-      if (!activated) return callback(notFoundError());
-      const activation = new devicePb.DeviceActivation();
-      activation.setNFCntDown(7);
-      activation.setAFCntDown(12);
-      const response = new devicePb.GetDeviceActivationResponse();
-      response.setDeviceActivation(activation);
-      callback(null, response);
-    },
-  };
-  assert.deepEqual(await client.getDownlinkFrameCounters('A840410000000001'), { nFCntDown: 7, aFCntDown: 12 });
-  activated = false;
-  assert.equal(await client.getDownlinkFrameCounters('A840410000000001'), null);
-  await assert.rejects(client.getDownlinkFrameCounters(''), /DevEUI is required/);
-});

@@ -625,13 +625,17 @@ test('CANCEL_VALVE_ACTUATION with expectation_id cancels that actuation and read
   const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
     flushQueue: async () => ({}),
     queueClient: {
-      getDeviceQueue: async (eui) => { reads.push('queue:' + eui); return []; },
+      getDeviceQueue: async (eui) => {
+        reads.push(eui);
+        const open = Buffer.from([0x41, 15]).toString('base64');
+        return [{ fPort: 2, data: open, isPending: false }, { fPort: 2, data: open, isPending: false }];
+      },
       enqueueDownlink: async () => ({}),
-      getDownlinkFrameCounters: async (eui) => { reads.push('counters:' + eui); return { nFCntDown: 0, aFCntDown: 1 }; },
     },
   });
   assert.equal(out.ok, true);
-  assert.deepEqual(reads, ['counters:' + EUI, 'queue:' + EUI], 'the cancel looks at the queue instead of flushing it blindly');
+  assert.deepEqual(reads, [EUI], 'the cancel looks at the queue instead of flushing it blindly');
+  assert.equal(out.detail, 'dropped_opens=1 expectation_ids=e2', 'the ACK names the other actuation whose open was taken out');
   const states = Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((r) => [r.expectation_id, r.reconciliation_state]));
   assert.deepEqual(states, { e1: 'CANCELLED', e2: 'PENDING_OBSERVATION' });
 });

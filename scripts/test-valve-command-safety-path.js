@@ -22,7 +22,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
-const { executeFunction, loadNode } = require('./lib/scoped-access-harness');
+const { executeFunction, loadNode, makeAuthHeader } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const FLOWS = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -89,9 +89,6 @@ function fakeChirpstack(queue) {
       calls.flush += 1;
       queue.splice(0, queue.length);
       return { devEui: eui, method: 'DeviceService.FlushQueue' };
-    },
-    async getDownlinkFrameCounters() {
-      return { nFCntDown: 0, aFCntDown: 40 };
     },
     async getDeviceQueue() {
       return queue.map((item) => Object.assign({}, item));
@@ -466,7 +463,7 @@ test('a second delivery of one cloud timed action under a new command id replays
   }
 });
 
-test('a cancel for actuation A leaves actuation B running and its downlink queued', async () => {
+test('a cancel for actuation A leaves actuation B pending, never queues B\'s open again, and names it in the ACK', async () => {
   const db = seedDb();
   try {
     const insert = db.prepare(
@@ -490,9 +487,11 @@ test('a cancel for actuation A leaves actuation B running and its downlink queue
     const states = Object.fromEntries(db.prepare('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations').all()
       .map((r) => [r.expectation_id, r.reconciliation_state]));
     assert.deepEqual(states, { 701: 'CANCELLED', 702: 'PENDING_OBSERVATION' });
-    assert.deepEqual(queue.map((item) => [item.fPort, item.data]), [[10, plan], [2, open]],
-      'only the cancelled open left the queue; the plan push and the other open stay, in order');
-    assert.equal(ackRows(db, 703)[0].result, 'APPLIED');
+    assert.deepEqual(queue.map((item) => [item.fPort, item.data]), [[10, plan]],
+      'the plan push is queued again; B\'s open, which may already have been sent, is never queued again');
+    const ack = ackRows(db, 703)[0];
+    assert.equal(ack.result, 'APPLIED');
+    assert.equal(ack.reason, 'dropped_opens=1 expectation_ids=702', 'the cloud ACK names the actuation whose open was taken out');
   } finally {
     db.close();
   }
@@ -528,6 +527,42 @@ test('a cloud open is tracked under its command id as text, the id a cancel name
     })]);
     const row = db.prepare('SELECT expectation_id FROM valve_actuation_expectations').get();
     assert.equal(row && row.expectation_id, '721');
+  } finally {
+    db.close();
+  }
+});
+
+test('the local cancel route reports the other open it took out of the queue', async () => {
+  const db = seedDb();
+  try {
+    const insert = db.prepare(
+      "INSERT INTO valve_actuation_expectations (expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) " +
+      "VALUES (?, ?, ?, ?, 600, ?, 'unknown', 'PENDING_OBSERVATION', ?)"
+    );
+    insert.run('731', VALVE, '731', '2026-10-01T10:00:00.000Z', '2026-10-01T10:12:00.000Z', '2026-10-01T10:00:00.000Z');
+    insert.run('732', VALVE, '732', '2026-10-01T10:01:00.000Z', '2026-10-01T10:13:00.000Z', '2026-10-01T10:01:00.000Z');
+    const open = Buffer.from([0x41, 10]).toString('base64');
+    const queue = [
+      { id: 'q-a', fPort: 2, data: open, confirmed: false, isPending: false, isEncrypted: false },
+      { id: 'q-b', fPort: 2, data: open, confirmed: false, isPending: false, isEncrypted: false },
+    ];
+    const fake = fakeChirpstack(queue);
+    const run = await executeFunction(byId[idOf('Cancel STREGA Actuation')], {
+      msg: {
+        req: { headers: { authorization: makeAuthHeader({ userId: 1, username: 'grower', secret: 'valve-test-secret' }) }, params: { deveui: VALVE } },
+        payload: { expectation_id: '731', reason: 'operator_cancel' },
+      },
+      env: Object.assign({ AUTH_TOKEN_SECRET: 'valve-test-secret' }, ENV),
+      db,
+      osiLibModules: { 'osi-valve-control': valveControl },
+      libOverrides: { chirpstack: fake.lib },
+    });
+    assert.equal(run.result.statusCode, 200, JSON.stringify(run.result.payload));
+    assert.deepEqual(run.result.payload.dropped_opens, { count: 1, expectationIds: ['732'] });
+    assert.equal(queue.length, 0, 'neither open is queued again');
+    const states = Object.fromEntries(db.prepare('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations').all()
+      .map((r) => [r.expectation_id, r.reconciliation_state]));
+    assert.deepEqual(states, { 731: 'CANCELLED', 732: 'PENDING_OBSERVATION' }, 'the dropped actuation is reported, not cancelled');
   } finally {
     db.close();
   }

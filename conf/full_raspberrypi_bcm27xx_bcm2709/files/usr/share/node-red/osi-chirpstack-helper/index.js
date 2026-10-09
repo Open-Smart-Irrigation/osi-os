@@ -667,27 +667,6 @@ class ChirpStackClient {
     }));
   }
 
-  // The device's downlink frame counters, or null for a device with no activation. A
-  // counter that moves between two reads means ChirpStack sent a downlink in between.
-  async getDownlinkFrameCounters(devEui) {
-    const normalizedDevEui = normalizeDevEui(devEui);
-    if (!normalizedDevEui) {
-      throw annotateError(new Error('DevEUI is required'), 'getDownlinkFrameCounters');
-    }
-    const request = new devicePb.GetDeviceActivationRequest();
-    request.setDevEui(normalizedDevEui);
-    let response;
-    try {
-      response = await grpcInvoke(this.deviceClient, 'getActivation', request, this.metadata, 'getDownlinkFrameCounters');
-    } catch (error) {
-      if (error.code === grpc.status.NOT_FOUND) return null;
-      throw error;
-    }
-    const activation = response && response.getDeviceActivation();
-    if (!activation) return null;
-    return { nFCntDown: activation.getNFCntDown(), aFCntDown: activation.getAFCntDown() };
-  }
-
   // Enqueues one item on the device's downlink queue. `data` is bytes for the
   // queue item's `data` field: DeviceQueueItem.setData accepts either a
   // Uint8Array or a base64 string (jspb's own bytes-field convention, the

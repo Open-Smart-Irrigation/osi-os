@@ -272,8 +272,9 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
 // actuation; a cancel without one is accepted only while exactly one actuation is active.
 // ambiguous_actuation and actuation_not_active are permanent refusals (permanent: true),
 // answered REJECTED_PERMANENT by the caller.
-// queueClient is the ChirpStack client (getDeviceQueue, enqueueDownlink,
-// getDownlinkFrameCounters); the bridge passes it whole to keep its own body small.
+// queueClient is the ChirpStack client (getDeviceQueue, enqueueDownlink); the bridge passes
+// it whole to keep its own body small. When the cancel took other actuations' opens out of
+// the queue, detail names them for the command ACK (the cloud stores it, up to 255 chars).
 async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, now, warn }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
@@ -283,9 +284,12 @@ async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, now
     db, deviceEui: eui, expectationId, reason: cmd.reason, flushQueue, now, warn,
     readQueue: q && ((e) => q.getDeviceQueue(e)),
     enqueue: q && ((item) => q.enqueueDownlink(item)),
-    readFrameCounter: q && ((e) => q.getDownlinkFrameCounters(e)),
   });
-  return { ok: result.ok, error: result.error, permanent: !!result.permanent, downlinks: result.downlinks || [] };
+  const dropped = result.droppedOpens;
+  const detail = dropped && dropped.count
+    ? ('dropped_opens=' + dropped.count + ' expectation_ids=' + dropped.expectationIds.join(',')).slice(0, 255)
+    : null;
+  return { ok: result.ok, error: result.error, permanent: !!result.permanent, detail, downlinks: result.downlinks || [] };
 }
 
 const APPLIERS = {
