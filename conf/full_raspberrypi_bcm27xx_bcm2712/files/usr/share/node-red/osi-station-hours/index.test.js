@@ -66,6 +66,11 @@ test('hourlyAggregate: means, min/max, sums, counts; a field with no sample is n
   assert.equal(sh.hourlyAggregate([{ ambient_temperature: 20 }]).global_radiation_wm2, null);
 });
 
+test('hourlyAggregate keeps rain to the millimetre thousandth (S2120 0.254 mm increments)', () => {
+  const rows = [{ rain_mm_delta: 0.254 }, { rain_mm_delta: 0.254 }, { rain_mm_delta: 0.254 }];
+  assert.equal(sh.hourlyAggregate(rows).rain_mm, 0.762);
+});
+
 test('aggregateStationHours writes one row per assigned station and completed UTC hour, idempotently', async () => {
   const db = scratchDb();
   seedZone(db, 1);
