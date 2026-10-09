@@ -761,8 +761,11 @@ export interface ForecastEnvironment {
 }
 
 export interface RainFocus {
-  totalNext24hMm: number;
-  totalNext72hMm: number;
+  /** null when no forecast hour in the horizon carries a rain value (unknown, not 0 mm). */
+  totalNext24hMm: number | null;
+  totalNext72hMm: number | null;
+  /** Forecast hours behind totalNext24hMm; absent from an older gateway or the cloud. */
+  next24hCoverage?: { coveredHours: number; expectedHours: number };
   maxHourlyRainMm: number;
   maxHourlyRainAt: string | null;
   nextRainEta: string | null;

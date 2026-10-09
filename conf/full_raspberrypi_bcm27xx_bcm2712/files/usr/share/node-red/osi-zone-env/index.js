@@ -507,14 +507,27 @@ function estimateStepHours(hours) {
   return median(diffs) || 1;
 }
 
+/**
+ * Forecast rain over [now, now + horizon) and how much of the horizon it
+ * covers. Only forecast steps with a rain value count; each covers the
+ * provider's step length (one hour for Open-Meteo, three for OpenAgri). No
+ * covered step means the total is unknown (null), never 0 mm; a partly
+ * covered horizon keeps the sum of what is known, with its coverage.
+ */
 function sumRain(hours, nowMs, horizonHours) {
   const endMs = nowMs + horizonHours * 3600000;
-  return round((hours || []).reduce((total, hour) => {
+  const list = Array.isArray(hours) ? hours : [];
+  const seen = new Set();
+  let total = 0;
+  for (const hour of list) {
     const timestamp = hour && hour.time ? new Date(hour.time).getTime() : NaN;
     const rainMm = toFiniteNumber(hour && hour.rainMm);
-    if (!Number.isFinite(timestamp) || rainMm == null || timestamp < nowMs || timestamp >= endMs) return total;
-    return total + rainMm;
-  }, 0), 2) || 0;
+    if (!Number.isFinite(timestamp) || rainMm == null || timestamp < nowMs || timestamp >= endMs || seen.has(timestamp)) continue;
+    seen.add(timestamp);
+    total += rainMm;
+  }
+  const coveredHours = seen.size ? Math.min(horizonHours, round(seen.size * estimateStepHours(list), 2)) : 0;
+  return { totalMm: seen.size ? round(total, 2) : null, coveredHours, expectedHours: horizonHours };
 }
 
 function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso) {
@@ -543,6 +556,7 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
     return Number.isFinite(timestamp) && timestamp >= nowMs && Number(hour.rainMm || 0) > 0.05;
   }) || null;
   const stepHours = estimateStepHours(hours);
+  const next24h = sumRain(hours, nowMs, 24);
   // Each forecast day takes its own place on the FAO-56 curve (contract v2 A5).
   const kcOn = (date) => resolveKc({ ...(crop || {}), date }).kc;
   return {
@@ -552,8 +566,9 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
     observedAt: forecastData.observedAt || nowIso,
     expiresAt: expiresAt || null,
     rainFocus: {
-      totalNext24hMm: sumRain(hours, nowMs, 24),
-      totalNext72hMm: sumRain(hours, nowMs, 72),
+      totalNext24hMm: next24h.totalMm,
+      totalNext72hMm: sumRain(hours, nowMs, 72).totalMm,
+      next24hCoverage: { coveredHours: next24h.coveredHours, expectedHours: next24h.expectedHours },
       maxHourlyRainMm: maxRainHour ? round(maxRainHour.rainMm, 2) : null,
       maxHourlyRainAt: maxRainHour ? maxRainHour.time : null,
       nextRainEta: nextRainHour ? nextRainHour.time : null,

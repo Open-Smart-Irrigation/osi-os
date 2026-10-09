@@ -167,3 +167,22 @@ test('measured rain is observed even without a configured gauge', async () => {
   assert.equal(water.rainTodayStatus, 'observed');
   assert.equal(water.balanceTodayMm, Math.round((6.4 - water.waterNeededTodayMm) * 100) / 100);
 });
+
+test('a forecast without rain values has no 24-hour total, and says how much it covered', async () => {
+  forecastRain = 'no-rain-values';
+  const payload = await zoneWater({ rainGauge: true, todayRow: { rainfall_mm: 0, flow_liters: 0, rain_source: 'aquascope_lorain' } });
+  const rf = payload.forecast.rainFocus;
+  assert.equal(rf.totalNext24hMm, null);
+  assert.equal(rf.totalNext72hMm, null);
+  assert.deepEqual(rf.next24hCoverage, { coveredHours: 0, expectedHours: 24 });
+  assert.equal(payload.water.next24hRainMm, null);
+  assert.deepEqual([payload.water.action.source, payload.water.action.reasonCode], ['insufficient_data', 'forecast_unknown'],
+    'a measured shortfall with an unknown forecast cannot be resolved');
+});
+
+test('a dry forecast is a covered 0 mm, not unknown', async () => {
+  forecastRain = 'dry';
+  const rf = (await zoneWater({ rainGauge: true })).forecast.rainFocus;
+  assert.equal(rf.totalNext24hMm, 0);
+  assert.deepEqual(rf.next24hCoverage, { coveredHours: 24, expectedHours: 24 });
+});

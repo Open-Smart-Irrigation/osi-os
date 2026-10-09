@@ -154,7 +154,7 @@ test('forecast helpers preserve deterministic provider normalization', () => {
     { time: '2026-07-11T12:00:00.000Z' },
     { time: '2026-07-11T18:00:00.000Z' },
   ]), 6);
-  assert.equal(ZE.sumRain(merged.hours, NOW_MS, 24), 1.2);
+  assert.deepEqual(ZE.sumRain(merged.hours, NOW_MS, 24), { totalMm: 1.2, coveredHours: 1, expectedHours: 24 });
   assert.equal(ZE.localDateIso(null, 'UTC', NOW_MS), '2026-07-11');
   assert.equal(ZE.addUtcDays('2026-07-11', 2), '2026-07-13');
 
@@ -696,4 +696,34 @@ test('overlay: a stale bundle takes today\'s rain status from the gateway too', 
   const shared = { available: true, rainTodayMm: 2, balanceTodayMm: 1, daily: [{ date: '2026-10-07', rainMm: 2 }] };
   const stale = ZE.overlayLocalWaterIrrigationSplit(shared, local, '2026-10-08');
   assert.deepEqual([stale.rainTodayMm, stale.rainTodayStatus], [null, 'unknown']);
+});
+
+test('sumRain: no covered hour gives null with coverage', () => {
+  const now = Date.parse('2026-10-08T10:00:00Z');
+  assert.deepEqual(ZE.sumRain([{ time: '2026-10-08T11:00:00.000Z', rainMm: null }], now, 24),
+    { totalMm: null, coveredHours: 0, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain([], now, 24), { totalMm: null, coveredHours: 0, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain(undefined, now, 72), { totalMm: null, coveredHours: 0, expectedHours: 72 });
+  const hours = [{ time: '2026-10-08T11:00:00.000Z', rainMm: 0.4 }, { time: '2026-10-08T12:00:00.000Z', rainMm: 0 }];
+  assert.deepEqual(ZE.sumRain(hours, now, 24), { totalMm: 0.4, coveredHours: 2, expectedHours: 24 }, 'a forecast of 0 mm is covered, not unknown');
+  // An hour outside the horizon, a null hour and a repeated instant cover nothing extra.
+  const mixed = hours.concat([
+    { time: '2026-10-08T12:00:00.000Z', rainMm: 5 },
+    { time: '2026-10-08T13:00:00.000Z', rainMm: null },
+    { time: '2026-10-09T10:00:00.000Z', rainMm: 9 },
+  ]);
+  assert.deepEqual(ZE.sumRain(mixed, now, 24), { totalMm: 0.4, coveredHours: 2, expectedHours: 24 });
+  // A three-hourly provider: each value covers its step.
+  const threeHourly = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ time: new Date(now + (i * 3 + 1) * 3600000).toISOString(), rainMm: 0.3 }));
+  assert.deepEqual(ZE.sumRain(threeHourly, now, 24), { totalMm: 2.4, coveredHours: 24, expectedHours: 24 });
+});
+
+test('buildForecastSection: an all-null horizon has null totals and says so', () => {
+  const f = ZE.buildForecastSection({ hours: [{ time: '2026-10-08T11:00:00.000Z', rainMm: null }], days: [] }, 'live', null, {}, '2026-10-08T10:00:00.000Z');
+  assert.equal(f.rainFocus.totalNext24hMm, null);
+  assert.equal(f.rainFocus.totalNext72hMm, null);
+  assert.deepEqual(f.rainFocus.next24hCoverage, { coveredHours: 0, expectedHours: 24 });
+  const partial = ZE.buildForecastSection({ hours: [{ time: '2026-10-08T11:00:00.000Z', rainMm: 1.5 }], days: [] }, 'live', null, {}, '2026-10-08T10:00:00.000Z');
+  assert.equal(partial.rainFocus.totalNext24hMm, 1.5, 'a partly covered horizon keeps the sum of its known hours');
+  assert.deepEqual(partial.rainFocus.next24hCoverage, { coveredHours: 1, expectedHours: 24 });
 });
