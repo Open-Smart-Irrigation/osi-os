@@ -97,3 +97,39 @@ test('repeated dry heartbeats on a linked gateway emit one outbox event and one 
   const dirty = db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='zone_daily_environment'").get();
   assert.equal(dirty.n, 1, 'history dirty keys coalesce on one key per zone day');
 });
+
+// A zero heartbeat never takes over a zone day another source owns (orchestrator ruling
+// on finding 2 interim): the row, its version and its freshness stay as they are.
+function seedOwnedRow(db, source, mm) {
+  db.exec(`INSERT INTO zone_daily_environment(zone_id,date,rainfall_mm,flow_liters,rain_source,computed_at,sync_version)
+    VALUES (1,'2026-10-08',${mm},12,'${source}','2026-10-08T09:00:00.000Z',4);`);
+}
+function zoneDay(db) {
+  return { ...db.prepare("SELECT rainfall_mm, flow_liters, rain_source, computed_at, sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get() };
+}
+
+test('a zero heartbeat leaves an S2120-owned zone day and its sync_version unchanged', async () => {
+  const db = seed('UTC');
+  seedOwnedRow(db, 'sensecap_s2120', 3.2);
+  const before = zoneDay(db);
+  await ingest(db, '2026-10-08T10:00:00.000Z', 0);
+  assert.deepEqual(zoneDay(db), before);
+});
+
+test('a zero heartbeat leaves an LSN50 local_gauge zone day unchanged (no ping-pong)', async () => {
+  const db = seed('UTC');
+  seedOwnedRow(db, 'local_gauge', 0);
+  const before = zoneDay(db);
+  await ingest(db, '2026-10-08T10:00:00.000Z', 0);
+  await ingest(db, '2026-10-08T14:00:00.000Z', 0);
+  assert.deepEqual(zoneDay(db), before);
+});
+
+test('a zero heartbeat with no zone day inserts 0 mm owned by the gauge', async () => {
+  const db = seed('UTC');
+  await ingest(db, '2026-10-08T10:00:00.000Z', 0);
+  const row = zoneDay(db);
+  assert.equal(row.rainfall_mm, 0);
+  assert.equal(row.rain_source, 'aquascope_lorain');
+  assert.equal(row.sync_version, 0);
+});
