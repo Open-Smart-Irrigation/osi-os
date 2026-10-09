@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
 import { SenseCapWeatherCard } from '../SenseCapWeatherCard';
@@ -43,6 +43,9 @@ const s2120Device: Device = {
     wind_gust_mps: 5.6,
     wind_direction_deg: 45,
     rain_mm_today: 4.2,
+    rain_day: '2026-07-04',
+    rain_day_timezone: 'Europe/Zurich',
+    rain_day_timezone_basis: 'zone',
     rain_mm_delta: 0.2,
     rain_mm_per_10min: 0.2,
     rain_mm_per_hour: 1.2,
@@ -53,6 +56,13 @@ const s2120Device: Device = {
     counter_interval_seconds: 600,
   },
 } as unknown as Device;
+
+// 14:00 in Zurich on the day of rain_day; the "today" tile reads Date.now().
+const NOW = Date.parse('2026-07-04T12:00:00Z');
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW);
+});
+afterEach(() => vi.restoreAllMocks());
 
 describe('SenseCapWeatherCard history wiring (issue #33 regression net)', () => {
   it.each([
@@ -101,5 +111,24 @@ describe('SenseCapWeatherCard rain counter status labels', () => {
   it('says the rain amount is unknown when only the intensity was reported', () => {
     render(<SenseCapWeatherCard device={withStatus('intensity_only', { counter_interval_seconds: 1200 })} removeContext="farm" />);
     expect(screen.getByText('Rain amount unknown for this interval; only the intensity was reported.')).toBeInTheDocument();
+  });
+});
+
+describe('SenseCapWeatherCard rain today (rain review finding 10)', () => {
+  it('labels the tile "Rain recorded today" with the value and "so far" on the farm day', () => {
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
+    expect(screen.getByText('rain.recordedToday')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4.2 mm' })).toBeInTheDocument();
+    expect(screen.getByText('rain.soFar')).toBeInTheDocument();
+  });
+
+  it('after the farm midnight shows "—" and the dated last report, and still opens the history', () => {
+    // 00:30 in Zurich on the next day: 4.2 mm belong to yesterday.
+    vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-04T22:30:00Z'));
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
+    expect(screen.queryByRole('button', { name: '4.2 mm' })).not.toBeInTheDocument();
+    expect(screen.getByText('rain.lastReportOn')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '—' }));
+    expect(screen.getByTestId('rain-monitor')).toBeInTheDocument();
   });
 });

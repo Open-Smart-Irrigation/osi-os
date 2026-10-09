@@ -198,3 +198,39 @@ describe('DraginoTempCard WATERMARK history', () => {
     await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'ext_temperature_c', 24));
   });
 });
+
+describe('DraginoTempCard rain gauge today line (rain review finding 10)', () => {
+  const rainDevice = (rainDay: string | undefined): Device => ({
+    deveui: 'AA00000000000002',
+    name: 'Rain gauge node',
+    type_id: 'DRAGINO_LSN50',
+    last_seen: FRESH,
+    rain_gauge_enabled: 1,
+    latest_data: {
+      rain_mm_today: 8,
+      rain_mm_delta: 0.4,
+      rain_day: rainDay,
+      rain_day_timezone: 'UTC',
+      rain_day_timezone_basis: 'unassigned_default',
+    },
+  } as unknown as Device);
+
+  it('shows the total when its farm day is today', () => {
+    render(<DraginoTempCard device={rainDevice('2026-09-24')} removeContext="farm" />);
+    expect(screen.getByText('8.0 mm')).toBeInTheDocument();
+    expect(screen.getByText(/rain\.recordedToday/)).toBeInTheDocument();
+  });
+
+  it('never labels yesterday\'s total as today', () => {
+    render(<DraginoTempCard device={rainDevice('2026-09-23')} removeContext="farm" />);
+    expect(screen.queryByText('8.0 mm')).not.toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText(/rain\.lastReportOn/)).toBeInTheDocument();
+    expect(screen.getByText(/\(UTC\)/)).toBeInTheDocument();
+  });
+
+  it('a total without a farm day is not shown as today', () => {
+    render(<DraginoTempCard device={rainDevice(undefined)} removeContext="farm" />);
+    expect(screen.queryByText('8.0 mm')).not.toBeInTheDocument();
+  });
+});

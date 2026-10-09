@@ -9,6 +9,7 @@ import { SensorMonitor } from './SensorMonitor';
 import { WindMonitor } from './WindMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
+import { RainTodayTile } from './shared/RainTodayTile';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 
@@ -310,16 +311,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           </button>
         </div>
 
-        <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('zone.water.rainToday', { defaultValue: 'Rain today' })}</p>
-          <button
-            onClick={() => setShowRainMonitor(true)}
-            className="cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)]"
-            title={t('common.viewHistory', { defaultValue: 'View history' })}
-            style={{ color: '#2563eb' }}
-          >
-            {fmtNum(data.rain_mm_today, 1, 'mm')}
-          </button>
+        <RainTodayTile data={data} onOpenHistory={() => setShowRainMonitor(true)} valueStyle={{ color: '#2563eb' }}>
           {/* The button already carries a "View history" title; the hint
               said "tap" on a 1366 px desktop screen. */}
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
@@ -331,7 +323,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
           {data.rain_mm_delta != null && data.rain_mm_delta > 0 && (
             <p className="mt-1 text-xs text-[var(--text-tertiary)]">Last uplink: {data.rain_mm_delta.toFixed(1)} mm</p>
           )}
-        </div>
+        </RainTodayTile>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('environment.metrics.pressure_hpa', { defaultValue: 'Pressure' })}</p>

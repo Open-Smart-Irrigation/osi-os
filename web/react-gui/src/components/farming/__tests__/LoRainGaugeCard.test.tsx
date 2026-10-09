@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { devicesAPI } from '../../../services/api';
 import type { Device } from '../../../types/farming';
@@ -41,10 +41,20 @@ const lorainDevice: Device = {
     rain_mm_delta: 1.5,
     rain_mm_per_10min: 1.5,
     rain_mm_today: 2.7,
+    rain_day: '2026-05-17',
+    rain_day_timezone: 'UTC',
+    rain_day_timezone_basis: 'zone',
     counter_interval_seconds: 600,
     rain_delta_status: 'ok',
   },
 } as unknown as Device;
+
+// The "today" tile compares rain_day with the farm date of Date.now().
+const NOW = Date.parse('2026-05-17T12:30:00Z');
+beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(NOW);
+});
+afterEach(() => vi.restoreAllMocks());
 
 describe('LoRainGaugeCard', () => {
   beforeEach(() => {
@@ -62,6 +72,22 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getByText('1.5 mm / 10 min')).toBeInTheDocument();
     expect(screen.getByText('20.5 °C')).toBeInTheDocument();
     expect(screen.getByText(/3\.3 V/)).toBeInTheDocument();
+  });
+
+  it('never labels a previous day\'s total as today', () => {
+    const yesterday = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_day: '2026-05-16' } } as Device;
+    render(<LoRainGaugeCard device={yesterday} removeContext="farm" />);
+
+    expect(screen.queryByText('2.7 mm')).not.toBeInTheDocument();
+    expect(screen.getByText('rain.recordedToday')).toBeInTheDocument();
+    expect(screen.getByText('rain.lastReportOn')).toBeInTheDocument();
+  });
+
+  it('a total without a farm day is not shown as today', () => {
+    const undated = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_day: undefined } } as Device;
+    render(<LoRainGaugeCard device={undated} removeContext="farm" />);
+
+    expect(screen.queryByText('2.7 mm')).not.toBeInTheDocument();
   });
 
   it('handles missing telemetry without throwing', () => {

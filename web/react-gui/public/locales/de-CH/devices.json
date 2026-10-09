@@ -926,5 +926,10 @@
     "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
     "soFar": "bisher",
     "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
+  },
+  "rain": {
+    "recordedToday": "Heute gemessener Regen",
+    "soFar": "bisher",
+    "lastReportOn": "Letzte Meldung {{date}}: {{value}} mm"
   }
 }
