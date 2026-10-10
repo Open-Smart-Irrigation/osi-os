@@ -79,29 +79,37 @@ function legacyComparableDb(root, { old = 2, received = 3, source = 'local_gauge
   db.close();
   return dbPath;
 }
-function lsn50SnapshotDb(root, { enabled = true, status = 'accepted', amount = 3, rawAmount = 3, zoneId = 1, timezone = 'Europe/Zurich', zones = [1], zoneSnapshots = [{ zone_id: 1, zone_uuid: 'synthetic-zone-1', timezone: 'Europe/Zurich' }], observation = true, second = null, duplicateTimestampUnlinked = false } = {}) {
+function lsn50SnapshotDb(root, { enabled = true, status = 'accepted', amount = 3, rawAmount = 3, old = 2, zoneId = 1, timezone = 'Europe/Zurich', zones = [1], zoneSnapshots = [{ zone_id: 1, zone_uuid: 'synthetic-zone-1', timezone: 'Europe/Zurich' }], observation = true, second = null, duplicateTimestampUnlinked = false, duplicateLinkedSnapshots = null, instrumentType = 'DRAGINO_LSN50' } = {}) {
   const dbPath = path.join(root, `lsn50-snapshot-${legacyFixtureId++}.db`);
   const db = new DatabaseSync(dbPath);
   db.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER, rain_gauge_enabled INTEGER);
     CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
     CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT, rain_selected_deveui TEXT, rain_coverage TEXT);
     CREATE TABLE rain_instrument_days (deveui TEXT, date TEXT, timezone TEXT, coverage TEXT);
-    INSERT INTO devices VALUES ('${E3}', 'DRAGINO_LSN50', ${zoneId}, 1);
+    INSERT INTO devices VALUES ('${E3}', '${instrumentType}', ${zoneId}, 1);
     INSERT INTO device_data VALUES (1, '${E3}', '2026-03-29T10:00:00Z', ${rawAmount}, ${rawAmount}, 'ok');
-    INSERT INTO zone_daily_environment VALUES (${zoneId}, '2026-03-29', 2, 'local_gauge', '${E3}', 'complete');
+    INSERT INTO zone_daily_environment VALUES (${zoneId}, '2026-03-29', ${old}, 'local_gauge', '${E3}', 'complete');
     INSERT INTO rain_instrument_days VALUES ('${E3}', '2026-03-29', '${timezone}', 'complete');`);
   if (observation) {
     db.exec(fs.readFileSync(path.join(__dirname, '../database/migrations/ordered/0071__rain_observations.sql'), 'utf8'));
     const config = JSON.stringify({ frame: null, zones, zone_snapshots: zoneSnapshots, rain_gauge_enabled: enabled });
     db.prepare(`INSERT INTO rain_observations
       (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, config_json, zone_id, timezone)
-      VALUES (1, ?, 'DRAGINO_LSN50', 'synthetic-lsn50', '2026-03-29T10:00:00Z', 'unknown', 'ordinary', ?, ?, ?, ?, ?)`)
-      .run(E3, amount, status, config, zoneId, timezone);
+      VALUES (1, ?, ?, 'synthetic-lsn50', '2026-03-29T10:00:00Z', 'unknown', 'ordinary', ?, ?, ?, ?, ?)`)
+      .run(E3, instrumentType, amount, status, config, zoneId, timezone);
+    for (const [index, snapshot] of (duplicateLinkedSnapshots || []).entries()) {
+      const duplicateConfig = JSON.stringify({ frame: null, zones, zone_snapshots: zoneSnapshots, rain_gauge_enabled: snapshot.enabled });
+      db.prepare(`INSERT INTO rain_observations
+        (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, config_json, zone_id, timezone)
+        VALUES (1, ?, ?, ?, '2026-03-29T10:00:00Z', 'unknown', 'ordinary', ?, ?, ?, ?, ?)`)
+        .run(E3, snapshot.instrumentType || instrumentType, `synthetic-lsn50-duplicate-${index}`, snapshot.amount === undefined ? amount : snapshot.amount,
+          snapshot.status === undefined ? status : snapshot.status, duplicateConfig, zoneId, timezone);
+    }
     if (duplicateTimestampUnlinked) db.prepare('INSERT INTO device_data VALUES (2, ?, ?, ?, ?, ?)').run(E3, '2026-03-29T10:00:00Z', rawAmount, rawAmount, 'ok');
     if (second) {
       const secondZone = Number(second.zoneId);
       db.prepare('INSERT INTO device_data VALUES (2, ?, ?, ?, ?, ?)').run(E3, second.receivedAt, second.amount, second.amount, 'ok');
-      db.prepare("INSERT INTO zone_daily_environment VALUES (?, '2026-03-29', 2, 'local_gauge', ?, 'complete')").run(secondZone, E3);
+      db.prepare("INSERT INTO zone_daily_environment VALUES (?, '2026-03-29', ?, 'local_gauge', ?, 'complete')").run(secondZone, old, E3);
       db.prepare('INSERT INTO rain_instrument_days VALUES (?, ?, ?, ?)').run(E3, '2026-03-29', second.timezone, 'complete');
       const secondConfig = JSON.stringify({ frame: null, zones: [secondZone], zone_snapshots: [{ zone_id: secondZone, zone_uuid: `synthetic-zone-${secondZone}`, timezone: second.timezone }], rain_gauge_enabled: true });
       db.prepare(`INSERT INTO rain_observations
@@ -328,13 +336,13 @@ test('LSN50 snapshot enablement and accepted amount gate received totals while s
     assert.equal(movedRows.length, 2);
     assert.ok(movedRows.every((row) => row.new_received_mm === '' && row.delta_mm === '' && row.reasons.includes('assignment_changed_within_day')));
 
-    const linkedPair = lsn50SnapshotDb(root, { second: { zoneId: 1, timezone: 'Europe/Zurich', receivedAt: '2026-03-29T12:00:00Z', amount: 1 } });
+    const linkedPair = lsn50SnapshotDb(root, { old: 3, second: { zoneId: 1, timezone: 'Europe/Zurich', receivedAt: '2026-03-29T12:00:00Z', amount: 1 } });
     const linkedOut = path.join(root, 'out-linked-pair');
     const linkedResult = invoke(linkedPair, linkedOut);
     assert.equal(linkedResult.status, 0, linkedResult.stderr);
     const linkedRow = parseCsv(fs.readFileSync(path.join(linkedOut, 'rain-diff-days.csv'), 'utf8')).find((row) => row.deveui === E3);
     assert.equal(linkedRow.new_received_mm, '4');
-    assert.equal(linkedRow.delta_mm, '2');
+    assert.equal(linkedRow.delta_mm, '1');
 
     const duplicate = lsn50SnapshotDb(root, { duplicateTimestampUnlinked: true });
     const duplicateOut = path.join(root, 'out-duplicate-unlinked');
@@ -344,6 +352,37 @@ test('LSN50 snapshot enablement and accepted amount gate received totals while s
     assert.equal(duplicateRow.new_received_mm, '');
     assert.equal(duplicateRow.delta_mm, '');
     assert.ok(duplicateRow.reasons.includes('snapshot_ineligible'));
+
+    const linkedObservationConflicts = [
+      { name: 'disabled-then-enabled', enabled: false, snapshots: [{ enabled: true }] },
+      { name: 'enabled-then-disabled', enabled: true, snapshots: [{ enabled: false }] },
+      { name: 'duplicate-identical', enabled: true, snapshots: [{ enabled: true }] },
+      { name: 'amount-disagreement', enabled: false, amount: 2, snapshots: [{ enabled: true, amount: 3 }] },
+      { name: 'amount-disagreement-reversed', enabled: true, snapshots: [{ enabled: false, amount: 2 }] },
+      { name: 'null-amount-then-valid', enabled: true, snapshots: [{ enabled: true, amount: null }] },
+      { name: 'valid-then-null-amount', enabled: true, amount: null, snapshots: [{ enabled: true, amount: 3 }] },
+      { name: 'status-disagreement', enabled: false, status: 'not_additive', snapshots: [{ enabled: true, status: 'accepted', amount: 3 }] },
+      { name: 'status-disagreement-reversed', enabled: true, status: 'accepted', snapshots: [{ enabled: false, status: 'not_additive', amount: 3 }] },
+      { name: 'type-lsn-then-lorain', enabled: true, instrumentType: 'DRAGINO_LSN50', snapshots: [{ enabled: true, instrumentType: 'AQUASCOPE_LORAIN' }] },
+      { name: 'type-lorain-then-lsn', enabled: true, instrumentType: 'AQUASCOPE_LORAIN', snapshots: [{ enabled: true, instrumentType: 'DRAGINO_LSN50' }] },
+    ];
+    for (const conflict of linkedObservationConflicts) {
+      const conflictDb = lsn50SnapshotDb(root, {
+        enabled: conflict.enabled,
+        status: conflict.status || 'accepted',
+        amount: conflict.amount === undefined ? 3 : conflict.amount,
+        rawAmount: 3,
+        instrumentType: conflict.instrumentType || 'DRAGINO_LSN50',
+        duplicateLinkedSnapshots: conflict.snapshots,
+      });
+      const conflictOut = path.join(root, 'out-linked-' + conflict.name);
+      const conflictResult = invoke(conflictDb, conflictOut);
+      assert.equal(conflictResult.status, 0, conflictResult.stderr);
+      const conflictRow = parseCsv(fs.readFileSync(path.join(conflictOut, 'rain-diff-days.csv'), 'utf8')).find((row) => row.deveui === E3);
+      assert.equal(conflictRow.new_received_mm, '', conflict.name);
+      assert.equal(conflictRow.delta_mm, '', conflict.name);
+      assert.ok(conflictRow.reasons.includes('snapshot_ineligible'), conflict.name);
+    }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
