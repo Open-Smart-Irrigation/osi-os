@@ -1562,10 +1562,14 @@ async function zoneCandidates(t, zoneId, win) {
   const byEui = new Map();
   for (const r of rows) byEui.set(normalizeEui(r.deveui), { deveui: normalizeEui(r.deveui), typeId: String(r.type_id || '').toUpperCase(), tier: Number(r.direct) === 1 ? 0 : 1 });
   if (win) {
+    // Driven from the gauges (CROSS JOIN fixes the loop order in SQLite), so
+    // each one reads its day through the (deveui, received_at) index instead
+    // of scanning every observation.
     const snap = await t.all(
-      'SELECT DISTINCT o.deveui, d.type_id FROM rain_observations o JOIN devices d ON d.deveui = o.deveui AND d.deleted_at IS NULL '
-      + "WHERE o.status = 'accepted' AND o.received_at >= ? AND o.received_at < ? "
-      + "AND (o.zone_id = ? OR EXISTS (SELECT 1 FROM json_each(o.config_json, '$.zones') j WHERE j.value = ?))",
+      'SELECT DISTINCT d.deveui, d.type_id FROM devices d '
+      + 'CROSS JOIN rain_observations o ON o.deveui = d.deveui AND o.received_at >= ? AND o.received_at < ? '
+      + "WHERE d.deleted_at IS NULL AND d.type_id IN ('" + LORAIN_TYPE_ID + "','" + S2120_TYPE_ID + "') AND o.status = 'accepted' "
+      + "AND (o.zone_id = ? OR CASE WHEN json_valid(o.config_json) THEN EXISTS (SELECT 1 FROM json_each(o.config_json, '$.zones') j WHERE j.value = ?) ELSE 0 END)",
       [win.startIso, win.endIso, zoneId, zoneId]);
     for (const r of snap) {
       const eui = normalizeEui(r.deveui);
