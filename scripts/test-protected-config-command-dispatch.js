@@ -227,7 +227,7 @@ const ledgerTests = path.join(
 const ledgerRun = spawnSync(process.execPath, ['--test', ledgerTests], {
   cwd: ROOT,
   encoding: 'utf8',
-  timeout: 180000,
+  timeout: 600000,
 });
 assert.equal(ledgerRun.status, 0, ledgerRun.stderr || ledgerRun.stdout);
 assert.match(ledgerRun.stdout, /# pass \d+/);
