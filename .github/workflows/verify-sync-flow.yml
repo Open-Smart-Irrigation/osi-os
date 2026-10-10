@@ -122,6 +122,12 @@ jobs:
       # plus concurrent first frames, duplicate deliveries, a rollback and a restart.
       - name: S2120 ingestion under the real database helper
         run: node --test scripts/test-s2120-ingest-concurrency.js
+      # LSN50 MOD9 rain counter (same race, regression only): the shipped Apply Config
+      # and LSN50 Normalize + Write bodies under the real osi-db-helper; the counter read
+      # and the device_data insert share one transaction, so 100 then 101 and 102 in
+      # flight together store 2 x 0.2 mm.
+      - name: LSN50 MOD9 counter under concurrent uplinks
+        run: node --test scripts/test-lsn50-counter-concurrency.js
       # History correction queue (shipped Build / POST / Mark History Batch and
       # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
       # the cloud's ordering, hash, row-index and manifest rules): batches go out

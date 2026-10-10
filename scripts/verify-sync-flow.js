@@ -2419,15 +2419,21 @@ expectIncludes('Apply Config', 'd.swt1Kpa = swt.swt1Kpa;', 'stores derived SWT1 
 expectIncludes('Apply Config', 'if (!dendroEnabled)', 'keeps dendrometer enablement as the persistence gate after Chameleon derivation');
 expectExcludes('Apply Config', '} else if (d.isChameleon === true) {', 'the old dedicated Chameleon bypass branch');
 expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status in node status text');
-expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
-expectIncludes('Apply Config', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
-expectIncludes('Apply Config', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
-expectIncludes('Apply Config', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
-expectIncludes('Apply Config', 'd.rainMmPerHour = d.counterIntervalSeconds', 'derives a rain rate from the elapsed interval');
-expectIncludes('Apply Config', 'd.flowLitersPerMin = d.counterIntervalSeconds', 'derives a flow rate from the elapsed interval');
-expectIncludes('Apply Config', 'd.rainMmPer10Min = d.counterIntervalSeconds', 'derives normalized rain per 10 minutes');
-expectIncludes('Apply Config', 'd.flowLitersPer10Min = d.counterIntervalSeconds', 'derives normalized flow per 10 minutes');
-expectIncludes('Apply Config', 'loadTodayCounterTotals', 'derives running daily rain and flow totals from persisted counters');
+// MOD9 counters (review finding 4): the previous-counter read and the delta derivation moved
+// from Apply Config into LSN50 Normalize + Write, inside the transaction that inserts the row.
+// Behaviour: scripts/test-lsn50-counter-concurrency.js.
+expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
+expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
+expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
+expectIncludes('LSN50 Normalize + Write', 'return await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
+expectIncludes('LSN50 Normalize + Write', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
+expectIncludes('LSN50 Normalize + Write', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
+expectIncludes('LSN50 Normalize + Write', 'd.rainMmPerHour = d.counterIntervalSeconds', 'derives a rain rate from the elapsed interval');
+expectIncludes('LSN50 Normalize + Write', 'd.flowLitersPerMin = d.counterIntervalSeconds', 'derives a flow rate from the elapsed interval');
+expectIncludes('LSN50 Normalize + Write', 'd.rainMmPer10Min = d.counterIntervalSeconds', 'derives normalized rain per 10 minutes');
+expectIncludes('LSN50 Normalize + Write', 'd.flowLitersPer10Min = d.counterIntervalSeconds', 'derives normalized flow per 10 minutes');
+expectIncludes('LSN50 Normalize + Write', 'loadTodayCounterTotals', 'derives running daily rain and flow totals from persisted counters');
 expectIncludes('Apply Config', 'const derived = dendro.buildDendroDerivedMetrics({', 'uses the shared dual-path dendrometer conversion helper');
 expectIncludes('Apply Config', 'd.dendroModeUsed = derived.dendroModeUsed;', 'stores which dendrometer conversion path was applied');
 expectIncludes('Apply Config', 'd.dendroRatio = derived.dendroRatio;', 'stores the derived dendrometer ratio');
