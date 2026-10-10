@@ -183,3 +183,208 @@ test('a gauge moved to another zone stays a candidate of its earlier days in the
   assert.ok(moved.reasons.includes('zone_reassigned'));
   assert.equal((await select(db, 1, null)).state, 'none', 'without a day the zone has no current gauge');
 });
+
+// ---------------------------------------------------------------------------
+// Projection and writers, end to end through the ingest nodes (Task 6; A5, A12, A31)
+// ---------------------------------------------------------------------------
+const { loadNode, executeFunction } = require('./lib/flow-node-harness');
+
+// Node-RED runs a function body as an AsyncFunction; the shared harness uses a plain Function.
+function asyncNode(id) {
+  const node = loadNode(id);
+  return { ...node, func: 'return (async () => {\n' + node.func + '\n})();' };
+}
+// osi-rain as the node loads it, with the test's pinned build (the shipped set is empty).
+const PINNED_RAIN = { ...R, ingestLoRainUplink: (t, uplink, opts) => R.ingestLoRainUplink(t, uplink, { ...opts, pinnedBuilds: PINNED }) };
+let nodeSeq = 0;
+async function loRainNode(db, eui, { devAddr = '01000001', fCnt, time, hex, rain = PINNED_RAIN }) {
+  nodeSeq += 1;
+  const bytes = Buffer.from(hex, 'hex');
+  const msg = { payload: {
+    deviceInfo: { devEui: eui.toLowerCase(), deviceProfileName: 'Aqua-Scope LoRain', applicationId: 'app-sensors' },
+    deduplicationId: '00000000-0000-4000-a000-' + String(nodeSeq).padStart(12, '0'),
+    devAddr, fCnt, time, fPort: 2, data: bytes.toString('base64'), object: decodeUplink({ fPort: 2, bytes }).data,
+  } };
+  const out = await executeFunction(asyncNode('lorain-ingest-fn'), { msg, db, osiLibModules: { rain } });
+  assert.deepEqual(out.errors, []);
+  return out;
+}
+// A promoted chain over one farm day of `timezone`: join 2 h before the day,
+// a frame every 4 h from midnight, rain at index `rainAt`, and the first frame
+// after the day's end. skip: chain indexes to leave out (a lost frame).
+function dayChain(dayStartIso, dayEndIso, { rainAt = 4, tips = 10, skip = [] } = {}) {
+  const start = Date.parse(dayStartIso);
+  const end = Date.parse(dayEndIso);
+  const times = [start - 2 * 3600000];
+  for (let ms = start; ms < end; ms += 4 * 3600000) times.push(ms);
+  times.push(end);
+  return times.map((ms, i) => ({ fCnt: i, time: new Date(ms).toISOString(), hex: i === 0 ? JOIN_HEX : rainHex(i === rainAt ? tips : 0) }))
+    .filter((f) => !skip.includes(f.fCnt));
+}
+const zoneRow = (db, zoneId, date) => one(db, 'SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_selected_deveui, rain_policy_version, '
+  + 'rain_quality_reasons, rain_source, flow_liters, sync_version, computed_at FROM zone_daily_environment WHERE zone_id = ? AND date = ?', zoneId, date);
+const D = { start: '2026-10-08T00:00:00.000Z', end: '2026-10-09T00:00:00.000Z' };
+
+test('(a) a complete day projects rainfall_mm, coverage complete, the selected gauge and policy 1', async () => {
+  const db = seed();
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_A, f);
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual({ ...row, computed_at: undefined, sync_version: undefined }, {
+    rainfall_mm: 5, rain_received_mm: 5, rain_coverage: 'complete', rain_selected_deveui: GAUGE_A, rain_policy_version: 1,
+    rain_quality_reasons: '[]', rain_source: 'aquascope_lorain', flow_liters: 0, sync_version: undefined, computed_at: undefined,
+  });
+  const inst = one(db, "SELECT amount_mm, received_mm, coverage, accepted_count, policy_version FROM rain_instrument_days WHERE deveui = ? AND date = '2026-10-08' AND timezone = 'UTC'", GAUGE_A);
+  assert.deepEqual(inst, { amount_mm: 5, received_mm: 5, coverage: 'complete', accepted_count: 6, policy_version: 1 });
+});
+
+test('(b) a partial day projects rainfall_mm NULL and rain_received_mm', async () => {
+  const db = seed();
+  for (const f of dayChain(D.start, D.end, { skip: [3] })) await loRainNode(db, GAUGE_A, f);
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.equal(row.rainfall_mm, null);
+  assert.equal(row.rain_received_mm, 5);
+  assert.equal(row.rain_coverage, 'partial');
+  assert.deepEqual(JSON.parse(row.rain_quality_reasons), ['frame_gap']);
+});
+
+test('without promotion every LoRain day is unknown with received_only and rainfall_mm NULL (D9)', async () => {
+  const db = seed();
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_A, { ...f, rain: R });
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.equal(row.rainfall_mm, null);
+  assert.equal(row.rain_received_mm, 5);
+  assert.equal(row.rain_coverage, 'unknown');
+  assert.ok(JSON.parse(row.rain_quality_reasons).includes('build_unpinned'), 'no pinned build: received only');
+});
+
+test('(c) a late distinct observation that completes a day re-projects it and increments sync_version exactly once', async () => {
+  const db = seed();
+  db.exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-01-01T00:00:00.000Z')");
+  const chain = dayChain(D.start, D.end);
+  const lost = chain.find((f) => f.fCnt === 3);
+  for (const f of chain.filter((x) => x !== lost)) await loRainNode(db, GAUGE_A, f);
+  const before = zoneRow(db, 1, '2026-10-08');
+  assert.equal(before.rain_coverage, 'partial');
+  const events = () => db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type = 'ZONE_ENVIRONMENT' AND aggregate_key = 'z-1|2026-10-08'").get().n;
+  const eventsBefore = events();
+  await loRainNode(db, GAUGE_A, lost);
+  const after = zoneRow(db, 1, '2026-10-08');
+  assert.equal(after.rain_coverage, 'complete');
+  assert.equal(after.rainfall_mm, 5);
+  assert.equal(after.sync_version, before.sync_version + 1, 'exactly one increment');
+  assert.ok(after.computed_at > before.computed_at, 'a new computed_at with the projected change');
+  assert.equal(events(), eventsBefore + 1, 'one outbox event for the correction');
+  // Re-delivering the same observation changes nothing and emits nothing.
+  const msgAgain = await loRainNode(db, GAUGE_A, { ...lost });
+  assert.deepEqual(msgAgain.errors, []);
+  assert.deepEqual(zoneRow(db, 1, '2026-10-08'), after);
+});
+
+test('(d) a recompute that changes nothing does not increment sync_version or touch computed_at', async () => {
+  const db = seed();
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_A, f);
+  const before = zoneRow(db, 1, '2026-10-08');
+  const out = await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'accepted' }));
+  assert.equal(out.written, false);
+  assert.deepEqual(zoneRow(db, 1, '2026-10-08'), before);
+});
+
+test('(e) gateway host in UTC, zone in Europe/Zurich, 25-hour day: the farm day is the zone day', async () => {
+  const db = seed();
+  db.exec("UPDATE irrigation_zones SET timezone = 'Europe/Zurich' WHERE id = 1");
+  // 2025-10-26 in Zurich runs from 2025-10-25T22:00Z to 2025-10-26T23:00Z (25 hours).
+  for (const f of dayChain('2025-10-25T22:00:00.000Z', '2025-10-26T23:00:00.000Z', { rainAt: 6, tips: 4 })) await loRainNode(db, GAUGE_A, f);
+  const row = zoneRow(db, 1, '2025-10-26');
+  assert.equal(row.rain_coverage, 'complete');
+  assert.equal(row.rainfall_mm, 2);
+  assert.equal(one(db, "SELECT COUNT(*) AS n FROM zone_daily_environment WHERE zone_id = 1 AND date = '2025-10-25' AND rain_received_mm > 0").n, 0,
+    'nothing carried over from the host day');
+});
+
+test('(f) flow_liters written by lsn50-zone-agg-fn survives a rain recomputation; the flow-only insert is labelled', async () => {
+  const db = seed();
+  const flowMsg = { formattedData: { detectedMode: 9, devEui: 'DENDRO1', timestamp: '2026-10-08T03:00:00.000Z',
+    rainDeltaStatus: 'first_sample', rainMmDelta: null, flowDeltaStatus: 'ok', flowLitersDelta: 12 } };
+  const out = await executeFunction(asyncNode('lsn50-zone-agg-fn'), { msg: flowMsg, db });
+  assert.deepEqual(out.warnings, []);
+  const flowOnly = zoneRow(db, 1, '2026-10-08');
+  assert.equal(flowOnly.flow_liters, 12);
+  assert.equal(flowOnly.rain_coverage, 'unknown', 'a flow-only insert at policy 1 carries a coverage, never NULL (legacy)');
+  assert.equal(flowOnly.rain_source, 'aquascope_lorain');
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_A, f);
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.equal(row.flow_liters, 12);
+  assert.equal(row.rainfall_mm, 5);
+});
+
+test('(g) a pre-0072 legacy row is not modified by a recompute of another date', async () => {
+  const db = seed();
+  db.exec(`INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version)
+    VALUES (1, '2026-10-07', 3.5, 0, 'aquascope_lorain', '2026-10-07T23:00:00.000Z', 4)`);
+  const legacy = zoneRow(db, 1, '2026-10-07');
+  for (const f of dayChain(D.start, D.end).slice(1)) await loRainNode(db, GAUGE_A, f);
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'accepted' }));
+  assert.deepEqual(zoneRow(db, 1, '2026-10-07'), legacy);
+});
+
+test('the day of a move: each zone counts only what it received, and neither certifies the day', async () => {
+  const db = seed();
+  db.exec("UPDATE devices SET irrigation_zone_id = NULL WHERE deveui = 'WX1'");
+  const chain = dayChain(D.start, D.end, { rainAt: 2, tips: 4 });
+  // Frames up to 08:00 under zone 1 (rain 2 mm at 04:00), then the gauge moves to zone 2.
+  for (const f of chain.slice(0, 4)) await loRainNode(db, GAUGE_A, f);
+  db.exec(`UPDATE devices SET irrigation_zone_id = 2 WHERE deveui = '${GAUGE_A}'`);
+  const rest = chain.slice(4).map((f) => (f.fCnt === 5 ? { ...f, hex: rainHex(6) } : f));
+  for (const f of rest) await loRainNode(db, GAUGE_A, f);
+  const zone1 = zoneRow(db, 1, '2026-10-08');
+  const zone2 = zoneRow(db, 2, '2026-10-08');
+  assert.deepEqual([zone1.rainfall_mm, zone1.rain_received_mm, zone1.rain_coverage], [null, 2, 'partial']);
+  assert.deepEqual([zone2.rainfall_mm, zone2.rain_received_mm, zone2.rain_coverage], [null, 3, 'partial']);
+  assert.ok(JSON.parse(zone1.rain_quality_reasons).includes('zone_reassigned'));
+  assert.ok(JSON.parse(zone2.rain_quality_reasons).includes('zone_reassigned'));
+  const inst = one(db, "SELECT amount_mm, coverage FROM rain_instrument_days WHERE deveui = ? AND date = '2026-10-08' AND timezone = 'UTC'", GAUGE_A);
+  assert.deepEqual(inst, { amount_mm: 5, coverage: 'complete' }, 'the instrument itself measured the whole day');
+});
+
+test('reassignment keeps history: day 1 of the old zone keeps its amount, the new zone gets nothing from it', async () => {
+  const db = seed();
+  db.exec("UPDATE devices SET irrigation_zone_id = NULL WHERE deveui = 'WX1'");
+  for (const f of dayChain(D.start, D.end, { tips: 6 })) await loRainNode(db, GAUGE_A, f);
+  db.exec(`UPDATE devices SET irrigation_zone_id = 2 WHERE deveui = '${GAUGE_A}'`);
+  // The next day's frames arrive under zone 2.
+  for (const f of dayChain('2026-10-09T00:00:00.000Z', '2026-10-10T00:00:00.000Z', { tips: 2 }).slice(2).map((f) => ({ ...f, fCnt: f.fCnt + 6 }))) {
+    await loRainNode(db, GAUGE_A, f);
+  }
+  const old = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual([old.rainfall_mm, old.rain_selected_deveui], [3, GAUGE_A]);
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'selection' }));
+  assert.equal(zoneRow(db, 1, '2026-10-08').rainfall_mm, 3, 'a recomputation of the old day keeps it in the old zone');
+  assert.equal(zoneRow(db, 2, '2026-10-08'), undefined, 'zone 2 has no row for the day before the move');
+  const z2 = await resolve(db, 2, '2026-10-08');
+  assert.equal(z2.receivedMm, null);
+  assert.equal(z2.amountMm, null);
+});
+
+test('two gauges through the nodes: an ambiguous zone stays unknown until a selection, never the sum', async () => {
+  const db = seed();
+  addDevice(db, GAUGE_B, 'AQUASCOPE_LORAIN', 1);
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_A, { ...f, devAddr: '01000001' });
+  for (const f of dayChain(D.start, D.end)) await loRainNode(db, GAUGE_B, { ...f, devAddr: '01000002' });
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual([row.rainfall_mm, row.rain_received_mm, row.rain_coverage, row.rain_source, row.rain_selected_deveui],
+    [null, null, 'unknown', 'none', null]);
+  assert.deepEqual(JSON.parse(row.rain_quality_reasons), ['gauge_ambiguous']);
+  db.exec(`INSERT INTO zone_rain_source(zone_id, selected_deveui, updated_at) VALUES (1, '${GAUGE_A}', '2026-10-09T08:00:00.000Z')`);
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'selection' }));
+  const chosen = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual([chosen.rainfall_mm, chosen.rain_selected_deveui, chosen.rain_coverage], [5, GAUGE_A, 'complete']);
+  assert.equal(chosen.sync_version, row.sync_version + 1);
+});
+
+test('A31: a valid dry LoRain report creates a zone row with 0 mm received; a silent gauge has none', async () => {
+  const db = seed();
+  assert.equal(one(db, 'SELECT COUNT(*) AS n FROM zone_daily_environment').n, 0);
+  await loRainNode(db, GAUGE_A, { fCnt: 1, time: '2026-10-08T10:00:00.000Z', hex: rainHex(0), rain: R });
+  const row = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual([row.rain_received_mm, row.rain_source, row.rainfall_mm], [0, 'aquascope_lorain', null]);
+});

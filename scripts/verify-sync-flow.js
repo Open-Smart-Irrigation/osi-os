@@ -2501,7 +2501,10 @@ expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via
 expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
 expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
 expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
-expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
+expectIncludesById('lsn50-zone-agg-fn', 'R.zoneDayWindow(d.timestamp || new Date().toISOString(), timezone).date', 'bins MOD9 zone totals by uplink timestamp in the zone timezone instead of processing time');
+expectIncludesById('lsn50-zone-agg-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib for the zone-day projection');
+expectIncludesById('lsn50-zone-agg-fn', 'await R.recomputeZoneDay(t, zone.zone_id, date, {', 'writes rain and flow through the zone-day projection inside one transaction');
+expectLibById('lsn50-zone-agg-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
@@ -2653,8 +2656,9 @@ expectLibById('s2120-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib
     ['FROM weather_station_zones wsz', 'prefers explicit S2120 weather station zone assignments'],
     ['if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL', 'falls back when S2120 weather station zone assignments are absent'],
     ['SELECT d.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback'],
-    ['const total = await s2120DayTotal(t, id.deveui, win.startIso, win.endIso, false);', 'sets the S2120 zone day to the device day total in the zone timezone'],
-    ['source: S2120_RAIN_SOURCE, allowTakeover: rain.deltaMm > 0', 'never lets a zero S2120 increment take over a zone day another source owns'],
+    ['zones: zoneIds,', 'records the zones an S2120 observation was received under'],
+    ['zoneDays = await recomputeRainDays(t, id.deveui, items, { nowMs });', 'projects the S2120 zone days through the zone-day projection in the zone timezone'],
+    ["const filter = instrument.typeId === S2120_TYPE_ID", 'assesses S2120 days from S2120 rain frames only, never with the LoRain chain'],
   ]) {
     expectCondition(rainModuleSource.includes(needle), `osi-rain S2120 ${description}`, `osi-rain S2120 missing: ${description}`);
   }
@@ -2692,7 +2696,10 @@ expectLibById('lorain-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLi
   for (const [needle, description] of [
     ["const LORAIN_TYPE_ID = 'AQUASCOPE_LORAIN';", 'guards LoRain uplinks by local device type'],
     ["const LORAIN_RAIN_SOURCE = 'aquascope_lorain';", 'labels LoRain zone rainfall source'],
-    ["'WHERE ? = 1 OR zone_daily_environment.rain_source = ?'", 'never lets a zero report take over a zone day another source owns'],
+    ["else if (trigger === 'accepted' && row.rain_source && row.rain_source !== 'none' && row.rain_source !== p.source", 'never lets a zero report take over a legacy zone day another source owns'],
+    ["amountMm: coverage === 'complete' ? amountMm : null,", 'projects a zone rainfall amount only for a certified complete day'],
+    ["zoneReasons.add(selection.state === 'ambiguous' ? 'gauge_ambiguous' : 'no_gauge');", 'never adds two gauges: an ambiguous zone has no amount'],
+    ["'SELECT * FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1'", 'runs the LoRain chain only on LoRain observations'],
     ['rain_tips_delta', 'persists LoRain tip deltas'],
     ['const PINNED_LORAIN_BUILDS = Object.freeze([]);', 'promotes no installed LoRain build until the owner confirms one'],
   ]) {

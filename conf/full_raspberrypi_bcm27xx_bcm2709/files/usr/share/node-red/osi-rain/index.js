@@ -882,6 +882,7 @@ function storedFields(row, result) {
   const cfg = parseJson(row.config_json);
   const config = { frame: cfg.frame, state: result.state };
   if (cfg.query) config.query = cfg.query;
+  if (cfg.zones) config.zones = cfg.zones;
   return {
     status,
     frame_kind: result.frameKind,
@@ -948,18 +949,14 @@ async function reassessLoRain(t, deveui, fromIso, toIso, { pinnedBuilds, newObse
       await t.run('UPDATE device_data SET ' + ddKeys.map((key) => key + ' = ?').join(', ') + ' WHERE id = ?',
         ddKeys.map((key) => after[key]).concat([row.device_data_id]));
     }
-    // A zone day changes only when what the frame contributes to it changes;
-    // the new observation's own day is written by the caller.
-    if (row.id !== newObservationId && row.zone_id !== null && row.zone_id !== undefined
-      && contribution(row) !== contribution(fields)) {
-      changedDays.push({ zoneId: Number(row.zone_id), timezone: row.timezone, receivedAt: row.received_at });
+    // Any change of a stored field can change the coverage of the day the
+    // frame belongs to (a closed gap, a withdrawn amount); the new
+    // observation's own day is recomputed by the caller.
+    if (row.id !== newObservationId) {
+      changedDays.push({ zones: observationZones(row), receivedAt: row.received_at });
     }
   }
   return { changedDays };
-}
-
-function contribution(row) {
-  return row.status === 'accepted' && row.amount_mm !== null && row.amount_mm !== undefined ? Number(row.amount_mm) : null;
 }
 
 // The device's received amount in its zone-local day: accepted observations
@@ -977,49 +974,6 @@ async function loRainDayTotal(t, deveui, zoneId, startIso, endIso, upToIso) {
     + 'AND NOT EXISTS (SELECT 1 FROM rain_observations o WHERE o.device_data_id = dd.id)',
     [deveui, startIso, until, endIso]);
   return Math.round(((Number(obs && obs.mm) || 0) + (Number(legacy && legacy.mm) || 0)) * 10) / 10;
-}
-
-// The zone row for one LoRain zone day (R-DRY semantics): the gauge's day
-// total; sync_version moves only when the synced values change; computed_at
-// records the latest evidence; a row another source owns is taken over only
-// by a positive accepted report (pinned until R-ZONE settles multi-source days).
-async function writeLoRainZoneDay(t, { deveui, zoneId, timezone, receivedAt, allowTakeover, computedAt }) {
-  const win = zoneDayWindow(receivedAt, timezone);
-  const total = await loRainDayTotal(t, deveui, zoneId, win.startIso, win.endIso, null);
-  await upsertGaugeZoneDay(t, { zoneId, date: win.date, total, source: LORAIN_RAIN_SOURCE, allowTakeover, computedAt });
-  return { zoneId, date: win.date };
-}
-
-// One gauge's zone day (both gauge types): the gauge's day total; sync_version
-// moves only when the synced values change; computed_at records the latest
-// evidence; a row another source owns is taken over only when allowTakeover.
-async function upsertGaugeZoneDay(t, { zoneId, date, total, source, allowTakeover, computedAt }) {
-  await t.run(
-    'INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at) VALUES (?, ?, ?, 0, ?, ?) '
-    + 'ON CONFLICT(zone_id, date) DO UPDATE SET '
-    + 'sync_version = CASE WHEN ? IS NOT zone_daily_environment.rainfall_mm OR zone_daily_environment.rain_source IS NOT ? '
-    + 'THEN zone_daily_environment.sync_version + 1 ELSE zone_daily_environment.sync_version END, '
-    + 'rainfall_mm = ?, rain_source = ?, computed_at = ? '
-    + 'WHERE ? = 1 OR zone_daily_environment.rain_source = ?',
-    [zoneId, date, total, source, computedAt,
-      total, source,
-      total, source, computedAt,
-      allowTakeover ? 1 : 0, source]);
-}
-
-async function writeZoneDays(t, deveui, days, computedAt) {
-  const seen = new Map();
-  for (const day of days) {
-    const key = day.zoneId + '|' + zoneDayWindow(day.receivedAt, day.timezone).date;
-    const prior = seen.get(key);
-    if (!prior || (day.allowTakeover && !prior.allowTakeover)) seen.set(key, day);
-  }
-  const written = [];
-  for (const day of seen.values()) {
-    written.push(await writeLoRainZoneDay(t, { deveui, zoneId: day.zoneId, timezone: day.timezone, receivedAt: day.receivedAt,
-      allowTakeover: !!day.allowTakeover, computedAt }));
-  }
-  return written;
 }
 
 // One query at commissioning and one after a firmware upgrade, never an
@@ -1071,12 +1025,13 @@ async function ingestLoRainUplink(t, uplink, opts = {}) {
   const facts = loRainFrameFacts(uplink.object, payloadRainBlocks(uplink.data));
   const intr = intrinsicClassification(facts);
   const timezone = formatterFor(device.timezone).timezone;
+  const zoneIds = (await gaugeZones(t, id.deveui)).map((z) => Number(z.zone_id));
   await t.run(
     'INSERT INTO rain_observations (deveui, instrument_type, event_id, dev_addr, f_cnt, payload_digest, received_at, interval_basis, '
     + 'frame_kind, tips, amount_mm, status, quality_reasons, config_json, zone_id, zone_uuid, timezone, source_policy_version) '
     + 'VALUES (?, ?, ?, ?, ?, ?, ?, \'unknown\', ?, ?, NULL, ?, \'[]\', ?, ?, ?, ?, ?)',
     [id.deveui, LORAIN_TYPE_ID, id.eventId, id.devAddr, id.fCnt, id.digest, id.receivedAt, intr.frameKind,
-      isValidTips(intr.tips) ? intr.tips : null, intr.status, JSON.stringify({ frame: frameJson(fPort, facts), state: null }),
+      isValidTips(intr.tips) ? intr.tips : null, intr.status, JSON.stringify({ frame: frameJson(fPort, facts), state: null, zones: zoneIds }),
       device.zone_id, device.zone_uuid, timezone, RAIN_POLICY_VERSION]);
   const observationId = await lastInsertId(t);
 
@@ -1115,11 +1070,16 @@ async function ingestLoRainUplink(t, uplink, opts = {}) {
     }
   }
 
-  const days = changedDays.map((d) => ({ ...d, allowTakeover: false }));
-  if (obs.status === 'accepted' && device.zone_id !== null && device.zone_id !== undefined) {
-    days.push({ zoneId: Number(device.zone_id), timezone, receivedAt: id.receivedAt, allowTakeover: Number(obs.amount_mm) > 0 });
-  }
-  const zoneDays = await writeZoneDays(t, id.deveui, days, new Date(nowMs).toISOString());
+  // Instrument and zone days: the frame's own day, the day of the frame before
+  // it in the zones that frame was received under (this frame may close it),
+  // and every day a re-assessment changed.
+  const items = changedDays.map((d) => ({ ...d, trigger: 'reassessed' }));
+  items.push({ receivedAt: id.receivedAt, zones: zoneIds, trigger: obs.status === 'accepted' ? 'accepted' : 'reassessed',
+    amountMm: obs.amount_mm === null ? null : Number(obs.amount_mm) });
+  const previous = await t.get('SELECT received_at, zone_id, config_json FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at < ? '
+    + 'ORDER BY received_at DESC, id DESC LIMIT 1', [id.deveui, LORAIN_TYPE_ID, id.receivedAt]);
+  if (previous) items.push({ receivedAt: previous.received_at, zones: observationZones(previous), trigger: 'reassessed' });
+  const zoneDays = await recomputeRainDays(t, id.deveui, items, { nowMs });
   return { outcome: 'accepted', status: obs.status, observationId, deviceDataId, zoneDays, configQuery };
 }
 
@@ -1320,6 +1280,7 @@ async function ingestS2120Uplink(t, uplink, opts = {}) {
   let zones = await t.all(S2120_STATION_ZONES_SQL, [id.deveui]);
   if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL, [id.deveui]);
   const snapshot = zones[0] || null;
+  const zoneIds = (await gaugeZones(t, id.deveui)).map((z) => Number(z.zone_id));
   const frameKind = m.rainGaugeCumulativeMm != null ? 'counter' : (m.rainMmPerHour != null ? 'ordinary' : 'status');
   let status = counted ? 'accepted' : 'not_additive';
   if (!id.eventId) status = 'ambiguous_identity';
@@ -1342,6 +1303,7 @@ async function ingestS2120Uplink(t, uplink, opts = {}) {
   const config = {
     frame: { fPort: toIntOrNull(uplink.fPort), cumulativeMm: m.rainGaugeCumulativeMm, intensityMmH: m.rainMmPerHour },
     counter: { previousAt: rain.previousAt, previousMm: rain.previousMm, differenceMm: rain.differenceMm },
+    zones: zoneIds,
   };
   await t.run(
     'INSERT INTO rain_observations (deveui, instrument_type, event_id, dev_addr, f_cnt, payload_digest, received_at, measured_start, measured_end, '
@@ -1364,16 +1326,16 @@ async function ingestS2120Uplink(t, uplink, opts = {}) {
   const deviceDataId = await lastInsertId(t);
   await t.run('UPDATE rain_observations SET device_data_id = ? WHERE id = ?', [deviceDataId, observationId]);
 
-  const zoneDays = [];
-  if (counted) {
-    const computedAt = new Date(nowMs).toISOString();
-    for (const zone of zones) {
-      const tz = formatterFor(zone.timezone).timezone;
-      const win = zoneDayWindow(id.receivedAt, tz);
-      const total = await s2120DayTotal(t, id.deveui, win.startIso, win.endIso, false);
-      await upsertGaugeZoneDay(t, { zoneId: zone.zone_id, date: win.date, total, source: S2120_RAIN_SOURCE, allowTakeover: rain.deltaMm > 0, computedAt });
-      zoneDays.push({ zoneId: zone.zone_id, date: win.date });
-    }
+  // Instrument and zone days of a rain frame: its own day and the day of the
+  // rain frame before it (this frame may close it). Weather-only frames carry
+  // no rain evidence.
+  let zoneDays = [];
+  if (frameKind !== 'status') {
+    const items = [{ receivedAt: id.receivedAt, zones: zoneIds, trigger: counted ? 'accepted' : 'reassessed', amountMm: counted ? rain.deltaMm : null }];
+    const previous = await t.get("SELECT received_at, zone_id, config_json FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND frame_kind IN ('counter','ordinary') "
+      + 'AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1', [id.deveui, S2120_TYPE_ID, id.receivedAt]);
+    if (previous) items.push({ receivedAt: previous.received_at, zones: observationZones(previous), trigger: 'reassessed' });
+    zoneDays = await recomputeRainDays(t, id.deveui, items, { nowMs });
   }
   return { outcome: 'accepted', status, observationId, deviceDataId, zoneDays, configQuery: null, rainDeltaStatus: rain.status, rainMmDelta: counted ? rain.deltaMm : null };
 }
@@ -1819,7 +1781,7 @@ async function recomputeRainDays(t, deveui, items, opts = {}) {
   const written = [];
   for (const z of zoneDays.values()) {
     const out = await recomputeZoneDay(t, z.zoneId, z.date, { trigger: z.trigger, amountMm: z.amountMm, nowMs: opts.nowMs, cache });
-    if (out) written.push({ zoneId: z.zoneId, date: z.date, written: out.written });
+    if (out) written.push({ zoneId: z.zoneId, date: z.date });
   }
   return written;
 }

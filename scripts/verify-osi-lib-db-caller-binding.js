@@ -77,10 +77,11 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
   rain: Object.freeze({
     moduleDir: 'osi-rain',
     facadeTestFile: 'facade-contract.test.js',
-    reviewedCallerNodeIds: Object.freeze(['lorain-ingest-fn', 's2120-ingest-fn']),
-    requiredFacadeExports: Object.freeze(['ingestLoRainUplink', 'recomputeInstrumentDay', 'ingestS2120Uplink']),
-    // lorain-ingest-fn and s2120-ingest-fn each await the transaction that runs their ingest.
-    awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.ingest(?:LoRain|S2120)Uplink\(/,
+    reviewedCallerNodeIds: Object.freeze(['lorain-ingest-fn', 'lsn50-zone-agg-fn', 's2120-ingest-fn']),
+    requiredFacadeExports: Object.freeze(['ingestLoRainUplink', 'recomputeInstrumentDay', 'ingestS2120Uplink', 'recomputeZoneDay']),
+    // lorain-ingest-fn and s2120-ingest-fn each await the transaction that runs their ingest;
+    // lsn50-zone-agg-fn awaits the transaction in which it recomputes the zone day.
+    awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.ingest(?:LoRain|S2120)Uplink\(|await\s+db\.transaction\(async\s+\(t\)\s*=>\s*\{[\s\S]*?await\s+R\.recomputeZoneDay\(t,/,
   }),
   'agronomy-daily': Object.freeze({
     moduleDir: 'osi-agronomy-daily',

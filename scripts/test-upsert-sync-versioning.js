@@ -123,18 +123,19 @@ test('the shipped writers use version-bumping upserts, not INSERT OR REPLACE', (
   assert.ok(dendroCompute.includes('sync_version=dendrometer_daily.sync_version+1'));
   assert.ok(dendroCompute.includes('sync_version=zone_daily_recommendations.sync_version+1'));
 
-  for (const id of ['lsn50-zone-agg-fn']) {
-    assert.ok(fnOf(id).includes('sync_version=zone_daily_environment.sync_version+1'), `${id} must bump zone_daily_environment.sync_version`);
+  // Every zone_daily_environment writer goes through osi-rain's recomputeZoneDay
+  // (zone-day projection contract): one UPDATE writes the projected fields, a
+  // new computed_at and sync_version + 1, and only when a projected field
+  // changed, so a repeated dry report emits no outbox event (behaviour:
+  // test-lorain-dry-zone-row.js, test-s2120-rain-ingest.js,
+  // test-lsn50-flow-only-zone-row.js, test-rain-zone-days.js).
+  for (const id of ['lorain-ingest-fn', 's2120-ingest-fn', 'lsn50-zone-agg-fn']) {
+    assert.ok(fnOf(id).includes("osiLib.require('rain')"), `${id} writes through osi-rain`);
   }
-  // LoRain and S2120 bump only when rainfall_mm or rain_source changes, so a repeated dry
-  // report refreshes computed_at without an outbox event (behaviour: test-lorain-dry-zone-row.js,
-  // test-s2120-rain-ingest.js). The writer is osi-rain's upsertGaugeZoneDay, called by
-  // lorain-ingest-fn and s2120-ingest-fn.
-  assert.ok(fnOf('lorain-ingest-fn').includes("osiLib.require('rain')"), 'lorain-ingest-fn writes through osi-rain');
-  assert.ok(fnOf('s2120-ingest-fn').includes("osiLib.require('rain')"), 's2120-ingest-fn writes through osi-rain');
+  assert.ok(fnOf('lsn50-zone-agg-fn').includes('R.recomputeZoneDay('), 'lsn50-zone-agg-fn writes the zone day through osi-rain');
   const rainModule = fs.readFileSync(path.join(path.dirname(FLOWS), 'node-red/osi-rain/index.js'), 'utf8');
-  assert.ok(rainModule.includes('THEN zone_daily_environment.sync_version + 1 ELSE zone_daily_environment.sync_version END'),
-    'osi-rain must bump zone_daily_environment.sync_version when its values change');
+  assert.ok(rainModule.includes(", computed_at = ?, sync_version = sync_version + 1 WHERE zone_id = ? AND date = ?'"),
+    'osi-rain must bump zone_daily_environment.sync_version and write a new computed_at when a projected field changes');
   assert.ok(!/INSERT OR REPLACE INTO zone_daily_environment/.test(rainModule));
 
   const sim = fnOf('sim-dendro-fn-setup');

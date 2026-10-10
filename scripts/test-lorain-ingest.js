@@ -76,7 +76,13 @@ test('duplicate delivery counts once (one observation, one device_data row, one 
   assert.deepEqual(first.errors.concat(second.errors), []);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 1);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 1);
-  assert.equal(db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().rainfall_mm, 0.5);
+  assert.equal(db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().rain_received_mm, 0.5);
+  // No installed gauge is promoted (D9, empty pinned set): the zone day carries
+  // what was received, never a certified amount.
+  const day = db.prepare("SELECT rainfall_mm, rain_coverage, rain_quality_reasons FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  assert.equal(day.rainfall_mm, null);
+  assert.equal(day.rain_coverage, 'unknown');
+  assert.ok(JSON.parse(day.rain_quality_reasons).includes('received_only'));
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'"), 1);
 });
 
@@ -208,7 +214,7 @@ for (const fx of fixtures) {
     }
     const conflicts = fx.expect.observations.filter((o) => o.reason === 'identity_conflict').length;
     assert.equal(count(db, "SELECT COUNT(*) AS n FROM ingest_quarantine WHERE reason='identity_conflict'"), conflicts);
-    const zone = rows(db, 'SELECT COALESCE(SUM(rainfall_mm), 0) AS mm, COUNT(*) AS n FROM zone_daily_environment WHERE zone_id=1')[0];
+    const zone = rows(db, 'SELECT COALESCE(SUM(rain_received_mm), 0) AS mm, COUNT(*) AS n FROM zone_daily_environment WHERE zone_id=1')[0];
     assert.equal(Math.round(zone.mm * 10) / 10, Math.round(expectedTotal * 10) / 10, 'zone total = sum of counted amounts');
   });
 }
@@ -218,9 +224,9 @@ test('a frame pair in one wake slot: the earlier frame is withdrawn from history
   const fx = fixture('button-same-slot');
   await ingest(db, fx.frames[0]);
   await ingest(db, fx.frames[1]);
-  assert.equal(db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1").get().rainfall_mm, 1.5);
+  assert.equal(db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1").get().rain_received_mm, 1.5);
   await ingest(db, fx.frames[2]);
-  assert.equal(db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1").get().rainfall_mm, 0.5);
+  assert.equal(db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1").get().rain_received_mm, 0.5);
   const dd = rows(db, 'SELECT rain_mm_delta, rain_delta_status FROM device_data ORDER BY id');
   assert.deepEqual(dd[1], { rain_mm_delta: null, rain_delta_status: 'overlap_unqualified' });
 });
@@ -233,7 +239,7 @@ test('a delayed distinct frame is accepted once and its zone day gains its amoun
   await ingest(db, fx.frames[2]);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 3);
   assert.deepEqual(rows(db, 'SELECT status FROM rain_observations ORDER BY received_at').map((r) => r.status), ['accepted', 'accepted', 'accepted']);
-  assert.equal(db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().rainfall_mm, 2);
+  assert.equal(db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().rain_received_mm, 2);
 });
 
 test('a delayed frame from an earlier zone day lands in its own day (order-independent)', async () => {
@@ -242,8 +248,8 @@ test('a delayed frame from an earlier zone day lands in its own day (order-indep
   const next = { deduplicationId: '00000000-0000-4000-8000-000000000072', devAddr: '01000001', fCnt: 6, time: '2026-10-08T22:00:01.000Z', fPort: 2, bytesHex: '06030005060100b8068100011221000a' };
   await ingest(db, next);
   await ingest(db, late);
-  assert.deepEqual(rows(db, 'SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1 ORDER BY date'),
-    [{ date: '2026-10-08', rainfall_mm: 1 }, { date: '2026-10-09', rainfall_mm: 0.5 }]);
+  assert.deepEqual(rows(db, 'SELECT date, rain_received_mm FROM zone_daily_environment WHERE zone_id=1 ORDER BY date'),
+    [{ date: '2026-10-08', rain_received_mm: 1 }, { date: '2026-10-09', rain_received_mm: 0.5 }]);
 });
 
 test('after a rejoin on a new devAddr with fCnt from 0 both sessions count; a repeat inside one hour is a duplicate (t07)', async () => {
@@ -260,7 +266,7 @@ test('after a rejoin on a new devAddr with fCnt from 0 both sessions count; a re
   assert.ok(reasons.includes('session_reset'));
   await ingest(db, { ...fx.frames[3], deduplicationId: '00000000-0000-4000-8000-000000000098', time: '2026-10-08T11:40:00.000Z' });
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 4);
-  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1').get().rainfall_mm, 2.5);
+  assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1').get().rain_received_mm, 2.5);
 });
 
 // Task 5 (A2, A3): an average rate only over a protocol-verified interval.

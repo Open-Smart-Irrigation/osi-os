@@ -88,7 +88,9 @@ test('ingestLoRainUplink and recomputeInstrumentDay through the osi-db-helper tr
     const check = new DatabaseSync(file, { readOnly: true });
     try {
       assert.equal(check.prepare('SELECT device_data_id FROM rain_observations').get().device_data_id, first.deviceDataId);
-      assert.equal(check.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get().rainfall_mm, 1);
+      assert.deepEqual({ ...check.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get() },
+        { rainfall_mm: null, rain_received_mm: 1, rain_coverage: 'unknown' });
+      assert.equal(check.prepare("SELECT coverage FROM rain_instrument_days WHERE deveui = 'A840410000000001' AND date = '2026-10-08'").get().coverage, 'unknown');
     } finally {
       check.close();
     }
@@ -129,7 +131,44 @@ test('ingestS2120Uplink through the osi-db-helper transaction facade', async () 
     const check = new DatabaseSync(file, { readOnly: true });
     try {
       assert.equal(check.prepare('SELECT device_data_id FROM rain_observations WHERE id = ?').get(first.observationId).device_data_id, first.deviceDataId);
-      assert.equal(check.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get().rainfall_mm, 0.5);
+      assert.equal(check.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get().rain_received_mm, 0.5);
+    } finally {
+      check.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-agg-fn shape)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-rain-facade-'));
+  try {
+    const file = path.join(dir, 'farming.db');
+    const native = new DatabaseSync(file);
+    native.exec(fs.readFileSync(SEED, 'utf8'));
+    native.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+      INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z', 1, 'z-1', 'Europe/Zurich', 'local');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, rain_gauge_enabled, created_at, updated_at)
+        VALUES ('A840410000000003', 'Counter', 'DRAGINO_LSN50', 1, 1, 1, '2026-01-01', '2026-01-01');
+      INSERT INTO device_data (deveui, recorded_at, rain_count_cumulative, rain_mm_delta, rain_delta_status, counter_interval_seconds)
+        VALUES ('A840410000000003', '2026-10-08T09:50:00.000Z', 10, NULL, 'first_sample', NULL),
+               ('A840410000000003', '2026-10-08T10:00:00.000Z', 12, 0.4, 'ok', 600);`);
+    native.close();
+    const osiDb = loadOsiDbHelper();
+    const db = new osiDb.Database(file);
+    const nowMs = Date.parse('2026-10-08T12:00:00.000Z');
+    const out = await db.transaction(async (t) => {
+      await R.recomputeInstrumentDay(t, 'A840410000000003', '2026-10-08', 'Europe/Zurich', { nowMs });
+      return R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'accepted', amountMm: 0.4, flowLitersDelta: 3, nowMs });
+    });
+    assert.equal(out.written, 'inserted');
+    const again = await db.transaction((t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'reassessed', nowMs }));
+    assert.equal(again.written, false, 'nothing projected changed');
+    const check = new DatabaseSync(file, { readOnly: true });
+    try {
+      assert.deepEqual({ ...check.prepare("SELECT rainfall_mm, rain_received_mm, flow_liters, rain_source, rain_coverage, rain_selected_deveui, rain_policy_version, sync_version FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get() },
+        { rainfall_mm: null, rain_received_mm: 0.4, flow_liters: 3, rain_source: 'local_gauge', rain_coverage: 'partial',
+          rain_selected_deveui: 'A840410000000003', rain_policy_version: 1, sync_version: 0 });
     } finally {
       check.close();
     }

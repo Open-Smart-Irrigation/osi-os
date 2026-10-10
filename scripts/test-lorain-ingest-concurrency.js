@@ -111,7 +111,7 @@ test('20 distinct uplinks in parallel: 20 observations, zone total = their sum',
   assert.ok(results.every((r) => r.outcome === 'accepted'));
   assert.deepEqual(snapshot('SELECT COUNT(*) AS n FROM rain_observations'), [{ n: 21 }]);
   assert.deepEqual(snapshot("SELECT COUNT(*) AS n FROM rain_observations WHERE status = 'accepted'"), [{ n: 21 }]);
-  assert.deepEqual(snapshot("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rainfall_mm: 10.5 }]);
+  assert.deepEqual(snapshot("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rain_received_mm: 10.5 }]);
 });
 
 test('a failure inside the transaction leaves nothing behind; the retry counts once', async () => {
@@ -124,7 +124,7 @@ test('a failure inside the transaction leaves nothing behind; the retry counts o
   assert.deepEqual(snapshot('SELECT (SELECT COUNT(*) FROM rain_observations) AS o, (SELECT COUNT(*) FROM device_data) AS d'), before);
   const retry = await ingest(db, uplink(30));
   assert.equal(retry.outcome, 'accepted');
-  assert.deepEqual(snapshot("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rainfall_mm: 11 }]);
+  assert.deepEqual(snapshot("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rain_received_mm: 11 }]);
 });
 
 test('after a restart the first uplink is still a duplicate (durable identity)', async () => {
@@ -136,5 +136,5 @@ test('after a restart the first uplink is still a duplicate (durable identity)',
   const retransmission = await ingest(db, { ...uplink(0), eventId: '00000000-0000-4000-8000-000000000199' });
   assert.equal(retransmission.outcome, 'duplicate', 'same session, fCnt and payload within the replay window');
   assert.deepEqual(snapshot('SELECT COUNT(*) AS n FROM rain_observations'), [{ n: 22 }]);
-  assert.deepEqual(snapshot("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rainfall_mm: 11 }]);
+  assert.deepEqual(snapshot("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'"), [{ rain_received_mm: 11 }]);
 });

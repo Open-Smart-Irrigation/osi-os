@@ -235,7 +235,7 @@ jobs:
       # legacy command path, each against the shipped source.
       - name: Zone weather provider round trip
         run: node --test scripts/test-zone-weather-source.js
-      # LoRain zone rain: a valid dry report writes a 0 mm zone row, a non-ok one does
+      # LoRain zone rain: a valid dry report writes a zone row with 0 mm received, a non-ok one does
       # not, and a new zone day starts from the zone's own day window, never the host
       # day. TZ pins the host clock the old 'localtime' path depended on.
       - name: LoRain dry reports and zone day window
