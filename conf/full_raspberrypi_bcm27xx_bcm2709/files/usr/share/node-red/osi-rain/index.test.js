@@ -253,3 +253,109 @@ test('constants', () => {
   assert.equal(R.RAIN_POLICY_VERSION, 1);
   assert.equal(R.LORAIN_MM_PER_TIP, 0.5);
 });
+
+// ---------------------------------------------------------------------------
+// SenseCAP S2120 (contract of the merged S2120 rain fix: 4213 is cumulative
+// rainfall in mm and the only counter; 4113 is rain intensity in mm/h; firmware
+// without 4213 integrates intensity / 6 only over a 600 s +/- 60 s interval).
+// Expectations copied from scripts/test-s2120-rain-ingest.js; the test names
+// cited in each case are the cases there.
+// ---------------------------------------------------------------------------
+
+const S2120_CODEC = path.join(NODE_RED, 'codecs/sensecap_s2120_decoder.js');
+function s2120Codec() {
+  const sandbox = { Buffer, console: { log() {} } };
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(S2120_CODEC, 'utf8'), sandbox, { filename: S2120_CODEC });
+  return sandbox.decodeUplink;
+}
+const decodeS2120 = s2120Codec();
+const hex = (value, width) => Math.round(value).toString(16).toUpperCase().padStart(width, '0');
+const s2120Intensity = (frameId, mmH) => frameId + '0156' + hex(mmH * 1000, 8) + '2703';
+const s2120Cumulative = (mm) => '4C000B' + hex(mm * 1000, 8);
+const s2120Object = (rawHex) => decodeS2120({ fPort: 5, bytes: [...Buffer.from(rawHex, 'hex')] }).data;
+
+test('parseS2120Measurements: 4113 is intensity, 4213 cumulative (vendor example; "codec emits 4113 as intensity and 4213 as cumulative rainfall")', () => {
+  const m = R.parseS2120Measurements(s2120Object('4B0156000000FE27034C000B000006F2'));
+  assert.equal(m.rainMmPerHour, 0.254);
+  assert.equal(m.rainGaugeCumulativeMm, 1.778);
+  assert.equal(m.measurements['4113'], 0.254);
+});
+
+test('parseS2120Measurements: both message shapes, pressure in hPa, gust only from 4191, battery from 4103 or Battery(%)', () => {
+  const group = [
+    { measurementId: 4097, measurementValue: 18.2 }, { measurementId: 4098, measurementValue: 66.1 },
+    { measurementId: 4099, measurementValue: 1234 }, { measurementId: 4101, measurementValue: 100870 },
+    { measurementId: 4104, measurementValue: 182.4 }, { measurementId: 4105, measurementValue: 3.2 },
+    { measurementId: 4190, measurementValue: 2.7 }, { measurementId: 4191, measurementValue: 7.6 },
+    { measurementId: 4213, measurementValue: 12.4 }, { 'Battery(%)': 84 },
+  ];
+  for (const object of [{ messages: [group] }, { data: { messages: [group] } }]) {
+    const m = R.parseS2120Measurements(object);
+    assert.equal(m.ambientTemperature, 18.2);
+    assert.equal(m.relativeHumidity, 66.1);
+    assert.equal(m.lightLux, 1234);
+    assert.ok(Math.abs(m.barometricPressureHpa - 1008.7) < 1e-9);
+    assert.equal(m.windDirectionDeg, 182.4);
+    assert.equal(m.windSpeedMps, 3.2);
+    assert.equal(m.uvIndex, 2.7);
+    assert.equal(m.windGustMps, 7.6, 'never the 4213 rain accumulation');
+    assert.equal(m.rainGaugeCumulativeMm, 12.4);
+    assert.equal(m.rainMmPerHour, null);
+    assert.equal(m.batPct, 84);
+  }
+  assert.equal(R.parseS2120Measurements({ messages: [[{ measurementId: 4103, measurementValue: 55 }, { 'Battery(%)': 84 }]] }).batPct, 55);
+  assert.equal(R.parseS2120Measurements({ messages: [[{ measurementId: 4101, measurementValue: 1008.7 }]] }).barometricPressureHpa, 1008.7);
+  const empty = R.parseS2120Measurements(undefined);
+  assert.equal(empty.rainGaugeCumulativeMm, null);
+  assert.equal(empty.rainMmPerHour, null);
+  assert.equal(R.parseS2120Measurements({ messages: [[{ measurementId: 4213, measurementValue: 'n/a' }]] }).rainGaugeCumulativeMm, null);
+});
+
+test('deriveS2120Counter A22: steady intensity, 4213 1.778 -> 2.032 gives 0.254 mm ("review reproduction: steady 4113 with rising 4213")', () => {
+  const steady = R.parseS2120Measurements(s2120Object(s2120Intensity('4B', 0.254) + s2120Cumulative(2.032)));
+  assert.equal(steady.rainMmPerHour, 0.254);
+  assert.deepEqual(R.deriveS2120Counter(1.778, steady.rainGaugeCumulativeMm), { deltaMm: 0.254, status: 'ok' });
+  assert.deepEqual(R.deriveS2120Counter(3, 3.254), { deltaMm: 0.254, status: 'ok' }, '"a drop in intensity is not a counter reset"');
+  assert.deepEqual(R.deriveS2120Counter(12, 12), { deltaMm: 0, status: 'ok' }, '"a dry counter interval is a valid zero"');
+});
+
+test('deriveS2120Counter A23: reset 100 -> 2 -> 2.4 ("a falling 4213 is a counter reset and becomes the new baseline")', () => {
+  assert.deepEqual(R.deriveS2120Counter(100, 2), { deltaMm: null, status: 'counter_reset' });
+  assert.deepEqual(R.deriveS2120Counter(2, 2.4), { deltaMm: 0.4, status: 'ok' });
+  assert.deepEqual(R.deriveS2120Counter(5, 0.254), { deltaMm: null, status: 'counter_reset' });
+  assert.deepEqual(R.deriveS2120Counter(0.254, 0.508), { deltaMm: 0.254, status: 'ok' });
+});
+
+test('deriveS2120Counter: baseline, first sample, invalid interval, absent counter', () => {
+  assert.deepEqual(R.deriveS2120Counter(null, 1.778, { hasBaseline: false }), { deltaMm: null, status: 'cumulative_baseline' },
+    '"the first 4213 row of a device is its counter baseline"');
+  assert.deepEqual(R.deriveS2120Counter(0.254, 150, { hasBaseline: false }), { deltaMm: null, status: 'cumulative_baseline' },
+    '"upgrade: rows written under the old interpretation are never a counter baseline"');
+  assert.deepEqual(R.deriveS2120Counter(null, 1.778), { deltaMm: null, status: 'first_sample' });
+  assert.deepEqual(R.deriveS2120Counter(1, 2, { intervalSeconds: null }), { deltaMm: null, status: 'invalid_interval' });
+  assert.deepEqual(R.deriveS2120Counter(1, 2, { intervalSeconds: 600 }), { deltaMm: 1, status: 'ok' });
+  assert.deepEqual(R.deriveS2120Counter(1, null), { deltaMm: null, status: 'no_rain_sensor' });
+});
+
+test('deriveS2120Legacy: firmware without 4213 integrates intensity / 6 only over 600 s +/- 60 s', () => {
+  assert.deepEqual(R.deriveS2120Legacy(0, { hasPrevious: false }), { deltaMm: null, status: 'first_sample' },
+    '"legacy firmware, 10-minute cadence": cadence unknown until a previous uplink exists');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: 600 }), { deltaMm: 0.254, status: 'ok' });
+  assert.deepEqual(R.deriveS2120Legacy(3.048, { hasPrevious: true, intervalSeconds: 640 }), { deltaMm: 0.508, status: 'ok' },
+    '"small timing jitter within the tolerance still integrates"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: 1200 }), { deltaMm: null, status: 'intensity_only' },
+    '"lost uplink: the amount stays unknown"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: 300 }), { deltaMm: null, status: 'intensity_only' },
+    '"5-minute cadence: overlapping windows are not integrated"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: 660 }), { deltaMm: 0.254, status: 'ok' },
+    '"legacy tolerance boundary: 660 s integrates"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: 661 }), { deltaMm: null, status: 'intensity_only' },
+    '"661 s does not"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasBaseline: true, hasPrevious: true, intervalSeconds: 600 }), { deltaMm: null, status: 'intensity_only' },
+    '"a counter device never integrates an intensity-only uplink"');
+  assert.deepEqual(R.deriveS2120Legacy(1.524, { hasPrevious: true, intervalSeconds: null }), { deltaMm: null, status: 'invalid_interval' });
+  const legacy = R.parseS2120Measurements(s2120Object(s2120Intensity('02', 1.524)));
+  assert.equal(legacy.rainGaugeCumulativeMm, null, 'a rate is never stored as a counter');
+  assert.equal(legacy.rainMmPerHour, 1.524);
+});

@@ -559,6 +559,113 @@ function buildLoRainConfigQueryDownlink({ applicationId, deveui, fPort } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// SenseCAP S2120: measurement parsing and counter derivation
+// ---------------------------------------------------------------------------
+// Moved verbatim from the s2120-process-fn node of the S2120 rain contract fix.
+// Rain contract (SenseCAP S2120 user guide 10.2, 10.3.1, 13.3):
+// 4113 = rainfall intensity in mm/h (six times the rain of the past ten
+// minutes); 4213 = cumulative rainfall in mm (frame 4C, firmware v2.0+).
+// 4213 is differenced as a counter; 4113 is stored as the rain rate and is
+// never a counter. Without 4213 (firmware before v2.0), intensity / 6 is the
+// interval amount only when the time since the previous rain uplink is the
+// vendor's ten-minute window within S2120_LEGACY_TOLERANCE_S; any other interval
+// leaves the amount unknown (intensity_only). Once a device has a counter
+// baseline it never integrates intensity, so no rain is counted twice.
+// The first 4213 row of a device is marked cumulative_baseline; rows before
+// it may hold 4113 values from older ingest and are never a counter baseline.
+const S2120_TYPE_ID = 'SENSECAP_S2120';
+const S2120_RAIN_SOURCE = 'sensecap_s2120';
+const S2120_LEGACY_WINDOW_S = 600;
+const S2120_LEGACY_TOLERANCE_S = 60;
+const S2120_COUNTER_BASELINE = 'cumulative_baseline';
+
+function normalizePressureHpa(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n > 2000 ? n / 100 : n;
+}
+
+function roundTo(value, digits) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  const factor = Math.pow(10, digits || 0);
+  return Math.round(numeric * factor) / factor;
+}
+
+function finiteOrNull(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Flatten decoded message groups by measurementId. ChirpStack codec versions
+// have used both shapes (object.messages and object.data.messages).
+function parseS2120Measurements(object) {
+  const measurements = {};
+  const messageSources = [
+    object?.messages,
+    object?.data?.messages,
+  ].filter(Array.isArray);
+  const messages = [];
+  for (const source of messageSources) {
+    for (const group of source) {
+      messages.push(Array.isArray(group) ? group : [group]);
+    }
+  }
+  for (const group of messages) {
+    for (const m of group) {
+      if (m && m.measurementId != null) {
+        measurements[String(m.measurementId)] = m.measurementValue;
+      }
+      if (m && typeof m['Battery(%)'] === 'number') {
+        measurements.bat_pct = m['Battery(%)'];
+      }
+    }
+  }
+  return {
+    measurements,
+    ambientTemperature: measurements['4097'] ?? null,
+    relativeHumidity: measurements['4098'] ?? null,
+    lightLux: measurements['4099'] ?? null,
+    barometricPressureHpa: normalizePressureHpa(measurements['4101']),
+    windDirectionDeg: measurements['4104'] ?? null,
+    windSpeedMps: measurements['4105'] ?? null,
+    windGustMps: measurements['4191'] ?? null,
+    uvIndex: measurements['4190'] ?? null,
+    rainGaugeCumulativeMm: finiteOrNull(measurements['4213']),
+    rainMmPerHour: finiteOrNull(measurements['4113']),
+    batPct: measurements['4103'] ?? measurements.bat_pct ?? null,
+  };
+}
+
+// The 4213 counter step: previous counter value (from the device's counter
+// baseline on) against the current one. hasBaseline=false means the device has
+// no cumulative_baseline row yet, so this row becomes it; intervalSeconds, when
+// given, must be a positive number of seconds since the previous counter row.
+function deriveS2120Counter(prevMm, currentMm, { hasBaseline = true, intervalSeconds } = {}) {
+  if (currentMm == null) return { deltaMm: null, status: 'no_rain_sensor' };
+  if (!hasBaseline) return { deltaMm: null, status: S2120_COUNTER_BASELINE };
+  if (prevMm == null) return { deltaMm: null, status: 'first_sample' };
+  if (intervalSeconds !== undefined && intervalSeconds == null) return { deltaMm: null, status: 'invalid_interval' };
+  if (currentMm < prevMm) return { deltaMm: null, status: 'counter_reset' };
+  return { deltaMm: roundTo(currentMm - prevMm, 3), status: 'ok' };
+}
+
+// Firmware without 4213: the reported intensity covers the vendor's ten-minute
+// window, so it is an interval amount only when the uplink interval is that
+// window (within the tolerance). A device with a counter baseline never
+// integrates intensity.
+function deriveS2120Legacy(intensityMmH, { hasBaseline = false, hasPrevious = false, intervalSeconds } = {}) {
+  if (hasBaseline) return { deltaMm: null, status: 'intensity_only' };
+  if (!hasPrevious) return { deltaMm: null, status: 'first_sample' };
+  if (intervalSeconds == null) return { deltaMm: null, status: 'invalid_interval' };
+  if (Math.abs(intervalSeconds - S2120_LEGACY_WINDOW_S) <= S2120_LEGACY_TOLERANCE_S) {
+    return { deltaMm: roundTo((intensityMmH * S2120_LEGACY_WINDOW_S) / 3600, 3), status: 'ok' };
+  }
+  return { deltaMm: null, status: 'intensity_only' };
+}
+
+// ---------------------------------------------------------------------------
 // Ingestion (inside the caller's transaction)
 // ---------------------------------------------------------------------------
 
@@ -900,4 +1007,8 @@ module.exports = {
   recomputeInstrumentDay,
   loRainConfigQueryBytes,
   buildLoRainConfigQueryDownlink,
+  S2120_RAIN_SOURCE,
+  parseS2120Measurements,
+  deriveS2120Counter,
+  deriveS2120Legacy,
 };
