@@ -214,8 +214,8 @@
       "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return"
     },
     "dendro-compute-fn": {
-      "delta": 1595,
-      "reason": "Supersedes the prior entry (2304, issue #10 upserts and PR #140 fallback sync_version), which origin/main already measures in full. Rolling 7-day rain over seven calendar days (rain correctness, finding 13): measured with verify-flows-size-ratchet nodeSizes, each byte-identical maintained profile: origin/main 42927 -> HEAD 44522 = +1595. The rolling query gains a lower date bound (analytics date - 6) and reads the stored rain.daily_status so a day recorded as unknown is missing rather than a zero day; the rain object gains daily_status, rolling7d_days_present, rolling7d_window and warnings (rain_unknown), and rolling7d is rounded to 0.01 mm. The two provider fetchers (OpenAgri, Open-Meteo) return rainfall_mm null and no rain source when no hour carries a precipitation value, instead of 0 mm."
+      "delta": 1608,
+      "reason": "Supersedes the prior entry (1595, rolling 7-day rain, finding 13), which origin/main already measures in full. Rain-resolution policy for dendro advice (rain correctness, finding 7): measured with verify-flows-size-ratchet nodeSizes, each byte-identical maintained profile: origin/main 44522 -> HEAD 46130 = +1608. The node loads osi-rain and takes the day's rain from osi-rain.resolveAdviceRain (certified gauge day, else provider, else unknown stored as NULL); the rain object gains source, coverage, deveui, lower_bound_mm, suppression_mm, reasons, policy_version and the provider hour coverage; both provider fetchers count the hours that carry a precipitation value; a provider answer without rain passes rain to Open-Meteo. The local rain selection by a positive amount is removed."
     },
     "sim-dendro-fn-setup": {
       "delta": 950,

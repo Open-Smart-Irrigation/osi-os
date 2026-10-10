@@ -194,3 +194,31 @@ test('PHENO_MOD: FAO-56 stage keys, legacy keys through normalizeStage, and 1.0 
   const stored = 'late_season';
   assert.equal(DA.PHENO_MOD[stored] || 1.0, 1.3);
 });
+
+test('irrDecision: suppression entry uses suppression_mm (amount or received lower bound); null rain never enters', () => {
+  const computedAt = '2026-10-09T03:00:00.000Z';
+  const opts = { computedAt, nowMs: Date.parse(computedAt) };
+  const lowerBound = {};
+  assert.deepEqual(
+    da.irrDecision(['none', 'none', 'none'], { daily_mm: 2, lower_bound_mm: 7, suppression_mm: 7, rolling7d: 2 }, lowerBound, [], opts),
+    { action: 'maintain_rain_suppression', reasoning: 'New rain: at least 7mm received by the local gauge (day incomplete)' },
+  );
+  assert.equal(lowerBound.rain_suppression_timeout_h, 48);
+  const heavy = {};
+  da.irrDecision(['none'], { daily_mm: null, lower_bound_mm: 16, suppression_mm: 16, rolling7d: 0 }, heavy, [], opts);
+  assert.equal(heavy.rain_suppression_timeout_h, 72);
+  // The provider amount decides when it is the larger.
+  assert.deepEqual(
+    da.irrDecision(['none'], { daily_mm: 10, lower_bound_mm: 3, suppression_mm: 10, rolling7d: 10 }, {}, [], opts),
+    { action: 'maintain_rain_suppression', reasoning: 'New rain: 10mm' },
+  );
+  // Unknown rain (null amount, no lower bound) never starts suppression.
+  const unknown = {};
+  assert.deepEqual(
+    da.irrDecision(['none', 'none', 'none'], { daily_mm: null, lower_bound_mm: null, suppression_mm: null, rolling7d: 0 }, unknown, [], opts),
+    { action: 'decrease_10', reasoning: 'No stress ≥2 of 3 days' },
+  );
+  assert.equal(unknown.rain_suppression_active, undefined);
+  // A caller without suppression_mm keeps the daily amount (scenario tests, older callers).
+  assert.equal(da.irrDecision(['none'], { daily_mm: 6, rolling7d: 6 }, {}, [], opts).action, 'maintain_rain_suppression');
+});

@@ -77,16 +77,17 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
   rain: Object.freeze({
     moduleDir: 'osi-rain',
     facadeTestFile: 'facade-contract.test.js',
-    reviewedCallerNodeIds: Object.freeze([['460e0bfd', '95f89e67'].join(''), 'lorain-ingest-fn', 'lsn50-zone-agg-fn', 's2120-ingest-fn', 'zone-rain-source-fn']),
+    reviewedCallerNodeIds: Object.freeze([['460e0bfd', '95f89e67'].join(''), 'dendro-compute-fn', 'lorain-ingest-fn', 'lsn50-zone-agg-fn', 's2120-ingest-fn', 'zone-rain-source-fn']),
     requiredFacadeExports: Object.freeze([
       'ingestLoRainUplink', 'recomputeInstrumentDay', 'ingestS2120Uplink', 'recomputeZoneDay',
-      'captureLsn50Observation', 'aggregateLsn50ZoneDay', 'zoneRainSourceView', 'setZoneRainSource',
+      'captureLsn50Observation', 'aggregateLsn50ZoneDay', 'zoneRainSourceView', 'setZoneRainSource', 'resolveAdviceRain',
     ]),
-    // lorain-ingest-fn and s2120-ingest-fn each await the transaction that runs their ingest;
+    // lorain-ingest-fn and s2120-ingest-fn await the transaction that runs their ingest;
     // lsn50-zone-agg-fn awaits the transaction in which it recomputes the zone day;
     // captureLsn50Observation and aggregateLsn50ZoneDay are awaited inside their transactions;
-    // zone-rain-source-fn awaits the transaction that stores the gauge selection.
-    awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.(?:ingest(?:LoRain|S2120)Uplink|setZoneRainSource)\(|await\s+db\.transaction\(async\s+\(t\)\s*=>\s*\{[\s\S]*?await\s+R\.recomputeZoneDay\(t,|await\s+db\.transaction\(async\s+function\s*\(t\)\s*\{[\s\S]*?await\s+rainRes\.value\.captureLsn50Observation\(t,|await\s+db\.transaction\(async\s*\(t\)\s*=>\s*rainLoad\.value\.aggregateLsn50ZoneDay\(t,/,
+    // zone-rain-source-fn awaits the transaction that stores the gauge selection;
+    // dendro-compute-fn awaits the read-only advice rain with plain reads on its handle.
+    awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.(?:ingest(?:LoRain|S2120)Uplink|setZoneRainSource)\(|await\s+db\.transaction\(async\s+\(t\)\s*=>\s*\{[\s\S]*?await\s+R\.recomputeZoneDay\(t,|await\s+db\.transaction\(async\s+function\s*\(t\)\s*\{[\s\S]*?await\s+rainRes\.value\.captureLsn50Observation\(t,|await\s+db\.transaction\(async\s*\(t\)\s*=>\s*rainLoad\.value\.aggregateLsn50ZoneDay\(t,|await\s+R\.resolveAdviceRain\(_db,/,
   }),
   'agronomy-daily': Object.freeze({
     moduleDir: 'osi-agronomy-daily',

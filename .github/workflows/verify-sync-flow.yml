@@ -270,6 +270,11 @@ jobs:
       # days, and unknown rain warns without starting rain suppression. Both profiles.
       - name: Dendro rolling 7-day rain
         run: node --test scripts/test-dendro-rolling-7d-rain.js
+      # Rain finding 7: dendro advice follows the rain-resolution policy. The zone's certified
+      # gauge day (a certified 0 mm included) outranks provider rain; an uncertified day's
+      # received amount may start suppression but is never the amount; unknown is NULL.
+      - name: Dendro rain-resolution policy
+        run: node --test scripts/test-dendro-rain-policy.js
       # osi-os #377: the valve, zone-schedule and zone-delete routes keep each
       # request's target, duration and identity on msg. Runs the shipped function
       # bodies with two requests interleaved at every sqlite boundary, flag off and
