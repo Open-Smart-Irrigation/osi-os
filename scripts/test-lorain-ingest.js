@@ -262,3 +262,56 @@ test('after a rejoin on a new devAddr with fCnt from 0 both sessions count; a re
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 4);
   assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1').get().rainfall_mm, 2.5);
 });
+
+// Task 5 (A2, A3): an average rate only over a protocol-verified interval.
+async function ingestModule(db, frame, opts) {
+  const facade = facadeDb(db);
+  const msg = uplinkMsg(frame).payload;
+  return facade.transaction((t) => R.ingestLoRainUplink(t, {
+    deveui: EUI, eventId: msg.deduplicationId, devAddr: msg.devAddr, fCnt: msg.fCnt, time: msg.time, fPort: msg.fPort, data: msg.data, object: msg.object,
+  }, { nowMs: Date.parse('2026-10-09T00:00:00.000Z'), ...opts }));
+}
+const PINNED = [{ fPort: 2, buildDate: '241015' }];
+const JOIN_FRAME = { deduplicationId: '00000000-0000-4000-8000-000000000081', devAddr: '01000009', fCnt: 0, time: '2026-10-08T09:45:00.000Z', fPort: 2,
+  // build date 241015, hardware, configuration reply 900 s / 16 wakes, zero rain
+  bytesHex: '0a0003ad7703050001040403840402001006030000060100b8068100001221000a' };
+
+test('0.5 mm over a verified 900-second interval is 2 mm/h, explicitly over 15 minutes (A2)', async () => {
+  const db = seed();
+  await ingestModule(db, JOIN_FRAME, { pinnedBuilds: PINNED });
+  const wet = { deduplicationId: '00000000-0000-4000-8000-000000000082', devAddr: '01000009', fCnt: 1, time: '2026-10-08T10:00:01.000Z', fPort: 2,
+    bytesHex: '06030000060100b8068100011221000a' };
+  const result = await ingestModule(db, wet, { pinnedBuilds: PINNED });
+  assert.equal(result.status, 'accepted');
+  const obs = db.prepare('SELECT interval_basis, measured_start, measured_end, amount_mm FROM rain_observations WHERE id = ?').get(result.observationId);
+  assert.deepEqual({ ...obs }, { interval_basis: 'protocol_verified', measured_start: '2026-10-08T09:45:01.000Z', measured_end: '2026-10-08T10:00:01.000Z', amount_mm: 0.5 });
+  const dd = db.prepare('SELECT rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, counter_interval_seconds FROM device_data WHERE id = ?').get(result.deviceDataId);
+  assert.deepEqual({ ...dd }, { rain_mm_delta: 0.5, rain_mm_per_hour: 2, rain_mm_per_10min: null, counter_interval_seconds: 900 });
+});
+
+test('unknown firmware and a 90-minute reception gap keep 0.5 mm without a rate or bounds (A3)', async () => {
+  const db = seed();
+  await ingestModule(db, JOIN_FRAME, {});
+  const wet = { deduplicationId: '00000000-0000-4000-8000-000000000083', devAddr: '01000009', fCnt: 1, time: '2026-10-08T11:15:00.000Z', fPort: 2,
+    bytesHex: '06030000060100b8068100011221000a' };
+  const result = await ingestModule(db, wet, {});
+  const obs = db.prepare('SELECT interval_basis, measured_start, measured_end, amount_mm FROM rain_observations WHERE id = ?').get(result.observationId);
+  assert.deepEqual({ ...obs }, { interval_basis: 'unknown', measured_start: null, measured_end: null, amount_mm: 0.5 });
+  const dd = db.prepare('SELECT rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, counter_interval_seconds FROM device_data WHERE id = ?').get(result.deviceDataId);
+  assert.deepEqual({ ...dd }, { rain_mm_delta: 0.5, rain_mm_per_hour: null, rain_mm_per_10min: null, counter_interval_seconds: null });
+});
+
+test('the configuration query is off by default and never sent from the node unless enabled', async () => {
+  const db = seed();
+  const off = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(fixture('wet-ordinary').frames[0]), db });
+  assert.equal(off.result, null);
+  const db2 = seed();
+  const on = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(fixture('wet-ordinary').frames[0]), db: db2, env: { OSI_LORAIN_CONFIG_QUERY: '1' } });
+  assert.equal(on.result.topic, 'application/app-sensors/device/a840410000000001/command/down');
+  assert.deepEqual(JSON.parse(on.result.payload), { devEui: 'a840410000000001', confirmed: false, fPort: 2, data: Buffer.from('000000000000000000000402040404030a00', 'hex').toString('base64') });
+  const again = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(fixture('wet-ordinary').frames[1]), db: db2, env: { OSI_LORAIN_CONFIG_QUERY: '1' } });
+  assert.equal(again.result, null, 'one query per gauge, never re-sent automatically');
+  const db3 = seed();
+  const port10 = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(fixture('fport10-unpinned').frames[0]), db: db3, env: { OSI_LORAIN_CONFIG_QUERY: '1' } });
+  assert.equal(port10.result, null, 'no documented query form for the FPort-10 build');
+});
