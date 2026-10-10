@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sensorAPI, type SensorHistoryPoint } from '../../../services/api';
 import type { RainHistory, RainHistoryDay } from '../../../utils/rain';
 import { RainMonitor } from '../RainMonitor';
+import { A12_DST_DAYS, A19_HISTORY, a12History } from '../../../analysis/__tests__/fixtures/rainAcceptance';
 
 // The viewer sits far from the farm: day labels and the window must still be
 // the farm's own days from the gateway, never the browser's.
@@ -98,7 +99,7 @@ function history(overrides: Partial<Record<string, [number | null, number]>> = {
   };
 }
 
-function chartRows(): Array<{ day: string; total_mm: number | null }> {
+function chartRows(): Array<{ day: string; total_mm: number | null; [key: string]: unknown }> {
   return JSON.parse(screen.getByTestId('rain-bar-chart').getAttribute('data-rows') || '[]');
 }
 
@@ -150,6 +151,38 @@ describe('RainMonitor', () => {
     expect(chartRows().map((row) => row.day)).toEqual(DAY_KEYS);
     const ticks = Array.from(screen.getByTestId('rain-x-ticks').querySelectorAll('li')).map((li) => li.textContent);
     expect(ticks).toEqual(['Jun 26', 'Jun 27', 'Jun 28', 'Jun 29', 'Jun 30', 'Jul 1', 'Jul 2']);
+  });
+
+  it.each(A12_DST_DAYS)('keeps the $day Zurich farm-day key and bounds under the Los Angeles viewer zone', async (day) => {
+    vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(a12History(day));
+    await openWeek();
+
+    const row = chartRows().find((entry) => entry.day === day.day);
+    expect(row).toMatchObject({
+      day: day.day,
+      period_start: day.period_start,
+      period_end: day.period_end,
+      total_mm: day.total_mm,
+      quality: day.quality,
+    });
+    const tick = Array.from(screen.getByTestId('rain-x-ticks').querySelectorAll('li')).map((li) => li.textContent);
+    const expectedTick = day.day === '2026-03-29' ? 'Mar 29' : 'Oct 25';
+    expect(tick).toContain(expectedTick);
+  });
+
+  it('preserves the four API day states and the 25-hour farm period in the chart rows', async () => {
+    vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(A19_HISTORY);
+    await openWeek();
+
+    expect(screen.getByText('4 days · daily totals (Europe/Zurich)')).toBeInTheDocument();
+    expect(chartRows()).toEqual(A19_HISTORY.days.map(({ day, period_start, period_end, total_mm, samples, quality }) => ({
+      day, period_start, period_end, total_mm, samples, quality,
+      so_far: false,
+    })));
+    expect(chartRows()[0].total_mm).toBeNull();
+    expect(chartRows()[3].total_mm).toBe(0);
+    expect(chartRows()[3].period_end).toBe('2026-10-25T23:00:00.000Z');
+    expect(screen.getByTestId('rain-last-tooltip')).toHaveTextContent('0.0 mm');
   });
 
   it('draws no bar for a no-data day and keeps a measured dry day at zero', async () => {

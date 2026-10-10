@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { CSV_V2_EXTRA_COLUMNS, toTidyCsv } from '../csv';
 import { catalogById as fixtureCatalog, rain as fixtureRain, seriesList as fixtureSeries } from './fixtures/csvSeries';
 import type { AnalysisSeries, AnalysisCatalogEntry } from '../types';
+import { A12_DST_DAYS, A12_DST_EXPORT, A19_EXPORT, A19_HISTORY, RAIN_ACCEPTANCE_CATALOG } from './fixtures/rainAcceptance';
 
 const series: AnalysisSeries = {
   seriesId: 'abc',
@@ -125,11 +126,47 @@ describe('toTidyCsv versions', () => {
     expect(lines[4].endsWith(',Europe/Zurich,2026-10-24T22:00:00.000Z,2026-10-25T23:00:00.000Z,,,1')).toBe(true);
   });
 
-  it('v2 names a raw rain report "this interval", ending at the report, start unknown', () => {
-    const raw = { ...fixtureRain, points: [{ t: '2026-10-25T06:15:00.000Z', value: 0.5, count: 1, expected: null, quality: null }] };
+  it('A3 v2 keeps the 0.5 mm raw report time while its measurement start and rate are unknown', () => {
+    const raw = { ...fixtureRain, points: [{ t: '2026-10-08T11:15:00.000Z', value: 0.5, count: 1, expected: null, quality: null }] };
     const lines = toTidyCsv([raw], fixtureCatalog, { version: 2, aggregation: 'raw', rangeEnd: '2026-10-26T00:00:00.000Z' }).split('\n');
-    expect(lines[2]).toBe('2026-10-25T06:15:00.000Z,HUB-1,"North, Plot A",Gauge - Rainfall this interval,environment,environment-src-1,rain_mm_delta,,,mm,0.5,'
-      + ',Europe/Zurich,,2026-10-25T06:15:00.000Z,received_only,,1');
+    expect(lines[2]).toBe('2026-10-08T11:15:00.000Z,HUB-1,"North, Plot A",Gauge - Rainfall this interval,environment,environment-src-1,rain_mm_delta,,,mm,0.5,'
+      + ',Europe/Zurich,,2026-10-08T11:15:00.000Z,received_only,,1');
+  });
+
+  it.each(A12_DST_DAYS)('A12 v2 exports the Zurich $day DST day with farm-local date and exact bounds', (fixtureDay) => {
+    const day = fixtureDay.day;
+    const rows = toTidyCsv([A12_DST_EXPORT], RAIN_ACCEPTANCE_CATALOG, { version: 2, aggregation: 'daily' }).split('\n').slice(2);
+    const row = rows.find((line) => line.startsWith(`${day},`));
+    expect(row).toBeDefined();
+    const fields = row!.split(',');
+    expect(fields[0]).toBe(day);
+    expect(fields[12]).toBe('Europe/Zurich');
+    if (day === '2026-03-29') {
+      expect(fields[13]).toBe('2026-03-28T23:00:00.000Z');
+      expect(fields[14]).toBe('2026-03-29T22:00:00.000Z');
+      expect(Date.parse(fields[14]) - Date.parse(fields[13])).toBe(23 * 60 * 60 * 1000);
+    } else {
+      expect(fields[13]).toBe('2026-10-24T22:00:00.000Z');
+      expect(fields[14]).toBe('2026-10-25T23:00:00.000Z');
+      expect(Date.parse(fields[14]) - Date.parse(fields[13])).toBe(25 * 60 * 60 * 1000);
+    }
+  });
+
+  it('A19 v2 exports the same four day keys, Zurich bounds and quality states as the API fixture', () => {
+    const rows = toTidyCsv([A19_EXPORT], RAIN_ACCEPTANCE_CATALOG, { version: 2, aggregation: 'daily' }).split('\n').slice(2);
+    const actual = rows.map((line) => {
+      const fields = line.split(',');
+      return { day: fields[0], timezone: fields[12], period_start: fields[13], period_end: fields[14], quality: fields[15], value: fields[10] };
+    });
+
+    expect(actual).toEqual(A19_EXPORT.points.map((point, index) => ({
+      day: A19_HISTORY.days[index].day,
+      timezone: 'Europe/Zurich',
+      period_start: point.t,
+      period_end: A19_HISTORY.days[index].period_end,
+      quality: A19_HISTORY.days[index].quality,
+      value: point.value === null ? '' : String(point.value),
+    })));
   });
 
   it('v2 states the coverage of a partial weather sum as a fraction, never for rain reports', () => {
