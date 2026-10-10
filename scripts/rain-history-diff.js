@@ -179,7 +179,7 @@ function readEvidence(db, options, provenance) {
     : [];
   const observationCols = columns(db, names, 'rain_observations');
   const observations = names.has('rain_observations') && observationCols.has('deveui') && observationCols.has('received_at')
-    ? db.prepare('SELECT ' + selectExpressions(observationCols, 'o', ['id', 'device_data_id', 'deveui', 'instrument_type', 'received_at', 'zone_id', 'timezone']) + ' FROM rain_observations o WHERE date(received_at) >= date(?) AND date(received_at) <= date(?) ORDER BY received_at, id').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
+    ? db.prepare('SELECT ' + selectExpressions(observationCols, 'o', ['id', 'device_data_id', 'deveui', 'instrument_type', 'received_at', 'zone_id', 'timezone', 'status', 'amount_mm', 'config_json']) + ' FROM rain_observations o WHERE date(received_at) >= date(?) AND date(received_at) <= date(?) ORDER BY received_at, id').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
     : [];
   const linkedObservationData = names.has('device_data') && dataCols.has('id') && dataCols.has('deveui')
     && names.has('rain_observations') && observationCols.has('device_data_id') && observationCols.has('received_at')
@@ -208,6 +208,28 @@ function assignmentCoversDay(intervals, bounds) {
     if (coveredUntil >= bounds.end) return true;
   }
   return false;
+}
+function lsn50SnapshotEligible(observation, row) {
+  if (!observation || observation.status !== 'accepted') return false;
+  const observedAmount = finiteNonnegative(observation.amount_mm);
+  const rowAmount = finiteNonnegative(row.rain_mm_delta);
+  if (observedAmount == null || rowAmount == null || Math.abs(observedAmount - rowAmount) > 0.001 || row.rain_delta_status !== 'ok') return false;
+  let config;
+  try { config = JSON.parse(observation.config_json); } catch { return false; }
+  if (!config || config.rain_gauge_enabled !== true || !Array.isArray(config.zones) || !Array.isArray(config.zone_snapshots)) return false;
+  const zones = config.zones.map(Number);
+  const snapshots = config.zone_snapshots;
+  if (zones.some((zone) => !Number.isSafeInteger(zone) || zone <= 0) || new Set(zones).size !== zones.length) return false;
+  const snapshotZones = snapshots.map((snapshot) => Number(snapshot && snapshot.zone_id));
+  if (snapshotZones.some((zone) => !Number.isSafeInteger(zone) || zone <= 0) || new Set(snapshotZones).size !== snapshotZones.length) return false;
+  if (zones.length !== snapshotZones.length || zones.some((zone) => !snapshotZones.includes(zone))) return false;
+  const directZone = Number(observation.zone_id);
+  if (!Number.isSafeInteger(directZone) || directZone <= 0 || !zones.includes(directZone)) return false;
+  const directTimezone = String(observation.timezone || '');
+  const snapshot = snapshots.find((item) => Number(item.zone_id) === directZone);
+  if (!snapshot || String(snapshot.timezone || '') !== directTimezone) return false;
+  try { validZone(directTimezone, 'LSN50 observation timezone'); } catch { return false; }
+  return true;
 }
 function soleEligibleGaugeForDay(provenance, devices, data, observations, zoneId, date, deveui, bounds) {
   const sourcesByDevice = new Map();
@@ -309,9 +331,13 @@ function deriveRows(evidence, options, provenance) {
     }
     if (!day || day < options.from || day > options.to) continue;
     const key = [row.deveui, zoneId == null ? '' : zoneId, day, timezone || ''].join('|');
-    if (!recordsByDeviceDate.has(key)) recordsByDeviceDate.set(key, { deveui: row.deveui, zoneId, date: day, timezone, basis, sourceRef, rows: [], selectedInterval, hasObservationIdentity: basis === 'observation_snapshot', timezoneIssue, evidenceRefs: sourceRef ? [sourceRef] : [] });
+    const instrumentType = String((retainedObservation && retainedObservation.instrument_type) || (deviceById.get(row.deveui) || {}).type_id || '').toUpperCase();
+    const requiresLsnSnapshot = instrumentType === 'DRAGINO_LSN50';
+    const lsnSnapshotEligible = requiresLsnSnapshot && lsn50SnapshotEligible(retainedObservation, row);
+    if (!recordsByDeviceDate.has(key)) recordsByDeviceDate.set(key, { deveui: row.deveui, zoneId, date: day, timezone, basis, sourceRef, rows: [], selectedInterval, hasObservationIdentity: basis === 'observation_snapshot', timezoneIssue, lsnSnapshotUnverifiable: false, evidenceRefs: sourceRef ? [sourceRef] : [] });
     const record = recordsByDeviceDate.get(key);
-    record.rows.push(row);
+    record.rows.push({ ...row, retainedObservation, requiresLsnSnapshot, lsnSnapshotEligible });
+    if (requiresLsnSnapshot && !lsnSnapshotEligible) record.lsnSnapshotUnverifiable = true;
     record.timezoneIssue = record.timezoneIssue || timezoneIssue;
     if (sourceRef && !record.evidenceRefs.includes(sourceRef)) record.evidenceRefs.push(sourceRef);
     if (basis === 'observation_snapshot') record.hasObservationIdentity = true;
@@ -354,7 +380,7 @@ function deriveRows(evidence, options, provenance) {
     let excludedCount = 0;
     for (const item of record.rows) {
       const amount = finiteNonnegative(item.rain_mm_delta);
-      if (amount != null && item.rain_delta_status === 'ok') acceptedCount += 1;
+      if (amount != null && item.rain_delta_status === 'ok' && (!item.requiresLsnSnapshot || item.lsnSnapshotEligible)) acceptedCount += 1;
       else if (item.rain_mm_delta != null || item.rain_delta_status != null || item.rain_tips_delta != null) excludedCount += 1;
     }
     let fullDay = false;
@@ -363,7 +389,7 @@ function deriveRows(evidence, options, provenance) {
       fullDay = Date.parse(record.selectedInterval.from) <= bounds.start && Date.parse(record.selectedInterval.to) >= bounds.end;
     }
     let received = null;
-    if (((record.basis === 'provenance' && fullDay) || record.basis === 'observation_snapshot') && record.rows.length) {
+    if (((record.basis === 'provenance' && fullDay) || record.basis === 'observation_snapshot') && record.rows.length && !record.lsnSnapshotUnverifiable) {
       const window = rain.zoneDateWindow(record.date, record.timezone);
       const frames = record.rows.filter((item) => finiteNonnegative(item.rain_mm_delta) != null && item.rain_delta_status === 'ok').map((item) => ({
         receivedAt: item.recorded_at, amountMm: Number(item.rain_mm_delta), status: 'accepted', intervalBasis: 'unknown', measuredStart: null, measuredEnd: null,
@@ -373,6 +399,7 @@ function deriveRows(evidence, options, provenance) {
       received = round3(rain.assessInstrumentDay({ kind: 'cumulative', frames, window, cutoffIso: null }).receivedMm);
     }
     if (record.basis === 'current_assignment_only') reasons.add('current_assignment_only');
+    if (record.lsnSnapshotUnverifiable) reasons.add('snapshot_ineligible');
     if (record.basis === 'historical_attribution_unknown' || record.basis === 'assignment_changed_within_day') reasons.add(record.basis);
     if (!record.rows.length || acceptedCount === 0) reasons.add('no_accepted_rain_rows');
     if (excludedCount) reasons.add('excluded_or_unknown_status_rows');
@@ -404,7 +431,7 @@ function deriveRows(evidence, options, provenance) {
       && (!zone || zone.rain_coverage == null || zone.rain_coverage === 'complete')
       && (!instrumentDay || instrumentDay.coverage == null || instrumentDay.coverage === 'complete');
     const retainedComparable = sourceMatches && oldSelected === record.deveui && zone && zone.rain_coverage === 'complete' && instrumentDay && instrumentDay.coverage === 'complete';
-    const proof = selectedProof && record.timezone && zone && oldZone != null && (legacyComparable || retainedComparable) && acceptedCount > 0;
+    const proof = selectedProof && record.timezone && zone && oldZone != null && (legacyComparable || retainedComparable) && acceptedCount > 0 && !record.lsnSnapshotUnverifiable;
     const delta = proof ? round3(received - oldZone) : null;
     if (proof && delta === 0) reasons.add('unchanged');
     if (zone && !proof) reasons.add('comparison_unverifiable');
@@ -473,7 +500,7 @@ function summary(rows, provenance) {
     `Unverifiable rows: ${rows.length - comparable}`,
     `Unverifiable farm days: ${new Set(rows.filter((row) => row.delta_mm == null).map((row) => row.zone_id + '|' + row.date)).size}`,
     `Original host timezone: ${provenance.hostTimezone || 'unknown'} (${provenance.hostTimezoneSource})`,
-    'Quantity rules: accepted finite nonnegative rain_mm_delta with rain_delta_status=ok is summed per device and proven farm day; accepted rows with an explicit zero remain 0. rain_mm_today is contextual only. No rain_tips_delta conversion is applied because retained per-device calibration and original ingestion conversion are not established by this tool.',
+    'Quantity rules: accepted finite nonnegative rain_mm_delta with rain_delta_status=ok is summed per device and proven farm day; accepted rows with an explicit zero remain 0. DRAGINO_LSN50 rows additionally require a matching accepted rain_observations amount and a captured enabled, zone, and timezone snapshot; missing or unresolved snapshots leave the day amount unreported. rain_mm_today is contextual only. No rain_tips_delta conversion is applied because retained per-device calibration and original ingestion conversion are not established by this tool.',
     `Historical evidence references: ${[...new Set(rows.flatMap((row) => row.evidenceRefs || []))].sort().map(escapeMarkdown).join(', ') || 'none retained'}.`,
     'Rows without retained observation identity are received_only and carry no deduplication claim. A numeric delta requires a proven historical assignment, matching old rain source and gauge basis, retained zone row, and matching farm-day period. Complete stored coverage markers are required on post-migration rows; a marker-less legacy comparison requires full-day provenance showing a sole eligible gauge. Neither quantity is certified.',
     'Reason counts:', '',

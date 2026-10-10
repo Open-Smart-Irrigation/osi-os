@@ -79,6 +79,39 @@ function legacyComparableDb(root, { old = 2, received = 3, source = 'local_gauge
   db.close();
   return dbPath;
 }
+function lsn50SnapshotDb(root, { enabled = true, status = 'accepted', amount = 3, rawAmount = 3, zoneId = 1, timezone = 'Europe/Zurich', zones = [1], zoneSnapshots = [{ zone_id: 1, zone_uuid: 'synthetic-zone-1', timezone: 'Europe/Zurich' }], observation = true, second = null } = {}) {
+  const dbPath = path.join(root, `lsn50-snapshot-${legacyFixtureId++}.db`);
+  const db = new DatabaseSync(dbPath);
+  db.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER, rain_gauge_enabled INTEGER);
+    CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+    CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT, rain_selected_deveui TEXT, rain_coverage TEXT);
+    CREATE TABLE rain_instrument_days (deveui TEXT, date TEXT, timezone TEXT, coverage TEXT);
+    INSERT INTO devices VALUES ('${E3}', 'DRAGINO_LSN50', ${zoneId}, 1);
+    INSERT INTO device_data VALUES (1, '${E3}', '2026-03-29T10:00:00Z', ${rawAmount}, ${rawAmount}, 'ok');
+    INSERT INTO zone_daily_environment VALUES (${zoneId}, '2026-03-29', 2, 'local_gauge', '${E3}', 'complete');
+    INSERT INTO rain_instrument_days VALUES ('${E3}', '2026-03-29', '${timezone}', 'complete');`);
+  if (observation) {
+    db.exec(fs.readFileSync(path.join(__dirname, '../database/migrations/ordered/0071__rain_observations.sql'), 'utf8'));
+    const config = JSON.stringify({ frame: null, zones, zone_snapshots: zoneSnapshots, rain_gauge_enabled: enabled });
+    db.prepare(`INSERT INTO rain_observations
+      (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, config_json, zone_id, timezone)
+      VALUES (1, ?, 'DRAGINO_LSN50', 'synthetic-lsn50', '2026-03-29T10:00:00Z', 'unknown', 'ordinary', ?, ?, ?, ?, ?)`)
+      .run(E3, amount, status, config, zoneId, timezone);
+    if (second) {
+      const secondZone = Number(second.zoneId);
+      db.prepare('INSERT INTO device_data VALUES (2, ?, ?, ?, ?, ?)').run(E3, second.receivedAt, second.amount, second.amount, 'ok');
+      db.prepare("INSERT INTO zone_daily_environment VALUES (?, '2026-03-29', 2, 'local_gauge', ?, 'complete')").run(secondZone, E3);
+      db.prepare('INSERT INTO rain_instrument_days VALUES (?, ?, ?, ?)').run(E3, '2026-03-29', second.timezone, 'complete');
+      const secondConfig = JSON.stringify({ frame: null, zones: [secondZone], zone_snapshots: [{ zone_id: secondZone, zone_uuid: `synthetic-zone-${secondZone}`, timezone: second.timezone }], rain_gauge_enabled: true });
+      db.prepare(`INSERT INTO rain_observations
+        (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, config_json, zone_id, timezone)
+        VALUES (2, ?, 'DRAGINO_LSN50', 'synthetic-lsn50-second', ?, 'unknown', 'ordinary', ?, 'accepted', ?, ?, ?)`)
+        .run(E3, second.receivedAt, second.amount, secondConfig, secondZone, second.timezone);
+    }
+  }
+  db.close();
+  return dbPath;
+}
 function soleGaugeProvenance(root, from = '2026-03-28T23:00:00Z', to = '2026-04-07T22:00:00Z') {
   return provenanceFile(root, [{ deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from, to, selected: true, sourceRef: 'synthetic:sole-gauge-period' }]);
 }
@@ -137,7 +170,8 @@ test('reports per-device legacy received amounts without certifying gauge aggreg
     assert.ok(e1Mar29.reasons.includes('gauge_addition_suspected'));
     assert.equal(e2Mar29.new_received_mm, '2');
     assert.equal(e2Mar29.new_selected_deveui, '');
-    assert.equal(flowZero.new_received_mm, '0');
+    assert.equal(flowZero.new_received_mm, '');
+    assert.ok(flowZero.reasons.includes('snapshot_ineligible'));
     assert.ok(flowZero.reasons.includes('flow_only_zero'));
     assert.ok(rows.some((row) => row.date === '2026-03-31' && row.deveui === E1 && row.new_received_mm === '' && row.reasons.includes('dry_row_missing')));
     assert.equal(e1Mar29.old_rain_source, "'=legacy, \"aggregate\"\nsecond line");
@@ -256,6 +290,42 @@ test('retained observation timezone snapshots attribute farm dates without curre
     assert.equal(observed.new_selected_deveui, E1);
     assert.equal(observed.delta_mm, '', 'partial retained coverage cannot be compared as a complete day');
     assert.ok(!observed.reasons.includes('no_observation_identity'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('LSN50 snapshot enablement and accepted amount gate received totals while shared snapshot zones remain valid', () => {
+  const root = tmp();
+  try {
+    const cases = [
+      { name: 'disabled', options: { enabled: false }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'enabled', options: {}, received: '3', delta: '1' },
+      { name: 'legacy-missing-observation', options: { observation: false }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'unaccepted', options: { status: 'ambiguous_identity' }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'amount-mismatch', options: { amount: 2, rawAmount: 3 }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'missing-snapshot-membership', options: { zones: [1], zoneSnapshots: [] }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'snapshot-timezone-mismatch', options: { zoneSnapshots: [{ zone_id: 1, zone_uuid: 'synthetic-zone-1', timezone: 'America/Chicago' }] }, received: '', delta: '', reason: 'snapshot_ineligible' },
+      { name: 'shared-secondary-zone', options: { zoneId: 2, zones: [1, 2], zoneSnapshots: [
+        { zone_id: 1, zone_uuid: 'synthetic-zone-1', timezone: 'Europe/Zurich' },
+        { zone_id: 2, zone_uuid: 'synthetic-zone-2', timezone: 'Europe/Zurich' },
+      ] }, received: '3', delta: '1' },
+    ];
+    for (const item of cases) {
+      const db = lsn50SnapshotDb(root, item.options);
+      const out = path.join(root, 'out-' + item.name);
+      const result = invoke(db, out);
+      assert.equal(result.status, 0, result.stderr);
+      const row = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8')).find((entry) => entry.deveui === E3);
+      assert.equal(row.new_received_mm, item.received, item.name);
+      assert.equal(row.delta_mm, item.delta, item.name);
+      if (item.reason) assert.ok(row.reasons.includes(item.reason), item.name);
+    }
+    const moved = lsn50SnapshotDb(root, { second: { zoneId: 2, timezone: 'America/Chicago', receivedAt: '2026-03-29T12:00:00Z', amount: 1 } });
+    const movedOut = path.join(root, 'out-moved');
+    const movedResult = invoke(moved, movedOut);
+    assert.equal(movedResult.status, 0, movedResult.stderr);
+    const movedRows = parseCsv(fs.readFileSync(path.join(movedOut, 'rain-diff-days.csv'), 'utf8')).filter((row) => row.deveui === E3);
+    assert.equal(movedRows.length, 2);
+    assert.ok(movedRows.every((row) => row.new_received_mm === '' && row.delta_mm === '' && row.reasons.includes('assignment_changed_within_day')));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
