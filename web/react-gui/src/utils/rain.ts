@@ -10,7 +10,7 @@ export type RainTimezoneBasis =
   | 'abbreviation'
   | 'invalid';
 
-export type RainDayQuality = 'received_only' | 'complete' | 'partial' | 'unknown';
+export type RainDayQuality = 'received_only' | 'complete' | 'complete_so_far' | 'partial' | 'unknown';
 
 export interface RainHistoryDay {
   day: string; // 'YYYY-MM-DD' farm calendar day, as bucketed by the gateway
@@ -44,7 +44,7 @@ const TIMEZONE_BASES: readonly RainTimezoneBasis[] = [
   'abbreviation',
   'invalid',
 ];
-const QUALITIES: readonly RainDayQuality[] = ['received_only', 'complete', 'partial', 'unknown'];
+const QUALITIES: readonly RainDayQuality[] = ['received_only', 'complete', 'complete_so_far', 'partial', 'unknown'];
 
 export function addDaysIso(day: string, delta: number): string {
   const ms = Date.parse(`${day}T00:00:00.000Z`);
