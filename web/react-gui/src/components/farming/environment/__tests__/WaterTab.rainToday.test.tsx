@@ -39,6 +39,19 @@ function buildTestI18n() {
 
 const TODAY = '2026-09-18';
 const SO_FAR = enDevices.environment.water.rainSoFar;
+const PROVIDER_PARTIAL = enDevices.environment.water.rainCoverage.providerPartial;
+const PARTIAL_RAIN_SOURCES = [
+  {
+    rainSource: 'weather_service' as const,
+    rainStation: null,
+    sourceHelp: 'From weather data (not measured)',
+  },
+  {
+    rainSource: 'meteoswiss_station' as const,
+    rainStation: { id: 'PAY', name: 'Payerne', distanceKm: 1.2, network: 'ogd-smn' },
+    sourceHelp: 'Measured at MeteoSwiss Payerne (1.2 km away)',
+  },
+];
 
 function week(): WaterDay[] {
   return Array.from({ length: 7 }, (_, index) => ({
@@ -126,9 +139,37 @@ describe('WaterTab rain today under the rain-resolution policy', () => {
       rainSource: 'weather_service',
     }));
 
-    expect(screen.getByText('0.0 mm')).toBeInTheDocument();
-    expect(screen.getByText('3.0 mm received only (incomplete day)')).toBeInTheDocument();
+    const rainTile = screen.getByText('0.0 mm').parentElement;
+    expect(rainTile).toHaveTextContent(PROVIDER_PARTIAL);
+    expect(rainTile).toHaveTextContent('3.0 mm received only (incomplete day)');
     fireEvent.click(screen.getByRole('button', { name: 'Where this rain value comes from' }));
     expect(screen.getByText('From weather data (not measured)')).toBeInTheDocument();
   });
+
+  it.each(PARTIAL_RAIN_SOURCES.flatMap((sourceCase) => [false, true].map((hasLowerBound) => ({
+    ...sourceCase,
+    hasLowerBound,
+  }))))(
+    'labels partial $rainSource coverage separately from received-only, lower bound: $hasLowerBound',
+    ({ rainSource, rainStation, sourceHelp, hasLowerBound }) => {
+      renderTab(gaugeWater({
+        rainTodayMm: 6,
+        rainTodayStatus: 'observed',
+        rainTodayCoverage: 'partial',
+        rainTodayReceivedMm: hasLowerBound ? 3 : null,
+        rainSource,
+        rainStation,
+      }));
+
+      const rainTile = screen.getByText('6.0 mm').parentElement;
+      expect(rainTile).toHaveTextContent(PROVIDER_PARTIAL);
+      if (hasLowerBound) {
+        expect(rainTile).toHaveTextContent('3.0 mm received only (incomplete day)');
+      } else {
+        expect(rainTile).not.toHaveTextContent(/received only/);
+      }
+      fireEvent.click(screen.getByRole('button', { name: 'Where this rain value comes from' }));
+      expect(screen.getByText(sourceHelp)).toBeInTheDocument();
+    },
+  );
 });

@@ -377,7 +377,20 @@ describe('water card source gating', () => {
  */
 describe('water card rain source', () => {
   const RAIN_HELP = { name: 'Where this rain value comes from' };
+  const PROVIDER_PARTIAL = 'Provider amount — partial coverage';
   const payerne = { id: 'PAY', name: 'Payerne', distanceKm: 1.2, network: 'ogd-smn' };
+  const partialProviderSources = [
+    {
+      rainSource: 'weather_service',
+      rainStation: null,
+      sourceHelp: 'From weather data (not measured)',
+    },
+    {
+      rainSource: 'meteoswiss_station',
+      rainStation: payerne,
+      sourceHelp: 'Measured at MeteoSwiss Payerne (1.2 km away)',
+    },
+  ] as const;
   const soil = () => sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } });
 
   it('shows station rain for a zone without a gauge and names the station behind a HelpTip', async () => {
@@ -432,6 +445,44 @@ describe('water card rain source', () => {
 
     expect(screen.queryByTestId('water-rain-tile')).not.toBeInTheDocument();
   });
+
+  it.each(partialProviderSources.flatMap((sourceCase) => [false, true].map((hasLowerBound) => ({
+    ...sourceCase,
+    hasLowerBound,
+  }))))(
+    'shows actual partial $rainSource coverage despite a configured gauge, lower bound: $hasLowerBound',
+    async ({ rainSource, rainStation, sourceHelp, hasLowerBound }) => {
+      apiMocks.getSummary.mockResolvedValue({
+        ...summary,
+        water: {
+          ...summary.water,
+          rainTodayMm: 6,
+          rainTodayCoverage: 'partial',
+          rainTodayReceivedMm: hasLowerBound ? 3 : null,
+          rainSource,
+          rainStation,
+          sensorHealth: { ...summary.water.sensorHealth, rainGaugePresent: true },
+        },
+      });
+      await openCard([soil()]);
+
+      const tile = screen.getByTestId('water-rain-tile');
+      expect(tile).toHaveTextContent('6.0 mm');
+      expect(tile).toHaveTextContent(PROVIDER_PARTIAL);
+      if (hasLowerBound) {
+        expect(tile).toHaveTextContent('3.0 mm received only (incomplete day)');
+      } else {
+        expect(tile).not.toHaveTextContent(/received only/);
+      }
+      fireEvent.click(screen.getByRole('button', RAIN_HELP));
+      expect(screen.getByText(sourceHelp)).toBeInTheDocument();
+      expect(screen.getByTestId('water-action-tile')).toHaveTextContent(
+        rainSource === 'weather_service'
+          ? 'Driven by water balance · rain from weather data'
+          : 'Driven by water balance · rain measured at MeteoSwiss Payerne',
+      );
+    },
+  );
 
   it('names no station when the source is not the station', async () => {
     apiMocks.getSummary.mockResolvedValue({

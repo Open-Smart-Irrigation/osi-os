@@ -90,6 +90,29 @@ const REASON_LABELS: Record<string, string> = {
 type Translate = TFunction<'devices'>;
 type LegendEntry = NonNullable<LegendProps['payload']>[number];
 
+/** Coverage wording for the selected rain amount; received-only stays separate. */
+export function rainCoverageNote(
+  t: Translate,
+  coverage: string | null | undefined,
+  source?: string | null,
+): string | null {
+  switch (coverage) {
+    case 'complete_so_far':
+      return t('environment.water.rainSoFar', { defaultValue: 'so far' });
+    case 'partial':
+      if (source === 'meteoswiss_station' || source === 'weather_service') {
+        return t('environment.water.rainCoverage.providerPartial', {
+          defaultValue: 'Provider amount — partial coverage',
+        });
+      }
+      return t('environment.water.rainReceivedOnly', { defaultValue: 'received only (incomplete day)' });
+    case 'unknown':
+      return t('environment.water.rainReceivedOnly', { defaultValue: 'received only (incomplete day)' });
+    default:
+      return null;
+  }
+}
+
 const RAIN_COLOR = '#38bdf8';
 const MEASURED_COLOR = '#14b8a6';
 const ESTIMATED_COLOR = '#22c55e';
@@ -384,6 +407,9 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       : water.rainSource === 'weather_service'
         ? t('zone.water.rainFromWeather', { defaultValue: 'From weather data (not measured)' })
         : null;
+  const rainCoverageDetail = water.rainTodayMm != null
+    ? rainCoverageNote(t, water.rainTodayCoverage, water.rainSource)
+    : null;
   const showRainTile = hasRainGauge || (rainSourceHelp != null && water.rainTodayMm != null);
   const todayDate = water.todayDate ?? null;
   const chartData = buildWaterChartRows(water);
@@ -438,8 +464,7 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       value: formatValue(water.rainTodayMm, 'mm', 1),
       // A received lower bound stays visible alongside a provider-resolved amount.
       detail: [
-        water.rainTodayMm != null && water.rainTodayCoverage === 'complete_so_far'
-          ? t('environment.water.rainSoFar', { defaultValue: 'so far' }) : null,
+        rainCoverageDetail,
         water.rainTodayReceivedMm != null
           ? t('environment.water.rainReceivedOnly', { value: formatValue(water.rainTodayReceivedMm, 'mm', 1), defaultValue: '{{value}} received only (incomplete day)' }) : null,
       ].filter(Boolean).join(' · ') || null,

@@ -450,7 +450,10 @@
         "cloud": "ET0 dal modello meteo Open-Meteo (non misurata in questa azienda); OSI Cloud applica il coefficiente colturale"
       },
       "modelAccuracyNote": "L’ET0 da modello può discostarsi del 10-20 % da una stazione locale in un singolo giorno, soprattutto nelle giornate nuvolose o ventose e in montagna; i totali settimanali concordano meglio.",
-      "meteoswissCloudNote": "Questa zona usa MeteoSvizzera sul gateway; lo storico di OSI Cloud usa Open-Meteo finché lo storico MeteoSvizzera non è disponibile nel cloud."
+      "meteoswissCloudNote": "Questa zona usa MeteoSvizzera sul gateway; lo storico di OSI Cloud usa Open-Meteo finché lo storico MeteoSvizzera non è disponibile nel cloud.",
+      "rainCoverage": {
+        "providerPartial": "Quantità del fornitore — copertura parziale"
+      }
     },
     "generatedAt": "Generato {{time}}",
     "sectionTitle": "Ambiente e previsioni meteo",
