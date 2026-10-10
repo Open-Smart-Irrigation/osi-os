@@ -132,8 +132,20 @@ test('the shipped writers use version-bumping upserts, not INSERT OR REPLACE', (
   for (const id of ['lorain-ingest-fn', 's2120-ingest-fn', 'lsn50-zone-agg-fn']) {
     assert.ok(fnOf(id).includes("osiLib.require('rain')"), `${id} writes through osi-rain`);
   }
-  assert.ok(fnOf('lsn50-zone-agg-fn').includes('R.recomputeZoneDay('), 'lsn50-zone-agg-fn writes the zone day through osi-rain');
   const rainModule = fs.readFileSync(path.join(path.dirname(FLOWS), 'node-red/osi-rain/index.js'), 'utf8');
+  const lsn50ZoneAgg = fnOf('lsn50-zone-agg-fn');
+  assert.ok(lsn50ZoneAgg.includes('await db.transaction(async (t) => rainLoad.value.aggregateLsn50ZoneDay(t, d)'),
+    'lsn50-zone-agg-fn delegates zone-day writes through the osi-rain aggregate facade transaction');
+  const aggregateStart = rainModule.indexOf('async function aggregateLsn50ZoneDay(t, d)');
+  const aggregateEnd = rainModule.indexOf('\nfunction sameValue', aggregateStart);
+  assert.ok(aggregateStart > -1 && aggregateEnd > aggregateStart, 'osi-rain exposes the LSN50 aggregate helper');
+  const aggregateBody = rainModule.slice(aggregateStart, aggregateEnd);
+  assert.ok(aggregateBody.includes('if (acceptedRain) {')
+    && aggregateBody.includes('await recomputeZoneDay(t, zoneId, date, {'),
+  'accepted rain snapshots are projected through the versioned zone-day helper');
+  assert.ok(aggregateBody.includes('if (zone && flowAvailable && !flowZones.has(Number(zone.zone_id)))')
+    && aggregateBody.includes("await recomputeZoneDay(t, zone.zone_id, date, { trigger: 'flow', flowLitersDelta: flowDelta });"),
+  'flow for the current owner is projected through the versioned zone-day helper');
   assert.ok(rainModule.includes(", computed_at = ?, sync_version = sync_version + 1 WHERE zone_id = ? AND date = ?'"),
     'osi-rain must bump zone_daily_environment.sync_version and write a new computed_at when a projected field changes');
   assert.ok(!/INSERT OR REPLACE INTO zone_daily_environment/.test(rainModule));
