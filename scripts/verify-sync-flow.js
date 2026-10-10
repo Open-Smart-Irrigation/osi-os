@@ -1413,6 +1413,28 @@ if (bootstrapNode) {
     }
   }
 }
+// Zone-day rain quality: the bootstrap and force-sync zoneEnvironments SELECTs name
+// the five quality columns, and the reasons travel as a parsed JSON array.
+for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+  const node = flows.find((entry) => entry.id === id);
+  const func = String(node?.func || '');
+  const start = func.indexOf('const zoneEnvironments = await q([');
+  const end = start >= 0 ? func.indexOf("].join('\\n'));", start) : -1;
+  const query = start >= 0 && end > start ? func.slice(start, end) : '';
+  if (!query) {
+    fail(`${id} zoneEnvironments query not found`);
+    continue;
+  }
+  for (const column of ['sync_version', 'rain_coverage', 'rain_selected_deveui', 'rain_policy_version', 'rain_quality_reasons', 'rain_received_mm']) {
+    if (!query.includes(`'  ze.${column}`)) fail(`${id} zoneEnvironments SELECT missing ze.${column}`);
+    else console.log(`OK ${id} zoneEnvironments SELECT names ze.${column}`);
+  }
+  if (!func.includes('JSON.parse(ze.rain_quality_reasons)') || !func.includes('ze.rain_quality_reasons = null;')) {
+    fail(`${id} zoneEnvironments rain_quality_reasons is not parsed to an array (null on failure)`);
+  } else {
+    console.log(`OK ${id} zoneEnvironments rain_quality_reasons parsed to an array`);
+  }
+}
 
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Validate & decode token', 'function allowPrivateTargets()', 'supports a private-target maintenance override');
