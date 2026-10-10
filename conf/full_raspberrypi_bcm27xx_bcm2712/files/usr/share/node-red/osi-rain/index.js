@@ -1712,6 +1712,12 @@ async function recomputeZoneDay(t, zoneId, dayIso, opts = {}) {
     if (!CREATING_TRIGGERS.has(trigger)) applyRain = false;
     else if (trigger === 'accepted' && row.rain_source && row.rain_source !== 'none' && row.rain_source !== p.source
       && !(Number(opts.amountMm) > 0)) applyRain = false;
+    else if (trigger === 'flow') {
+      const sameSource = !row.rain_source || row.rain_source === 'none' || row.rain_source === p.source;
+      const keepsAmount = row.rainfall_mm == null
+        || (p.receivedMm != null && Number.isFinite(p.receivedMm) && p.receivedMm >= row.rainfall_mm);
+      if (!sameSource || !keepsAmount) applyRain = false;
+    }
   }
   const next = { ...row };
   if (applyRain) Object.assign(next, projected);

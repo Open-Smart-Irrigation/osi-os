@@ -327,6 +327,51 @@ test('(g) a pre-0072 legacy row is not modified by a recompute of another date',
   assert.deepEqual(zoneRow(db, 1, '2026-10-07'), legacy);
 });
 
+test('flow preserves a legacy S2120 row when the zone becomes ambiguous', async () => {
+  const db = seed();
+  addDevice(db, 'A840410000000099', 'SENSECAP_S2120', 1);
+  db.exec(`INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version)
+    VALUES (1, '2026-10-08', 3, 2, 'sensecap_s2120', '2026-10-08T09:00:00.000Z', 7)`);
+  const before = zoneRow(db, 1, '2026-10-08');
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'flow', flowLitersDelta: 4 }));
+  const after = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual({ ...after, flow_liters: before.flow_liters, sync_version: before.sync_version, computed_at: before.computed_at }, before);
+  assert.equal(after.flow_liters, 6);
+  assert.equal(after.sync_version, before.sync_version + 1);
+  assert.equal(after.rain_source, 'sensecap_s2120');
+});
+
+test('flow preserves a legacy LoRain amount after its device is deleted', async () => {
+  const db = seed();
+  db.exec(`UPDATE devices SET deleted_at = '2026-10-08T11:00:00.000Z' WHERE deveui = '${GAUGE_A}'`);
+  db.exec(`INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version)
+    VALUES (1, '2026-10-08', 5, 1, 'aquascope_lorain', '2026-10-08T09:00:00.000Z', 3)`);
+  const before = zoneRow(db, 1, '2026-10-08');
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'flow', flowLitersDelta: 2 }));
+  const after = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual({ ...after, flow_liters: before.flow_liters, sync_version: before.sync_version, computed_at: before.computed_at }, before);
+  assert.equal(after.flow_liters, 3);
+  assert.equal(after.sync_version, before.sync_version + 1);
+  assert.equal(after.rainfall_mm, 5);
+  assert.equal(after.rain_source, 'aquascope_lorain');
+});
+
+test('flow preserves a legacy same-source amount when the projection is lower', async () => {
+  const db = seed();
+  db.prepare(`INSERT INTO device_data (deveui, recorded_at, rain_mm_delta, rain_delta_status)
+    VALUES (?, '2026-10-08T08:00:00.000Z', 2.5, 'ok')`).run(GAUGE_A);
+  db.exec(`INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version)
+    VALUES (1, '2026-10-08', 5, 1, 'aquascope_lorain', '2026-10-08T09:00:00.000Z', 3)`);
+  const before = zoneRow(db, 1, '2026-10-08');
+  await tx(db, (t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'flow', flowLitersDelta: 2 }));
+  const after = zoneRow(db, 1, '2026-10-08');
+  assert.deepEqual({ ...after, flow_liters: before.flow_liters, sync_version: before.sync_version, computed_at: before.computed_at }, before);
+  assert.equal(after.flow_liters, 3);
+  assert.equal(after.sync_version, before.sync_version + 1);
+  assert.equal(after.rainfall_mm, 5);
+  assert.equal(after.rain_source, 'aquascope_lorain');
+});
+
 test('the day of a move: each zone counts only what it received, and neither certifies the day', async () => {
   const db = seed();
   db.exec("UPDATE devices SET irrigation_zone_id = NULL WHERE deveui = 'WX1'");
