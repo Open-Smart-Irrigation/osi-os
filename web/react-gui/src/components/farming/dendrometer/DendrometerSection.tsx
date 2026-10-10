@@ -248,7 +248,7 @@ const NoDataBanner: React.FC = () => (
 
 interface ZoneSummaryProps {
   stress: string;
-  rainfall: number;
+  rainfall: number | null;
   water: number;
   deviceCount: number;
 }
@@ -261,7 +261,7 @@ const ZoneSummaryRow: React.FC<ZoneSummaryProps> = ({ stress, rainfall, water, d
         Zone worst stress:{' '}
         <span className={`font-semibold ${cfg.badgeText}`}>{cfg.label}</span>
       </span>
-      {rainfall > 0 && <span>🌧 {rainfall.toFixed(1)} mm rain</span>}
+      {rainfall != null && rainfall > 0 && <span>🌧 {rainfall.toFixed(1)} mm rain</span>}
       {water > 0    && <span>💧 {water.toFixed(0)} L delivered</span>}
       <span>{deviceCount} sensor{deviceCount !== 1 ? 's' : ''}</span>
     </div>

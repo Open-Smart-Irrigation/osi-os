@@ -286,8 +286,8 @@
       "reason": "Daily agronomy parity (spec docs/superpowers/specs/2026-09-27-daily-agronomy-parity-design.md), measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 4958 -> HEAD 4998 = +40. Supersedes the prior entry, whose growth this delta includes. The zone list SELECT reads iz.stage_started_on."
     },
     "dendro-zone-rec-fn": {
-      "delta": 1955,
-      "reason": "Supersedes the previous entry (1049). port/wave3-auth-flaggate (fix(auth): flag-gate the shared scope resolver across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit 2c4fa9a5f): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 5194 -> HEAD 7149 = +1955. getAuthSecret() previously called osiLib.require('scope') unconditionally, violating the default-off contract (a lost osi-lib helper file would 500 every auth endpoint on a flag-off gateway). Fixed per the history-api-router-fn/zone-env-fn reference pattern: getAuthSecret() now checks a freshly-recomputed OSI_SCOPED_ACCESS flag first (recomputed locally rather than closing over any outer scopedOn, avoiding TDZ risk uniformly across every node regardless of its own structure) and only resolves osiLib inside the flag-on branch; the flag-off branch inlines the exact pre-refactor secret-resolution logic (same file paths, same ENOENT-quiet read/generate/write behavior), byte-equivalent to the pre-port route."
+      "delta": 3,
+      "reason": "Supersedes the prior entry (1955, flag-gated scope resolver), which origin/main already measures in full. Rain-resolution policy (finding 7): the zone recommendations API answers a stored NULL rainfall_mm as null instead of 0 (`?? 0` -> `?? null`). Measured with verify-flows-size-ratchet nodeSizes over both byte-identical maintained profiles: origin/main 7149 -> HEAD 7152 = +3."
     },
     "dendro-history-fn": {
       "delta": 1953,

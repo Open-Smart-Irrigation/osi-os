@@ -20,7 +20,7 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { facadeDb, loadNode } = require('./lib/flow-node-harness');
+const { executeFunction, facadeDb, loadNode, makeAuthHeader, seedTestDb } = require('./lib/flow-node-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = path.join(ROOT, 'database/seed-blank.sql');
@@ -320,3 +320,33 @@ for (const profile of PROFILES) {
     db.close();
   });
 }
+
+// The zone recommendations API (dendro-zone-rec-fn) answers the stored amount: an
+// unknown day stays null there, never 0.
+test('GET zone recommendations keeps an unknown day\'s rainfall_mm null and a dry day 0', async () => {
+  const SECRET = 'dendro-rain-policy-secret';
+  const db = seedTestDb();
+  const insert = db.prepare(`INSERT INTO zone_daily_recommendations(zone_id, date, zone_stress_summary, rainfall_mm, irrigation_action, computed_at)
+    VALUES (1, ?, 'none', ?, 'maintain', ?)`);
+  insert.run('2026-10-07', 0, NOW_ISO);
+  insert.run('2026-10-08', null, NOW_ISO);
+  try {
+    const out = await executeFunction(loadNode('dendro-zone-rec-fn'), {
+      db,
+      env: { AUTH_TOKEN_SECRET: SECRET },
+      msg: {
+        req: {
+          headers: { authorization: makeAuthHeader({ userId: 2, username: 'res1', secret: SECRET, expiresAt: Date.now() + 60000 }) },
+          params: { zone_id: '1' },
+          query: {},
+        },
+      },
+    });
+    assert.deepEqual(out.errors, []);
+    assert.equal(out.result.statusCode, 200, JSON.stringify(out.result.payload));
+    const byDate = Object.fromEntries(out.result.payload.map((r) => [r.date, r.rainfall_mm]));
+    assert.deepEqual(byDate, { '2026-10-07': 0, '2026-10-08': null });
+  } finally {
+    db.close();
+  }
+});

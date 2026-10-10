@@ -520,7 +520,8 @@ export interface ZoneRecommendation {
   zone_id: number;
   date: string;
   zone_stress_summary: StressLevel;
-  rainfall_mm: number;
+  /** The day's rain under the rain-resolution policy; null when unknown, never 0. */
+  rainfall_mm: number | null;
   water_delivered_liters: number;
   irrigation_action: IrrigationAction;
   action_reasoning: string;
