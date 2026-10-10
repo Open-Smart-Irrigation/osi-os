@@ -362,7 +362,9 @@ guide, sections 10.2, 10.3.1 and 13.3):
 - measurementId `4213` ("Rain Accumulation", frame `4C`, firmware v2.0 and
   later) is **cumulative** rainfall in mm.
 
-`flows.json` node `s2120-process-fn` ("Process S2120") stores `4113` as
+`flows.json` node `s2120-ingest-fn` ("Ingest S2120", the one S2120 writer;
+rules in `osi-rain`: `parseS2120Measurements`, `deriveS2120Counter`,
+`deriveS2120Legacy`, `ingestS2120Uplink`) stores `4113` as
 `device_data.rain_mm_per_hour` and `4213` as
 `device_data.rain_gauge_cumulative_mm`, and derives the interval amount
 `rain_mm_delta` (kept to 0.001 mm; round only for display):
@@ -384,13 +386,20 @@ guide, sections 10.2, 10.3.1 and 13.3):
 
 `rain_delta_status` values: `cumulative_baseline`, `first_sample`,
 `counter_reset`, `intensity_only`, `duplicate_timestamp`/`out_of_order` (a
-same-or-later rain row already exists), `invalid_interval`, `error`, or `ok`.
+same-or-later rain row already exists), `invalid_interval`,
+`ambiguous_identity` (no ChirpStack `deduplicationId`), or `ok`.
 Only `ok` samples have a non-null `rain_mm_delta`/`rain_mm_per_10min`, and only
-those flow into `zone_daily_environment` aggregation (`s2120-rain-agg-fn`,
-"Aggregate Zone Rain"), which upserts `rain_source='sensecap_s2120'` and
-accumulates `rainfall_mm` per zone/day (multi-zone via the
-`weather_station_zones` junction table, since one S2120 can serve multiple
-zones). S2120 totals stored before this contract (ingest that differenced
+those reach `zone_daily_environment`: in the same transaction the zone day is
+set to the device's `ok` total inside that zone's local day, with
+`rain_source='sensecap_s2120'` (multi-zone via the `weather_station_zones`
+junction table, since one S2120 can serve multiple zones; else the device's
+own zone). A zero increment never takes over a day another source owns.
+Every uplink also gets a `rain_observations` row (`instrument_type
+'SENSECAP_S2120'`, `frame_kind` `counter`/`ordinary`/`status`); a repeated
+delivery or a retransmission is a duplicate, and a counter frame older than
+the latest rain row carries `late_counter_frame` and is never counted.
+`rain_mm_today` is the device's day in its zone timezone (device zone, else
+first weather-station zone, else UTC), never the gateway host day. S2120 totals stored before this contract (ingest that differenced
 `4113`) are not validated measurements; `scripts/assess-s2120-rain-history.js`
 reports them per device and day against a DB copy.
 

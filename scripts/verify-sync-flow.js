@@ -295,8 +295,7 @@ const requiredFunctionNodes = [
   'Build LSN50 mode downlink',
   'Process STREGA',
   'Persist STREGA Uplink',
-  'Process S2120',
-  'Aggregate Zone Rain',
+  'Ingest S2120',
   'Ingest LoRain',
   'Insert Chameleon Reading',
   'Get Zone Assignments',
@@ -2606,33 +2605,54 @@ expectIncludesById('merge-device-data', 'wind_gust_mps: latest.wind_gust_mps', '
 expectIncludesById('merge-device-data', 'uv_index: latest.uv_index', 'merges S2120 UV into GET /api/devices');
 expectIncludesById('merge-device-data', 'rain_gauge_cumulative_mm: latest.rain_gauge_cumulative_mm', 'merges S2120 cumulative rain into GET /api/devices');
 expectIncludesById('merge-device-data', 'bat_pct: latest.bat_pct', 'merges S2120 battery into GET /api/devices');
-expectIncludesById('s2120-process-fn', 'data.object?.messages', 'accepts live decoded S2120 message shape');
-expectIncludesById('s2120-process-fn', 'data.object?.data?.messages', 'accepts nested decoded S2120 message shape');
-expectIncludesById('s2120-process-fn', "normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID');
-// SenseCAP S2120 user guide 10.3.1 and 13.3: 4113 is rainfall INTENSITY (mm/h,
-// six times the rain of the past ten minutes); 4213 (frame 4C, firmware v2.0+)
-// is CUMULATIVE rainfall (mm). Only 4213 is a counter; 4113 is a rate.
-expectIncludesById('s2120-process-fn', "rainGaugeCumulativeMm: finiteOrNull(measurements['4213'])", 'differences only the Seeed cumulative-rainfall measurement 4213 as the rain counter');
-expectIncludesById('s2120-process-fn', "const rainMmPerHour = finiteOrNull(measurements['4113'])", 'stores the Seeed rain-intensity measurement 4113 as the rain rate, never as a counter');
-expectIncludesById('s2120-process-fn', "const COUNTER_BASELINE = 'cumulative_baseline'", 'marks the first 4213 row so rows written under the old 4113 interpretation never become a counter baseline');
-expectIncludesById('s2120-process-fn', 'const LEGACY_WINDOW_S = 600', 'integrates legacy intensity only over the vendor ten-minute window');
-expectIncludesById('s2120-process-fn', "rainDeltaStatus = 'intensity_only'", 'leaves the legacy rain amount unknown when the cadence does not match the ten-minute window');
-expectIncludesById('s2120-process-fn', "const MARKER_KEY = 's2120CounterBaseline'", 'caches the counter-baseline marker per device in node context instead of scanning the history on every uplink');
-expectIncludesById('s2120-process-fn', "windGustMps: measurements['4191'] ?? null", "reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)");
-expectIncludesById('s2120-process-fn', "measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field');
-expectIncludesById('s2120-process-fn', 'duplicate_timestamp', 'skips duplicate S2120 rain-counter uplinks');
-expectIncludesById('s2120-process-fn', 'out_of_order', 'skips out-of-order S2120 rain-counter uplinks');
-expectIncludesById('s2120-process-fn', 'counter_reset', 'detects S2120 rain-counter resets');
-expectIncludesById('s2120-process-fn', 'invalid_interval', 'skips S2120 rain deltas when the interval is invalid');
-expectIncludesById('s2120-process-fn', 'rainMmPer10Min', 'computes normalized S2120 rain telemetry per 10 minutes');
-expectIncludesById('s2120-process-fn', 'counterIntervalSeconds', 'stores the elapsed S2120 counter interval in seconds');
-expectIncludesById('s2120-rain-agg-fn', 'SELECT wsz.zone_id', 'prefers explicit S2120 weather station zone assignments');
-expectIncludesById('s2120-rain-agg-fn', 'if (!zones.length)', 'falls back when S2120 weather station zone assignments are absent');
-expectIncludesById('s2120-rain-agg-fn', 'd.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback');
-expectIncludesById('s2120-rain-agg-fn', 'const rainToday = sn(d.rainMmToday != null ? d.rainMmToday : d.rainMmDelta)', 'seeds S2120 zone totals from device daily rain');
-expectIncludesById('s2120-rain-agg-fn', 'MAX(COALESCE(rainfall_mm,0)+${rainDelta}, ${rainToday})', 'keeps S2120 zone totals caught up with device daily rain');
-expectLibById('s2120-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
-expectLibById('s2120-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+// S2120 has one writer (rain correctness programme, review finding 4): s2120-ingest-fn hands
+// the uplink to osi-rain, which reads the previous 4213 counter, derives the increment and
+// writes rain_observations, device_data and the zone days inside one osiDb transaction.
+// Behaviour: scripts/test-s2120-rain-ingest.js, scripts/test-s2120-ingest-concurrency.js.
+for (const removedId of ['s2120-process-fn', 's2120-sql-fn', 's2120-sqlite', 's2120-rain-agg-fn']) {
+  expectCondition(!findNodeById(removedId), `S2120 second writer path ${removedId} is gone`, `S2120 second writer path ${removedId} is still present`);
+}
+expectCondition(JSON.stringify((findNodeById('s2120-mqtt-in') || {}).wires) === JSON.stringify([['s2120-ingest-fn']]),
+  'S2120 MQTT input feeds only s2120-ingest-fn', 'S2120 MQTT input must feed only s2120-ingest-fn');
+expectIncludesById('s2120-ingest-fn', "device.type_id !== 'SENSECAP_S2120'", 'opens a write transaction only for S2120 devices');
+expectIncludesById('s2120-ingest-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib');
+expectIncludesById('s2120-ingest-fn', 'db.transaction((t) => R.ingestS2120Uplink(t, uplink,', 'ingests inside one osiDb transaction');
+expectIncludesById('s2120-ingest-fn', 'eventId: data.deduplicationId || null', 'hands the ChirpStack deduplicationId to the durable identity claim');
+expectIncludesById('s2120-ingest-fn', "const MARKER_KEY = 's2120CounterBaseline'", 'caches the counter-baseline marker per device in node context instead of scanning the history on every uplink');
+expectIncludesById('s2120-ingest-fn', 'delete c[devEui]', 'forgets the cached counter-baseline marker when the transaction rolls back');
+expectLibById('s2120-ingest-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('s2120-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
+{
+  const rainModuleSource = fs.readFileSync(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'), 'utf8');
+  // SenseCAP S2120 user guide 10.3.1 and 13.3: 4113 is rainfall INTENSITY (mm/h,
+  // six times the rain of the past ten minutes); 4213 (frame 4C, firmware v2.0+)
+  // is CUMULATIVE rainfall (mm). Only 4213 is a counter; 4113 is a rate.
+  for (const [needle, description] of [
+    ['object?.messages', 'accepts live decoded S2120 message shape'],
+    ['object?.data?.messages', 'accepts nested decoded S2120 message shape'],
+    ["normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID'],
+    ["rainGaugeCumulativeMm: finiteOrNull(measurements['4213'])", 'differences only the Seeed cumulative-rainfall measurement 4213 as the rain counter'],
+    ["rainMmPerHour: finiteOrNull(measurements['4113'])", 'stores the Seeed rain-intensity measurement 4113 as the rain rate, never as a counter'],
+    ["const S2120_COUNTER_BASELINE = 'cumulative_baseline';", 'marks the first 4213 row so rows written under the old 4113 interpretation never become a counter baseline'],
+    ['const S2120_LEGACY_WINDOW_S = 600;', 'integrates legacy intensity only over the vendor ten-minute window'],
+    ["return { deltaMm: null, status: 'intensity_only' };", 'leaves the legacy rain amount unknown when the cadence does not match the ten-minute window'],
+    ["windGustMps: measurements['4191'] ?? null", 'reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)'],
+    ["measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field'],
+    ["'duplicate_timestamp' : 'out_of_order'", 'skips duplicate and out-of-order S2120 rain-counter uplinks'],
+    ["status: 'counter_reset'", 'detects S2120 rain-counter resets'],
+    ["status: 'invalid_interval'", 'skips S2120 rain deltas when the interval is invalid'],
+    ['out.per10Mm = roundTo((d.deltaMm / out.intervalSeconds) * 600, 3)', 'computes normalized S2120 rain telemetry per 10 minutes'],
+    ['rain.intervalSeconds, rain.status', 'stores the elapsed S2120 counter interval in seconds'],
+    ["reasons.push('late_counter_frame')", 'marks a late S2120 counter frame and never counts it'],
+    ['FROM weather_station_zones wsz', 'prefers explicit S2120 weather station zone assignments'],
+    ['if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL', 'falls back when S2120 weather station zone assignments are absent'],
+    ['SELECT d.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback'],
+    ['const total = await s2120DayTotal(t, id.deveui, win.startIso, win.endIso, false);', 'sets the S2120 zone day to the device day total in the zone timezone'],
+    ['source: S2120_RAIN_SOURCE, allowTakeover: rain.deltaMm > 0', 'never lets a zero S2120 increment take over a zone day another source owns'],
+  ]) {
+    expectCondition(rainModuleSource.includes(needle), `osi-rain S2120 ${description}`, `osi-rain S2120 missing: ${description}`);
+  }
+}
 const lorainMqttNode = findNodeById('lorain-mqtt-in');
 if (!lorainMqttNode) {
   fail('missing LoRain MQTT input node');
@@ -2681,9 +2701,9 @@ expectLibById('lorain-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLi
 for (const dedupNodeId of [
   '81c98fb07344a787', // KIWI/CLOVER "Process Data"
   'strega-process-fn', // "Process STREGA"
-  's2120-process-fn',
-  // LoRain left this list with migration 0071: rain_observations' unique
-  // (deveui, event_id) index makes its identity durable across restarts.
+  // LoRain (migration 0071) and S2120 (one transactional writer) left this
+  // list: rain_observations' unique (deveui, event_id) index makes their
+  // identity durable across restarts.
   'lsn50-decode-fn', // "Decode LSN50"
   '6b28e0d879808dd9', // "UC512 Normalize + Write"
   'sdi12-gate-fn', // "SDI12 Gate + Decode"
@@ -4412,30 +4432,6 @@ if (!dendroHelperPath) {
       };
     }
 
-    function createS2120QueryHandler(options = {}) {
-      return (sql) => {
-        if (sql.includes('SELECT type_id FROM devices')) {
-          return [{ type_id: options.deviceType || 'SENSECAP_S2120' }];
-        }
-        if (sql.includes("rain_delta_status = 'cumulative_baseline'")) {
-          return options.counterBaseline ? [options.counterBaseline] : [];
-        }
-        if (sql.includes('SELECT recorded_at, rain_gauge_cumulative_mm')) {
-          return options.previousSample ? [options.previousSample] : [];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_mm_per_hour IS NOT NULL')) {
-          return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at <') && sql.includes('rain_mm_per_hour IS NOT NULL')) {
-          return options.previousRainRow ? [options.previousRainRow] : [];
-        }
-        if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
-          return [{ rain_mm_today: options.todayTotal ?? 0 }];
-        }
-        return [];
-      };
-    }
-
     function buildLorainFixture(options = {}) {
       const rainMmDelta = options.rainMmDelta ?? 1.5;
       const object = {
@@ -4630,123 +4626,109 @@ if (!dendroHelperPath) {
       fail(`failed to execute STREGA telemetry fixture: ${error.message}`);
     }));
 
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture(),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler()),
-          },
+    // S2120 measurement mapping and counter rules, now in osi-rain (moved from the
+    // former Process S2120 node); behaviour on a real database:
+    // scripts/test-s2120-rain-ingest.js and scripts/test-s2120-ingest-concurrency.js.
+    {
+      const rain = require(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'));
+      const parsed = rain.parseS2120Measurements(buildS2120Fixture().payload.object);
+      expectEqual(parsed.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4213 to cumulative rain');
+      expectEqual(parsed.rainMmPerHour, 8.4, 'S2120 fixture keeps measurement 4113 as the reported rain intensity');
+      expectEqual(parsed.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
+      expectEqual(parsed.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
+      expectApprox(parsed.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
+      const baseline = rain.deriveS2120Counter(null, 12.4, { hasBaseline: false });
+      expectEqual(baseline.status, 'cumulative_baseline', 'S2120 fixture marks the first cumulative-rain sample as the counter baseline without fabricating a delta');
+      expectEqual(baseline.deltaMm, null, 'S2120 first-sample fixture stores no rain increment');
+      const valid = rain.deriveS2120Counter(10.0, 11.4, { intervalSeconds: 600 });
+      expectEqual(valid.status, 'ok', 'S2120 fixture marks increasing cumulative rain as valid');
+      expectApprox(valid.deltaMm, 1.4, 0.000001, 'S2120 fixture computes rain deltas from cumulative rain');
+    }
+
+    // s2120-ingest-fn's contract with osi-rain: only an S2120 opens a transaction, the
+    // uplink it hands over, one transaction, nothing emitted, and a rollback that is
+    // reported and forgets the cached counter-baseline marker.
+    function s2120RainLib(result, calls) {
+      return {
+        require(name) {
+          if (name !== 'rain') return { ok: false, error: 'unexpected module ' + name };
+          return { ok: true, value: { async ingestS2120Uplink(t, uplink, opts) {
+            calls.push({ t, uplink, opts });
+            if (opts && opts.markerCache) opts.markerCache.set(uplink.deveui, '2026-04-21T09:00:00.000Z');
+            if (result instanceof Error) throw result;
+            return result;
+          } } };
+        },
+      };
+    }
+    function s2120TxDb(log, typeId) {
+      return { Database: class S2120TxDatabase {
+        get(sql, params) { log.push('GET'); return Promise.resolve(typeId ? { type_id: typeId } : undefined); }
+        transaction(fn) {
+          log.push('BEGIN');
+          return Promise.resolve().then(() => fn({ scope: 'tx' })).then(
+            (value) => { log.push('COMMIT'); return value; },
+            (error) => { log.push('ROLLBACK'); throw error; });
         }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4213 to cumulative rain');
-      expectEqual(formatted.rainMmPerHour, 8.4, 'S2120 fixture keeps measurement 4113 as the reported rain intensity');
-      expectEqual(formatted.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
-      expectEqual(formatted.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
-      expectApprox(formatted.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
-      expectEqual(formatted.rainDeltaStatus, 'cumulative_baseline', 'S2120 fixture marks the first cumulative-rain sample as the counter baseline without fabricating a delta');
-      expectEqual(formatted.rainMmDelta, null, 'S2120 first-sample fixture stores no rain increment');
-      expectEqual(formatted.rainMmPer10Min, null, 'S2120 first-sample fixture leaves the normalized rain rate empty');
-      expectEqual(rainOut, null, 'S2120 first-sample fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute first-sample S2120 fixture: ${error.message}`);
-    }));
+        close(callback) { log.push('CLOSE'); if (callback) callback(); }
+      } };
+    }
+    function s2120Context() {
+      const store = new Map();
+      return { store, get: (key) => store.get(key), set: (key, value) => store.set(key, value) };
+    }
+    const s2120Uplink = () => {
+      const msg = buildS2120Fixture();
+      Object.assign(msg.payload, { deduplicationId: 'ev-s1', devAddr: '01000002', fCnt: 9, fPort: 3, data: 'TAALAAAwcA==' });
+      return msg;
+    };
+    const s2120Accepted = { outcome: 'accepted', status: 'accepted', observationId: 1, deviceDataId: 1, zoneDays: [], configQuery: null, rainDeltaStatus: 'ok', rainMmDelta: 1.4 };
 
     pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainCumulativeMm: 11.4 }),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler({
-              counterBaseline: { recorded_at: '2026-04-21T09:00:00.000Z' },
-              previousSample: {
-                recorded_at: '2026-04-21T09:50:00.000Z',
-                rain_gauge_cumulative_mm: 10.0,
-              },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'S2120 fixture marks increasing cumulative rain as valid');
-      expectApprox(formatted.rainMmDelta, 1.4, 0.000001, 'S2120 fixture computes rain deltas from cumulative rain');
-      expectApprox(formatted.rainMmPerHour, 8.4, 0.000001, 'S2120 fixture stores the reported 4113 intensity as the hourly rain rate');
-      expectApprox(formatted.rainMmPer10Min, 1.4, 0.000001, 'S2120 fixture computes normalized rain per 10 minutes');
-      expectApprox(formatted.rainMmToday, 2.6, 0.000001, 'S2120 fixture accumulates local-day rain totals');
-      expectEqual(formatted.counterIntervalSeconds, 600, 'S2120 fixture stores the elapsed rain-counter interval in seconds');
-      expectCondition(!!rainOut, 'S2120 fixture emits valid rain deltas to the zone aggregation path', 'S2120 fixture did not emit a valid rain delta to the zone aggregation path');
-    })().catch((error) => {
-      fail(`failed to execute valid-delta S2120 fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(s2120Accepted, calls), osiDb: s2120TxDb(log, 'DRAGINO_LSN50') },
+      });
+      expectCondition(result === null && calls.length === 0 && JSON.stringify(log) === JSON.stringify(['GET', 'CLOSE']),
+        'S2120 ingest opens no transaction for another device type', `S2120 ingest handled another device type: ${JSON.stringify(log)}`);
+    })().catch((error) => fail(`failed to execute non-S2120 rejection fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainCumulativeMm: 11.4 }),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler({
-              counterBaseline: { recorded_at: '2026-04-21T09:00:00.000Z' },
-              previousSample: {
-                recorded_at: '2026-04-21T09:50:00.000Z',
-                rain_gauge_cumulative_mm: 10.0,
-              },
-              duplicateOrFuture: {
-                recorded_at: '2026-04-21T10:00:00.000Z',
-              },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'duplicate_timestamp', 'S2120 fixture skips duplicate timestamps');
-      expectEqual(formatted.rainMmDelta, null, 'S2120 duplicate fixture does not emit a duplicate rain delta');
-      expectEqual(rainOut, null, 'S2120 duplicate fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute duplicate-timestamp S2120 fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const ctx = s2120Context();
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(s2120Accepted, calls), osiDb: s2120TxDb(log, 'SENSECAP_S2120') },
+        context: ctx,
+      });
+      const call = calls[0] || { uplink: {}, opts: {} };
+      expectCondition(result === null && calls.length === 1 && call.t && call.t.scope === 'tx',
+        'S2120 ingest runs osi-rain once inside the transaction and emits nothing', 'S2120 ingest did not run osi-rain once inside the transaction');
+      expectCondition(JSON.stringify(log) === JSON.stringify(['GET', 'BEGIN', 'COMMIT', 'CLOSE']),
+        'S2120 ingest commits then closes its handle', `S2120 ingest transaction log ${JSON.stringify(log)}`);
+      expectCondition(call.uplink.deveui === 'ABC123' && call.uplink.eventId === 'ev-s1' && call.uplink.devAddr === '01000002'
+        && call.uplink.fCnt === 9 && call.uplink.fPort === 3 && call.uplink.data === 'TAALAAAwcA==' && call.uplink.time === '2026-04-21T10:00:00.000Z'
+        && Array.isArray(call.uplink.object.messages),
+        'S2120 ingest hands osi-rain the identity, session, payload and decoded object', `S2120 ingest uplink ${JSON.stringify(call.uplink)}`);
+      expectCondition((ctx.store.get('s2120CounterBaseline') || {}).ABC123 === '2026-04-21T09:00:00.000Z',
+        'S2120 ingest keeps the counter-baseline marker cache in node context', 'S2120 ingest did not keep the marker cache in node context');
+    })().catch((error) => fail(`failed to execute S2120 ingest fixture: ${error.message}`)));
 
-    pendingChecks.push(executeFunctionNodeById('s2120-sql-fn', {
-      formattedData: {
-        devEui: 'ABC123',
-        timestamp: '2026-04-21T10:00:00.000Z',
-        ambientTemperature: 18.2,
-        relativeHumidity: 66.1,
-        lightLux: 1234,
-        barometricPressureHpa: 1008.7,
-        windSpeedMps: 3.2,
-        windDirectionDeg: 182.4,
-        windGustMps: 7.6,
-        uvIndex: 2.7,
-        rainGaugeCumulativeMm: 11.4,
-        rainMmDelta: 1.4,
-        rainMmPerHour: 8.4,
-        rainMmPer10Min: 1.4,
-        rainMmToday: 2.6,
-        counterIntervalSeconds: 600,
-        rainDeltaStatus: 'ok',
-        batPct: 84,
-      },
-    }).then((sqlMsg) => {
-      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
-      expectCondition(
-        sql.includes('rain_mm_per_10min') && sql.includes('counter_interval_seconds'),
-        'S2120 SQL insert persists normalized rain telemetry and interval length',
-        'S2120 SQL insert is missing normalized rain telemetry or interval length'
-      );
-      expectCondition(
-        sql.includes('8.4') && sql.includes('600') && sql.includes("'ok'"),
-        'S2120 SQL insert includes the computed rain-rate values and status',
-        'S2120 SQL insert is missing computed rain-rate values or status'
-      );
-    }).catch((error) => {
-      fail(`failed to execute S2120 SQL fixture: ${error.message}`);
-    }));
+    pendingChecks.push((async () => {
+      const errors = [];
+      const log = [];
+      const ctx = s2120Context();
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(new Error('disk I/O error'), []), osiDb: s2120TxDb(log, 'SENSECAP_S2120') },
+        context: ctx,
+        node: { error: (message) => errors.push(String(message)) },
+      });
+      expectCondition(result === null && JSON.stringify(log) === JSON.stringify(['GET', 'BEGIN', 'ROLLBACK', 'CLOSE'])
+        && errors.some((m) => m.includes('rolled back') && m.includes('disk I/O error'))
+        && !Object.prototype.hasOwnProperty.call(ctx.store.get('s2120CounterBaseline') || {}, 'ABC123'),
+        'S2120 ingest failure rolls back, reports, forgets the cached marker and emits nothing', `S2120 ingest failure handling: ${JSON.stringify({ log, errors })}`);
+    })().catch((error) => fail(`failed to execute S2120 ingest failure fixture: ${error.message}`)));
   }
 }
 

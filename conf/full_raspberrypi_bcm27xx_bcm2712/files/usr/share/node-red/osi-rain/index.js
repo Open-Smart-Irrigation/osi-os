@@ -820,6 +820,14 @@ async function loRainDayTotal(t, deveui, zoneId, startIso, endIso, upToIso) {
 async function writeLoRainZoneDay(t, { deveui, zoneId, timezone, receivedAt, allowTakeover, computedAt }) {
   const win = zoneDayWindow(receivedAt, timezone);
   const total = await loRainDayTotal(t, deveui, zoneId, win.startIso, win.endIso, null);
+  await upsertGaugeZoneDay(t, { zoneId, date: win.date, total, source: LORAIN_RAIN_SOURCE, allowTakeover, computedAt });
+  return { zoneId, date: win.date };
+}
+
+// One gauge's zone day (both gauge types): the gauge's day total; sync_version
+// moves only when the synced values change; computed_at records the latest
+// evidence; a row another source owns is taken over only when allowTakeover.
+async function upsertGaugeZoneDay(t, { zoneId, date, total, source, allowTakeover, computedAt }) {
   await t.run(
     'INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at) VALUES (?, ?, ?, 0, ?, ?) '
     + 'ON CONFLICT(zone_id, date) DO UPDATE SET '
@@ -827,11 +835,10 @@ async function writeLoRainZoneDay(t, { deveui, zoneId, timezone, receivedAt, all
     + 'THEN zone_daily_environment.sync_version + 1 ELSE zone_daily_environment.sync_version END, '
     + 'rainfall_mm = ?, rain_source = ?, computed_at = ? '
     + 'WHERE ? = 1 OR zone_daily_environment.rain_source = ?',
-    [zoneId, win.date, total, LORAIN_RAIN_SOURCE, computedAt,
-      total, LORAIN_RAIN_SOURCE,
-      total, LORAIN_RAIN_SOURCE, computedAt,
-      allowTakeover ? 1 : 0, LORAIN_RAIN_SOURCE]);
-  return { zoneId, date: win.date };
+    [zoneId, date, total, source, computedAt,
+      total, source,
+      total, source, computedAt,
+      allowTakeover ? 1 : 0, source]);
 }
 
 async function writeZoneDays(t, deveui, days, computedAt) {
@@ -891,25 +898,8 @@ async function ingestLoRainUplink(t, uplink, opts = {}) {
   const device = await t.get(DEVICE_SQL, [id.deveui]);
   if (!device || device.type_id !== LORAIN_TYPE_ID) return none('ignored');
 
-  if (id.eventId) {
-    const existing = await t.get('SELECT id, payload_digest FROM rain_observations WHERE deveui = ? AND event_id = ?', [id.deveui, id.eventId]);
-    if (existing) {
-      if (existing.payload_digest === id.digest) return none('duplicate', existing.id);
-      await quarantineConflict(t, id);
-      return none('conflict', existing.id);
-    }
-  }
-  if (id.devAddr && id.fCnt !== null) {
-    const slot = await t.all(
-      'SELECT id, payload_digest FROM rain_observations WHERE deveui = ? AND dev_addr = ? AND f_cnt = ? '
-      + 'AND ABS(julianday(received_at) - julianday(?)) < (1.0 / 24) ORDER BY id', [id.deveui, id.devAddr, id.fCnt, id.receivedAt]);
-    const same = slot.find((r) => r.payload_digest === id.digest);
-    if (same) return none('duplicate', same.id);
-    if (slot.length) {
-      await quarantineConflict(t, id);
-      return none('conflict', slot[0].id);
-    }
-  }
+  const claim = await claimObservationIdentity(t, id);
+  if (claim) return none(claim.outcome, claim.observationId);
 
   const fPort = toIntOrNull(uplink.fPort);
   const facts = loRainFrameFacts(uplink.object, payloadRainBlocks(uplink.data));
@@ -967,6 +957,34 @@ async function ingestLoRainUplink(t, uplink, opts = {}) {
   return { outcome: 'accepted', status: obs.status, observationId, deviceDataId, zoneDays, configQuery };
 }
 
+// The durable identity check both writers run first: the same deduplicationId
+// with the same payload is a duplicate, with another payload a quarantined
+// conflict; the same devAddr + fCnt within REPLAY_WINDOW_MS likewise (a
+// confirmed-uplink retransmission carries a new deduplicationId). Returns null
+// when the uplink is new.
+async function claimObservationIdentity(t, id) {
+  if (id.eventId) {
+    const existing = await t.get('SELECT id, payload_digest FROM rain_observations WHERE deveui = ? AND event_id = ?', [id.deveui, id.eventId]);
+    if (existing) {
+      if (existing.payload_digest === id.digest) return { outcome: 'duplicate', observationId: existing.id };
+      await quarantineConflict(t, id);
+      return { outcome: 'conflict', observationId: existing.id };
+    }
+  }
+  if (id.devAddr && id.fCnt !== null) {
+    const slot = await t.all(
+      'SELECT id, payload_digest FROM rain_observations WHERE deveui = ? AND dev_addr = ? AND f_cnt = ? '
+      + 'AND ABS(julianday(received_at) - julianday(?)) < (1.0 / 24) ORDER BY id', [id.deveui, id.devAddr, id.fCnt, id.receivedAt]);
+    const same = slot.find((r) => r.payload_digest === id.digest);
+    if (same) return { outcome: 'duplicate', observationId: same.id };
+    if (slot.length) {
+      await quarantineConflict(t, id);
+      return { outcome: 'conflict', observationId: slot[0].id };
+    }
+  }
+  return null;
+}
+
 async function quarantineConflict(t, id) {
   await t.run("INSERT INTO ingest_quarantine (deveui, channel, reason, raw_value) VALUES (?, 'rain_observation', 'identity_conflict', ?)",
     [id.deveui, JSON.stringify({ eventId: id.eventId, devAddr: id.devAddr, fCnt: id.fCnt, digest: id.digest, receivedAt: id.receivedAt })]);
@@ -986,6 +1004,228 @@ async function recomputeInstrumentDay(t, deveui, dayIso, timezone, opts = {}) {
     .concat(zones.map((z) => ({ zoneId: Number(z.zone_id), timezone: z.timezone, receivedAt: win.startIso, allowTakeover: false })));
   const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   return { zoneDays: await writeZoneDays(t, eui, days, new Date(nowMs).toISOString()) };
+}
+
+// ---------------------------------------------------------------------------
+// SenseCAP S2120 ingestion (inside the caller's transaction)
+// ---------------------------------------------------------------------------
+// One writer per uplink: identity claim, counter read, derivation, device_data
+// row, observation row and zone days in the caller's transaction. Because the
+// osiDb operation queue runs one transaction at a time, two uplinks of one
+// device can no longer both read the same previous counter value.
+//
+// rain_observations for S2120 (one row per uplink with an identity):
+//   frame_kind  'counter' (4213 present), 'ordinary' (4113 only, firmware
+//               before v2.0), 'status' (no rain measurement);
+//   status      'accepted' for a counted increment (amount_mm = the increment,
+//               a measured zero included), 'ambiguous_identity' without a
+//               deduplicationId, otherwise 'not_additive';
+//   interval    a 4213 difference covers [previous counter row, this row]:
+//               'protocol_verified'; a legacy intensity window tiles the
+//               interval only within the tolerance: 'reception_gap';
+//   reasons     the device_data rain_delta_status of a row that is not counted;
+//               a frame older than the device's latest rain row also carries
+//               'late_counter_frame' (counter frames) and is never counted.
+//               Its difference against its own predecessor is kept in
+//               config_json.counter.differenceMm; the following row's
+//               increment is not rewritten.
+const S2120_DEVICE_SQL = 'SELECT d.deveui, d.type_id, d.irrigation_zone_id AS zone_id, iz.zone_uuid, iz.timezone AS zone_timezone, '
+  + '(SELECT iz2.timezone FROM weather_station_zones w JOIN irrigation_zones iz2 ON iz2.id = w.zone_id AND iz2.deleted_at IS NULL '
+  + 'WHERE w.deveui = d.deveui ORDER BY w.zone_id LIMIT 1) AS station_timezone '
+  + 'FROM devices d LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL '
+  + 'WHERE d.deveui = ? AND d.deleted_at IS NULL';
+// Zones an S2120 reports rain to: its weather-station assignments, else the
+// zone it is installed in (as the zone aggregation always did).
+const S2120_STATION_ZONES_SQL = "SELECT wsz.zone_id, iz.zone_uuid, COALESCE(iz.timezone, 'UTC') AS timezone FROM weather_station_zones wsz "
+  + 'LEFT JOIN irrigation_zones iz ON iz.id = wsz.zone_id WHERE wsz.deveui = ? ORDER BY wsz.zone_id';
+const S2120_DEVICE_ZONE_SQL = "SELECT d.irrigation_zone_id AS zone_id, iz.zone_uuid, COALESCE(iz.timezone, 'UTC') AS timezone FROM devices d "
+  + 'LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE d.deveui = ? AND d.irrigation_zone_id IS NOT NULL AND d.deleted_at IS NULL';
+// A rain row of the device: a stored counter or rate whose identity is known.
+const S2120_RAIN_ROW = "(rain_gauge_cumulative_mm IS NOT NULL OR rain_mm_per_hour IS NOT NULL) AND rain_delta_status IS NOT 'ambiguous_identity'";
+
+function s2120Seconds(fromIso, toIso) {
+  const fromMs = fromIso ? Date.parse(fromIso) : NaN;
+  const toMs = Date.parse(toIso);
+  const seconds = Number.isFinite(fromMs) && Number.isFinite(toMs) ? Math.round((toMs - fromMs) / 1000) : null;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function numericOrNull(value) {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Counter-baseline marker: the device's first cumulative_baseline row. The
+// lookup scans the device's history, so its result (time or null) is cached
+// per DevEUI by the caller (markerCache { get(eui), set(eui, value) }, node
+// context in the flow); this writer is its only producer. A cached marker
+// with no counter row behind it (rows deleted) is looked up again.
+async function loadS2120RainContext(t, deveui, receivedAt, markerCache) {
+  const findMarker = () => t.get(
+    "SELECT recorded_at FROM device_data WHERE deveui = ? AND rain_delta_status = 'cumulative_baseline' ORDER BY recorded_at ASC LIMIT 1",
+    [deveui]);
+  const findCounter = (m) => (m ? t.get(
+    'SELECT recorded_at, rain_gauge_cumulative_mm FROM device_data WHERE deveui = ? AND recorded_at < ? AND rain_gauge_cumulative_mm IS NOT NULL '
+    + "AND recorded_at >= ? AND rain_delta_status IS NOT 'ambiguous_identity' ORDER BY recorded_at DESC LIMIT 1",
+    [deveui, receivedAt, m.recorded_at]) : Promise.resolve(undefined));
+  const cached = markerCache ? markerCache.get(deveui) : undefined;
+  let marker = cached === undefined ? await findMarker() : (cached ? { recorded_at: cached } : null);
+  const future = await t.get('SELECT recorded_at FROM device_data WHERE deveui = ? AND recorded_at >= ? AND ' + S2120_RAIN_ROW
+    + ' ORDER BY recorded_at ASC LIMIT 1', [deveui, receivedAt]);
+  const previous = await t.get('SELECT recorded_at FROM device_data WHERE deveui = ? AND recorded_at < ? AND ' + S2120_RAIN_ROW
+    + ' ORDER BY recorded_at DESC LIMIT 1', [deveui, receivedAt]);
+  let counter = await findCounter(marker);
+  let lookedUp = cached === undefined;
+  if (cached && !counter && !future) {
+    marker = await findMarker();
+    counter = await findCounter(marker);
+    lookedUp = true;
+  }
+  if (lookedUp && markerCache) markerCache.set(deveui, (marker && marker.recorded_at) || null);
+  return { marker: marker || null, future: future || null, previous: previous || null, counter: counter || null };
+}
+
+// Rain fields of one S2120 uplink (R-S2120 rules, unchanged): a frame at or
+// before the device's latest rain row is a duplicate timestamp or out of
+// order and is never counted; otherwise 4213 is differenced from the counter
+// baseline on, and without 4213 the legacy window rule applies.
+async function deriveS2120Rain(t, deveui, receivedAt, m, markerCache) {
+  const cumulative = m.rainGaugeCumulativeMm;
+  const rate = m.rainMmPerHour;
+  const out = { status: 'no_rain_sensor', deltaMm: null, per10Mm: null, intervalSeconds: null, late: false, previousAt: null, previousMm: null, differenceMm: null };
+  if (cumulative == null && rate == null) return out;
+  const ctx = await loadS2120RainContext(t, deveui, receivedAt, markerCache);
+  if (ctx.future) {
+    out.status = ctx.future.recorded_at === receivedAt ? 'duplicate_timestamp' : 'out_of_order';
+    out.late = true;
+    if (cumulative != null && ctx.counter) {
+      out.previousAt = ctx.counter.recorded_at;
+      out.previousMm = Number(ctx.counter.rain_gauge_cumulative_mm);
+      out.differenceMm = deriveS2120Counter(out.previousMm, cumulative).deltaMm;
+    }
+    return out;
+  }
+  if (cumulative != null) {
+    const previousMm = ctx.counter ? Number(ctx.counter.rain_gauge_cumulative_mm) : null;
+    out.intervalSeconds = s2120Seconds(ctx.counter && ctx.counter.recorded_at, receivedAt);
+    out.previousAt = ctx.counter ? ctx.counter.recorded_at : null;
+    out.previousMm = previousMm;
+    const d = deriveS2120Counter(previousMm, cumulative, { hasBaseline: !!ctx.marker, intervalSeconds: out.intervalSeconds });
+    out.status = d.status;
+    out.deltaMm = d.deltaMm;
+    if (d.status === S2120_COUNTER_BASELINE && markerCache) markerCache.set(deveui, receivedAt);
+    if (d.status === 'ok') out.per10Mm = roundTo((d.deltaMm / out.intervalSeconds) * 600, 3);
+    return out;
+  }
+  const intervalSeconds = ctx.marker || !ctx.previous ? null : s2120Seconds(ctx.previous.recorded_at, receivedAt);
+  const d = deriveS2120Legacy(rate, { hasBaseline: !!ctx.marker, hasPrevious: !!ctx.previous, intervalSeconds });
+  out.intervalSeconds = intervalSeconds;
+  out.previousAt = ctx.previous ? ctx.previous.recorded_at : null;
+  out.status = d.status;
+  out.deltaMm = d.deltaMm;
+  if (d.status === 'ok') out.per10Mm = d.deltaMm;
+  return out;
+}
+
+// The device's received S2120 rain in [startIso, until): counted increments.
+async function s2120DayTotal(t, deveui, startIso, until, inclusive) {
+  const row = await t.get(
+    "SELECT COALESCE(SUM(rain_mm_delta), 0) AS mm FROM device_data WHERE deveui = ? AND rain_delta_status = 'ok' AND rain_mm_delta IS NOT NULL "
+    + 'AND recorded_at >= ? AND recorded_at ' + (inclusive ? '<=' : '<') + ' ?', [deveui, startIso, until]);
+  return roundTo(Number(row && row.mm) || 0, 3);
+}
+
+// Ingest one S2120 uplink inside the caller's transaction. uplink = { deveui,
+// eventId, devAddr, fCnt, time, fPort, data, object }; opts = { nowMs,
+// markerCache }. Same return shape as ingestLoRainUplink, plus the stored
+// rain fields (rainDeltaStatus, rainMmDelta) for the node status.
+async function ingestS2120Uplink(t, uplink, opts = {}) {
+  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const none = (outcome, observationId) => ({ outcome, status: null, observationId: observationId || null, deviceDataId: null, zoneDays: [], configQuery: null });
+  const id = observationIdentity(uplink, { nowMs });
+  if (!id.deveui) return none('ignored');
+  const device = await t.get(S2120_DEVICE_SQL, [id.deveui]);
+  if (!device || device.type_id !== S2120_TYPE_ID) return none('ignored');
+  const claim = await claimObservationIdentity(t, id);
+  if (claim) return none(claim.outcome, claim.observationId);
+
+  const m = parseS2120Measurements(uplink.object);
+  const hasRain = m.rainGaugeCumulativeMm != null || m.rainMmPerHour != null;
+  let rain;
+  if (hasRain && !id.eventId) {
+    rain = { status: 'ambiguous_identity', deltaMm: null, per10Mm: null, intervalSeconds: null, late: false, previousAt: null, previousMm: null, differenceMm: null };
+  } else {
+    rain = await deriveS2120Rain(t, id.deveui, id.receivedAt, m, opts.markerCache);
+  }
+  const counted = rain.status === 'ok' && rain.deltaMm !== null;
+  // The device's farm day: its zone, else its first weather-station zone, else UTC.
+  const timezone = formatterFor(device.zone_timezone || device.station_timezone || 'UTC').timezone;
+  let rainToday = null;
+  if (hasRain && rain.status !== 'ambiguous_identity') {
+    const win = zoneDayWindow(id.receivedAt, timezone);
+    rainToday = roundTo((await s2120DayTotal(t, id.deveui, win.startIso, id.receivedAt, false)) + (counted ? rain.deltaMm : 0), 3);
+  }
+
+  let zones = await t.all(S2120_STATION_ZONES_SQL, [id.deveui]);
+  if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL, [id.deveui]);
+  const snapshot = zones[0] || null;
+  const frameKind = m.rainGaugeCumulativeMm != null ? 'counter' : (m.rainMmPerHour != null ? 'ordinary' : 'status');
+  let status = counted ? 'accepted' : 'not_additive';
+  if (!id.eventId) status = 'ambiguous_identity';
+  const reasons = [];
+  if (rain.late && frameKind === 'counter') reasons.push('late_counter_frame');
+  if (!counted) reasons.push(rain.status);
+  else if (frameKind === 'ordinary') reasons.push('legacy_intensity_window');
+  let intervalBasis = 'unknown';
+  let measuredStart = null;
+  let measuredEnd = null;
+  if (counted && frameKind === 'counter') {
+    intervalBasis = 'protocol_verified';
+    measuredStart = rain.previousAt;
+    measuredEnd = id.receivedAt;
+  } else if (counted) {
+    intervalBasis = 'reception_gap';
+    measuredStart = new Date(Date.parse(id.receivedAt) - S2120_LEGACY_WINDOW_S * 1000).toISOString();
+    measuredEnd = id.receivedAt;
+  }
+  const config = {
+    frame: { fPort: toIntOrNull(uplink.fPort), cumulativeMm: m.rainGaugeCumulativeMm, intensityMmH: m.rainMmPerHour },
+    counter: { previousAt: rain.previousAt, previousMm: rain.previousMm, differenceMm: rain.differenceMm },
+  };
+  await t.run(
+    'INSERT INTO rain_observations (deveui, instrument_type, event_id, dev_addr, f_cnt, payload_digest, received_at, measured_start, measured_end, '
+    + 'interval_basis, frame_kind, tips, amount_mm, status, quality_reasons, config_json, zone_id, zone_uuid, timezone, source_policy_version) '
+    + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id.deveui, S2120_TYPE_ID, id.eventId, id.devAddr, id.fCnt, id.digest, id.receivedAt, measuredStart, measuredEnd,
+      intervalBasis, frameKind, counted ? rain.deltaMm : null, status, JSON.stringify(reasons), JSON.stringify(config),
+      snapshot ? snapshot.zone_id : null, snapshot ? snapshot.zone_uuid || null : null,
+      formatterFor(snapshot ? snapshot.timezone : timezone).timezone, RAIN_POLICY_VERSION]);
+  const observationId = await lastInsertId(t);
+
+  await t.run(
+    'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, light_lux, barometric_pressure_hpa, wind_speed_mps, '
+    + 'wind_direction_deg, wind_gust_mps, uv_index, rain_gauge_cumulative_mm, rain_mm_delta, rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, '
+    + 'counter_interval_seconds, rain_delta_status, bat_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [id.deveui, id.receivedAt, numericOrNull(m.ambientTemperature), numericOrNull(m.relativeHumidity), numericOrNull(m.lightLux),
+      numericOrNull(m.barometricPressureHpa), numericOrNull(m.windSpeedMps), numericOrNull(m.windDirectionDeg), numericOrNull(m.windGustMps),
+      numericOrNull(m.uvIndex), m.rainGaugeCumulativeMm, counted ? rain.deltaMm : null, m.rainMmPerHour, rain.per10Mm, rainToday,
+      rain.intervalSeconds, rain.status, numericOrNull(m.batPct)]);
+  const deviceDataId = await lastInsertId(t);
+  await t.run('UPDATE rain_observations SET device_data_id = ? WHERE id = ?', [deviceDataId, observationId]);
+
+  const zoneDays = [];
+  if (counted) {
+    const computedAt = new Date(nowMs).toISOString();
+    for (const zone of zones) {
+      const tz = formatterFor(zone.timezone).timezone;
+      const win = zoneDayWindow(id.receivedAt, tz);
+      const total = await s2120DayTotal(t, id.deveui, win.startIso, win.endIso, false);
+      await upsertGaugeZoneDay(t, { zoneId: zone.zone_id, date: win.date, total, source: S2120_RAIN_SOURCE, allowTakeover: rain.deltaMm > 0, computedAt });
+      zoneDays.push({ zoneId: zone.zone_id, date: win.date });
+    }
+  }
+  return { outcome: 'accepted', status, observationId, deviceDataId, zoneDays, configQuery: null, rainDeltaStatus: rain.status, rainMmDelta: counted ? rain.deltaMm : null };
 }
 
 module.exports = {
@@ -1011,4 +1251,5 @@ module.exports = {
   parseS2120Measurements,
   deriveS2120Counter,
   deriveS2120Legacy,
+  ingestS2120Uplink,
 };

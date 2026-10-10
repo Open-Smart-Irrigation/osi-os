@@ -1,6 +1,6 @@
 'use strict';
-// Binds osi-rain's ingestLoRainUplink and recomputeInstrumentDay EXACTLY as
-// lorain-ingest-fn does: `new osiDb.Database(...)` from osi-db-helper, then
+// Binds osi-rain's ingestLoRainUplink, recomputeInstrumentDay and
+// ingestS2120Uplink EXACTLY as lorain-ingest-fn and s2120-ingest-fn do: `new osiDb.Database(...)` from osi-db-helper, then
 // `db.transaction((t) => ...)`, where `t` has only run/get/all/exec and `run`
 // resolves to undefined (no lastID). index.test.js covers the pure rules; this
 // file guards the module/caller shape. The sqlite3 binding is replaced by a
@@ -87,6 +87,47 @@ test('ingestLoRainUplink and recomputeInstrumentDay through the osi-db-helper tr
     try {
       assert.equal(check.prepare('SELECT device_data_id FROM rain_observations').get().device_data_id, first.deviceDataId);
       assert.equal(check.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get().rainfall_mm, 1);
+    } finally {
+      check.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ingestS2120Uplink through the osi-db-helper transaction facade', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-rain-facade-'));
+  try {
+    const file = path.join(dir, 'farming.db');
+    const native = new DatabaseSync(file);
+    native.exec(fs.readFileSync(SEED, 'utf8'));
+    native.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+      INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z', 1, 'z-1', 'Europe/Zurich', 'local');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+        VALUES ('A840410000000002', 'Station', 'SENSECAP_S2120', 1, 1, '2026-01-01', '2026-01-01');`);
+    native.close();
+    const osiDb = loadOsiDbHelper();
+    const db = new osiDb.Database(file);
+    const cache = new Map();
+    const markerCache = { get: (eui) => cache.get(eui), set: (eui, value) => cache.set(eui, value) };
+    const uplink = (n, mm) => ({ deveui: 'A840410000000002', eventId: 'ev-s' + n, devAddr: '01000002', fCnt: n, fPort: 3,
+      time: new Date(Date.parse('2026-10-08T10:00:00.000Z') + n * 600000).toISOString(),
+      object: { messages: [[{ measurementId: 4113, measurementValue: 0 }, { measurementId: 4213, measurementValue: mm }]] } });
+    const nowMs = Date.parse('2026-10-08T12:00:00.000Z');
+    const baseline = await db.transaction((t) => R.ingestS2120Uplink(t, uplink(0, 10), { nowMs, markerCache }));
+    assert.equal(baseline.outcome, 'accepted');
+    assert.equal(baseline.rainDeltaStatus, 'cumulative_baseline');
+    assert.equal(cache.get('A840410000000002'), '2026-10-08T10:00:00.000Z');
+    const first = await db.transaction((t) => R.ingestS2120Uplink(t, uplink(1, 10.5), { nowMs, markerCache }));
+    assert.equal(first.status, 'accepted');
+    assert.ok(Number.isInteger(first.observationId) && Number.isInteger(first.deviceDataId), 'ids come from last_insert_rowid()');
+    assert.deepEqual(first.zoneDays, [{ zoneId: 1, date: '2026-10-08' }]);
+    const again = await db.transaction((t) => R.ingestS2120Uplink(t, uplink(1, 10.5), { nowMs, markerCache }));
+    assert.equal(again.outcome, 'duplicate');
+    const check = new DatabaseSync(file, { readOnly: true });
+    try {
+      assert.equal(check.prepare('SELECT device_data_id FROM rain_observations WHERE id = ?').get(first.observationId).device_data_id, first.deviceDataId);
+      assert.equal(check.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get().rainfall_mm, 0.5);
     } finally {
       check.close();
     }

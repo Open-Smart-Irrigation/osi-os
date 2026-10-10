@@ -1110,9 +1110,11 @@ if (silentCatchBaseline) {
   // DB-close catch(_){} gains a visible node.warn while the node gets its verifyBearer: 87 -> 86.
   // 84: rain correctness, one LoRain writer -- lorain-process-fn and lorain-rain-agg-fn, each
   // with one silent close() catch, are replaced by lorain-ingest-fn (none): 86 -> 84.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 84 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 84,
-    'silent-catch baseline records 84 for both maintained profiles',
-    'silent-catch baseline must be 84 for both maintained profiles');
+  // 82: rain correctness, one S2120 writer -- s2120-process-fn and s2120-rain-agg-fn, each
+  // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 82 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 82,
+    'silent-catch baseline records 82 for both maintained profiles',
+    'silent-catch baseline must be 82 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
