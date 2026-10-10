@@ -300,6 +300,7 @@ function deriveRows(evidence, options, provenance) {
   const recordsByDeviceDate = new Map();
   const observationByDataId = new Map();
   const observationByDeviceTime = new Map();
+  const unresolvedLsnTimestampKeys = new Set();
   for (const observation of evidence.observations) {
     if (observation.device_data_id != null) observationByDataId.set(String(observation.device_data_id), observation);
     observationByDeviceTime.set(observation.deveui + '|' + String(observation.received_at), observation);
@@ -310,7 +311,16 @@ function deriveRows(evidence, options, provenance) {
     if (!Number.isFinite(ms)) continue;
     let day = null; let zoneId = null; let timezone = null; let basis = 'historical_attribution_unknown'; let selectedInterval = null; let sourceRef = null; let timezoneIssue = false;
     const matching = provenance.intervals.filter((i) => i.deveui === row.deveui && Date.parse(i.from) <= ms && ms < Date.parse(i.to));
-    const retainedObservation = observationByDataId.get(String(row.id)) || observationByDeviceTime.get(row.deveui + '|' + String(row.recorded_at));
+    const linkedObservation = observationByDataId.get(String(row.id)) || null;
+    const timestampObservation = observationByDeviceTime.get(row.deveui + '|' + String(row.recorded_at)) || null;
+    const candidateType = String((linkedObservation && linkedObservation.instrument_type) || (timestampObservation && timestampObservation.instrument_type) || (deviceById.get(row.deveui) || {}).type_id || '').toUpperCase();
+    const requiresLsnSnapshot = candidateType === 'DRAGINO_LSN50';
+    const retainedObservation = requiresLsnSnapshot ? linkedObservation : linkedObservation || timestampObservation;
+    // Timestamp equality can expose an ambiguous duplicate, but cannot authorize
+    // the unlinked row or the linked row sharing its timestamp.
+    if (requiresLsnSnapshot && !linkedObservation && timestampObservation && timestampObservation.instrument_type === 'DRAGINO_LSN50') {
+      unresolvedLsnTimestampKeys.add(row.deveui + '|' + String(row.recorded_at));
+    }
     if (matching.length === 1) { selectedInterval = matching[0]; zoneId = selectedInterval.zoneId; timezone = selectedInterval.timezone; day = dateInZone(ms, timezone); basis = 'provenance'; sourceRef = selectedInterval.sourceRef; }
     else if (matching.length > 1) { basis = 'historical_attribution_unknown'; }
     else {
@@ -331,8 +341,6 @@ function deriveRows(evidence, options, provenance) {
     }
     if (!day || day < options.from || day > options.to) continue;
     const key = [row.deveui, zoneId == null ? '' : zoneId, day, timezone || ''].join('|');
-    const instrumentType = String((retainedObservation && retainedObservation.instrument_type) || (deviceById.get(row.deveui) || {}).type_id || '').toUpperCase();
-    const requiresLsnSnapshot = instrumentType === 'DRAGINO_LSN50';
     const lsnSnapshotEligible = requiresLsnSnapshot && lsn50SnapshotEligible(retainedObservation, row);
     if (!recordsByDeviceDate.has(key)) recordsByDeviceDate.set(key, { deveui: row.deveui, zoneId, date: day, timezone, basis, sourceRef, rows: [], selectedInterval, hasObservationIdentity: basis === 'observation_snapshot', timezoneIssue, lsnSnapshotUnverifiable: false, evidenceRefs: sourceRef ? [sourceRef] : [] });
     const record = recordsByDeviceDate.get(key);
@@ -341,6 +349,9 @@ function deriveRows(evidence, options, provenance) {
     record.timezoneIssue = record.timezoneIssue || timezoneIssue;
     if (sourceRef && !record.evidenceRefs.includes(sourceRef)) record.evidenceRefs.push(sourceRef);
     if (basis === 'observation_snapshot') record.hasObservationIdentity = true;
+  }
+  for (const record of recordsByDeviceDate.values()) {
+    if (record.rows.some((row) => unresolvedLsnTimestampKeys.has(row.deveui + '|' + String(row.recorded_at)))) record.lsnSnapshotUnverifiable = true;
   }
   for (const interval of provenance.intervals) {
     const start = Math.max(Date.parse(interval.from), Date.parse(options.from + 'T00:00:00.000Z') - 26 * 3600000);
