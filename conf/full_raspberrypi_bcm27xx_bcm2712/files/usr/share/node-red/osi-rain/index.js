@@ -2043,6 +2043,137 @@ async function setZoneRainSource(t, zoneId, deveui, opts = {}) {
     if (out && out.written) reprojected.push(date);
   }
   return { ok: true, view: await zoneRainSourceView(t, zid), reprojected };
+// Advice: the rain-resolution policy (docs/contracts/rainfall/rain-resolution-policy.md)
+// ---------------------------------------------------------------------------
+
+const ADVICE_COVERAGES = new Set(['complete', 'complete_so_far', 'partial', 'unknown']);
+const ADVICE_ROW_SQL = 'SELECT rainfall_mm, rain_source, rain_coverage, rain_selected_deveui, rain_policy_version, '
+  + 'rain_quality_reasons, rain_received_mm FROM zone_daily_environment WHERE zone_id = ? AND date = ?';
+
+function finiteMm(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+// The legacy reading of edge dendrometer analytics (policy, "Legacy rows"):
+// a local amount greater than 0 is the day's rain; 0 or null is no evidence.
+function legacyPositiveRainMm(row) {
+  const mm = finiteMm(row && row.rainfall_mm);
+  return mm !== null && mm > 0 ? mm : null;
+}
+
+// Step 3: the first provider tier with an amount answers, partial or complete.
+// provider: null, one value, or the tiers in order; a value is
+// { amountMm, source, period: 'farm_day' | 'utc_day', coveredHours, expectedHours }
+// (no hour counts: a daily total that covers its period).
+function providerAnswer(provider) {
+  const tiers = Array.isArray(provider) ? provider : [provider];
+  for (const tier of tiers) {
+    const amountMm = finiteMm(tier && tier.amountMm);
+    if (amountMm === null) continue;
+    const covered = finiteMm(tier.coveredHours);
+    const expected = finiteMm(tier.expectedHours);
+    const partial = covered !== null && expected !== null && covered < expected;
+    const reasons = [];
+    if (tier.period === 'utc_day') reasons.push('utc_day_period');
+    if (partial) reasons.push('provider_partial');
+    return {
+      amountMm,
+      coverage: partial ? 'partial' : 'complete',
+      source: String(tier.source || 'provider'),
+      coveredHours: covered,
+      expectedHours: expected,
+      reasons,
+    };
+  }
+  return null;
+}
+
+// The rain an advice rule uses for one zone and farm day, read-only inside the
+// caller's scope `t`. The four steps in order: certified local day, local lower
+// bound (never the amount), provider rain, unknown. Selection never depends on
+// whether an amount is positive. opts:
+//   nowMs         the consumer's now (which farm day is current);
+//   legacyRainMm  the consumer's reading of a legacy row (amount or null);
+//                 default: the dendrometer reading (a positive local amount).
+async function resolveAdviceRain(t, zoneId, dayIso, provider, opts = {}) {
+  const zid = Number(zoneId);
+  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const zone = await loadZone(t, zid);
+  const timezone = resolveTimezone(zone || null).timezone;
+  const isToday = zoneDayWindow(nowMs, timezone).date === dayIso;
+  const row = await t.get(ADVICE_ROW_SQL, [zid, dayIso]);
+  const reasons = new Set();
+  let amountMm = null;
+  let lowerBoundMm = null;
+  let coverage = 'unknown';
+  let source = 'none';
+  let deveui = null;
+  let coveredHours = null;
+  let expectedHours = null;
+
+  const legacy = !!row && (row.rain_policy_version === null || row.rain_policy_version === undefined);
+  if (legacy) {
+    for (const r of parseReasons(row.rain_quality_reasons || '[]')) reasons.add(r);
+    reasons.add('legacy_row');
+    const read = typeof opts.legacyRainMm === 'function' ? opts.legacyRainMm(row) : legacyPositiveRainMm(row);
+    const mm = finiteMm(read);
+    if (mm !== null) {
+      amountMm = mm;
+      coverage = 'legacy_unvalidated';
+      source = LOCAL_GAUGE_SOURCE;
+    }
+  } else {
+    let selected = null;
+    if (row) {
+      for (const r of parseReasons(row.rain_quality_reasons || '[]')) reasons.add(r);
+      selected = row.rain_selected_deveui ? normalizeEui(row.rain_selected_deveui) : null;
+    } else {
+      const selection = await selectZoneGauge(t, zid, dayIso, { zone });
+      if (selection.state === 'selected') selected = selection.deveui;
+      else reasons.add(selection.state === 'ambiguous' ? 'gauge_ambiguous' : 'no_gauge');
+    }
+    const rowCoverage = row && ADVICE_COVERAGES.has(row.rain_coverage) ? row.rain_coverage : 'unknown';
+    const rainfall = finiteMm(row && row.rainfall_mm);
+    const received = finiteMm(row && row.rain_received_mm);
+    if (selected && rowCoverage === 'complete' && rainfall !== null) {
+      // Step 1: a certified day, zero included, ends the search.
+      amountMm = rainfall;
+      coverage = 'complete';
+      source = LOCAL_GAUGE_SOURCE;
+      deveui = selected;
+    } else if (selected && rowCoverage === 'complete_so_far' && isToday && received !== null) {
+      amountMm = received;
+      coverage = 'complete_so_far';
+      source = LOCAL_GAUGE_SOURCE;
+      deveui = selected;
+    } else if (selected) {
+      // Step 2: an uncertified day of the selected gauge; its received amount is a lower bound only.
+      reasons.add(rowCoverage === 'partial' || (rowCoverage === 'complete_so_far' && !isToday) ? 'local_partial' : 'local_unknown');
+      if (received !== null) {
+        lowerBoundMm = received;
+        deveui = selected;
+      }
+    }
+  }
+  if (amountMm === null) {
+    const answer = providerAnswer(provider);
+    if (answer) {
+      ({ amountMm, coverage, source, coveredHours, expectedHours } = answer);
+      for (const r of answer.reasons) reasons.add(r);
+    } else {
+      reasons.add('rain_unknown');
+    }
+  }
+  return { amountMm, lowerBoundMm, coverage, source, deveui, reasons: [...reasons], policyVersion: RAIN_POLICY_VERSION, coveredHours, expectedHours };
+}
+
+// What enters rain suppression (and picks its timeout): the larger of the
+// amount and the received lower bound, ignoring nulls; null when both are.
+function adviceSuppressionMm(result) {
+  const values = [finiteMm(result && result.amountMm), finiteMm(result && result.lowerBoundMm)].filter((v) => v !== null);
+  return values.length ? Math.max(...values) : null;
 }
 
 module.exports = {
@@ -2081,4 +2212,7 @@ module.exports = {
   SELECTION_REPROJECT_DAYS,
   zoneRainSourceView,
   setZoneRainSource,
+  resolveAdviceRain,
+  adviceSuppressionMm,
 };
+}
