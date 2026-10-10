@@ -40,6 +40,12 @@ vi.mock('../environment/EnvironmentCard', () => ({
   EnvironmentCard: () => <div data-testid="environment-card" />,
 }));
 
+vi.mock('../ZoneConfigModal', () => ({
+  ZoneConfigModal: ({ isOpen, onSaved }: { isOpen: boolean; onSaved: () => void }) => isOpen
+    ? <button type="button" onClick={onSaved}>Save zone settings</button>
+    : null,
+}));
+
 vi.mock('../dendrometer/DendrometerSection', () => ({
   DendrometerSection: ({ predictionAdvisoryEnabled }: { predictionAdvisoryEnabled: boolean }) => (
     <div data-testid="dendrometer-section">
@@ -347,6 +353,48 @@ describe('IrrigationZoneCard Data entry', () => {
     const waterCard = await screen.findByTestId('water-today-card');
     await waitFor(() => expect(apiMocks.getRainSource).toHaveBeenCalledWith(12));
     expect(waterCard).not.toHaveTextContent('Two rain gauges report for this zone.');
+  });
+
+  it('reloads rain amount and advice after saving the zone rain source', async () => {
+    const beforeSave = {
+      ...environmentSummary,
+      water: {
+        ...environmentSummary.water,
+        rainTodayMm: 1.2,
+        rainSource: 'weather_service',
+        action: { ...environmentSummary.water.action, code: 'monitor_today' },
+        sensorHealth: { ...environmentSummary.water.sensorHealth, rainGaugePresent: false },
+      },
+    } as ZoneEnvironmentSummary;
+    const afterSave = {
+      ...beforeSave,
+      generatedAt: '2026-07-08T10:05:00.000Z',
+      water: {
+        ...beforeSave.water,
+        rainTodayMm: 8.5,
+        action: { ...beforeSave.water.action, code: 'irrigate_today' },
+      },
+    } as ZoneEnvironmentSummary;
+    apiMocks.getSummary.mockReset().mockResolvedValueOnce(beforeSave).mockResolvedValueOnce(afterSave);
+    const onUpdate = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={[]} unassignedDevices={[]} onUpdate={onUpdate} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(await screen.findByText('1.2 mm')).toBeInTheDocument();
+    expect(screen.getByText('Monitor today')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save zone settings' }));
+
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('8.5 mm')).toBeInTheDocument();
+    expect(screen.getByText('Irrigate today')).toBeInTheDocument();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('does not expose scheduling-source controls in the water balance card', async () => {

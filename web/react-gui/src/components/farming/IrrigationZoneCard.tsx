@@ -430,7 +430,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hasDendroDevices, zone.id]);
+  }, [hasDendroDevices, settingsVersion, zone.id]);
 
   return (
     <div id={`irrigation-zone-${zone.id}`} className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
