@@ -1016,6 +1016,11 @@ const schemaContract = {
     'rain_source',
     'computed_at',
     'sync_version',
+    'rain_coverage',
+    'rain_selected_deveui',
+    'rain_policy_version',
+    'rain_quality_reasons',
+    'rain_received_mm',
   ],
   weather_locations: [
     'location_key',
@@ -1199,6 +1204,26 @@ const schemaContract = {
     'timezone',
     'source_policy_version',
     'created_at',
+  ],
+  rain_instrument_days: [
+    'deveui',
+    'date',
+    'timezone',
+    'amount_mm',
+    'received_mm',
+    'coverage',
+    'reasons',
+    'accepted_count',
+    'observed_cutoff',
+    'policy_version',
+    'computed_at',
+  ],
+  zone_rain_source: [
+    'zone_id',
+    'selected_deveui',
+    'selected_at',
+    'selected_by_uuid',
+    'updated_at',
   ],
 };
 

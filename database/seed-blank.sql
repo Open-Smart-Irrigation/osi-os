@@ -950,10 +950,14 @@ CREATE TABLE zone_daily_environment (
   flow_liters  REAL DEFAULT 0,
   rain_source  TEXT DEFAULT 'none',
   computed_at  TEXT,
-  sync_version INTEGER NOT NULL DEFAULT 0,
+  sync_version INTEGER NOT NULL DEFAULT 0, rain_coverage TEXT, rain_selected_deveui TEXT, rain_policy_version INTEGER, rain_quality_reasons TEXT, rain_received_mm REAL,
   UNIQUE(zone_id, date),
   FOREIGN KEY (zone_id) REFERENCES irrigation_zones(id) ON DELETE CASCADE
 );
+-- The five rain_* columns come from migration 0072: SQLite's ALTER TABLE ... ADD COLUMN
+-- inserts them after the last column definition, so they share sync_version's line here.
+-- A NULL rain_coverage is a legacy row written before rain policy version 1
+-- (docs/contracts/rainfall/zone-day-projection.md).
 
 -- ---------------------------------------------------------------------------
 -- weather_locations
@@ -7377,3 +7381,26 @@ CREATE INDEX IF NOT EXISTS idx_rain_observations_deveui_received ON rain_observa
 CREATE INDEX IF NOT EXISTS idx_rain_observations_zone_received ON rain_observations(zone_id, received_at);
 -- The device_data foreign key needs a child index, or every device_data delete scans this table.
 CREATE INDEX IF NOT EXISTS idx_rain_observations_device_data ON rain_observations(device_data_id);
+
+-- 0072__rain_instrument_days.sql (migration-owned; per-instrument rain days and zone gauge selection)
+CREATE TABLE IF NOT EXISTS rain_instrument_days (
+  deveui          TEXT NOT NULL,
+  date            TEXT NOT NULL,
+  timezone        TEXT NOT NULL,
+  amount_mm       REAL,
+  received_mm     REAL,
+  coverage        TEXT NOT NULL CHECK (coverage IN ('complete','complete_so_far','partial','unknown')),
+  reasons         TEXT NOT NULL DEFAULT '[]',
+  accepted_count  INTEGER NOT NULL DEFAULT 0,
+  observed_cutoff TEXT,
+  policy_version  INTEGER NOT NULL,
+  computed_at     TEXT NOT NULL,
+  PRIMARY KEY (deveui, date, timezone)
+);
+CREATE TABLE IF NOT EXISTS zone_rain_source (
+  zone_id          INTEGER PRIMARY KEY REFERENCES irrigation_zones(id) ON DELETE CASCADE,
+  selected_deveui  TEXT,
+  selected_at      TEXT,
+  selected_by_uuid TEXT,
+  updated_at       TEXT NOT NULL
+);
