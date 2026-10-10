@@ -3,6 +3,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const rain = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain');
 
@@ -38,7 +39,9 @@ function validZone(zone, label) {
 }
 function validInstant(value, label) {
   if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(value) || !Number.isFinite(Date.parse(value))) throw new Error(label + ' must be a UTC ISO instant');
-  return new Date(value).toISOString();
+  const parsed = new Date(value);
+  if (parsed.toISOString().slice(0, 19) !== value.slice(0, 19)) throw new Error(label + ' must be a real UTC calendar date and clock time');
+  return parsed.toISOString();
 }
 function isUnder(child, parent) {
   const rel = path.relative(parent, child);
@@ -148,13 +151,14 @@ function hostDay(value, zone) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? dateInZone(ms, zone) : null;
 }
-function safeCell(value) {
+const TEXT_COLUMNS = new Set(['deveui', 'instrument_type', 'timezone', 'old_rain_source', 'new_selected_deveui', 'reasons']);
+function safeCell(value, isText = true) {
   if (value == null) return '';
   let text = String(value);
-  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
+  if (isText && /^[=+\-@\t\r]/.test(text)) text = "'" + text;
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }
-function csv(rows) { return [HEADER.join(','), ...rows.map((row) => HEADER.map((key) => safeCell(row[key])).join(','))].join('\n') + '\n'; }
+function csv(rows) { return [HEADER.join(','), ...rows.map((row) => HEADER.map((key) => safeCell(row[key], TEXT_COLUMNS.has(key))).join(','))].join('\n') + '\n'; }
 function escapeMarkdown(value) { return String(value).replace(/[|\r\n]/g, ' '); }
 
 function readEvidence(db, options, provenance) {
@@ -198,10 +202,18 @@ function deriveRows(evidence, options, provenance) {
     if (!Number.isFinite(ms)) continue;
     let day = null; let zoneId = null; let timezone = null; let basis = 'historical_attribution_unknown'; let selectedInterval = null; let sourceRef = null; let timezoneIssue = false;
     const matching = provenance.intervals.filter((i) => i.deveui === row.deveui && Date.parse(i.from) <= ms && ms < Date.parse(i.to));
+    const retainedObservation = observationByDataId.get(String(row.id)) || observationByDeviceTime.get(row.deveui + '|' + String(row.recorded_at));
+    if (matching.length === 1 && retainedObservation) {
+      const interval = matching[0];
+      const contradictsIdentity = retainedObservation.deveui !== row.deveui;
+      const contradictsZone = retainedObservation.zone_id != null && Number(retainedObservation.zone_id) !== interval.zoneId;
+      const contradictsTimezone = retainedObservation.timezone != null && String(retainedObservation.timezone) !== interval.timezone;
+      if (contradictsIdentity || contradictsZone || contradictsTimezone) throw new Error('provenance conflicts with retained observation snapshot for device_data row ' + row.id);
+    }
     if (matching.length === 1) { selectedInterval = matching[0]; zoneId = selectedInterval.zoneId; timezone = selectedInterval.timezone; day = dateInZone(ms, timezone); basis = 'provenance'; sourceRef = selectedInterval.sourceRef; }
     else if (matching.length > 1) { basis = 'historical_attribution_unknown'; }
     else {
-      const observation = observationByDataId.get(String(row.id)) || observationByDeviceTime.get(row.deveui + '|' + String(row.recorded_at));
+      const observation = retainedObservation;
       if (observation && observation.zone_id != null && observation.timezone) {
         const tz = String(observation.timezone);
         if (tz === 'UTC' || tz === 'Etc/UTC' || tz.includes('/')) {
@@ -300,10 +312,18 @@ function deriveRows(evidence, options, provenance) {
     const oldSelected = retainedSelected;
     const selectedProof = (record.basis === 'provenance' && fullDay && record.selectedInterval && record.selectedInterval.selected && selectedDeveui === record.deveui && selected.size === 1)
       || (record.basis === 'observation_snapshot' && record.hasObservationIdentity && retainedSelected === record.deveui);
-    const proof = selectedProof && record.timezone && zone && oldZone != null && oldSelected === record.deveui && zone.rain_coverage === 'complete' && instrumentDay && instrumentDay.coverage === 'complete' && acceptedCount > 0;
+    const oldSource = zone && zone.rain_source != null ? String(zone.rain_source).toLowerCase() : '';
+    const sourceMatches = oldSource === 'local_gauge';
+    const legacyComparable = record.basis === 'provenance' && fullDay && record.selectedInterval && record.selectedInterval.selected
+      && selectedProof && sourceMatches && (oldSelected == null || oldSelected === record.deveui)
+      && (!zone || zone.rain_coverage == null || zone.rain_coverage === 'complete')
+      && (!instrumentDay || instrumentDay.coverage == null || instrumentDay.coverage === 'complete');
+    const retainedComparable = sourceMatches && oldSelected === record.deveui && zone && zone.rain_coverage === 'complete' && instrumentDay && instrumentDay.coverage === 'complete';
+    const proof = selectedProof && record.timezone && zone && oldZone != null && (legacyComparable || retainedComparable) && acceptedCount > 0;
     const delta = proof ? round3(received - oldZone) : null;
     if (proof && delta === 0) reasons.add('unchanged');
     if (zone && !proof) reasons.add('comparison_unverifiable');
+    if (zone && record.basis === 'provenance' && oldSource && oldSource !== 'local_gauge') reasons.add('old_source_mismatch');
     const oldHost = options.hostTimezone && ((record.basis === 'provenance' && fullDay) || record.basis === 'observation_snapshot') ? hostValue : null;
     if (record.date && record.timezone && !fullDay) reasons.add('assignment_period_unproven');
     rows.push({ deveui: record.deveui || null, instrument_type: device.type_id || null, zone_id: record.zoneId, date: record.date, timezone: record.timezone, old_host_day_mm: oldHost, old_zone_row_mm: oldZone, old_rain_source: zone ? zone.rain_source : null, new_received_mm: received, new_coverage: record.rows.length ? 'received_only' : null, new_selected_deveui: selectedGauge, delta_mm: delta, reasons: [...reasons].sort().join(';'), evidenceRefs: record.evidenceRefs });
@@ -376,7 +396,42 @@ function summary(rows, provenance) {
   out.push('', 'Largest comparable numeric deltas:', '');
   if (!deltas.length) out.push('- None established.');
   else for (const row of deltas.slice(0, 10)) out.push(`- ${escapeMarkdown(row.deveui)} ${row.date} zone ${row.zone_id}: ${row.delta_mm} mm`);
-  out.push('', 'Advice-threshold candidates:', '', '- 5 mm and 20 mm over seven days are unverifiable unless seven consecutive farm days have comparable, complete baselines. Received-only legacy values never establish a certified rolling total.', '');
+  const daily = rows.filter((row) => row.delta_mm != null && row.old_zone_row_mm != null && row.new_received_mm != null)
+    .filter((row) => (row.old_zone_row_mm < 5 && row.new_received_mm >= 5) || (row.old_zone_row_mm >= 5 && row.new_received_mm < 5));
+  out.push('', 'Hypothetical advice-threshold candidates (not proof of actual past advice):', '');
+  if (daily.length) for (const row of daily) out.push(`- Hypothetical daily crossing of 5 mm on ${row.date}, zone ${row.zone_id}: old ${row.old_zone_row_mm} mm; received ${row.new_received_mm} mm (${row.new_received_mm >= 5 ? 'upward' : 'downward'}). Received-only values are not certified.`);
+  else out.push('- No comparable single-day crossing of 5 mm established.');
+  const buckets = new Map();
+  for (const row of rows) {
+    if (row.zone_id == null || !row.date || !row.timezone) continue;
+    const key = [row.zone_id, row.timezone].join('|');
+    if (!buckets.has(key)) buckets.set(key, new Map());
+    const days = buckets.get(key);
+    if (!days.has(row.date)) days.set(row.date, []);
+    days.get(row.date).push(row);
+  }
+  const rollingCandidates = [];
+  let rollingWindowCount = 0;
+  for (const [zoneKey, days] of buckets) {
+    const orderedDates = [...days.keys()].sort();
+    if (orderedDates.length < 7) continue;
+    const first = Date.parse(orderedDates[0] + 'T00:00:00Z');
+    const last = Date.parse(orderedDates.at(-1) + 'T00:00:00Z');
+    for (let start = first; start + 6 * 86400000 <= last; start += 86400000) {
+      rollingWindowCount += 1;
+      const windowDates = Array.from({ length: 7 }, (_, index) => new Date(start + index * 86400000).toISOString().slice(0, 10));
+      const windowRows = windowDates.map((day) => days.get(day));
+      if (windowRows.some((group) => !group || group.length !== 1 || group[0].delta_mm == null || group[0].old_zone_row_mm == null || group[0].new_received_mm == null)) continue;
+      const period = windowRows.map((group) => group[0]);
+      if (new Set(period.map((row) => row.new_selected_deveui)).size !== 1 || new Set(period.map((row) => row.old_rain_source)).size !== 1) continue;
+      const oldTotal = round3(period.reduce((sum, row) => sum + row.old_zone_row_mm, 0));
+      const newTotal = round3(period.reduce((sum, row) => sum + row.new_received_mm, 0));
+      if ((oldTotal < 20 && newTotal >= 20) || (oldTotal >= 20 && newTotal < 20)) rollingCandidates.push({ zoneKey, from: windowDates[0], to: windowDates[6], oldTotal, newTotal });
+    }
+  }
+  if (rollingCandidates.length) for (const candidate of rollingCandidates) out.push(`- Hypothetical seven-day crossing of 20 mm for ${candidate.from} through ${candidate.to}, zone/timezone ${candidate.zoneKey}: old ${candidate.oldTotal} mm; received ${candidate.newTotal} mm (${candidate.newTotal >= 20 ? 'upward' : 'downward'}). Received-only totals are not certified.`);
+  else out.push(`- Seven-day threshold assessment unverifiable: ${rollingWindowCount ? 'no seven-day window had seven comparable, unambiguous farm days with matching gauge/source/period' : 'missing or ambiguous farm day(s) leave no complete seven-day window'}. Received-only legacy values never establish a certified rolling total.`);
+  out.push('');
   return out.join('\n');
 }
 function run(options) {
@@ -402,9 +457,24 @@ function run(options) {
   const csvPath = targets.files[0]; const summaryPath = targets.files[1];
   for (const target of targets.files) if (fs.existsSync(target) && fs.realpathSync(target) === dbPath) throw new Error('output target aliases the input database');
   const created = [];
+  const temporary = targets.files.map((file) => file + '.tmp-' + process.pid + '-' + crypto.randomUUID());
   try {
-    fs.writeFileSync(csvPath, csv(rows), { flag: 'w' }); created.push(csvPath);
-    fs.writeFileSync(summaryPath, summary(rows, provenance), { flag: 'w' }); created.push(summaryPath);
+    for (let index = 0; index < temporary.length; index += 1) {
+      const fd = fs.openSync(temporary[index], 'wx', 0o600);
+      created.push(temporary[index]);
+      fs.closeSync(fd);
+      fs.writeFileSync(temporary[index], index === 0 ? csv(rows) : summary(rows, provenance));
+    }
+    for (let index = 0; index < temporary.length; index += 1) {
+      try { fs.linkSync(temporary[index], targets.files[index]); }
+      catch (error) {
+        if (error.code === 'EEXIST') throw new Error('refusing to overwrite existing output: ' + path.basename(targets.files[index]));
+        throw error;
+      }
+      created.push(targets.files[index]);
+      fs.unlinkSync(temporary[index]);
+      created.splice(created.indexOf(temporary[index]), 1);
+    }
   } catch (error) {
     for (const file of created) { try { fs.unlinkSync(file); } catch {} }
     throw error;
