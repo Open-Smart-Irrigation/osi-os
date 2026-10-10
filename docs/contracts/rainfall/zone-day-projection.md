@@ -12,7 +12,7 @@ The cloud receiver ships first. Before it, the cloud reads a payload `rainfall_m
 
 ## Payload fields
 
-The fields appear on every path that carries a `zone_daily_environment` row to the cloud: the `ZONE_ENVIRONMENT_APPENDED` event (insert and update triggers), the `zoneEnvironments` items of the bootstrap and force-sync snapshots, and the `zone_daily_environment` pages of history sync. The aggregate key stays `zone_uuid|date`.
+The fields appear on every path that carries a `zone_daily_environment` row to the cloud: the `ZONE_ENVIRONMENT_APPENDED` event (insert and update triggers), the `zoneEnvironments` items of the bootstrap and force-sync snapshots, and the `zone_daily_environment` rows of history sync. The aggregate key stays `zone_uuid|date`. History sync sends each row whole (`SELECT zde.*`), so its rows carry the five fields and `sync_version` without a change to the history code; the section "History rows" below says what must stay fixed there.
 
 | Field | Type | Values |
 |---|---|---|
@@ -21,7 +21,7 @@ The fields appear on every path that carries a `zone_daily_environment` row to t
 | `rain_coverage` | string or null | `complete`, `complete_so_far`, `partial`, `unknown`. Null only on a row written before policy version 1. |
 | `rain_selected_deveui` | string or null | The selected gauge, 16 uppercase hex digits. Null when the zone has no gauge or its gauges are ambiguous. |
 | `rain_policy_version` | integer or null | The policy that computed the row; `1` for this contract. Null on a legacy row. |
-| `rain_quality_reasons` | array of strings or null | Reason codes, in the order the assessor produced them, without duplicates. An empty array means no reason applies. A JSON array in the payload, never a string that contains one. |
+| `rain_quality_reasons` | array of strings, JSON text, or null | Reason codes without duplicates: the instrument's codes first, then the zone's own. An empty array means no reason applies. Events and snapshot items carry a JSON array, never a string that contains one; history rows carry the stored JSON text. Receivers accept both forms. |
 | `rain_received_mm` | number or null | Sum of the selected gauge's accepted amounts received during the farm day. "Received in this period", never a measured day total. Null when no gauge is selected. |
 
 ### Coverage values
@@ -39,7 +39,7 @@ The fields appear on every path that carries a `zone_daily_environment` row to t
 
 ### Legacy rows and older gateways
 
-Rows written before policy version 1 keep their stored values; the edge does not rewrite them. Their five new fields are null, and their `rainfall_mm` is a value no coverage rule produced. A receiver treats such a row as legacy and unvalidated: it may display the amount with that label, and no advice consumer may use it as measured rain.
+Rows written before policy version 1 get no bulk rewrite. The edge re-projects such a row at policy version 1 only when it accepts an observation for that zone and date after the upgrade, typically on the upgrade day; until then the row keeps its stored values. Its five new fields are null, and their `rainfall_mm` is a value no coverage rule produced. A receiver treats such a row as legacy and unvalidated: it may display the amount with that label, and no advice consumer may use it as measured rain.
 
 A payload from an older gateway lacks the five keys, and the receiver stores the row as legacy, as if the keys were present with null values. Only `rainfall_mm` tells an absent key from a present null:
 
@@ -68,14 +68,14 @@ The codes of an instrument's own contract pass through unchanged; for the LoRain
 
 Coverage is first assessed per instrument and farm day, keyed by `(deveui, date, timezone)`. `date` is the farm day in the zone's IANA timezone, midnight to the next midnight, including 23- and 25-hour DST days. A gauge that serves zones in two timezones has a separate day in each.
 
-The edge recomputes an instrument day from its accepted observations every time an observation for it is accepted, including a delayed one. It never increments a stored total. Two kinds of instrument exist:
+The edge recomputes an instrument day from its accepted observations every time an observation for it is accepted, including a delayed one, and every time a re-assessment changes the status of an earlier observation (for example, when the first frame of a same-slot pair is withdrawn). It never increments a stored total. Two kinds of instrument exist:
 
 - **Interval instruments** (LoRain). Each accepted frame covers a measurement interval. A day is `complete` only under the coverage rule of `lorain.md`: one fCnt-continuous chain in one session, a frame at or after the day end, a promoted device (configuration reply, continuity and a pinned build, owner decision D9), and proven allocation at both boundaries. A non-zero window that crosses midnight blocks certification of both days (`boundary_allocation`); a zero window splits exactly.
 - **Cumulative instruments** (S2120 register, LSN50 tip counter). A day is `complete` when the register did not reset, no frame arrived out of order, frames exist on both sides of each boundary, and the deltas of the two frame pairs that straddle the boundaries are zero, or a frame lies exactly on the boundary.
 
 A gauge without promotion evidence never produces a `complete` day. For a LoRain gauge that is not yet promoted, every day is `unknown` with `received_only`, `rainfall_mm` stays null, and `rain_received_mm` shows what arrived.
 
-Each observation keeps the zone it was received under. A device moved to another zone leaves its earlier days in the earlier zone; the new zone gets only days observed after the move.
+Each observation keeps the zone it was received under. A device moved to another zone leaves its earlier days in the earlier zone, and the new zone gets only observations received after the move. On the day of the move each zone counts only the observations received under its own zone, and neither zone certifies that day: its coverage is `partial` at best in both.
 
 ## Gauge selection
 
@@ -94,20 +94,36 @@ The zone day projects the selected gauge's instrument day for that date: its cov
 
 ## Versions and late corrections
 
-`sync_version` belongs to the `(zone_uuid, date)` row and only increases. Every write that changes `rainfall_mm`, `flow_liters`, `rain_source`, `rain_coverage`, `rain_selected_deveui`, `rain_policy_version`, `rain_quality_reasons` or `rain_received_mm` increments it by one in the same statement. A rain recomputation that changes none of these leaves it alone and emits no event.
+`sync_version` belongs to the `(zone_uuid, date)` row and only increases. Every write that changes `rainfall_mm`, `flow_liters`, `rain_source`, `rain_coverage`, `rain_selected_deveui`, `rain_policy_version`, `rain_quality_reasons` or `rain_received_mm` increments it by one and writes a new `computed_at`, in the same statement. A rain recomputation that changes none of these leaves both alone and emits no event.
 
 A late distinct observation can change a past day: it can close a frame gap or supply the frame after midnight that a `complete` day needs. The edge then recomputes the instrument day and the zone day, the projected fields change, `sync_version` increments once, and the update trigger emits one event with the new values. Re-delivering the same observation changes nothing and emits nothing.
 
-The receiver converges by version:
+The cloud converges by version, with a different rule for events than for the two paths that write the row directly.
+
+Events pass the cloud's existing resource watermark for `ZONE_ENVIRONMENT|zone_uuid|date`. This contract does not change that path:
+
+| Incoming event against the watermark | Cloud answer |
+|---|---|
+| Newer version | Applied; the watermark advances |
+| Older version | Rejected `stale_sync_version` |
+| Equal version, different payload | Rejected `equal_version_payload_conflict` |
+
+Both rejection codes are permanent in `docs/contracts/sync-schema/rejection-recovery-v1.json`, so the edge outbox moves past them.
+
+Bootstrap and force-sync `zoneEnvironments` items and history rows bypass the watermark. For them the receiver compares the row's `sync_version` with the stored one:
 
 | Stored `sync_version` | Incoming `sync_version` | Receiver |
 |---|---|---|
-| null or absent | any | Applies the payload |
-| n | ≥ n | Applies the payload; an equal version carries the same content and changes nothing |
-| n | < n | Ignores the payload without rejecting it, so the edge outbox drains |
-| n | absent (older gateway) | Applies the payload, as before this contract |
+| null | any | Applies the row |
+| n | ≥ n | Applies the row. An equal version carries the same rain and flow fields; `computed_at` may differ. |
+| n | < n | Ignores the row without rejecting it |
+| n | key absent | Applies the row, as before this contract. Only a row without the key takes this branch; current snapshot items and history rows carry it. |
 
-History-sync pages of `zone_daily_environment` carry `sync_version` together with the five fields, so a history page can never overwrite a newer event.
+### History rows
+
+The history hash v1 of a `zone_daily_environment` row stays the six columns it covers today: `zone_uuid`, `date`, `rainfall_mm`, `flow_liters`, `rain_source` and `computed_at` (`scripts/lib/history-hash-v1.js`, golden vector `zone-environment-rain-and-flow` in `docs/sync/history-hash-v1-fixtures.json`). The five quality fields and `sync_version` travel in the row unhashed. The cloud recomputes the hash for each row and answers `hash_mismatch`, a permanent rejection that stops the batch, when the two sides disagree, so adding columns to the hash on one side would stall the history sync of every gateway on the other version.
+
+The cloud also skips a history row whose hash equals the stored one as a duplicate. A change of coverage or reasons alone would therefore never reach the cloud through history if it left the hashed columns unchanged; the new `computed_at` written with every projected change prevents that.
 
 Advice that needs measured rain reads `rainfall_mm` only when `rain_coverage` is `complete`. Whether an advice rule may use `rain_received_mm`, for example as a lower bound, is decided by that rule's own policy; this projection only labels the amount.
 

@@ -186,12 +186,14 @@ version. The scheduled bootstrap repeats the last 30 days of each zone in
 
 From rain policy version 1 the edge adds five optional fields to every
 `zone_daily_environment` row it sends (event, bootstrap and force-sync
-`zoneEnvironments`, history pages): `rain_coverage`, `rain_selected_deveui`,
+`zoneEnvironments`, history rows): `rain_coverage`, `rain_selected_deveui`,
 `rain_policy_version`, `rain_quality_reasons` and `rain_received_mm`.
 `rainfall_mm` is null unless `rain_coverage` is `complete`, and a present null
 replaces a stored amount. A row without the fields is legacy and unvalidated.
 An older `sync_version` never overwrites a newer one for the same
-`zone_uuid|date`. `contract_version` stays 1 and the schema files do not
+`zone_uuid|date`: events keep the existing watermark (`stale_sync_version`),
+and snapshot items and history rows are compared by `sync_version`. The
+history hash v1 input does not change. `contract_version` stays 1 and the schema files do not
 change, because `events.schema.json` defines no payload for this operation and
 allows additional payload properties. The full contract, including the deploy
 order (cloud receiver first), is
