@@ -10,6 +10,7 @@ import { isDesktopBrowser } from '../../../utils/isDesktopBrowser';
 const apiMocks = vi.hoisted(() => ({
   getZoneRecommendations: vi.fn(),
   getSummary: vi.fn(),
+  getRainSource: vi.fn(),
 }));
 
 vi.mock('../../../services/api', () => ({
@@ -23,6 +24,10 @@ vi.mock('../../../services/api', () => ({
     delete: vi.fn().mockResolvedValue(undefined),
     removeDevice: vi.fn().mockResolvedValue(undefined),
     updateConfig: vi.fn().mockResolvedValue(undefined),
+  },
+  zoneRainSourceAPI: {
+    get: apiMocks.getRainSource,
+    set: vi.fn(),
   },
 }));
 
@@ -170,6 +175,8 @@ beforeEach(() => {
   apiMocks.getZoneRecommendations.mockResolvedValue([]);
   apiMocks.getSummary.mockReset();
   apiMocks.getSummary.mockResolvedValue(null);
+  apiMocks.getRainSource.mockReset();
+  apiMocks.getRainSource.mockResolvedValue({ state: 'none', selectedDeveui: null, basis: null, candidates: [], suggestedDeveui: null });
 });
 
 afterEach(() => {
@@ -305,6 +312,41 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(waterCard).toHaveClass('bg-[var(--card)]');
     expect(waterCard.className).not.toContain('white_55%');
     expect(waterCard.className).not.toContain('sky-100');
+  });
+
+  it('says in the water card when two rain gauges report and none is chosen', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    apiMocks.getRainSource.mockResolvedValue({
+      state: 'ambiguous', selectedDeveui: null, basis: null, suggestedDeveui: 'A840410000000001',
+      candidates: [
+        { deveui: 'A840410000000001', name: 'Gauge north', typeId: 'AQUASCOPE_LORAIN', via: 'direct' },
+        { deveui: 'A840410000000002', name: 'Station east', typeId: 'SENSECAP_S2120', via: 'weather_station' },
+      ],
+    });
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    await waitFor(() => expect(waterCard).toHaveTextContent(
+      'Two rain gauges report for this zone. Choose one in the zone settings.',
+    ));
+    expect(apiMocks.getRainSource).toHaveBeenCalledWith(12);
+  });
+
+  it('shows no gauge banner once a gauge is chosen', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    apiMocks.getRainSource.mockResolvedValue({
+      state: 'selected', selectedDeveui: 'A840410000000001', basis: 'explicit', suggestedDeveui: null,
+      candidates: [{ deveui: 'A840410000000001', name: 'Gauge north', typeId: 'AQUASCOPE_LORAIN', via: 'direct' }],
+    });
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    await waitFor(() => expect(apiMocks.getRainSource).toHaveBeenCalledWith(12));
+    expect(waterCard).not.toHaveTextContent('Two rain gauges report for this zone.');
   });
 
   it('does not expose scheduling-source controls in the water balance card', async () => {

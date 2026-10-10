@@ -936,5 +936,17 @@
     "tips_one": "{{count}} tip",
     "tips_other": "{{count}} tips",
     "tipsUnavailable": "Tip count unavailable"
+  },
+  "zoneRainGauge": {
+    "label": "Rain gauge for this zone",
+    "helpLabel": "About the rain gauge",
+    "help": "When more than one rain gauge reports for this zone, the zone's daily rain comes from the gauge you choose here. Rain from two gauges is never added. A change recalculates the last 30 days.",
+    "notChosen": "— No gauge chosen —",
+    "optionShared": "{{name}} (shared weather station)",
+    "optionSuggested": "{{label}} — suggested",
+    "ambiguous": "Two rain gauges report for this zone. Until you choose one, the zone has no measured rain.",
+    "onlyCandidate": "The only rain gauge of this zone is used.",
+    "loadFailed": "The rain gauges of this zone could not be loaded.",
+    "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
   }
 }

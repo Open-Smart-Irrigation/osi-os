@@ -939,5 +939,17 @@
     "tips_one": "{{count}} basculamento",
     "tips_other": "{{count}} basculamentos",
     "tipsUnavailable": "Número de basculamentos indisponível"
+  },
+  "zoneRainGauge": {
+    "label": "Pluviómetro desta zona",
+    "helpLabel": "Sobre o pluviómetro",
+    "help": "Quando vários pluviómetros reportam para esta zona, a chuva diária da zona vem do pluviómetro que escolher aqui. A chuva de dois pluviómetros nunca é somada. Uma alteração recalcula os últimos 30 dias.",
+    "notChosen": "— Nenhum pluviómetro escolhido —",
+    "optionShared": "{{name}} (estação meteorológica partilhada)",
+    "optionSuggested": "{{label}} — sugerido",
+    "ambiguous": "Dois pluviómetros reportam para esta zona. Enquanto não escolher um, a zona não tem chuva medida.",
+    "onlyCandidate": "É usado o único pluviómetro desta zona.",
+    "loadFailed": "Não foi possível carregar os pluviómetros desta zona.",
+    "banner": "Dois pluviómetros reportam para esta zona. Escolha um nas definições da zona."
   }
 }
