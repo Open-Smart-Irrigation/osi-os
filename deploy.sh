@@ -2045,6 +2045,14 @@ fetch_required "osi-station-hours index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-station-hours/index.js" \
     "/srv/node-red/osi-station-hours/index.js"
 
+fetch_required "osi-rain package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/package.json" \
+    "/srv/node-red/osi-rain/package.json"
+
+fetch_required "osi-rain index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/index.js" \
+    "/srv/node-red/osi-rain/index.js"
+
 fetch_required "osi-agronomy-daily package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-agronomy-daily/package.json" \
     "/srv/node-red/osi-agronomy-daily/package.json"

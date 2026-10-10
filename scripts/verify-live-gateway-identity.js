@@ -1108,9 +1108,11 @@ if (silentCatchBaseline) {
   // rejected events as delivery successes: 88 -> 87.
   // 86: session check on the reference-tree route -- dendro-ref-tree-fn's error-path
   // DB-close catch(_){} gains a visible node.warn while the node gets its verifyBearer: 87 -> 86.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 86 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 86,
-    'silent-catch baseline records 86 for both maintained profiles',
-    'silent-catch baseline must be 86 for both maintained profiles');
+  // 84: rain correctness, one LoRain writer -- lorain-process-fn and lorain-rain-agg-fn, each
+  // with one silent close() catch, are replaced by lorain-ingest-fn (none): 86 -> 84.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 84 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 84,
+    'silent-catch baseline records 84 for both maintained profiles',
+    'silent-catch baseline must be 84 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

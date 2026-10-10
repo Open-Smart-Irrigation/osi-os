@@ -68,5 +68,6 @@
   "0067__zone_daily_agronomy_sync.sql": "f007051f72dd0ba5f8e967625b21c39293b271902a77817a9940095932f4c610",
   "0068__watermark_cloud_parity.sql": "f029ee2ef4f672532aa2ab758743ea3e249a1fd83bff7b481655880fd60d9778",
   "0069__journal_v2_plot_group_snapshot.sql": "da04a8c0b720a15f297f8083258e02db0868e86cfdbdc8f80f3a3bd4f001372a",
-  "0070__journal_catalog_v11.sql": "4970ecd34f5e72e0a84576d3b97402edabada863f5784df73cd8b17ddda88260"
+  "0070__journal_catalog_v11.sql": "4970ecd34f5e72e0a84576d3b97402edabada863f5784df73cd8b17ddda88260",
+  "0071__rain_observations.sql": "aa211aac5ab08175a1842422f24dde80b8725093e4e66617ddf4e22061682c16"
 }

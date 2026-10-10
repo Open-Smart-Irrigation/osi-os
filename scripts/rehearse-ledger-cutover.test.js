@@ -496,7 +496,7 @@ test('earlier lineage at 53 with data: interrupted run, clean restart, designed 
   assert.equal(recon.databaseUnchanged, true);
   const tail = Object.fromEntries(recon.remaps.filter((m) => m.from >= 50).map((m) => [m.from, m.to]));
   assert.deepEqual(tail, { 50: 69, 51: 70, 52: 61, 53: 68 });
-  const holes = [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67];
+  const holes = [22, 23, 24, 25, 54, 55, 56, 57, 58, 59, 60, 62, 63, 64, 65, 66, 67, 71];
   assert.deepEqual(recon.pendingAfterReconcile, holes);
   assert.equal(stepOf(report, 1, 'reconcile-apply').result.applied, true);
   assert.deepEqual(stepOf(report, 1, 'migrate-cli').result.applied, holes);

@@ -1,5 +1,6 @@
 'use strict';
-// LoRain dry reports and the zone day window.
+// LoRain dry reports and the zone day window, through the one writer node
+// (lorain-ingest-fn; it replaced lorain-process-fn + lorain-rain-agg-fn).
 // Run with a pinned host timezone: TZ=UTC node --test scripts/test-lorain-dry-zone-row.js
 // (the result must not depend on it; TZ=Pacific/Auckland must pass as well).
 const test = require('node:test');
@@ -25,18 +26,11 @@ function uplink(time, tips, extra = {}) {
     deduplicationId: 'dedup-' + time, fCnt: 1, object: { rain_tips_delta: tips, rain_mm_delta: tips * 0.5, ...extra } } };
 }
 async function ingest(db, time, tips, extra) {
-  const proc = await executeFunction(asyncNode('lorain-process-fn'), { msg: uplink(time, tips, extra), db });
-  const [rowMsg, aggMsg] = proc.result;
-  if (rowMsg) {
-    const sql = await executeFunction(loadNode('lorain-sql-fn'), { msg: rowMsg, db });
-    db.exec(sql.result.topic);
-  }
-  if (aggMsg) {
-    const agg = await executeFunction(asyncNode('lorain-rain-agg-fn'), { msg: aggMsg, db });
-    assert.deepEqual(agg.errors, []);
-  }
-  return proc.result;
+  const out = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplink(time, tips, extra), db });
+  assert.deepEqual(out.errors, []);
+  return out.result;
 }
+const zoneRows = (db) => db.prepare('SELECT COUNT(*) AS n FROM zone_daily_environment').get().n;
 
 test('a valid zero report creates a zone row with 0 mm and the gauge source', async () => {
   const db = seed('UTC');
@@ -51,25 +45,34 @@ test('a silent gauge has no zone row', async () => {
 });
 
 test('non-ok zero does not reach the zone table', async () => {
+  // A zero with an invalid tip value, a zero without an event identity, and a
+  // repeated delivery: none of them creates a zone row.
   const db = seed('UTC');
-  await ingest(db, '2026-10-08T10:00:00.000Z', 1);
-  // An older report than the stored one is classified duplicate_or_out_of_order by lorain-process-fn.
-  const [, aggMsg] = await ingest(db, '2026-10-08T09:00:00.000Z', 0);
-  assert.equal(aggMsg, null);
+  await ingest(db, '2026-10-08T10:00:00.000Z', 0, { rain_tips_delta: '0' });
+  const anonymous = uplink('2026-10-08T11:00:00.000Z', 0);
+  delete anonymous.payload.deduplicationId;
+  await executeFunction(asyncNode('lorain-ingest-fn'), { msg: anonymous, db });
+  assert.equal(zoneRows(db), 0);
+  await ingest(db, '2026-10-08T12:00:00.000Z', 1);
+  await ingest(db, '2026-10-08T12:00:00.000Z', 1);
+  // A delayed distinct zero (older time, own identity) is accepted and adds nothing (A7).
+  await ingest(db, '2026-10-08T09:00:00.000Z', 0);
   const row = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
   assert.equal(row.rainfall_mm, 0.5);
 });
 
 test('seeds a new zone day from the zone-local window, not the host day', async () => {
   const db = seed('Europe/Zurich');
-  // 20:00Z on 2026-10-24 is 22:00 local (CEST); 10 mm on the 24th.
-  await ingest(db, '2026-10-24T20:00:00.000Z', 20);
-  // 23:15Z on 2026-10-24 is 01:15 local on the 25th (the 25-hour day); host day (UTC) is still the 24th.
-  await ingest(db, '2026-10-24T23:15:00.000Z', 1);
-  const day25 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-25'").get();
-  assert.equal(day25.rainfall_mm, 0.5, 'never 10.5 mm carried over from the host day');
-  const day24 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-24'").get();
-  assert.equal(day24.rainfall_mm, 10);
+  // A past 25-hour day: the writer clamps a reception time after "now" to now,
+  // so the case uses 2025-10-26, the last Sunday of October 2025.
+  // 20:00Z on 2025-10-25 is 22:00 local (CEST); 10 mm on the 25th.
+  await ingest(db, '2025-10-25T20:00:00.000Z', 20);
+  // 23:15Z on 2025-10-25 is 01:15 local on the 26th (the 25-hour day); host day (UTC) is still the 25th.
+  await ingest(db, '2025-10-25T23:15:00.000Z', 1);
+  const day26 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-26'").get();
+  assert.equal(day26.rainfall_mm, 0.5, 'never 10.5 mm carried over from the host day');
+  const day25 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-25'").get();
+  assert.equal(day25.rainfall_mm, 10);
 });
 
 test('a dry report after rain keeps the day total, refreshes computed_at, and does not bump sync_version', async () => {
