@@ -60,13 +60,14 @@ The codes of an instrument's own contract pass through unchanged; for the LoRain
 | Code | Effect on coverage | Meaning |
 |---|---|---|
 | `gauge_ambiguous` | `unknown` | Two or more gauges are eligible for the zone and the operator has selected none. |
-| `no_gauge` | `unknown` | The zone has no eligible gauge. |
+| `no_gauge` | `unknown` | The zone has no eligible gauge for the day; a stable disabled LSN50 is not evidence of zero rain. |
 | `timezone_invalid` | `unknown` | The zone's stored timezone is not a valid IANA name; the day was computed in UTC and is never certified. |
 | `timezone_abbreviation` | none | The zone's timezone is an abbreviation such as `CET`. Days stay certifiable, and the flag prompts the operator to choose a region name (owner decision D6). |
 | `counter_reset` | `partial` at best | A cumulative rain register (S2120, LSN50 counter) restarted inside the day. |
 | `late_counter_frame` | blocks `complete` | A cumulative-register frame arrived out of order, so the deltas around it cannot be trusted. |
 | `frame_gap` (day bounds) | `partial` at best; `unknown` when the day has no frame at all | Besides the missing fCnt value of `lorain.md`: the day is not bounded yet. No frame of the instrument lies before its start, or the day has ended and no frame lies at or after its end. The edge recomputes the day when the bounding frame arrives. |
 | `zone_reassigned` | `partial` at best; `unknown` when nothing was received under this zone | The selected gauge reported under another zone for part of the farm day (it was moved, or a weather-station link changed). The zone counts only the observations received under it: `rainfall_mm` is null and `rain_received_mm` is that share. |
+| `zone_provenance_unknown` | `unknown` | A legacy counter frame or day-bound snapshot lacks the durable zone and gauge-enable provenance needed to attribute a cumulative zero or amount to this zone. No share is inferred for the affected frame; separately proven own-zone shares remain visible. |
 | `ambiguous_identity` | `unknown` | A frame of the day arrived without an observation identity (no `deduplicationId`); its amount is not counted. |
 
 Cumulative registers pass their sample status through as instrument reasons. `first_sample`, `cumulative_baseline` and `missing_previous_count` leave the day `partial` at best; `invalid_interval`, `intensity_only`, `out_of_order`, `duplicate_timestamp` and `legacy_intensity_window` make it `unknown`. The edge treats a code it does not classify as blocking certification.
@@ -83,6 +84,8 @@ The edge recomputes an instrument day from its accepted observations every time 
 A gauge without promotion evidence never produces a `complete` day. For a LoRain gauge that is not yet promoted, every day is `unknown` with `received_only`, `rainfall_mm` stays null, and `rain_received_mm` shows what arrived.
 
 Each observation keeps the zone it was received under. A device moved to another zone leaves its earlier days in the earlier zone, and the new zone gets only observations received after the move. On the day of the move each zone counts only the observations received under its own zone, and neither zone certifies that day: its coverage is `partial` at best in both, with reason `zone_reassigned`.
+
+For LSN50 counters, a known enablement change within the farm day adds `config_change` and leaves coverage `unknown`; only accepted frames saved as enabled and under the zone contribute to `rain_received_mm`. Stable disabled bounds add `no_gauge`. Missing saved enablement or zone fields add `zone_provenance_unknown`, while a known zone assignment disagreement adds `zone_reassigned`.
 
 ## Gauge selection
 

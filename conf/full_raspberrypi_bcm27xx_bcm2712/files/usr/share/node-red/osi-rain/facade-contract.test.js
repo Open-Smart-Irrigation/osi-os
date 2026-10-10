@@ -142,6 +142,7 @@ test('ingestS2120Uplink through the osi-db-helper transaction facade', async () 
 
 test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-agg-fn shape)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-rain-facade-'));
+  const realNow = Date.now;
   try {
     const file = path.join(dir, 'farming.db');
     const native = new DatabaseSync(file);
@@ -157,6 +158,7 @@ test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-
     const osiDb = loadOsiDbHelper();
     const db = new osiDb.Database(file);
     const nowMs = Date.parse('2026-10-08T12:00:00.000Z');
+    Date.now = () => nowMs;
     const captures = await db.transaction(async (t) => {
       const rows = await t.all("SELECT id, deveui, recorded_at, rain_count_cumulative, rain_mm_delta, rain_delta_status, counter_interval_seconds FROM device_data WHERE deveui='A840410000000003' ORDER BY recorded_at");
       const out = [];
@@ -170,7 +172,7 @@ test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-
       rainDeltaStatus: 'ok', rainMmDelta: 0.4, flowDeltaStatus: 'ok', flowLitersDelta: 3,
     }));
     const again = await db.transaction((t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'reassessed', nowMs }));
-    assert.equal(again.written, false, 'nothing projected changed');
+    assert.equal(again.written, false, `nothing projected changed: ${JSON.stringify(again)}`);
     const check = new DatabaseSync(file, { readOnly: true });
     try {
       assert.deepEqual({ ...check.prepare("SELECT rainfall_mm, rain_received_mm, flow_liters, rain_source, rain_coverage, rain_selected_deveui, rain_policy_version, sync_version FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get() },
@@ -180,6 +182,7 @@ test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-
       check.close();
     }
   } finally {
+    Date.now = realNow;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

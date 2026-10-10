@@ -20,7 +20,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadNode, executeFunction, seedTestDb } = require('./lib/flow-node-harness');
+const { loadNode, executeFunction, facadeDb, seedTestDb } = require('./lib/flow-node-harness');
+const rain = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain');
 
 function msgFor(rainStatus, rain, flowStatus, flow, timestamp = '2026-10-08T10:00:00.000Z') {
   return {
@@ -218,9 +219,134 @@ test('legacy LSN50 counter rows without a zone snapshot are not assigned to the 
   const db = gauge(seedTestDb());
   legacyCounterRow(db, '2026-10-08T09:50:00.000Z', 10, 'first_sample', null, null);
   legacyCounterRow(db, '2026-10-08T10:00:00.000Z', 15, 'ok', 1, 600);
+  const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+  assert.equal(resolved.coverage, 'unknown');
+  assert.equal(resolved.amountMm, null);
+  assert.equal(resolved.receivedMm, null, 'without a saved frame zone, no received share is provable');
+  assert.ok(resolved.reasons.includes('zone_provenance_unknown'));
+  assert.ok(!resolved.reasons.includes('zone_reassigned'), 'missing provenance does not assert that the gauge moved');
   await run(db, msgFor('ok', 1, 'missing_current', null));
   assert.equal(rowForDate(db, '2026-10-08'), undefined, 'pre-snapshot device_data has no durable zone provenance');
   db.close();
+});
+
+test('an unknown LSN50 frame cannot erase a separately proven own-zone share', async () => {
+  const db = gauge(seedTestDb());
+  counterRow(db, '2026-10-08T09:50:00.000Z', 10, 'first_sample', null, null);
+  counterRow(db, '2026-10-08T10:00:00.000Z', 12, 'ok', 0.4, 600);
+  legacyCounterRow(db, '2026-10-08T10:10:00.000Z', 15, 'ok', 0.6, 600);
+
+  const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+  assert.equal(resolved.coverage, 'unknown');
+  assert.equal(resolved.amountMm, null);
+  assert.equal(resolved.receivedMm, 0.4, 'only the amount with a durable own-zone snapshot is retained');
+  assert.ok(resolved.reasons.includes('zone_provenance_unknown'));
+  assert.ok(!resolved.reasons.includes('zone_reassigned'));
+  db.close();
+});
+
+test('zero counter bounds across a saved zone move cannot certify the sparse move day', async () => {
+  const db = gauge(seedTestDb());
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-10-10T00:00:00.000Z');
+  try {
+    db.prepare("UPDATE devices SET irrigation_zone_id=NULL WHERE deveui='WX1'").run();
+    await writeMod9(db, mod9Msg('2026-10-07T23:50:00.000Z', 10));
+    db.prepare("UPDATE devices SET irrigation_zone_id=2 WHERE deveui='DENDRO1'").run();
+    await writeMod9(db, mod9Msg('2026-10-09T00:10:00.000Z', 10));
+
+    const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 2, '2026-10-08'));
+    assert.equal(resolved.coverage, 'unknown');
+    assert.equal(resolved.amountMm, null);
+    assert.equal(resolved.receivedMm, null);
+    assert.ok(resolved.reasons.includes('zone_reassigned'));
+
+    await facadeDb(db).transaction((t) => rain.recomputeZoneDay(t, 2, '2026-10-08', {
+      trigger: 'flow', flowLitersDelta: 1,
+    }));
+    const stored = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_quality_reasons FROM zone_daily_environment WHERE zone_id=2 AND date='2026-10-08'").get();
+    assert.equal(stored.rainfall_mm, null);
+    assert.equal(stored.rain_received_mm, null);
+    assert.equal(stored.rain_coverage, 'unknown');
+    assert.ok(JSON.parse(stored.rain_quality_reasons).includes('zone_reassigned'));
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+});
+
+test('stationary zero counter bounds still certify a complete dry day', async () => {
+  const db = gauge(seedTestDb());
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-10-10T00:00:00.000Z');
+  try {
+    await writeMod9(db, mod9Msg('2026-10-07T23:50:00.000Z', 10));
+    await writeMod9(db, mod9Msg('2026-10-09T00:10:00.000Z', 10));
+    const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+    assert.equal(resolved.coverage, 'complete');
+    assert.equal(resolved.amountMm, 0);
+    assert.deepEqual(resolved.reasons, []);
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+});
+
+test('legacy zero counter bounds without zone snapshots cannot certify a current assignment', async () => {
+  const db = gauge(seedTestDb());
+  try {
+    legacyCounterRow(db, '2026-10-07T23:50:00.000Z', 10, 'ok', 0, 600);
+    legacyCounterRow(db, '2026-10-09T00:10:00.000Z', 10, 'ok', 0, 87600);
+    const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+    assert.notEqual(resolved.coverage, 'complete');
+    assert.equal(resolved.amountMm, null);
+    assert.ok(resolved.reasons.includes('zone_provenance_unknown'));
+  } finally {
+    db.close();
+  }
+});
+
+test('known LSN50 enablement changes are not reported as missing provenance or zone moves', async () => {
+  const db = seedTestDb();
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-10-10T00:00:00.000Z');
+  try {
+    db.prepare("UPDATE devices SET rain_gauge_enabled=0 WHERE deveui='DENDRO1'").run();
+    await writeMod9(db, mod9Msg('2026-10-07T23:50:00.000Z', 10));
+    db.prepare("UPDATE devices SET rain_gauge_enabled=1 WHERE deveui='DENDRO1'").run();
+    await writeMod9(db, mod9Msg('2026-10-09T00:10:00.000Z', 10));
+    const changed = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+    assert.equal(changed.coverage, 'unknown');
+    assert.equal(changed.amountMm, null);
+    assert.ok(changed.reasons.includes('config_change'), JSON.stringify(changed));
+    assert.ok(!changed.reasons.includes('zone_provenance_unknown'));
+    assert.ok(!changed.reasons.includes('zone_reassigned'));
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+});
+
+test('stable disabled LSN50 bounds do not certify a dry day', async () => {
+  const db = seedTestDb();
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-10-10T00:00:00.000Z');
+  try {
+    db.prepare("UPDATE devices SET rain_gauge_enabled=0 WHERE deveui='DENDRO1'").run();
+    await writeMod9(db, mod9Msg('2026-10-07T23:50:00.000Z', 10));
+    await writeMod9(db, mod9Msg('2026-10-09T00:10:00.000Z', 10));
+    db.prepare("UPDATE devices SET rain_gauge_enabled=1 WHERE deveui='DENDRO1'").run();
+    const resolved = await facadeDb(db).transaction((t) => rain.resolveZoneRain(t, 1, '2026-10-08'));
+    assert.equal(resolved.coverage, 'unknown');
+    assert.equal(resolved.amountMm, null);
+    assert.equal(resolved.receivedMm, null);
+    assert.ok(resolved.reasons.includes('no_gauge'), JSON.stringify(resolved));
+    assert.ok(!resolved.reasons.includes('zone_provenance_unknown'));
+    assert.ok(!resolved.reasons.includes('zone_reassigned'));
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
 });
 
 test('a flow-only uplink on a legacy LoRain day labels it with the zone projection', async () => {

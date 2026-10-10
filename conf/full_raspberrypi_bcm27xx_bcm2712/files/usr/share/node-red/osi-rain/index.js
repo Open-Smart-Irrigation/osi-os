@@ -568,7 +568,7 @@ function finalize(w) {
 // and the coverage rule of lorain.md. Reason codes are the instrument's own
 // (lorain.md table, the S2120 and LSN50 counter statuses) plus the coverage
 // codes below; a code this module does not know blocks certification.
-const COVERAGE_ORDER = ['received_only', 'build_unpinned', 'frame_gap', 'session_reset', 'counter_reset', 'late_counter_frame',
+const COVERAGE_ORDER = ['received_only', 'build_unpinned', 'frame_gap', 'zone_provenance_unknown', 'session_reset', 'counter_reset', 'late_counter_frame',
   'boundary_allocation', 'config_change', 'config_mismatch', 'overlap_unqualified', 'multi_block', 'invalid_tips', 'ambiguous_identity'];
 const ZONE_REASON_ORDER = ['gauge_ambiguous', 'no_gauge', 'zone_reassigned', 'timezone_invalid', 'timezone_abbreviation'];
 // A known part of the period is uncovered, but what was covered is usable.
@@ -1435,15 +1435,15 @@ function counterRowFrame(row) {
   const reasons = ok ? [] : [status || 'unknown_status'];
   if (status === 'out_of_order' || status === 'duplicate_timestamp') reasons.unshift('late_counter_frame');
   const config = parseJson(row.rain_config_json);
-  const zones = config.rain_gauge_enabled === true && Array.isArray(config.zones)
-    ? config.zones.map(Number).filter(Number.isInteger) : null;
+  const zones = Array.isArray(config.zones) ? config.zones.map(Number).filter(Number.isInteger) : null;
+  const hasZoneSnapshot = typeof config.rain_gauge_enabled === 'boolean' && Array.isArray(config.zones) && Array.isArray(config.zone_snapshots);
   return {
     receivedAt: row.recorded_at, tips: null, amountMm: ok ? Number(row.rain_mm_delta) : null, deltaMm: ok ? Number(row.rain_mm_delta) : null,
     cumulativeMm: null, status: ok ? 'accepted' : 'not_additive', frameKind: 'counter',
     intervalBasis: verified ? 'protocol_verified' : 'unknown',
     measuredStart: verified ? new Date(endMs - seconds * 1000).toISOString() : null,
     measuredEnd: verified ? new Date(endMs).toISOString() : null,
-    devAddr: null, fCnt: null, reasons, zones,
+    devAddr: null, fCnt: null, reasons, zones, hasZoneSnapshot,
     rainGaugeEnabled: config.rain_gauge_enabled === true,
   };
 }
@@ -1510,7 +1510,11 @@ async function computeInstrumentDay(t, deveui, dayIso, timezone, opts = {}) {
     const ms = frameMs(f.receivedAt);
     return ms >= startMs && ms < endMs;
   });
-  const result = { deveui: eui, date: dayIso, timezone: tz, instrument, window: win, assessment, inWindow };
+  const boundaryFrames = frames.filter((f) => {
+    const ms = frameMs(f.receivedAt);
+    return ms < startMs || ms >= endMs;
+  });
+  const result = { deveui: eui, date: dayIso, timezone: tz, instrument, window: win, assessment, inWindow, boundaryFrames };
   if (opts.persist !== false) await storeInstrumentDay(t, result, nowMs);
   if (opts.cache) opts.cache.set(cacheKey, result);
   return result;
@@ -1639,12 +1643,56 @@ async function projectZoneDay(t, zoneId, dayIso, opts = {}) {
   let amountMm = a.amountMm;
   let receivedMm = a.receivedMm;
   const reasons = new Set(a.reasons);
-  if (instrument.store === 'observations' || instrument.typeId === LSN50_TYPE_ID) {
+  if (instrument.typeId === LSN50_TYPE_ID) {
+    // A counter can prove a zero only for zones with stable, durable ownership
+    // and gauge-enable snapshots at both day bounds. Legacy rows stay unknown.
+    const accepted = day.inWindow.filter((f) => f.status === 'accepted' && f.amountMm !== null);
+    const own = accepted.filter((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
+      && Array.isArray(f.zones) && f.zones.includes(zid));
+    let provenanceUnknown = accepted.some((f) => f.hasZoneSnapshot !== true
+      || typeof f.rainGaugeEnabled !== 'boolean' || !Array.isArray(f.zones));
+    let configChanged = false;
+    let noGauge = false;
+    let reassigned = accepted.some((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
+      && Array.isArray(f.zones) && f.zones.length > 0 && !f.zones.includes(zid));
+    const snapshots = day.inWindow.concat(day.boundaryFrames).filter((f) => f.hasZoneSnapshot === true
+      && typeof f.rainGaugeEnabled === 'boolean' && Array.isArray(f.zones));
+    const enabledStates = new Set(snapshots.map((f) => f.rainGaugeEnabled));
+    if (enabledStates.size > 1) configChanged = true;
+    if (snapshots.length && snapshots.every((f) => f.rainGaugeEnabled === false)) noGauge = true;
+    if (accepted.some((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
+      && Array.isArray(f.zones) && f.zones.length === 0)) noGauge = true;
+    if (day.boundaryFrames.length === 2) {
+      const [before, after] = day.boundaryFrames;
+      if (before.hasZoneSnapshot !== true || after.hasZoneSnapshot !== true
+        || typeof before.rainGaugeEnabled !== 'boolean' || typeof after.rainGaugeEnabled !== 'boolean'
+        || !Array.isArray(before.zones) || !Array.isArray(after.zones)) {
+        provenanceUnknown = true;
+      } else {
+        if (before.rainGaugeEnabled !== after.rainGaugeEnabled) configChanged = true;
+        if (before.rainGaugeEnabled === false && after.rainGaugeEnabled === false) noGauge = true;
+        const beforeZones = before.zones.slice().sort((a, b) => a - b);
+        const afterZones = after.zones.slice().sort((a, b) => a - b);
+        const snapshotsDiffer = beforeZones.length !== afterZones.length
+          || beforeZones.some((zone, index) => zone !== afterZones[index]);
+        if (snapshotsDiffer && (beforeZones.includes(zid) || afterZones.includes(zid))) reassigned = true;
+        else if (snapshotsDiffer || !beforeZones.includes(zid)) noGauge = true;
+      }
+    }
+    if (own.length < accepted.length || provenanceUnknown || configChanged || noGauge || reassigned) {
+      if (provenanceUnknown) zoneReasons.add('zone_provenance_unknown');
+      if (configChanged) reasons.add('config_change');
+      if (noGauge) zoneReasons.add('no_gauge');
+      if (reassigned) zoneReasons.add('zone_reassigned');
+      receivedMm = own.length ? roundTo(own.reduce((s, f) => s + f.amountMm, 0), 3) : null;
+      amountMm = null;
+      if (provenanceUnknown || configChanged || noGauge || !own.length) coverage = 'unknown';
+      else if (coverage === 'complete' || coverage === 'complete_so_far') coverage = 'partial';
+    }
+  } else if (instrument.store === 'observations') {
     // Move day: count only what was received under this zone; certify neither zone.
     const accepted = day.inWindow.filter((f) => f.status === 'accepted' && f.amountMm !== null);
-    const own = instrument.typeId === LSN50_TYPE_ID
-      ? accepted.filter((f) => f.rainGaugeEnabled === true && Array.isArray(f.zones) && f.zones.includes(zid))
-      : accepted.filter((f) => !Array.isArray(f.zones) || f.zones.includes(zid));
+    const own = accepted.filter((f) => !Array.isArray(f.zones) || f.zones.includes(zid));
     if (own.length < accepted.length) {
       zoneReasons.add('zone_reassigned');
       receivedMm = own.length ? roundTo(own.reduce((s, f) => s + f.amountMm, 0), 3) : null;
