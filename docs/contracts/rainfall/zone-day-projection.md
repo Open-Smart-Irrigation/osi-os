@@ -41,7 +41,7 @@ The fields appear on every path that carries a `zone_daily_environment` row to t
 
 **Legacy rule.** A row whose payload carries no `rain_policy_version` (key absent or null) is a legacy row. The cloud displays and uses it exactly as it did before this contract: the amount as received, no coverage label, and the same advice rules as before. Only a row that carries `rain_policy_version` follows the quality model of this document. The rule holds for the whole rollout, which deploys the cloud receiver before any edge emits the fields, and afterwards for every gateway that has not upgraded.
 
-Rows written before policy version 1 get no bulk rewrite. The edge re-projects such a row at policy version 1 only when it accepts an observation for that zone and date after the upgrade, typically on the upgrade day; until then the row keeps its stored values and stays legacy. Its five new fields are null, and its `rainfall_mm` is a value no coverage rule produced.
+Rows written before policy version 1 get no bulk rewrite. The edge re-projects such a row at policy version 1 only when it accepts an observation for that zone and date after the upgrade, typically on the upgrade day, or when a flow-meter write for that date meets the condition in "Gauge selection"; until then the row keeps its stored values and stays legacy. Its five new fields are null, and its `rainfall_mm` is a value no coverage rule produced.
 
 A payload from an older gateway lacks the five keys, and the receiver stores the row as legacy, as if the keys were present with null values. Only `rainfall_mm` tells an absent key from a present null:
 
@@ -65,6 +65,11 @@ The codes of an instrument's own contract pass through unchanged; for the LoRain
 | `timezone_abbreviation` | none | The zone's timezone is an abbreviation such as `CET`. Days stay certifiable, and the flag prompts the operator to choose a region name (owner decision D6). |
 | `counter_reset` | `partial` at best | A cumulative rain register (S2120, LSN50 counter) restarted inside the day. |
 | `late_counter_frame` | blocks `complete` | A cumulative-register frame arrived out of order, so the deltas around it cannot be trusted. |
+| `frame_gap` (day bounds) | `partial` at best; `unknown` when the day has no frame at all | Besides the missing fCnt value of `lorain.md`: the day is not bounded yet. No frame of the instrument lies before its start, or the day has ended and no frame lies at or after its end. The edge recomputes the day when the bounding frame arrives. |
+| `zone_reassigned` | `partial` at best; `unknown` when nothing was received under this zone | The selected gauge reported under another zone for part of the farm day (it was moved, or a weather-station link changed). The zone counts only the observations received under it: `rainfall_mm` is null and `rain_received_mm` is that share. |
+| `ambiguous_identity` | `unknown` | A frame of the day arrived without an observation identity (no `deduplicationId`); its amount is not counted. |
+
+Cumulative registers pass their sample status through as instrument reasons. `first_sample`, `cumulative_baseline` and `missing_previous_count` leave the day `partial` at best; `invalid_interval`, `intensity_only`, `out_of_order`, `duplicate_timestamp` and `legacy_intensity_window` make it `unknown`. The edge treats a code it does not classify as blocking certification.
 
 ## Instrument days
 
@@ -77,7 +82,7 @@ The edge recomputes an instrument day from its accepted observations every time 
 
 A gauge without promotion evidence never produces a `complete` day. For a LoRain gauge that is not yet promoted, every day is `unknown` with `received_only`, `rainfall_mm` stays null, and `rain_received_mm` shows what arrived.
 
-Each observation keeps the zone it was received under. A device moved to another zone leaves its earlier days in the earlier zone, and the new zone gets only observations received after the move. On the day of the move each zone counts only the observations received under its own zone, and neither zone certifies that day: its coverage is `partial` at best in both.
+Each observation keeps the zone it was received under. A device moved to another zone leaves its earlier days in the earlier zone, and the new zone gets only observations received after the move. On the day of the move each zone counts only the observations received under its own zone, and neither zone certifies that day: its coverage is `partial` at best in both, with reason `zone_reassigned`.
 
 ## Gauge selection
 
@@ -92,7 +97,7 @@ The candidates are the zone's devices of type `AQUASCOPE_LORAIN` or `SENSECAP_S2
 
 The selection is gateway state. The cloud sees its result in `rain_selected_deveui` and cannot change it under contract version 1.
 
-The zone day projects the selected gauge's instrument day for that date: its coverage, its reasons followed by the zone's own (timezone flags), its received amount, and its amount when coverage is `complete`. Every row the edge inserts or updates at policy version 1 or later carries a non-null `rain_coverage`, including a row created by a flow-meter write.
+The zone day projects the selected gauge's instrument day for that date: its coverage, its reasons followed by the zone's own (timezone flags), its received amount, and its amount when coverage is `complete`. Every row the edge inserts at policy version 1 or later carries a non-null `rain_coverage`, including a row created by a flow-meter write, and so does every row whose rain fields the edge writes. A flow-meter write on a legacy row re-projects the row only when the projection keeps the row's `rain_source` (or the row has none) and its `rain_received_mm` is at least the row's stored `rainfall_mm`. Otherwise the write changes `flow_liters` alone and the row stays legacy.
 
 ## Versions and late corrections
 
