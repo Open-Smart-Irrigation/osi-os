@@ -291,6 +291,12 @@ export const WaterDayTooltip: React.FC<WaterDayTooltipProps> = ({ row, label, wa
       {showRain && (
         <p className="font-semibold text-sky-700">
           {t('environment.water.tooltipRain', { defaultValue: 'Rain' })}: {formatValue(row.rainMm, 'mm', 1)}
+          {/* MeteoSwiss' daily file covers 0-24 UTC, which differs from the farm's local day. */}
+          {row.rainMm != null && row.rainPeriod === 'utc_day' && (
+            <span className="ml-1 text-xs font-normal text-[var(--text-secondary)]" data-testid="water-day-rain-period">
+              ({t('environment.water.utcDay', { defaultValue: 'UTC day' })})
+            </span>
+          )}
         </p>
       )}
       {showMeasured && (

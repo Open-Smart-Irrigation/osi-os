@@ -437,6 +437,7 @@
       "setupRequiredHelpLabel": "Warum die effektive Bewässerung fehlt",
       "rainSourceHelpLabel": "Woher dieser Regenwert stammt",
       "rainSoFar": "bisher",
+      "utcDay": "UTC-Tag",
       "rainReceivedOnly": "nur {{value}} empfangen (Tag unvollständig)",
       "demandNoSource": "keine Wetterquelle für diesen Tag",
       "demandMixedStation": "Stunden von zwei MeteoSchweiz-Stationen",

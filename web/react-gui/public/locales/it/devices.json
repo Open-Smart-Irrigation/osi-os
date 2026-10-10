@@ -437,6 +437,7 @@
       "setupRequiredHelpLabel": "Perché manca l'irrigazione efficace",
       "rainSourceHelpLabel": "Da dove proviene questo valore di pioggia",
       "rainSoFar": "finora",
+      "utcDay": "giorno UTC",
       "rainReceivedOnly": "solo {{value}} ricevuti (giornata incompleta)",
       "demandNoSource": "nessuna fonte meteo per questo giorno",
       "demandMixedStation": "ore da due stazioni MeteoSvizzera",

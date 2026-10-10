@@ -645,6 +645,8 @@ export interface WaterAction {
 export interface WaterDay {
   date: string;
   rainMm: number | null;
+  /** The period covered by a station's daily rain value; gauges and local-day values may omit it. */
+  rainPeriod?: 'local_day' | 'utc_day' | null;
   /** Rain-resolution policy coverage of a policy-1 gateway day; absent on a legacy day. */
   rainCoverage?: string | null;
   /** What the gauge received on an uncertified policy-1 day (rainMm is then null). */

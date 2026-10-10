@@ -437,6 +437,7 @@
       "setupRequiredHelpLabel": "Porque falta a rega efetiva",
       "rainSourceHelpLabel": "De onde vem este valor de chuva",
       "rainSoFar": "até agora",
+      "utcDay": "dia UTC",
       "rainReceivedOnly": "apenas {{value}} recebidos (dia incompleto)",
       "demandNoSource": "nenhuma fonte meteorológica para este dia",
       "demandMixedStation": "horas de duas estações da MeteoSwiss",
