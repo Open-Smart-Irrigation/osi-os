@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -115,5 +115,20 @@ describe('WaterTab rain today under the rain-resolution policy', () => {
     expect(screen.queryByText(SO_FAR)).not.toBeInTheDocument();
     expect(screen.queryByText(/received only/)).not.toBeInTheDocument();
     expect(screen.queryByText(/legacy/i)).not.toBeInTheDocument();
+  });
+
+  it('names the provider even with a configured gauge and keeps its received lower bound visible', () => {
+    renderTab(gaugeWater({
+      rainTodayMm: 0,
+      rainTodayStatus: 'observed',
+      rainTodayCoverage: 'partial',
+      rainTodayReceivedMm: 3,
+      rainSource: 'weather_service',
+    }));
+
+    expect(screen.getByText('0.0 mm')).toBeInTheDocument();
+    expect(screen.getByText('3.0 mm received only (incomplete day)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Where this rain value comes from' }));
+    expect(screen.getByText('From weather data (not measured)')).toBeInTheDocument();
   });
 });

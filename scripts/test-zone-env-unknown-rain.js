@@ -128,24 +128,28 @@ async function zoneWater({ rainGauge = false, todayRow = null } = {}) {
   }
 }
 
-test('no rain observation at all: today\'s rain and balance are unknown, not 0 and minus the demand', async () => {
+test('elapsed dry provider hours resolve today even when no local rain sensor observed', async () => {
   forecastRain = 'dry';
   const payload = await zoneWater({ rainGauge: true });
   const water = payload.water;
   assert.ok(water.waterNeededTodayMm >= 1, 'the probe has a demand of at least 1 mm: ' + water.waterNeededTodayMm);
   assert.equal(water.irrigationTodayNetMm, 0, 'irrigation is known (nothing irrigated)');
-  assert.equal(water.rainTodayMm, null);
-  assert.equal(water.rainTodayStatus, 'unknown');
-  assert.equal(water.balanceTodayMm, null);
+  assert.equal(water.rainTodayMm, 0);
+  assert.equal(water.rainTodayStatus, 'observed');
+  assert.equal(water.rainSource, 'weather_service');
+  assert.equal(water.rainTodayCoverage, 'partial');
+  assert.ok(water.rainTodayCoverage !== 'complete_so_far');
+  assert.ok(water.balanceTodayMm < 0);
   assert.equal(water.daily.at(-1).rainMm, null, 'the tile and today\'s history row agree');
 });
 
-test('a flow-only zero row without a rain gauge is unknown rain; its flow still counts', async () => {
+test('a flow-only zero row stays provider-resolved; its flow still counts', async () => {
   forecastRain = 'dry';
   const water = (await zoneWater({ todayRow: { rainfall_mm: 0, flow_liters: 100, rain_source: 'local_gauge' } })).water;
-  assert.equal(water.rainTodayMm, null);
-  assert.equal(water.rainTodayStatus, 'unknown');
-  assert.equal(water.balanceTodayMm, null);
+  assert.equal(water.rainTodayMm, 0);
+  assert.equal(water.rainTodayStatus, 'observed');
+  assert.equal(water.rainSource, 'weather_service');
+  assert.ok(water.balanceTodayMm < 0);
   assert.equal(water.irrigationTodayMeasuredLiters, 100);
   assert.equal(water.irrigationTodayNetMm, 0.9);
 });
@@ -187,18 +191,25 @@ test('a dry forecast is a covered 0 mm, not unknown', async () => {
   assert.deepEqual(rf.next24hCoverage, { coveredHours: 24, expectedHours: 24 });
 });
 
-// Owner decision D2 (rain_unknown policy 'warn'): the verdict is still shown,
-// computed on zero rain (a lower bound on supply) and flagged rain_unknown.
-test('review probe: no rain observations, a demand, dry forecast -> the verdict is flagged rain_unknown', async () => {
+test('elapsed provider zero is used as the measured amount for advice', async () => {
   forecastRain = 'dry';
   const water = (await zoneWater({ rainGauge: true })).water;
-  assert.equal(water.rainTodayMm, null);
-  assert.equal(water.balanceTodayMm, null);
-  assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], ['irrigate_today', 'heuristic', 'rain_unknown']);
+  assert.equal(water.rainTodayMm, 0);
+  assert.equal(water.rainSource, 'weather_service');
+  assert.ok(water.balanceTodayMm < 0);
+  assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], ['irrigate_today', 'heuristic', 'demand_exceeds_supply']);
 });
 
 test('unknown rain today and no forecast rain values give no verdict', async () => {
   forecastRain = 'no-rain-values';
   const water = (await zoneWater({ rainGauge: true })).water;
+  assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], [null, 'insufficient_data', 'rain_unknown']);
+});
+
+test('no elapsed valid provider rain hours leave today unknown and D2 warns rain_unknown', async () => {
+  forecastRain = 'no-rain-values';
+  const water = (await zoneWater({ rainGauge: true })).water;
+  assert.equal(water.rainTodayMm, null);
+  assert.equal(water.rainSource, null);
   assert.deepEqual([water.action.code, water.action.source, water.action.reasonCode], [null, 'insufficient_data', 'rain_unknown']);
 });

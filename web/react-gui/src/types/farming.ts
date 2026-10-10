@@ -590,9 +590,9 @@ export interface WaterEnvironment {
    */
   rainTodayStatus?: 'observed' | 'unknown';
   /**
-   * Rain-resolution policy coverage of rainTodayMm, sent by the gateway: 'complete_so_far'
-   * (the selected gauge's day so far), 'unknown', or 'legacy_unvalidated' for a day written
-   * before policy version 1 (audit only, never shown as a warning).
+   * Rain-resolution policy coverage of rainTodayMm: gauge 'complete_so_far', provider
+   * 'complete'/'partial', 'unknown', or 'legacy_unvalidated' for a pre-policy row
+   * (audit only, never shown as a warning).
    */
   rainTodayCoverage?: string | null;
   /** What the gauge received today when the day is not certified: a lower bound, never balanced. */
@@ -614,8 +614,8 @@ export interface WaterEnvironment {
   /** The zone's local calendar day (YYYY-MM-DD); the row with this date is today's. */
   todayDate?: string | null;
   /**
-   * Where today's rain comes from. Sent by the cloud bundle on a linked
-   * gateway; absent on an unlinked gateway or an older cloud.
+   * Where today's rain comes from. The gateway may resolve elapsed provider
+   * rain as weather_service; linked cloud bundles may also name a station.
    */
   rainSource?: 'gauge' | 'meteoswiss_station' | 'weather_service' | null;
   rainStation?: RainStation | null;

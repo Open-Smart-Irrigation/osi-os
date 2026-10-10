@@ -369,7 +369,8 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const estimatedNetMm = water.estimatedIrrigationNetMm ?? null;
   // A linked gateway can carry rain for a zone without a gauge: measured at the
   // nearest MeteoSwiss station, or the weather service's rain for the hours of
-  // today that have passed. The zone's own gauge always wins the label.
+  // today that have passed. A certified measurement names its actual source,
+  // even when the zone also has a configured gauge.
   const rainStationLabel = water.rainStation
     ? {
         station: water.rainStation.name ?? water.rainStation.id,
@@ -378,9 +379,7 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
           : '—',
       }
     : null;
-  const rainSourceHelp = hasRainGauge
-    ? null
-    : water.rainSource === 'meteoswiss_station' && rainStationLabel
+  const rainSourceHelp = water.rainSource === 'meteoswiss_station' && rainStationLabel
       ? t('zone.water.rainFromStation', { ...rainStationLabel, defaultValue: 'Measured at MeteoSwiss {{station}} ({{distance}} km away)' })
       : water.rainSource === 'weather_service'
         ? t('zone.water.rainFromWeather', { defaultValue: 'From weather data (not measured)' })
@@ -437,13 +436,13 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       key: 'rain',
       label: t('environment.water.rainToday', { defaultValue: 'Rain today' }),
       value: formatValue(water.rainTodayMm, 'mm', 1),
-      // Rain-resolution policy: a gauge day certified so far is "so far"; an incomplete day has
-      // no amount, only what the gauge received (a lower bound). A legacy day shows as before.
-      detail: water.rainTodayMm != null && water.rainTodayCoverage === 'complete_so_far'
-        ? t('environment.water.rainSoFar', { defaultValue: 'so far' })
-        : water.rainTodayMm == null && water.rainTodayReceivedMm != null
-          ? t('environment.water.rainReceivedOnly', { value: formatValue(water.rainTodayReceivedMm, 'mm', 1), defaultValue: '{{value}} received only (incomplete day)' })
-          : null,
+      // A received lower bound stays visible alongside a provider-resolved amount.
+      detail: [
+        water.rainTodayMm != null && water.rainTodayCoverage === 'complete_so_far'
+          ? t('environment.water.rainSoFar', { defaultValue: 'so far' }) : null,
+        water.rainTodayReceivedMm != null
+          ? t('environment.water.rainReceivedOnly', { value: formatValue(water.rainTodayReceivedMm, 'mm', 1), defaultValue: '{{value}} received only (incomplete day)' }) : null,
+      ].filter(Boolean).join(' · ') || null,
       help: rainSourceHelp
         ? { label: t('environment.water.rainSourceHelpLabel', { defaultValue: 'Where this rain value comes from' }), text: rainSourceHelp }
         : null,
