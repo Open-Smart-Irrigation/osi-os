@@ -2,8 +2,9 @@
 'use strict';
 
 // S2120 rain ingest contract, exercised through the shipped codec and the
-// shipped Node-RED function bodies against an in-memory SQLite database that
-// uses the real device_data DDL from database/seed-blank.sql.
+// shipped Node-RED function body (s2120-ingest-fn, the one S2120 writer) with
+// osi-rain against an in-memory SQLite database built from
+// database/seed-blank.sql.
 //
 // Vendor contract (SenseCAP S2120 user guide, sections 10.2, 10.3.1 and 13.3):
 // - measurement 4113 (frame 02 before firmware v2.0, frame 4B from v2.0) is
@@ -14,6 +15,9 @@
 //
 // Ingest must difference 4213 as a counter, keep 4113 as a stored rate, and
 // integrate 4113 into an amount only under the documented cadence policy.
+// Identity, replay and atomicity (rain correctness programme): every uplink
+// claims a rain_observations identity, and the counter read, the device_data
+// row and the zone day are one transaction.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,12 +25,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
-const { facadeDb } = require('./lib/scoped-access-harness');
+const { facadeDb } = require('./lib/flow-node-harness');
 
 const repoRoot = path.resolve(__dirname, '..');
 const shareDir = path.join(repoRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share');
 const flows = JSON.parse(fs.readFileSync(path.join(shareDir, 'flows.json'), 'utf8'));
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
+const R = require(path.join(shareDir, 'node-red/osi-rain/index.js'));
 
 const DEV_EUI = 'A840410000000001';
 const DEV_EUI_2 = 'A840410000000002';
@@ -46,24 +51,16 @@ function nodeBody(id) {
   return node.func;
 }
 
-function ddl(table) {
-  const match = seedSql.match(new RegExp('CREATE TABLE ' + table + ' \\([\\s\\S]*?\\n\\);'));
-  assert.ok(match, 'seed-blank.sql has no CREATE TABLE ' + table);
-  return match[0];
-}
-
-function createDb() {
+function createDb({ timezone = 'UTC' } = {}) {
   const db = new DatabaseSync(':memory:');
-  db.exec([
-    'CREATE TABLE devices(deveui TEXT PRIMARY KEY, type_id TEXT, irrigation_zone_id INTEGER, deleted_at TEXT);',
-    'CREATE TABLE irrigation_zones(id INTEGER PRIMARY KEY, timezone TEXT, deleted_at TEXT);',
-    "CREATE TABLE weather_station_zones(deveui TEXT NOT NULL, zone_id INTEGER NOT NULL, created_at TEXT, PRIMARY KEY (deveui, zone_id));",
-    ddl('device_data'),
-    ddl('zone_daily_environment').replace(/,\s*FOREIGN KEY[^\n]*\n/, '\n'),
-  ].join('\n'));
-  db.prepare("INSERT INTO devices VALUES (?, 'SENSECAP_S2120', 1, NULL)").run(DEV_EUI);
-  db.prepare("INSERT INTO devices VALUES (?, 'SENSECAP_S2120', 1, NULL)").run(DEV_EUI_2);
-  db.prepare("INSERT INTO irrigation_zones VALUES (1, 'UTC', NULL)").run();
+  db.exec(seedSql);
+  db.exec(`
+    INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+    INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z One', 1, 'z-1', '${timezone}', 'local');
+    INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z Two', 1, 'z-2', 'UTC', 'local');
+    INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('${DEV_EUI}', 'Station 1', 'SENSECAP_S2120', 1, 1, '2026-01-01', '2026-01-01'),
+             ('${DEV_EUI_2}', 'Station 2', 'SENSECAP_S2120', 1, 1, '2026-01-01', '2026-01-01');`);
   return db;
 }
 
@@ -86,40 +83,61 @@ function decode(rawHex) {
   return codec.decodeUplink({ fPort: 5, bytes: [...Buffer.from(rawHex, 'hex')] }).data;
 }
 
-function harness(db) {
+// Every delivered uplink gets its own ChirpStack deduplicationId, also across
+// harness restarts.
+let eventSeq = 0;
+
+// Node-RED runs the body as an AsyncFunction with its declared libs. osiDb is
+// the harness facade over the shared DatabaseSync (transaction = BEGIN
+// IMMEDIATE ... COMMIT/ROLLBACK); node context persists across messages within
+// one harness (one Node-RED run).
+function harness(db, { failOn = null } = {}) {
   const facade = facadeDb(db);
   const stats = { markerLookups: 0 };
-  const counting = Object.assign({}, facade, {
+  const counted = (scope) => Object.assign({}, scope, {
+    get(sql, ...rest) {
+      if (/rain_delta_status = 'cumulative_baseline'/.test(sql)) stats.markerLookups += 1;
+      return scope.get(sql, ...rest);
+    },
     all(sql, ...rest) {
       if (/rain_delta_status = 'cumulative_baseline'/.test(sql)) stats.markerLookups += 1;
-      return facade.all(sql, ...rest);
+      return scope.all(sql, ...rest);
+    },
+    run(sql, ...rest) {
+      if (failOn && failOn.active && failOn.pattern.test(sql)) return Promise.reject(new Error('injected failure'));
+      return scope.run(sql, ...rest);
     },
   });
-  const osiDb = { Database: function Database() { return counting; } };
-  // Node context persists across messages within one Node-RED run.
+  const database = Object.assign({}, facade, { transaction: (fn) => facade.transaction((t) => fn(counted(t))) });
+  const osiDb = { Database: function Database() { return database; } };
   const store = new Map();
   const context = { get: (key) => store.get(key), set: (key, value) => store.set(key, value) };
-  const osiLib = {
-    require(name) {
-      if (name === 'uplink-dedup') return { ok: true, value: { isDuplicateUplink: () => false } };
-      return { ok: false, error: 'unexpected module ' + name };
-    },
-  };
-  const node = { status() {}, warn() {}, error(message) { throw new Error(String(message)); } };
-  const processFn = new AsyncFunction('msg', 'osiDb', 'osiLib', 'node', 'context', nodeBody('s2120-process-fn'));
-  const sqlFn = new AsyncFunction('msg', 'node', nodeBody('s2120-sql-fn'));
-  const aggFn = new AsyncFunction('msg', 'osiDb', 'node', nodeBody('s2120-rain-agg-fn'));
+  const osiLib = { require: (name) => (name === 'rain' ? { ok: true, value: R } : { ok: false, error: 'unexpected module ' + name }) };
+  const errors = [];
+  const node = { status() {}, warn() {}, error(message) { errors.push(String(message)); } };
+  const ingestFn = new AsyncFunction('msg', 'osiDb', 'osiLib', 'node', 'context', nodeBody('s2120-ingest-fn'));
 
-  async function uplink(time, rawHex, devEui = DEV_EUI) {
-    const msg = { payload: { deviceInfo: { devEui }, time, object: decode(rawHex) } };
-    const [stored, rainOut] = await processFn(msg, osiDb, osiLib, node, context);
-    assert.ok(stored && stored.formattedData, 'process node dropped the uplink');
-    const sqlMsg = await sqlFn({ formattedData: stored.formattedData }, node);
-    db.exec(sqlMsg.topic);
-    if (rainOut) await aggFn(rainOut, osiDb, node);
-    return { formatted: stored.formattedData, rainOut, row: lastRow(db, devEui) };
+  async function deliver(payload) {
+    const before = errors.length;
+    await ingestFn({ payload }, osiDb, osiLib, node, context);
+    return errors.slice(before);
   }
-  return { uplink, stats };
+  async function uplink(time, rawHex, devEui = DEV_EUI, extra = {}) {
+    eventSeq += 1;
+    const payload = {
+      deviceInfo: { devEui }, deduplicationId: '00000000-0000-4000-8000-' + String(eventSeq).padStart(12, '0'),
+      time, fPort: 3, data: Buffer.from(rawHex, 'hex').toString('base64'), object: decode(rawHex), ...extra,
+    };
+    const errs = await deliver(payload);
+    assert.deepEqual(errs, [], 'the ingest node reported no error');
+    const row = db.prepare('SELECT * FROM device_data WHERE deveui = ? ORDER BY id DESC LIMIT 1').get(devEui);
+    const obs = row ? db.prepare('SELECT * FROM rain_observations WHERE device_data_id = ?').get(row.id) : null;
+    return {
+      row, obs, payload, accepted: !!obs && obs.status === 'accepted',
+      formatted: { rainDeltaStatus: row.rain_delta_status, rainMmDelta: row.rain_mm_delta },
+    };
+  }
+  return { uplink, deliver, stats, errors, context, store };
 }
 
 function lastRow(db, devEui = DEV_EUI) {
@@ -153,7 +171,7 @@ test('review reproduction: steady 4113 with rising 4213 stores the 0.254 mm incr
   assert.equal(second.row.rain_mm_per_10min, 0.254);
   assert.equal(second.row.counter_interval_seconds, 600);
   assert.equal(second.row.rain_mm_today, 0.254);
-  assert.ok(second.rainOut, 'a valid increment reaches the zone aggregation');
+  assert.ok(second.accepted, 'a valid increment is a counted observation');
 });
 
 test('a drop in intensity is not a counter reset', async () => {
@@ -173,7 +191,7 @@ test('a falling 4213 is a counter reset and becomes the new baseline', async () 
   const reset = await uplink('2026-10-08T10:10:00.000Z', v2(0, 0.254));
   assert.equal(reset.row.rain_delta_status, 'counter_reset');
   assert.equal(reset.row.rain_mm_delta, null);
-  assert.equal(reset.rainOut, null);
+  assert.equal(reset.accepted, false, 'not counted');
   const after = await uplink('2026-10-08T10:20:00.000Z', v2(1.524, 0.508));
   assert.equal(after.row.rain_delta_status, 'ok');
   assert.equal(after.row.rain_mm_delta, 0.254);
@@ -191,7 +209,7 @@ test('upgrade: rows written under the old interpretation are never a counter bas
   const first = await uplink('2026-10-08T10:00:00.000Z', v2(0.254, 150));
   assert.equal(first.row.rain_mm_delta, null, 'no 149.7 mm phantom increment against an intensity row');
   assert.notEqual(first.row.rain_delta_status, 'ok');
-  assert.equal(first.rainOut, null);
+  assert.equal(first.accepted, false, 'not counted');
   const second = await uplink('2026-10-08T10:10:00.000Z', v2(0.254, 150.254));
   assert.equal(second.row.rain_delta_status, 'ok');
   assert.equal(second.row.rain_mm_delta, 0.254);
@@ -226,7 +244,7 @@ test('legacy firmware, 10-minute cadence: intensity / 6 is the interval amount',
   assert.equal(second.row.rain_mm_per_hour, 1.524);
   assert.equal(second.row.rain_gauge_cumulative_mm, null);
   assert.equal(second.row.counter_interval_seconds, 600);
-  assert.ok(second.rainOut);
+  assert.ok(second.accepted);
 });
 
 test('legacy firmware, small timing jitter within the tolerance still integrates', async () => {
@@ -246,7 +264,7 @@ test('legacy firmware, lost uplink: the amount stays unknown', async () => {
   assert.equal(gap.row.rain_delta_status, 'intensity_only');
   assert.equal(gap.row.rain_mm_delta, null, 'ten observed minutes do not cover a twenty-minute interval');
   assert.equal(gap.row.rain_mm_per_hour, 1.524, 'the intensity itself is still stored');
-  assert.equal(gap.rainOut, null);
+  assert.equal(gap.accepted, false, 'not counted');
 });
 
 test('legacy firmware, 5-minute cadence: overlapping windows are not integrated', async () => {
@@ -279,14 +297,14 @@ test('a duplicate timestamp is skipped for counter and legacy uplinks', async ()
   const dup = await uplink('2026-10-08T10:00:00.000Z', legacy(1.524));
   assert.equal(dup.formatted.rainDeltaStatus, 'duplicate_timestamp', 'legacy path');
   assert.equal(dup.formatted.rainMmDelta, null);
-  assert.equal(dup.rainOut, null);
+  assert.equal(dup.accepted, false, 'not counted');
 
   await uplink('2026-10-08T10:00:00.000Z', v2(0, 7), DEV_EUI_2);
   await uplink('2026-10-08T10:10:00.000Z', v2(1.524, 7.254), DEV_EUI_2);
   const counterDup = await uplink('2026-10-08T10:10:00.000Z', v2(3.048, 7.508), DEV_EUI_2);
   assert.equal(counterDup.formatted.rainDeltaStatus, 'duplicate_timestamp', 'counter path');
   assert.equal(counterDup.formatted.rainMmDelta, null);
-  assert.equal(counterDup.rainOut, null);
+  assert.equal(counterDup.accepted, false, 'not counted');
 });
 
 test('an out-of-order counter uplink is skipped and does not move the baseline', async () => {
@@ -297,7 +315,7 @@ test('an out-of-order counter uplink is skipped and does not move the baseline',
   const late = await uplink('2026-10-08T10:10:00.000Z', v2(1.524, 4.254));
   assert.equal(late.formatted.rainDeltaStatus, 'out_of_order');
   assert.equal(late.formatted.rainMmDelta, null);
-  assert.equal(late.rainOut, null);
+  assert.equal(late.accepted, false, 'not counted');
   const next = await uplink('2026-10-08T10:30:00.000Z', v2(1.524, 4.762));
   assert.equal(next.row.rain_delta_status, 'ok');
   assert.equal(next.row.rain_mm_delta, 0.254, 'differenced against 4.508 at 10:20, not the late 4.254 row');
@@ -335,7 +353,7 @@ test('a dry counter interval is a valid zero and reaches the zone aggregation', 
   const dry = await uplink('2026-10-08T10:10:00.000Z', v2(0, 12));
   assert.equal(dry.row.rain_delta_status, 'ok');
   assert.equal(dry.row.rain_mm_delta, 0);
-  assert.ok(dry.rainOut, 'a measured zero is emitted, not dropped');
+  assert.ok(dry.accepted, 'a measured zero is counted, not dropped');
   const zone = db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1').get();
   assert.equal(zone.rainfall_mm, 0);
 });
@@ -395,4 +413,186 @@ test('a cached baseline whose rows are gone is looked up again', async () => {
   const next = await uplink('2026-10-08T10:30:00.000Z', v2(0, 3.254));
   assert.equal(next.row.rain_mm_delta, 0.254);
   assert.equal(stats.markerLookups, before + 1, 'the new baseline is cached again');
+});
+
+// ---------------------------------------------------------------------------
+// Identity, replay and atomicity (one writer, one transaction per uplink).
+// Mirrors the LoRain writer's cases in scripts/test-lorain-ingest.js.
+// ---------------------------------------------------------------------------
+
+const count = (db, sql) => db.prepare(sql).get().n;
+const rows = (db, sql, ...params) => db.prepare(sql).all(...params).map((r) => ({ ...r }));
+const T0 = '2026-10-08T10:00:00.000Z';
+const at = (minutes) => new Date(Date.parse(T0) + minutes * 60000).toISOString();
+
+function link(db) {
+  db.exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES ('cloud', 1, '0016C001F1000001', '2026-01-01T00:00:00.000Z');");
+}
+
+test('duplicate delivery counts once (one observation, one device_data row, one outbox insertion)', async () => {
+  const db = createDb();
+  link(db);
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100));
+  const wet = await h.uplink(at(10), v2(6, 101));
+  assert.deepEqual(await h.deliver(wet.payload), []);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 2);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'"), 2);
+  assert.deepEqual(rows(db, 'SELECT rainfall_mm, rain_source FROM zone_daily_environment'), [{ rainfall_mm: 1, rain_source: 'sensecap_s2120' }]);
+});
+
+test('a confirmed-uplink retransmission (new deduplicationId, same devAddr, fCnt and payload) is a duplicate', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100), DEV_EUI, { devAddr: '01000001', fCnt: 41 });
+  const wet = await h.uplink(at(10), v2(6, 101), DEV_EUI, { devAddr: '01000001', fCnt: 42 });
+  assert.deepEqual(await h.deliver({ ...wet.payload, deduplicationId: '00000000-0000-4000-8000-0000000009ff', time: at(10.1) }), []);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 2);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
+  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 1);
+});
+
+test('identity conflict is quarantined, not overwritten', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100));
+  const wet = await h.uplink(at(10), v2(6, 101));
+  const raw = v2(6, 150);
+  assert.deepEqual(await h.deliver({ ...wet.payload, data: Buffer.from(raw, 'hex').toString('base64'), object: decode(raw) }), []);
+  assert.deepEqual(rows(db, 'SELECT deveui, channel, reason FROM ingest_quarantine'),
+    [{ deveui: DEV_EUI, channel: 'rain_observation', reason: 'identity_conflict' }]);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
+  assert.deepEqual(rows(db, 'SELECT amount_mm FROM rain_observations ORDER BY id'), [{ amount_mm: null }, { amount_mm: 1 }]);
+});
+
+test('failure between identity claim and persistence rolls back; the retry counts once; the marker cache is forgotten', async () => {
+  const db = createDb();
+  link(db);
+  const failOn = { active: true, pattern: /^\s*INSERT INTO device_data/i };
+  const h = harness(db, { failOn });
+  const payload = (minutes, mm, n) => ({ deviceInfo: { devEui: DEV_EUI }, deduplicationId: '00000000-0000-4000-8000-0000000a000' + n,
+    time: at(minutes), fPort: 3, data: Buffer.from(v2(0, mm), 'hex').toString('base64'), object: decode(v2(0, mm)) });
+  const failedBaseline = await h.deliver(payload(0, 100, 1));
+  assert.equal(failedBaseline.length, 1);
+  assert.match(failedBaseline[0], /rolled back.*injected failure/);
+  for (const table of ['rain_observations', 'device_data', 'zone_daily_environment', 'sync_outbox']) {
+    assert.equal(count(db, `SELECT COUNT(*) AS n FROM ${table}`), 0, `${table} empty after the rollback`);
+  }
+  assert.ok(!Object.prototype.hasOwnProperty.call(h.store.get('s2120CounterBaseline') || {}, DEV_EUI),
+    'the rolled-back baseline is not cached');
+  failOn.active = false;
+  assert.deepEqual(await h.deliver(payload(0, 100, 1)), []);
+  assert.equal(lastRow(db).rain_delta_status, 'cumulative_baseline');
+  failOn.active = true;
+  assert.equal((await h.deliver(payload(10, 101, 2))).length, 1);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 1);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM zone_daily_environment'), 0);
+  failOn.active = false;
+  assert.deepEqual(await h.deliver(payload(10, 101, 2)), []);
+  assert.deepEqual(await h.deliver(payload(10, 101, 2)), [], 'a second delivery after the retry is a duplicate');
+  assert.deepEqual(rows(db, 'SELECT rain_mm_delta, rain_delta_status FROM device_data ORDER BY id'),
+    [{ rain_mm_delta: null, rain_delta_status: 'cumulative_baseline' }, { rain_mm_delta: 1, rain_delta_status: 'ok' }]);
+  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 1);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'"), 2);
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='ZONE_ENVIRONMENT'"), 1);
+});
+
+test('missing deduplicationId is ambiguous identity: never counted and never a counter predecessor', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100));
+  const ambiguous = await h.uplink(at(10), v2(6, 101), DEV_EUI, { deduplicationId: undefined });
+  assert.equal(ambiguous.obs.status, 'ambiguous_identity');
+  assert.equal(ambiguous.obs.event_id, null);
+  assert.equal(ambiguous.row.rain_delta_status, 'ambiguous_identity');
+  assert.equal(ambiguous.row.rain_mm_delta, null);
+  assert.equal(ambiguous.row.rain_gauge_cumulative_mm, 101, 'the reading itself is kept');
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM zone_daily_environment'), 0);
+  const next = await h.uplink(at(20), v2(6, 102));
+  assert.equal(next.row.rain_mm_delta, 2, 'differenced against the last identified counter row, so no rain is lost');
+  assert.equal(next.row.counter_interval_seconds, 1200);
+  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 2);
+});
+
+test('a device of another type is ignored', async () => {
+  const db = createDb();
+  db.exec(`UPDATE devices SET type_id = 'DRAGINO_LSN50' WHERE deveui = '${DEV_EUI}'`);
+  const h = harness(db);
+  assert.deepEqual(await h.deliver({ deviceInfo: { devEui: DEV_EUI }, deduplicationId: 'ev-other', time: at(0), object: decode(v2(0, 1)) }), []);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 0);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 0);
+});
+
+test('a late counter frame is kept with late_counter_frame and its own difference, never counted; the next row is not rewritten', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100));
+  const after = await h.uplink(at(20), v2(6, 102));
+  assert.equal(after.row.rain_mm_delta, 2);
+  const late = await h.uplink(at(10), v2(6, 101));
+  assert.equal(late.obs.status, 'not_additive');
+  assert.equal(late.obs.frame_kind, 'counter');
+  assert.equal(late.obs.amount_mm, null);
+  assert.deepEqual(JSON.parse(late.obs.quality_reasons), ['late_counter_frame', 'out_of_order']);
+  assert.deepEqual(JSON.parse(late.obs.config_json).counter, { previousAt: at(0), previousMm: 100, differenceMm: 1 });
+  assert.equal(late.row.rain_delta_status, 'out_of_order');
+  assert.equal(late.row.rain_mm_delta, null);
+  assert.equal(db.prepare('SELECT rain_mm_delta FROM device_data WHERE id = ?').get(after.row.id).rain_mm_delta, 2, 'not rewritten');
+  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 2);
+});
+
+test('observation rows: counter increments are protocol-verified intervals, legacy windows reception gaps, weather frames status rows', async () => {
+  const db = createDb();
+  const h = harness(db);
+  const base = await h.uplink(at(0), v2(0, 100));
+  assert.equal(base.obs.instrument_type, 'SENSECAP_S2120');
+  assert.equal(base.obs.status, 'not_additive');
+  assert.deepEqual(JSON.parse(base.obs.quality_reasons), ['cumulative_baseline']);
+  const inc = await h.uplink(at(10), v2(6, 100.254));
+  assert.deepEqual({ status: inc.obs.status, frame_kind: inc.obs.frame_kind, amount_mm: inc.obs.amount_mm, interval_basis: inc.obs.interval_basis,
+    measured_start: inc.obs.measured_start, measured_end: inc.obs.measured_end, quality_reasons: inc.obs.quality_reasons, zone_id: inc.obs.zone_id,
+    timezone: inc.obs.timezone, event_id: inc.obs.event_id },
+  { status: 'accepted', frame_kind: 'counter', amount_mm: 0.254, interval_basis: 'protocol_verified', measured_start: at(0), measured_end: at(10),
+    quality_reasons: '[]', zone_id: 1, timezone: 'UTC', event_id: inc.payload.deduplicationId });
+  await h.uplink(at(0), legacy(0), DEV_EUI_2);
+  const window = await h.uplink(at(10), legacy(1.524), DEV_EUI_2);
+  assert.deepEqual({ status: window.obs.status, frame_kind: window.obs.frame_kind, amount_mm: window.obs.amount_mm, interval_basis: window.obs.interval_basis,
+    measured_start: window.obs.measured_start, quality_reasons: window.obs.quality_reasons },
+  { status: 'accepted', frame_kind: 'ordinary', amount_mm: 0.254, interval_basis: 'reception_gap', measured_start: at(0), quality_reasons: '["legacy_intensity_window"]' });
+  const weather = await h.uplink(at(11), '4A' + '00EA' + '3C' + '0000' + '0000' + '0000' + '0000', DEV_EUI_2);
+  assert.equal(weather.obs.frame_kind, 'status');
+  assert.equal(weather.obs.status, 'not_additive');
+  assert.equal(weather.row.rain_delta_status, 'no_rain_sensor');
+  assert.equal(weather.row.rain_mm_today, null);
+});
+
+test('zone day: weather-station zones first; a zero never takes over another source\'s day, a positive increment does', async () => {
+  const db = createDb();
+  db.exec(`INSERT INTO weather_station_zones (deveui, zone_id, created_at) VALUES ('${DEV_EUI}', 2, '2026-01-01');
+    INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at)
+      VALUES (2, '2026-10-08', 5, 0, 'aquascope_lorain', '2026-10-08T09:00:00.000Z');`);
+  const h = harness(db);
+  await h.uplink(at(0), v2(0, 100));
+  const dry = await h.uplink(at(10), v2(0, 100));
+  assert.equal(dry.row.rain_delta_status, 'ok');
+  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_source FROM zone_daily_environment ORDER BY zone_id'),
+    [{ zone_id: 2, rainfall_mm: 5, rain_source: 'aquascope_lorain' }], 'the device zone is not written while a station zone exists');
+  assert.equal(dry.obs.zone_id, 2, 'the observation snapshots the zone it reports to');
+  await h.uplink(at(20), v2(1.524, 100.254));
+  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_source FROM zone_daily_environment ORDER BY zone_id'),
+    [{ zone_id: 2, rainfall_mm: 0.254, rain_source: 'sensecap_s2120' }]);
+});
+
+test('the farm day is the zone timezone, never the gateway host day', async () => {
+  const db = createDb({ timezone: 'Europe/Zurich' });
+  const h = harness(db);
+  await h.uplink('2026-10-08T21:40:00.000Z', v2(0, 100));
+  const late = await h.uplink('2026-10-08T21:50:00.000Z', v2(3, 100.5));
+  assert.equal(late.row.rain_mm_today, 0.5);
+  const midnight = await h.uplink('2026-10-08T22:10:00.000Z', v2(3, 101));
+  assert.equal(midnight.row.rain_mm_today, 0.5, '00:10 in Zurich starts a new farm day');
+  assert.deepEqual(rows(db, 'SELECT date, rainfall_mm FROM zone_daily_environment ORDER BY date'),
+    [{ date: '2026-10-08', rainfall_mm: 0.5 }, { date: '2026-10-09', rainfall_mm: 0.5 }]);
+  assert.equal(midnight.obs.timezone, 'Europe/Zurich');
 });

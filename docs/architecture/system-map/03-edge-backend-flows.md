@@ -196,15 +196,17 @@ refactored "narrow waist" path (normalizer + shared device writer);
 specialist history tables; **Aggregate Zone Rain/Flow** rolls rain/flow readings
 up into the per-zone daily environment table.
 
-### Sensor_S2120 (3), Sensor_LORAIN (3), Sensor_UC512 (1)
+### Sensor_S2120 (1), Sensor_LORAIN (3), Sensor_UC512 (1)
 
 One small ingest tab per remaining device family:
 
-- **Process S2120** + **Build SQL INSERT** + **Aggregate Zone Rain**: SenseCAP
-  weather station. Rain arrives as a *cumulative* counter, so the flow computes
-  the difference from the previous reading, with explicit statuses for first
-  sample, counter reset, duplicates, and out-of-order packets — only clean
-  deltas count toward a zone's daily rainfall.
+- **Ingest S2120**: SenseCAP weather station. Rain arrives as a *cumulative*
+  counter, so the flow computes the difference from the previous reading, with
+  explicit statuses for first sample, counter reset, duplicates, and
+  out-of-order packets — only clean deltas count toward a zone's daily
+  rainfall. The counter read, the stored reading and the zone day are one
+  database transaction (helper `osi-rain`), so two uplinks in flight together
+  cannot count the same rain twice.
 - **Process LoRain** + **Build LoRain SQL INSERT** + **Aggregate LoRain Zone
   Rain**: Aqua-Scope LoRain gauge. Reports *interval* rain (already a delta of
   0.5 mm bucket tips), so it must never be double-aggregated.

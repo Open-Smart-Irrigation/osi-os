@@ -123,13 +123,15 @@ test('the shipped writers use version-bumping upserts, not INSERT OR REPLACE', (
   assert.ok(dendroCompute.includes('sync_version=dendrometer_daily.sync_version+1'));
   assert.ok(dendroCompute.includes('sync_version=zone_daily_recommendations.sync_version+1'));
 
-  for (const id of ['lsn50-zone-agg-fn', 's2120-rain-agg-fn']) {
+  for (const id of ['lsn50-zone-agg-fn']) {
     assert.ok(fnOf(id).includes('sync_version=zone_daily_environment.sync_version+1'), `${id} must bump zone_daily_environment.sync_version`);
   }
-  // LoRain bumps only when rainfall_mm or rain_source changes, so a repeated dry heartbeat
-  // refreshes computed_at without an outbox event (behaviour: test-lorain-dry-zone-row.js).
-  // The writer is osi-rain's writeLoRainZoneDay, called by lorain-ingest-fn.
+  // LoRain and S2120 bump only when rainfall_mm or rain_source changes, so a repeated dry
+  // report refreshes computed_at without an outbox event (behaviour: test-lorain-dry-zone-row.js,
+  // test-s2120-rain-ingest.js). The writer is osi-rain's upsertGaugeZoneDay, called by
+  // lorain-ingest-fn and s2120-ingest-fn.
   assert.ok(fnOf('lorain-ingest-fn').includes("osiLib.require('rain')"), 'lorain-ingest-fn writes through osi-rain');
+  assert.ok(fnOf('s2120-ingest-fn').includes("osiLib.require('rain')"), 's2120-ingest-fn writes through osi-rain');
   const rainModule = fs.readFileSync(path.join(path.dirname(FLOWS), 'node-red/osi-rain/index.js'), 'utf8');
   assert.ok(rainModule.includes('THEN zone_daily_environment.sync_version + 1 ELSE zone_daily_environment.sync_version END'),
     'osi-rain must bump zone_daily_environment.sync_version when its values change');
