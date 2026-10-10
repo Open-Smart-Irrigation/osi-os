@@ -281,6 +281,8 @@ function snapshotDb() {
   insertProjected(db, { date: isoDay(-3), rainfall_mm: 4.5, rain_coverage: 'complete', rain_quality_reasons: '[]', rain_received_mm: 4.5 });
   db.prepare("INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version) VALUES (1, ?, 3.2, 0, 'aquascope_lorain', ?, 1)").run(isoDay(-4), now);
   insertProjected(db, { date: isoDay(-5), rain_quality_reasons: 'not json' });
+  insertProjected(db, { date: isoDay(-6), rain_quality_reasons: '{"private":"RAW_REASONS_SENTINEL"}' });
+  insertProjected(db, { date: isoDay(-7), rain_quality_reasons: 'x'.repeat(10000) });
   return db;
 }
 
@@ -311,7 +313,18 @@ function assertZoneEnvironments(items, warnings) {
   const broken = byDate[isoDay(-5)];
   assert.equal(broken.rain_quality_reasons, null, 'unparseable reasons are sent as null, never the raw text');
   assert.equal(broken.rain_coverage, 'partial');
-  assert.ok(warnings.some((w) => /rain_quality_reasons/.test(w) && w.includes(isoDay(-5))), 'the parse failure is logged');
+  const nonArray = byDate[isoDay(-6)];
+  assert.equal(nonArray.rain_quality_reasons, null, 'valid JSON that is not an array is sent as null');
+  const oversized = byDate[isoDay(-7)];
+  assert.equal(oversized.rain_quality_reasons, null, 'oversized malformed reasons are sent as null');
+  for (const day of [isoDay(-5), isoDay(-6), isoDay(-7)]) {
+    const warning = warnings.find((w) => /rain_quality_reasons/.test(w) && w.includes(day));
+    assert.ok(warning, `the parse failure for ${day} is logged`);
+    assert.ok(warning.length <= 256, `the warning for ${day} is bounded`);
+    assert.ok(!warning.includes('RAW_REASONS_SENTINEL'), 'warnings do not expose stored reasons');
+    assert.ok(!warning.includes('not json'), 'warnings do not expose malformed text');
+    assert.ok(!warning.includes('x'.repeat(32)), 'warnings do not expose long malformed text');
+  }
 }
 
 test('snapshots: bootstrap and force-sync zoneEnvironments carry the five fields, reasons as an array', async () => {
