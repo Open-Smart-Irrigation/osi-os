@@ -13,7 +13,7 @@ The zone-day fields this policy reads (`rainfall_mm`, `rain_coverage`, `rain_sel
 - the zone's `zone_daily_environment` row for `date`, the farm day in the zone's IANA timezone;
 - the zone's gauge selection for that day, so a reason such as `gauge_ambiguous` or `no_gauge` is known even when no row exists.
 
-`provider` is the provider rain the consumer already holds for the same farm day, or null. It carries the amount in millimetres, a source label, the period the amount covers (the farm day, or a UTC day), and whether the provider reported precipitation for the whole period. The function makes no network call. A caller that fetches weather does so before or after the read, never inside a write transaction.
+`provider` is the provider rain the consumer already holds for the same farm day, or null. It carries the amount in millimetres, a source label, the period the amount covers (the farm day, or a UTC day), and the period's hour coverage (`coveredHours`, `expectedHours`; a daily total covers its whole period). The function makes no network call. A caller that fetches weather does so before or after the read, never inside a write transaction.
 
 ## The four steps
 
@@ -51,9 +51,9 @@ The consumer holds a provider value for the farm day. The tiers, in order:
 2. A station-measured value over a UTC day. It is used and labelled with reason `utc_day_period`; it is never presented as the farm day.
 3. A modelled value (forecast or archive, for example Open-Meteo or OpenAgri).
 
-A consumer uses the tiers it has, in this order. A provider value counts only when the provider reported precipitation for every hour of its period, or delivered a daily total for that period. A provider period with missing hours is skipped with reason `provider_partial`, and its sum is not a lower bound. A temperature-only answer carries no rain.
+A consumer uses the tiers it has, in this order. A provider amount is the sum of the hours that carry a valid precipitation value, the same rule as the merged dendrometer and zone forecast code. When some hours lack a value, the sum is still used, with `coverage = 'partial'`, reason `provider_partial`, and the hour coverage (`coveredHours` of `expectedHours`) stored with the advice. A period with no valid hour yields no provider amount; a temperature-only answer is such a period.
 
-`amountMm` is the provider amount, `coverage = 'complete'` (over the labelled period), and `source` is the provider's label, for example `meteoswiss_station` or `open_meteo`. A lower bound from step 2 stays in the result next to it.
+`amountMm` is the provider amount, `coverage` is `complete` when every hour of the labelled period carries a value and `partial` otherwise, and `source` is the provider's label, for example `meteoswiss_station` or `open_meteo`. A lower bound from step 2 stays in the result next to it.
 
 ### Step 4: unknown
 
@@ -65,20 +65,20 @@ No step yielded an amount: `amountMm = null`, `coverage = 'unknown'`, `source = 
 |---|---|
 | `amountMm` | The day's rain from step 1 or step 3, in millimetres; null at step 4. |
 | `lowerBoundMm` | The received amount of an uncertified local day (step 2); null when step 1 answered, when no gauge is selected, or when nothing was received. |
-| `coverage` | Coverage of `amountMm`: `complete` or `complete_so_far` from step 1, `complete` from step 3, `legacy_unvalidated` from a legacy row, `unknown` at step 4. |
+| `coverage` | Coverage of `amountMm`: `complete` or `complete_so_far` from step 1, `complete` or `partial` from step 3, `legacy_unvalidated` from a legacy row, `unknown` at step 4. |
 | `source` | `local_gauge` (step 1 or a legacy local amount), the provider label (step 3), or `none` (step 4). |
 | `deveui` | The selected gauge whose day gave `amountMm` or `lowerBoundMm`; null when neither came from a gauge. |
 | `reasons` | The zone day's `rain_quality_reasons` (or the selection's reason when no row exists), then the policy's codes below. No duplicates. |
 | `policyVersion` | `1`. |
 
-Every consumer stores `source`, `coverage` and `deveui` with the advice it derives, so a reader can tell which rain the advice used.
+Every consumer stores `source`, `coverage` and `deveui` (and, for a provider amount, `coveredHours` and `expectedHours`) with the advice it derives, so a reader can tell which rain the advice used.
 
 | Policy reason code | Added when |
 |---|---|
 | `local_partial` | Step 2 read a `partial` day, or a `complete_so_far` row on a past date. |
 | `local_unknown` | The local day is `unknown`, or no zone row exists for the date while a gauge is selected. |
 | `utc_day_period` | The provider amount covers a UTC day, not the farm day. |
-| `provider_partial` | A provider period was skipped because hours were missing. |
+| `provider_partial` | The provider amount sums fewer hours than its period has. Informational: the amount is used. |
 | `legacy_row` | The zone row carries no `rain_policy_version`; see "Legacy rows". |
 | `rain_unknown` | Step 4 answered. |
 
