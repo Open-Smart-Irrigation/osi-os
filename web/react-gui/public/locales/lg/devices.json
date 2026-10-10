@@ -452,7 +452,8 @@
       "modelAccuracyNote": "Model-based ET0 can differ from a local station by 10-20 % on a single day, most on cloudy, windy or mountain days; weekly totals agree better.",
       "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud.",
       "rainCoverage": {
-        "providerPartial": "Provider amount — partial coverage"
+        "providerPartial": "Provider amount — partial coverage",
+        "receivedOnlyLabel": "received only (incomplete day)"
       }
     },
     "generatedAt": "Generated {{time}}",

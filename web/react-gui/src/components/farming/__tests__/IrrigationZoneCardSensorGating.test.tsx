@@ -1,7 +1,17 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import i18next from 'i18next';
+import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import enHistory from '../../../../public/locales/en/history.json';
+import deChDevices from '../../../../public/locales/de-CH/devices.json';
+import enDevices from '../../../../public/locales/en/devices.json';
+import esDevices from '../../../../public/locales/es/devices.json';
+import frDevices from '../../../../public/locales/fr/devices.json';
+import itDevices from '../../../../public/locales/it/devices.json';
+import lgDevices from '../../../../public/locales/lg/devices.json';
+import ptDevices from '../../../../public/locales/pt/devices.json';
 
 import { IrrigationZoneCard } from '../IrrigationZoneCard';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
@@ -30,25 +40,33 @@ vi.mock('../environment/EnvironmentCard', () => ({ EnvironmentCard: () => <div /
 vi.mock('../dendrometer/DendrometerSection', () => ({ DendrometerSection: () => <div /> }));
 vi.mock('../../../utils/isDesktopBrowser', () => ({ isDesktopBrowser: vi.fn(() => false) }));
 
-// Same shape as the other zone-card suites: resolve `defaultValue` and
-// `{{placeholders}}` so assertions read the English the card renders.
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    i18n: { language: 'en' },
-    t: (key: string, options?: unknown) => {
-      const statusLabel = ({
-        'history.soil.state.wet': 'Wet',
-        'history.soil.state.moist': 'Moist',
-        'history.soil.state.dry': 'Dry',
-      } as Record<string, string>)[key];
-      if (statusLabel) return statusLabel;
-      if (typeof options === 'string') return options;
-      const values = (options ?? {}) as Record<string, unknown>;
-      const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
-      return template.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(values[name] ?? ''));
-    },
-  }),
-}));
+const localeDevices = {
+  'de-CH': deChDevices,
+  en: enDevices,
+  es: esDevices,
+  fr: frDevices,
+  it: itDevices,
+  lg: lgDevices,
+  pt: ptDevices,
+};
+
+function buildTestI18n(language: keyof typeof localeDevices = 'en') {
+  const instance = i18next.createInstance();
+  const resources = Object.fromEntries(Object.entries(localeDevices).map(([locale, devices]) => [
+    locale,
+    { devices, history: enHistory },
+  ]));
+  void instance.use(initReactI18next).init({
+    lng: language,
+    fallbackLng: 'en',
+    defaultNS: 'devices',
+    ns: ['devices', 'history'],
+    resources,
+    interpolation: { escapeValue: false },
+    initImmediate: false,
+  });
+  return instance;
+}
 
 const NOW = Date.parse('2026-07-08T12:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
@@ -103,11 +121,13 @@ function sensor(overrides: Partial<Device>): Device {
   } as Device;
 }
 
-async function openCard(devices: Device[]) {
+async function openCard(devices: Device[], language: keyof typeof localeDevices = 'en') {
   render(
-    <MemoryRouter>
-      <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
-    </MemoryRouter>,
+    <I18nextProvider i18n={buildTestI18n(language)}>
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>
+    </I18nextProvider>,
   );
   fireEvent.click(screen.getByRole('button', { expanded: false }));
   await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
@@ -481,6 +501,31 @@ describe('water card rain source', () => {
           ? 'Driven by water balance · rain from weather data'
           : 'Driven by water balance · rain measured at MeteoSwiss Payerne',
       );
+    },
+  );
+
+  it.each(Object.keys(localeDevices) as Array<keyof typeof localeDevices>)(
+    'interpolates the received lower bound once using shipped %s wording',
+    async (language) => {
+      const devices = localeDevices[language];
+      const expectedReceived = devices.environment.water.rainReceivedOnly.replace('{{value}}', '3.0 mm');
+      apiMocks.getSummary.mockResolvedValue({
+        ...summary,
+        water: {
+          ...summary.water,
+          rainTodayMm: 6,
+          rainTodayCoverage: 'partial',
+          rainTodayReceivedMm: 3,
+          rainSource: 'weather_service',
+          sensorHealth: { ...summary.water.sensorHealth, rainGaugePresent: true },
+        },
+      });
+      await openCard([soil()], language);
+
+      const tile = screen.getByTestId('water-rain-tile');
+      expect(tile).toHaveTextContent(expectedReceived);
+      expect(tile).not.toHaveTextContent('{{value}}');
+      expect(tile.textContent?.match(/3\.0 mm/g)).toHaveLength(1);
     },
   );
 

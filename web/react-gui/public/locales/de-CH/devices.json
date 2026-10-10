@@ -452,7 +452,8 @@
       "modelAccuracyNote": "Modellbasierte ET0 kann an einem einzelnen Tag um 10-20 % von einer lokalen Station abweichen, am stärksten an bewölkten und windigen Tagen oder in den Bergen; Wochensummen stimmen besser überein.",
       "meteoswissCloudNote": "Diese Zone nutzt auf dem Gateway MeteoSchweiz; die eigene Historie von OSI Cloud nutzt Open-Meteo, bis die MeteoSchweiz-Historie in der Cloud verfügbar ist.",
       "rainCoverage": {
-        "providerPartial": "Anbietermenge — teilweise Abdeckung"
+        "providerPartial": "Anbietermenge — teilweise Abdeckung",
+        "receivedOnlyLabel": "nur empfangen (Tag unvollständig)"
       }
     },
     "generatedAt": "Erstellt {{time}}",

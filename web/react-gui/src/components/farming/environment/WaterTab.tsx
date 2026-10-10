@@ -105,9 +105,13 @@ export function rainCoverageNote(
           defaultValue: 'Provider amount — partial coverage',
         });
       }
-      return t('environment.water.rainReceivedOnly', { defaultValue: 'received only (incomplete day)' });
+      return t('environment.water.rainCoverage.receivedOnlyLabel', {
+        defaultValue: 'received only (incomplete day)',
+      });
     case 'unknown':
-      return t('environment.water.rainReceivedOnly', { defaultValue: 'received only (incomplete day)' });
+      return t('environment.water.rainCoverage.receivedOnlyLabel', {
+        defaultValue: 'received only (incomplete day)',
+      });
     default:
       return null;
   }

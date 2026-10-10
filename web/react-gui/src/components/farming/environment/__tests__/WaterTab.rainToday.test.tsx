@@ -172,4 +172,21 @@ describe('WaterTab rain today under the rain-resolution policy', () => {
       expect(screen.getByText(sourceHelp)).toBeInTheDocument();
     },
   );
+
+  it.each([
+    { coverage: 'partial', source: 'gauge' },
+    { coverage: 'unknown', source: null },
+  ] as const)('uses a value-free received-only label for non-provider $coverage coverage', ({ coverage, source }) => {
+    renderTab(gaugeWater({
+      rainTodayMm: 0.8,
+      rainTodayStatus: 'observed',
+      rainTodayCoverage: coverage,
+      rainTodayReceivedMm: null,
+      rainSource: source,
+    }));
+
+    const rainTile = screen.getByText('0.8 mm').parentElement;
+    expect(rainTile).toHaveTextContent('received only (incomplete day)');
+    expect(rainTile).not.toHaveTextContent('{{value}}');
+  });
 });

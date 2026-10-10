@@ -452,7 +452,8 @@
       "modelAccuracyNote": "L’ET0 issue d’un modèle peut s’écarter de 10-20 % d’une station locale sur une seule journée, surtout par temps nuageux ou venteux et en montagne ; les totaux hebdomadaires concordent mieux.",
       "meteoswissCloudNote": "Cette zone utilise MétéoSuisse sur la passerelle ; l’historique propre d’OSI Cloud utilise Open-Meteo jusqu’à ce que l’historique MétéoSuisse soit disponible dans le cloud.",
       "rainCoverage": {
-        "providerPartial": "Quantité du fournisseur — couverture partielle"
+        "providerPartial": "Quantité du fournisseur — couverture partielle",
+        "receivedOnlyLabel": "reçu uniquement (journée incomplète)"
       }
     },
     "generatedAt": "Généré {{time}}",

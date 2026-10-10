@@ -327,7 +327,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     ? rainCoverageNote(t, environmentSummary.water.rainTodayCoverage, rainSource)
     : null;
   const rainTodayReceivedDetail = environmentSummary?.water.rainTodayReceivedMm != null
-    ? `${formatWaterValue(environmentSummary.water.rainTodayReceivedMm, 'mm', 1)} ${t('environment.water.rainReceivedOnly', { defaultValue: 'received only (incomplete day)' })}`
+    ? t('environment.water.rainReceivedOnly', {
+        value: formatWaterValue(environmentSummary.water.rainTodayReceivedMm, 'mm', 1),
+        defaultValue: '{{value}} received only (incomplete day)',
+      })
     : null;
   const hasRainTile = hasRainGauge
     || environmentSummary?.water.rainTodayReceivedMm != null
