@@ -58,7 +58,7 @@ function openMeteoStub(url, nowMs = NOW_MS) {
     daily: {
       time: dayStarts.map((ms) => (unixtime ? ms / 1000 : new Date(ms).toISOString().slice(0, 10))),
       weather_code: [0, 0, 0],
-      precipitation_sum: forecastRain === 'dry' ? [0, 0, 0] : [null, null, null],
+      precipitation_sum: forecastRain === 'dry' ? [0, 0, 0] : forecastRain === '30h-only' ? [null, 2.5, null] : [null, null, null],
       precipitation_probability_max: [5, 5, 5],
       et0_fao_evapotranspiration: [4.5, 4.5, 4.5],
       temperature_2m_min: [12, 12, 12],
