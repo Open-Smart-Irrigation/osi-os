@@ -203,7 +203,7 @@ test('only proven sole-gauge full farm days receive numeric deltas; 23-hour DST 
   try {
     const db = fixture(root);
     const handle = new DatabaseSync(db);
-    handle.prepare(`UPDATE zone_daily_environment SET rainfall_mm = 2, rain_source = 'local_gauge', rain_selected_deveui = '${E1}', rain_coverage = 'complete' WHERE date = '2026-03-29'`).run();
+    handle.prepare(`UPDATE zone_daily_environment SET rainfall_mm = 2, rain_source = 'aquascope_lorain', rain_selected_deveui = '${E1}', rain_coverage = 'complete' WHERE date = '2026-03-29'`).run();
     handle.exec('CREATE TABLE rain_instrument_days (deveui TEXT, date TEXT, timezone TEXT, coverage TEXT); INSERT INTO rain_instrument_days VALUES (\'' + E1 + '\', \'2026-03-29\', \'Europe/Zurich\', \'complete\')');
     handle.prepare("UPDATE device_data SET rain_mm_delta = 3 WHERE id = 1").run();
     handle.prepare("DELETE FROM device_data WHERE deveui = ?").run(E2);
@@ -340,6 +340,104 @@ test('weather-station old source cannot be compared to a selected local gauge', 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('pre-0071 local-gauge aggregate stays incomparable when two LoRain gauges were eligible', () => {
+  const root = tmp();
+  try {
+    const db = path.join(root, 'two-lorain-legacy.db');
+    const handle = new DatabaseSync(db);
+    handle.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER);
+      CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+      CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT);
+      INSERT INTO devices VALUES ('${E1}', 'AQUASCOPE_LORAIN', 1), ('${E2}', 'AQUASCOPE_LORAIN', 1);
+      INSERT INTO device_data VALUES (1, '${E1}', '2026-03-29T10:00:00Z', 3, 3, 'ok'), (2, '${E2}', '2026-03-29T11:00:00Z', 2, 2, 'ok');
+      INSERT INTO zone_daily_environment VALUES (1, '2026-03-29', 5, 'local_gauge');`);
+    handle.close();
+    const provenance = provenanceFile(root, [
+      { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:chosen-lorain' },
+      { deveui: E2, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: false, sourceRef: 'synthetic:other-lorain' },
+    ]);
+    const out = path.join(root, 'out');
+    const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+    assert.equal(result.status, 0, result.stderr);
+    const rows = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8'));
+    const chosen = rows.find((r) => r.deveui === E1);
+    const other = rows.find((r) => r.deveui === E2);
+    assert.equal(chosen.new_received_mm, '3');
+    assert.equal(other.new_received_mm, '2');
+    assert.equal(chosen.old_zone_row_mm, '5');
+    assert.equal(chosen.delta_mm, '');
+    assert.equal(other.delta_mm, '');
+    assert.ok(chosen.reasons.includes('old_gauge_basis_ambiguous'));
+    const summary = fs.readFileSync(path.join(out, 'rain-diff-summary.md'), 'utf8');
+    assert.doesNotMatch(summary, /hypothetical daily crossing.*5 mm/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('pre-0071 sole-gauge proof is withheld when another rain-capable device lacks historical attribution', () => {
+  const root = tmp();
+  try {
+    const db = path.join(root, 'missing-competitor-history.db');
+    const handle = new DatabaseSync(db);
+    handle.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER);
+      CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+      CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT);
+      INSERT INTO devices VALUES ('${E1}', 'AQUASCOPE_LORAIN', 1), ('${E2}', 'AQUASCOPE_LORAIN', 1);
+      INSERT INTO device_data VALUES (1, '${E1}', '2026-03-29T10:00:00Z', 3, 3, 'ok');
+      INSERT INTO zone_daily_environment VALUES (1, '2026-03-29', 2, 'local_gauge');`);
+    handle.close();
+    const provenance = provenanceFile(root, [
+      { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:known-lorain' },
+    ]);
+    const out = path.join(root, 'out');
+    const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+    assert.equal(result.status, 0, result.stderr);
+    const row = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8')).find((r) => r.deveui === E1);
+    assert.equal(row.new_received_mm, '3');
+    assert.equal(row.delta_mm, '');
+    assert.ok(row.reasons.includes('old_gauge_basis_ambiguous'));
+    assert.doesNotMatch(fs.readFileSync(path.join(out, 'rain-diff-summary.md'), 'utf8'), /hypothetical daily crossing.*5 mm/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+for (const [type, source] of [['AQUASCOPE_LORAIN', 'aquascope_lorain'], ['SENSECAP_S2120', 'sensecap_s2120']]) {
+  test(`post-0072 ${type} source matches selected instrument despite a competing gauge`, () => {
+    const root = tmp();
+    try {
+      const db = legacyComparableDb(root);
+      const handle = new DatabaseSync(db);
+      handle.prepare('UPDATE devices SET type_id = ?').run(type);
+      handle.prepare('UPDATE zone_daily_environment SET rainfall_mm = 2, rain_source = ?').run(source);
+      handle.exec(`ALTER TABLE zone_daily_environment ADD COLUMN rain_selected_deveui TEXT;
+        ALTER TABLE zone_daily_environment ADD COLUMN rain_coverage TEXT;
+        UPDATE zone_daily_environment SET rain_selected_deveui = '${E1}', rain_coverage = 'complete';
+        CREATE TABLE rain_instrument_days (deveui TEXT, date TEXT, timezone TEXT, coverage TEXT);
+        INSERT INTO rain_instrument_days VALUES ('${E1}', '2026-03-29', 'Europe/Zurich', 'complete');
+        INSERT INTO devices VALUES ('${E2}', '${type}', 1);
+        INSERT INTO device_data (id, deveui, recorded_at, rain_mm_today, rain_mm_delta, rain_delta_status) VALUES (2, '${E2}', '2026-03-29T11:00:00.000Z', 2, 2, 'ok');`);
+      handle.prepare('INSERT INTO rain_instrument_days VALUES (?, ?, ?, ?)').run(E2, '2026-03-29', 'Europe/Zurich', 'complete');
+      handle.close();
+      const out = path.join(root, `out-${type}`);
+      const provenance = provenanceFile(root, [
+        { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:selected-instrument' },
+        { deveui: E2, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: false, sourceRef: 'synthetic:competing-instrument' },
+      ]);
+      const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+      assert.equal(result.status, 0, result.stderr);
+      const rows = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8'));
+      const row = rows.find((r) => r.deveui === E1);
+      assert.equal(row.old_zone_row_mm, '2');
+      assert.equal(row.new_received_mm, '3');
+      assert.equal(row.delta_mm, '1');
+      assert.ok(!row.reasons.includes('old_source_mismatch'));
+      const competing = rows.find((r) => r.deveui === E2);
+      assert.equal(competing.new_received_mm, '2');
+      assert.equal(competing.delta_mm, '');
+      const summary = fs.readFileSync(path.join(out, 'rain-diff-summary.md'), 'utf8');
+      assert.match(summary, /complete stored coverage markers are required on post-migration rows; a marker-less legacy comparison requires full-day provenance showing a sole eligible gauge/i);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
 test('provenance contradicting a retained observation snapshot is refused', () => {
   const root = tmp();
   try {
@@ -421,16 +519,13 @@ test('malformed UTC provenance calendar and clock components are refused', () =>
 test('negative numeric delta stays numeric in CSV while text cells remain formula escaped', () => {
   const root = tmp();
   try {
-    const db = legacyComparableDb(root, { old: 4, received: 3, source: 'local_gauge' });
-    const update = new DatabaseSync(db);
-    update.exec("UPDATE devices SET type_id = '-AQUASCOPE_LORAIN'");
-    update.close();
+    const db = legacyComparableDb(root, { old: 4, received: 3, source: 'aquascope_lorain' });
     const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', path.join(root, 'out'), '--provenance', soleGaugeProvenance(root)]);
     assert.equal(result.status, 0, result.stderr);
     const content = fs.readFileSync(path.join(root, 'out', 'rain-diff-days.csv'), 'utf8');
     assert.match(content, /,3,received_only,[^,]*,-1,/);
     const row = parseCsv(content).find((r) => r.deveui === E1);
-    assert.equal(row.instrument_type, "'-AQUASCOPE_LORAIN");
+    assert.equal(row.instrument_type, 'AQUASCOPE_LORAIN');
     assert.equal(row.delta_mm, '-1');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

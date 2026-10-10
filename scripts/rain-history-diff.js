@@ -9,6 +9,7 @@ const rain = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/n
 
 const HEADER = ['deveui', 'instrument_type', 'zone_id', 'date', 'timezone', 'old_host_day_mm', 'old_zone_row_mm', 'old_rain_source', 'new_received_mm', 'new_coverage', 'new_selected_deveui', 'delta_mm', 'reasons'];
 const LIVE_ROOT = '/data';
+const SOURCE_BY_TYPE = { AQUASCOPE_LORAIN: 'aquascope_lorain', SENSECAP_S2120: 'sensecap_s2120' };
 
 function usage() {
   return 'usage: node scripts/rain-history-diff.js --db PATH --from YYYY-MM-DD --to YYYY-MM-DD --out DIR [--host-timezone IANA] [--provenance PATH]';
@@ -166,7 +167,7 @@ function readEvidence(db, options, provenance) {
   const deviceCols = columns(db, names, 'devices');
   const dataCols = columns(db, names, 'device_data');
   const envCols = columns(db, names, 'zone_daily_environment');
-  const devices = names.has('devices') ? db.prepare('SELECT ' + selectExpressions(deviceCols, 'd', ['deveui', 'type_id', 'irrigation_zone_id', 'name', 'rain_mm_per_tip']) + ' FROM devices d').all().map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() })) : [];
+  const devices = names.has('devices') ? db.prepare('SELECT ' + selectExpressions(deviceCols, 'd', ['deveui', 'type_id', 'irrigation_zone_id', 'name', 'rain_mm_per_tip', 'rain_gauge_enabled']) + ' FROM devices d').all().map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() })) : [];
   const range = queryBounds(options.from, options.to);
   const data = names.has('device_data') && dataCols.has('recorded_at')
     ? db.prepare('SELECT ' + selectExpressions(dataCols, 'x', ['id', 'deveui', 'recorded_at', 'rain_mm_today', 'rain_mm_delta', 'rain_delta_status', 'rain_tips_delta', 'flow_liters_delta', 'rain_mm_per_hour']) + ' FROM device_data x WHERE date(recorded_at) >= date(?) AND date(recorded_at) <= date(?) ORDER BY recorded_at, id').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
@@ -180,7 +181,46 @@ function readEvidence(db, options, provenance) {
   const observations = names.has('rain_observations') && observationCols.has('deveui') && observationCols.has('received_at')
     ? db.prepare('SELECT ' + selectExpressions(observationCols, 'o', ['id', 'device_data_id', 'deveui', 'received_at', 'zone_id', 'timezone']) + ' FROM rain_observations o WHERE date(received_at) >= date(?) AND date(received_at) <= date(?) ORDER BY received_at, id').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
     : [];
-  return { devices, data, env, observations, instrumentDays, tableNames: names };
+  return { devices, data, env, observations, instrumentDays, tableNames: names, envColumns: envCols };
+}
+function possibleRainGauge(device) {
+  if (!device) return null;
+  const type = String(device.type_id || '').toUpperCase();
+  if (Object.hasOwn(SOURCE_BY_TYPE, type)) return true;
+  if (device.rain_gauge_enabled === 1 || device.rain_gauge_enabled === true || Number(device.rain_mm_per_tip) > 0) return true;
+  if (['KIWI_SENSOR', 'STREGA_VALVE', 'TEKTELIC_CLOVER', 'DRAGINO_SDI12', 'MCLIMATE_TVALVE'].includes(type)) return false;
+  // DRAGINO_LSN50 and unknown types can act as local gauges. Current disabled
+  // state cannot rule out historical eligibility, so keep the result unknown.
+  return null;
+}
+function assignmentCoversDay(intervals, bounds) {
+  let coveredUntil = bounds.start;
+  for (const interval of intervals.slice().sort((a, b) => Date.parse(a.from) - Date.parse(b.from))) {
+    const start = Date.parse(interval.from);
+    const end = Date.parse(interval.to);
+    if (end <= coveredUntil) continue;
+    if (start > coveredUntil) return false;
+    coveredUntil = Math.max(coveredUntil, end);
+    if (coveredUntil >= bounds.end) return true;
+  }
+  return false;
+}
+function soleEligibleGaugeForDay(provenance, devices, zoneId, deveui, bounds) {
+  const deviceById = new Map(devices.map((device) => [device.deveui, device]));
+  const intervalsByDevice = new Map();
+  for (const interval of provenance.intervals) {
+    if (!intervalsByDevice.has(interval.deveui)) intervalsByDevice.set(interval.deveui, []);
+    intervalsByDevice.get(interval.deveui).push(interval);
+  }
+  const candidates = new Set();
+  const allDevices = new Set([...deviceById.keys(), ...intervalsByDevice.keys()]);
+  for (const candidateEui of allDevices) {
+    if (possibleRainGauge(deviceById.get(candidateEui)) === false) continue;
+    const intervals = intervalsByDevice.get(candidateEui) || [];
+    const overlapsZoneDay = intervals.some((interval) => interval.zoneId === zoneId && Date.parse(interval.from) < bounds.end && Date.parse(interval.to) > bounds.start);
+    if (overlapsZoneDay || !assignmentCoversDay(intervals, bounds)) candidates.add(candidateEui);
+  }
+  return candidates.size === 1 && candidates.has(deveui);
 }
 function deriveRows(evidence, options, provenance) {
   const deviceById = new Map(evidence.devices.map((d) => [d.deveui, d]));
@@ -313,9 +353,15 @@ function deriveRows(evidence, options, provenance) {
     const selectedProof = (record.basis === 'provenance' && fullDay && record.selectedInterval && record.selectedInterval.selected && selectedDeveui === record.deveui && selected.size === 1)
       || (record.basis === 'observation_snapshot' && record.hasObservationIdentity && retainedSelected === record.deveui);
     const oldSource = zone && zone.rain_source != null ? String(zone.rain_source).toLowerCase() : '';
-    const sourceMatches = oldSource === 'local_gauge';
+    const instrumentType = String(device.type_id || '').toUpperCase();
+    const expectedSource = SOURCE_BY_TYPE[instrumentType] || null;
+    const exactStoredGauge = oldSelected === record.deveui && zone && zone.rain_coverage === 'complete' && instrumentDay && instrumentDay.coverage === 'complete';
+    const markerlessLegacyRow = !evidence.envColumns.has('rain_selected_deveui') && !evidence.envColumns.has('rain_coverage');
+    const legacySource = oldSource === 'local_gauge' && markerlessLegacyRow;
+    const soleLegacyGauge = markerlessLegacyRow && bounds && fullDay && soleEligibleGaugeForDay(provenance, evidence.devices, record.zoneId, record.deveui, bounds);
+    const sourceMatches = Boolean((expectedSource && oldSource === expectedSource) || soleLegacyGauge || (oldSource === 'local_gauge' && instrumentType === 'DRAGINO_LSN50' && exactStoredGauge));
     const legacyComparable = record.basis === 'provenance' && fullDay && record.selectedInterval && record.selectedInterval.selected
-      && selectedProof && sourceMatches && (oldSelected == null || oldSelected === record.deveui)
+      && selectedProof && markerlessLegacyRow && sourceMatches && soleLegacyGauge
       && (!zone || zone.rain_coverage == null || zone.rain_coverage === 'complete')
       && (!instrumentDay || instrumentDay.coverage == null || instrumentDay.coverage === 'complete');
     const retainedComparable = sourceMatches && oldSelected === record.deveui && zone && zone.rain_coverage === 'complete' && instrumentDay && instrumentDay.coverage === 'complete';
@@ -323,7 +369,8 @@ function deriveRows(evidence, options, provenance) {
     const delta = proof ? round3(received - oldZone) : null;
     if (proof && delta === 0) reasons.add('unchanged');
     if (zone && !proof) reasons.add('comparison_unverifiable');
-    if (zone && record.basis === 'provenance' && oldSource && oldSource !== 'local_gauge') reasons.add('old_source_mismatch');
+    if (zone && record.basis === 'provenance' && oldSource && !sourceMatches && !legacySource) reasons.add('old_source_mismatch');
+    if (zone && markerlessLegacyRow && !soleLegacyGauge) reasons.add('old_gauge_basis_ambiguous');
     const oldHost = options.hostTimezone && ((record.basis === 'provenance' && fullDay) || record.basis === 'observation_snapshot') ? hostValue : null;
     if (record.date && record.timezone && !fullDay) reasons.add('assignment_period_unproven');
     rows.push({ deveui: record.deveui || null, instrument_type: device.type_id || null, zone_id: record.zoneId, date: record.date, timezone: record.timezone, old_host_day_mm: oldHost, old_zone_row_mm: oldZone, old_rain_source: zone ? zone.rain_source : null, new_received_mm: received, new_coverage: record.rows.length ? 'received_only' : null, new_selected_deveui: selectedGauge, delta_mm: delta, reasons: [...reasons].sort().join(';'), evidenceRefs: record.evidenceRefs });
@@ -389,7 +436,7 @@ function summary(rows, provenance) {
     `Original host timezone: ${provenance.hostTimezone || 'unknown'} (${provenance.hostTimezoneSource})`,
     'Quantity rules: accepted finite nonnegative rain_mm_delta with rain_delta_status=ok is summed per device and proven farm day; accepted rows with an explicit zero remain 0. rain_mm_today is contextual only. No rain_tips_delta conversion is applied because retained per-device calibration and original ingestion conversion are not established by this tool.',
     `Historical evidence references: ${[...new Set(rows.flatMap((row) => row.evidenceRefs || []))].sort().map(escapeMarkdown).join(', ') || 'none retained'}.`,
-    'Rows without retained observation identity are received_only and carry no deduplication claim. A numeric delta requires a proven historical assignment, selected gauge, retained zone row, and complete stored coverage on both sides for the matching farm-day period; it does not certify either quantity.',
+    'Rows without retained observation identity are received_only and carry no deduplication claim. A numeric delta requires a proven historical assignment, matching old rain source and gauge basis, retained zone row, and matching farm-day period. Complete stored coverage markers are required on post-migration rows; a marker-less legacy comparison requires full-day provenance showing a sole eligible gauge. Neither quantity is certified.',
     'Reason counts:', '',
   ];
   for (const [reason, count] of [...reasons].sort((a, b) => a[0].localeCompare(b[0]))) out.push(`- ${reason}: ${count}`);
