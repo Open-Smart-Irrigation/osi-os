@@ -84,6 +84,7 @@ test('immutable token subject blocks username reuse across scoped shared reads',
   const cases = [
     ['zone environment', 'zone-env-fn', { zone_id: '1' }],
     ['dendrometer recommendations', 'dendro-zone-rec-fn', { zone_id: '1' }],
+    ['zone rain gauge selection', 'zone-rain-source-fn', { zone_id: '1' }],
     ['device history', 'dendro-daily-fn', { deveui: 'DENDRO1' }],
     ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
   ];
@@ -176,6 +177,46 @@ test('F2: recommendations are account-wide and a disabled account is refused', a
     db.close();
   }
 
+  scopeHelper._resetForTests();
+  const disabledDb = seedScopedDb();
+  disabledDb.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  try {
+    const disabled = await executeFunction(node, {
+      msg: requestFor(3, 'view1', { zone_id: '2' }),
+      env: ENV,
+      db: disabledDb,
+    });
+    assert.equal(disabled.result && disabled.result.statusCode, 403);
+  } finally {
+    disabledDb.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F2: every enabled role reads the rain gauge selection of any zone; a disabled account is refused', async () => {
+  const node = loadNode('zone-rain-source-fn');
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    for (const zoneId of ['1', '2']) {
+      scopeHelper._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const response = await executeFunction(node, {
+          msg: requestFor(userId, username, { zone_id: zoneId }),
+          env: ENV,
+          db,
+        });
+        assert.equal(
+          response.result && response.result.statusCode,
+          200,
+          `${username} must read the rain gauge selection of zone ${zoneId}`
+        );
+      } finally {
+        db.close();
+      }
+    }
+  }
   scopeHelper._resetForTests();
   const disabledDb = seedScopedDb();
   disabledDb.prepare(

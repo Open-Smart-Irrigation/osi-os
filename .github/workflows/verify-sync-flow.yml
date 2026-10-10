@@ -218,6 +218,10 @@ jobs:
             scripts/test-entity-name-command-path.js \
             scripts/test-entity-name-create-paths.js \
             scripts/test-legacy-upsert-zone-name.js
+      # The zone rain gauge selection routes (GET/PUT rain-source): auth, the
+      # zone settings guard, candidate validation and the re-projection.
+      - name: Zone rain gauge selection gates
+        run: node --test scripts/test-zone-rain-source-route.js
       # F128: a local zone create/delete must ping the outbox flush gate over the
       # link pair instead of waiting up to 30 s for the "Flush Sync Outbox" inject.
       # Pins the wiring (both scoped and legacy routes tap it) and the gate's

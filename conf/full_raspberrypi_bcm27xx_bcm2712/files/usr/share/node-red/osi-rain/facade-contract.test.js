@@ -186,3 +186,40 @@ test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('zoneRainSourceView and setZoneRainSource through the osi-db-helper facade (zone-rain-source-fn shape)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-rain-facade-'));
+  try {
+    const file = path.join(dir, 'farming.db');
+    const native = new DatabaseSync(file);
+    native.exec(fs.readFileSync(SEED, 'utf8'));
+    native.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+      INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z', 1, 'z-1', 'Europe/Zurich', 'local');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at) VALUES
+        ('A840410000000001', 'Gauge', 'AQUASCOPE_LORAIN', 1, 1, '2026-01-01', '2026-01-01'),
+        ('A840410000000002', 'Station', 'SENSECAP_S2120', 1, NULL, '2026-01-01', '2026-01-01');
+      INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('A840410000000002', 1);`);
+    native.close();
+    const osiDb = loadOsiDbHelper();
+    const db = new osiDb.Database(file);
+    const before = await R.zoneRainSourceView(db, 1);
+    assert.equal(before.state, 'ambiguous');
+    assert.equal(before.suggested_deveui, 'A840410000000001');
+    assert.deepEqual(before.candidates.map((c) => [c.deveui, c.via]), [['A840410000000001', 'direct'], ['A840410000000002', 'weather_station']]);
+    const out = await db.transaction((t) => R.setZoneRainSource(t, 1, 'A840410000000002', { actorUuid: 'u-owner' }));
+    assert.equal(out.ok, true);
+    assert.equal(out.view.selected_deveui, 'A840410000000002');
+    assert.equal(out.view.basis, 'explicit');
+    const refused = await db.transaction((t) => R.setZoneRainSource(t, 1, 'A8404100000000FF', {}));
+    assert.deepEqual(refused, { ok: false, reason: 'not_a_candidate' });
+    const check = new DatabaseSync(file, { readOnly: true });
+    try {
+      assert.deepEqual({ ...check.prepare('SELECT selected_deveui, selected_by_uuid FROM zone_rain_source WHERE zone_id = 1').get() },
+        { selected_deveui: 'A840410000000002', selected_by_uuid: 'u-owner' });
+    } finally {
+      check.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

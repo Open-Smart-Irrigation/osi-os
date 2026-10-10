@@ -939,5 +939,17 @@
     "tips_one": "{{count}} Kippung",
     "tips_other": "{{count}} Kippungen",
     "tipsUnavailable": "Anzahl Kippungen nicht verfügbar"
+  },
+  "zoneRainGauge": {
+    "label": "Regenmesser für diese Zone",
+    "helpLabel": "Über den Regenmesser",
+    "help": "Melden mehrere Regenmesser für diese Zone, stammt der tägliche Regen der Zone vom hier gewählten Regenmesser. Der Regen zweier Regenmesser wird nie addiert. Eine Änderung berechnet die letzten 30 Tage neu.",
+    "notChosen": "— Kein Regenmesser gewählt —",
+    "optionShared": "{{name}} (gemeinsame Wetterstation)",
+    "optionSuggested": "{{label}} — vorgeschlagen",
+    "ambiguous": "Zwei Regenmesser melden für diese Zone. Bis Sie einen wählen, hat die Zone keinen gemessenen Regen.",
+    "onlyCandidate": "Der einzige Regenmesser dieser Zone wird verwendet.",
+    "loadFailed": "Die Regenmesser dieser Zone konnten nicht geladen werden.",
+    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen."
   }
 }

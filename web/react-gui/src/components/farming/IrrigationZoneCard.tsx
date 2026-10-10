@@ -17,6 +17,7 @@ import { EditableName } from './shared/EditableName';
 import { HelpTip } from './shared/HelpTip';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
+import { RainGaugeAmbiguityBanner } from './environment/RainGaugeAmbiguityBanner';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
@@ -248,6 +249,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
   const [environmentSummary, setEnvironmentSummary] = useState<ZoneEnvironmentSummary | null>(null);
+  // Bumped when the zone settings are saved, so the water card reads the
+  // rain gauge selection again.
+  const [settingsVersion, setSettingsVersion] = useState(0);
   const [latestZoneRecommendation, setLatestZoneRecommendation] = useState<ZoneRecommendation | null>(null);
 
   const handleRenameZone = async (nextName: string) => {
@@ -426,7 +430,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [hasDendroDevices, zone.id]);
+  }, [hasDendroDevices, settingsVersion, zone.id]);
 
   return (
     <div id={`irrigation-zone-${zone.id}`} className="bg-[var(--surface)] border-2 border-[var(--border)] rounded-xl p-6 shadow-lg mb-6">
@@ -622,6 +626,13 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
             <div className="mt-3 rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
               {fallbackReasonText}
             </div>
+          )}
+          {hasRainTile && (
+            <RainGaugeAmbiguityBanner
+              zoneId={zone.id}
+              className="mt-3"
+              refreshKey={`${environmentSummary.generatedAt ?? ''}|${settingsVersion}`}
+            />
           )}
           <div className={`mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 ${WATER_TILE_GRID[waterTileCount]}`}>
             {/* The daily aggregation writes 0 mm for a day with no sample, so
@@ -1008,7 +1019,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         isOpen={canWrite && showConfigModal}
         zone={zone}
         onClose={() => setShowConfigModal(false)}
-        onSaved={onUpdate}
+        onSaved={() => {
+          setSettingsVersion((version) => version + 1);
+          onUpdate();
+        }}
       />
 
       <AdvancedScheduleDrawer

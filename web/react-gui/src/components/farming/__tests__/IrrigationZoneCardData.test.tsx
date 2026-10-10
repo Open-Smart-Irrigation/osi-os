@@ -10,6 +10,7 @@ import { isDesktopBrowser } from '../../../utils/isDesktopBrowser';
 const apiMocks = vi.hoisted(() => ({
   getZoneRecommendations: vi.fn(),
   getSummary: vi.fn(),
+  getRainSource: vi.fn(),
 }));
 
 vi.mock('../../../services/api', () => ({
@@ -24,6 +25,10 @@ vi.mock('../../../services/api', () => ({
     removeDevice: vi.fn().mockResolvedValue(undefined),
     updateConfig: vi.fn().mockResolvedValue(undefined),
   },
+  zoneRainSourceAPI: {
+    get: apiMocks.getRainSource,
+    set: vi.fn(),
+  },
 }));
 
 vi.mock('../ScheduleSection', () => ({
@@ -33,6 +38,12 @@ vi.mock('../ScheduleSection', () => ({
 
 vi.mock('../environment/EnvironmentCard', () => ({
   EnvironmentCard: () => <div data-testid="environment-card" />,
+}));
+
+vi.mock('../ZoneConfigModal', () => ({
+  ZoneConfigModal: ({ isOpen, onSaved }: { isOpen: boolean; onSaved: () => void }) => isOpen
+    ? <button type="button" onClick={onSaved}>Save zone settings</button>
+    : null,
 }));
 
 vi.mock('../dendrometer/DendrometerSection', () => ({
@@ -170,6 +181,8 @@ beforeEach(() => {
   apiMocks.getZoneRecommendations.mockResolvedValue([]);
   apiMocks.getSummary.mockReset();
   apiMocks.getSummary.mockResolvedValue(null);
+  apiMocks.getRainSource.mockReset();
+  apiMocks.getRainSource.mockResolvedValue({ state: 'none', selectedDeveui: null, basis: null, candidates: [], suggestedDeveui: null });
 });
 
 afterEach(() => {
@@ -305,6 +318,83 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(waterCard).toHaveClass('bg-[var(--card)]');
     expect(waterCard.className).not.toContain('white_55%');
     expect(waterCard.className).not.toContain('sky-100');
+  });
+
+  it('says in the water card when two rain gauges report and none is chosen', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    apiMocks.getRainSource.mockResolvedValue({
+      state: 'ambiguous', selectedDeveui: null, basis: null, suggestedDeveui: 'A840410000000001',
+      candidates: [
+        { deveui: 'A840410000000001', name: 'Gauge north', typeId: 'AQUASCOPE_LORAIN', via: 'direct' },
+        { deveui: 'A840410000000002', name: 'Station east', typeId: 'SENSECAP_S2120', via: 'weather_station' },
+      ],
+    });
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    await waitFor(() => expect(waterCard).toHaveTextContent(
+      'Two rain gauges report for this zone. Choose one in the zone settings.',
+    ));
+    expect(apiMocks.getRainSource).toHaveBeenCalledWith(12);
+  });
+
+  it('shows no gauge banner once a gauge is chosen', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    apiMocks.getRainSource.mockResolvedValue({
+      state: 'selected', selectedDeveui: 'A840410000000001', basis: 'explicit', suggestedDeveui: null,
+      candidates: [{ deveui: 'A840410000000001', name: 'Gauge north', typeId: 'AQUASCOPE_LORAIN', via: 'direct' }],
+    });
+
+    renderCard([dendroDevice]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    await waitFor(() => expect(apiMocks.getRainSource).toHaveBeenCalledWith(12));
+    expect(waterCard).not.toHaveTextContent('Two rain gauges report for this zone.');
+  });
+
+  it('reloads rain amount and advice after saving the zone rain source', async () => {
+    const beforeSave = {
+      ...environmentSummary,
+      water: {
+        ...environmentSummary.water,
+        rainTodayMm: 1.2,
+        rainSource: 'weather_service',
+        action: { ...environmentSummary.water.action, code: 'monitor_today' },
+        sensorHealth: { ...environmentSummary.water.sensorHealth, rainGaugePresent: false },
+      },
+    } as ZoneEnvironmentSummary;
+    const afterSave = {
+      ...beforeSave,
+      generatedAt: '2026-07-08T10:05:00.000Z',
+      water: {
+        ...beforeSave.water,
+        rainTodayMm: 8.5,
+        action: { ...beforeSave.water.action, code: 'irrigate_today' },
+      },
+    } as ZoneEnvironmentSummary;
+    apiMocks.getSummary.mockReset().mockResolvedValueOnce(beforeSave).mockResolvedValueOnce(afterSave);
+    const onUpdate = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={[]} unassignedDevices={[]} onUpdate={onUpdate} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    expect(await screen.findByText('1.2 mm')).toBeInTheDocument();
+    expect(screen.getByText('Monitor today')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save zone settings' }));
+
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('8.5 mm')).toBeInTheDocument();
+    expect(screen.getByText('Irrigate today')).toBeInTheDocument();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('does not expose scheduling-source controls in the water balance card', async () => {

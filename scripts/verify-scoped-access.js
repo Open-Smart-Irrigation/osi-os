@@ -311,6 +311,14 @@ const REQUEST_FIXTURES = {
   },
   'dendro-location-http': { body: { latitude: 46.5, longitude: 7.5 } },
   'zone-config-http': { body: { cropType: 'probe-crop' } },
+  // The probe device and the foreign device as rain gauges, so the probe
+  // device is a candidate of the caller's zone and the foreign one is not.
+  'zone-rain-source-put-http': {
+    body: { deveui: PROBE_DEVEUI },
+    foreignBodies: [{ deveui: FOREIGN_DEVEUI }],
+    setupSql: "UPDATE devices SET rain_gauge_enabled = 1 WHERE deveui IN ('" + PROBE_DEVEUI + "', '" +
+      FOREIGN_DEVEUI + "');",
+  },
   'put-lsn50-mode-http': { body: { mode: 'MOD1' } },
   'put-lsn50-interval-http': { body: { minutes: 10 } },
   'put-kiwi-interval-http': { body: { minutes: 10 }, setupSql: probeDeviceType('KIWI_SENSOR') },

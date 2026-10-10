@@ -648,6 +648,10 @@
     "delete-zone-delete": {
       "delta": 149,
       "reason": "Zone delete request isolation (osi-os #377, E02 zone delete), measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 442 -> HEAD 591 = +149. (Soft) Delete Zone reads zone id and actor from msg.osi.request and the next sync_version from msg.osi.applied instead of three flow.get(delete_zone_*) reads, and throws to the tab catch (500) when either is missing. Unassign Devices (-62) and Disable Schedule (-18) shrink in the same change; net +340 per profile."
+    },
+    "scoped-zone-config-guard": {
+      "delta": 84,
+      "reason": "Zone rain gauge selection (rain correctness R-ZSEL): the zone settings guard takes PUT /api/irrigation-zones/:zone_id/rain-source as its fifth route (one more entry in its route table, index 4; the error output moves to index 5), so the selection write gets exactly the zone settings decisions (fresh role, canMutate, assertFreshZoneAccess). Measured with verify-flows-size-ratchet nodeSizes per profile; bcm2712 and bcm2709 are byte-identical and each measures origin/main 3724 -> HEAD 3808 = +84. Replaces this node's new_node_ceilings entry (max_chars 3724, Wave 3 scoped-access port commit E6, canMutate allowlist), which origin/main has fully consumed: the node exists there at exactly 3724 chars, so it is no longer a new node and the ceiling no longer applied."
     }
   },
   "total_allowance": {
@@ -704,10 +708,6 @@
       "max_chars": 3858,
       "reason": "Supersedes the prior E6 entry (3042). Wave 3 scoped-access port, pick-list commit 56 (AgroLink 09bcf11c0, \"feat(scope): let any write role delete an unassigned device\"): an unassigned device may now be deleted by any write-capable role (not admin-only), while a zone-assigned device still requires zone write access -- 3042 -> 3858 (+816). Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles."
     },
-    "scoped-zone-config-guard": {
-      "max_chars": 3724,
-      "reason": "Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles."
-    },
     "zone-rename-fn": {
       "max_chars": 6996,
       "reason": "Zone/device rename Stage 1, Task 6, fix round 1 (controller ruling T6-I1b/T6-M3). PUT /api/irrigation-zones/:id/name handler. Grew from 6435 to 7006 chars (+571), then back to 6996 in the final fix wave, which dropped the `msg` argument from its two node.error calls (GLOBAL amendment A5): adds a scopedOn fail-closed check (403 Forbidden when OSI_SCOPED_ACCESS='1' and msg._scopedZoneWriteAuthorized !== true, never falling back to the flag-off owner check) and a NAME_REASON_CODES allowlist so only the four reviewed normalizeEntityName reason codes reach the 400 path (anything else is a 500 with no reason key). Still over the 4096-char new-node ceiling for the same reason as before: it carries the repo's standard inline getAuthSecret()/verifyBearer() block verbatim (spliced from put-soil-depth-fn with only sourceId substituted), which scripts/verify-auth-flag-off-hermetic.js requires on the OSI_SCOPED_ACCESS-off path. Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles."
@@ -727,6 +727,10 @@
     "watermark-cal-fn": {
       "max_chars": 6898,
       "reason": "WATERMARK phase 1 (spec 2026-09-25), GET/PUT/DELETE /api/devices/:deveui/watermark/calibration handler, measured at exactly 6898 chars on both byte-identical maintained profiles (6069 as first committed; +829 in Task 7 fix round 1: a GET/PUT/DELETE method whitelist answering 405 before any auth or DB work, because Express routes HEAD to the unguarded GET http-in, and a scoped write skips the bearer check only when scoped-device-config-guard vouched for it via msg.actor_user_uuid, otherwise 401/403). Over the 4096-char new-node ceiling because it carries the inline flag-off auth prelude (getAuthSecret/toB64u/fromB64u/verifyBearer, copied verbatim from s2120-zones-get-fn with only the sourceId and log strings substituted, about 3.7 KB) that verify-auth-flag-off-hermetic.js requires: with OSI_SCOPED_ACCESS unset no path may reach osiLib.require('scope'), so the bearer check cannot delegate to the scope helper. The prelude alone exceeds the ceiling with any handler body, following sdi12-config-auth-fn and device-rename-fn. The handler body itself is thin: validation, storage, versioning and access rules live in osi-watermark-helper (osiLib.require('watermark-helper'))."
+    },
+    "zone-rain-source-fn": {
+      "max_chars": 8276,
+      "reason": "Zone rain gauge selection (rain correctness R-ZSEL): handler of GET and PUT /api/irrigation-zones/:zone_id/rain-source. Over the 4096-char new-node ceiling because it carries the standard inline getAuthSecret()/verifyBearer() block verbatim (spliced from zone-rename-fn with only the sourceId substituted, 4217 chars), which scripts/verify-auth-flag-off-hermetic.js requires on the OSI_SCOPED_ACCESS-off path, plus the account-wide read decision of the scoped GET (W1, as dendro-zone-rec-fn) and the fail-closed write marker check. The selection rules, candidate validation and re-projection live in osi-rain (zoneRainSourceView, setZoneRainSource). Measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: 8276."
     }
   }
 }

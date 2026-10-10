@@ -43,6 +43,7 @@ import type {
 } from '../history/types';
 import { migrateHistoryWorkspace } from '../history/workspaceModel';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
+import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
 import type {
   Device,
   LoginRequest,
@@ -724,6 +725,21 @@ export const irrigationZonesAPI = {
   disableAllSchedules: async (): Promise<{ disabledSchedules: number }> => {
     const response = await api.post<{ disabledSchedules?: number }>('/api/irrigation-zones/schedules/disable-all');
     return { disabledSchedules: Number(response.data?.disabledSchedules ?? 0) };
+  },
+};
+
+// A zone's rain gauge: which of the gauges reporting for the zone measures its
+// rain. PUT { deveui } chooses one of the candidates; null clears the choice.
+// The gateway re-projects the zone's last 30 days on a change.
+export const zoneRainSourceAPI = {
+  get: async (zoneId: number): Promise<ZoneRainSource> => {
+    const response = await api.get<unknown>(`/api/irrigation-zones/${zoneId}/rain-source`);
+    return normaliseZoneRainSource(response.data);
+  },
+
+  set: async (zoneId: number, deveui: string | null): Promise<ZoneRainSource> => {
+    const response = await api.put<unknown>(`/api/irrigation-zones/${zoneId}/rain-source`, { deveui });
+    return normaliseZoneRainSource(response.data);
   },
 };
 
