@@ -600,7 +600,7 @@ async function insertExpectation(db, { id, state, commandedAt, deviceEui }) {
   );
 }
 
-test('CANCEL_VALVE_ACTUATION cancels the newest active expectation and flushes the queue exactly once', async () => {
+test('CANCEL_VALVE_ACTUATION cancels the only active expectation and flushes the queue exactly once', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
   const flushCalls = [];
@@ -613,6 +613,52 @@ test('CANCEL_VALVE_ACTUATION cancels the newest active expectation and flushes t
   const row = await db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id=?', ['e1']);
   assert.equal(row.reconciliation_state, 'CANCELLED');
   assert.equal(row.cancel_reason, 'operator_cancel');
+});
+
+// #428: the cloud names the actuation it cancels (expectation_id); without a name, two
+// active actuations are a permanent refusal instead of cancelling the newest.
+test('CANCEL_VALVE_ACTUATION with expectation_id cancels that actuation and reads and refills the queue', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e2', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  const reads = [];
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
+    flushQueue: async () => ({}),
+    queueClient: {
+      getDeviceQueue: async (eui) => {
+        reads.push(eui);
+        const open = Buffer.from([0x41, 15]).toString('base64');
+        return [{ fPort: 2, data: open, isPending: false }, { fPort: 2, data: open, isPending: false }];
+      },
+      enqueueDownlink: async () => ({}),
+    },
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(reads, [EUI], 'the cancel looks at the queue instead of flushing it blindly');
+  assert.equal(out.detail, 'dropped_opens=1 expectation_ids=e2', 'the ACK names the other actuation whose open was taken out');
+  const states = Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((r) => [r.expectation_id, r.reconciliation_state]));
+  assert.deepEqual(states, { e1: 'CANCELLED', e2: 'PENDING_OBSERVATION' });
+});
+
+test('CANCEL_VALVE_ACTUATION says dropped_opens=unknown when the queue cannot be read', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI }, {
+    flushQueue: async () => ({}),
+    queueClient: { getDeviceQueue: async () => { throw new Error('unavailable'); }, enqueueDownlink: async () => ({}) },
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.detail, 'dropped_opens=unknown');
+});
+
+test('CANCEL_VALVE_ACTUATION without expectation_id and two active actuations is a permanent refusal', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z' });
+  await insertExpectation(db, { id: 'e2', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:01:00.000Z' });
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'ambiguous_actuation');
+  assert.equal(out.permanent, true);
 });
 
 test('CANCEL_VALVE_ACTUATION with an explicit null reason defaults to operator_cancel', async () => {

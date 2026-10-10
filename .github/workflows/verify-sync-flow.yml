@@ -89,6 +89,12 @@ jobs:
           node scripts/verify-lsn50-chameleon-persistence.js
           node scripts/verify-module-file-deploy-coverage.js
           node scripts/verify-s2120-gust-fix.js
+      # Valve command safety through the shipped flow (pending split, gate, real command
+      # ledger, Route Command, STREGA downlink builder, valve command bridge): only a
+      # bounded timed open reaches a STREGA valve, refused commands are answered, and
+      # stop commands still run with the gateway clock ahead of their expiry.
+      - name: Valve command safety path
+        run: node --test scripts/test-valve-command-safety-path.js
       # WATERMARK protected configuration commands (SET/DELETE_WATERMARK_CALIBRATION,
       # SET_CHAMELEON_CONFIG, UPSERT_DEVICE_SOIL_DEPTHS): the receiver and the command
       # ledger on the seed schema, including a rejected or conflicting command that

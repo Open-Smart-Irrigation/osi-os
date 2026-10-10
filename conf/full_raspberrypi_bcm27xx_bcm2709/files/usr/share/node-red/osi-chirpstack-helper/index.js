@@ -647,6 +647,26 @@ class ChirpStackClient {
     };
   }
 
+  // Lists the device's downlink queue, oldest first. `data` is base64, as
+  // enqueueDownlink accepts it, so a caller can queue an item again unchanged.
+  async getDeviceQueue(devEui) {
+    const normalizedDevEui = normalizeDevEui(devEui);
+    if (!normalizedDevEui) {
+      throw annotateError(new Error('DevEUI is required'), 'getDeviceQueue');
+    }
+    const request = new devicePb.GetDeviceQueueItemsRequest();
+    request.setDevEui(normalizedDevEui);
+    const response = await grpcInvoke(this.deviceClient, 'getQueue', request, this.metadata, 'getDeviceQueue');
+    return response.getResultList().map((item) => ({
+      id: item.getId(),
+      fPort: item.getFPort(),
+      data: item.getData_asB64(),
+      confirmed: item.getConfirmed(),
+      isPending: item.getIsPending(),
+      isEncrypted: item.getIsEncrypted(),
+    }));
+  }
+
   // Enqueues one item on the device's downlink queue. `data` is bytes for the
   // queue item's `data` field: DeviceQueueItem.setData accepts either a
   // Uint8Array or a base64 string (jspb's own bytes-field convention, the

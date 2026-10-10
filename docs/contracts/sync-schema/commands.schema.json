@@ -142,6 +142,7 @@
         "unit": {"type": ["string", "null"], "enum": ["SECONDS", "MINUTES", "HOURS", null]},
         "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", "OPEN_FOR_DURATION", null]},
         "effect_key": {"type": ["string", "null"]},
+        "expectation_id": {"type": ["string", "null"], "minLength": 1, "description": "CANCEL_VALVE_ACTUATION: the actuation to cancel (ValveActuation.expectation_id; for a cloud-issued open, its command id as text). Without it the edge cancels only when exactly one actuation of the valve is active."},
         "operation": {"type": "string", "enum": ["set", "delete"]},
         "issued_at": {"type": "string", "format": "date-time"},
         "expires_at": {"type": ["string", "null"], "format": "date-time"},

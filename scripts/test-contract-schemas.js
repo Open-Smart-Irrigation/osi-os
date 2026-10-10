@@ -2515,6 +2515,22 @@ expectInvalid(
     cmdSchema
 );
 
+// #428: CANCEL_VALVE_ACTUATION names the actuation it cancels. The field is optional
+// (an older cloud sends none; the edge then cancels only a single active actuation).
+const namedCancel = {
+    command_id: UUID,
+    command_type: 'CANCEL_VALVE_ACTUATION',
+    device_eui: 'A840410000000001',
+    gateway_device_eui: '0016C001F1000001',
+    expectation_id: '4711',
+    reason: 'operator_cancel',
+    effect_key: 'irrigation:manual:A840410000000001:cloud:' + UUID,
+};
+expectValid('CANCEL_VALVE_ACTUATION naming its actuation', cmdSchema, namedCancel, cmdSchema);
+const { expectation_id: _unnamed, ...unnamedCancel } = namedCancel;
+expectValid('CANCEL_VALVE_ACTUATION from a cloud that names no actuation', cmdSchema, unnamedCancel, cmdSchema);
+expectInvalid('CANCEL_VALVE_ACTUATION with an empty expectation_id', cmdSchema, { ...namedCancel, expectation_id: '' }, /expectation_id/, cmdSchema);
+
 const effectKeyDoc = fs.readFileSync(path.join(SCHEMA_DIR, 'effect-keys.md'), 'utf8');
 for (const format of [
     'journal_entry:{entry_uuid}:{base_sync_version}',

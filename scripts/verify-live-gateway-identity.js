@@ -1621,9 +1621,24 @@ if (sizeAllowances) {
   // resolveRainTodayMm and flags the verdict rain_unknown; lsn50-zone-agg-fn writes flow only
   // for a flow-only uplink). origin/main 1657501 -> HEAD 1658111 = +610, so the baseline plus
   // the delta must cover 1658111 - 1616019 = 42092. The baseline doc is unchanged.
-  expectCondition(sizeAllowances.total_allowance?.delta === 42092,
-    'size total allowance: exact cumulative delta 42092',
-    'size total allowance: expected exact cumulative delta 42092');
+  // 45088: valve command safety (#427): refused commands answered, VALVE_COMMAND only a
+  // bounded timed open. origin/main 1652422 -> HEAD 1655418 = +2996 (reject-indefinite-open
+  // +1664, Route Command +1422, Build STREGA downlink -90), so 42092 + 2996 = 45088.
+  // 45321: valve command effect keys (#427 b): Route Command carries the action: key of the
+  // three STREGA physical actions (+192) and the STREGA builder ACK carries it (+41):
+  // 45088 + 233 = 45321.
+  // 46109: targeted valve cancel (#428): write-strega-expectation +47, Cancel STREGA
+  // Actuation +745, Valve Cloud Command Bridge -4: 45321 + 788 = 46109.
+  // 47696: timed action as a timed open (reject-indefinite-open +647, Route Command +903,
+  // STREGA builder +41, Build Status + ACK -4): 46109 + 1587 = 47696.
+  // 47644: cancel frame-counter guard (Cancel STREGA Actuation +99, Valve Cloud Command
+  // Bridge -151): 47696 - 52 = 47644.
+  // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
+  // 47589: partial-opening and flushing ports pinned (Route Command -54); re-measured on
+  // 7157ef0fa: origin/main 1658111 -> HEAD 1663608 = +5497, so 42092 + 5497 = 47589.
+  expectCondition(sizeAllowances.total_allowance?.delta === 47589,
+    'size total allowance: exact cumulative delta 47589',
+    'size total allowance: expected exact cumulative delta 47589');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

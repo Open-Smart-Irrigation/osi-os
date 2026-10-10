@@ -107,7 +107,30 @@ function assertIndefiniteOpenRejection() {
     if (node.func.indexOf("command_type === 'OPEN'") > node.func.indexOf('const entry = types')) {
         throw new Error('"Reject Indefinite Open" must reject OPEN before registry lookup so the explicit safety log is reachable');
     }
-    console.log('  ok Indefinite-open rejection node present');
+    // #427: a VALVE_COMMAND reaches the STREGA builder with its action verbatim, so the gate
+    // admits only the timed open, and every refusal is answered on a second output wired to
+    // the durable ACK queue instead of being dropped.
+    for (const required of ["cmd.command_type === 'VALVE_COMMAND'", "!== 'OPEN_FOR_DURATION'", "refuse('valve_action_not_allowed')", "result: 'REJECTED_PERMANENT'"]) {
+        if (!node.func.includes(required)) {
+            throw new Error(`"Reject Indefinite Open" must refuse VALVE_COMMAND actions other than OPEN_FOR_DURATION with a REJECTED_PERMANENT ACK (${required})`);
+        }
+    }
+    if (node.outputs !== 2 || !Array.isArray(node.wires) || !(node.wires[1] || []).includes('command-ack-queue-rest')) {
+        throw new Error('"Reject Indefinite Open" must answer refusals on a second output wired to command-ack-queue-rest');
+    }
+    // Fix round F1: a cloud SET_STREGA_TIMED_ACTION is sent as a timed open; its close is refused.
+    if (!node.func.includes("timedAction && String(cmd.action || cmd.valveAction || '').trim().toUpperCase() !== 'OPEN'")) {
+        throw new Error('"Reject Indefinite Open" must refuse a SET_STREGA_TIMED_ACTION that does not open');
+    }
+    console.log('  ok Indefinite-open rejection node present; VALVE_COMMAND admits only OPEN_FOR_DURATION; refusals are answered');
+}
+
+function assertStregaBuilderHasNoBareOpen() {
+    const node = assertFunctionNode('Build STREGA downlink + emit log ctx');
+    if (/case\s+'OPEN'\s*:/.test(node.func)) {
+        throw new Error('"Build STREGA downlink" must not encode a bare OPEN (0x31 on fPort 1): a STREGA valve opens only for a duration');
+    }
+    console.log('  ok STREGA downlink builder has no bare OPEN');
 }
 
 function assertValveRestRejectsIndefiniteOpen() {
@@ -133,6 +156,21 @@ function assertRouteHandlesSafeValveCommands() {
         if (!node.func.includes(required)) {
             throw new Error(`"Route Command" must preserve and route registry valve commands (${required})`);
         }
+    }
+    const valveBranch = node.func.slice(node.func.indexOf("if (commandType === 'VALVE_COMMAND')"), node.func.indexOf("if (commandType === 'SET_LSN50_MODE')"));
+    if (!valveBranch.includes("action: 'OPEN_FOR_DURATION'") || valveBranch.includes('action: cmd.action')) {
+        throw new Error('"Route Command" must send a VALVE_COMMAND only as OPEN_FOR_DURATION, never with the cloud action verbatim');
+    }
+    // A partial opening or flushing ([0x31, pct]) on fPort 2 would be an open: the ports are pinned.
+    for (const [type, next, port] of [['SET_STREGA_PARTIAL_OPENING', 'SET_STREGA_FLUSHING', 27], ['SET_STREGA_FLUSHING', 'SET_SDI12_IDENTIFY', 28]]) {
+        const branch = node.func.slice(node.func.indexOf(`if (commandType === '${type}')`), node.func.indexOf(`if (commandType === '${next}')`));
+        if (!branch.includes(`fPort: ${port},`) || branch.includes('cmd.fPort')) {
+            throw new Error(`"Route Command" must send ${type} on fPort ${port} whatever the command names`);
+        }
+    }
+    const timedBranch = node.func.slice(node.func.indexOf("if (commandType === 'SET_STREGA_TIMED_ACTION')"), node.func.indexOf("if (commandType === 'SET_STREGA_MAGNET_MODE')"));
+    if (!timedBranch.includes("action: 'OPEN_FOR_DURATION'") || timedBranch.includes("action: 'TIMED_ACTION'")) {
+        throw new Error('"Route Command" must send a cloud SET_STREGA_TIMED_ACTION as OPEN_FOR_DURATION');
     }
     console.log('  ok Route Command handles duration-bound valve registry commands');
 }
@@ -209,12 +247,35 @@ function assertCancelPath() {
     // node now delegates instead of inlining the SQL, so verify the delegation call here
     // and check the actual safety invariants (CANCELLED state, cancel_reason, no bare
     // CLOSE) against cancel.js directly rather than against this node's source text.
+    // #428: a cancel names its actuation and keeps every other queued downlink, so both
+    // entry points hand cancel.js the queue reader and writer next to the flush.
+    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'dropped_opens: result.droppedOpens']) {
+        if (!fn.func.includes(required)) {
+            throw new Error(`Cancel function must pass the named actuation and the queue reader/writer to cancel.js (${required})`);
+        }
+    }
+    const bridge = assertFunctionNode('Valve Cloud Command Bridge');
+    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'", 'out.detail']) {
+        if (!bridge.func.includes(required)) {
+            throw new Error(`Valve Cloud Command Bridge must pass the queue reader/writer and answer permanent refusals (${required})`);
+        }
+    }
     if (!fn.func.includes('VC.cancelActuation(')) {
         throw new Error('Cancel function must delegate to cancel.js cancelActuation() (shared with the CANCEL_VALVE_ACTUATION cloud command applier)');
     }
     const cancelJsSrc = fs.readFileSync(CANCEL_JS, 'utf8');
     if (!cancelJsSrc.includes("'CANCELLED'") && !cancelJsSrc.includes('"CANCELLED"')) {
         throw new Error('cancel.js must set reconciliation_state = CANCELLED');
+    }
+    // Fix rounds: another actuation's open is never queued again (it may already have been
+    // sent), and the cancel reports it.
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item) && !isUnboundedMoveItem(item)', 'droppedOpens: queue.dropped']) {
+        if (!cancelJsSrc.includes(required)) {
+            throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
+        }
+    }
+    if (/ORDER BY commanded_at DESC LIMIT 1/.test(cancelJsSrc)) {
+        throw new Error('cancel.js must not pick the newest active actuation');
     }
     if (!cancelJsSrc.includes('cancel_reason')) {
         throw new Error('cancel.js must record cancel_reason');
@@ -251,7 +312,12 @@ function assertQueueFlushUsesGrpc() {
             throw new Error(`ChirpStack helper must not use REST for queue flush (${forbidden})`);
         }
     }
-    console.log('  ok ChirpStack queue flush uses DeviceService.FlushQueue gRPC');
+    for (const required of ['new devicePb.GetDeviceQueueItemsRequest()', "grpcInvoke(this.deviceClient, 'getQueue'"]) {
+        if (!helper.includes(required)) {
+            throw new Error(`ChirpStack helper must read the queue through DeviceService.GetQueue (${required})`);
+        }
+    }
+    console.log('  ok ChirpStack queue flush uses DeviceService.FlushQueue gRPC; queue read uses GetQueue');
 }
 
 function assertFrontendValveControls() {
@@ -368,9 +434,9 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     'RESEND_VALVE_PLAN',
     'SET_VALVE_SCHEDULER_STATUS',
     // cloud full-parity Task 1.4: CANCEL_VALVE_ACTUATION matches on "VALVE"/"ACTUAT"
-    // but never itself opens or closes a valve - it flushes the ChirpStack downlink queue
-    // and marks the newest active valve_actuation_expectations row CANCELLED (cancel.js's
-    // cancelActuation, shared with the REST cancel route). Correctly actuator=false.
+    // but never itself opens or closes a valve - it takes the named actuation's open out of
+    // the ChirpStack downlink queue and marks that valve_actuation_expectations row CANCELLED
+    // (cancel.js's cancelActuation, shared with the REST cancel route). Correctly actuator=false.
     'CANCEL_VALVE_ACTUATION',
     // cloud full-parity Task P2-E1: UPSERT_VALVE_SETTINGS matches on "VALVE" but only
     // ever writes valve_settings columns (strega_generation, flow_rate_lpm/source,
@@ -482,6 +548,7 @@ function assertBareOpenNotInRegistry(registry) {
 function main() {
     checkSchema();
     assertIndefiniteOpenRejection();
+    assertStregaBuilderHasNoBareOpen();
     assertValveRestRejectsIndefiniteOpen();
     assertRouteHandlesSafeValveCommands();
     assertWriteExpectation();

@@ -18,7 +18,8 @@
 //
 // Nothing here sends a CLOSE. A STREGA is opened for a duration and closes itself
 // (feedback_strega_valve_operation), so an in-flight actuation is retired through
-// cancelActuation() -- the same ChirpStack queue flush + mark-CANCELLED path the operator
+// cancelActuation({ all: true }) -- every active actuation CANCELLED and the whole ChirpStack
+// queue flushed, through the same core the operator
 // cancel button uses. That path writes devices.target_state (the commanded intent) and
 // never current_state (what the valve last reported), so the commanded-vs-observed split
 // F19/F25 restored stays intact: an open the valve already received still reads as open
@@ -56,7 +57,7 @@ async function clearValveOnUnclaim(options) {
 
   let cancelled = null;
   try {
-    cancelled = await cancelActuation({ db, deviceEui: eui, reason: 'device_unclaimed', flushQueue: o.flushQueue, now, warn });
+    cancelled = await cancelActuation({ db, deviceEui: eui, all: true, reason: 'device_unclaimed', flushQueue: o.flushQueue, now, warn });
   } catch (error) {
     // cancelActuation fails closed on a flush failure: nothing is marked CANCELLED if the
     // queued downlink could not be withdrawn. Keep that honesty -- but do not let it stop
