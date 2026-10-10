@@ -8,8 +8,10 @@ const DAY_MILLISECONDS = DAY_SECONDS * 1000;
 const RAW_ROW_LIMIT = 4096;
 
 // v1 rain source policy: the selected subject wins, then a direct zone gauge,
-// then a shared weather_station_zones gauge. Native interval devices win within
-// a tier, followed by canonical DevEUI for a stable final tie-break.
+// then a shared weather_station_zones gauge. The zone's selected rain gauge
+// (zone_rain_source, the zone-day projection's choice) is a direct gauge and
+// comes first in that tier. Native interval devices win within a tier,
+// followed by canonical DevEUI for a stable final tie-break.
 const RAIN_SOURCE_TIER = Object.freeze({ subject: 0, direct: 1, shared: 2 });
 const RAIN_DEVICE_TYPE_PRIORITY = Object.freeze({
   AQUASCOPE_LORAIN: 0,
@@ -210,14 +212,16 @@ async function loadSourceDevices(db, zone) {
   const rows = await db.all(
     'SELECT DISTINCT d.deveui,d.type_id,d.irrigation_zone_id,d.rain_gauge_enabled,' +
       'CASE WHEN d.irrigation_zone_id=? THEN 1 ELSE 0 END AS direct_assignment,' +
-      'CASE WHEN wsz.deveui IS NULL THEN 0 ELSE 1 END AS shared_assignment ' +
+      'CASE WHEN wsz.deveui IS NULL THEN 0 ELSE 1 END AS shared_assignment,' +
+      'CASE WHEN UPPER(zrs.selected_deveui)=UPPER(d.deveui) THEN 1 ELSE 0 END AS rain_selected ' +
     'FROM devices AS d ' +
     'LEFT JOIN weather_station_zones AS wsz ' +
       'ON wsz.deveui=d.deveui AND wsz.zone_id=? ' +
+    'LEFT JOIN zone_rain_source AS zrs ON zrs.zone_id=? ' +
     'WHERE d.deleted_at IS NULL AND d.user_id=? AND d.gateway_device_eui=? ' +
       'AND (d.irrigation_zone_id=? OR wsz.deveui IS NOT NULL) ' +
     'ORDER BY UPPER(d.deveui)',
-    [zone.zone_id, zone.zone_id, zone.user_id, zone.gateway_device_eui, zone.zone_id]
+    [zone.zone_id, zone.zone_id, zone.zone_id, zone.user_id, zone.gateway_device_eui, zone.zone_id]
   );
   return rows.map(function(row) {
     return {
@@ -226,6 +230,7 @@ async function loadSourceDevices(db, zone) {
       type_id: String(row.type_id || '').toUpperCase(),
       direct: Number(row.direct_assignment) === 1,
       shared: Number(row.shared_assignment) === 1,
+      rainSelected: Number(row.rain_selected) === 1,
       rainCapable: Number(row.rain_gauge_enabled) === 1 ||
         ['AQUASCOPE_LORAIN', 'SENSECAP_S2120'].includes(String(row.type_id || '').toUpperCase()),
     };
@@ -294,7 +299,7 @@ function rainTypePriority(device) {
 
 function rainTier(device, subjectDevice) {
   if (subjectDevice && device.deveui === subjectDevice) return RAIN_SOURCE_TIER.subject;
-  if (device.direct) return RAIN_SOURCE_TIER.direct;
+  if (device.direct || device.rainSelected) return RAIN_SOURCE_TIER.direct;
   return RAIN_SOURCE_TIER.shared;
 }
 
@@ -349,6 +354,7 @@ async function rainRecord(db, devices, subjectDevice, windowStart, windowEnd) {
     return sourcesWithData.has(device.deveui);
   }).sort(function(left, right) {
     return rainTier(left, subject) - rainTier(right, subject) ||
+      Number(!!right.rainSelected) - Number(!!left.rainSelected) ||
       rainTypePriority(left) - rainTypePriority(right) ||
       left.deveui.localeCompare(right.deveui);
   })[0];
