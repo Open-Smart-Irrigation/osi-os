@@ -3627,8 +3627,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.8.0 ---
-const EXPECTED_VERSION = '0.8.0';
+// --- firmware version 0.8.1 ---
+const EXPECTED_VERSION = '0.8.1';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);

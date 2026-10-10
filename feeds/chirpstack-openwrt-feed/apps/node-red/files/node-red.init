@@ -383,7 +383,7 @@ start_service() {
         journal_media_root=""
     fi
     local scoped_access_enabled=$(uci -q get osi-server.cloud.scoped_access_enabled 2>/dev/null || echo "0")
-    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.8.0")
+    local fw_version=$(uci -q get osi-server.cloud.firmware_version 2>/dev/null || echo "0.8.1")
     local openagri_weather_url=$(uci -q get osi-server.cloud.openagri_weather_url 2>/dev/null || echo "")
     local openagri_weather_username=$(uci -q get osi-server.cloud.openagri_weather_username 2>/dev/null || echo "")
     local openagri_weather_password=$(uci -q get osi-server.cloud.openagri_weather_password 2>/dev/null || echo "")

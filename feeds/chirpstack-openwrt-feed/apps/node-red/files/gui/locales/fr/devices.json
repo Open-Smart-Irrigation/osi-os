@@ -513,6 +513,7 @@
       "etaTomorrow": "{{time}} demain",
       "next24h": "Proch. 24 h",
       "next72h": "Proch. 72 h",
+      "coverage": "{{covered}} sur {{expected}} h",
       "nextRain": "Prochaine pluie",
       "rainHours": "Heures de pluie",
       "maxHourly": "Max. horaire",
@@ -921,5 +922,22 @@
       "invalidField": "Vérifiez {{field}} : hors plage.",
       "loadFailed": "Impossible de charger l'étalonnage."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} jours · totaux journaliers ({{timezone}})",
+    "soFar": "jusqu'ici",
+    "timezoneCheck": "Vérifiez le fuseau horaire de la zone dans ses paramètres."
+  },
+  "rain": {
+    "recordedToday": "Pluie mesurée aujourd'hui",
+    "soFar": "jusqu'ici",
+    "lastReportOn": "Dernier relevé {{date}} : {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Pluie de l’intervalle",
+    "lastReport": "Dernier relevé",
+    "tips_one": "{{count}} basculement",
+    "tips_other": "{{count}} basculements",
+    "tipsUnavailable": "Nombre de basculements indisponible"
   }
 }

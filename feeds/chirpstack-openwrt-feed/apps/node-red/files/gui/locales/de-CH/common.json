@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Nicht unterstützt",
         "available_no_recent_data": "Keine aktuellen Daten verfügbar"
-      }
+      },
+      "showLegacy": "Schätzungen nach alter Methode anzeigen"
     },
     "range": {
       "label": "Analysezeitraum",
@@ -92,6 +93,7 @@
       "png": "PNG exportieren",
       "allZonesCsv": "CSV für alle Zonen exportieren",
       "allZonesCsvBusy": "Wird exportiert…",
+      "qualityColumns": "Qualitätsspalten einschliessen",
       "errors": {
         "tooLarge": "Dieser Export ist zu gross. Wählen Sie einen kürzeren Zeitraum oder eine gröbere Aggregation.",
         "busy": "Ein anderer Export läuft. Versuchen Sie es gleich noch einmal.",
@@ -127,8 +129,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} von {{expected}} h)",
-      "partialDays": " ({{count}} von {{expected}} Tagen)"
-    }
+      "partialDays": " ({{count}} von {{expected}} Tagen)",
+      "reportsReceived_one": " · {{count}} Meldung empfangen",
+      "reportsReceived_other": " · {{count}} Meldungen empfangen"
+    },
+    "legacyEstimate": "Schätzung, alte Methode"
   },
   "restart": {
     "gateway_identity_change": "Gateway-Identität aktualisiert. Die Dienste starten in {{count}} s neu.",
