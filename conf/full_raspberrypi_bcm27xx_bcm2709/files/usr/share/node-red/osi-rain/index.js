@@ -1725,6 +1725,34 @@ async function recomputeZoneDay(t, zoneId, dayIso, opts = {}) {
   return { zoneId: p.zoneId, date: dayIso, written: 'updated', changed, projection: p };
 }
 
+// The LSN50 zone writer also closes its previous farm day on the next frame.
+// The caller supplies the zone's rain-gauge flag from the same transaction.
+async function recomputeLsn50ZoneDay(t, options = {}) {
+  const { deveui, zoneId, timezone, timestamp } = options;
+  const rainGaugeEnabled = options.rainGaugeEnabled === true;
+  const acceptedRain = rainGaugeEnabled && options.rainAccepted === true;
+  const date = zoneDayWindow(timestamp, timezone).date;
+  if (rainGaugeEnabled) {
+    const previous = await t.get(
+      'SELECT recorded_at FROM device_data WHERE deveui = ? AND rain_count_cumulative IS NOT NULL AND recorded_at < ? ORDER BY recorded_at DESC LIMIT 1',
+      [deveui, timestamp]);
+    if (previous) {
+      const previousDate = zoneDayWindow(previous.recorded_at, timezone).date;
+      if (previousDate !== date) {
+        await recomputeInstrumentDay(t, deveui, previousDate, timezone);
+        await recomputeZoneDay(t, zoneId, previousDate, { trigger: 'reassessed' });
+      }
+    }
+  }
+  if (!acceptedRain && options.flowAvailable !== true) return null;
+  if (acceptedRain) await recomputeInstrumentDay(t, deveui, date, timezone);
+  return recomputeZoneDay(t, zoneId, date, {
+    trigger: acceptedRain ? 'accepted' : 'flow',
+    amountMm: acceptedRain ? Number(options.amountMm) : null,
+    flowLitersDelta: options.flowLitersDelta,
+  });
+}
+
 function sameValue(a, b) {
   const na = a === undefined ? null : a;
   const nb = b === undefined ? null : b;
@@ -1809,6 +1837,7 @@ module.exports = {
   zoneDateWindow,
   ingestLoRainUplink,
   recomputeInstrumentDay,
+  recomputeLsn50ZoneDay,
   loRainConfigQueryBytes,
   buildLoRainConfigQueryDownlink,
   S2120_RAIN_SOURCE,

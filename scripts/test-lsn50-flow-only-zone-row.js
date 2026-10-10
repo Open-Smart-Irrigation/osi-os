@@ -20,10 +20,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadNode, executeFunction, seedTestDb } = require('./lib/flow-node-harness');
 
-function msgFor(rainStatus, rain, flowStatus, flow) {
+function msgFor(rainStatus, rain, flowStatus, flow, timestamp = '2026-10-08T10:00:00.000Z') {
   return {
     formattedData: {
-      detectedMode: 9, devEui: 'DENDRO1', timestamp: '2026-10-08T10:00:00.000Z',
+      detectedMode: 9, devEui: 'DENDRO1', timestamp,
       rainDeltaStatus: rainStatus, rainMmDelta: rain, flowDeltaStatus: flowStatus, flowLitersDelta: flow,
     },
   };
@@ -36,6 +36,10 @@ function asyncNode(id) {
 const run = (db, m) => executeFunction(asyncNode('lsn50-zone-agg-fn'), { msg: m, db });
 const row = (db) => {
   const r = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, flow_liters, rain_source FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  return r ? { ...r } : r;
+};
+const rowForDate = (db, date) => {
+  const r = db.prepare('SELECT * FROM zone_daily_environment WHERE zone_id=1 AND date=?').get(date);
   return r ? { ...r } : r;
 };
 // DENDRO1 (zone 1) as the zone's rain gauge, with the counter rows the
@@ -111,6 +115,20 @@ test('a flow-only uplink on a legacy LoRain day labels it with the zone projecti
   db.close();
 });
 
+test('positive rain from a non-gauge LSN50 preserves another legacy source', async () => {
+  const db = seedTestDb();
+  db.prepare("INSERT INTO zone_daily_environment(zone_id,date,rainfall_mm,flow_liters,rain_source,computed_at,sync_version) VALUES(1,'2026-10-08',3,2,'sensecap_s2120','2026-10-08T09:00:00.000Z',7)").run();
+  counterRow(db, '2026-10-08T09:50:00.000Z', 10, 'first_sample', null, null);
+  const before = { ...db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_source, rain_policy_version, rain_quality_reasons, rain_selected_deveui, flow_liters, sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get() };
+  await run(db, msgFor('ok', 0.5, 'ok', 4));
+  const after = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_source, rain_policy_version, rain_quality_reasons, rain_selected_deveui, flow_liters, sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  assert.deepEqual({ ...after, flow_liters: before.flow_liters, sync_version: before.sync_version }, before,
+    'a non-gauge rain report must take the flow-only path and keep every legacy rain field');
+  assert.equal(after.flow_liters, 6);
+  assert.equal(after.sync_version, 8);
+  db.close();
+});
+
 test('each write that changes the row bumps sync_version once', async () => {
   const db = seedTestDb();
   await run(db, msgFor('first_sample', null, 'ok', 1));
@@ -120,4 +138,82 @@ test('each write that changes the row bumps sync_version once', async () => {
   assert.equal(db.prepare("SELECT sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().sync_version, 1,
     'a write that changes nothing projected bumps nothing');
   db.close();
+});
+
+test('next-day uplink closes the prior local-gauge day once without applying rain twice', async () => {
+  const db = gauge(seedTestDb());
+  const realNow = Date.now;
+  let now = Date.parse('2026-10-08T10:00:00.000Z');
+  Date.now = () => now;
+  try {
+    counterRow(db, '2026-10-07T23:50:00.000Z', 10, 'ok', 0, 600);
+    counterRow(db, '2026-10-08T10:00:00.000Z', 11, 'ok', 0.4, 600);
+    await run(db, msgFor('ok', 0.4, 'first_sample', null, '2026-10-08T10:00:00.000Z'));
+    const open = rowForDate(db, '2026-10-08');
+    assert.equal(open.rain_coverage, 'complete_so_far');
+
+    counterRow(db, '2026-10-09T00:10:00.000Z', 11, 'ok', 0, 600);
+    now = Date.parse('2026-10-09T00:10:00.000Z');
+    const successor = msgFor('ok', 0, 'first_sample', null, '2026-10-09T00:10:00.000Z');
+    await run(db, successor);
+    const closed = rowForDate(db, '2026-10-08');
+    assert.ok(['complete', 'partial'].includes(closed.rain_coverage), 'the day is assessed from its actual counter bounds');
+    assert.equal(closed.rain_received_mm, 0.4);
+    assert.equal(closed.rainfall_mm, closed.rain_coverage === 'complete' ? 0.4 : null);
+    assert.equal(closed.sync_version, open.sync_version + 1, 'closing the day changes its projection once');
+    assert.ok(!JSON.parse(closed.rain_quality_reasons).includes('ongoing'));
+    const afterFirstClose = { ...closed };
+    await run(db, successor);
+    assert.deepEqual(rowForDate(db, '2026-10-08'), afterFirstClose, 'reassessment replay is a no-op');
+    assert.equal(closed.flow_liters, 0, 'a rain-only successor does not add flow to the prior date');
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+});
+
+test('a reset-only successor closes the previous day without creating a current-day row', async () => {
+  const db = gauge(seedTestDb());
+  const realNow = Date.now;
+  let now = Date.parse('2026-10-08T10:00:00.000Z');
+  Date.now = () => now;
+  try {
+    counterRow(db, '2026-10-07T23:50:00.000Z', 10, 'ok', 0, 600);
+    counterRow(db, '2026-10-08T10:00:00.000Z', 11, 'ok', 0.4, 600);
+    await run(db, msgFor('ok', 0.4, 'first_sample', null, '2026-10-08T10:00:00.000Z'));
+    counterRow(db, '2026-10-09T00:10:00.000Z', 0, 'counter_reset', null, null);
+    now = Date.parse('2026-10-09T00:10:00.000Z');
+    await run(db, msgFor('counter_reset', null, 'counter_reset', null, '2026-10-09T00:10:00.000Z'));
+    const closed = rowForDate(db, '2026-10-08');
+    assert.ok(['complete', 'partial'].includes(closed.rain_coverage));
+    assert.ok(!JSON.parse(closed.rain_quality_reasons).includes('ongoing'));
+    assert.equal(rowForDate(db, '2026-10-09'), undefined, 'a non-accepted frame does not invent a current-day row');
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
+});
+
+test('Zurich midnight closes the prior farm date even while the UTC date is unchanged', async () => {
+  const db = gauge(seedTestDb());
+  db.exec("UPDATE irrigation_zones SET timezone = 'Europe/Zurich' WHERE id = 1");
+  const realNow = Date.now;
+  let now = Date.parse('2026-10-08T10:00:00.000Z');
+  Date.now = () => now;
+  try {
+    counterRow(db, '2026-10-07T21:50:00.000Z', 10, 'ok', 0, 600);
+    counterRow(db, '2026-10-08T10:00:00.000Z', 11, 'ok', 0.4, 600);
+    await run(db, msgFor('ok', 0.4, 'first_sample', null, '2026-10-08T10:00:00.000Z'));
+    assert.equal(rowForDate(db, '2026-10-08').rain_coverage, 'complete_so_far');
+    counterRow(db, '2026-10-08T22:10:00.000Z', 11, 'ok', 0, 600);
+    now = Date.parse('2026-10-08T22:10:00.000Z');
+    await run(db, msgFor('ok', 0, 'first_sample', null, '2026-10-08T22:10:00.000Z'));
+    const closed = rowForDate(db, '2026-10-08');
+    assert.ok(['complete', 'partial'].includes(closed.rain_coverage));
+    assert.ok(!JSON.parse(closed.rain_quality_reasons).includes('ongoing'));
+    assert.equal(rowForDate(db, '2026-10-09').rain_source, 'local_gauge');
+  } finally {
+    Date.now = realNow;
+    db.close();
+  }
 });
