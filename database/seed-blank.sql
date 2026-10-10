@@ -3370,7 +3370,7 @@ BEGIN
   );
 END;
 
--- zone_daily_environment → sync_outbox (insert)
+-- zone_daily_environment → sync_outbox (insert; rain quality keys since migration 0073)
 CREATE TRIGGER trg_dp_zone_env_outbox_ai
 AFTER INSERT ON zone_daily_environment
 FOR EACH ROW
@@ -3397,6 +3397,11 @@ BEGIN
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
       'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'rain_coverage',        CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_coverage END,
+      'rain_selected_deveui', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_selected_deveui END,
+      'rain_policy_version',  NEW.rain_policy_version,
+      'rain_quality_reasons', json(CASE WHEN NEW.rain_policy_version IS NOT NULL AND json_valid(NEW.rain_quality_reasons) AND json_type(NEW.rain_quality_reasons) = 'array' THEN NEW.rain_quality_reasons END),
+      'rain_received_mm',     CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_received_mm END,
       'sync_version',       NEW.sync_version
     ),
     NEW.sync_version,
@@ -3405,7 +3410,7 @@ BEGIN
   );
 END;
 
--- zone_daily_environment → sync_outbox (update)
+-- zone_daily_environment → sync_outbox (update; rain quality keys since migration 0073)
 CREATE TRIGGER trg_dp_zone_env_outbox_au
 AFTER UPDATE ON zone_daily_environment
 FOR EACH ROW
@@ -3433,6 +3438,11 @@ BEGIN
       'rain_source',        NEW.rain_source,
       'computed_at',        NEW.computed_at,
       'gateway_device_eui', COALESCE((SELECT gateway_device_eui FROM irrigation_zones WHERE id=NEW.zone_id AND deleted_at IS NULL),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),'')),
+      'rain_coverage',        CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_coverage END,
+      'rain_selected_deveui', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_selected_deveui END,
+      'rain_policy_version',  NEW.rain_policy_version,
+      'rain_quality_reasons', json(CASE WHEN NEW.rain_policy_version IS NOT NULL AND json_valid(NEW.rain_quality_reasons) AND json_type(NEW.rain_quality_reasons) = 'array' THEN NEW.rain_quality_reasons END),
+      'rain_received_mm',     CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_received_mm END,
       'sync_version',       NEW.sync_version
     ),
     NEW.sync_version,

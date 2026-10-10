@@ -1604,13 +1604,31 @@ const requiredTriggerSqlFragments = {
     "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_dp_zone_env_outbox_ai: [
-    "'sync_version', new.sync_version ), new.sync_version,",
+    // 0073 writes the canonical one-line body of scripts/sync-trigger-source.json
+    // (the body sync-init-fn recreates at boot): sync_version stays the last payload
+    // key and the outbox row's version.
+    "'sync_version', new.sync_version), new.sync_version,",
     "'zone-id:' || new.zone_id) || '|' ||",
+    // 0073: the five zone-day rain quality keys, null on a row without a policy version.
+    "'rain_coverage', case when new.rain_policy_version is not null then new.rain_coverage end",
+    "'rain_selected_deveui', case when new.rain_policy_version is not null then new.rain_selected_deveui end",
+    "'rain_policy_version', new.rain_policy_version",
+    "'rain_quality_reasons', json(case when new.rain_policy_version is not null and json_valid(new.rain_quality_reasons) and json_type(new.rain_quality_reasons) = 'array' then new.rain_quality_reasons end)",
+    "'rain_received_mm', case when new.rain_policy_version is not null then new.rain_received_mm end",
   ],
   trg_dp_zone_env_outbox_au: [
     'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
-    "'sync_version', new.sync_version ), new.sync_version,",
+    // 0073 writes the canonical one-line body of scripts/sync-trigger-source.json
+    // (the body sync-init-fn recreates at boot): sync_version stays the last payload
+    // key and the outbox row's version.
+    "'sync_version', new.sync_version), new.sync_version,",
     "'zone-id:' || new.zone_id) || '|' ||",
+    // 0073: the five zone-day rain quality keys, null on a row without a policy version.
+    "'rain_coverage', case when new.rain_policy_version is not null then new.rain_coverage end",
+    "'rain_selected_deveui', case when new.rain_policy_version is not null then new.rain_selected_deveui end",
+    "'rain_policy_version', new.rain_policy_version",
+    "'rain_quality_reasons', json(case when new.rain_policy_version is not null and json_valid(new.rain_quality_reasons) and json_type(new.rain_quality_reasons) = 'array' then new.rain_quality_reasons end)",
+    "'rain_received_mm', case when new.rain_policy_version is not null then new.rain_received_mm end",
   ],
   trg_sync_device_data_dirty_au: [
     "select gateway_device_eui from devices where deveui = new.deveui",
