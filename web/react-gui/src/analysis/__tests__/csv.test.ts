@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { CSV_V2_EXTRA_COLUMNS, toTidyCsv } from '../csv';
 import { catalogById as fixtureCatalog, rain as fixtureRain, seriesList as fixtureSeries } from './fixtures/csvSeries';
 import type { AnalysisSeries, AnalysisCatalogEntry } from '../types';
-import { A12_DST_DAYS, A12_DST_EXPORT, A19_EXPORT, A19_HISTORY, RAIN_ACCEPTANCE_CATALOG } from './fixtures/rainAcceptance';
+import { A12_DST_DAYS, A12_DST_EXPORT, A19_EXPORT, RAIN_ACCEPTANCE_CATALOG } from './fixtures/rainAcceptance';
 
 const series: AnalysisSeries = {
   seriesId: 'abc',
@@ -152,21 +152,22 @@ describe('toTidyCsv versions', () => {
     }
   });
 
-  it('A19 v2 exports the same four day keys, Zurich bounds and quality states as the API fixture', () => {
+  it('A19 Data view CSV keeps sparse rain sums received-only with Zurich bounds and null versus zero', () => {
     const rows = toTidyCsv([A19_EXPORT], RAIN_ACCEPTANCE_CATALOG, { version: 2, aggregation: 'daily' }).split('\n').slice(2);
     const actual = rows.map((line) => {
       const fields = line.split(',');
-      return { day: fields[0], timezone: fields[12], period_start: fields[13], period_end: fields[14], quality: fields[15], value: fields[10] };
+      return {
+        day: fields[0], timezone: fields[12], period_start: fields[13], period_end: fields[14],
+        quality: fields[15], value: fields[10], samples: fields[17],
+      };
     });
 
-    expect(actual).toEqual(A19_EXPORT.points.map((point, index) => ({
-      day: A19_HISTORY.days[index].day,
-      timezone: 'Europe/Zurich',
-      period_start: point.t,
-      period_end: A19_HISTORY.days[index].period_end,
-      quality: A19_HISTORY.days[index].quality,
-      value: point.value === null ? '' : String(point.value),
-    })));
+    expect(actual).toEqual([
+      { day: '2026-10-22', timezone: 'Europe/Zurich', period_start: '2026-10-21T22:00:00.000Z', period_end: '2026-10-22T22:00:00.000Z', quality: 'received_only', value: '', samples: '0' },
+      { day: '2026-10-23', timezone: 'Europe/Zurich', period_start: '2026-10-22T22:00:00.000Z', period_end: '2026-10-23T22:00:00.000Z', quality: 'received_only', value: '0.5', samples: '1' },
+      { day: '2026-10-24', timezone: 'Europe/Zurich', period_start: '2026-10-23T22:00:00.000Z', period_end: '2026-10-24T22:00:00.000Z', quality: 'received_only', value: '1', samples: '2' },
+      { day: '2026-10-25', timezone: 'Europe/Zurich', period_start: '2026-10-24T22:00:00.000Z', period_end: '2026-10-25T23:00:00.000Z', quality: 'received_only', value: '0', samples: '3' },
+    ]);
   });
 
   it('v2 states the coverage of a partial weather sum as a fraction, never for rain reports', () => {

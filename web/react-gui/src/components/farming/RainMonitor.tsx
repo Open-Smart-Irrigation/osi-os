@@ -10,6 +10,8 @@ import {
   YAxis,
 } from 'recharts';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
+import { downloadBlob } from '../../analysis/download';
+import { toRainHistoryCsv } from '../../utils/rainCsv';
 import {
   hasRainData,
   summarizeRainDays,
@@ -165,6 +167,19 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
     selectedWindow.mode === 'interval'
       ? intervalData.some((point) => point.value != null)
       : historyDays.some(hasRainData);
+  const canExportDailyHistory = Boolean(
+    dailyHistory?.timezone
+      && dailyHistory.timezoneBasis
+      && dailyHistory.periodStart
+      && dailyHistory.periodEnd
+      && dailyHistory.days.every((day) => day.period_start && day.period_end),
+  );
+
+  const exportDailyHistory = () => {
+    if (dailyHistory && canExportDailyHistory) {
+      downloadBlob(`rain-history-${deveui}.csv`, toRainHistoryCsv(dailyHistory), 'text/csv;charset=utf-8');
+    }
+  };
 
   return (
     <div
@@ -197,6 +212,19 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
               {option.label}
             </button>
           ))}
+          {!loading && !error && selectedWindow.mode === 'daily' && dailyHistory && (
+            <button
+              type="button"
+              onClick={exportDailyHistory}
+              disabled={!canExportDailyHistory}
+              title={!canExportDailyHistory
+                ? t('rainMonitor.exportUnavailable', { defaultValue: 'Daily rain CSV unavailable for this gateway history' })
+                : undefined}
+              className="rounded-lg px-4 py-1.5 text-sm font-semibold transition-colors bg-[var(--card)] text-[var(--text)] hover:bg-[var(--border)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {t('rainMonitor.exportDailyCsv', { defaultValue: 'Export daily rain CSV' })}
+            </button>
+          )}
         </div>
 
         {!loading && !error && hasData && (

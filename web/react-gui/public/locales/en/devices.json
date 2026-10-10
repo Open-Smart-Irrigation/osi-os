@@ -930,7 +930,9 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} days · daily totals ({{timezone}})",
     "soFar": "so far",
-    "timezoneCheck": "Check the zone time zone in its settings."
+    "timezoneCheck": "Check the zone time zone in its settings.",
+    "exportDailyCsv": "Export daily rain CSV",
+    "exportUnavailable": "Daily rain CSV unavailable for this gateway history"
   },
   "rain": {
     "recordedToday": "Rain recorded today",

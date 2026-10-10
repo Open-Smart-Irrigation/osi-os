@@ -933,7 +933,9 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
     "soFar": "bisher",
-    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
+    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen.",
+    "exportDailyCsv": "Tägliche Niederschlagsdaten als CSV exportieren",
+    "exportUnavailable": "CSV-Export für diesen Gateway-Verlauf nicht verfügbar"
   },
   "rain": {
     "recordedToday": "Heute gemessener Regen",

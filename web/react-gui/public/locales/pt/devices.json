@@ -933,7 +933,9 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} dias · totais diários ({{timezone}})",
     "soFar": "até agora",
-    "timezoneCheck": "Verifique o fuso horário da zona nas suas definições."
+    "timezoneCheck": "Verifique o fuso horário da zona nas suas definições.",
+    "exportDailyCsv": "Exportar o histórico diário de chuva em CSV",
+    "exportUnavailable": "A exportação CSV não está disponível para este histórico do gateway"
   },
   "rain": {
     "recordedToday": "Chuva registada hoje",

@@ -1,12 +1,15 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { sensorAPI, type SensorHistoryPoint } from '../../../services/api';
 import type { RainHistory, RainHistoryDay } from '../../../utils/rain';
+import { toRainHistoryCsv } from '../../../utils/rainCsv';
 import { RainMonitor } from '../RainMonitor';
 import { A12_DST_DAYS, A19_HISTORY, a12History } from '../../../analysis/__tests__/fixtures/rainAcceptance';
+
+const { downloadBlob } = vi.hoisted(() => ({ downloadBlob: vi.fn() }));
 
 // The viewer sits far from the farm: day labels and the window must still be
 // the farm's own days from the gateway, never the browser's.
@@ -24,6 +27,10 @@ vi.mock('../../../services/api', () => ({
     getHistory: vi.fn(),
     getDailyRainHistory: vi.fn(),
   },
+}));
+
+vi.mock('../../../analysis/download', () => ({
+  downloadBlob: (...args: unknown[]) => downloadBlob(...args),
 }));
 
 // The chart stub renders what the real chart is given: the rows (bar values),
@@ -99,8 +106,8 @@ function history(overrides: Partial<Record<string, [number | null, number]>> = {
   };
 }
 
-function chartRows(): Array<{ day: string; total_mm: number | null; [key: string]: unknown }> {
-  return JSON.parse(screen.getByTestId('rain-bar-chart').getAttribute('data-rows') || '[]');
+function chartRows(): RainHistoryDay[] {
+  return JSON.parse(screen.getByTestId('rain-bar-chart').getAttribute('data-rows') || '[]') as RainHistoryDay[];
 }
 
 async function openWeek() {
@@ -116,6 +123,7 @@ describe('RainMonitor', () => {
     vi.setSystemTime(new Date('2026-07-02T05:00:00.000Z'));
     vi.mocked(sensorAPI.getHistory).mockReset();
     vi.mocked(sensorAPI.getDailyRainHistory).mockReset();
+    downloadBlob.mockReset();
     vi.mocked(sensorAPI.getHistory).mockResolvedValue(INTERVAL_ROWS);
     vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(history());
   });
@@ -131,6 +139,7 @@ describe('RainMonitor', () => {
     expect(screen.getByText('1.5 mm')).toBeInTheDocument(); // peak interval
     expect(screen.getByText('WET INTERVALS')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export daily rain CSV' })).not.toBeInTheDocument();
     expect(sensorAPI.getHistory).toHaveBeenCalledWith('A840410000000001', 'rain_mm_delta', 24);
     expect(sensorAPI.getDailyRainHistory).not.toHaveBeenCalled();
   });
@@ -168,6 +177,13 @@ describe('RainMonitor', () => {
     const tick = Array.from(screen.getByTestId('rain-x-ticks').querySelectorAll('li')).map((li) => li.textContent);
     const expectedTick = day.day === '2026-03-29' ? 'Mar 29' : 'Oct 25';
     expect(tick).toContain(expectedTick);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export daily rain CSV' }));
+    expect(downloadBlob).toHaveBeenCalledWith(
+      'rain-history-A840410000000001.csv',
+      toRainHistoryCsv(a12History(day)),
+      'text/csv;charset=utf-8',
+    );
   });
 
   it('preserves the four API day states and the 25-hour farm period in the chart rows', async () => {
@@ -175,14 +191,76 @@ describe('RainMonitor', () => {
     await openWeek();
 
     expect(screen.getByText('4 days · daily totals (Europe/Zurich)')).toBeInTheDocument();
-    expect(chartRows()).toEqual(A19_HISTORY.days.map(({ day, period_start, period_end, total_mm, samples, quality }) => ({
-      day, period_start, period_end, total_mm, samples, quality,
+    expect(chartRows()).toEqual(A19_HISTORY.days.map(({ day, period_start, period_end, total_mm, samples, quality, reasons }) => ({
+      day, period_start, period_end, total_mm, samples, quality, reasons,
       so_far: false,
     })));
     expect(chartRows()[0].total_mm).toBeNull();
     expect(chartRows()[3].total_mm).toBe(0);
     expect(chartRows()[3].period_end).toBe('2026-10-25T23:00:00.000Z');
     expect(screen.getByTestId('rain-last-tooltip')).toHaveTextContent('0.0 mm');
+  });
+
+  it('downloads the same qualified four-day response displayed in the chart', async () => {
+    vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(A19_HISTORY);
+    await openWeek();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export daily rain CSV' }));
+
+    expect(sensorAPI.getDailyRainHistory).toHaveBeenCalledTimes(1);
+    const chartHistory: RainHistory = { ...A19_HISTORY, days: chartRows() };
+    expect(downloadBlob).toHaveBeenCalledWith(
+      'rain-history-A840410000000001.csv',
+      toRainHistoryCsv(chartHistory),
+      'text/csv;charset=utf-8',
+    );
+    expect(chartHistory.days.map((row) => row.day)).toEqual(A19_HISTORY.days.map((row) => row.day));
+  });
+
+  it('allows a qualified export when every daily amount is empty', async () => {
+    const emptyHistory: RainHistory = {
+      ...A19_HISTORY,
+      days: A19_HISTORY.days.map((day) => ({ ...day, total_mm: null, samples: 0, quality: 'unknown' })),
+    };
+    vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(emptyHistory);
+    render(<RainMonitor deveui="A840410000000001" deviceName="Orchard gauge" onClose={vi.fn()} />);
+    await screen.findByText('2.0 mm');
+    fireEvent.click(screen.getByRole('button', { name: '7 d' }));
+    await screen.findByText('No rainfall recorded in this window.');
+
+    const exportButton = screen.getByRole('button', { name: 'Export daily rain CSV' });
+    expect(exportButton).toBeEnabled();
+    fireEvent.click(exportButton);
+    expect(downloadBlob).toHaveBeenCalledWith('rain-history-A840410000000001.csv', toRainHistoryCsv(emptyHistory), 'text/csv;charset=utf-8');
+  });
+
+  it('disables qualified export for an older gateway payload without timezone or bounds', async () => {
+    vi.mocked(sensorAPI.getDailyRainHistory).mockResolvedValue(history({}, {
+      timezone: null,
+      timezoneBasis: null,
+      periodStart: null,
+      periodEnd: null,
+    }));
+    await openWeek();
+
+    const exportButton = screen.getByRole('button', { name: 'Export daily rain CSV' });
+    expect(exportButton).toBeDisabled();
+    expect(exportButton).toHaveAttribute('title', 'Daily rain CSV unavailable for this gateway history');
+    fireEvent.click(exportButton);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it('keeps qualified export absent while daily history loads and after a daily fetch error', async () => {
+    let rejectDaily: ((reason: Error) => void) | undefined;
+    vi.mocked(sensorAPI.getDailyRainHistory).mockReturnValue(new Promise((_resolve, reject) => { rejectDaily = reject; }));
+    render(<RainMonitor deveui="A840410000000001" deviceName="Orchard gauge" onClose={vi.fn()} />);
+    await screen.findByText('2.0 mm');
+    fireEvent.click(screen.getByRole('button', { name: '7 d' }));
+    expect(screen.queryByRole('button', { name: 'Export daily rain CSV' })).not.toBeInTheDocument();
+
+    await act(async () => { rejectDaily?.(new Error('daily history unavailable')); });
+    expect(await screen.findByText('daily history unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export daily rain CSV' })).not.toBeInTheDocument();
   });
 
   it('draws no bar for a no-data day and keeps a measured dry day at zero', async () => {
