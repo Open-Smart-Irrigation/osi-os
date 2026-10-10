@@ -1434,13 +1434,17 @@ function counterRowFrame(row) {
   const verified = ok && Number.isFinite(seconds) && seconds > 0 && Number.isFinite(endMs);
   const reasons = ok ? [] : [status || 'unknown_status'];
   if (status === 'out_of_order' || status === 'duplicate_timestamp') reasons.unshift('late_counter_frame');
+  const config = parseJson(row.rain_config_json);
+  const zones = config.rain_gauge_enabled === true && Array.isArray(config.zones)
+    ? config.zones.map(Number).filter(Number.isInteger) : null;
   return {
     receivedAt: row.recorded_at, tips: null, amountMm: ok ? Number(row.rain_mm_delta) : null, deltaMm: ok ? Number(row.rain_mm_delta) : null,
     cumulativeMm: null, status: ok ? 'accepted' : 'not_additive', frameKind: 'counter',
     intervalBasis: verified ? 'protocol_verified' : 'unknown',
     measuredStart: verified ? new Date(endMs - seconds * 1000).toISOString() : null,
     measuredEnd: verified ? new Date(endMs).toISOString() : null,
-    devAddr: null, fCnt: null, reasons, zones: null,
+    devAddr: null, fCnt: null, reasons, zones,
+    rainGaugeEnabled: config.rain_gauge_enabled === true,
   };
 }
 
@@ -1448,17 +1452,19 @@ function counterRowFrame(row) {
 // frame in it and the first frame after it.
 async function loadInstrumentFrames(t, deveui, instrument, win) {
   if (instrument.store === 'device_data') {
-    const cols = 'recorded_at, rain_mm_delta, rain_delta_status, counter_interval_seconds';
-    const base = 'FROM device_data WHERE deveui = ? AND rain_count_cumulative IS NOT NULL';
-    const before = await t.get(`SELECT ${cols} ${base} AND recorded_at < ? ORDER BY recorded_at DESC LIMIT 1`, [deveui, win.startIso]);
-    const inside = await t.all(`SELECT ${cols} ${base} AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at`, [deveui, win.startIso, win.endIso]);
-    const after = await t.get(`SELECT ${cols} ${base} AND recorded_at >= ? ORDER BY recorded_at LIMIT 1`, [deveui, win.endIso]);
+    const cols = 'dd.recorded_at, dd.rain_mm_delta, dd.rain_delta_status, dd.counter_interval_seconds, o.config_json AS rain_config_json';
+    const base = 'FROM device_data dd LEFT JOIN rain_observations o ON o.id = (SELECT ro.id FROM rain_observations ro WHERE ro.device_data_id = dd.id AND ro.instrument_type = ? ORDER BY ro.id DESC LIMIT 1) '
+      + 'WHERE dd.deveui = ? AND dd.rain_count_cumulative IS NOT NULL';
+    const args = [LSN50_TYPE_ID, deveui];
+    const before = await t.get(`SELECT ${cols} ${base} AND dd.recorded_at < ? ORDER BY dd.recorded_at DESC LIMIT 1`, args.concat([win.startIso]));
+    const inside = await t.all(`SELECT ${cols} ${base} AND dd.recorded_at >= ? AND dd.recorded_at < ? ORDER BY dd.recorded_at`, args.concat([win.startIso, win.endIso]));
+    const after = await t.get(`SELECT ${cols} ${base} AND dd.recorded_at >= ? ORDER BY dd.recorded_at LIMIT 1`, args.concat([win.endIso]));
     return (before ? [before] : []).concat(inside, after ? [after] : []).map(counterRowFrame);
   }
   // S2120 weather-only frames carry no rain; an S2120 frame without identity is
   // never a counter predecessor, so the next identified frame counts its rise.
   const filter = instrument.typeId === S2120_TYPE_ID
-    ? " AND frame_kind IN ('counter','ordinary') AND status <> 'ambiguous_identity'" : '';
+    ? " AND frame_kind IN ('counter','ordinary')" : '';
   const base = 'FROM rain_observations WHERE deveui = ? AND instrument_type = ?' + filter;
   const args = [deveui, instrument.typeId];
   const before = await t.get(`SELECT * ${base} AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1`, args.concat([win.startIso]));
@@ -1568,7 +1574,9 @@ async function zoneCandidates(t, zoneId, win) {
     const snap = await t.all(
       'SELECT DISTINCT d.deveui, d.type_id FROM devices d '
       + 'CROSS JOIN rain_observations o ON o.deveui = d.deveui AND o.received_at >= ? AND o.received_at < ? '
-      + "WHERE d.deleted_at IS NULL AND d.type_id IN ('" + LORAIN_TYPE_ID + "','" + S2120_TYPE_ID + "') AND o.status = 'accepted' "
+      + "WHERE d.deleted_at IS NULL AND ((d.type_id IN ('" + LORAIN_TYPE_ID + "','" + S2120_TYPE_ID + "') AND o.status = 'accepted') "
+      + "OR (d.type_id = '" + LSN50_TYPE_ID + "' AND o.instrument_type = '" + LSN50_TYPE_ID + "' "
+      + "AND json_extract(o.config_json, '$.rain_gauge_enabled') = 1)) "
       + "AND (o.zone_id = ? OR CASE WHEN json_valid(o.config_json) THEN EXISTS (SELECT 1 FROM json_each(o.config_json, '$.zones') j WHERE j.value = ?) ELSE 0 END)",
       [win.startIso, win.endIso, zoneId, zoneId]);
     for (const r of snap) {
@@ -1631,10 +1639,12 @@ async function projectZoneDay(t, zoneId, dayIso, opts = {}) {
   let amountMm = a.amountMm;
   let receivedMm = a.receivedMm;
   const reasons = new Set(a.reasons);
-  if (instrument.store === 'observations') {
+  if (instrument.store === 'observations' || instrument.typeId === LSN50_TYPE_ID) {
     // Move day: count only what was received under this zone; certify neither zone.
     const accepted = day.inWindow.filter((f) => f.status === 'accepted' && f.amountMm !== null);
-    const own = accepted.filter((f) => !Array.isArray(f.zones) || f.zones.includes(zid));
+    const own = instrument.typeId === LSN50_TYPE_ID
+      ? accepted.filter((f) => f.rainGaugeEnabled === true && Array.isArray(f.zones) && f.zones.includes(zid))
+      : accepted.filter((f) => !Array.isArray(f.zones) || f.zones.includes(zid));
     if (own.length < accepted.length) {
       zoneReasons.add('zone_reassigned');
       receivedMm = own.length ? roundTo(own.reduce((s, f) => s + f.amountMm, 0), 3) : null;
@@ -1733,15 +1743,79 @@ async function recomputeZoneDay(t, zoneId, dayIso, opts = {}) {
 
 // The LSN50 flow writer closes its previous farm day on every next frame,
 // including frames with no accepted rain or positive flow.
-async function recomputeLsn50PreviousDay(t, deveui, zoneId, date, timezone, timestamp) {
+async function recomputeLsn50PreviousDay(t, deveui, currentObservationId) {
+  const eui = normalizeEui(deveui);
+  const current = await t.get(
+    'SELECT d.recorded_at FROM rain_observations o JOIN device_data d ON d.id = o.device_data_id '
+    + 'WHERE o.id = ? AND o.deveui = ? AND o.instrument_type = ?', [Number(currentObservationId), eui, LSN50_TYPE_ID]);
+  if (!current) return [];
   const previous = await t.get(
-    'SELECT recorded_at FROM device_data WHERE deveui = ? AND rain_count_cumulative IS NOT NULL AND recorded_at < ? ORDER BY recorded_at DESC LIMIT 1',
-    [deveui, timestamp]);
-  if (!previous) return null;
-  const previousDate = zoneDayWindow(previous.recorded_at, timezone).date;
-  if (previousDate === date) return null;
-  await recomputeInstrumentDay(t, deveui, previousDate, timezone);
-  return recomputeZoneDay(t, zoneId, previousDate, { trigger: 'reassessed' });
+    'SELECT o.*, d.recorded_at AS device_recorded_at FROM device_data d JOIN rain_observations o ON o.device_data_id = d.id '
+    + 'AND o.instrument_type = ? WHERE d.deveui = ? AND d.rain_count_cumulative IS NOT NULL AND d.recorded_at < ? '
+    + 'ORDER BY d.recorded_at DESC, d.id DESC LIMIT 1', [LSN50_TYPE_ID, eui, current.recorded_at]);
+  if (!previous) return [];
+  const config = parseJson(previous.config_json);
+  if (config.rain_gauge_enabled !== true || !Array.isArray(config.zone_snapshots)) return [];
+  const closed = [];
+  for (const zone of config.zone_snapshots) {
+    const zoneId = Number(zone.zone_id);
+    if (!Number.isInteger(zoneId)) continue;
+    const timezone = resolveTimezone(zone.timezone).timezone;
+    const previousDate = zoneDayWindow(previous.device_recorded_at, timezone).date;
+    const currentDate = zoneDayWindow(current.recorded_at, timezone).date;
+    if (previousDate === currentDate) continue;
+    await recomputeInstrumentDay(t, eui, previousDate, timezone);
+    await recomputeZoneDay(t, zoneId, previousDate, { trigger: 'reassessed' });
+    closed.push({ zoneId, date: previousDate });
+  }
+  return closed;
+}
+
+// Aggregate one MOD9 frame after its raw write. Rain follows the immutable
+// observation snapshot; flow continues to follow the device's current owner.
+async function aggregateLsn50ZoneDay(t, d) {
+  const timestamp = d.timestamp || new Date().toISOString();
+  const rainOk = d.rainDeltaStatus === 'ok' && d.rainMmDelta != null && Number(d.rainMmDelta) >= 0;
+  const flowAvailable = d.flowDeltaStatus === 'ok' && d.flowLitersDelta != null;
+  const flowDelta = flowAvailable ? (Number(d.flowLitersDelta) || 0) : 0;
+  const deveui = normalizeEui(d.devEui);
+  const observationId = Number(d.rainObservationId);
+  const observation = Number.isInteger(observationId) && observationId > 0
+    ? await t.get('SELECT id, received_at, status, config_json FROM rain_observations WHERE id = ? AND deveui = ? AND instrument_type = ?',
+      [observationId, deveui, LSN50_TYPE_ID]) : null;
+  if (observation) await recomputeLsn50PreviousDay(t, deveui, observation.id);
+  const zone = await t.get('SELECT d.irrigation_zone_id AS zone_id, iz.timezone FROM devices d '
+    + 'JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL '
+    + 'WHERE d.deveui = ? AND d.deleted_at IS NULL', [deveui]);
+  const config = observation && observation.config_json ? parseJson(observation.config_json) : {};
+  const snapshotZones = observation && observation.status === 'accepted' && config.rain_gauge_enabled === true && Array.isArray(config.zone_snapshots)
+    ? config.zone_snapshots : [];
+  const acceptedRain = rainOk && observation && observation.status === 'accepted' && config.rain_gauge_enabled === true;
+  const flowZones = new Set();
+  if (acceptedRain) {
+    const instrumentDays = new Set();
+    for (const savedZone of snapshotZones) {
+      const zoneId = Number(savedZone.zone_id);
+      if (!Number.isInteger(zoneId)) continue;
+      const timezone = resolveTimezone(savedZone.timezone).timezone;
+      const date = zoneDayWindow(observation.received_at, timezone).date;
+      const instrumentKey = date + '|' + timezone;
+      if (!instrumentDays.has(instrumentKey)) {
+        instrumentDays.add(instrumentKey);
+        await recomputeInstrumentDay(t, deveui, date, timezone);
+      }
+      const isCurrentOwner = zone && Number(zone.zone_id) === zoneId;
+      await recomputeZoneDay(t, zoneId, date, {
+        trigger: 'accepted', amountMm: Number(d.rainMmDelta), flowLitersDelta: isCurrentOwner ? flowDelta : 0,
+      });
+      if (isCurrentOwner) flowZones.add(zoneId);
+    }
+  }
+  if (zone && flowAvailable && !flowZones.has(Number(zone.zone_id))) {
+    const timezone = resolveTimezone(zone.timezone).timezone;
+    const date = zoneDayWindow(timestamp, timezone).date;
+    await recomputeZoneDay(t, zone.zone_id, date, { trigger: 'flow', flowLitersDelta: flowDelta });
+  }
 }
 
 function sameValue(a, b) {
@@ -1760,6 +1834,52 @@ async function gaugeZones(t, deveui) {
     + 'iz.id = (SELECT d.irrigation_zone_id FROM devices d WHERE d.deveui = ? AND d.deleted_at IS NULL) '
     + 'OR iz.id IN (SELECT w.zone_id FROM weather_station_zones w WHERE w.deveui = ?)) ORDER BY iz.id',
     [deveui, deveui]);
+}
+
+// Capture the MOD9 counter's rain attribution in the same transaction as its
+// device_data row. Older rows have no trustworthy zone history and are never
+// assigned from a device's later irrigation_zone_id.
+async function captureLsn50Observation(t, row) {
+  if (!row || !Number.isInteger(Number(row.id)) || row.rain_count_cumulative === null || row.rain_count_cumulative === undefined) return null;
+  const eui = normalizeEui(row.deveui);
+  const existing = await t.get('SELECT id FROM rain_observations WHERE device_data_id = ? AND instrument_type = ?', [Number(row.id), LSN50_TYPE_ID]);
+  if (existing) return { id: Number(existing.id), deviceDataId: Number(row.id) };
+  const device = await t.get(
+    'SELECT d.type_id, d.rain_gauge_enabled, d.irrigation_zone_id AS zone_id, iz.zone_uuid, iz.timezone '
+    + 'FROM devices d LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL '
+    + 'WHERE d.deveui = ? AND d.deleted_at IS NULL', [eui]);
+  if (!device || String(device.type_id).toUpperCase() !== LSN50_TYPE_ID) return null;
+  const zoneRows = await gaugeZones(t, eui);
+  const zones = zoneRows.map((zone) => Number(zone.zone_id)).filter(Number.isInteger);
+  const zoneSnapshots = zoneRows.map((zone) => ({ zone_id: Number(zone.zone_id), zone_uuid: zone.zone_uuid || null, timezone: resolveTimezone(zone.timezone).timezone }));
+  const gaugeEnabled = Number(device.rain_gauge_enabled) === 1;
+  const recordedAt = String(row.recorded_at);
+  const delta = row.rain_mm_delta === null || row.rain_mm_delta === undefined ? null : Number(row.rain_mm_delta);
+  const accepted = String(row.rain_delta_status || '') === 'ok' && Number.isFinite(delta) && delta >= 0;
+  const intervalSeconds = Number(row.counter_interval_seconds);
+  const endMs = frameMs(recordedAt);
+  const verified = accepted && Number.isFinite(intervalSeconds) && intervalSeconds > 0 && Number.isFinite(endMs);
+  const frame = {
+    rain_count_cumulative: Number(row.rain_count_cumulative),
+    rain_mm_delta: accepted ? delta : null,
+    rain_delta_status: String(row.rain_delta_status || 'unknown'),
+    counter_interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : null,
+  };
+  const config = { frame, zones, zone_snapshots: zoneSnapshots, rain_gauge_enabled: gaugeEnabled };
+  const digest = crypto.createHash('sha256').update(canonicalJson({ deveui: eui, recordedAt, frame })).digest('hex');
+  await t.run(
+    'INSERT INTO rain_observations (device_data_id, deveui, instrument_type, payload_digest, received_at, measured_start, measured_end, '
+    + 'interval_basis, frame_kind, amount_mm, status, quality_reasons, config_json, zone_id, zone_uuid, timezone, source_policy_version) '
+    + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, \'counter\', ?, ?, ?, ?, ?, ?, ?, ?)',
+    [Number(row.id), eui, LSN50_TYPE_ID, digest, recordedAt,
+      verified ? new Date(endMs - intervalSeconds * 1000).toISOString() : null,
+      verified ? new Date(endMs).toISOString() : null,
+      verified ? 'protocol_verified' : 'unknown', accepted ? delta : null,
+      accepted ? 'accepted' : 'not_additive', JSON.stringify(accepted ? [] : [frame.rain_delta_status]), JSON.stringify(config),
+      device.zone_id === null || device.zone_id === undefined ? null : Number(device.zone_id), device.zone_uuid || null,
+      device.timezone ? resolveTimezone(device.timezone).timezone : (zoneSnapshots[0] && zoneSnapshots[0].timezone) || 'UTC', RAIN_POLICY_VERSION]);
+  const id = await lastInsertId(t);
+  return { id, deviceDataId: Number(row.id), receivedAt: recordedAt, zones, zoneSnapshots, rainGaugeEnabled: gaugeEnabled };
 }
 
 // After a writer stored a frame: recompute the instrument days and zone days
@@ -1829,6 +1949,8 @@ module.exports = {
   ingestLoRainUplink,
   recomputeInstrumentDay,
   recomputeLsn50PreviousDay,
+  aggregateLsn50ZoneDay,
+  captureLsn50Observation,
   loRainConfigQueryBytes,
   buildLoRainConfigQueryDownlink,
   S2120_RAIN_SOURCE,

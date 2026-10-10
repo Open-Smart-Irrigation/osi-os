@@ -157,11 +157,18 @@ test('recomputeZoneDay through the osi-db-helper transaction facade (lsn50-zone-
     const osiDb = loadOsiDbHelper();
     const db = new osiDb.Database(file);
     const nowMs = Date.parse('2026-10-08T12:00:00.000Z');
-    const out = await db.transaction(async (t) => {
-      await R.recomputeInstrumentDay(t, 'A840410000000003', '2026-10-08', 'Europe/Zurich', { nowMs });
-      return R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'accepted', amountMm: 0.4, flowLitersDelta: 3, nowMs });
+    const captures = await db.transaction(async (t) => {
+      const rows = await t.all("SELECT id, deveui, recorded_at, rain_count_cumulative, rain_mm_delta, rain_delta_status, counter_interval_seconds FROM device_data WHERE deveui='A840410000000003' ORDER BY recorded_at");
+      const out = [];
+      for (const row of rows) out.push(await R.captureLsn50Observation(t, row));
+      return out;
     });
-    assert.equal(out.written, 'inserted');
+    assert.equal(captures.length, 2);
+    assert.ok(captures.every((capture) => Number.isInteger(capture.id)), 'LSN50 snapshots use the promise-returning transaction facade');
+    await db.transaction((t) => R.aggregateLsn50ZoneDay(t, {
+      devEui: 'A840410000000003', timestamp: '2026-10-08T10:00:00.000Z', rainObservationId: captures[1].id,
+      rainDeltaStatus: 'ok', rainMmDelta: 0.4, flowDeltaStatus: 'ok', flowLitersDelta: 3,
+    }));
     const again = await db.transaction((t) => R.recomputeZoneDay(t, 1, '2026-10-08', { trigger: 'reassessed', nowMs }));
     assert.equal(again.written, false, 'nothing projected changed');
     const check = new DatabaseSync(file, { readOnly: true });

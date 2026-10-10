@@ -518,6 +518,25 @@ test('missing deduplicationId is ambiguous identity: never counted and never a c
   assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment').get().rain_received_mm, 2);
 });
 
+test('an identityless S2120 counter frame makes the in-day instrument assessment unknown without becoming a counter baseline', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink('2026-10-07T23:00:00.000Z', v2(0, 100));
+  await h.uplink('2026-10-08T00:00:00.000Z', v2(0, 100));
+  await h.uplink('2026-10-08T04:00:00.000Z', v2(0, 102));
+  const ambiguous = await h.uplink('2026-10-08T12:00:00.000Z', v2(0, 103), DEV_EUI, { deduplicationId: undefined });
+  await h.uplink('2026-10-08T20:00:00.000Z', v2(0, 104));
+  const closesDay = await h.uplink('2026-10-09T00:00:00.000Z', v2(0, 104));
+
+  assert.equal(ambiguous.obs.status, 'ambiguous_identity');
+  assert.equal(closesDay.row.rain_mm_delta, 0, 'the identityless frame is not a cumulative-counter baseline');
+  const day = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_quality_reasons FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get();
+  assert.equal(day.rain_coverage, 'unknown', 'the ambiguous frame remains in the day assessment');
+  assert.equal(day.rainfall_mm, null);
+  assert.equal(day.rain_received_mm, 4, 'only identified increments are counted');
+  assert.ok(JSON.parse(day.rain_quality_reasons).includes('ambiguous_identity'));
+});
+
 test('a device of another type is ignored', async () => {
   const db = createDb();
   db.exec(`UPDATE devices SET type_id = 'DRAGINO_LSN50' WHERE deveui = '${DEV_EUI}'`);

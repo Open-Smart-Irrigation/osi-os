@@ -12,6 +12,8 @@ const {
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
+const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
+const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
 const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
@@ -2425,7 +2427,10 @@ expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status 
 expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
 expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
-expectIncludes('LSN50 Normalize + Write', 'return await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
+expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
 expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
 expectIncludes('LSN50 Normalize + Write', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
 expectIncludes('LSN50 Normalize + Write', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
@@ -2501,9 +2506,14 @@ expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via
 expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
 expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
 expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
-expectIncludesById('lsn50-zone-agg-fn', 'R.zoneDayWindow(d.timestamp || new Date().toISOString(), timezone).date', 'bins MOD9 zone totals by uplink timestamp in the zone timezone instead of processing time');
 expectIncludesById('lsn50-zone-agg-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib for the zone-day projection');
-expectIncludesById('lsn50-zone-agg-fn', 'await R.recomputeZoneDay(t, zone.zone_id, date, {', 'writes rain and flow through the zone-day projection inside one transaction');
+expectIncludesById('lsn50-zone-agg-fn', 'await db.transaction(async (t) => rainLoad.value.aggregateLsn50ZoneDay(t, d))', 'delegates snapshot-based rain aggregation inside the helper transaction');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function captureLsn50Observation(t, row)', 'captures MOD9 zone provenance at raw-write time');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function aggregateLsn50ZoneDay(t, d)', 'keeps LSN50 rain and flow projection in the transaction helper');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function recomputeLsn50PreviousDay(t, deveui, currentObservationId)', 'closes prior days from captured zone snapshots');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'config.rain_gauge_enabled === true', 'does not retroactively enable captured non-gauge frames');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'accepted', amountMm: Number(d.rainMmDelta)", 'writes captured rain through the zone-day projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'flow', flowLitersDelta: flowDelta", 'keeps flow arithmetic on the current owner');
 expectLibById('lsn50-zone-agg-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
 expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
 expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
