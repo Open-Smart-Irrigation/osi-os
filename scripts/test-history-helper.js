@@ -2155,6 +2155,28 @@ test('rainDailyHistory: empty days are null, not zero; dry days are zero', async
   }
 });
 
+test('rainDailyHistory: each day carries its instrument-day coverage and reasons; days without one stay received_only', async () => {
+  const db = seededRainDb('UTC', [['2026-06-29T10:00:00.000Z', 1], ['2026-06-30T10:00:00.000Z', 2], ['2026-07-01T10:00:00.000Z', 0.5], ['2026-07-02T08:00:00.000Z', 1]]);
+  try {
+    db.runSql(`
+      INSERT INTO rain_instrument_days(deveui,date,timezone,amount_mm,received_mm,coverage,reasons,accepted_count,observed_cutoff,policy_version,computed_at) VALUES
+        ('A840410000000001','2026-06-30','UTC',2,2,'complete','[]',1,'2026-06-30T10:00:00.000Z',1,'2026-07-01T01:00:00.000Z'),
+        ('A840410000000001','2026-07-01','UTC',NULL,0.5,'partial','["frame_gap"]',1,'2026-07-01T10:00:00.000Z',1,'2026-07-02T01:00:00.000Z'),
+        ('A840410000000001','2026-07-02','UTC',NULL,1,'unknown','["received_only","ongoing"]',1,'2026-07-02T08:00:00.000Z',1,'2026-07-02T08:00:00.000Z'),
+        ('A840410000000001','2026-06-29','Europe/Zurich',1,1,'complete','[]',1,NULL,1,'2026-06-30T01:00:00.000Z');
+    `);
+    const h = await helper.rainDailyHistory(db, { deveui: 'A840410000000001', days: 4, userId: 1, nowMs: Date.parse('2026-07-02T10:00:00Z') });
+    assert.deepStrictEqual(h.days.map((d) => [d.day, d.total_mm, d.quality, d.reasons]), [
+      ['2026-06-29', 1, 'received_only', []],
+      ['2026-06-30', 2, 'complete', []],
+      ['2026-07-01', 0.5, 'partial', ['frame_gap']],
+      ['2026-07-02', 1, 'unknown', ['received_only', 'ongoing']],
+    ], 'a day in another timezone is another instrument day; a day without one is legacy received_only');
+  } finally {
+    db.close();
+  }
+});
+
 test('rainDailyHistory: a SQLite-shaped recorded_at is read as UTC, not the host zone', async () => {
   const db = seededRainDb('Europe/Zurich', [['2026-07-01 22:30:00', 1.5], ['2026-07-01T22:10:00.000+01:00', 0.5]]);
   try {

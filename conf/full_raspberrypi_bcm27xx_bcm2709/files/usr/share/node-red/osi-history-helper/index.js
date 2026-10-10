@@ -2104,9 +2104,13 @@ const RAIN_SLOT_SECONDS = 15 * 60;
 // zone or the viewer's offset. Every day of the window is listed; a day
 // without rows has total_mm null and samples 0 (no data, not a dry day); the
 // last day ends at the request time (so_far). Sums rain_mm_delta because the
-// stored rollups keep no sum column. quality is 'received_only': legacy rows
-// carry no interval provenance, so a total is what arrived, not a certified
-// day amount. A device the caller does not own answers in UTC with no data.
+// stored rollups keep no sum column. quality is the coverage of the device's
+// instrument day in this timezone (rain_instrument_days, migration 0072:
+// complete, complete_so_far, partial, unknown) with its reasons; a day without
+// one stays 'received_only' with no reasons (no interval provenance, so a
+// total is what arrived, not a certified day amount). total_mm stays the
+// received sum either way. A device the caller does not own answers in UTC
+// with no data.
 async function rainDailyHistory(db, options = {}) {
   const deveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   const daysRaw = toFiniteNumber(options.days);
@@ -2130,8 +2134,17 @@ async function rainDailyHistory(db, options = {}) {
       total_mm: null,
       samples: 0,
       quality: 'received_only',
+      reasons: [],
       so_far: soFar,
     });
+  }
+  if (deveui && await ownsDevice(db, deveui, options)) {
+    for (const day of await instrumentDays(db, deveui, timezone, firstKey, todayKey)) {
+      const bucket = buckets.get(day.date);
+      if (!bucket) continue;
+      bucket.quality = day.coverage;
+      bucket.reasons = day.reasons;
+    }
   }
   if (deveui) {
     const ownerFilter = optionalUserFilter(options, 'dv');
@@ -2172,6 +2185,40 @@ async function rainDailyHistory(db, options = {}) {
     period_end: periodEnd,
     days: Array.from(buckets.values()),
   };
+}
+
+const INSTRUMENT_COVERAGE = new Set(['complete', 'complete_so_far', 'partial', 'unknown']);
+
+// The device's instrument days (coverage, reasons) in one timezone between two
+// farm dates. A database without the table (before migration 0072) has none.
+async function instrumentDays(db, deveui, timezone, firstKey, lastKey) {
+  let rows;
+  try {
+    rows = await dbAll(db, `
+      SELECT date, coverage, reasons FROM rain_instrument_days
+       WHERE deveui = ? AND timezone = ? AND date >= ? AND date <= ?
+    `, [deveui, timezone, firstKey, lastKey]);
+  } catch (error) {
+    if (/no such table/i.test(String(error && error.message))) return [];
+    throw error;
+  }
+  return rows.map((row) => {
+    let reasons = [];
+    try {
+      const parsed = JSON.parse(row.reasons || '[]');
+      if (Array.isArray(parsed)) reasons = parsed.map(String);
+    } catch (_badReasons) {
+      reasons = ['quality_reasons_unreadable'];
+    }
+    return { date: row.date, coverage: INSTRUMENT_COVERAGE.has(row.coverage) ? row.coverage : 'unknown', reasons };
+  });
+}
+
+async function ownsDevice(db, deveui, options) {
+  const ownerFilter = optionalUserFilter(options, 'd');
+  const rows = await dbAll(db, `SELECT 1 AS ok FROM devices d WHERE d.deveui = ? AND d.deleted_at IS NULL${ownerFilter.sql} LIMIT 1`,
+    [deveui].concat(ownerFilter.params));
+  return rows.length > 0;
 }
 
 // Deprecated: the pre-v2 array of { day, total_mm, samples } for days with
