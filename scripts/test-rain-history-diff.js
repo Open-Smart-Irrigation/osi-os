@@ -508,8 +508,49 @@ test('provenance contradicting a retained observation snapshot is refused', () =
       const out = path.join(root, 'out-' + index);
       const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', soleGaugeProvenance(root)]);
       assert.notEqual(result.status, 0);
-      assert.match(result.stderr, /conflicts with retained observation/);
+      assert.match(result.stderr, /conflicts with retained observation|retained observation identity conflicts/);
       assert.equal(fs.existsSync(out), false);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('preflight refuses orphan observation provenance identity, zone, and timezone conflicts', () => {
+  const root = tmp();
+  try {
+    const cases = [
+      { name: 'zone', deviceDataId: null, observedEui: E2, zoneId: 2, timezone: 'Europe/Zurich', intervalEui: E2, intervalZoneId: 1, intervalTimezone: 'Europe/Zurich' },
+      { name: 'timezone', deviceDataId: null, observedEui: E2, zoneId: 1, timezone: 'Europe/Zurich', intervalEui: E2, intervalZoneId: 1, intervalTimezone: 'America/Chicago' },
+      { name: 'identity', deviceDataId: 1, observedEui: E2, zoneId: 1, timezone: 'Europe/Zurich', intervalEui: E1, intervalZoneId: 1, intervalTimezone: 'Europe/Zurich' },
+    ];
+    for (const [index, conflict] of cases.entries()) {
+      const db = path.join(root, `orphan-conflict-${conflict.name}.db`);
+      const handle = new DatabaseSync(db);
+      handle.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER);
+        CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+        CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT);
+        INSERT INTO devices VALUES ('${E1}', 'AQUASCOPE_LORAIN', 1);
+        INSERT INTO device_data VALUES (1, '${E1}', '2026-03-29T10:00:00Z', 3, 3, 'ok');
+        INSERT INTO zone_daily_environment VALUES (1, '2026-03-29', 5, 'local_gauge');`);
+      handle.exec(fs.readFileSync(path.join(__dirname, '../database/migrations/ordered/0071__rain_observations.sql'), 'utf8'));
+      handle.exec('PRAGMA foreign_keys = ON');
+      handle.prepare(`INSERT INTO rain_observations
+        (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, zone_id, timezone)
+        VALUES (?, ?, 'AQUASCOPE_LORAIN', ?, '2026-03-29T11:00:00Z', 'unknown', 'ordinary', 2, 'accepted', ?, ?)`)
+        .run(conflict.deviceDataId, conflict.observedEui, `synthetic-${index}`, conflict.zoneId, conflict.timezone);
+      handle.close();
+      const intervals = [
+        { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:selected-lorain' },
+      ];
+      if (conflict.intervalEui !== E1 || conflict.name !== 'identity') intervals.push({
+        deveui: conflict.intervalEui, zoneId: conflict.intervalZoneId, timezone: conflict.intervalTimezone,
+        from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: false, sourceRef: 'synthetic:conflicting-history',
+      });
+      const provenance = provenanceFile(root, intervals);
+      const out = path.join(root, `out-${conflict.name}`);
+      const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+      assert.notEqual(result.status, 0, `${conflict.name} conflict must be refused`);
+      assert.match(result.stderr, /conflicts with retained observation|retained observation identity conflicts/);
+      assert.equal(fs.existsSync(out), false, `${conflict.name} conflict must fail before output creation`);
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

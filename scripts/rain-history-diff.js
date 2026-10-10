@@ -181,7 +181,11 @@ function readEvidence(db, options, provenance) {
   const observations = names.has('rain_observations') && observationCols.has('deveui') && observationCols.has('received_at')
     ? db.prepare('SELECT ' + selectExpressions(observationCols, 'o', ['id', 'device_data_id', 'deveui', 'instrument_type', 'received_at', 'zone_id', 'timezone']) + ' FROM rain_observations o WHERE date(received_at) >= date(?) AND date(received_at) <= date(?) ORDER BY received_at, id').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
     : [];
-  return { devices, data, env, observations, instrumentDays, tableNames: names, envColumns: envCols };
+  const linkedObservationData = names.has('device_data') && dataCols.has('id') && dataCols.has('deveui')
+    && names.has('rain_observations') && observationCols.has('device_data_id') && observationCols.has('received_at')
+    ? db.prepare('SELECT x.id, x.deveui FROM device_data x WHERE x.id IN (SELECT o.device_data_id FROM rain_observations o WHERE o.device_data_id IS NOT NULL AND date(o.received_at) >= date(?) AND date(o.received_at) <= date(?))').all(range[0], range[1]).map((row) => ({ ...row, deveui: String(row.deveui || '').toUpperCase() }))
+    : [];
+  return { devices, data, env, observations, linkedObservationData, instrumentDays, tableNames: names, envColumns: envCols };
 }
 function possibleRainGauge(device) {
   if (!device) return null;
@@ -244,6 +248,26 @@ function soleEligibleGaugeForDay(provenance, devices, data, observations, zoneId
   }
   return candidates.size === 1 && candidates.has(deveui);
 }
+function validateObservationProvenance(evidence, provenance) {
+  const linkedById = new Map(evidence.linkedObservationData.map((row) => [String(row.id), row]));
+  const intervalsByDevice = new Map();
+  for (const interval of provenance.intervals) {
+    if (!intervalsByDevice.has(interval.deveui)) intervalsByDevice.set(interval.deveui, []);
+    intervalsByDevice.get(interval.deveui).push(interval);
+  }
+  for (const observation of evidence.observations) {
+    const linked = observation.device_data_id == null ? null : linkedById.get(String(observation.device_data_id));
+    if (linked && linked.deveui && linked.deveui !== observation.deveui) throw new Error('retained observation identity conflicts with linked device_data row ' + observation.device_data_id);
+    const receivedAt = Date.parse(observation.received_at);
+    if (!Number.isFinite(receivedAt)) continue;
+    for (const interval of intervalsByDevice.get(observation.deveui) || []) {
+      if (Date.parse(interval.from) > receivedAt || receivedAt >= Date.parse(interval.to)) continue;
+      const zoneConflict = observation.zone_id != null && Number(observation.zone_id) !== interval.zoneId;
+      const timezoneConflict = observation.timezone != null && String(observation.timezone) !== interval.timezone;
+      if (zoneConflict || timezoneConflict) throw new Error('provenance conflicts with retained observation snapshot' + (observation.id == null ? '' : ' ' + observation.id));
+    }
+  }
+}
 function deriveRows(evidence, options, provenance) {
   const deviceById = new Map(evidence.devices.map((d) => [d.deveui, d]));
   const zoneRows = new Map();
@@ -265,13 +289,6 @@ function deriveRows(evidence, options, provenance) {
     let day = null; let zoneId = null; let timezone = null; let basis = 'historical_attribution_unknown'; let selectedInterval = null; let sourceRef = null; let timezoneIssue = false;
     const matching = provenance.intervals.filter((i) => i.deveui === row.deveui && Date.parse(i.from) <= ms && ms < Date.parse(i.to));
     const retainedObservation = observationByDataId.get(String(row.id)) || observationByDeviceTime.get(row.deveui + '|' + String(row.recorded_at));
-    if (matching.length === 1 && retainedObservation) {
-      const interval = matching[0];
-      const contradictsIdentity = retainedObservation.deveui !== row.deveui;
-      const contradictsZone = retainedObservation.zone_id != null && Number(retainedObservation.zone_id) !== interval.zoneId;
-      const contradictsTimezone = retainedObservation.timezone != null && String(retainedObservation.timezone) !== interval.timezone;
-      if (contradictsIdentity || contradictsZone || contradictsTimezone) throw new Error('provenance conflicts with retained observation snapshot for device_data row ' + row.id);
-    }
     if (matching.length === 1) { selectedInterval = matching[0]; zoneId = selectedInterval.zoneId; timezone = selectedInterval.timezone; day = dateInZone(ms, timezone); basis = 'provenance'; sourceRef = selectedInterval.sourceRef; }
     else if (matching.length > 1) { basis = 'historical_attribution_unknown'; }
     else {
@@ -517,6 +534,7 @@ function run(options) {
     db = new DatabaseSync(dbPath, { readOnly: true });
     const effectiveOptions = { ...options, from, to, hostTimezone: provenance.hostTimezone };
     const evidence = readEvidence(db, effectiveOptions, provenance);
+    validateObservationProvenance(evidence, provenance);
     // Pure day and coverage functions receive only in-memory frames; this tool never calls recompute APIs.
     rows = deriveRows(evidence, effectiveOptions, provenance);
   } finally {
