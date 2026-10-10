@@ -224,3 +224,41 @@ test('a frame pair in one wake slot: the earlier frame is withdrawn from history
   const dd = rows(db, 'SELECT rain_mm_delta, rain_delta_status FROM device_data ORDER BY id');
   assert.deepEqual(dd[1], { rain_mm_delta: null, rain_delta_status: 'overlap_unqualified' });
 });
+
+// Task 4 (A7): delayed distinct events and rejoined sessions keep their identity.
+test('a delayed distinct frame is accepted once and its zone day gains its amount once (t06)', async () => {
+  const db = seed();
+  const fx = fixture('delayed-distinct');
+  for (const frame of fx.frames) await ingest(db, frame);
+  await ingest(db, fx.frames[2]);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 3);
+  assert.deepEqual(rows(db, 'SELECT status FROM rain_observations ORDER BY received_at').map((r) => r.status), ['accepted', 'accepted', 'accepted']);
+  assert.equal(db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get().rainfall_mm, 2);
+});
+
+test('a delayed frame from an earlier zone day lands in its own day (order-independent)', async () => {
+  const db = seed({ tz: 'Europe/Zurich' });
+  const late = { deduplicationId: '00000000-0000-4000-8000-000000000071', devAddr: '01000001', fCnt: 5, time: '2026-10-08T21:45:00.000Z', fPort: 2, bytesHex: '06030005060100b8068100021221000a' };
+  const next = { deduplicationId: '00000000-0000-4000-8000-000000000072', devAddr: '01000001', fCnt: 6, time: '2026-10-08T22:00:01.000Z', fPort: 2, bytesHex: '06030005060100b8068100011221000a' };
+  await ingest(db, next);
+  await ingest(db, late);
+  assert.deepEqual(rows(db, 'SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1 ORDER BY date'),
+    [{ date: '2026-10-08', rainfall_mm: 1 }, { date: '2026-10-09', rainfall_mm: 0.5 }]);
+});
+
+test('after a rejoin on a new devAddr with fCnt from 0 both sessions count; a repeat inside one hour is a duplicate (t07)', async () => {
+  const db = seed();
+  const fx = fixture('rejoin-fcnt-reuse');
+  for (const frame of fx.frames) await ingest(db, frame);
+  assert.deepEqual(rows(db, 'SELECT dev_addr, f_cnt, status, amount_mm FROM rain_observations ORDER BY received_at'), [
+    { dev_addr: '01000001', f_cnt: 1, status: 'accepted', amount_mm: 0.5 },
+    { dev_addr: '01000001', f_cnt: 2, status: 'accepted', amount_mm: 0.5 },
+    { dev_addr: '01000002', f_cnt: 0, status: 'accepted', amount_mm: 0.5 },
+    { dev_addr: '01000002', f_cnt: 1, status: 'accepted', amount_mm: 1 },
+  ]);
+  const reasons = JSON.parse(db.prepare("SELECT quality_reasons FROM rain_observations WHERE dev_addr='01000002' AND f_cnt=0").get().quality_reasons);
+  assert.ok(reasons.includes('session_reset'));
+  await ingest(db, { ...fx.frames[3], deduplicationId: '00000000-0000-4000-8000-000000000098', time: '2026-10-08T11:40:00.000Z' });
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 4);
+  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1').get().rainfall_mm, 2.5);
+});
