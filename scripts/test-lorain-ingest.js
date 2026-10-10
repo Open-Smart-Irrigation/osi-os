@@ -315,3 +315,33 @@ test('the configuration query is off by default and never sent from the node unl
   const port10 = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(fixture('fport10-unpinned').frames[0]), db: db3, env: { OSI_LORAIN_CONFIG_QUERY: '1' } });
   assert.equal(port10.result, null, 'no documented query form for the FPort-10 build');
 });
+
+// One query at commissioning and one after a firmware upgrade, never an
+// automatic resend (contract, "Configuration query"). A query recorded before
+// any 0x0A frame was seen covers the first build date observed afterwards.
+test('a query recorded without a build date is not re-sent when the gauge rejoins with its build date', async () => {
+  const db = seed();
+  const env = { OSI_LORAIN_CONFIG_QUERY: '1' };
+  const frames = [
+    { deduplicationId: '00000000-0000-4000-8000-000000000091', devAddr: '01000005', fCnt: 40, time: '2026-10-08T08:00:00.000Z', fPort: 2, bytesHex: '06030005060100b8068100011221000a' },
+    { deduplicationId: '00000000-0000-4000-8000-000000000092', devAddr: '01000005', fCnt: 41, time: '2026-10-08T08:15:01.000Z', fPort: 2, bytesHex: '06030005060100b8068100011221000a' },
+    // rejoin: new session, the post-join frame carries the stock build date 241015 and still no 0x04 reply
+    { deduplicationId: '00000000-0000-4000-8000-000000000093', devAddr: '01000006', fCnt: 0, time: '2026-10-08T10:00:00.000Z', fPort: 2, bytesHex: '0a0003ad770305000106030000060100b8068100011221000a' },
+    { deduplicationId: '00000000-0000-4000-8000-000000000094', devAddr: '01000006', fCnt: 1, time: '2026-10-08T10:15:01.000Z', fPort: 2, bytesHex: '06030000060100b8068100011221000a' },
+  ];
+  const sends = [];
+  for (const frame of frames) {
+    const out = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(frame), db, env });
+    assert.deepEqual(out.errors, []);
+    sends.push(out.result !== null);
+  }
+  assert.deepEqual(sends, [true, false, false, false]);
+  // A real upgrade (a recorded build date changes to another one) allows one more query.
+  const upgrade = { deduplicationId: '00000000-0000-4000-8000-000000000095', devAddr: '01000007', fCnt: 0, time: '2026-10-08T12:00:00.000Z', fPort: 2,
+    bytesHex: '0a0003d0a50305000106030000060100b8068100011221000a' };
+  const after = { deduplicationId: '00000000-0000-4000-8000-000000000096', devAddr: '01000007', fCnt: 1, time: '2026-10-08T12:15:01.000Z', fPort: 2,
+    bytesHex: '06030000060100b8068100011221000a' };
+  const up1 = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(upgrade), db, env });
+  const up2 = await executeFunction(asyncNode('lorain-ingest-fn'), { msg: uplinkMsg(after), db, env });
+  assert.deepEqual([up1.result !== null, up2.result !== null], [true, false]);
+});

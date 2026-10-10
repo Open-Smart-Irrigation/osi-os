@@ -742,14 +742,32 @@ async function writeZoneDays(t, deveui, days, computedAt) {
   return written;
 }
 
+// One query at commissioning and one after a firmware upgrade, never an
+// automatic resend (contract, "Configuration query"). The latest recorded
+// query covers its build date; a query recorded before any 0x0A frame was
+// seen covers the first build date observed after it. A further query is
+// planned only when a known build date differs from the covered one (an
+// upgrade). A missing reply is never a reason to send again.
 async function planConfigQuery(t, deveui, fPort, state, nowMs) {
   if (!loRainConfigQueryBytes(fPort)) return null;
   if (state && state.confInterval && state.confHeartbeatWakes && !state.stale) return null;
   const buildDate = state && state.buildDate ? String(state.buildDate) : '';
-  const sent = await t.get(
-    "SELECT 1 AS sent FROM rain_observations WHERE deveui = ? AND json_extract(config_json, '$.query.requestedAt') IS NOT NULL "
-    + "AND COALESCE(json_extract(config_json, '$.query.buildDate'), '') = ? LIMIT 1", [deveui, buildDate]);
-  return sent ? null : { requestedAt: new Date(nowMs).toISOString(), buildDate };
+  const last = await t.get(
+    "SELECT id, received_at, json_extract(config_json, '$.query.buildDate') AS build FROM rain_observations "
+    + "WHERE deveui = ? AND json_extract(config_json, '$.query.requestedAt') IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1",
+    [deveui]);
+  if (last) {
+    let covered = last.build ? String(last.build) : '';
+    if (!covered) {
+      const first = await t.get(
+        "SELECT json_extract(config_json, '$.frame.buildDate') AS build FROM rain_observations WHERE deveui = ? "
+        + "AND (received_at > ? OR (received_at = ? AND id >= ?)) AND json_extract(config_json, '$.frame.buildDate') IS NOT NULL "
+        + 'ORDER BY received_at, id LIMIT 1', [deveui, last.received_at, last.received_at, last.id]);
+      covered = first && first.build ? String(first.build) : '';
+    }
+    if (!covered || !buildDate || buildDate === covered) return null;
+  }
+  return { requestedAt: new Date(nowMs).toISOString(), buildDate };
 }
 
 // Ingest one LoRain uplink inside the caller's transaction: claim the

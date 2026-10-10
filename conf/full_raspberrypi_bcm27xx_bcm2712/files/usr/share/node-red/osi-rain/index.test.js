@@ -173,6 +173,11 @@ test('zoneDayWindow: 23-hour spring day in the zone timezone', () => {
     { date: '2026-03-29', startIso: '2026-03-28T23:00:00.000Z', endIso: '2026-03-29T22:00:00.000Z' });
 });
 
+test('zoneDayWindow: a day that starts at 01:00 because DST begins at midnight (Cairo)', () => {
+  assert.deepEqual(R.zoneDayWindow('2026-04-24T12:00:00.000Z', 'Africa/Cairo'),
+    { date: '2026-04-24', startIso: '2026-04-23T22:00:00.000Z', endIso: '2026-04-24T21:00:00.000Z' });
+});
+
 test('zoneDayWindow: invalid or padded timezones', () => {
   assert.deepEqual(R.zoneDayWindow('2026-10-08T22:30:00.000Z', 'Mars/Olympus'),
     { date: '2026-10-08', startIso: '2026-10-08T00:00:00.000Z', endIso: '2026-10-09T00:00:00.000Z' });
@@ -182,9 +187,11 @@ test('zoneDayWindow: invalid or padded timezones', () => {
 
 test('zoneDayWindow agrees with osi-history-helper.startOfLocalDayMs on DST dates', () => {
   const H = require(path.join(NODE_RED, 'osi-history-helper/index.js'));
-  const zones = ['Europe/Zurich', 'America/Santiago', 'America/Sao_Paulo', 'Asia/Beirut', 'Pacific/Auckland', 'Africa/Kampala', 'UTC'];
+  // Africa/Cairo begins DST at local midnight (2026-04-24), so that local date starts at 01:00.
+  const zones = ['Europe/Zurich', 'America/Santiago', 'America/Sao_Paulo', 'Asia/Beirut', 'Africa/Cairo', 'Pacific/Auckland', 'Africa/Kampala', 'UTC'];
   const instants = ['2026-03-29T00:30:00Z', '2026-03-29T01:30:00Z', '2026-03-29T23:59:00Z', '2026-10-25T00:30:00Z',
-    '2026-10-25T01:30:00Z', '2026-10-25T23:30:00Z', '2026-04-05T03:30:00Z', '2026-09-06T04:30:00Z', '2026-09-27T14:00:00Z'];
+    '2026-10-25T01:30:00Z', '2026-10-25T23:30:00Z', '2026-04-05T03:30:00Z', '2026-09-06T04:30:00Z', '2026-09-27T14:00:00Z',
+    '2026-04-23T21:59:00Z', '2026-04-23T22:30:00Z', '2026-04-24T12:00:00Z'];
   for (const tz of zones) {
     for (const iso of instants) {
       const win = R.zoneDayWindow(iso, tz);
