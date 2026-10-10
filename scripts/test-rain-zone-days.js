@@ -265,6 +265,15 @@ test('(c) a late distinct observation that completes a day re-projects it and in
   for (const f of chain.filter((x) => x !== lost)) await loRainNode(db, GAUGE_A, f);
   const before = zoneRow(db, 1, '2026-10-08');
   assert.equal(before.rain_coverage, 'partial');
+  const observations = () => rows(db, 'SELECT id, deveui, event_id, dev_addr, f_cnt, payload_digest, received_at '
+    + 'FROM rain_observations WHERE deveui = ? ORDER BY id', GAUGE_A);
+  const identityFields = (items) => items.map(({ deveui, dev_addr, f_cnt, received_at }) => ({ deveui, dev_addr, f_cnt, received_at }));
+  const observationsBefore = observations();
+  assert.equal(observationsBefore.length, chain.length - 1, 'the initial distinct frames each have one observation');
+  assert.deepEqual(identityFields(observationsBefore), chain.filter((x) => x !== lost).map((f) => ({
+    deveui: GAUGE_A, dev_addr: '01000001', f_cnt: f.fCnt, received_at: f.time,
+  })), 'the missing frame identity is absent before the late delivery');
+  assert.ok(observationsBefore.every((row) => row.event_id && row.payload_digest), 'every stored observation has a durable identity');
   const events = () => db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type = 'ZONE_ENVIRONMENT' AND aggregate_key = 'z-1|2026-10-08'").get().n;
   const eventsBefore = events();
   await loRainNode(db, GAUGE_A, lost);
@@ -274,10 +283,24 @@ test('(c) a late distinct observation that completes a day re-projects it and in
   assert.equal(after.sync_version, before.sync_version + 1, 'exactly one increment');
   assert.ok(after.computed_at > before.computed_at, 'a new computed_at with the projected change');
   assert.equal(events(), eventsBefore + 1, 'one outbox event for the correction');
+  const observationsAfterCorrection = observations();
+  assert.equal(observationsAfterCorrection.length, chain.length, 'the late frame adds exactly one observation');
+  assert.deepEqual(observationsAfterCorrection.slice(0, observationsBefore.length), observationsBefore,
+    'the late frame does not replace any earlier observation identity');
+  assert.deepEqual(identityFields(observationsAfterCorrection), chain.filter((f) => f !== lost).concat(lost).map((f) => ({
+    deveui: GAUGE_A, dev_addr: '01000001', f_cnt: f.fCnt, received_at: f.time,
+  })), 'the corrected set contains every distinct frame identity exactly once');
+  const lateObservation = observationsAfterCorrection.at(-1);
+  assert.ok(lateObservation.event_id && lateObservation.payload_digest, 'the late frame has a durable identity');
+  assert.deepEqual(identityFields([lateObservation]), [{
+    deveui: GAUGE_A, dev_addr: '01000001', f_cnt: lost.fCnt, received_at: lost.time,
+  }], 'the appended observation is the late frame');
   // Re-delivering the same observation changes nothing and emits nothing.
   const msgAgain = await loRainNode(db, GAUGE_A, { ...lost });
   assert.deepEqual(msgAgain.errors, []);
   assert.deepEqual(zoneRow(db, 1, '2026-10-08'), after);
+  assert.deepEqual(observations(), observationsAfterCorrection, 'redelivery preserves the exact observation rows and identities');
+  assert.equal(observations().length, chain.length, 'redelivery does not add an observation');
 });
 
 test('(d) a recompute that changes nothing does not increment sync_version or touch computed_at', async () => {
