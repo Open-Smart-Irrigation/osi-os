@@ -1,6 +1,9 @@
 'use strict';
 // LoRain dry reports and the zone day window, through the one writer node
 // (lorain-ingest-fn; it replaced lorain-process-fn + lorain-rain-agg-fn).
+// Since the zone-day projection (policy 1) the zone row carries what a gauge
+// received in rain_received_mm; rainfall_mm stays NULL until a day is
+// certified complete, which no unpromoted gauge achieves (owner decision D9).
 // Run with a pinned host timezone: TZ=UTC node --test scripts/test-lorain-dry-zone-row.js
 // (the result must not depend on it; TZ=Pacific/Auckland must pass as well).
 const test = require('node:test');
@@ -32,11 +35,11 @@ async function ingest(db, time, tips, extra) {
 }
 const zoneRows = (db) => db.prepare('SELECT COUNT(*) AS n FROM zone_daily_environment').get().n;
 
-test('a valid zero report creates a zone row with 0 mm and the gauge source', async () => {
+test('a valid zero report creates a zone row with 0 mm received and the gauge source', async () => {
   const db = seed('UTC');
   await ingest(db, '2026-10-08T10:00:00.000Z', 0);
-  const row = db.prepare("SELECT rainfall_mm, rain_source FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
-  assert.deepEqual({ ...row }, { rainfall_mm: 0, rain_source: 'aquascope_lorain' });
+  const row = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_source, rain_coverage FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  assert.deepEqual({ ...row }, { rainfall_mm: null, rain_received_mm: 0, rain_source: 'aquascope_lorain', rain_coverage: 'unknown' });
 });
 
 test('a silent gauge has no zone row', async () => {
@@ -57,8 +60,8 @@ test('non-ok zero does not reach the zone table', async () => {
   await ingest(db, '2026-10-08T12:00:00.000Z', 1);
   // A delayed distinct zero (older time, own identity) is accepted and adds nothing (A7).
   await ingest(db, '2026-10-08T09:00:00.000Z', 0);
-  const row = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
-  assert.equal(row.rainfall_mm, 0.5);
+  const row = db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  assert.equal(row.rain_received_mm, 0.5);
 });
 
 test('seeds a new zone day from the zone-local window, not the host day', async () => {
@@ -69,22 +72,24 @@ test('seeds a new zone day from the zone-local window, not the host day', async 
   await ingest(db, '2025-10-25T20:00:00.000Z', 20);
   // 23:15Z on 2025-10-25 is 01:15 local on the 26th (the 25-hour day); host day (UTC) is still the 25th.
   await ingest(db, '2025-10-25T23:15:00.000Z', 1);
-  const day26 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-26'").get();
-  assert.equal(day26.rainfall_mm, 0.5, 'never 10.5 mm carried over from the host day');
-  const day25 = db.prepare("SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-25'").get();
-  assert.equal(day25.rainfall_mm, 10);
+  const day26 = db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-26'").get();
+  assert.equal(day26.rain_received_mm, 0.5, 'never 10.5 mm carried over from the host day');
+  const day25 = db.prepare("SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id=1 AND date='2025-10-25'").get();
+  assert.equal(day25.rain_received_mm, 10);
 });
 
-test('a dry report after rain keeps the day total, refreshes computed_at, and does not bump sync_version', async () => {
+// Since policy 1 a recomputation that changes no projected field writes nothing
+// (zone-day projection contract), so computed_at stays as well.
+test('a dry report after rain keeps the day total and writes nothing when no projected field changes', async () => {
   const db = seed('UTC');
   await ingest(db, '2026-10-08T10:00:00.000Z', 2);
   const before = db.prepare("SELECT sync_version, computed_at FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
   await new Promise((r) => setTimeout(r, 5));
   await ingest(db, '2026-10-08T11:00:00.000Z', 0);
-  const after = db.prepare("SELECT rainfall_mm, sync_version, computed_at FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
-  assert.equal(after.rainfall_mm, 1);
+  const after = db.prepare("SELECT rain_received_mm, sync_version, computed_at FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get();
+  assert.equal(after.rain_received_mm, 1);
   assert.equal(after.sync_version, before.sync_version);
-  assert.ok(after.computed_at > before.computed_at, 'dry evidence refreshes computed_at');
+  assert.equal(after.computed_at, before.computed_at, 'nothing projected changed, nothing written');
 });
 
 // The installed gauges send nothing while dry and a heartbeat (0 tips) every 4 hours;
@@ -108,7 +113,7 @@ function seedOwnedRow(db, source, mm) {
     VALUES (1,'2026-10-08',${mm},12,'${source}','2026-10-08T09:00:00.000Z',4);`);
 }
 function zoneDay(db) {
-  return { ...db.prepare("SELECT rainfall_mm, flow_liters, rain_source, computed_at, sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get() };
+  return { ...db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, flow_liters, rain_source, computed_at, sync_version FROM zone_daily_environment WHERE zone_id=1 AND date='2026-10-08'").get() };
 }
 
 test('a zero heartbeat leaves an S2120-owned zone day and its sync_version unchanged', async () => {
@@ -128,22 +133,29 @@ test('a zero heartbeat leaves an LSN50 local_gauge zone day unchanged (no ping-p
   assert.deepEqual(zoneDay(db), before);
 });
 
-test('a zero heartbeat with no zone day inserts 0 mm owned by the gauge', async () => {
+test('a zero heartbeat with no zone day inserts 0 mm received, owned by the gauge', async () => {
   const db = seed('UTC');
   await ingest(db, '2026-10-08T10:00:00.000Z', 0);
   const row = zoneDay(db);
-  assert.equal(row.rainfall_mm, 0);
+  assert.equal(row.rainfall_mm, null);
+  assert.equal(row.rain_received_mm, 0);
   assert.equal(row.rain_source, 'aquascope_lorain');
   assert.equal(row.sync_version, 0);
 });
 
-test('a positive report still overwrites another source\'s zone day (pinned until R-ZONE)', async () => {
+// A legacy row (written before policy 1, rain_coverage NULL) is re-projected
+// by an accepted positive observation of its own date; the zone's one gauge is
+// the LoRain, so the row now says what it received and that it is unknown.
+test('a positive report re-projects a legacy zone day of another source at policy 1', async () => {
   const db = seed('UTC');
   seedOwnedRow(db, 'sensecap_s2120', 3.2);
   await ingest(db, '2026-10-08T10:00:00.000Z', 2);
   const row = zoneDay(db);
-  assert.equal(row.rainfall_mm, 1);
+  assert.equal(row.rainfall_mm, null);
+  assert.equal(row.rain_received_mm, 1);
+  assert.equal(row.rain_coverage, 'unknown');
   assert.equal(row.rain_source, 'aquascope_lorain');
+  assert.equal(row.flow_liters, 12, 'flow is never touched by a rain recomputation');
   assert.equal(row.sync_version, 5);
 });
 
@@ -151,14 +163,15 @@ test('an invalid zone timezone falls back to UTC for both the date and the day w
   const db = seed('Mars/Olympus');
   await ingest(db, '2026-10-07T23:00:00.000Z', 1);
   await ingest(db, '2026-10-08T00:30:00.000Z', 0);
-  const rows = db.prepare('SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1 ORDER BY date').all().map((r) => ({ ...r }));
-  assert.deepEqual(rows, [{ date: '2026-10-07', rainfall_mm: 0.5 }, { date: '2026-10-08', rainfall_mm: 0 }]);
+  const rows = db.prepare('SELECT date, rain_received_mm, rain_coverage, rain_quality_reasons FROM zone_daily_environment WHERE zone_id=1 ORDER BY date').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows.map((r) => [r.date, r.rain_received_mm, r.rain_coverage]), [['2026-10-07', 0.5, 'unknown'], ['2026-10-08', 0, 'unknown']]);
+  assert.ok(rows.every((r) => JSON.parse(r.rain_quality_reasons).includes('timezone_invalid')), 'never certified, flagged');
 });
 
 test('the day date and the day window read the zone timezone the same way', async () => {
   const db = seed(' Europe/Zurich');
   // 22:30Z on 2026-10-08 is 00:30 local on the 9th.
   await ingest(db, '2026-10-08T22:30:00.000Z', 1);
-  const rows = db.prepare('SELECT date, rainfall_mm FROM zone_daily_environment WHERE zone_id=1').all().map((r) => ({ ...r }));
-  assert.deepEqual(rows, [{ date: '2026-10-09', rainfall_mm: 0.5 }]);
+  const rows = db.prepare('SELECT date, rain_received_mm FROM zone_daily_environment WHERE zone_id=1').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [{ date: '2026-10-09', rain_received_mm: 0.5 }]);
 });

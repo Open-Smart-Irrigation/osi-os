@@ -12,6 +12,8 @@ const {
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
+const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
+const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
 const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
@@ -2425,7 +2427,10 @@ expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status 
 expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
 expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
 expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
-expectIncludes('LSN50 Normalize + Write', 'return await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
+expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
 expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
 expectIncludes('LSN50 Normalize + Write', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
 expectIncludes('LSN50 Normalize + Write', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
@@ -2501,9 +2506,19 @@ expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via
 expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
 expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
 expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
-expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
-expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
-expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
+expectIncludesById('lsn50-zone-agg-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib for the zone-day projection');
+expectIncludesById('lsn50-zone-agg-fn', 'await db.transaction(async (t) => rainLoad.value.aggregateLsn50ZoneDay(t, d))', 'delegates snapshot-based rain aggregation inside the helper transaction');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function captureLsn50Observation(t, row)', 'captures MOD9 zone provenance at raw-write time');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function aggregateLsn50ZoneDay(t, d)', 'keeps LSN50 rain and flow projection in the transaction helper');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function recomputeLsn50PreviousDay(t, deveui, currentObservationId)', 'closes prior days from captured zone snapshots');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'config.rain_gauge_enabled === true', 'does not retroactively enable captured non-gauge frames');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'accepted', amountMm: Number(d.rainMmDelta)", 'writes captured rain through the zone-day projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'flow', flowLitersDelta: flowDelta", 'keeps flow arithmetic on the current owner');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const rainOk = d.rainDeltaStatus === 'ok' && d.rainMmDelta != null && Number(d.rainMmDelta) >= 0", 'only aggregates valid rain deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const flowAvailable = d.flowDeltaStatus === 'ok' && d.flowLitersDelta != null", 'only aggregates valid flow deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'const acceptedRain = rainOk && observation && observation.status === \'accepted\' && config.rain_gauge_enabled === true', 'requires an accepted enabled rain observation before zone rain projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'if (zone && flowAvailable && !flowZones.has(Number(zone.zone_id)))', 'requires a valid flow delta before current-owner flow projection');
+expectLibById('lsn50-zone-agg-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
 expectIncludesById('format-devices', 'dd.adc_ch1v', 'returns dendrometer CH1 voltage in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_ratio', 'returns dendrometer ratio in GET /api/devices');
@@ -2653,8 +2668,9 @@ expectLibById('s2120-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib
     ['FROM weather_station_zones wsz', 'prefers explicit S2120 weather station zone assignments'],
     ['if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL', 'falls back when S2120 weather station zone assignments are absent'],
     ['SELECT d.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback'],
-    ['const total = await s2120DayTotal(t, id.deveui, win.startIso, win.endIso, false);', 'sets the S2120 zone day to the device day total in the zone timezone'],
-    ['source: S2120_RAIN_SOURCE, allowTakeover: rain.deltaMm > 0', 'never lets a zero S2120 increment take over a zone day another source owns'],
+    ['zones: zoneIds,', 'records the zones an S2120 observation was received under'],
+    ['zoneDays = await recomputeRainDays(t, id.deveui, items, { nowMs });', 'projects the S2120 zone days through the zone-day projection in the zone timezone'],
+    ["const filter = instrument.typeId === S2120_TYPE_ID", 'assesses S2120 days from S2120 rain frames only, never with the LoRain chain'],
   ]) {
     expectCondition(rainModuleSource.includes(needle), `osi-rain S2120 ${description}`, `osi-rain S2120 missing: ${description}`);
   }
@@ -2692,7 +2708,10 @@ expectLibById('lorain-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLi
   for (const [needle, description] of [
     ["const LORAIN_TYPE_ID = 'AQUASCOPE_LORAIN';", 'guards LoRain uplinks by local device type'],
     ["const LORAIN_RAIN_SOURCE = 'aquascope_lorain';", 'labels LoRain zone rainfall source'],
-    ["'WHERE ? = 1 OR zone_daily_environment.rain_source = ?'", 'never lets a zero report take over a zone day another source owns'],
+    ["else if (trigger === 'accepted' && row.rain_source && row.rain_source !== 'none' && row.rain_source !== p.source", 'never lets a zero report take over a legacy zone day another source owns'],
+    ["amountMm: coverage === 'complete' ? amountMm : null,", 'projects a zone rainfall amount only for a certified complete day'],
+    ["zoneReasons.add(selection.state === 'ambiguous' ? 'gauge_ambiguous' : 'no_gauge');", 'never adds two gauges: an ambiguous zone has no amount'],
+    ["'SELECT * FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1'", 'runs the LoRain chain only on LoRain observations'],
     ['rain_tips_delta', 'persists LoRain tip deltas'],
     ['const PINNED_LORAIN_BUILDS = Object.freeze([]);', 'promotes no installed LoRain build until the owner confirms one'],
   ]) {

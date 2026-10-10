@@ -1112,9 +1112,11 @@ if (silentCatchBaseline) {
   // with one silent close() catch, are replaced by lorain-ingest-fn (none): 86 -> 84.
   // 82: rain correctness, one S2120 writer -- s2120-process-fn and s2120-rain-agg-fn, each
   // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 82 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 82,
-    'silent-catch baseline records 82 for both maintained profiles',
-    'silent-catch baseline must be 82 for both maintained profiles');
+  // 81: zone-day projection -- lsn50-zone-agg-fn's silent close() catch is replaced by a
+  // close in finally: 82 -> 81.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 81 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 81,
+    'silent-catch baseline records 81 for both maintained profiles',
+    'silent-catch baseline must be 81 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

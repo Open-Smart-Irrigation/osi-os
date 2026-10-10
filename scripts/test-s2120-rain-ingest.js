@@ -60,7 +60,9 @@ function createDb({ timezone = 'UTC' } = {}) {
     INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z Two', 1, 'z-2', 'UTC', 'local');
     INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
       VALUES ('${DEV_EUI}', 'Station 1', 'SENSECAP_S2120', 1, 1, '2026-01-01', '2026-01-01'),
-             ('${DEV_EUI_2}', 'Station 2', 'SENSECAP_S2120', 1, 1, '2026-01-01', '2026-01-01');`);
+             ('${DEV_EUI_2}', 'Station 2', 'SENSECAP_S2120', 1, NULL, '2026-01-01', '2026-01-01');`);
+  // Station 2 has no zone: two gauges in zone 1 would make every zone day
+  // ambiguous (one selected gauge per zone, owner decision D1).
   return db;
 }
 
@@ -224,8 +226,9 @@ test('increments keep three decimals through the daily total and the zone total'
   const third = await uplink('2026-10-08T10:30:00.000Z', v2(1.524, 10.762));
   assert.equal(third.row.rain_mm_delta, 0.254);
   assert.equal(third.row.rain_mm_today, 0.762);
-  const zone = db.prepare('SELECT rainfall_mm, rain_source FROM zone_daily_environment WHERE zone_id = 1').get();
-  assert.ok(Math.abs(zone.rainfall_mm - 0.762) < 1e-9, 'zone total ' + zone.rainfall_mm + ' keeps the thousandths');
+  const zone = db.prepare('SELECT rainfall_mm, rain_received_mm, rain_source FROM zone_daily_environment WHERE zone_id = 1').get();
+  assert.ok(Math.abs(zone.rain_received_mm - 0.762) < 1e-9, 'zone total ' + zone.rain_received_mm + ' keeps the thousandths');
+  assert.equal(zone.rainfall_mm, null, 'no reading before the day started, so the day is not certified');
   assert.equal(zone.rain_source, 'sensecap_s2120');
 });
 
@@ -354,8 +357,8 @@ test('a dry counter interval is a valid zero and reaches the zone aggregation', 
   assert.equal(dry.row.rain_delta_status, 'ok');
   assert.equal(dry.row.rain_mm_delta, 0);
   assert.ok(dry.accepted, 'a measured zero is counted, not dropped');
-  const zone = db.prepare('SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1').get();
-  assert.equal(zone.rainfall_mm, 0);
+  const zone = db.prepare('SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1').get();
+  assert.equal(zone.rain_received_mm, 0);
 });
 
 test('intensity-only uplinks before the first 4213 are not counted again by the counter', async () => {
@@ -439,7 +442,7 @@ test('duplicate delivery counts once (one observation, one device_data row, one 
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 2);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'"), 2);
-  assert.deepEqual(rows(db, 'SELECT rainfall_mm, rain_source FROM zone_daily_environment'), [{ rainfall_mm: 1, rain_source: 'sensecap_s2120' }]);
+  assert.deepEqual(rows(db, 'SELECT rain_received_mm, rain_source FROM zone_daily_environment'), [{ rain_received_mm: 1, rain_source: 'sensecap_s2120' }]);
 });
 
 test('a confirmed-uplink retransmission (new deduplicationId, same devAddr, fCnt and payload) is a duplicate', async () => {
@@ -450,7 +453,7 @@ test('a confirmed-uplink retransmission (new deduplicationId, same devAddr, fCnt
   assert.deepEqual(await h.deliver({ ...wet.payload, deduplicationId: '00000000-0000-4000-8000-0000000009ff', time: at(10.1) }), []);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM rain_observations'), 2);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM device_data'), 2);
-  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 1);
+  assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment').get().rain_received_mm, 1);
 });
 
 test('identity conflict is quarantined, not overwritten', async () => {
@@ -493,7 +496,7 @@ test('failure between identity claim and persistence rolls back; the retry count
   assert.deepEqual(await h.deliver(payload(10, 101, 2)), [], 'a second delivery after the retry is a duplicate');
   assert.deepEqual(rows(db, 'SELECT rain_mm_delta, rain_delta_status FROM device_data ORDER BY id'),
     [{ rain_mm_delta: null, rain_delta_status: 'cumulative_baseline' }, { rain_mm_delta: 1, rain_delta_status: 'ok' }]);
-  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 1);
+  assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment').get().rain_received_mm, 1);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE op='DEVICE_DATA_APPENDED'"), 2);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='ZONE_ENVIRONMENT'"), 1);
 });
@@ -512,7 +515,26 @@ test('missing deduplicationId is ambiguous identity: never counted and never a c
   const next = await h.uplink(at(20), v2(6, 102));
   assert.equal(next.row.rain_mm_delta, 2, 'differenced against the last identified counter row, so no rain is lost');
   assert.equal(next.row.counter_interval_seconds, 1200);
-  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 2);
+  assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment').get().rain_received_mm, 2);
+});
+
+test('an identityless S2120 counter frame makes the in-day instrument assessment unknown without becoming a counter baseline', async () => {
+  const db = createDb();
+  const h = harness(db);
+  await h.uplink('2026-10-07T23:00:00.000Z', v2(0, 100));
+  await h.uplink('2026-10-08T00:00:00.000Z', v2(0, 100));
+  await h.uplink('2026-10-08T04:00:00.000Z', v2(0, 102));
+  const ambiguous = await h.uplink('2026-10-08T12:00:00.000Z', v2(0, 103), DEV_EUI, { deduplicationId: undefined });
+  await h.uplink('2026-10-08T20:00:00.000Z', v2(0, 104));
+  const closesDay = await h.uplink('2026-10-09T00:00:00.000Z', v2(0, 104));
+
+  assert.equal(ambiguous.obs.status, 'ambiguous_identity');
+  assert.equal(closesDay.row.rain_mm_delta, 0, 'the identityless frame is not a cumulative-counter baseline');
+  const day = db.prepare("SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_quality_reasons FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'").get();
+  assert.equal(day.rain_coverage, 'unknown', 'the ambiguous frame remains in the day assessment');
+  assert.equal(day.rainfall_mm, null);
+  assert.equal(day.rain_received_mm, 4, 'only identified increments are counted');
+  assert.ok(JSON.parse(day.rain_quality_reasons).includes('ambiguous_identity'));
 });
 
 test('a device of another type is ignored', async () => {
@@ -539,7 +561,7 @@ test('a late counter frame is kept with late_counter_frame and its own differenc
   assert.equal(late.row.rain_delta_status, 'out_of_order');
   assert.equal(late.row.rain_mm_delta, null);
   assert.equal(db.prepare('SELECT rain_mm_delta FROM device_data WHERE id = ?').get(after.row.id).rain_mm_delta, 2, 'not rewritten');
-  assert.equal(db.prepare('SELECT rainfall_mm FROM zone_daily_environment').get().rainfall_mm, 2);
+  assert.equal(db.prepare('SELECT rain_received_mm FROM zone_daily_environment').get().rain_received_mm, 2);
 });
 
 test('observation rows: counter increments are protocol-verified intervals, legacy windows reception gaps, weather frames status rows', async () => {
@@ -567,7 +589,10 @@ test('observation rows: counter increments are protocol-verified intervals, lega
   assert.equal(weather.row.rain_mm_today, null);
 });
 
-test('zone day: weather-station zones first; a zero never takes over another source\'s day, a positive increment does', async () => {
+// Every zone the station serves (its own zone and its weather-station zones) is
+// recomputed; the station is the one candidate of both here. A zero never takes
+// over a legacy day another gauge source owns; a positive increment re-projects it.
+test('zone day: every zone the station serves; a zero never takes over a legacy day of another source, a positive increment re-projects it', async () => {
   const db = createDb();
   db.exec(`INSERT INTO weather_station_zones (deveui, zone_id, created_at) VALUES ('${DEV_EUI}', 2, '2026-01-01');
     INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at)
@@ -576,12 +601,14 @@ test('zone day: weather-station zones first; a zero never takes over another sou
   await h.uplink(at(0), v2(0, 100));
   const dry = await h.uplink(at(10), v2(0, 100));
   assert.equal(dry.row.rain_delta_status, 'ok');
-  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_source FROM zone_daily_environment ORDER BY zone_id'),
-    [{ zone_id: 2, rainfall_mm: 5, rain_source: 'aquascope_lorain' }], 'the device zone is not written while a station zone exists');
+  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_received_mm, rain_source, rain_coverage FROM zone_daily_environment ORDER BY zone_id'),
+    [{ zone_id: 1, rainfall_mm: null, rain_received_mm: 0, rain_source: 'sensecap_s2120', rain_coverage: 'partial' },
+      { zone_id: 2, rainfall_mm: 5, rain_received_mm: null, rain_source: 'aquascope_lorain', rain_coverage: null }],
+    'the legacy LoRain day of zone 2 is untouched by a zero');
   assert.equal(dry.obs.zone_id, 2, 'the observation snapshots the zone it reports to');
   await h.uplink(at(20), v2(1.524, 100.254));
-  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_source FROM zone_daily_environment ORDER BY zone_id'),
-    [{ zone_id: 2, rainfall_mm: 0.254, rain_source: 'sensecap_s2120' }]);
+  assert.deepEqual(rows(db, 'SELECT zone_id, rainfall_mm, rain_received_mm, rain_source FROM zone_daily_environment WHERE zone_id = 2'),
+    [{ zone_id: 2, rainfall_mm: null, rain_received_mm: 0.254, rain_source: 'sensecap_s2120' }]);
 });
 
 test('the farm day is the zone timezone, never the gateway host day', async () => {
@@ -592,7 +619,7 @@ test('the farm day is the zone timezone, never the gateway host day', async () =
   assert.equal(late.row.rain_mm_today, 0.5);
   const midnight = await h.uplink('2026-10-08T22:10:00.000Z', v2(3, 101));
   assert.equal(midnight.row.rain_mm_today, 0.5, '00:10 in Zurich starts a new farm day');
-  assert.deepEqual(rows(db, 'SELECT date, rainfall_mm FROM zone_daily_environment ORDER BY date'),
-    [{ date: '2026-10-08', rainfall_mm: 0.5 }, { date: '2026-10-09', rainfall_mm: 0.5 }]);
+  assert.deepEqual(rows(db, 'SELECT date, rain_received_mm FROM zone_daily_environment ORDER BY date'),
+    [{ date: '2026-10-08', rain_received_mm: 0.5 }, { date: '2026-10-09', rain_received_mm: 0.5 }]);
   assert.equal(midnight.obs.timezone, 'Europe/Zurich');
 });

@@ -30,6 +30,16 @@ describe('addDaysIso', () => {
 });
 
 describe('parseRainHistory', () => {
+  it('preserves complete_so_far quality from a current farm day', () => {
+    const history = parseRainHistory({
+      version: 2,
+      timezone: 'Europe/Zurich',
+      timezone_basis: 'zone',
+      days: [{ day: '2026-10-08', total_mm: 0.4, samples: 1, quality: 'complete_so_far', so_far: true }],
+    });
+    expect(history.days[0].quality).toBe('complete_so_far');
+  });
+
   it('reads the version 2 payload of the gateway', () => {
     const history = parseRainHistory({
       version: 2,

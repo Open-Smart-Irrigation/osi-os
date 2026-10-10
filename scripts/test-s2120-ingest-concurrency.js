@@ -117,7 +117,7 @@ function snapshot(dbPath, sql) {
   try { return native.prepare(sql).all().map((r) => ({ ...r })); } finally { native.close(); }
 }
 const acceptedTotal = (dbPath) => snapshot(dbPath, "SELECT ROUND(COALESCE(SUM(amount_mm), 0), 3) AS mm FROM rain_observations WHERE status = 'accepted'")[0].mm;
-const zoneDay = (dbPath) => snapshot(dbPath, "SELECT rainfall_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'");
+const zoneDay = (dbPath) => snapshot(dbPath, "SELECT rain_received_mm FROM zone_daily_environment WHERE zone_id = 1 AND date = '2026-10-08'");
 
 test.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
 
@@ -132,7 +132,7 @@ for (const order of ['101 first', '102 first']) {
     assert.deepEqual(rt.errors, []);
     assert.equal(acceptedTotal(dbPath), 2);
     assert.equal(snapshot(dbPath, "SELECT ROUND(SUM(rain_mm_delta), 3) AS mm FROM device_data WHERE rain_delta_status = 'ok'")[0].mm, 2);
-    assert.deepEqual(zoneDay(dbPath), [{ rainfall_mm: 2 }]);
+    assert.deepEqual(zoneDay(dbPath), [{ rain_received_mm: 2 }]);
   });
 }
 
@@ -145,7 +145,7 @@ test('twenty distinct uplinks in parallel: every increment once, zone day = the 
   await Promise.all(batch);
   assert.deepEqual(rt.errors, []);
   assert.equal(acceptedTotal(dbPath), 5.08);
-  assert.deepEqual(zoneDay(dbPath), [{ rainfall_mm: 5.08 }]);
+  assert.deepEqual(zoneDay(dbPath), [{ rain_received_mm: 5.08 }]);
 });
 
 test('two first frames on a cold marker cache: exactly one counter baseline', async () => {
@@ -166,7 +166,7 @@ test('the same uplink delivered twice at once is ingested once', async () => {
   assert.deepEqual(rt.errors, []);
   assert.deepEqual(snapshot(dbPath, 'SELECT COUNT(*) AS n FROM rain_observations'), [{ n: 2 }]);
   assert.deepEqual(snapshot(dbPath, 'SELECT COUNT(*) AS n FROM device_data'), [{ n: 2 }]);
-  assert.deepEqual(zoneDay(dbPath), [{ rainfall_mm: 1 }]);
+  assert.deepEqual(zoneDay(dbPath), [{ rain_received_mm: 1 }]);
 });
 
 test('a failure inside the transaction leaves nothing behind; the retry counts once; a restart keeps the identity', async () => {
@@ -186,7 +186,7 @@ test('a failure inside the transaction leaves nothing behind; the retry counts o
   crash = false;
   await rt.deliver(uplink(1, 100, 0));
   await rt.deliver(uplink(2, 101, 600));
-  assert.deepEqual(zoneDay(dbPath), [{ rainfall_mm: 1 }]);
+  assert.deepEqual(zoneDay(dbPath), [{ rain_received_mm: 1 }]);
 
   const openedBefore = opened;
   const restarted = runtime(dbPath);
@@ -197,5 +197,5 @@ test('a failure inside the transaction leaves nothing behind; the retry counts o
   assert.deepEqual(restarted.errors, []);
   assert.deepEqual(snapshot(dbPath, 'SELECT COUNT(*) AS n FROM rain_observations'), [{ n: 3 }]);
   assert.equal(acceptedTotal(dbPath), 1.5);
-  assert.deepEqual(zoneDay(dbPath), [{ rainfall_mm: 1.5 }]);
+  assert.deepEqual(zoneDay(dbPath), [{ rain_received_mm: 1.5 }]);
 });

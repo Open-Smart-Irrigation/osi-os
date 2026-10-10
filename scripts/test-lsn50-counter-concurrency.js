@@ -30,6 +30,7 @@ const MODULES = {
   chameleon: require(path.join(NODE_RED, 'osi-chameleon-helper')),
   'lsn50-normalize': require(path.join(NODE_RED, 'osi-lsn50-normalize')),
   'device-writer': require(path.join(NODE_RED, 'osi-device-writer')),
+  rain: require(path.join(NODE_RED, 'osi-rain')),
 };
 const MANIFEST = fs.readFileSync(path.join(NODE_RED, 'edge-channels.json'), 'utf8');
 
@@ -160,5 +161,25 @@ for (const order of ['101 first', '102 first']) {
     assert.equal(stored.length, 3, 'three device_data rows');
     const total = stored.reduce((sum, r) => sum + (r.rain_delta_status === 'ok' ? Number(r.rain_mm_delta) : 0), 0);
     assert.equal(Math.round(total * 10) / 10, 0.4, 'accepted rain_mm_delta total is 2 tips x 0.2 mm, never 3 tips: ' + JSON.stringify(stored));
+    const linked = snapshot(dbPath,
+      "SELECT dd.id AS device_data_id, dd.rain_count_cumulative, ro.id AS observation_id, ro.zone_id, ro.timezone, ro.config_json "
+      + "FROM device_data dd LEFT JOIN rain_observations ro ON ro.device_data_id = dd.id AND ro.instrument_type = 'DRAGINO_LSN50' "
+      + 'ORDER BY dd.recorded_at');
+    assert.equal(linked.length, stored.length, 'each committed counter row is returned for snapshot verification');
+    assert.equal(linked.filter((row) => row.observation_id !== null).length, stored.length,
+      'each committed counter row has a linked rain observation');
+    assert.equal(new Set(linked.map((row) => row.device_data_id)).size, stored.length,
+      'each committed device_data row appears once in the snapshot join');
+    assert.equal(new Set(linked.map((row) => row.observation_id)).size, stored.length,
+      'each counter row has exactly one distinct rain observation');
+    for (const row of linked) {
+      assert.equal(row.zone_id, 1, 'rain observation snapshots the assigned irrigation zone');
+      assert.equal(row.timezone, 'UTC', 'rain observation snapshots the zone timezone');
+      const config = JSON.parse(row.config_json);
+      assert.equal(config.frame.rain_count_cumulative, row.rain_count_cumulative);
+      assert.equal(config.rain_gauge_enabled, true);
+      assert.deepEqual(config.zones, [1]);
+      assert.deepEqual(config.zone_snapshots.map((zone) => zone.zone_id), [1]);
+    }
   });
 }

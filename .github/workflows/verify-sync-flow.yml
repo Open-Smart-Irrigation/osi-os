@@ -235,7 +235,7 @@ jobs:
       # legacy command path, each against the shipped source.
       - name: Zone weather provider round trip
         run: node --test scripts/test-zone-weather-source.js
-      # LoRain zone rain: a valid dry report writes a 0 mm zone row, a non-ok one does
+      # LoRain zone rain: a valid dry report writes a zone row with 0 mm received, a non-ok one does
       # not, and a new zone day starts from the zone's own day window, never the host
       # day. TZ pins the host clock the old 'localtime' path depended on.
       - name: LoRain dry reports and zone day window
@@ -248,6 +248,11 @@ jobs:
         run: TZ=UTC node --test scripts/test-lorain-ingest.js
       - name: LoRain ingestion under the real database helper
         run: TZ=UTC node --test scripts/test-lorain-ingest-concurrency.js
+      # Zone-day rain projection (migration 0072, osi-rain): one selected gauge per zone
+      # (never a sum), instrument days with coverage, rainfall_mm only for a certified
+      # complete day, late corrections, the move-day rule, through the ingest nodes.
+      - name: Zone-day rain projection
+        run: TZ=UTC node --test scripts/test-rain-zone-days.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
