@@ -52,6 +52,8 @@ const NAME_TO_PATH = {
   'sdi12-commissioning': 'osi-sdi12-commissioning',
   'sdi12-reassemble': 'osi-sdi12-reassemble',
   'station-hours': 'osi-station-hours',
+  // Rain correctness programme: rainfall measurement rules and the LoRain writer.
+  'rain': 'osi-rain',
   'agronomy-daily': 'osi-agronomy-daily',
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',

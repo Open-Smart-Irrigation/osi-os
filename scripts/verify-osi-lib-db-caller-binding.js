@@ -74,6 +74,14 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
     requiredFacadeExports: Object.freeze(['aggregateStationHours']),
     awaitedCall: /await\s+load\.value\.aggregateStationHours\s*\(/,
   }),
+  rain: Object.freeze({
+    moduleDir: 'osi-rain',
+    facadeTestFile: 'facade-contract.test.js',
+    reviewedCallerNodeIds: Object.freeze(['lorain-ingest-fn']),
+    requiredFacadeExports: Object.freeze(['ingestLoRainUplink', 'recomputeInstrumentDay']),
+    // lorain-ingest-fn awaits the transaction that runs the ingest.
+    awaitedCall: /await\s+db\.transaction\(\(t\)\s*=>\s*R\.ingestLoRainUplink\(/,
+  }),
   'agronomy-daily': Object.freeze({
     moduleDir: 'osi-agronomy-daily',
     facadeTestFile: 'facade-contract.test.js',
