@@ -354,3 +354,45 @@ test('snapshots: bootstrap and force-sync zoneEnvironments carry the five fields
     global.get = previousGet;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Convergence end to end (Task 3, A21): a partial day completed by a late
+// distinct observation converges with one versioned event.
+// ---------------------------------------------------------------------------
+test('a late rain correction converges with one versioned event; a re-delivery emits nothing', async () => {
+  const db = seedTestDb();
+  seedGauge(db);
+  const chain = dayChain();
+  const lost = chain.find((f) => f.fCnt === 3);
+  // The gateway links before the noon rain frame: from there on every projected
+  // change of 2026-10-08 is an event.
+  for (const frame of chain.filter((f) => f.fCnt < 3)) await loRain(db, frame);
+  db.prepare('INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES (?, ?, ?, ?)')
+    .run('cloud', 1, GATEWAY, '2026-10-01T00:00:00.000Z');
+  for (const frame of chain.filter((f) => f.fCnt > 3)) await loRain(db, frame);
+  await loRain(db, lost);
+  const delivered = zoneEvents(db);
+  assert.equal(delivered.length, 2, 'the partial day, then its correction');
+  const [partial, complete] = delivered;
+  assert.ok(complete.syncVersion > partial.syncVersion, 'increasing sync_version');
+  assert.equal(partial.payload.sync_version, partial.syncVersion);
+  assert.equal(complete.payload.sync_version, complete.syncVersion);
+  assert.deepEqual(
+    { coverage: partial.payload.rain_coverage, rainfall: partial.payload.rainfall_mm, received: partial.payload.rain_received_mm, reasons: partial.payload.rain_quality_reasons },
+    { coverage: 'partial', rainfall: null, received: 5, reasons: ['frame_gap'] });
+  assert.deepEqual(
+    { coverage: complete.payload.rain_coverage, rainfall: complete.payload.rainfall_mm, received: complete.payload.rain_received_mm, reasons: complete.payload.rain_quality_reasons },
+    { coverage: 'complete', rainfall: 5, received: 5, reasons: [] });
+  for (const event of delivered) {
+    assert.equal(event.payload.rain_selected_deveui, GAUGE);
+    assert.equal(event.payload.rain_policy_version, 1);
+    assert.equal(event.payload.rain_source, 'aquascope_lorain');
+    assert.equal(event.payload.contract_version, 1);
+  }
+  assert.ok(complete.payload.computed_at > partial.payload.computed_at);
+  // Re-delivering the late observation changes nothing and emits nothing.
+  frameSeq -= 1;
+  await loRain(db, lost);
+  assert.equal(zoneEvents(db).length, 2, 'no third event');
+  if (process.env.ZONE_ENV_PRINT_PAYLOADS === '1') console.log(JSON.stringify(delivered.map((e) => e.payload), null, 2));
+});
