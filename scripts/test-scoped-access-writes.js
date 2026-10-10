@@ -1708,6 +1708,7 @@ const ZONE_CONFIG_ROUTES = [
   ['PUT', '/api/irrigation-zones/1/location', { zone_id: '1' }],
   ['PUT', '/api/irrigation-zones/1/config', { zone_id: '1' }],
   ['POST', '/api/irrigation-zones/1/calibration', { id: '1' }],
+  ['PUT', '/api/irrigation-zones/1/rain-source', { zone_id: '1' }],
 ];
 
 test('W7: every zone-config route fresh-checks scope and records the actor', async () => {

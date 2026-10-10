@@ -1965,6 +1965,64 @@ async function recomputeRainDays(t, deveui, items, opts = {}) {
   return written;
 }
 
+// ---------------------------------------------------------------------------
+// Operator gauge selection (GET/PUT /api/irrigation-zones/:zone_id/rain-source)
+// ---------------------------------------------------------------------------
+
+// The zone's selection as the zone settings show it: the selectZoneGauge state
+// for the zone as it is now (no day snapshot), every live candidate with its
+// name and how it reaches the zone, and the journal v1 suggestion while the
+// zone is ambiguous (owner decision D1: the operator confirms it). Null when
+// the zone does not exist or is deleted.
+async function zoneRainSourceView(t, zoneId) {
+  const zid = Number(zoneId);
+  const zone = await loadZone(t, zid);
+  if (!zone) return null;
+  const selection = await selectZoneGauge(t, zid, null, { zone });
+  const candidates = (await zoneCandidates(t, zid, null)).sort(suggestionOrder);
+  const names = new Map();
+  if (candidates.length) {
+    const rows = await t.all('SELECT deveui, name FROM devices WHERE deleted_at IS NULL AND upper(deveui) IN ('
+      + candidates.map(() => '?').join(', ') + ')', candidates.map((c) => c.deveui));
+    for (const r of rows) names.set(normalizeEui(r.deveui), r.name === null || r.name === undefined ? null : String(r.name));
+  }
+  return {
+    state: selection.state,
+    selected_deveui: selection.deveui,
+    basis: selection.basis,
+    candidates: candidates.map((c) => ({
+      deveui: c.deveui,
+      name: names.has(c.deveui) ? names.get(c.deveui) : null,
+      type_id: c.typeId,
+      via: c.tier === 0 ? 'direct' : 'weather_station',
+    })),
+    suggested_deveui: selection.suggestedDeveui,
+  };
+}
+
+// Store the operator's choice (a candidate's DevEUI, or null to clear it).
+// Runs inside the caller's transaction. Returns { ok: false, reason } for a
+// missing zone ('zone_not_found') or a DevEUI that is not a live candidate of
+// the zone ('not_a_candidate'); nothing is written then.
+async function setZoneRainSource(t, zoneId, deveui, opts = {}) {
+  const zid = Number(zoneId);
+  const zone = await loadZone(t, zid);
+  if (!zone) return { ok: false, reason: 'zone_not_found' };
+  const eui = deveui === null || deveui === undefined ? null : normalizeEui(deveui);
+  if (eui !== null) {
+    const candidates = await zoneCandidates(t, zid, null);
+    if (!eui || !candidates.some((c) => c.deveui === eui)) return { ok: false, reason: 'not_a_candidate' };
+  }
+  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  await t.run(
+    'INSERT INTO zone_rain_source (zone_id, selected_deveui, selected_at, selected_by_uuid, updated_at) VALUES (?, ?, ?, ?, ?) '
+    + 'ON CONFLICT(zone_id) DO UPDATE SET selected_deveui = excluded.selected_deveui, selected_at = excluded.selected_at, '
+    + 'selected_by_uuid = excluded.selected_by_uuid, updated_at = excluded.updated_at',
+    [zid, eui, eui === null ? null : nowIso, opts.actorUuid ? String(opts.actorUuid) : null, nowIso]);
+  return { ok: true, view: await zoneRainSourceView(t, zid) };
+}
+
 module.exports = {
   RAIN_POLICY_VERSION,
   LORAIN_MM_PER_TIP,
@@ -1998,4 +2056,6 @@ module.exports = {
   recomputeZoneDay,
   resolveZoneRain,
   recomputeRainDays,
+  zoneRainSourceView,
+  setZoneRainSource,
 };
