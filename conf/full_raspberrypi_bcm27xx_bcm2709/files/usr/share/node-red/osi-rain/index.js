@@ -143,6 +143,29 @@ function localDateKey(ms, timezone) {
   return p.year + '-' + p.month + '-' + p.day;
 }
 
+// The one timezone resolver for rain on the gateway (zone-day projection
+// contract; osi-history-helper delegates its classification here). Takes the
+// stored value, or a zone row with a `timezone` column. basis:
+//   'zone'               a region name (or UTC) that Intl accepts;
+//   'abbreviation'       Intl accepts it but it is not a region name (CET):
+//                        kept, certifiable, flagged so the operator can pick a
+//                        region (owner decision D6);
+//   'invalid'            not a timezone: answered in UTC and never certified;
+//   'unassigned_default' empty or missing: UTC.
+function resolveTimezone(raw) {
+  const value = raw !== null && typeof raw === 'object' ? raw.timezone : raw;
+  const tz = String(value === null || value === undefined ? '' : value).trim();
+  if (!tz) return { timezone: 'UTC', basis: 'unassigned_default' };
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+  } catch (_invalidZone) {
+    return { timezone: 'UTC', basis: 'invalid' };
+  }
+  const upper = tz.toUpperCase();
+  if (upper === 'UTC' || upper === 'ETC/UTC' || tz.includes('/')) return { timezone: tz, basis: 'zone' };
+  return { timezone: tz, basis: 'abbreviation' };
+}
+
 // The zone-local day that contains `tsIso`: date and [startIso, endIso).
 // A day is 23 to 25 hours long, so 26 hours after its start always lies in
 // the next day. An invalid timezone reads as UTC (as osi-history-helper does).
@@ -1241,6 +1264,7 @@ module.exports = {
   classifyLoRainFrame,
   loRainChainFrame,
   assessLoRainChain,
+  resolveTimezone,
   zoneDayWindow,
   zoneDateWindow,
   ingestLoRainUplink,

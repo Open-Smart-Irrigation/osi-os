@@ -359,3 +359,25 @@ test('deriveS2120Legacy: firmware without 4213 integrates intensity / 6 only ove
   assert.equal(legacy.rainGaugeCumulativeMm, null, 'a rate is never stored as a counter');
   assert.equal(legacy.rainMmPerHour, 1.524);
 });
+
+// ---------------------------------------------------------------------------
+// Zone-day projection (docs/contracts/rainfall/zone-day-projection.md)
+// ---------------------------------------------------------------------------
+
+test('resolver flags abbreviation and invalid', () => {
+  assert.deepEqual(R.resolveTimezone('Europe/Zurich'), { timezone: 'Europe/Zurich', basis: 'zone' });
+  assert.deepEqual(R.resolveTimezone('CET'), { timezone: 'CET', basis: 'abbreviation' });
+  assert.deepEqual(R.resolveTimezone('Mars/Olympus'), { timezone: 'UTC', basis: 'invalid' });
+  assert.deepEqual(R.resolveTimezone(''), { timezone: 'UTC', basis: 'unassigned_default' });
+  assert.deepEqual(R.resolveTimezone(null), { timezone: 'UTC', basis: 'unassigned_default' });
+  assert.deepEqual(R.resolveTimezone('UTC'), { timezone: 'UTC', basis: 'zone' });
+  assert.deepEqual(R.resolveTimezone(' Europe/Zurich '), { timezone: 'Europe/Zurich', basis: 'zone' });
+  // A zone row resolves through its timezone column.
+  assert.deepEqual(R.resolveTimezone({ id: 1, timezone: 'CET' }), { timezone: 'CET', basis: 'abbreviation' });
+  assert.deepEqual(R.resolveTimezone({ id: 1 }), { timezone: 'UTC', basis: 'unassigned_default' });
+});
+
+test('dst-25h-day and 23h day windows', () => {
+  assert.deepEqual(R.zoneDayWindow('2026-10-25T12:00:00Z', 'Europe/Zurich'), { date: '2026-10-25', startIso: '2026-10-24T22:00:00.000Z', endIso: '2026-10-25T23:00:00.000Z' });
+  assert.deepEqual(R.zoneDayWindow('2026-03-29T12:00:00Z', 'Europe/Zurich'), { date: '2026-03-29', startIso: '2026-03-28T23:00:00.000Z', endIso: '2026-03-29T22:00:00.000Z' });
+});

@@ -4,8 +4,10 @@ const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
 const { deviceSourceId, describeDeviceSource } = require('./device-sources');
 // The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
-// as in the repo; osi-weather-provider requires nothing back, so there is no cycle.
+// as in the repo; osi-weather-provider and osi-rain require nothing back, so
+// there is no cycle.
 const { zoneLocations } = require('../osi-weather-provider');
+const rainRules = require('../osi-rain');
 
 const DEFAULT_SOURCE_KEYS = {
   soil: 'root-zone',
@@ -2042,17 +2044,13 @@ async function legacySensorHistory(db, options = {}) {
 // can prompt for a region) or 'invalid' (not a timezone; answered in UTC).
 const UNASSIGNED_TIMEZONE = Object.freeze({ timezone: 'UTC', basis: 'unassigned_default' });
 
+// Classification is osi-rain's resolveTimezone (one resolver for rain on the
+// gateway); here an empty value means "not set at this level" (null) and a
+// region name carries no basis of its own, so the caller names the level.
 function classifyTimezone(raw) {
-  const tz = String(raw == null ? '' : raw).trim();
-  if (!tz) return null;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: tz });
-  } catch (_) {
-    return { timezone: 'UTC', basis: 'invalid' };
-  }
-  const upper = tz.toUpperCase();
-  if (upper === 'UTC' || upper === 'ETC/UTC' || tz.includes('/')) return { timezone: tz, basis: null };
-  return { timezone: tz, basis: 'abbreviation' };
+  const resolved = rainRules.resolveTimezone(raw);
+  if (resolved.basis === 'unassigned_default') return null;
+  return { timezone: resolved.timezone, basis: resolved.basis === 'zone' ? null : resolved.basis };
 }
 
 async function resolveDeviceTimezones(db, deveuis, options = {}) {
