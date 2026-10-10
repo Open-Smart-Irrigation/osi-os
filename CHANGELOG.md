@@ -7,7 +7,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.1] — 2026-10-10
+
+Rain fixes from the October rainfall review, plus valve command safety. No
+schema migration and no new device type since 0.8.0: a gateway goes back to
+0.8.0 by redeploying the 0.8.0 bundle.
+
 ### Upgrade notes
+- **Deploy OSI Server first.** It is not a hard order (no new sync event, no
+  new contract field the cloud must accept), but two edge changes read
+  better on an updated cloud. A flow-only LSN50 day now syncs
+  `rainfall_mm: null` with `rain_source: none`; OSI Server from #358 on reads
+  that row as unknown rain, while an older cloud stores 0 mm and its
+  prediction input uses that zero in place of the weather archive. The valve
+  refusals below come back as `REJECTED_PERMANENT` acknowledgements, which
+  every cloud already handles.
+- **No database change.** 0.8.1 adds no migration and rewrites no stored
+  row. Rolling back is a redeploy of the 0.8.0 bundle. Rows that 0.8.1
+  wrote stay valid under 0.8.0: 0 mm zone rows from dry LoRain heartbeats,
+  and empty rain on flow-only LSN50 days, which 0.8.0 reads as 0 mm as it
+  always did.
+- **Check each zone's time zone.** Rain history, the rain "today" tiles and
+  the LoRain zone rows now count days from the zone's own midnight. A zone
+  whose stored time zone is an abbreviation such as `CET` or a name the
+  gateway does not know shows "Check the zone time zone in its settings."
+  under its rain history; set it to a region name such as `Europe/Zurich`
+  in the zone settings. Nothing rewrites the value for you. A zone on the
+  default `UTC` is valid but counts days from UTC midnight. To list the
+  zones to look at:
+  `sqlite3 /data/db/farming.db "SELECT id, name, timezone FROM irrigation_zones WHERE deleted_at IS NULL AND timezone NOT LIKE '%/%';"`
+- **Upgrade with `deploy.sh`, so flows and GUI change together.**
+  `GET /api/devices/:deveui/rain-history` now answers a version 2 object
+  (farm time zone, day bounds, one entry per day). A 0.8.0 dashboard on
+  0.8.1 flows shows "No rainfall recorded in this window" in the 7, 30 and
+  90 day rain views. A 0.8.1 dashboard on 0.8.0 flows still works (it reads
+  the old array as UTC days). The firmware feed copy of the dashboard is
+  refreshed in this release.
 - **SenseCAP S2120 rain totals stored before this release are not validated
   measurements.** Earlier ingest read the rain intensity (measurement 4113,
   mm/h) as a rain counter, so the stored S2120 increments, daily totals,
@@ -23,6 +60,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   that carries 4213 starts a new counter baseline (status
   `cumulative_baseline`) and has no increment, so the rain of that one
   interval is not counted.
+- **Cloud valve commands that the gateway now refuses.** A `VALVE_COMMAND`
+  with `action: OPEN` or `CLOSE`, or without a duration, and a
+  `SET_STREGA_TIMED_ACTION` without a usable duration are answered
+  `REJECTED_PERMANENT` with a reason (`valve_action_not_allowed`,
+  `missing_or_invalid_duration`, `duration_out_of_range`). Before,
+  `action: OPEN` and `CLOSE` reached the valve as a bare open or close, and
+  the timed action was dropped. A cancel that names no actuation while two or more actuations of
+  one valve are active is refused with `ambiguous_actuation`; OSI Server does
+  not send `expectation_id` yet, and the local dashboard cancel answers 409 in
+  that case.
+- **Dendrometer advice may move on the first run.** See the rolling 7-day
+  rain entry under Fixed: some zones move from `decrease_20` to
+  `decrease_10`.
+
+### Known limitations
+- A LoRain heartbeat writes 0 mm for its zone day at the heartbeat's own
+  time. If rain reports of that day were lost, the day total undercounts and
+  nothing marks it. Coverage and interval quality per day come in 0.9.0.
+- `rain_mm_today` on a device is still summed per gateway host day. On a
+  gateway whose system clock runs on UTC with a farm in another time zone,
+  the "today" tile can show the UTC-day total between the farm's midnight
+  and UTC midnight.
+- A LoRain report with rain still overwrites a zone day that another rain
+  source (S2120, LSN50 gauge, weather service) wrote. Zero reports no longer
+  do. One selected gauge per zone comes in 0.9.0.
+- On the Water tab, a verdict flagged `rain_unknown` shows its reason but no
+  action word while the balance is empty. The zone card shows both.
+- OSI Server prefers any zone rain row over the weather archive for its
+  forecast input, so a zone measured only by a LoRain gauge gets 0 mm from
+  the cloud on days with heartbeats and no rain report, including days
+  whose rain frames were lost.
+- New strings in this release carry English text in the Luganda bundle
+  until the human translation pass (`docs/i18n/pending-luganda-translations.md`).
 
 ### Added
 - **Data view CSV with quality columns (opt-in).** An "Include quality
@@ -34,6 +104,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   partial weather sum gives its coverage as a fraction. Version 1 stays the
   default with the same columns and format. The gateway's zone and
   all-zones exports have no version 2.
+- **LoRain rainfall contract.** `docs/contracts/rainfall/lorain.md` states
+  what each LoRain frame proves (truth table `T1` to `T16`), when a silent
+  span counts as dry, and the conditions under which a gauge's reports may
+  be treated as verified. Replay fixtures under `scripts/fixtures/lorain-rain/`
+  run through the shipped codec in CI. No codec or flow change.
 
 ### Changed
 - **Data view daily device buckets follow the zone's local day.** Device
@@ -67,6 +142,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   offers the interval amount and the farm-day total.
 
 ### Fixed
+- **Rain "today" tiles no longer show yesterday's total as today.** The
+  LoRain "Today" tile, the S2120 "Rain today" tile and the LSN50 rain gauge
+  line showed the stored daily total without a date, so the morning after
+  the last report of a day still read "Today 8 mm". `GET /api/devices` now
+  adds `rain_day`, `rain_day_timezone` and `rain_day_timezone_basis` for
+  every rain-capable device: the farm-local date of the latest reading and
+  where the time zone came from (the device's zone, else the zone of the
+  weather station it serves, else UTC). The tiles show the value only while
+  that date is today in the farm's time zone, never the browser's;
+  otherwise they show "—" and "Last report <date>: <value> mm". An open tab
+  switches at the farm's midnight without a reload.
+- **Rain history days are the farm's days.** The daily rain history
+  (7, 30 and 90 days) was bucketed with the viewer's current UTC offset,
+  applied to every past date: a Zurich reading at 22:30 UTC on 1 July
+  belongs to 2 July but landed on 1 July for a viewer on winter time, and a
+  viewer abroad shifted every day. The gateway now cuts the days at the
+  zone's own midnights, so 23- and 25-hour days around a clock change are
+  exact, also in zones where the change happens at midnight. A day without
+  readings is empty instead of 0 mm, the current day is marked "so far",
+  and the footer names the farm time zone. `tz_offset_min` is accepted and
+  ignored.
+- **Dry LoRain heartbeats reach the zone table.** A LoRain gauge as
+  installed sends nothing while it is dry and a heartbeat with zero tips
+  every 4 hours. Those heartbeats never reached the zone's daily row, so a
+  gauge that reported dry looked like a silent one. A valid zero report now
+  writes 0 mm for the zone day, owned by the gauge; a silent gauge still
+  has no row. A zero never takes over a day that another source wrote. A
+  new zone day starts from this gauge's own reports inside the zone's local
+  day, not from the gateway host's daily total, so yesterday's rain no
+  longer carries into the next local morning. Further dry heartbeats on the
+  same day add no cloud sync events.
 - **Unknown rain is no longer reported as a measured 0 mm.** The zone water
   tile read a day without a rain-gauge row as 0 mm, so a zone with a 4 mm
   demand and no rain observation showed a balance of -4 mm. Today's rain now
@@ -87,21 +193,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   flow delta but no valid rain delta inserted 0 mm of rain labelled as a
   gauge reading. It now writes flow only: a new zone day keeps rain empty
   with source `none`, and an existing day keeps its rain and source.
-- **Dendrometer advice counts rain over seven calendar days.** The rolling
-  rain behind the "No stress + heavy recent rain (>20mm/7d)" rule added the
-  seven most recent stored days to the analytics day, so with complete
-  history it covered eight days, and with gaps it could reach back months.
-  It now covers the seven calendar days ending on the zone's analytics day,
-  and the recommendation records the window and how many of its days had a
-  rain value. A day without a rain value counts as missing, never as a dry
-  day. When the analytics day's rain is unknown (no local gauge amount and no
-  provider precipitation value), the recommendation is still given and
-  carries a `rain_unknown` warning; unknown rain never starts rain
-  suppression. **Behaviour change on the first run after the update:** a
-  zone without stress that had more than 20 mm over the old eight days but
-  20 mm or less over the seven calendar days moves from `decrease_20` to
-  `decrease_10`, and so does a zone whose sparse history reached outside the
-  week.
+- **Zone forecast: rain hours are no longer shifted by the zone's UTC
+  offset.** The zone environment summary asked Open-Meteo for the zone's
+  timezone, which returns local times without an offset, and then read
+  those times as UTC. In a zone two hours ahead of UTC, rain forecast for
+  12:00 local was shown at 14:00 local. The next rain time, the hourly rain
+  chart and the next-24-hour and next-72-hour rain sums took the wrong
+  hours, and so did the delay-irrigation advice that uses the next-24-hour
+  sum. The time of the current online weather had the same shift. The
+  gateway now asks Open-Meteo for exact timestamps. Daily forecast values
+  and the hourly weather history used for ET0 were not affected. Forecasts
+  and current weather cached before the upgrade are no longer used, also
+  not as the offline fallback.
 - **S2120 rain comes from the cumulative rainfall, not the intensity.** The
   SenseCAP S2120 sends two rain values: 4113, rain intensity in mm/h (six
   times the rain of the past ten minutes), and, from firmware v2.0, 4213,
@@ -119,6 +222,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   this interval is unknown". A device that has sent 4213 never adds
   intensity, so no rain is counted twice. Increments, daily totals and hourly
   station rain keep 0.001 mm; values are rounded only for display.
+- **Dendrometer advice counts rain over seven calendar days.** The rolling
+  rain behind the "No stress + heavy recent rain (>20mm/7d)" rule added the
+  seven most recent stored days to the analytics day, so with complete
+  history it covered eight days, and with gaps it could reach back months.
+  It now covers the seven calendar days ending on the zone's analytics day,
+  and the recommendation records the window and how many of its days had a
+  rain value. A day without a rain value counts as missing, never as a dry
+  day. When the analytics day's rain is unknown (no local gauge amount and no
+  provider precipitation value), the recommendation is still given and
+  carries a `rain_unknown` warning; unknown rain never starts rain
+  suppression. **Behaviour change on the first run after the update:** a
+  zone without stress that had more than 20 mm over the old eight days but
+  20 mm or less over the seven calendar days moves from `decrease_20` to
+  `decrease_10`, and so does a zone whose sparse history reached outside the
+  week.
+- **Cloud valve commands open a STREGA valve only for a bounded time.** A
+  cloud `VALVE_COMMAND` reached the valve with its action as sent, so
+  `action: OPEN` became an open with no end time. The gateway now accepts
+  only `OPEN_FOR_DURATION` for 1 to 255 minutes, read from
+  `duration_seconds`, `durationMinutes` or `duration_minutes`, and the
+  STREGA downlink builder no longer encodes a bare open. A cloud
+  `SET_STREGA_TIMED_ACTION` is sent as a timed open for the duration it
+  carries (`amount` and `unit` included); before, the gateway dropped every
+  one. Each refused command is answered with a reason instead of staying
+  leased in the cloud until it expires. A second delivery of the same timed
+  action, partial opening or flushing replays its first answer instead of
+  acting again. Refs #427.
+- **A valve cancel stops the actuation it names.** A cancel marked the
+  newest actuation and flushed the valve's whole downlink queue. It now
+  cancels the actuation named by `expectation_id`, or the only active one,
+  and refuses when several are active and none is named. Plan pushes and
+  configuration queued for the valve are queued again in order; another
+  actuation's open that the cancel took out is not re-sent, and the answer
+  names it (`dropped_opens`). Refs #428.
 - **Deploy keeps the newest three pre-migration backups, not three files.**
   The retention step of `deploy.sh` (and of every migrating run) counted the
   `-wal`, `-shm` and `-journal` files that SQLite leaves next to a backup
@@ -128,65 +265,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   files, never touches the newest `MIGRATE_BACKUP_KEEP` backups, and logs
   every file it removes. Side files whose backup is already gone are left in
   place. Fixes #474.
-- **History upload position no longer jumps.** A linked gateway uploads its
-  history to the cloud in order and remembers how far the cloud has
-  confirmed. The confirmation of a repair or correction batch also moved
-  that position. A repair of an old reading moved it back, so the gateway
-  sent every newer reading again (the cloud recognised them as duplicates).
-  A correction of a newer reading moved it forward, so readings in between
-  were skipped, and only the periodic history comparison could bring them
-  back. Now only the ordered upload moves the position, and only forward. A
-  position that an earlier build already moved past unsent readings is not
-  moved back; those readings still arrive through the history comparison.
-  Refs #432.
-- **SDI-12 recipe poll: no "client close failed" warning every minute.** The
-  60-second recipe poll and the recipe apply and rollback routes closed their
-  ChirpStack client in a `finally` block, but the client in
-  `osi-chirpstack-helper` had no `close()`. On every gateway with a
-  `DRAGINO_SDI12` device the poll logged `SDI12 recipe poll client close
-  failed` once a minute and left the client's five gRPC channels open. The
-  client now has `close()`, which shuts down all five channels and returns any
-  close error instead of throwing. Polling behaves as before. (Recipe apply
-  and rollback still fail on real gateways for a separate reason, #469.)
-- **Zone forecast: rain hours are no longer shifted by the zone's UTC
-  offset.** The zone environment summary asked Open-Meteo for the zone's
-  timezone, which returns local times without an offset, and then read
-  those times as UTC. In a zone two hours ahead of UTC, rain forecast for
-  12:00 local was shown at 14:00 local. The next rain time, the hourly rain
-  chart and the next-24-hour and next-72-hour rain sums took the wrong
-  hours, and so did the delay-irrigation advice that uses the next-24-hour
-  sum. The time of the current online weather had the same shift. The
-  gateway now asks Open-Meteo for exact timestamps. Daily forecast values
-  and the hourly weather history used for ET0 were not affected. Forecasts
-  and current weather cached before the upgrade are no longer used, also
-  not as the offline fallback.
-
-### Security
-- **The raw sensor export, the valve litres read and the reference-tree switch
-  need a signed-in session with scoped access off.** With `OSI_SCOPED_ACCESS`
-  off, `GET /download-sensordata` (every `device_data` row as CSV) and
-  `GET /api/v1/devices/:deveui/today-liters` answered without any token, and
-  `PUT /api/devices/:deveui/reference-tree` accepted any `Authorization`
-  header that started with `Bearer `. Node-RED listens on port 1880 on every
-  interface, so anyone who could reach the gateway could download its data
-  without logging in. All three now check the session token the way the
-  history and export routes beside them do, in both flag states, and answer
-  401 without one. This is a deliberate change for gateways with the flag off:
-  a script or bookmark that fetched `/download-sensordata` without logging in
-  now gets 401 and has to send `Authorization: Bearer <token>` from
-  `POST /auth/login`. The dashboard already sends the session on both routes
-  it calls (litres and reference tree) and does not call the sensor export.
-  With the flag on, the answer without a session is unchanged (401); a
-  signed-in session on the export and litres routes now works on gateways that
-  keep the token secret in `/data/db/osi_auth_token_secret` (the usual case),
-  where it used to get 500. The other routes were checked the same way: with
-  the flag off, only the login and registration routes, the CORS preflights,
-  `GET /api/catalog` (the static device-type list) and
-  `GET /api/system/features` answer without a session. **This narrows the
-  exposure; it does not close it.** With the flag off, `POST /auth/register`
-  still creates an account for anyone who can reach the gateway, and that
-  account's session reaches all three routes. Closing that needs scoped access
-  on, or registration closed once the first account exists (follow-up).
 
 ---
 
@@ -199,6 +277,10 @@ pre-built image was 0.6.5, so a gateway upgraded from that image also takes
 every 0.7.0 entry below. Some entries fix behaviour that only builds from
 `main` made between 0.7.0 and this release had; a gateway upgraded from 0.7.0
 never saw those defects.
+
+The `v0.8.0` tag was moved on 2026-10-08 to the commit that also carries
+#471, #472 and #473; their entries are the last ones under Fixed and
+Security below.
 
 ### Upgrade notes
 - **Cloud before edge.** This edge emits sync events that an OSI Server
@@ -781,6 +863,26 @@ never saw those defects.
   MAC-derived provisional gateway identity until an operator restarts Node-RED.
   Link and sync builders fail closed while an identity transition is healing or
   waiting for the warned restart.
+- **History upload position no longer jumps.** A linked gateway uploads its
+  history to the cloud in order and remembers how far the cloud has
+  confirmed. The confirmation of a repair or correction batch also moved
+  that position. A repair of an old reading moved it back, so the gateway
+  sent every newer reading again (the cloud recognised them as duplicates).
+  A correction of a newer reading moved it forward, so readings in between
+  were skipped, and only the periodic history comparison could bring them
+  back. Now only the ordered upload moves the position, and only forward. A
+  position that an earlier build already moved past unsent readings is not
+  moved back; those readings still arrive through the history comparison.
+  Refs #432.
+- **SDI-12 recipe poll: no "client close failed" warning every minute.** The
+  60-second recipe poll and the recipe apply and rollback routes closed their
+  ChirpStack client in a `finally` block, but the client in
+  `osi-chirpstack-helper` had no `close()`. On every gateway with a
+  `DRAGINO_SDI12` device the poll logged `SDI12 recipe poll client close
+  failed` once a minute and left the client's five gRPC channels open. The
+  client now has `close()`, which shuts down all five channels and returns any
+  close error instead of throwing. Polling behaves as before. (Recipe apply
+  and rollback still fail on real gateways for a separate reason, #469.)
 
 ### Removed
 - The legacy boot-DDL nodes that altered `users` on every start; their
@@ -825,6 +927,31 @@ never saw those defects.
   longer sees data cached for the first, and the first user's chained writes
   stop. The support request status secret is no longer stored in the
   browser.
+- **The raw sensor export, the valve litres read and the reference-tree switch
+  need a signed-in session with scoped access off.** With `OSI_SCOPED_ACCESS`
+  off, `GET /download-sensordata` (every `device_data` row as CSV) and
+  `GET /api/v1/devices/:deveui/today-liters` answered without any token, and
+  `PUT /api/devices/:deveui/reference-tree` accepted any `Authorization`
+  header that started with `Bearer `. Node-RED listens on port 1880 on every
+  interface, so anyone who could reach the gateway could download its data
+  without logging in. All three now check the session token the way the
+  history and export routes beside them do, in both flag states, and answer
+  401 without one. This is a deliberate change for gateways with the flag off:
+  a script or bookmark that fetched `/download-sensordata` without logging in
+  now gets 401 and has to send `Authorization: Bearer <token>` from
+  `POST /auth/login`. The dashboard already sends the session on both routes
+  it calls (litres and reference tree) and does not call the sensor export.
+  With the flag on, the answer without a session is unchanged (401); a
+  signed-in session on the export and litres routes now works on gateways that
+  keep the token secret in `/data/db/osi_auth_token_secret` (the usual case),
+  where it used to get 500. The other routes were checked the same way: with
+  the flag off, only the login and registration routes, the CORS preflights,
+  `GET /api/catalog` (the static device-type list) and
+  `GET /api/system/features` answer without a session. **This narrows the
+  exposure; it does not close it.** With the flag off, `POST /auth/register`
+  still creates an account for anyone who can reach the gateway, and that
+  account's session reaches all three routes. Closing that needs scoped access
+  on, or registration closed once the first account exists (follow-up).
 
 ---
 
