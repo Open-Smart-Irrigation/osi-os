@@ -2000,10 +2000,26 @@ async function zoneRainSourceView(t, zoneId) {
   };
 }
 
-// Store the operator's choice (a candidate's DevEUI, or null to clear it).
-// Runs inside the caller's transaction. Returns { ok: false, reason } for a
-// missing zone ('zone_not_found') or a DevEUI that is not a live candidate of
-// the zone ('not_a_candidate'); nothing is written then.
+// The zone-local dates of the `days` farm days ending today (today first).
+function recentZoneDates(timezone, nowMs, days) {
+  const today = zoneDayWindow(nowMs, timezone).date;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(today);
+  const base = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const dates = [];
+  for (let i = 0; i < days; i += 1) dates.push(new Date(base - i * 86400000).toISOString().slice(0, 10));
+  return dates;
+}
+
+const SELECTION_REPROJECT_DAYS = 30;
+
+// Store the operator's choice (a candidate's DevEUI, or null to clear it) and
+// re-project the zone's last SELECTION_REPROJECT_DAYS farm days, so the
+// projection follows the choice. Runs inside the caller's transaction (one
+// transaction for the choice and its re-projection). A re-projection updates
+// existing zone days only (trigger 'selection': no new row, no legacy row).
+// Returns { ok: false, reason } for a missing zone ('zone_not_found') or a
+// DevEUI that is not a live candidate of the zone ('not_a_candidate');
+// nothing is written then.
 async function setZoneRainSource(t, zoneId, deveui, opts = {}) {
   const zid = Number(zoneId);
   const zone = await loadZone(t, zid);
@@ -2020,7 +2036,13 @@ async function setZoneRainSource(t, zoneId, deveui, opts = {}) {
     + 'ON CONFLICT(zone_id) DO UPDATE SET selected_deveui = excluded.selected_deveui, selected_at = excluded.selected_at, '
     + 'selected_by_uuid = excluded.selected_by_uuid, updated_at = excluded.updated_at',
     [zid, eui, eui === null ? null : nowIso, opts.actorUuid ? String(opts.actorUuid) : null, nowIso]);
-  return { ok: true, view: await zoneRainSourceView(t, zid) };
+  const cache = new Map();
+  const reprojected = [];
+  for (const date of recentZoneDates(resolveTimezone(zone).timezone, nowMs, SELECTION_REPROJECT_DAYS)) {
+    const out = await recomputeZoneDay(t, zid, date, { trigger: 'selection', nowMs, cache });
+    if (out && out.written) reprojected.push(date);
+  }
+  return { ok: true, view: await zoneRainSourceView(t, zid), reprojected };
 }
 
 module.exports = {
@@ -2056,6 +2078,7 @@ module.exports = {
   recomputeZoneDay,
   resolveZoneRain,
   recomputeRainDays,
+  SELECTION_REPROJECT_DAYS,
   zoneRainSourceView,
   setZoneRainSource,
 };

@@ -310,3 +310,117 @@ test('scoped: the handler called without the guard marker refuses the write', as
     db.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// A selection re-projects the zone's last 30 farm days (Task 2)
+// ---------------------------------------------------------------------------
+
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { facadeDb } = require('./lib/scoped-access-harness');
+
+const NODE_RED = path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
+const R = require(path.join(NODE_RED, 'osi-rain/index.js'));
+const CODEC = path.join(NODE_RED, 'codecs/aquascope_lorain_decoder.js');
+// The frames below report FPort 2, build 241015; the test pins that build so
+// the gauges' days can be complete (the shipped pinned set is empty, D9).
+const PINNED = [{ fPort: 2, buildDate: '241015' }];
+const JOIN_HEX = '0a0003ad7703050001040403840402001006030000060100b8068100001221000a';
+const rainHex = (tips) => '06030000060100b8068100' + tips.toString(16).padStart(2, '0') + '1221000a';
+const decodeUplink = (() => {
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(fs.readFileSync(CODEC, 'utf8'), sandbox, { filename: CODEC });
+  return sandbox.decodeUplink;
+})();
+
+let eventSeq = 0;
+// One complete UTC day of a promoted LoRain: join the evening before, a frame
+// every 4 h, `noonTips` tips at noon, and the frame after midnight that closes it.
+async function completeLoRainDay(db, eui, day, { noonTips, devAddr, fCntBase }) {
+  const dayMs = Date.parse(day + 'T00:00:00.000Z');
+  const times = [dayMs - 4 * 3600000];
+  for (let h = 0; h <= 24; h += 4) times.push(dayMs + h * 3600000);
+  for (let i = 0; i < times.length; i += 1) {
+    eventSeq += 1;
+    const bytes = Buffer.from(i === 0 ? JOIN_HEX : rainHex(i === 4 ? noonTips : 0), 'hex');
+    const object = decodeUplink({ fPort: 2, bytes }).data;
+    await facadeDb(db).transaction((t) => R.ingestLoRainUplink(t, {
+      deveui: eui, eventId: '00000000-0000-4000-8000-' + String(eventSeq).padStart(12, '0'), devAddr, fCnt: fCntBase + i,
+      time: new Date(times[i]).toISOString(), fPort: 2, data: bytes.toString('base64'), object,
+    }, { nowMs: Date.now(), pinnedBuilds: PINNED }));
+  }
+}
+
+const utcDay = (offsetDays) => new Date(Date.now() - offsetDays * 86400000).toISOString().slice(0, 10);
+const zoneDay = (db, date) => {
+  const row = db.prepare('SELECT rainfall_mm, rain_received_mm, rain_coverage, rain_selected_deveui, rain_source, '
+    + 'rain_quality_reasons, sync_version FROM zone_daily_environment WHERE zone_id = 1 AND date = ?').get(date);
+  return row ? { ...row } : row;
+};
+
+test('selecting a gauge re-projects the last 30 days to its complete days; older days stay as they are', async (t) => {
+  const db = seedScopedDb();
+  try {
+    // Two LoRain gauges in zone 1 (UTC); no weather station.
+    db.exec(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at) VALUES
+      ('${LORAIN}', 'Gauge north', 'AQUASCOPE_LORAIN', 2, 1, '2026-01-01', '2026-01-01'),
+      ('${OTHER_ZONE_GAUGE}', 'Gauge west', 'AQUASCOPE_LORAIN', 2, 1, '2026-01-01', '2026-01-01');`);
+    const recent = [utcDay(3), utcDay(12), utcDay(29)];
+    const old = utcDay(40);
+    let fCnt = 0;
+    for (const day of [old, ...recent].sort()) {
+      await completeLoRainDay(db, LORAIN, day, { noonTips: 10, devAddr: '01000001', fCntBase: fCnt });
+      await completeLoRainDay(db, OTHER_ZONE_GAUGE, day, { noonTips: 6, devAddr: '01000002', fCntBase: fCnt });
+      fCnt += 10;
+    }
+    const before = Object.fromEntries([old, ...recent].map((d) => [d, zoneDay(db, d)]));
+    for (const d of [old, ...recent]) {
+      assert.deepEqual([before[d].rainfall_mm, before[d].rain_coverage, before[d].rain_selected_deveui], [null, 'unknown', null], d);
+      assert.deepEqual(JSON.parse(before[d].rain_quality_reasons), ['gauge_ambiguous'], d);
+    }
+
+    const started = process.hrtime.bigint();
+    const { result } = await putRoute(db, FLAG_OFF, { body: { deveui: OTHER_ZONE_GAUGE }, authorization: token(OWNER) });
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    t.diagnostic('PUT rain-source with a 30-day re-projection took ' + elapsedMs.toFixed(1) + ' ms on the harness');
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(result.payload.selected_deveui, OTHER_ZONE_GAUGE);
+
+    for (const d of recent) {
+      const row = zoneDay(db, d);
+      assert.deepEqual([row.rainfall_mm, row.rain_received_mm, row.rain_coverage, row.rain_selected_deveui, row.rain_source],
+        [3, 3, 'complete', OTHER_ZONE_GAUGE, 'aquascope_lorain'], 'the selected gauge alone, never 5 + 3: ' + d);
+      assert.deepEqual(JSON.parse(row.rain_quality_reasons), [], d);
+      assert.equal(row.sync_version, before[d].sync_version + 1, 'one version step per re-projected day: ' + d);
+    }
+    assert.deepEqual(zoneDay(db, old), before[old], 'a day outside the 30-day window is not re-projected');
+
+    // Selecting the same gauge again changes nothing.
+    await putRoute(db, FLAG_OFF, { body: { deveui: OTHER_ZONE_GAUGE }, authorization: token(OWNER) });
+    for (const d of recent) assert.equal(zoneDay(db, d).sync_version, before[d].sync_version + 1, d);
+
+    // Clearing the choice makes the recent days ambiguous again.
+    await putRoute(db, FLAG_OFF, { body: { deveui: null }, authorization: token(OWNER) });
+    for (const d of recent) {
+      const row = zoneDay(db, d);
+      assert.deepEqual([row.rainfall_mm, row.rain_coverage, row.rain_selected_deveui], [null, 'unknown', null], d);
+      assert.deepEqual(JSON.parse(row.rain_quality_reasons), ['gauge_ambiguous'], d);
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('a selection inserts no zone day for a date that has none (A31)', async () => {
+  const db = seedScopedDb();
+  seedGauges(db);
+  try {
+    const { result } = await putRoute(db, FLAG_OFF, { body: { deveui: LORAIN }, authorization: token(OWNER) });
+    assert.equal(result.statusCode, 200, JSON.stringify(result.payload));
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM zone_daily_environment WHERE zone_id = 1').get().n, 0);
+  } finally {
+    db.close();
+  }
+});
