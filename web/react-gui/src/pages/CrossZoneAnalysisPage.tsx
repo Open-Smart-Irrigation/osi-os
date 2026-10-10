@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnalysisCatalog } from '../analysis/useAnalysisCatalog';
 import { useAnalysisSeries } from '../analysis/useAnalysisSeries';
 import { useAnalysisViews } from '../analysis/useAnalysisViews';
-import { axisQuantityLabel, channelMetaFromCatalog } from '../analysis/channelLabels';
+import { axisQuantityLabel, channelMetaFromCatalog, presentRainfallName } from '../analysis/channelLabels';
 import { applyLabelOverrides } from '../analysis/labelOverrides';
 import { loadWorkspace, migrateWorkspaceSeriesIds, saveWorkspace } from '../analysis/analysisWorkspaceStorage';
 import {
@@ -78,6 +78,8 @@ export function CrossZoneAnalysisPage() {
     () => new Map((catalog?.channels ?? []).map((c) => [c.seriesId, c])),
     [catalog],
   );
+  // Legacy estimates are not offered as presets; the tray lists them on request.
+  const offeredChannels = useMemo(() => (catalog?.channels ?? []).filter((c) => !c.legacy), [catalog]);
   const zoneNameById = useMemo(
     () => new Map(
       (catalog?.channels ?? [])
@@ -86,9 +88,22 @@ export function CrossZoneAnalysisPage() {
     ),
     [catalog],
   );
+  const appliedAggregation = data?.aggregation.applied;
+  // A rain amount is named for the applied aggregation ("this interval" raw,
+  // "amount" summed) and a legacy estimate says so; a user's rename still wins.
+  const presentedSeries = useMemo(
+    () => (data?.series ?? []).map((item) => {
+      const entry = catalogById.get(item.seriesId);
+      if (!entry) return item;
+      const name = presentRainfallName(entry, appliedAggregation);
+      const label = entry.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
+      return label === item.label ? item : { ...item, label };
+    }),
+    [appliedAggregation, catalogById, data, t],
+  );
   const displayedSeries = useMemo(
-    () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
-    [activeWorkspace.labelOverrides, data],
+    () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
+    [activeWorkspace.labelOverrides, presentedSeries],
   );
   const resolvedExportRange = useMemo(
     () => exportRangeFor(data?.range),
@@ -122,7 +137,7 @@ export function CrossZoneAnalysisPage() {
         : setLabelOverride(currentWorkspace, seriesId, label)
     ));
   const resolveAxisLabel = (channelKey: string, unit: string | null) =>
-    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit);
+    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit, appliedAggregation);
   const renameAxis = (channelKey: string, label: string | null) =>
     updateWorkspace((currentWorkspace) => (
       label === null
@@ -136,6 +151,7 @@ export function CrossZoneAnalysisPage() {
         channel.sourceKind === 'device'
         && channel.availability === 'available'
         && channel.zoneId !== null
+        && !channel.legacy
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -238,7 +254,7 @@ export function CrossZoneAnalysisPage() {
               ) : null}
               {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
                 <MetricAcrossZonesPicker
-                  channels={catalog?.channels ?? []}
+                  channels={offeredChannels}
                   onApply={applyMetricPreset}
                 />
               ) : null}
@@ -250,6 +266,8 @@ export function CrossZoneAnalysisPage() {
               username={username}
               exportRange={resolvedExportRange}
               exportGranularity={exportGranularity(data?.aggregation.applied)}
+              aggregation={appliedAggregation}
+              rangeEnd={data?.range?.to}
             />
           </div>
           {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}

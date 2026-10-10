@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
@@ -71,6 +71,34 @@ describe('AnalysisExportMenu', () => {
       expect.stringContaining('timestamp,'),
       'text/csv',
     );
+  });
+
+  it('keeps the version 1 CSV by default and writes version 2 when quality columns are asked for', () => {
+    render(
+      <AnalysisExportMenu
+        series={series}
+        catalogById={new Map()}
+        chartRef={{ current: null }}
+        username="admin"
+        exportRange={{ from: '2026-06-01', to: '2026-06-07' }}
+        exportGranularity="daily"
+        aggregation="hourly"
+        rangeEnd="2026-06-07T00:00:00.000Z"
+      />,
+    );
+    // The switch sits with "Export CSV", the only export it changes.
+    const csvGroup = screen.getByRole('group', { name: 'analysis.export.csv' });
+    const toggle = within(csvGroup).getByRole('checkbox', { name: 'analysis.export.qualityColumns' });
+    expect(within(csvGroup).getByRole('button', { name: 'analysis.export.csv' })).toBeInTheDocument();
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.export.csv' }));
+    expect(String(downloadBlob.mock.calls[0][1]).startsWith('timestamp,site,')).toBe(true);
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole('button', { name: 'analysis.export.csv' }));
+    const v2 = String(downloadBlob.mock.calls[1][1]).split('\n');
+    expect(v2[0]).toBe('# osi-csv-version: 2');
+    expect(v2[1].endsWith(',timezone,period_start,period_end,quality,coverage,sample_count')).toBe(true);
   });
 
   it('exports PNG from the chart ref via downloadDataUrl (not downloadBlob)', () => {

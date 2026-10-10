@@ -2921,7 +2921,11 @@ expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'format
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'formatWindDirection', 'uses shared wind-direction formatting on the S2120 card');
 expectFileIncludes('farming.ts', farmingTypesSource, 'AQUASCOPE_LORAIN', 'types Aqua-Scope LoRain as a supported device');
 expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_delta', 'renders LoRain interval rainfall');
-expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'shows normalized LoRain rain-rate history options');
+// Owner decision D4 (rain presentation): the LoRain card shows amounts only. Its
+// elapsed-time rate and 10-minute value stay in Data view (legacy) and the export.
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_today', 'offers the LoRain farm-day total in the rain history');
+expectFileExcludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'never offers the legacy LoRain 10-minute value on the card');
+expectFileExcludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_hour', 'never offers the legacy LoRain elapsed-time rate on the card');
 // Every device card now removes through the shared hook, which is the only place allowed
 // to call devicesAPI.remove (the account unlink) and does so only in 'farm' context. A
 // card that calls it directly again is the zone-detach-deletes-the-device bug returning.

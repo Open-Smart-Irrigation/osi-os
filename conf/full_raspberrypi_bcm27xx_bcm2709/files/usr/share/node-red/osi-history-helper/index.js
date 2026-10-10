@@ -659,7 +659,7 @@ function channelsForCard(card, sourceDevices) {
       { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h', label: 'Rain rate' },
       { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min', label: 'Rain (10 min)' },
       { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm', label: 'Rain today' },
-      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rain delta' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rainfall amount' },
       { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s', label: 'Wind speed' },
       { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust' },
       { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure' },
@@ -2344,6 +2344,15 @@ function seriesLabel(sourceName, channel) {
   return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
 }
 
+// A raw rain row is what one report collected; a bucket is a summed amount
+// (channel label "Rainfall amount"). The GUI's rainfallLabel() uses the same words.
+const RAW_SERIES_LABELS = Object.freeze({ rain_mm_delta: 'Rainfall this interval' });
+
+function rawSeriesLabel(sourceName, channel) {
+  const rawLabel = channel && RAW_SERIES_LABELS[channel.id];
+  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel);
+}
+
 function sourceKeyForCsv(card, device) {
   const cardType = normalizeCardType(card && card.cardType);
   if (cardType === 'dendro') return dendroSourceKey(device && (device.deveui || device.device_eui)) || String(card && card.logicalSourceKey || '').trim();
@@ -2430,7 +2439,7 @@ async function rawZoneExportRows(db, scope) {
             timestamp,
             site: scope.site,
             zone: zoneName,
-            series_label: seriesLabel(sourceName, channel),
+            series_label: rawSeriesLabel(sourceName, channel),
             card_type: card.cardType,
             source_key: sourceKeyForCsv(card, device),
             channel_key: channel.id,

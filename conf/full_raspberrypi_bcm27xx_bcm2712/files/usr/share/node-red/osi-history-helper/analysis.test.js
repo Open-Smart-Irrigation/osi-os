@@ -123,6 +123,11 @@ function sha12(value) {
   return crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+// The fixture's LoRain gauge, looked up by name so the tests spell out no device identifier.
+function fixtureRainEui(raw) {
+  return raw.prepare("SELECT deveui FROM devices WHERE name = 'Rain'").get().deveui;
+}
+
 test('analysisSeriesId is a deterministic sha256-based id', () => {
   const idA = analysisModule.analysisSeriesId(1, 'soil', 'soil-src-abc123', 'swt_1');
   const idB = analysisModule.analysisSeriesId(1, 'soil', 'soil-src-abc123', 'swt_1');
@@ -558,11 +563,11 @@ test('device measurement statistics preserve interval totals, means, and final c
 
     const empty = await series(raw, [rainDelta], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
     assert.deepEqual(empty.series[0].points, [{
-      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown',
+      t: '2026-10-01T11:00:00.000Z', value: null, count: 0, quality: 'unknown', expected: null,
     }]);
     const oldRainRange = await series(raw, [oldRainDelta], range, 'hourly');
     assert.deepEqual(oldRainRange.series[0].points, [{
-      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown',
+      t: '2026-10-01T10:00:00.000Z', value: null, count: 0, quality: 'unknown', expected: null,
     }]);
   } finally {
     raw.close();
@@ -649,7 +654,207 @@ test('LoRain catalogue survives a newer configuration-only row and reads its raw
       value: 6,
       count: 1,
       quality: null,
+      expected: null,
     }]);
+  } finally {
+    raw.close();
+  }
+});
+
+// Rain presentation (D4): the summed amount reads as an amount; the channel
+// key, the unit and the series id a saved view stores are unchanged (the id
+// hashes zone, card, source and channel key, never the label).
+test('LoRain rain amount is labelled "Rainfall amount" under its unchanged key and series id', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    assert.ok(rain, 'LoRain rain amount entry');
+    assert.equal(rain.displayName, 'Rain - Rainfall amount');
+    assert.equal(rain.unit, 'mm');
+    const savedAmountId = analysisModule.analysisSeriesId(1, 'environment', rain.sourceKey, 'rain_mm_delta');
+    assert.equal(rain.seriesId, savedAmountId);
+    const rate = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_per_hour');
+    const savedRateId = analysisModule.analysisSeriesId(1, 'environment', rate.sourceKey, 'rain_mm_per_hour');
+    assert.equal(rate.seriesId, savedRateId);
+
+    raw.exec(analysisModule.ANALYSIS_VIEWS_SCHEMA);
+    raw.prepare('INSERT INTO analysis_views (user_id, name, view_json) VALUES (1, ?, ?)')
+      .run('rain-before-relabel', JSON.stringify({ schemaVersion: 1, name: 'rain-before-relabel', selectors: [{ seriesId: savedAmountId }, { seriesId: savedRateId }] }));
+    const [view] = await hh.listAnalysisViews(facade(raw), { userId: 1, deviceEui: HUB, weatherProviderDefault: 'open_meteo' });
+    assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId, savedRateId]);
+    assert.deepEqual(view.droppedSeriesIds, []);
+  } finally {
+    raw.close();
+  }
+});
+
+// D4: a LoRain's rate and 10-minute value are elapsed-time estimates. They stay
+// in the catalogue under their keys (saved views and exports resolve them) but
+// are flagged legacy; the S2120's intensity is a measured channel and is not.
+test('LoRain rate and 10-minute value are catalogued as legacy; the S2120 ones are not', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const flag = (deviceName, channelKey) => {
+      const found = result.channels.find((c) => c.deviceName === deviceName && c.channelKey === channelKey);
+      assert.ok(found, `${deviceName} ${channelKey}`);
+      return found.legacy;
+    };
+    assert.equal(flag('Rain', 'rain_mm_per_hour'), true);
+    assert.equal(flag('Rain', 'rain_mm_per_10min'), true);
+    assert.equal(flag('Rain', 'rain_mm_delta'), false);
+    assert.equal(flag('Rain', 'rain_mm_today'), false);
+    assert.equal(flag('demo-s2120', 'rain_mm_per_hour'), false);
+    assert.equal(flag('demo-s2120', 'rain_mm_per_10min'), false);
+    assert.ok(result.channels.filter((c) => c.sourceKind !== 'device').every((c) => c.legacy === false));
+  } finally {
+    raw.close();
+  }
+});
+
+// Rain reports are sparse events: a bucket is not graded against a presumed
+// cadence, so rain points carry the received count and expected: null.
+test('rain series points carry expected: null at every aggregation', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_tips_delta, rain_mm_delta) VALUES (?, ?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:10:00Z', 2, 0.5);
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:40:00Z', 4, 1.0);
+    const result = await catalog(raw);
+    const pick = (key) => result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === key);
+    const range = { from: '2026-10-02T07:00:00.000Z', to: '2026-10-02T10:00:00.000Z' };
+    for (const aggregation of ['raw', 'hourly', 'daily']) {
+      const out = await series(raw, [pick('rain_mm_delta'), pick('rain_tips_delta'), pick('ambient_temperature')], range, aggregation);
+      const [amount, tips, temperature] = out.series;
+      assert.ok(amount.points.length > 0 && tips.points.length > 0, aggregation);
+      assert.ok(amount.points.every((point) => point.expected === null && !('coveragePct' in point)), `${aggregation} amount`);
+      assert.ok(tips.points.every((point) => point.expected === null), `${aggregation} tips`);
+      assert.ok(temperature.points.every((point) => !('expected' in point)), `${aggregation} temperature unchanged`);
+    }
+  } finally {
+    raw.close();
+  }
+});
+
+// Acceptance A1: rain amounts are summed, never averaged.
+test('LoRain rain_mm_delta: two rows 0.5 and 1.0 inside one hour give 1.5, never 0.75', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_tips_delta, rain_mm_delta) VALUES (?, ?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:10:00Z', 2, 0.5);
+    insert.run(fixtureRainEui(raw), '2026-10-02T08:40:00Z', 4, 1.0);
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+
+    const hourly = await series(raw, [rain], { from: '2026-10-02T08:00:00.000Z', to: '2026-10-02T09:00:00.000Z' }, 'hourly');
+    assert.equal(hourly.aggregation.applied, 'hourly');
+    assert.equal(hourly.series[0].points.length, 1);
+    assert.equal(hourly.series[0].points[0].value, 1.5);
+    assert.equal(hourly.series[0].points[0].count, 2);
+
+    const daily = await series(raw, [rain], { from: '2026-10-02T00:00:00.000Z', to: '2026-10-03T00:00:00.000Z' }, 'daily');
+    assert.equal(daily.aggregation.applied, 'daily');
+    const filled = daily.series[0].points.filter((point) => point.value !== null);
+    assert.deepEqual(filled.map((point) => [point.value, point.count]), [[1.5, 2]]);
+  } finally {
+    raw.close();
+  }
+});
+
+// Farm day = the zone's timezone: a device's daily bucket starts at the zone's
+// local midnight, as the weather series beside it already do, and the autumn
+// clock change gives a 25-hour day. Zone 1 is Europe/Zurich.
+test('device daily buckets are zone-local days, including the 25-hour autumn day', async () => {
+  const raw = weatherDb();
+  try {
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_mm_delta) VALUES (?, ?, ?)');
+    insert.run(fixtureRainEui(raw), '2026-10-24T22:30:00Z', 0.5); // 00:30 local on 2026-10-25
+    insert.run(fixtureRainEui(raw), '2026-10-25T22:30:00Z', 1.0); // 23:30 local, still 2026-10-25
+    insert.run(fixtureRainEui(raw), '2026-10-25T23:30:00Z', 2.0); // 00:30 local on 2026-10-26
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    const daily = await series(raw, [rain], { from: '2026-10-24T22:00:00.000Z', to: '2026-10-26T23:00:00.000Z' }, 'daily');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-10-24T22:00:00.000Z', 1.5, 2],
+      ['2026-10-25T23:00:00.000Z', 2, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+// The same rule for a mean channel on the 23-hour spring day: every device
+// channel moved to the zone's local day, not only rain sums.
+test('a device mean channel uses zone-local days across the 23-hour spring day', async () => {
+  const raw = weatherDb();
+  try {
+    const kiwi = raw.prepare("SELECT deveui FROM devices WHERE name = 'Kiwi North'").get().deveui;
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+    insert.run(kiwi, '2026-03-28T23:30:00Z', 10); // 00:30 local on 2026-03-29
+    insert.run(kiwi, '2026-03-29T21:30:00Z', 20); // 23:30 local, still 2026-03-29
+    insert.run(kiwi, '2026-03-29T22:30:00Z', 40); // 00:30 local on 2026-03-30
+    const result = await catalog(raw);
+    const swt = result.channels.find((c) => c.deviceName === 'Kiwi North' && c.channelKey === 'swt_1');
+    const daily = await series(raw, [swt], { from: '2026-03-28T23:00:00.000Z', to: '2026-03-30T22:00:00.000Z' }, 'daily');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-03-28T23:00:00.000Z', 15, 2],
+      ['2026-03-29T22:00:00.000Z', 40, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+// A device without a zone has no farm timezone: its daily buckets stay UTC days.
+test('an unassigned device keeps UTC daily buckets', async () => {
+  const raw = weatherDb();
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A840410000000002', 'Loose gauge', 'AQUASCOPE_LORAIN', 1, NULL, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z')`).run();
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, rain_mm_delta) VALUES (?, ?, ?)');
+    insert.run('A840410000000002', '2026-10-24T22:30:00Z', 0.5);
+    insert.run('A840410000000002', '2026-10-25T23:30:00Z', 2.0);
+    const result = await catalog(raw, { unassignedAccess: 'owner' });
+    const loose = result.channels.find((c) => c.deviceName === 'Loose gauge' && c.channelKey === 'rain_mm_delta');
+    assert.ok(loose && loose.zoneId === null, 'unassigned rain entry');
+    const daily = await series(raw, [loose], { from: '2026-10-24T00:00:00.000Z', to: '2026-10-26T00:00:00.000Z' }, 'daily', { unassignedAccess: 'owner' });
+    assert.equal(daily.series[0].timezone, 'UTC');
+    assert.deepEqual(daily.series[0].points.map((point) => [point.t, point.value, point.count]), [
+      ['2026-10-24T00:00:00.000Z', 0.5, 1],
+      ['2026-10-25T00:00:00.000Z', 2, 1],
+    ]);
+  } finally {
+    raw.close();
+  }
+});
+
+// Acceptance A18: a rain bucket with no raw rows is null. A mean rollup of the
+// same hour is never read back as the amount (not 0.75, not 0.75 x 2).
+test('LoRain rain bucket with only a mean rollup and no raw rows is null', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const rain = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_delta');
+    const facadeDb = { ...facade(raw), run: (sql, params) => Promise.resolve(raw.prepare(sql).run(...(params || []))) };
+    for (const [level, start, end] of [
+      ['hourly', '2026-10-03T08:00:00.000Z', '2026-10-03T09:00:00.000Z'],
+      ['daily', '2026-10-02T22:00:00.000Z', '2026-10-03T22:00:00.000Z'],
+    ]) {
+      await hh.upsertRollups(facadeDb, [{
+        zone_id: 1, card_type: 'environment', logical_source_key: rain.sourceKey, channel_id: 'rain_mm_delta',
+        bucket_level: level, bucket_start: start, bucket_end: end,
+        min_value: 0.5, max_value: 1.0, mean_value: 0.75, median_value: 0.75, latest_value: 1.0,
+        dominant_status: null, coverage_pct: 50, coverage_confidence: 'derived', sample_count: 2, event_count: 0, threshold_crossing_count: 0, unit: 'mm',
+      }]);
+    }
+    assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM history_channel_rollups').get().n, 2);
+
+    const hourly = await series(raw, [rain], { from: '2026-10-03T08:00:00.000Z', to: '2026-10-03T09:00:00.000Z' }, 'hourly');
+    assert.deepEqual(hourly.series[0].points.map((point) => [point.value, point.count]), [[null, 0]]);
+    const daily = await series(raw, [rain], { from: '2026-10-02T22:00:00.000Z', to: '2026-10-03T22:00:00.000Z' }, 'daily');
+    assert.ok(daily.series[0].points.length >= 1);
+    assert.ok(daily.series[0].points.every((point) => point.value === null && point.count === 0), JSON.stringify(daily.series[0].points));
   } finally {
     raw.close();
   }

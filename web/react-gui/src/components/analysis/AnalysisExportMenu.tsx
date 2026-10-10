@@ -26,6 +26,10 @@ interface AnalysisExportMenuProps {
   username: string | null;
   exportRange: { from: string; to: string } | null;
   exportGranularity: HistoryExportGranularity;
+  /** The applied aggregation of the shown series; names rain amounts and bounds buckets in the CSV. */
+  aggregation?: string;
+  /** The end instant of the shown range; the last bucket of a version 2 row ends there. */
+  rangeEnd?: string;
 }
 
 export function AnalysisExportMenu({
@@ -35,13 +39,19 @@ export function AnalysisExportMenu({
   username,
   exportRange,
   exportGranularity,
+  aggregation,
+  rangeEnd,
 }: AnalysisExportMenuProps) {
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
   const disabled = series.length === 0;
+  // Version 1 stays the default for saved scripts; version 2 adds timezone, period
+  // bounds, quality, coverage and sample count (owner decision D3).
+  const [qualityColumns, setQualityColumns] = useState(false);
 
   const exportCsv = () => {
-    downloadBlob(exportFileName(username, 'csv'), toTidyCsv(series, catalogById), 'text/csv');
+    const csv = toTidyCsv(series, catalogById, { version: qualityColumns ? 2 : 1, aggregation, rangeEnd });
+    downloadBlob(exportFileName(username, 'csv'), csv, 'text/csv');
   };
 
   const exportPng = () => {
@@ -66,15 +76,27 @@ export function AnalysisExportMenu({
 
   return (
     <div className="analysis-export-menu">
-    <div className="flex gap-2">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={exportCsv}
-        className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
-      >
-        {t('analysis.export.csv')}
-      </button>
+    <div className="flex flex-wrap items-start gap-2">
+      {/* The quality-columns switch belongs to this CSV only; the all-zones export is the gateway's own file. */}
+      <div role="group" aria-label={t('analysis.export.csv')} className="flex flex-col gap-1">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={exportCsv}
+          className="rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-medium text-[var(--text)] hover:bg-[var(--secondary-bg)] disabled:opacity-50"
+        >
+          {t('analysis.export.csv')}
+        </button>
+        <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            checked={qualityColumns}
+            onChange={(event) => setQualityColumns(event.target.checked)}
+            className="h-4 w-4 rounded border-[var(--border)]"
+          />
+          {t('analysis.export.qualityColumns')}
+        </label>
+      </div>
       <button
         type="button"
         disabled={disabled}

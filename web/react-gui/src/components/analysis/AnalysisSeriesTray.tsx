@@ -91,13 +91,18 @@ function availabilityReasonKey(availability: AnalysisCatalogEntry['availability'
   return null;
 }
 
-function channelLabel(channel: AnalysisCatalogEntry): string {
+function channelName(channel: AnalysisCatalogEntry): string {
   if (!channel.deviceName) return channel.displayName;
   for (const separator of [' - ', ': ']) {
     const prefix = `${channel.deviceName}${separator}`;
     if (channel.displayName.startsWith(prefix)) return channel.displayName.slice(prefix.length);
   }
   return channel.displayName;
+}
+
+function channelLabel(channel: AnalysisCatalogEntry, t: AnalysisTranslate): string {
+  const name = channelName(channel);
+  return channel.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
 }
 
 function renderDestination(source: DeviceSource, modules: GatewayModuleFlags | null | undefined, t: AnalysisTranslate) {
@@ -119,14 +124,18 @@ export function AnalysisSeriesTray({ channels, sources, gatewayModules, selected
   const { t: translate } = useTranslation();
   const t = translate as AnalysisTranslate;
   const [query, setQuery] = useState('');
+  const [showLegacy, setShowLegacy] = useState(false);
   const trayId = useId();
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const hasLegacy = useMemo(() => channels.some((c) => c.legacy), [channels]);
 
   const filtered = useMemo(() => {
+    // Legacy estimates are listed on request, or when a saved view selected one.
+    const offered = showLegacy ? channels : channels.filter((c) => !c.legacy || selected.has(c.seriesId));
     const q = query.trim().toLowerCase();
-    if (!q) return channels;
-    return channels.filter((c) => `${c.zoneName ?? ''} ${c.displayName} ${c.deviceName ?? ''} ${c.hubEui ?? ''} ${c.cardType} ${c.channelKey} ${c.deviceSourceId ?? ''}`.toLowerCase().includes(q));
-  }, [channels, query]);
+    if (!q) return offered;
+    return offered.filter((c) => `${c.zoneName ?? ''} ${c.displayName} ${c.deviceName ?? ''} ${c.hubEui ?? ''} ${c.cardType} ${c.channelKey} ${c.deviceSourceId ?? ''}`.toLowerCase().includes(q));
+  }, [channels, query, selected, showLegacy]);
   const visibleSources = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sources;
@@ -142,6 +151,12 @@ export function AnalysisSeriesTray({ channels, sources, gatewayModules, selected
         <span className="rounded-full bg-[var(--card)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">{selectedIds.length}</span>
       </div>
       <input type="search" role="searchbox" placeholder={t('analysis.tray.search')} value={query} onChange={(e) => setQuery(e.target.value)} className="mb-1 w-full rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--text)] outline-none transition focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]" />
+      {hasLegacy ? (
+        <label className="analysis-series-tray__legacy-toggle mb-1 flex items-center gap-2 px-1 text-xs text-[var(--text-secondary)]">
+          <input type="checkbox" checked={showLegacy} onChange={(e) => setShowLegacy(e.target.checked)} className="h-4 w-4 rounded border-[var(--border)]" />
+          {t('analysis.tray.showLegacy')}
+        </label>
+      ) : null}
       <div className="flex flex-col gap-3 overflow-y-auto">
         {groups.map((group, groupIndex) => {
           const zoneHeadingId = `${trayId}-zone-${groupIndex}`;
@@ -165,7 +180,7 @@ export function AnalysisSeriesTray({ channels, sources, gatewayModules, selected
                         'flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-1',
                         disabled ? 'cursor-not-allowed border-[var(--border)] bg-[var(--surface)] text-[var(--text-disabled)]' : isSelected ? 'border-[var(--primary)] bg-[var(--card)] text-[var(--text)]' : 'border-[var(--border)] bg-[var(--card)] text-[var(--text-secondary)] hover:bg-[var(--secondary-bg)]',
                       ].join(' ')}>
-                        <span className="min-w-0 flex-1"><span className="block truncate font-medium">{channelLabel(c)}</span><span className="block truncate text-xs text-[var(--text-tertiary)]">{c.cardType}</span>{disabled && reasonKey ? <span className="block truncate text-xs text-[var(--text-tertiary)]">{t(reasonKey)}</span> : null}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate font-medium">{channelLabel(c, t)}</span><span className="block truncate text-xs text-[var(--text-tertiary)]">{c.cardType}</span>{disabled && reasonKey ? <span className="block truncate text-xs text-[var(--text-tertiary)]">{t(reasonKey)}</span> : null}</span>
                         {c.unit ? <span className="shrink-0 rounded bg-[var(--surface)] px-1.5 py-0.5 text-xs text-[var(--text-secondary)]">{c.unit}</span> : null}
                         <span className="w-4 shrink-0 text-[var(--primary)]" aria-hidden>{isSelected ? '✓' : ''}</span>
                       </button>

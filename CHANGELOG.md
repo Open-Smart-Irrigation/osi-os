@@ -24,6 +24,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `cumulative_baseline`) and has no increment, so the rain of that one
   interval is not counted.
 
+### Added
+- **Data view CSV with quality columns (opt-in).** An "Include quality
+  columns" switch next to "Export CSV" writes version 2 of the Data view
+  CSV: a first line `# osi-csv-version: 2`, then the version 1 columns plus
+  `timezone, period_start, period_end, quality, coverage, sample_count`. A
+  daily row spans its zone-local day (23 or 25 hours across a clock
+  change). Rain amounts are `received_only` and carry no coverage figure; a
+  partial weather sum gives its coverage as a fraction. Version 1 stays the
+  default with the same columns and format. The gateway's zone and
+  all-zones exports have no version 2.
+
+### Changed
+- **Data view daily device buckets follow the zone's local day.** Device
+  series in the Data view summed and averaged their daily buckets over UTC
+  days; they now run from the zone's local midnight to the next, like the
+  weather series beside them, the history cards and the zone export. This
+  applies to every device channel (soil, rain, temperature and the rest).
+  **Values change:** a saved view at daily aggregation, and the daily
+  device rows of a Data view CSV, show new bucket times (for example
+  22:00Z or 23:00Z instead of 00:00Z in Europe/Zurich) and new values.
+  Weekly buckets are unchanged (7 × 24 hours from the range start), as are
+  hourly and raw series. Devices without a zone stay on UTC days. Stored
+  data and rollups are not touched.
+- **Rain amounts are labelled as amounts.** `rain_mm_delta` reads
+  "Rainfall amount", and "Rainfall this interval" on raw samples, in the
+  Data view (series, legend, tooltip, axis) and in the `series_label` of
+  every CSV: the Data view CSV and the gateway's zone and all-zones
+  exports. **Values change** in that column ("Rain delta" before). Channel
+  keys, units and series ids are unchanged, so saved views keep opening.
+- **The LoRain rate and 10-minute value are legacy estimates.** They are
+  computed over the time since the previous report, not measured. For a
+  LoRain gauge the Data view lists them only on request ("Show legacy
+  estimates") or when a saved view selected one, marked "(legacy
+  estimate)", and metric presets skip them. Saved views and exports still
+  resolve them under their keys. S2120 and LSN50 rates are unchanged. Rain
+  amount tooltips state how many reports were received instead of a
+  coverage figure.
+- **The LoRain card's "Rate" tile is now "Last report".** It shows when
+  the last report arrived, in the farm timezone with the zone named. The
+  interval tile reads "Rainfall this interval", and the card's rain history
+  offers the interval amount and the farm-day total.
+
 ### Fixed
 - **Unknown rain is no longer reported as a measured 0 mm.** The zone water
   tile read a day without a rain-gauge row as 0 mm, so a zone with a 4 mm

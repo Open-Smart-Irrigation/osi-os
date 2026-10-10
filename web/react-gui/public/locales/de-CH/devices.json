@@ -932,5 +932,12 @@
     "recordedToday": "Heute gemessener Regen",
     "soFar": "bisher",
     "lastReportOn": "Letzte Meldung {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Niederschlag dieses Intervalls",
+    "lastReport": "Letzte Meldung",
+    "tips_one": "{{count}} Kippung",
+    "tips_other": "{{count}} Kippungen",
+    "tipsUnavailable": "Anzahl Kippungen nicht verfügbar"
   }
 }
