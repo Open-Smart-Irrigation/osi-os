@@ -562,6 +562,148 @@ function finalize(w) {
 }
 
 // ---------------------------------------------------------------------------
+// Instrument days: coverage of one farm day of one instrument
+// ---------------------------------------------------------------------------
+// Contract: docs/contracts/rainfall/zone-day-projection.md ("Instrument days")
+// and the coverage rule of lorain.md. Reason codes are the instrument's own
+// (lorain.md table, the S2120 and LSN50 counter statuses) plus the coverage
+// codes below; a code this module does not know blocks certification.
+const COVERAGE_ORDER = ['received_only', 'build_unpinned', 'frame_gap', 'session_reset', 'counter_reset', 'late_counter_frame',
+  'boundary_allocation', 'config_change', 'config_mismatch', 'overlap_unqualified', 'multi_block', 'invalid_tips', 'ambiguous_identity'];
+const ZONE_REASON_ORDER = ['gauge_ambiguous', 'no_gauge', 'zone_reassigned', 'timezone_invalid', 'timezone_abbreviation'];
+// A known part of the period is uncovered, but what was covered is usable.
+const PARTIAL_REASONS = new Set(['frame_gap', 'session_reset', 'counter_reset', 'first_sample', 'cumulative_baseline',
+  'missing_previous_count', 'zone_reassigned']);
+// Frame facts that do not affect a day's coverage.
+const NON_BLOCKING_REASONS = new Set(['alarm_event', 'duplicate', 'identity_conflict', 'no_rain_sensor', 'ongoing',
+  'timezone_abbreviation']);
+
+function orderReasons(set) {
+  const known = COVERAGE_ORDER.filter((r) => set.has(r));
+  const zone = ZONE_REASON_ORDER.filter((r) => set.has(r));
+  const other = [...set].filter((r) => !COVERAGE_ORDER.includes(r) && !ZONE_REASON_ORDER.includes(r) && r !== 'ongoing').sort();
+  return known.concat(other, set.has('ongoing') ? ['ongoing'] : [], zone);
+}
+
+function coverageOf(reasons, ongoing) {
+  let partial = false;
+  for (const r of reasons) {
+    if (NON_BLOCKING_REASONS.has(r)) continue;
+    if (PARTIAL_REASONS.has(r)) partial = true;
+    else return 'unknown';
+  }
+  if (partial) return 'partial';
+  return ongoing ? 'complete_so_far' : 'complete';
+}
+
+function frameMs(value) {
+  if (value === null || value === undefined || value === '') return NaN;
+  return Date.parse(value);
+}
+
+// One farm day of one instrument, pure. frames: the instrument's frames in
+// arrival order, including at least the last frame before and the first frame
+// after the window when they exist: { receivedAt, tips, amountMm, deltaMm,
+// cumulativeMm, status, frameKind, intervalBasis, measuredStart, measuredEnd,
+// devAddr, fCnt, reasons }. kind 'interval' (LoRain: continuity by fCnt and
+// devAddr) or 'cumulative' (a counter register: the delta covers the time
+// since the previous reading). cutoffIso: the latest accepted frame of a day
+// that has not ended (today), else null. promoted (interval only): false
+// marks the device received-only; undefined leaves it to the frames.
+// timezoneBasis: the zone timezone's basis, when the caller wants its flag here.
+// A day is complete only when one unbroken chain bounds it on both sides, every
+// frame of it is verified, and no non-zero interval crosses either boundary;
+// its amount is the sum of the verified intervals wholly inside the day.
+function assessInstrumentDay({ kind = 'interval', frames = [], window, cutoffIso = null, promoted, timezoneBasis } = {}) {
+  const startMs = Date.parse(window.startIso);
+  const endMs = Date.parse(window.endIso);
+  const sorted = frames.filter((f) => Number.isFinite(frameMs(f.receivedAt)))
+    .map((f, i) => ({ f, i, t: frameMs(f.receivedAt) }))
+    .sort((a, b) => a.t - b.t || a.i - b.i);
+  let before = null;
+  let after = null;
+  const inWin = [];
+  for (const x of sorted) {
+    if (x.t < startMs) before = x;
+    else if (x.t < endMs) inWin.push(x);
+    else if (!after) after = x;
+  }
+  const cutoffMs = frameMs(cutoffIso);
+  const ongoing = Number.isFinite(cutoffMs) && cutoffMs < endMs;
+  const reasons = new Set();
+  const accepted = inWin.filter((x) => x.f.status === 'accepted' && x.f.amountMm !== null && x.f.amountMm !== undefined);
+  const receivedMm = accepted.length ? roundTo(accepted.reduce((a, x) => a + Number(x.f.amountMm), 0), 3) : null;
+  const observedCutoff = accepted.length ? new Date(accepted[accepted.length - 1].t).toISOString() : null;
+  const tail = after && !ongoing ? [after] : [];
+
+  if (!inWin.length && !(before && after)) {
+    reasons.add('frame_gap');
+    if (ongoing) reasons.add('ongoing');
+    return { amountMm: null, receivedMm, coverage: 'unknown', reasons: orderReasons(reasons), acceptedCount: 0, observedCutoff };
+  }
+
+  // Bounds: a frame before the day starts the chain; a frame at or after its
+  // end (or the cutoff of today) closes it.
+  if (!before) reasons.add('frame_gap');
+  if (!after && !ongoing) reasons.add('frame_gap');
+
+  // Continuity across the chain that covers the day.
+  const chain = (before ? [before] : []).concat(inWin, tail);
+  if (kind === 'interval') {
+    for (let k = 1; k < chain.length; k += 1) {
+      const p = chain[k - 1].f;
+      const c = chain[k].f;
+      if (p.devAddr && c.devAddr && String(p.devAddr) !== String(c.devAddr)) reasons.add('session_reset');
+      else if (Number.isInteger(p.fCnt) && Number.isInteger(c.fCnt)) {
+        if (c.fCnt < p.fCnt) reasons.add('session_reset');
+        else if (c.fCnt > p.fCnt + 1) reasons.add('frame_gap');
+      }
+    }
+    if (promoted === false) reasons.add('received_only');
+  }
+
+  // What each frame of the day (and the frame that closes it) says itself.
+  for (const x of inWin.concat(tail)) {
+    for (const r of Array.isArray(x.f.reasons) ? x.f.reasons : []) reasons.add(String(r));
+    if (x.f.status === 'ambiguous_identity' && kind === 'interval') reasons.add('ambiguous_identity');
+  }
+
+  // Allocation: verified intervals wholly inside the day count; a non-zero
+  // interval across a boundary (or a non-zero edge frame without verified
+  // bounds) cannot be split.
+  let amount = 0;
+  const firstRain = inWin.find((x) => x.f.amountMm !== null && x.f.amountMm !== undefined);
+  for (const x of inWin.concat(tail)) {
+    const mm = x.f.amountMm;
+    if (mm === null || mm === undefined || x.f.status !== 'accepted') continue;
+    const value = Number(mm);
+    if (value === 0) continue;
+    const ms = frameMs(x.f.measuredStart);
+    const me = frameMs(x.f.measuredEnd);
+    const verified = x.f.intervalBasis === 'protocol_verified' && Number.isFinite(ms) && Number.isFinite(me);
+    if (!verified) {
+      if (x === firstRain || x === after) reasons.add('boundary_allocation');
+      continue;
+    }
+    if ((ms < startMs && me > startMs) || (ms < endMs && me > endMs)) reasons.add('boundary_allocation');
+    else if (ms >= startMs && me <= endMs) amount += value;
+  }
+
+  if (timezoneBasis === 'invalid') reasons.add('timezone_invalid');
+  if (timezoneBasis === 'abbreviation') reasons.add('timezone_abbreviation');
+  if (ongoing) reasons.add('ongoing');
+  const coverage = coverageOf(reasons, ongoing);
+  return {
+    amountMm: coverage === 'complete' || coverage === 'complete_so_far' ? roundTo(amount, 3) : null,
+    receivedMm,
+    coverage,
+    reasons: orderReasons(reasons),
+    acceptedCount: accepted.length,
+    observedCutoff,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Configuration query (authorised, NOT bench-verified; sender flag defaults off)
 // ---------------------------------------------------------------------------
 
@@ -1264,6 +1406,7 @@ module.exports = {
   classifyLoRainFrame,
   loRainChainFrame,
   assessLoRainChain,
+  assessInstrumentDay,
   resolveTimezone,
   zoneDayWindow,
   zoneDateWindow,

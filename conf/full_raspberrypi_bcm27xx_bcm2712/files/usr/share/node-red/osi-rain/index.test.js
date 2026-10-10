@@ -381,3 +381,201 @@ test('dst-25h-day and 23h day windows', () => {
   assert.deepEqual(R.zoneDayWindow('2026-10-25T12:00:00Z', 'Europe/Zurich'), { date: '2026-10-25', startIso: '2026-10-24T22:00:00.000Z', endIso: '2026-10-25T23:00:00.000Z' });
   assert.deepEqual(R.zoneDayWindow('2026-03-29T12:00:00Z', 'Europe/Zurich'), { date: '2026-03-29', startIso: '2026-03-28T23:00:00.000Z', endIso: '2026-03-29T22:00:00.000Z' });
 });
+
+// assessInstrumentDay: one farm day of one instrument (window = Zurich 2026-10-08).
+const ZRH_0810 = { startIso: '2026-10-07T22:00:00.000Z', endIso: '2026-10-08T22:00:00.000Z' };
+const ZRH_0809 = { startIso: '2026-10-08T22:00:00.000Z', endIso: '2026-10-09T22:00:00.000Z' };
+const ADDR = '01020304';
+// A LoRain chain of promoted frames: each frame covers the 900 s before it.
+function loRainChain(specs, { devAddr = ADDR, startFCnt = 10 } = {}) {
+  let fCnt = startFCnt;
+  return specs.map((s) => {
+    const [time, tips, extra = {}] = s;
+    const endMs = Date.parse(time);
+    const frame = {
+      receivedAt: new Date(endMs).toISOString(), tips, amountMm: tips === null ? null : tips * 0.5, deltaMm: null, cumulativeMm: null,
+      status: 'accepted', frameKind: tips ? 'ordinary' : 'heartbeat_zero', intervalBasis: 'protocol_verified',
+      measuredStart: new Date(endMs - 900000).toISOString(), measuredEnd: new Date(endMs).toISOString(),
+      devAddr, fCnt, reasons: [],
+    };
+    fCnt = (extra.fCnt !== undefined ? extra.fCnt : fCnt) + 1;
+    return { ...frame, ...extra };
+  });
+}
+// A cumulative register: each frame's delta covers the time since the previous frame.
+function counterChain(specs) {
+  let prev = null;
+  return specs.map(([time, deltaMm, extra = {}]) => {
+    const frame = {
+      receivedAt: new Date(Date.parse(time)).toISOString(), tips: null, amountMm: deltaMm, deltaMm, cumulativeMm: null,
+      status: deltaMm === null ? 'not_additive' : 'accepted', frameKind: 'counter',
+      intervalBasis: deltaMm === null || !prev ? 'unknown' : 'protocol_verified',
+      measuredStart: deltaMm === null || !prev ? null : prev, measuredEnd: deltaMm === null || !prev ? null : new Date(Date.parse(time)).toISOString(),
+      devAddr: null, fCnt: null, reasons: [],
+    };
+    prev = frame.receivedAt;
+    return { ...frame, ...extra };
+  });
+}
+const DRY_DAY = [
+  ['2026-10-07T20:00:00Z', 0], ['2026-10-08T00:00:00Z', 0], ['2026-10-08T04:00:00Z', 0], ['2026-10-08T08:00:00Z', 0],
+  ['2026-10-08T12:00:00Z', 0], ['2026-10-08T16:00:00Z', 0], ['2026-10-08T20:00:00Z', 0], ['2026-10-09T00:00:00Z', 0],
+];
+const assessDay = (frames, extra = {}) => R.assessInstrumentDay({ kind: 'interval', frames, window: ZRH_0810, cutoffIso: null, promoted: true, timezoneBasis: 'zone', ...extra });
+
+test('assessInstrumentDay: a verified dry day is complete with 0 mm; rain inside it is its amount', () => {
+  const dry = assessDay(loRainChain(DRY_DAY));
+  assert.equal(dry.coverage, 'complete');
+  assert.equal(dry.amountMm, 0);
+  assert.deepEqual(dry.reasons, []);
+  assert.equal(dry.receivedMm, 0);
+  const wet = assessDay(loRainChain([...DRY_DAY.slice(0, 4), ['2026-10-08T10:00:00Z', 3], ['2026-10-08T10:15:00Z', 2], ...DRY_DAY.slice(4)]));
+  assert.equal(wet.coverage, 'complete');
+  assert.equal(wet.amountMm, 2.5);
+  assert.equal(wet.receivedMm, 2.5);
+  assert.equal(wet.acceptedCount, 8);
+});
+
+test('assessInstrumentDay: a single heartbeat with no frames around it is partial with frame_gap, not a dry day', () => {
+  const r = assessDay(loRainChain([['2026-10-08T12:00:00Z', 0]]));
+  assert.equal(r.coverage, 'partial');
+  assert.ok(r.reasons.includes('frame_gap'));
+  assert.equal(r.amountMm, null);
+  assert.equal(r.receivedMm, 0);
+});
+
+test('assessInstrumentDay: an interval crossing midnight with tips is boundary_allocation on both days (A13)', () => {
+  const frames = loRainChain([...DRY_DAY.slice(0, 7), ['2026-10-08T22:05:00Z', 2], ['2026-10-09T02:05:00Z', 0], ['2026-10-09T06:05:00Z', 0],
+    ['2026-10-09T10:05:00Z', 0], ['2026-10-09T14:05:00Z', 0], ['2026-10-09T18:05:00Z', 0], ['2026-10-09T22:05:00Z', 0]]);
+  const day1 = assessDay(frames);
+  assert.equal(day1.coverage, 'unknown');
+  assert.ok(day1.reasons.includes('boundary_allocation'));
+  assert.equal(day1.amountMm, null);
+  assert.equal(day1.receivedMm, 0, 'the straddling frame is received on the next day');
+  const day2 = assessDay(frames, { window: ZRH_0809 });
+  assert.equal(day2.coverage, 'unknown');
+  assert.ok(day2.reasons.includes('boundary_allocation'));
+  assert.equal(day2.receivedMm, 1, 'received in this period, not a measured day total');
+  // A zero window across midnight splits exactly (zero on both sides).
+  const zero = assessDay(loRainChain([...DRY_DAY.slice(0, 7), ['2026-10-08T22:05:00Z', 0], ['2026-10-09T02:05:00Z', 0]]));
+  assert.equal(zero.coverage, 'complete');
+  assert.equal(zero.amountMm, 0);
+});
+
+test('assessInstrumentDay: a frame received exactly at midnight belongs to the day its window measured', () => {
+  const frames = loRainChain([...DRY_DAY.slice(0, 7), ['2026-10-08T22:00:00Z', 4], ['2026-10-09T02:00:00Z', 0]]);
+  const day1 = assessDay(frames);
+  assert.equal(day1.coverage, 'complete');
+  assert.equal(day1.amountMm, 2, 'measured 21:45-22:00Z, inside the day');
+  assert.equal(day1.receivedMm, 0, 'received on the next day');
+  const day2 = assessDay(frames, { window: ZRH_0809 });
+  assert.equal(day2.receivedMm, 2);
+  assert.equal(day2.amountMm, null, 'day 2 has no frame after its end yet');
+});
+
+test('assessInstrumentDay: button overlap and a configuration change mid-day are unknown (A9)', () => {
+  const overlap = loRainChain([...DRY_DAY.slice(0, 4), ['2026-10-08T10:07:00Z', 2, { status: 'overlap_unqualified', amountMm: null, frameKind: 'button', intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['overlap_unqualified'] }],
+    ['2026-10-08T10:15:00Z', 2, { intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['overlap_unqualified'] }], ...DRY_DAY.slice(4)]);
+  const r1 = assessDay(overlap);
+  assert.equal(r1.coverage, 'unknown');
+  assert.ok(r1.reasons.includes('overlap_unqualified'));
+  const config = loRainChain([...DRY_DAY.slice(0, 4), ['2026-10-08T09:00:00Z', null, { status: 'not_additive', amountMm: null, frameKind: 'config', intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['config_change'] }],
+    ['2026-10-08T09:30:00Z', 0, { intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['config_change'] }], ...DRY_DAY.slice(4)]);
+  const r2 = assessDay(config);
+  assert.equal(r2.coverage, 'unknown');
+  assert.ok(r2.reasons.includes('config_change'));
+});
+
+test('assessInstrumentDay: fCnt gap is partial frame_gap, session reset partial session_reset, unpromoted unknown received_only (D9)', () => {
+  const gap = loRainChain(DRY_DAY.map((s, i) => (i === 4 ? [s[0], s[1], { fCnt: 20 }] : s)));
+  const r1 = assessDay(gap);
+  assert.equal(r1.coverage, 'partial');
+  assert.deepEqual(r1.reasons, ['frame_gap']);
+  assert.equal(r1.amountMm, null);
+  const reset = loRainChain(DRY_DAY.map((s, i) => (i === 4 ? [s[0], s[1], { fCnt: 0 }] : s)));
+  const r2 = assessDay(reset);
+  assert.equal(r2.coverage, 'partial');
+  assert.deepEqual(r2.reasons, ['session_reset']);
+  const moved = loRainChain(DRY_DAY).map((f, i) => (i >= 5 ? { ...f, devAddr: '0a0b0c0d' } : f));
+  assert.deepEqual(assessDay(moved).reasons, ['session_reset']);
+  const unpromoted = assessDay(loRainChain(DRY_DAY), { promoted: false });
+  assert.equal(unpromoted.coverage, 'unknown');
+  assert.deepEqual(unpromoted.reasons, ['received_only']);
+  assert.equal(unpromoted.amountMm, null);
+  assert.equal(unpromoted.receivedMm, 0);
+  const unpinned = loRainChain(DRY_DAY).map((f) => ({ ...f, intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['build_unpinned', 'received_only'] }));
+  const r3 = assessDay(unpinned, { promoted: undefined });
+  assert.equal(r3.coverage, 'unknown');
+  assert.deepEqual(r3.reasons, ['received_only', 'build_unpinned']);
+  // unknown wins over partial
+  const both = assessDay(loRainChain(DRY_DAY.map((s, i) => (i === 4 ? [s[0], s[1], { fCnt: 20 }] : s))), { promoted: false });
+  assert.equal(both.coverage, 'unknown');
+  assert.deepEqual(both.reasons, ['received_only', 'frame_gap']);
+});
+
+test('assessInstrumentDay: an outage crossing midnight leaves both days not complete (A28)', () => {
+  const frames = loRainChain([...DRY_DAY.slice(0, 7), ['2026-10-09T06:00:00Z', 6, { fCnt: 40 }], ['2026-10-09T10:00:00Z', 0],
+    ['2026-10-09T14:00:00Z', 0], ['2026-10-09T18:00:00Z', 0], ['2026-10-09T22:00:00Z', 0]]);
+  const day1 = assessDay(frames);
+  const day2 = assessDay(frames, { window: ZRH_0809 });
+  assert.notEqual(day1.coverage, 'complete');
+  assert.notEqual(day2.coverage, 'complete');
+  assert.equal(day2.receivedMm, 3, 'the amount stays as an interval observation');
+});
+
+test('assessInstrumentDay: a partial day and the complete next day are assessed independently (A16)', () => {
+  const frames = loRainChain([['2026-10-08T12:00:00Z', 0], ['2026-10-08T16:00:00Z', 0], ['2026-10-08T20:00:00Z', 0],
+    ['2026-10-09T00:00:00Z', 0], ['2026-10-09T04:00:00Z', 0], ['2026-10-09T08:00:00Z', 2], ['2026-10-09T12:00:00Z', 0],
+    ['2026-10-09T16:00:00Z', 0], ['2026-10-09T20:00:00Z', 0], ['2026-10-10T00:00:00Z', 0]]);
+  assert.equal(assessDay(frames).coverage, 'partial');
+  const day2 = assessDay(frames, { window: ZRH_0809 });
+  assert.equal(day2.coverage, 'complete');
+  assert.equal(day2.amountMm, 1);
+});
+
+test('assessInstrumentDay: cumulative register complete with zero straddling deltas; a reset inside is partial counter_reset', () => {
+  const spec = [['2026-10-07T21:50:00Z', 0], ['2026-10-07T22:10:00Z', 0], ['2026-10-08T06:00:00Z', 1.2], ['2026-10-08T12:00:00Z', 0.4],
+    ['2026-10-08T21:50:00Z', 0], ['2026-10-08T22:10:00Z', 0]];
+  const ok = R.assessInstrumentDay({ kind: 'cumulative', frames: counterChain(spec), window: ZRH_0810, cutoffIso: null, timezoneBasis: 'zone' });
+  assert.equal(ok.coverage, 'complete');
+  assert.equal(ok.amountMm, 1.6);
+  const straddle = R.assessInstrumentDay({ kind: 'cumulative', frames: counterChain(spec.map((s, i) => (i === 1 ? [s[0], 0.2] : s))), window: ZRH_0810, cutoffIso: null });
+  assert.equal(straddle.coverage, 'unknown');
+  assert.ok(straddle.reasons.includes('boundary_allocation'));
+  const reset = counterChain(spec);
+  reset[3] = { ...reset[3], status: 'not_additive', amountMm: null, deltaMm: null, intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['counter_reset'] };
+  const r = R.assessInstrumentDay({ kind: 'cumulative', frames: reset, window: ZRH_0810, cutoffIso: null });
+  assert.equal(r.coverage, 'partial');
+  assert.deepEqual(r.reasons, ['counter_reset']);
+  const late = counterChain(spec);
+  late.splice(3, 0, { ...late[3], receivedAt: '2026-10-08T11:00:00.000Z', status: 'not_additive', amountMm: null, deltaMm: null, intervalBasis: 'unknown', measuredStart: null, measuredEnd: null, reasons: ['late_counter_frame', 'out_of_order'] });
+  assert.equal(R.assessInstrumentDay({ kind: 'cumulative', frames: late, window: ZRH_0810, cutoffIso: null }).coverage, 'unknown');
+});
+
+test('assessInstrumentDay: today against its cutoff is at best complete_so_far with ongoing', () => {
+  const frames = loRainChain(DRY_DAY.slice(0, 4).concat([['2026-10-08T10:00:00Z', 1]]));
+  const r = assessDay(frames, { cutoffIso: '2026-10-08T10:00:00.000Z' });
+  assert.equal(r.coverage, 'complete_so_far');
+  assert.deepEqual(r.reasons, ['ongoing']);
+  assert.equal(r.amountMm, 0.5);
+  assert.equal(r.receivedMm, 0.5);
+  assert.equal(r.observedCutoff, '2026-10-08T10:00:00.000Z');
+  const unpromoted = assessDay(frames, { cutoffIso: '2026-10-08T10:00:00.000Z', promoted: false });
+  assert.equal(unpromoted.coverage, 'unknown');
+  assert.deepEqual(unpromoted.reasons, ['received_only', 'ongoing']);
+});
+
+test('assessInstrumentDay: an invalid zone timezone never certifies; an abbreviation is flagged only', () => {
+  assert.equal(assessDay(loRainChain(DRY_DAY), { timezoneBasis: 'invalid' }).coverage, 'unknown');
+  assert.ok(assessDay(loRainChain(DRY_DAY), { timezoneBasis: 'invalid' }).reasons.includes('timezone_invalid'));
+  const abbr = assessDay(loRainChain(DRY_DAY), { timezoneBasis: 'abbreviation' });
+  assert.equal(abbr.coverage, 'complete');
+  assert.deepEqual(abbr.reasons, ['timezone_abbreviation']);
+});
+
+test('assessInstrumentDay: no evidence at all is unknown with no amount', () => {
+  const r = assessDay([]);
+  assert.equal(r.coverage, 'unknown');
+  assert.equal(r.amountMm, null);
+  assert.equal(r.receivedMm, null);
+});
