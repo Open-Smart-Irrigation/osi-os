@@ -13,7 +13,7 @@ The zone-day fields this policy reads (`rainfall_mm`, `rain_coverage`, `rain_sel
 - the zone's `zone_daily_environment` row for `date`, the farm day in the zone's IANA timezone;
 - the zone's gauge selection for that day, so a reason such as `gauge_ambiguous` or `no_gauge` is known even when no row exists.
 
-`provider` is the provider rain the consumer already holds for the same farm day, or null. It carries the amount in millimetres, a source label, the period the amount covers (the farm day, or a UTC day), and the period's hour coverage (`coveredHours`, `expectedHours`; a daily total covers its whole period). The function makes no network call. A caller that fetches weather does so before or after the read, never inside a write transaction.
+`provider` is the provider rain the consumer already holds for the same farm day (for the current farm day, only its elapsed hours; see step 3), or null. It carries the amount in millimetres, a source label, the period the amount covers (the farm day, or a UTC day), and the period's hour coverage (`coveredHours`, `expectedHours`; a daily total covers its whole period). The function makes no network call. A caller that fetches weather does so before or after the read, never inside a write transaction.
 
 ## The four steps
 
@@ -32,9 +32,11 @@ A `complete_so_far` row for a date that is no longer the current farm day was no
 
 ### Step 2: local lower bound
 
-The zone has a selected gauge, its day is not certified (`partial`, `unknown`, or `complete_so_far` on a past date), and `rain_received_mm` is a number. Then `lowerBoundMm = rain_received_mm` and `deveui = rain_selected_deveui`. The reasons gain `local_partial` or `local_unknown`.
+The zone has a selected gauge and its day is not certified: `partial`, `unknown`, `complete_so_far` on a past date, a coverage value outside the projection's table (read as `unknown`), or no zone row for the date. The reasons gain `local_partial` for a `partial` day or a past `complete_so_far` row, and `local_unknown` for every other uncertified day, whether or not anything was received. When `rain_received_mm` is a number, `lowerBoundMm = rain_received_mm` and `deveui = rain_selected_deveui`.
 
-A received amount proves that at least that much rain fell, and nothing more. It has two permitted uses:
+A zone without a selected gauge gets neither code and no lower bound; its reason is the projection's `gauge_ambiguous` or `no_gauge`.
+
+A received amount proves that at least that much rain fell in the windows of the received frames, and nothing more. The first of those windows can begin before midnight, because a frame received just after midnight can measure a window on the other side. It has two permitted uses:
 
 1. Entering rain suppression (owner decision D9 (a)): see "What a rule may conclude" below.
 2. Display, labelled "received only" or "so far", never as the day's total.
@@ -51,7 +53,9 @@ The consumer holds a provider value for the farm day. The tiers, in order:
 2. A station-measured value over a UTC day. It is used and labelled with reason `utc_day_period`; it is never presented as the farm day.
 3. A modelled value (forecast or archive, for example Open-Meteo or OpenAgri).
 
-A consumer uses the tiers it has, in this order. A provider amount is the sum of the hours that carry a valid precipitation value, the same rule as the merged dendrometer and zone forecast code. When some hours lack a value, the sum is still used, with `coverage = 'partial'`, reason `provider_partial`, and the hour coverage (`coveredHours` of `expectedHours`) stored with the advice. A period with no valid hour yields no provider amount; a temperature-only answer is such a period.
+A consumer uses the tiers it has, in this order. A tier that yields no amount passes to the next tier; the first tier that yields an amount answers, partial or complete. A provider amount is the sum of the hours that carry a valid precipitation value, the same rule as the merged dendrometer and zone forecast code. When some hours lack a value, the sum is still used, with `coverage = 'partial'`, reason `provider_partial`, and the hour coverage (`coveredHours` of `expectedHours`) stored with the advice. A period with no valid hour yields no provider amount; a temperature-only answer is such a period.
+
+For the current farm day the period ends at the consumer's now: only hours before now count, and `expectedHours` is the number of elapsed hours. Rain forecast for later hours belongs to the forecast rule (the zone water verdict's next-24-hour rain), never to `amountMm`; counting it in both would delay irrigation on rain that has not fallen.
 
 `amountMm` is the provider amount, `coverage` is `complete` when every hour of the labelled period carries a value and `partial` otherwise, and `source` is the provider's label, for example `meteoswiss_station` or `open_meteo`. A lower bound from step 2 stays in the result next to it.
 
@@ -71,12 +75,14 @@ No step yielded an amount: `amountMm = null`, `coverage = 'unknown'`, `source = 
 | `reasons` | The zone day's `rain_quality_reasons` (or the selection's reason when no row exists), then the policy's codes below. No duplicates. |
 | `policyVersion` | `1`. |
 
-Every consumer stores `source`, `coverage` and `deveui` (and, for a provider amount, `coveredHours` and `expectedHours`) with the advice it derives, so a reader can tell which rain the advice used.
+With a provider amount, `deveui` names the gauge of the lower bound, not the source of `amountMm`.
+
+Every consumer stores `source`, `coverage`, `deveui`, `lowerBoundMm`, `reasons` and `policyVersion` (and, for a provider amount, `coveredHours` and `expectedHours`) with the advice it derives, so a reader can tell from the stored record which rain the advice used and why suppression started.
 
 | Policy reason code | Added when |
 |---|---|
-| `local_partial` | Step 2 read a `partial` day, or a `complete_so_far` row on a past date. |
-| `local_unknown` | The local day is `unknown`, or no zone row exists for the date while a gauge is selected. |
+| `local_partial` | A gauge is selected and its day is `partial`, or a `complete_so_far` row on a past date. |
+| `local_unknown` | A gauge is selected and its day is uncertified for any other reason, including no zone row for the date. |
 | `utc_day_period` | The provider amount covers a UTC day, not the farm day. |
 | `provider_partial` | The provider amount sums fewer hours than its period has. Informational: the amount is used. |
 | `legacy_row` | The zone row carries no `rain_policy_version`; see "Legacy rows". |
@@ -96,11 +102,13 @@ The vocabulary is open in the same way as `rain_quality_reasons`: a consumer sto
 
 Dendrometer stress actions do not depend on rain and keep their behaviour when rain is unknown.
 
-The larger-of rule exists because a provider can understate rain that a gauge partly received. With a partial local day that received 7 mm and a provider day of 2 mm, `amountMm` is 2 (water balance, rolling sum) and suppression starts on 7. The policy does not raise `amountMm` to the lower bound: a received amount is not a day total.
+The certified day wins outright. When step 1 answers, `lowerBoundMm` is null, so a provider value is never compared with a certified amount. The larger-of rule applies only between a received lower bound and a provider amount, and only for entering suppression and choosing its timeout; `amountMm` never includes the lower bound.
+
+The rule exists because a provider can understate rain that a gauge partly received. With a partial local day that received 7 mm and a provider day of 2 mm, `amountMm` is 2 (water balance, rolling sum) and suppression starts on 7. The policy does not raise `amountMm` to the lower bound for two reasons: a received amount is not a day total, and its first window can begin before midnight, so a rolling sum that added it could count rain already in the previous day.
 
 ## Legacy rows
 
-**Legacy rule.** A zone row without `rain_policy_version` (null, or the column or payload key absent) is a legacy row. Every consumer reads a legacy row exactly as its last release before policy version 1 did, with one exception that binds both sides: no consumer adds the rain of two gauges (owner decision D1). The result carries `coverage = 'legacy_unvalidated'` when a legacy amount is used, and reason `legacy_row` either way.
+**Legacy rule.** A zone row without `rain_policy_version` (null, or the column or payload key absent) is a legacy row. Every consumer reads a legacy row exactly as its last release before policy version 1 did, with one exception that binds both sides: no consumer adds the rain of two gauges (owner decision D1). The result carries `coverage = 'legacy_unvalidated'` when a legacy amount is used, and reason `legacy_row` either way. Both are stored for audit only. They are never shown as a warning, and a legacy row displays as it did before policy version 1.
 
 | Consumer | Reading of a legacy row |
 |---|---|
@@ -108,7 +116,7 @@ The larger-of rule exists because a provider can understate rain that a gauge pa
 | Edge zone water tile | `osi-zone-env.resolveRainTodayMm`: a non-zero amount from a gauge source is measured; an exact 0 counts only while a rain-measuring device is configured for the zone |
 | Cloud zone water heuristic | The same evidence rule as the edge zone water tile |
 | Cloud dendrometer analytics | Provider rain only, as before; the legacy row is not read |
-| Cloud prediction forcing | One assigned weather station's own day, when exactly one is assigned; with two or more, no station rain (reason `gauge_ambiguous`) and the provider tier answers |
+| Cloud prediction forcing | One assigned weather station's own day, when exactly one is assigned (two or more: no station rain, reason `gauge_ambiguous`); then the legacy zone row under the cloud zone water evidence rule; then the provider tier |
 
 Rows get no bulk rewrite. A legacy row becomes a policy version 1 row when the edge re-projects it, which happens only when an observation for that zone and date arrives after the upgrade (see `zone-day-projection.md`). Until then the rolling 7-day window can mix legacy and version 1 days; each day is read by its own rule.
 
@@ -132,15 +140,21 @@ Rows written before release 0.8.1 can carry `rain_source = 'local_gauge'` and `r
 
 ### A partial day with a provider value
 
-Zone row: `rain_coverage = 'partial'`, reasons `['frame_gap']`, `rain_received_mm = 7`. Provider (Open-Meteo, whole farm day): 2 mm.
+Zone row: `rain_policy_version = 1`, `rain_coverage = 'partial'`, reasons `['frame_gap']`, `rain_received_mm = 7`, `rain_selected_deveui = 'A840410000000001'`. Provider (Open-Meteo, past farm day, 24 of 24 hours): 2 mm.
 
-Result: `amountMm = 2`, `lowerBoundMm = 7`, `coverage = 'complete'`, `source = 'open_meteo'`, `deveui = 'A840410000000001'`, reasons `['frame_gap', 'local_partial']`. Suppression starts on 7 mm, and the recommendation's reasoning cites the local lower bound. The rolling sum and the water balance use 2 mm.
+Result: `amountMm = 2`, `lowerBoundMm = 7`, `coverage = 'complete'`, `source = 'open_meteo'`, `deveui = 'A840410000000001'` (the gauge of the lower bound), reasons `['frame_gap', 'local_partial']`, `policyVersion = 1`. Suppression starts on 7 mm, and the recommendation's reasoning cites the local lower bound. The rolling sum and the water balance use 2 mm.
 
 ### Two gauges, no selection
 
-Zone row: `rain_coverage = 'unknown'`, reasons `['gauge_ambiguous']`, `rain_selected_deveui = null`. Provider: MeteoSwiss station, 3 mm over a UTC day.
+Zone row: `rain_policy_version = 1`, `rain_coverage = 'unknown'`, reasons `['gauge_ambiguous']`, `rain_selected_deveui = null`. Provider: MeteoSwiss station, 3 mm over a UTC day, every hour present.
 
-Result: `amountMm = 3`, `lowerBoundMm = null`, `source = 'meteoswiss_station'`, `deveui = null`, reasons `['gauge_ambiguous', 'utc_day_period']`. The two gauges are never added and never chosen by arrival order.
+Result: `amountMm = 3`, `lowerBoundMm = null`, `coverage = 'complete'`, `source = 'meteoswiss_station'`, `deveui = null`, reasons `['gauge_ambiguous', 'utc_day_period']`, `policyVersion = 1`. No local code is added, because no gauge is selected. The two gauges are never added and never chosen by arrival order.
+
+### Today: rain so far against forecast rain
+
+The zone water tile at 11:00 farm time. Zone row: `rain_policy_version = 1`, `rain_coverage = 'unknown'`, reasons `['received_only', 'ongoing']`, `rain_received_mm = 0`, `rain_selected_deveui = 'A840410000000001'`. Provider (Open-Meteo) hours: 0 mm in each of the 11 elapsed hours, and 8 mm forecast for the afternoon.
+
+Result: `amountMm = 0`, `lowerBoundMm = 0`, `coverage = 'complete'` (11 of 11 elapsed hours), `source = 'open_meteo'`, `deveui = 'A840410000000001'`, reasons `['received_only', 'ongoing', 'local_unknown']`. The afternoon's 8 mm is not in `amountMm`; it reaches the verdict once, through the next-24-hour forecast rule.
 
 ## Cloud mirror obligation
 
