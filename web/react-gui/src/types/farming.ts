@@ -588,6 +588,16 @@ export interface WaterEnvironment {
    * a measured zero is 'observed'. Sent by the gateway; absent in a cloud bundle.
    */
   rainTodayStatus?: 'observed' | 'unknown';
+  /**
+   * Rain-resolution policy coverage of rainTodayMm, sent by the gateway: 'complete_so_far'
+   * (the selected gauge's day so far), 'unknown', or 'legacy_unvalidated' for a day written
+   * before policy version 1 (audit only, never shown as a warning).
+   */
+  rainTodayCoverage?: string | null;
+  /** What the gauge received today when the day is not certified: a lower bound, never balanced. */
+  rainTodayReceivedMm?: number | null;
+  /** Rain-resolution policy reason codes for today's rain (open vocabulary). */
+  rainTodayReasons?: string[];
   irrigationTodayLiters: number | null;
   irrigationTodayNetMm: number | null;
   irrigationTodayMeasuredLiters?: number | null;
@@ -634,6 +644,10 @@ export interface WaterAction {
 export interface WaterDay {
   date: string;
   rainMm: number | null;
+  /** Rain-resolution policy coverage of a policy-1 gateway day; absent on a legacy day. */
+  rainCoverage?: string | null;
+  /** What the gauge received on an uncertified policy-1 day (rainMm is then null). */
+  rainReceivedMm?: number | null;
   irrigationLiters: number | null;
   irrigationNetMm: number | null;
   measuredIrrigationLiters?: number | null;

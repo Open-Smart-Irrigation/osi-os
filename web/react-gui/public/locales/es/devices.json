@@ -436,6 +436,8 @@
       "lastSevenDaysHelpLabel": "Acerca de los últimos 7 días",
       "setupRequiredHelpLabel": "Por qué falta el riego efectivo",
       "rainSourceHelpLabel": "De dónde procede este valor de lluvia",
+      "rainSoFar": "hasta ahora",
+      "rainReceivedOnly": "solo {{value}} recibidos (día incompleto)",
       "demandNoSource": "ninguna fuente meteorológica para este día",
       "demandMixedStation": "horas de dos estaciones de MeteoSwiss",
       "demandUnknownStation": "estación de MeteoSwiss desconocida para estas horas",

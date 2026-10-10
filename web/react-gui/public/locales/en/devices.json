@@ -433,6 +433,8 @@
       "lastSevenDaysHelpLabel": "About the last 7 days",
       "setupRequiredHelpLabel": "Why effective irrigation is missing",
       "rainSourceHelpLabel": "Where this rain value comes from",
+      "rainSoFar": "so far",
+      "rainReceivedOnly": "{{value}} received only (incomplete day)",
       "demandNoSource": "no weather source for this day",
       "demandMixedStation": "hours from two MeteoSwiss stations",
       "demandUnknownStation": "MeteoSwiss station unknown for these hours",

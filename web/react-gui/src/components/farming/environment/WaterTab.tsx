@@ -437,6 +437,13 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       key: 'rain',
       label: t('environment.water.rainToday', { defaultValue: 'Rain today' }),
       value: formatValue(water.rainTodayMm, 'mm', 1),
+      // Rain-resolution policy: a gauge day certified so far is "so far"; an incomplete day has
+      // no amount, only what the gauge received (a lower bound). A legacy day shows as before.
+      detail: water.rainTodayMm != null && water.rainTodayCoverage === 'complete_so_far'
+        ? t('environment.water.rainSoFar', { defaultValue: 'so far' })
+        : water.rainTodayMm == null && water.rainTodayReceivedMm != null
+          ? t('environment.water.rainReceivedOnly', { value: formatValue(water.rainTodayReceivedMm, 'mm', 1), defaultValue: '{{value}} received only (incomplete day)' })
+          : null,
       help: rainSourceHelp
         ? { label: t('environment.water.rainSourceHelpLabel', { defaultValue: 'Where this rain value comes from' }), text: rainSourceHelp }
         : null,

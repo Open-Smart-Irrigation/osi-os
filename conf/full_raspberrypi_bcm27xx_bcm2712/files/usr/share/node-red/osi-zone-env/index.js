@@ -683,6 +683,27 @@ function resolveRainTodayMm(row, rainGaugePresent) {
   return round(mm, 2);
 }
 
+/**
+ * One zone day's rain for the Water tab under the rain-resolution policy
+ * (docs/contracts/rainfall/rain-resolution-policy.md). A policy-1 row
+ * (rain_policy_version set) counts only when the selected gauge certified it:
+ * 'complete' gives rainfall_mm, 'complete_so_far' gives the received amount on
+ * the current day only; any other day is unknown rain, and its received amount
+ * is returned as receivedMm, a lower bound for display, never a total. A legacy
+ * row reads as before through resolveRainTodayMm and has no coverage.
+ */
+function resolveDayRain(row, rainGaugePresent, isToday) {
+  if (!row || row.rain_policy_version == null) {
+    return { rainMm: resolveRainTodayMm(row, rainGaugePresent), coverage: null, receivedMm: null };
+  }
+  const coverage = trimToNull(row.rain_coverage) || 'unknown';
+  const amount = toFiniteNumber(row.rainfall_mm);
+  const received = toFiniteNumber(row.rain_received_mm);
+  if (coverage === 'complete' && amount != null) return { rainMm: round(amount, 2), coverage, receivedMm: null };
+  if (coverage === 'complete_so_far' && isToday && received != null) return { rainMm: round(received, 2), coverage, receivedMm: null };
+  return { rainMm: null, coverage, receivedMm: received != null ? round(received, 2) : null };
+}
+
 function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyPct) {
   const liters = toFiniteNumber(irrigationLiters);
   const area = toFiniteNumber(areaM2);
@@ -714,7 +735,8 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
   const daily = [];
   for (let dateIso = startIso; dateIso && dateIso <= todayIso; dateIso = addUtcDays(dateIso, 1)) {
     const row = byDate[dateIso] || null;
-    const rainMm = resolveRainTodayMm(row, rainGaugePresent === undefined ? true : rainGaugePresent);
+    const dayRain = resolveDayRain(row, rainGaugePresent === undefined ? true : rainGaugePresent, dateIso === todayIso);
+    const rainMm = dayRain.rainMm;
     const measuredIrrigationLiters = round(row ? row.flow_liters : 0, 2) || 0;
     const estimatedIrrigationLiters = round(estimated[dateIso] || 0, 2) || 0;
     const measuredIrrigationNetMm = toEffectiveIrrigationMm(measuredIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
@@ -731,6 +753,8 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
       totalWaterMm: measuredIrrigationNetMm != null && rainMm != null ? round(rainMm + measuredIrrigationNetMm, 2) : null,
       estimatedTotalWaterMm: estimatedIrrigationNetMm != null && rainMm != null ? round(rainMm + estimatedIrrigationNetMm, 2) : null
     };
+    // Policy-1 days only: a legacy day keeps its earlier shape.
+    if (dayRain.coverage) Object.assign(day, { rainCoverage: dayRain.coverage, rainReceivedMm: dayRain.receivedMm });
     const a = agronomyByDate[dateIso] || null;
     if (dateIso === todayIso) {
       const cur = todayAgronomic && typeof todayAgronomic === 'object' ? todayAgronomic : {};
@@ -1034,6 +1058,7 @@ module.exports = {
   addUtcDays,
   GAUGE_RAIN_SOURCES,
   resolveRainTodayMm,
+  resolveDayRain,
   toEffectiveIrrigationMm,
   buildWaterDaily,
   buildSensorHealth,

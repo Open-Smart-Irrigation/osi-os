@@ -15,6 +15,11 @@
     "irrigationEfficiencyPct": 75,
     "rainTodayMm": 0.8,
     "rainTodayStatus": "observed",
+    "rainTodayCoverage": "legacy_unvalidated",
+    "rainTodayReceivedMm": null,
+    "rainTodayReasons": [
+      "legacy_row"
+    ],
     "irrigationTodayLiters": 15,
     "irrigationTodayNetMm": 0.23,
     "irrigationTodayMeasuredLiters": 15,

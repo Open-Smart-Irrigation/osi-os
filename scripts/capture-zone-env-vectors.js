@@ -149,14 +149,23 @@ function flowFunctionText() {
 
 function makeFacadeShim(dbPath) {
   const db = new DatabaseSync(dbPath);
-  const call = (kind) => (sql, cb) => {
+  // (sql, cb) or (sql, params, cb): the node's own queries carry no parameters;
+  // osi-rain's reads (resolveAdviceRain) do, and use get.
+  const call = (kind) => (sql, paramsOrCb, maybeCb) => {
+    const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+    const cb = typeof paramsOrCb === 'function' ? paramsOrCb : maybeCb;
     try {
       let result;
-      if (kind === 'run') {
+      if (kind === 'run' && !params.length) {
         db.exec(sql);
         result = undefined;
+      } else if (kind === 'run') {
+        db.prepare(sql).run(...params);
+        result = undefined;
+      } else if (kind === 'get') {
+        result = db.prepare(sql).get(...params);
       } else {
-        result = db.prepare(sql).all();
+        result = db.prepare(sql).all(...params);
       }
       if (typeof cb === 'function') {
         process.nextTick(() => cb(null, result));
@@ -173,6 +182,7 @@ function makeFacadeShim(dbPath) {
   };
   return {
     all: call('all'),
+    get: call('get'),
     run: call('run'),
     close(cb) {
       try { db.close(); } catch (_) {}
@@ -381,6 +391,9 @@ async function runCase(caseName, seedRows) {
     require(name) {
       if (name === 'zone-env') {
         return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env')) };
+      }
+      if (name === 'rain') {
+        return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain')) };
       }
       return { ok: false, error: `unknown module ${name}` };
     },

@@ -770,3 +770,38 @@ test('resolveRainUnknownWaterAction: withhold answers insufficient_data; a dendr
   }
   assert.equal(ZE.resolveWaterAction('2026-10-08', dendro, null, 0, 4, false, 0).source, 'dendro');
 });
+
+test('resolveDayRain: a policy-1 day counts only when certified; a legacy day follows resolveRainTodayMm', () => {
+  const policy = (fields) => ({ rain_policy_version: 1, rain_source: 'aquascope_lorain', rainfall_mm: null, rain_received_mm: null, ...fields });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete', rainfall_mm: 0 }), true, false), { rainMm: 0, coverage: 'complete', receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete', rainfall_mm: 4.25 }), false, false), { rainMm: 4.25, coverage: 'complete', receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete_so_far', rain_received_mm: 1.2 }), true, true), { rainMm: 1.2, coverage: 'complete_so_far', receivedMm: null });
+  // A complete_so_far row of an earlier day was not closed: received only.
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete_so_far', rain_received_mm: 1.2 }), true, false), { rainMm: null, coverage: 'complete_so_far', receivedMm: 1.2 });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'partial', rain_received_mm: 3 }), true, false), { rainMm: null, coverage: 'partial', receivedMm: 3 });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'unknown' }), true, true), { rainMm: null, coverage: 'unknown', receivedMm: null });
+  // Legacy rows: the evidence rule of R-UNK-E, no coverage.
+  assert.deepEqual(ZE.resolveDayRain({ rainfall_mm: 0, rain_source: 'aquascope_lorain' }, true, true), { rainMm: 0, coverage: null, receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain({ rainfall_mm: 0, rain_source: 'local_gauge' }, false, true), { rainMm: null, coverage: null, receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(null, true, true), { rainMm: null, coverage: null, receivedMm: null });
+});
+
+test('buildWaterDaily: policy-1 days carry their coverage and received amount; legacy days are unchanged', () => {
+  const daily = ZE.buildWaterDaily({
+    envRows: [
+      { date: '2026-09-23', rainfall_mm: null, flow_liters: 0, rain_source: 'aquascope_lorain', rain_policy_version: 1, rain_coverage: 'partial', rain_received_mm: 2 },
+      { date: '2026-09-24', rainfall_mm: 1.5, flow_liters: 0, rain_source: 'aquascope_lorain' },
+      { date: '2026-09-25', rainfall_mm: null, flow_liters: 0, rain_source: 'aquascope_lorain', rain_policy_version: 1, rain_coverage: 'complete_so_far', rain_received_mm: 0.6 },
+    ],
+    estimatedByDate: {}, agronomyRows: [], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: null, stationNames: {}, rainGaugePresent: true,
+  });
+  const day = (date) => daily.find((d) => d.date === date);
+  assert.equal(day('2026-09-23').rainMm, null);
+  assert.equal(day('2026-09-23').rainCoverage, 'partial');
+  assert.equal(day('2026-09-23').rainReceivedMm, 2);
+  assert.equal(day('2026-09-24').rainMm, 1.5);
+  assert.equal(Object.prototype.hasOwnProperty.call(day('2026-09-24'), 'rainCoverage'), false);
+  assert.equal(day('2026-09-25').rainMm, 0.6);
+  assert.equal(day('2026-09-25').rainCoverage, 'complete_so_far');
+  assert.equal(day('2026-09-25').rainReceivedMm, null);
+});
