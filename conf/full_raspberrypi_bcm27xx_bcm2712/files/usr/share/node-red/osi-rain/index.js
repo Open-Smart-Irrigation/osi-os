@@ -2043,6 +2043,7 @@ async function setZoneRainSource(t, zoneId, deveui, opts = {}) {
     if (out && out.written) reprojected.push(date);
   }
   return { ok: true, view: await zoneRainSourceView(t, zid), reprojected };
+}
 // Advice: the rain-resolution policy (docs/contracts/rainfall/rain-resolution-policy.md)
 // ---------------------------------------------------------------------------
 
@@ -2071,7 +2072,7 @@ function providerAnswer(provider) {
   const tiers = Array.isArray(provider) ? provider : [provider];
   for (const tier of tiers) {
     const amountMm = finiteMm(tier && tier.amountMm);
-    if (amountMm === null) continue;
+    if (amountMm === null || amountMm < 0) continue;
     const covered = finiteMm(tier.coveredHours);
     const expected = finiteMm(tier.expectedHours);
     const partial = covered !== null && expected !== null && covered < expected;
@@ -2215,4 +2216,3 @@ module.exports = {
   resolveAdviceRain,
   adviceSuppressionMm,
 };
-}

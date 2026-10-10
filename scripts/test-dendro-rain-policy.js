@@ -321,6 +321,46 @@ for (const profile of PROFILES) {
   });
 }
 
+for (const profile of PROFILES) {
+  const tag = profile.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+
+  test(`[${tag}] negative provider rainfall is ignored so valid fallback rain answers`, async () => {
+    const db = seedDb();
+    const weather = (url) => (url.includes('/api/v1/')
+      ? { status: 200, body: { data: [{ values: { temperature_2m: 18, relative_humidity_2m: 70, precipitation: -2 } }] } }
+      : openMeteoDay(3));
+    await runDendro(db, {
+      weather,
+      profile,
+      envVars: { OPENAGRI_WEATHER_URL: 'https://weather.example.invalid', OPENAGRI_WEATHER_BEARER_TOKEN: 'test-token' },
+    });
+    const { json } = recommendation(db);
+    assert.equal(json.rain.daily_mm, 3);
+    assert.equal(json.rain.source, 'open_meteo');
+    db.close();
+  });
+
+  test(`[${tag}] all-negative Open-Meteo precipitation remains unknown`, async () => {
+    const db = seedDb();
+    const weather = {
+      status: 200,
+      body: { hourly: {
+        temperature_2m: Array(24).fill(18),
+        relative_humidity_2m: Array(24).fill(70),
+        precipitation: Array(24).fill(-1),
+      } },
+    };
+    await runDendro(db, { weather, profile });
+    const { row, json } = recommendation(db);
+    assert.equal(json.rain.daily_mm, null);
+    assert.equal(json.rain.daily_status, 'unknown');
+    assert.ok(json.rain.warnings.includes('rain_unknown'));
+    assert.equal(row.rainfall_mm, null);
+    assert.equal(suppression(db).rain_suppression_active, 0);
+    db.close();
+  });
+}
+
 // The zone recommendations API (dendro-zone-rec-fn) answers the stored amount: an
 // unknown day stays null there, never 0.
 test('GET zone recommendations keeps an unknown day\'s rainfall_mm null and a dry day 0', async () => {

@@ -162,8 +162,8 @@
       "reason": "Wave 3 scoped-access port (AgroLink d49e1cd28, feat(api): scope shared analysis reads): measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3011 -> HEAD 4310 = +1299, superseding the previous +54 entry (fully subsumed: the vae.trigger column, added on main after AgroLink's fork, is preserved verbatim in both the CREATE TABLE and SELECT). When OSI_SCOPED_ACCESS=1, resolves the caller's zone scope via osi-scope-helper (assertEnabledAccount + listScopeZoneUuids) and scopes the recent-actuations query to iz.zone_uuid IN (...) instead of d.user_id =; unscoped mode keeps the owner-id predicate. Adds osiLib to libs; the CREATE TABLE catch is now visible via the function-level catch/node.warn."
     },
     "zone-env-fn": {
-      "delta": 994,
-      "reason": "Task 4 final-base integration measured with verify-flows-size-ratchet nodeSizes (func.length) against f09bce77bd0056701c3947f82b4fd9fa4130b117 on both byte-identical maintained profiles: base 39930 -> integrated HEAD 40924 = +994. This allowance covers Task 4 edge advice policy, observedAt-bounded raw forecast_v2 evidence, and linked rain metadata overlay in zone-env-fn; Task 3/Task 6 source-selection behavior is already present in the measured base."
+      "delta": 1150,
+      "reason": "Measured against final base f09bce77bd0056701c3947f82b4fd9fa4130b117 with nodeSizes: 39930 -> 41080 chars. Provider-only evidence timestamp adds 156 chars above the prior +994 allowance."
     },
     "strega-today-liters-fn": {
       "delta": 2994,
@@ -214,8 +214,8 @@
       "reason": "5.6: scheduler backward-jump debounce (sameLogicalWindow) on both DENDRO + threshold paths + threshold suppression early return"
     },
     "dendro-compute-fn": {
-      "delta": 1608,
-      "reason": "Supersedes the prior entry (1595, rolling 7-day rain, finding 13), which origin/main already measures in full. Rain-resolution policy for dendro advice (rain correctness, finding 7): measured with verify-flows-size-ratchet nodeSizes, each byte-identical maintained profile: origin/main 44522 -> HEAD 46130 = +1608. The node loads osi-rain and takes the day's rain from osi-rain.resolveAdviceRain (certified gauge day, else provider, else unknown stored as NULL); the rain object gains source, coverage, deveui, lower_bound_mm, suppression_mm, reasons, policy_version and the provider hour coverage; both provider fetchers count the hours that carry a precipitation value; a provider answer without rain passes rain to Open-Meteo. The local rain selection by a positive amount is removed."
+      "delta": 1630,
+      "reason": "Measured against final base f09bce77bd0056701c3947f82b4fd9fa4130b117 with nodeSizes: 44522 -> 46152 chars. Required nonnegative provider precipitation validation adds 22 chars above the prior +1608 allowance."
     },
     "sim-dendro-fn-setup": {
       "delta": 950,

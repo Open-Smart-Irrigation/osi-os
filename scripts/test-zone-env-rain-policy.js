@@ -216,7 +216,16 @@ test('no elapsed provider rain slots keep today unknown despite future forecast 
   const water = await zoneWater({ rows: [] });
   assert.equal(water.rainTodayMm, null);
   assert.equal(water.rainSource, null);
+  assert.equal(water.observedAt, null, 'future forecast data is not an observation of elapsed rain');
   assert.equal(water.action.reasonCode, 'rain_unknown');
+});
+
+test('provider-only rain carries its evidence timestamp for the zone water card', async () => {
+  forecastRain = 'dry';
+  const water = await zoneWater({ rainGauge: false, rows: [] });
+  assert.equal(water.rainTodayMm, 0);
+  assert.equal(water.rainSource, 'weather_service');
+  assert.equal(water.observedAt, NOW_ISO);
 });
 
 test('a daily-only future rain total does not answer today', async () => {

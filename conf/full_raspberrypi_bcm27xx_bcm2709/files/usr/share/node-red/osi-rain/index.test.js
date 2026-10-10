@@ -699,6 +699,21 @@ test('resolveAdviceRain: provider tiers in order; a tier without an amount passe
   assert.deepEqual(r.reasons, ['no_gauge', 'provider_partial']);
 });
 
+test('resolveAdviceRain: a negative provider amount is invalid and falls through to the next tier', async () => {
+  const db = adviceDb();
+  const validFallback = await advice(db, [
+    { amountMm: -1, source: 'openagri', period: 'farm_day' },
+    OPEN_METEO_DAY(2),
+  ]);
+  assert.equal(validFallback.amountMm, 2);
+  assert.equal(validFallback.source, 'open_meteo');
+
+  const noFallback = await advice(adviceDb(), { amountMm: -1, source: 'open_meteo', period: 'farm_day' });
+  assert.equal(noFallback.amountMm, null);
+  assert.equal(noFallback.coverage, 'unknown');
+  assert.ok(noFallback.reasons.includes('rain_unknown'));
+});
+
 test('resolveAdviceRain: complete_so_far is certified only on the current farm day', async () => {
   const db = adviceDb();
   adviceRow(db, { coverage: 'complete_so_far', deveui: ADVICE_GAUGE, reasons: ['ongoing'], received: 1.2, rain_source: 'sensecap_s2120' });
