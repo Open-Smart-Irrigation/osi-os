@@ -35,11 +35,13 @@ The fields appear on every path that carries a `zone_daily_environment` row to t
 
 `unknown` wins over `partial` when both apply. A `complete` row may still carry reason codes that do not block certification, such as `timezone_abbreviation`. Any coverage value outside this table is read as `unknown`.
 
-`legacy_unvalidated` is the name read-side APIs give a row whose `rain_coverage` is null. The edge never sends it as a payload value.
+`legacy_unvalidated` is the name the gateway's own read-side APIs may give a row whose `rain_coverage` is null. The edge never sends it as a payload value.
 
 ### Legacy rows and older gateways
 
-Rows written before policy version 1 get no bulk rewrite. The edge re-projects such a row at policy version 1 only when it accepts an observation for that zone and date after the upgrade, typically on the upgrade day; until then the row keeps its stored values. Its five new fields are null, and their `rainfall_mm` is a value no coverage rule produced. A receiver treats such a row as legacy and unvalidated: it may display the amount with that label, and no advice consumer may use it as measured rain.
+**Legacy rule.** A row whose payload carries no `rain_policy_version` (key absent or null) is a legacy row. The cloud displays and uses it exactly as it did before this contract: the amount as received, no coverage label, and the same advice rules as before. Only a row that carries `rain_policy_version` follows the quality model of this document. The rule holds for the whole rollout, which deploys the cloud receiver before any edge emits the fields, and afterwards for every gateway that has not upgraded.
+
+Rows written before policy version 1 get no bulk rewrite. The edge re-projects such a row at policy version 1 only when it accepts an observation for that zone and date after the upgrade, typically on the upgrade day; until then the row keeps its stored values and stays legacy. Its five new fields are null, and its `rainfall_mm` is a value no coverage rule produced.
 
 A payload from an older gateway lacks the five keys, and the receiver stores the row as legacy, as if the keys were present with null values. Only `rainfall_mm` tells an absent key from a present null:
 
@@ -125,7 +127,7 @@ The history hash v1 of a `zone_daily_environment` row stays the six columns it c
 
 The cloud also skips a history row whose hash equals the stored one as a duplicate. A change of coverage or reasons alone would therefore never reach the cloud through history if it left the hashed columns unchanged; the new `computed_at` written with every projected change prevents that.
 
-Advice that needs measured rain reads `rainfall_mm` only when `rain_coverage` is `complete`. Whether an advice rule may use `rain_received_mm`, for example as a lower bound, is decided by that rule's own policy; this projection only labels the amount.
+For a row that carries `rain_policy_version`, advice that needs measured rain reads `rainfall_mm` only when `rain_coverage` is `complete`; a legacy row follows the legacy rule above. Whether an advice rule may use `rain_received_mm`, for example as a lower bound, is decided by that rule's own policy; this projection only labels the amount.
 
 ## Example payloads
 

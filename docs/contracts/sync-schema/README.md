@@ -189,7 +189,10 @@ From rain policy version 1 the edge adds five optional fields to every
 `zoneEnvironments`, history rows): `rain_coverage`, `rain_selected_deveui`,
 `rain_policy_version`, `rain_quality_reasons` and `rain_received_mm`.
 `rainfall_mm` is null unless `rain_coverage` is `complete`, and a present null
-replaces a stored amount. A row without the fields is legacy and unvalidated.
+replaces a stored amount. A row without `rain_policy_version` is a legacy row:
+the cloud displays and uses it exactly as before this contract (amount as
+received, no coverage label), and only rows that carry `rain_policy_version`
+follow the quality model.
 An older `sync_version` never overwrites a newer one for the same
 `zone_uuid|date`: events keep the existing watermark (`stale_sync_version`),
 and snapshot items and history rows are compared by `sync_version`. The
