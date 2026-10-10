@@ -24,17 +24,18 @@ const HOUR_MS = 3600000;
 const RAIN_GAUGE_EUI = 'A840410000000001';
 
 // 'dry': every forecast hour has 0 mm. 'no-rain-values': the provider sent no
-// precipitation, so no hour of the horizon is covered.
+// precipitation, so no hour of the horizon is covered. '30h-only': the provider
+// has one end-stamped hourly value exactly 30 h after the fixed test clock.
 let forecastRain = 'dry';
 
-function openMeteoStub(url) {
+function openMeteoStub(url, nowMs = NOW_MS) {
   const params = new URL(url).searchParams;
   const unixtime = params.get('timeformat') === 'unixtime';
   const label = (ms) => (unixtime ? ms / 1000 : new Date(ms).toISOString().slice(0, 16));
   if (params.has('current')) {
     return {
       utc_offset_seconds: 0,
-      current: { time: label(NOW_MS), temperature_2m: 22, relative_humidity_2m: 50, precipitation: 0, cloud_cover: 10, pressure_msl: 1012, wind_speed_10m: 2, wind_direction_10m: 200 },
+      current: { time: label(nowMs), temperature_2m: 22, relative_humidity_2m: 50, precipitation: 0, cloud_cover: 10, pressure_msl: 1012, wind_speed_10m: 2, wind_direction_10m: 200 },
     };
   }
   const dayStarts = [0, 1, 2].map((d) => Date.UTC(2026, 9, 8 + d));
@@ -45,7 +46,11 @@ function openMeteoStub(url) {
       time: hours.map(label),
       temperature_2m: hours.map(() => 22),
       relative_humidity_2m: hours.map(() => 50),
-      precipitation: hours.map(() => (forecastRain === 'dry' ? 0 : null)),
+      precipitation: hours.map((ms) => {
+        if (forecastRain === 'dry') return 0;
+        if (forecastRain === '30h-only') return ms === nowMs + 30 * HOUR_MS ? 2.5 : null;
+        return null;
+      }),
       precipitation_probability: hours.map(() => 5),
       wind_speed_10m: hours.map(() => 2),
       wind_direction_10m: hours.map(() => 200),
@@ -62,7 +67,7 @@ function openMeteoStub(url) {
   };
 }
 
-function httpStub() {
+function httpStub(nowMs = NOW_MS) {
   return {
     request(url, _options, callback) {
       const req = new EventEmitter();
@@ -75,7 +80,7 @@ function httpStub() {
           res.statusCode = 200;
           callback(res);
           process.nextTick(() => {
-            res.emit('data', JSON.stringify(openMeteoStub(String(url))));
+            res.emit('data', JSON.stringify(openMeteoStub(String(url), nowMs)));
             res.emit('end');
           });
         });
@@ -85,14 +90,15 @@ function httpStub() {
   };
 }
 
-function fixedDate(RealDate) {
+function fixedDate(RealDate, nowMs = NOW_MS) {
   return class FixedDate extends RealDate {
-    constructor(...args) { super(...(args.length ? args : [NOW_MS])); }
-    static now() { return NOW_MS; }
+    constructor(...args) { super(...(args.length ? args : [nowMs])); }
+    static now() { return nowMs; }
   };
 }
 
-async function zoneWater({ rainGauge = false, todayRow = null } = {}) {
+async function zoneWater({ rainGauge = false, todayRow = null, nowIso = NOW_ISO } = {}) {
+  const nowMs = Date.parse(nowIso);
   const db = seedTestDb();
   db.prepare('UPDATE irrigation_zones SET latitude = 47.37, longitude = 8.54, area_m2 = 100, irrigation_efficiency_pct = 90 WHERE id = 1').run();
   if (rainGauge) {
@@ -100,18 +106,18 @@ async function zoneWater({ rainGauge = false, todayRow = null } = {}) {
   }
   if (todayRow) {
     db.prepare('INSERT INTO zone_daily_environment(zone_id,date,rainfall_mm,flow_liters,rain_source,computed_at) VALUES(1,?,?,?,?,?)')
-      .run('2026-10-08', todayRow.rainfall_mm, todayRow.flow_liters, todayRow.rain_source, NOW_ISO);
+      .run(nowIso.slice(0, 10), todayRow.rainfall_mm, todayRow.flow_liters, todayRow.rain_source, nowIso);
   }
-  const stub = httpStub();
+  const stub = httpStub(nowMs);
   const RealDate = global.Date;
-  global.Date = fixedDate(RealDate);
+  global.Date = fixedDate(RealDate, nowMs);
   try {
     const out = await executeFunction(loadNode('zone-env-fn'), {
       db,
       env: { AUTH_TOKEN_SECRET: SECRET },
       msg: {
         req: {
-          headers: { authorization: makeAuthHeader({ userId: 2, username: 'res1', secret: SECRET, expiresAt: NOW_MS + HOUR_MS }) },
+          headers: { authorization: makeAuthHeader({ userId: 2, username: 'res1', secret: SECRET, expiresAt: nowMs + HOUR_MS }) },
           params: { zone_id: '1' },
           query: {},
         },
@@ -189,6 +195,21 @@ test('a dry forecast is a covered 0 mm, not unknown', async () => {
   const rf = (await zoneWater({ rainGauge: true })).forecast.rainFocus;
   assert.equal(rf.totalNext24hMm, 0);
   assert.deepEqual(rf.next24hCoverage, { coveredHours: 24, expectedHours: 24 });
+});
+
+test('a single end-stamped provider hour exactly 30 hours ahead is outside the next-24h horizon', async () => {
+  forecastRain = '30h-only';
+  const nowIso = '2026-10-08T11:00:00.000Z';
+  const providerTimestamp = Date.parse('2026-10-09T17:00:00.000Z');
+  assert.equal(providerTimestamp - Date.parse(nowIso), 30 * HOUR_MS,
+    'Open-Meteo timestamp is the end of the 16:00–17:00 UTC interval, exactly 30 h after the fixed clock');
+
+  const payload = await zoneWater({ rainGauge: true, nowIso });
+  const rf = payload.forecast.rainFocus;
+  assert.equal(rf.totalNext24hMm, null);
+  assert.deepEqual(rf.next24hCoverage, { coveredHours: 0, expectedHours: 24 });
+  assert.equal(rf.totalNext72hMm, 2.5, 'the sole provider rain value is present at 30 h, beyond the 24-hour horizon');
+  assert.equal(payload.water.next24hRainMm, null);
 });
 
 test('elapsed provider zero is used as the measured amount for advice', async () => {
