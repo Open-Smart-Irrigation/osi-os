@@ -14,6 +14,7 @@
     "areaM2": 50,
     "irrigationEfficiencyPct": 75,
     "rainTodayMm": 0.8,
+    "rainTodayStatus": "observed",
     "irrigationTodayLiters": 15,
     "irrigationTodayNetMm": 0.23,
     "irrigationTodayMeasuredLiters": 15,
@@ -359,6 +360,10 @@
     "rainFocus": {
       "totalNext24hMm": 1.6,
       "totalNext72hMm": 1.6,
+      "next24hCoverage": {
+        "coveredHours": 9,
+        "expectedHours": 24
+      },
       "maxHourlyRainMm": 1.4,
       "maxHourlyRainAt": "2026-07-11T13:00:00.000Z",
       "nextRainEta": "2026-07-11T10:00:00.000Z",

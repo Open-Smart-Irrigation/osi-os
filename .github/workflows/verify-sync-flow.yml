@@ -59,6 +59,7 @@ jobs:
           node scripts/test-installation-recovery-flow.js
           node scripts/test-installation-recovery-schema.js
           node scripts/test-installation-revision-command.js
+          node scripts/test-lsn50-flow-only-zone-row.js
           node scripts/test-migration-helpers.js
           node scripts/test-node-red-admin-root-off.js
           node scripts/test-protected-command-replay-chain.js
@@ -82,6 +83,7 @@ jobs:
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
           node scripts/test-zone-env-forecast-instants.js
+          node scripts/test-zone-env-unknown-rain.js
           node scripts/test-zone-timezone-route.js
           node scripts/verify-chameleon-calibration.js
           node scripts/verify-lsn50-chameleon-persistence.js

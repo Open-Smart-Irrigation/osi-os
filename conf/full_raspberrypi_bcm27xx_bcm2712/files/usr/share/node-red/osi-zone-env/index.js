@@ -507,14 +507,27 @@ function estimateStepHours(hours) {
   return median(diffs) || 1;
 }
 
+/**
+ * Forecast rain over [now, now + horizon) and how much of the horizon it
+ * covers. Only forecast steps with a rain value count; each covers the
+ * provider's step length (one hour for Open-Meteo, three for OpenAgri). No
+ * covered step means the total is unknown (null), never 0 mm; a partly
+ * covered horizon keeps the sum of what is known, with its coverage.
+ */
 function sumRain(hours, nowMs, horizonHours) {
   const endMs = nowMs + horizonHours * 3600000;
-  return round((hours || []).reduce((total, hour) => {
+  const list = Array.isArray(hours) ? hours : [];
+  const seen = new Set();
+  let total = 0;
+  for (const hour of list) {
     const timestamp = hour && hour.time ? new Date(hour.time).getTime() : NaN;
     const rainMm = toFiniteNumber(hour && hour.rainMm);
-    if (!Number.isFinite(timestamp) || rainMm == null || timestamp < nowMs || timestamp >= endMs) return total;
-    return total + rainMm;
-  }, 0), 2) || 0;
+    if (!Number.isFinite(timestamp) || rainMm == null || timestamp < nowMs || timestamp >= endMs || seen.has(timestamp)) continue;
+    seen.add(timestamp);
+    total += rainMm;
+  }
+  const coveredHours = seen.size ? Math.min(horizonHours, round(seen.size * estimateStepHours(list), 2)) : 0;
+  return { totalMm: seen.size ? round(total, 2) : null, coveredHours, expectedHours: horizonHours };
 }
 
 function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso) {
@@ -543,6 +556,7 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
     return Number.isFinite(timestamp) && timestamp >= nowMs && Number(hour.rainMm || 0) > 0.05;
   }) || null;
   const stepHours = estimateStepHours(hours);
+  const next24h = sumRain(hours, nowMs, 24);
   // Each forecast day takes its own place on the FAO-56 curve (contract v2 A5).
   const kcOn = (date) => resolveKc({ ...(crop || {}), date }).kc;
   return {
@@ -552,8 +566,9 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
     observedAt: forecastData.observedAt || nowIso,
     expiresAt: expiresAt || null,
     rainFocus: {
-      totalNext24hMm: sumRain(hours, nowMs, 24),
-      totalNext72hMm: sumRain(hours, nowMs, 72),
+      totalNext24hMm: next24h.totalMm,
+      totalNext72hMm: sumRain(hours, nowMs, 72).totalMm,
+      next24hCoverage: { coveredHours: next24h.coveredHours, expectedHours: next24h.expectedHours },
       maxHourlyRainMm: maxRainHour ? round(maxRainHour.rainMm, 2) : null,
       maxHourlyRainAt: maxRainHour ? maxRainHour.time : null,
       nextRainEta: nextRainHour ? nextRainHour.time : null,
@@ -643,6 +658,31 @@ function addUtcDays(dateIso, days) {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * The `rain_source` labels the edge's rain writers stamp on a
+ * zone_daily_environment row (LoRain, S2120, LSN50 MOD9 gauge). Any other
+ * label, including the column default 'none' that a flow-only row keeps, is
+ * not rain evidence.
+ */
+const GAUGE_RAIN_SOURCES = ['aquascope_lorain', 'sensecap_s2120', 'local_gauge'];
+
+/**
+ * A zone_daily_environment row's rain in mm, or null when the row is no
+ * evidence (unknown, never zero). A non-zero amount from a gauge source, or
+ * from a legacy row without a source, is a measurement; an exact zero counts
+ * only while a rain-measuring device is configured for the zone. Same rule as
+ * the cloud's ZoneRainEvidence.trustedRainMm, so a linked gateway and the
+ * cloud read one row the same way. A measured 0 from a gauge is observed.
+ */
+function resolveRainTodayMm(row, rainGaugePresent) {
+  if (!row) return null;
+  const mm = toFiniteNumber(row.rainfall_mm);
+  if (mm == null) return null;
+  if (row.rain_source != null && GAUGE_RAIN_SOURCES.indexOf(String(row.rain_source).trim().toLowerCase()) < 0) return null;
+  if (mm === 0 && !rainGaugePresent) return null;
+  return round(mm, 2);
+}
+
 function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyPct) {
   const liters = toFiniteNumber(irrigationLiters);
   const area = toFiniteNumber(areaM2);
@@ -660,9 +700,10 @@ function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyP
  * (`todayAgronomic`, i.e. `agronomic.current`), and `nullReason
  * 'demand_unknown'` when there is no forecast demand. A station name is the
  * devices.name of a deveui; a MeteoSwiss id has no devices row and shows as
- * itself.
+ * itself. A day's rain follows resolveRainTodayMm; `rainGaugePresent`
+ * undefined (an older caller) counts a zero as measured, as before.
  */
-function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIso, waterNeededTodayMm, kcSourceToday, todayAgronomic, stationNames }) {
+function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIso, waterNeededTodayMm, kcSourceToday, todayAgronomic, stationNames, rainGaugePresent }) {
   const startIso = addUtcDays(todayIso, -6) || todayIso;
   const byDate = {};
   for (const row of envRows || []) if (row && row.date) byDate[String(row.date)] = row;
@@ -673,7 +714,7 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
   const daily = [];
   for (let dateIso = startIso; dateIso && dateIso <= todayIso; dateIso = addUtcDays(dateIso, 1)) {
     const row = byDate[dateIso] || null;
-    const rainMm = row && row.rainfall_mm != null ? round(row.rainfall_mm, 2) : null;
+    const rainMm = resolveRainTodayMm(row, rainGaugePresent === undefined ? true : rainGaugePresent);
     const measuredIrrigationLiters = round(row ? row.flow_liters : 0, 2) || 0;
     const estimatedIrrigationLiters = round(estimated[dateIso] || 0, 2) || 0;
     const measuredIrrigationNetMm = toEffectiveIrrigationMm(measuredIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
@@ -795,8 +836,12 @@ function buildSensorHealth(deviceRows, local) {
  *
  * The reason travels as a code rather than as an English sentence: the GUI
  * serves seven languages and cannot translate prose the edge invented.
+ *
+ * `rainTodayKnown === false` with a known irrigation (`irrigationNetMm`) and
+ * demand hands the verdict to resolveRainUnknownWaterAction under
+ * RAIN_UNKNOWN_POLICY. A caller that omits it keeps the old codes.
  */
-function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm, waterNeededTodayMm) {
+function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24hRainMm, waterNeededTodayMm, rainTodayKnown, irrigationNetMm) {
   if (recommendationRow) {
     return {
       code: trimToNull(recommendationRow.irrigation_action),
@@ -820,6 +865,11 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   });
 
   const balance = toFiniteNumber(balanceTodayMm);
+  const irrigation = toFiniteNumber(irrigationNetMm);
+  const demand = toFiniteNumber(waterNeededTodayMm);
+  if (balance == null && rainTodayKnown === false && irrigation != null && demand != null) {
+    return resolveRainUnknownWaterAction(RAIN_UNKNOWN_POLICY, todayIso, null, round(irrigation - demand, 2), next24hRainMm);
+  }
   // No demand for today is the cloud's demand_unknown; balance_unknown stays
   // for the missing zone area or efficiency ("set up the zone"). A caller
   // that does not pass the demand keeps the old code.
@@ -835,6 +885,36 @@ function resolveWaterAction(todayIso, recommendationRow, balanceTodayMm, next24h
   if (forecastRain >= shortfallMm) return heuristic('delay_irrigation', 'forecast_rain_covers_demand');
   if (balance <= -1) return heuristic('irrigate_today', 'demand_exceeds_supply');
   return heuristic('monitor_today', 'balance_neutral');
+}
+
+/**
+ * What a rain-dependent water verdict does while today's rain is unknown
+ * (owner decision D2, 2026-10-09): 'warn' computes it on zero rain and flags
+ * it rain_unknown; 'withhold' answers insufficient_data / rain_unknown. The
+ * cloud has the same switch under the same name (ZoneRainEvidence in the
+ * backend, engine.py in the prediction service): flip all three together, so
+ * a linked and an unlinked gateway answer alike. Unknown rain never starts
+ * dendrometer rain suppression under either value.
+ */
+const RAIN_UNKNOWN_POLICY = 'warn';
+
+/**
+ * The water verdict while today's rain is unknown and irrigation and demand
+ * are known. `supplyWithoutRainMm` is irrigation minus demand, the balance at
+ * zero rain and so a lower bound on the real one. Under 'warn' the usual
+ * branch order runs on that bound and the verdict carries reasonCode
+ * rain_unknown in place of its own; when the verdict still needs a missing
+ * forecast, or under 'withhold', the answer is insufficient_data /
+ * rain_unknown. A dendrometer verdict passes unchanged: it does not depend on
+ * rain. Mirrors the cloud's ZoneEnvironmentService.resolveRainUnknownWaterAction.
+ */
+function resolveRainUnknownWaterAction(policy, todayIso, recommendationRow, supplyWithoutRainMm, next24hRainMm) {
+  if (recommendationRow) return resolveWaterAction(todayIso, recommendationRow, null, next24hRainMm);
+  const insufficient = { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown', recommendationDate: todayIso };
+  if (policy !== 'warn') return insufficient;
+  const verdict = resolveWaterAction(todayIso, null, supplyWithoutRainMm, next24hRainMm);
+  if (verdict.code == null) return insufficient;
+  return { ...verdict, reasonCode: 'rain_unknown' };
 }
 
 const DEMAND_FIELDS = ['demandMm', 'demandSource', 'demandComputedBy', 'et0Mm', 'et0Source', 'et0Tier', 'et0StationId', 'et0StationName', 'kc', 'kcSource', 'cropType', 'phenologicalStage', 'stageOverrun', 'hoursPresent', 'expectedHours', 'nullReason'];
@@ -887,6 +967,7 @@ function overlayLocalWaterIrrigationSplit(sharedWater, localWater, todayIso) {
   // of the tile comes from the gateway, so the tile shows one day.
   const today = bundleCurrent || !todayIso ? {} : {
     rainTodayMm: localWater.rainTodayMm,
+    rainTodayStatus: localWater.rainTodayStatus,
     rainSource: localWater.rainSource != null ? localWater.rainSource : null,
     balanceTodayMm: localWater.balanceTodayMm,
     next24hRainMm: localWater.next24hRainMm,
@@ -951,10 +1032,14 @@ module.exports = {
   buildAgronomic,
   localDateIso,
   addUtcDays,
+  GAUGE_RAIN_SOURCES,
+  resolveRainTodayMm,
   toEffectiveIrrigationMm,
   buildWaterDaily,
   buildSensorHealth,
   resolveWaterAction,
+  RAIN_UNKNOWN_POLICY,
+  resolveRainUnknownWaterAction,
   mergeDailyIrrigationSplit,
   overlayLocalWaterIrrigationSplit,
 };

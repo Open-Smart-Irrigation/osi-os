@@ -510,6 +510,7 @@
       "etaTomorrow": "{{time}} tomorrow",
       "next24h": "Next 24 h",
       "next72h": "Next 72 h",
+      "coverage": "{{covered}} of {{expected}} h",
       "nextRain": "Next rain",
       "rainHours": "Rain hours",
       "maxHourly": "Peak hourly",

@@ -2384,7 +2384,7 @@ expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'minTempC: day.
 expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'rainProbabilityPct: day.rainProbabilityPct ?? day.precipitationProbabilityPct ?? null', 'returns the frontend daily forecast rain-probability field');
 expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'tempC: hour.tempC ?? hour.airTemperatureC ?? null', 'returns the frontend hourly forecast temperature field');
 expectIncludes('Get Zone Environment Summary', 'areaM2: ZE.toFiniteNumber(zone && zone.area_m2)', 'exposes zone area in water summary');
-expectIncludes('Get Zone Environment Summary', 'sensorHealth: ZE.buildSensorHealth(deviceRows, local)', 'reports water sensor health and warnings');
+expectIncludes('Get Zone Environment Summary', 'const sensorHealth = ZE.buildSensorHealth(deviceRows, local);', 'reports water sensor health and warnings');
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
 expectIncludes('Build Telemetry', 'convertHzToKPa(numberOrNull(obj.watermark1_frequency))', 'converts Kiwi watermark frequency telemetry to kPa for cloud mirroring');
 expectIncludes('Build Telemetry', "var isLsn50 = profileKind === 'DRAGINO_LSN50';", 'gates LSN50-only telemetry fields by profile');

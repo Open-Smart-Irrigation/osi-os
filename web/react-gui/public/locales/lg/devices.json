@@ -513,6 +513,7 @@
       "etaTomorrow": "{{time}} tomorrow",
       "next24h": "Essawa 24 ezijja",
       "next72h": "Essawa 72 ezijja",
+      "coverage": "{{covered}} of {{expected}} h",
       "nextRain": "Enkuba ejja",
       "rainHours": "Essawa z'enkuba",
       "maxHourly": "Nnyingi ku ssawa",

@@ -583,6 +583,11 @@ export interface WaterEnvironment {
   areaM2: number | null;
   irrigationEfficiencyPct: number | null;
   rainTodayMm: number | null;
+  /**
+   * 'unknown' when no rain gauge observed today (rainTodayMm is then null, never 0);
+   * a measured zero is 'observed'. Sent by the gateway; absent in a cloud bundle.
+   */
+  rainTodayStatus?: 'observed' | 'unknown';
   irrigationTodayLiters: number | null;
   irrigationTodayNetMm: number | null;
   irrigationTodayMeasuredLiters?: number | null;
@@ -756,8 +761,11 @@ export interface ForecastEnvironment {
 }
 
 export interface RainFocus {
-  totalNext24hMm: number;
-  totalNext72hMm: number;
+  /** null when no forecast hour in the horizon carries a rain value (unknown, not 0 mm). */
+  totalNext24hMm: number | null;
+  totalNext72hMm: number | null;
+  /** Forecast hours behind totalNext24hMm; absent from an older gateway or the cloud. */
+  next24hCoverage?: { coveredHours: number; expectedHours: number };
   maxHourlyRainMm: number;
   maxHourlyRainAt: string | null;
   nextRainEta: string | null;

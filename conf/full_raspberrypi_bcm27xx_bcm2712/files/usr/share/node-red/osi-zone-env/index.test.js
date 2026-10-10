@@ -154,7 +154,7 @@ test('forecast helpers preserve deterministic provider normalization', () => {
     { time: '2026-07-11T12:00:00.000Z' },
     { time: '2026-07-11T18:00:00.000Z' },
   ]), 6);
-  assert.equal(ZE.sumRain(merged.hours, NOW_MS, 24), 1.2);
+  assert.deepEqual(ZE.sumRain(merged.hours, NOW_MS, 24), { totalMm: 1.2, coveredHours: 1, expectedHours: 24 });
   assert.equal(ZE.localDateIso(null, 'UTC', NOW_MS), '2026-07-11');
   assert.equal(ZE.addUtcDays('2026-07-11', 2), '2026-07-13');
 
@@ -655,4 +655,118 @@ test('parseOpenMeteoForecast: empty or missing data gives null; hours without an
   assert.deepEqual(parsed.hours.map((h) => [h.time, h.rainMm]), [['2026-10-08T11:00:00.000Z', 2]]);
   assert.equal(parsed.source, 'open_meteo');
   assert.equal(parsed.observedAt, new Date(NOW_MS).toISOString());
+});
+
+test('resolveRainTodayMm: unknown stays null, measured zero needs a gauge', () => {
+  assert.equal(ZE.resolveRainTodayMm(null, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: null, rain_source: 'aquascope_lorain' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'none' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 3, rain_source: 'none' }, true), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'local_gauge' }, false), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: 'aquascope_lorain' }, true), 0, 'a measured zero from a configured gauge is observed');
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 4.256, rain_source: 'sensecap_s2120' }, false), 4.26);
+  // A legacy row without a source keeps the cloud's rule (ZoneRainEvidence.trustedRainMm).
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 1.2 }, false), 1.2);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: null }, false), null);
+  assert.equal(ZE.resolveRainTodayMm({ rainfall_mm: 0, rain_source: null }, true), 0);
+  assert.deepEqual(ZE.GAUGE_RAIN_SOURCES, ['aquascope_lorain', 'sensecap_s2120', 'local_gauge']);
+});
+
+test('buildWaterDaily: a flow-only zero day without a gauge is null, not dry', () => {
+  const args = {
+    envRows: [
+      { date: '2026-10-07', rainfall_mm: 0, flow_liters: 0, rain_source: 'aquascope_lorain' },
+      { date: '2026-10-08', rainfall_mm: 0, flow_liters: 50, rain_source: 'local_gauge' },
+    ],
+    estimatedByDate: {}, agronomyRows: [], zone: { area_m2: 100, irrigation_efficiency_pct: 90 },
+    todayIso: '2026-10-08', waterNeededTodayMm: 4, todayAgronomic: {},
+  };
+  const noGauge = ZE.buildWaterDaily({ ...args, rainGaugePresent: false });
+  assert.deepEqual(noGauge.slice(-2).map((d) => d.rainMm), [null, null]);
+  assert.equal(noGauge.at(-1).totalWaterMm, null);
+  const withGauge = ZE.buildWaterDaily({ ...args, rainGaugePresent: true });
+  assert.deepEqual(withGauge.slice(-2).map((d) => d.rainMm), [0, 0]);
+  const noneRow = ZE.buildWaterDaily({ ...args, envRows: [{ date: '2026-10-08', rainfall_mm: 0, flow_liters: 5, rain_source: 'none' }], rainGaugePresent: true });
+  assert.equal(noneRow.at(-1).rainMm, null);
+  assert.equal(noneRow.at(-1).measuredIrrigationLiters, 5, 'the flow of a flow-only row is kept');
+});
+
+test('overlay: a stale bundle takes today\'s rain status from the gateway too', () => {
+  const local = { available: true, rainTodayMm: null, rainTodayStatus: 'unknown', balanceTodayMm: null, next24hRainMm: null, action: null, daily: [] };
+  const shared = { available: true, rainTodayMm: 2, balanceTodayMm: 1, daily: [{ date: '2026-10-07', rainMm: 2 }] };
+  const stale = ZE.overlayLocalWaterIrrigationSplit(shared, local, '2026-10-08');
+  assert.deepEqual([stale.rainTodayMm, stale.rainTodayStatus], [null, 'unknown']);
+});
+
+test('sumRain: no covered hour gives null with coverage', () => {
+  const now = Date.parse('2026-10-08T10:00:00Z');
+  assert.deepEqual(ZE.sumRain([{ time: '2026-10-08T11:00:00.000Z', rainMm: null }], now, 24),
+    { totalMm: null, coveredHours: 0, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain([], now, 24), { totalMm: null, coveredHours: 0, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain(undefined, now, 72), { totalMm: null, coveredHours: 0, expectedHours: 72 });
+  const hours = [{ time: '2026-10-08T11:00:00.000Z', rainMm: 0.4 }, { time: '2026-10-08T12:00:00.000Z', rainMm: 0 }];
+  assert.deepEqual(ZE.sumRain(hours, now, 24), { totalMm: 0.4, coveredHours: 2, expectedHours: 24 }, 'a forecast of 0 mm is covered, not unknown');
+  // An hour outside the horizon, a null hour and a repeated instant cover nothing extra.
+  const mixed = hours.concat([
+    { time: '2026-10-08T12:00:00.000Z', rainMm: 5 },
+    { time: '2026-10-08T13:00:00.000Z', rainMm: null },
+    { time: '2026-10-09T10:00:00.000Z', rainMm: 9 },
+  ]);
+  assert.deepEqual(ZE.sumRain(mixed, now, 24), { totalMm: 0.4, coveredHours: 2, expectedHours: 24 });
+  // A three-hourly provider: each value covers its step.
+  const threeHourly = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ time: new Date(now + (i * 3 + 1) * 3600000).toISOString(), rainMm: 0.3 }));
+  assert.deepEqual(ZE.sumRain(threeHourly, now, 24), { totalMm: 2.4, coveredHours: 24, expectedHours: 24 });
+});
+
+test('buildForecastSection: an all-null horizon has null totals and says so', () => {
+  const f = ZE.buildForecastSection({ hours: [{ time: '2026-10-08T11:00:00.000Z', rainMm: null }], days: [] }, 'live', null, {}, '2026-10-08T10:00:00.000Z');
+  assert.equal(f.rainFocus.totalNext24hMm, null);
+  assert.equal(f.rainFocus.totalNext72hMm, null);
+  assert.deepEqual(f.rainFocus.next24hCoverage, { coveredHours: 0, expectedHours: 24 });
+  const partial = ZE.buildForecastSection({ hours: [{ time: '2026-10-08T11:00:00.000Z', rainMm: 1.5 }], days: [] }, 'live', null, {}, '2026-10-08T10:00:00.000Z');
+  assert.equal(partial.rainFocus.totalNext24hMm, 1.5, 'a partly covered horizon keeps the sum of its known hours');
+  assert.deepEqual(partial.rainFocus.next24hCoverage, { coveredHours: 1, expectedHours: 24 });
+});
+
+test('rain unknown: the default policy is warn (owner decision D2), as on the cloud', () => {
+  assert.equal(ZE.RAIN_UNKNOWN_POLICY, 'warn');
+});
+
+test('resolveWaterAction: unknown rain still gives the verdict on zero rain, flagged rain_unknown', () => {
+  const pick = (a) => ({ code: a.code, source: a.source, reasonCode: a.reasonCode });
+  // Probe: nothing irrigated, 4 mm demand, dry forecast. Zero rain is a lower bound on supply.
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 0)),
+    { code: 'irrigate_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 3.5)),
+    { code: 'monitor_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 5)),
+    { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, 10, 4, false, 0)),
+    { code: 'delay_irrigation', source: 'heuristic', reasonCode: 'rain_unknown' });
+  // Two unknowns (rain today and the forecast) never add up to a verdict.
+  assert.deepEqual(pick(ZE.resolveWaterAction('2026-10-08', null, null, null, 4, false, 0)),
+    { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown' });
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, 0).recommendationDate, '2026-10-08');
+});
+
+test('resolveWaterAction: a missing zone setup or demand is named before unknown rain; old callers keep their codes', () => {
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, false, null).reasonCode, 'balance_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, null, false, 0).reasonCode, 'demand_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4).reasonCode, 'balance_unknown', 'callers without the rain flag keep the old code');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, null, 0, 4, true, 0).reasonCode, 'balance_unknown');
+  assert.equal(ZE.resolveWaterAction('2026-10-08', null, -4, 0, 4, true, 0).reasonCode, 'demand_exceeds_supply', 'known rain is unchanged');
+});
+
+test('resolveRainUnknownWaterAction: withhold answers insufficient_data; a dendrometer verdict passes either way', () => {
+  const pick = (a) => ({ code: a.code, source: a.source, reasonCode: a.reasonCode });
+  assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction('withhold', '2026-10-08', null, -4, 0)),
+    { code: null, source: 'insufficient_data', reasonCode: 'rain_unknown' });
+  assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction('warn', '2026-10-08', null, -4, 0)),
+    { code: 'irrigate_today', source: 'heuristic', reasonCode: 'rain_unknown' });
+  const dendro = { irrigation_action: 'decrease_10', action_reasoning: 'Tree stress low', date: '2026-10-08' };
+  for (const policy of ['warn', 'withhold']) {
+    assert.deepEqual(pick(ZE.resolveRainUnknownWaterAction(policy, '2026-10-08', dendro, -4, 0)),
+      { code: 'decrease_10', source: 'dendro', reasonCode: null });
+  }
+  assert.equal(ZE.resolveWaterAction('2026-10-08', dendro, null, 0, 4, false, 0).source, 'dendro');
 });

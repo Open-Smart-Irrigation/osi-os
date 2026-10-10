@@ -5,7 +5,7 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import type { OnlineEnvironment, ForecastEnvironment, DailyForecast, HourlyForecast, EnvironmentLocation } from '../../../types/farming';
+import type { OnlineEnvironment, ForecastEnvironment, DailyForecast, HourlyForecast, EnvironmentLocation, RainFocus } from '../../../types/farming';
 import { formatForecastHighLow } from '../../../utils/forecastFormat';
 import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
@@ -92,9 +92,9 @@ const CurrentConditions: React.FC<{ online: OnlineEnvironment }> = ({ online }) 
 
 // Rain summary pills
 
-interface RainPillProps { label: string; value: string; highlight?: boolean }
+interface RainPillProps { label: string; value: string; highlight?: boolean; sub?: string | null }
 
-const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
+const RainPill: React.FC<RainPillProps> = ({ label, value, highlight, sub }) => (
   <div className={`flex min-h-[44px] flex-col items-center justify-center rounded-xl px-3 py-2 border ${highlight
     ? 'bg-blue-50 border-blue-200'
     : 'bg-[var(--card)] border-[var(--border)]'}`}>
@@ -102,8 +102,26 @@ const RainPill: React.FC<RainPillProps> = ({ label, value, highlight }) => (
     <span className={`text-sm font-bold tabular-nums ${highlight ? 'text-blue-700' : 'text-[var(--text)]'}`}>
       {value}
     </span>
+    {sub && <span className="text-[10px] tabular-nums text-[var(--text-tertiary)]">{sub}</span>}
   </div>
 );
+
+// A forecast total is null when no hour of its horizon carries a rain value:
+// unknown, so a dash rather than 0.0 mm. A partly covered 24 h total says how
+// many hours it covers.
+function formatRainTotal(mm: number | null | undefined): string {
+  return mm == null ? '—' : `${mm.toFixed(1)} mm`;
+}
+
+function coverageLabel(rf: RainFocus, t: Translate): string | null {
+  const coverage = rf.next24hCoverage;
+  if (!coverage || coverage.coveredHours >= coverage.expectedHours) return null;
+  return t('environment.forecast.coverage', {
+    covered: coverage.coveredHours,
+    expected: coverage.expectedHours,
+    defaultValue: '{{covered}} of {{expected}} h',
+  });
+}
 
 // Daily strip
 
@@ -262,13 +280,14 @@ export const WeatherTab: React.FC<Props> = ({ online, forecast, location }) => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <RainPill
               label={t('environment.forecast.next24h', { defaultValue: 'Next 24 h' })}
-              value={`${rf.totalNext24hMm.toFixed(1)} mm`}
-              highlight={rf.totalNext24hMm > 0}
+              value={formatRainTotal(rf.totalNext24hMm)}
+              highlight={(rf.totalNext24hMm ?? 0) > 0}
+              sub={coverageLabel(rf, t)}
             />
             <RainPill
               label={t('environment.forecast.next72h', { defaultValue: 'Next 72 h' })}
-              value={`${rf.totalNext72hMm.toFixed(1)} mm`}
-              highlight={rf.totalNext72hMm > 0}
+              value={formatRainTotal(rf.totalNext72hMm)}
+              highlight={(rf.totalNext72hMm ?? 0) > 0}
             />
             <RainPill
               label={t('environment.forecast.nextRain', { defaultValue: 'Next rain' })}

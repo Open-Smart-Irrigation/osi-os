@@ -25,6 +25,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   interval is not counted.
 
 ### Fixed
+- **Unknown rain is no longer reported as a measured 0 mm.** The zone water
+  tile read a day without a rain-gauge row as 0 mm, so a zone with a 4 mm
+  demand and no rain observation showed a balance of -4 mm. Today's rain now
+  counts only when a gauge wrote it; a measured 0 needs a configured rain
+  gauge (the cloud's rule). Otherwise `rainTodayMm` is null,
+  `rainTodayStatus` is `unknown` and the balance is null. The water verdict is
+  still shown, computed on zero rain and flagged with the reason
+  `rain_unknown` ("No rain measurement for today"); with no forecast rain
+  either, it stays "Not enough data to advise". The switch is
+  `RAIN_UNKNOWN_POLICY` in `osi-zone-env` (`warn`, or `withhold` for
+  insufficient data), the same name and default as on the cloud.
+- **Forecast rain totals without rain values are unknown, not 0 mm.** The
+  next-24-hour and next-72-hour totals are null when no forecast hour in the
+  window carries a rain value, and the 24-hour total comes with
+  `next24hCoverage`. The Weather tab shows a dash for an unknown total and
+  "x of 24 h" for a partly covered one.
+- **An LSN50 flow-only uplink no longer writes a dry day.** An uplink with a
+  flow delta but no valid rain delta inserted 0 mm of rain labelled as a
+  gauge reading. It now writes flow only: a new zone day keeps rain empty
+  with source `none`, and an existing day keeps its rain and source.
 - **Dendrometer advice counts rain over seven calendar days.** The rolling
   rain behind the "No stress + heavy recent rain (>20mm/7d)" rule added the
   seven most recent stored days to the analytics day, so with complete
