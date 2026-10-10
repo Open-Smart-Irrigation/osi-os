@@ -277,10 +277,6 @@
       "delta": 70,
       "reason": "issue #10: zone_daily_environment upsert bumps sync_version"
     },
-    "lorain-rain-agg-fn": {
-      "delta": 1120,
-      "reason": "Rain correctness, LoRain dry reports (finding 6): a valid zero report now writes a 0 mm zone_daily_environment row, a new zone day is seeded from the sum of this device's ok rain_mm_delta inside the zone's own local day window (osiHistory.startOfLocalDayMs, so never the gateway host day), sync_version moves only when rainfall_mm or rain_source changes, a zero report never takes over a zone day another source owns (upsert WHERE clause), the day date and the day window read the zone timezone through one trimmed value with a UTC fallback, and the SQL is parameterized (the unused sn/ss helpers are gone). Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles (bcm2712/bcm2709), origin/main 1cbd212b6 -> HEAD: 2304 -> 3424 = +1120. Supersedes the issue #10 entry (+70), which origin/main already includes in its measured 2304. The per-profile total growth is declared in total_allowance."
-    },
     "device-api-http500": {
       "delta": 2550,
       "reason": "Wave 3 scoped-access port: cumulative through AgroLink 708e11410 (feat(api): require admin for diagnostic reads). Measured on port/wave3-edge-scope with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 293 -> HEAD 2843 = +2550, superseding the previous +1982 entry (fully subsumed: the authSources allowlist, publicByCode map, and the merged fallback-to-thrown-statusCode design from c034b2893 are preserved verbatim). 708e11410 adds api-me-auth to the authSources allowlist (api-me-auth's own Decode Token node now also sets _osiAuthFailure) and no further structural change to this node beyond the earlier merge."
@@ -596,10 +592,6 @@
     "s2120-process-fn": {
       "delta": 2648,
       "reason": "Supersedes the prior entry (1078, F83 uplink dedup), fully consumed: origin/main already measures this node at 8682. S2120 rain contract fix: the node now differences measurement 4213 (cumulative rainfall, mm) as the rain counter instead of 4113 (rainfall intensity, mm/h), stores 4113 as the reported rain rate, marks the first 4213 row of a device as its counter baseline so rows written under the old interpretation are never differenced, integrates legacy-firmware intensity only over the vendor ten-minute window (status intensity_only otherwise), keeps increments and daily totals at three decimals, and warns on a failed rain-context read. The two former query helpers were merged into one loadRainContext. Review fix round 1 caches the counter-baseline marker per DevEUI in node context (the marker lookup scanned the device's whole history on every uplink), with a re-lookup when a cached marker has no counter row behind it. Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles: origin/main 8682 -> HEAD 11330 = +2648 (contract fix 9954, marker cache +1376)."
-    },
-    "lorain-process-fn": {
-      "delta": 165,
-      "reason": "Rain correctness, LoRain dry reports (finding 6): the second output now fires for every report with rainDeltaStatus ok and rainMmDelta >= 0 (was > 0), with a two-line comment. Measured with verify-flows-size-ratchet's nodeSizes over both byte-identical profiles (bcm2712/bcm2709), origin/main 1cbd212b6 -> HEAD: 8185 -> 8350 = +165. Supersedes the F83 uplink-dedup entry (+1080), which origin/main already includes in its measured 8185, so it was unearned headroom. The per-profile total growth is declared in total_allowance."
     },
     "lsn50-decode-fn": {
       "delta": 660,

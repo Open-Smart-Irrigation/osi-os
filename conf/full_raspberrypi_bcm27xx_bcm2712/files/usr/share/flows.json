@@ -10624,17 +10624,17 @@
     "y": 120,
     "wires": [
       [
-        "lorain-process-fn"
+        "lorain-ingest-fn"
       ]
     ]
   },
   {
-    "id": "lorain-process-fn",
+    "id": "lorain-ingest-fn",
     "type": "function",
     "z": "lorain-tab",
-    "name": "Process LoRain",
-    "func": "// Process Aqua-Scope LoRain uplink. ChirpStack has already decoded via aquascope_lorain_decoder.js.\nconst data = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\nif (!data || !data.deviceInfo) return [null, null];\n\nconst info = data.deviceInfo || {};\nconst configuredProfileId = String(env.get('CHIRPSTACK_PROFILE_LORAIN') || '').trim();\nconst profileId = String(info.deviceProfileId || data.deviceProfileId || '').trim();\nconst profileName = String(info.deviceProfileName || data.deviceProfileName || '').trim().toUpperCase();\nconst isLoRainProfile = (configuredProfileId && profileId === configuredProfileId)\n  || profileName.indexOf('LORAIN') >= 0\n  || profileName.indexOf('AQUA-SCOPE') >= 0\n  || profileName.indexOf('AQUASCOPE') >= 0;\nif (!isLoRainProfile) return [null, null];\n\nconst devEui = String(info.devEui || data.devEui || '').toUpperCase();\nif (!devEui) return [null, null];\nconst escapedEui = devEui.replace(/'/g, \"''\");\n\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql) => new Promise((res, rej) => _db.all(sql, (e, r) => e ? rej(e) : res(r || [])));\nconst close = () => new Promise((res) => _db.close(() => res()));\n\ntry {\n  const rows = await q(`SELECT type_id FROM devices WHERE deveui='${escapedEui}' AND deleted_at IS NULL`);\n  if (!rows[0] || rows[0].type_id !== 'AQUASCOPE_LORAIN') {\n    await close();\n    return [null, null];\n  }\n  await close();\n} catch (e) {\n  try { await close(); } catch (_) {}\n  return [null, null];\n}\n\n// F83: idempotent ingest -- drop an MQTT/ChirpStack redelivery of the\n// identical uplink instead of writing a second device_data row.\n// Fails OPEN (F83-V1): a hostile identity field or a shape-drifted\n// uplink-dedup module must never block this write, so the whole check\n// is guarded by both a typeof probe and a try/catch.\nvar _dedupIsDup = false;\nvar _dedupRes = null;\ntry {\n  _dedupRes = osiLib.require('uplink-dedup');\n  if (_dedupRes.ok && typeof _dedupRes.value.isDuplicateUplink === 'function') {\n    _dedupIsDup = !!_dedupRes.value.isDuplicateUplink({\n      source: 'lorain', deduplicationId: data.deduplicationId,\n      devEui: devEui, fCnt: data.fCnt, receivedAtMs: Date.now()\n    });\n  }\n} catch (_dedupErr) {\n  _dedupIsDup = false;\n}\nif (_dedupIsDup) {\n  if (_dedupRes && _dedupRes.ok && typeof _dedupRes.value.warnOncePerWindow === 'function') {\n    _dedupRes.value.warnOncePerWindow(node, context, 'uplink-dedup-warn:lorain:' + devEui, Date.now(), 600000,\n      'duplicate uplink dropped (F83): ' + devEui + ' fCnt=' + data.fCnt);\n  }\n  return [null, null];\n}\n\nfunction parseIsoMillis(value) {\n  const time = new Date(value).getTime();\n  return Number.isFinite(time) ? time : null;\n}\n\nfunction roundTo(value, digits) {\n  const numeric = Number(value);\n  if (!Number.isFinite(numeric)) return null;\n  const factor = Math.pow(10, digits || 0);\n  return Math.round(numeric * factor) / factor;\n}\n\nasync function loadPreviousRainSample(timestampIso) {\n  const escapedTimestamp = String(timestampIso || '').replace(/'/g, \"''\");\n  const db = new osiDb.Database('/data/db/farming.db');\n  const q2 = (sql) => new Promise((res, rej) => db.all(sql, (error, rows) => error ? rej(error) : res(rows || [])));\n  const close2 = () => new Promise((res) => db.close(() => res()));\n  try {\n    const futureSql = [\n      'SELECT recorded_at',\n      'FROM device_data',\n      `WHERE deveui = '${escapedEui}'`,\n      `  AND recorded_at >= '${escapedTimestamp}'`,\n      '  AND rain_mm_delta IS NOT NULL',\n      'ORDER BY recorded_at ASC',\n      'LIMIT 1',\n    ].join(' ');\n    const previousSql = [\n      'SELECT recorded_at',\n      'FROM device_data',\n      `WHERE deveui = '${escapedEui}'`,\n      `  AND recorded_at < '${escapedTimestamp}'`,\n      '  AND rain_mm_delta IS NOT NULL',\n      'ORDER BY recorded_at DESC',\n      'LIMIT 1',\n    ].join(' ');\n    const futureRows = await q2(futureSql);\n    const previousRows = await q2(previousSql);\n    return { duplicateOrFuture: futureRows[0] || null, previous: previousRows[0] || null };\n  } finally {\n    await close2();\n  }\n}\n\nasync function loadTodayRainTotal(timestampIso) {\n  const escapedTimestamp = String(timestampIso || '').replace(/'/g, \"''\");\n  const db = new osiDb.Database('/data/db/farming.db');\n  const q2 = (sql) => new Promise((res, rej) => db.all(sql, (error, rows) => error ? rej(error) : res(rows || [])));\n  const close2 = () => new Promise((res) => db.close(() => res()));\n  try {\n    const totalSql = [\n      'SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today',\n      'FROM device_data',\n      `WHERE deveui = '${escapedEui}'`,\n      `  AND recorded_at < '${escapedTimestamp}'`,\n      `  AND date(recorded_at, 'localtime') = date('${escapedTimestamp}', 'localtime')`,\n    ].join(' ');\n    const rows = await q2(totalSql);\n    return rows[0] || { rain_mm_today: 0 };\n  } finally {\n    await close2();\n  }\n}\n\nconst object = data.object || {};\nconst timestamp = data.time ? new Date(data.time).toISOString() : new Date().toISOString();\nconst rawRainMm = object.rain_mm_delta;\nconst rawRainLevel = object.rainlevel;\nconst rawRainTips = object.rain_tips_delta;\nconst rainMmDeltaPresent = rawRainMm != null;\nconst rainLevelPresent = rawRainLevel != null;\nconst rainMmDeltaNumber = Number(rawRainMm);\nconst rainLevelNumber = Number(rawRainLevel);\nconst hasRainMmDelta = rainMmDeltaPresent && Number.isFinite(rainMmDeltaNumber) && rainMmDeltaNumber >= 0;\nconst hasRainLevel = rainLevelPresent && Number.isFinite(rainLevelNumber) && rainLevelNumber >= 0;\nconst hasRainSource = rainMmDeltaPresent || rainLevelPresent;\nconst hasRain = hasRainMmDelta || hasRainLevel;\nconst rawRainMmDelta = hasRainMmDelta\n  ? roundTo(rainMmDeltaNumber, 1)\n  : (hasRainLevel ? roundTo(rainLevelNumber * 0.5, 1) : null);\nconst rawTipsNumber = Number(rawRainTips);\nconst hasRainTipsDelta = rawRainTips != null && Number.isFinite(rawTipsNumber) && rawTipsNumber >= 0;\nconst rawTips = hasRainTipsDelta ? rawTipsNumber : (hasRainLevel ? rainLevelNumber : null);\n\nconst d = {\n  devEui,\n  timestamp,\n  ambientTemperature: object.ambient_temperature ?? object.temperature_C ?? null,\n  batV: object.bat_v ?? null,\n  rainTipsDelta: rawTips,\n  rainMmDelta: rawRainMmDelta,\n  rainMmPerHour: null,\n  rainMmPer10Min: null,\n  rainMmToday: null,\n  counterIntervalSeconds: null,\n  rainDeltaStatus: hasRain ? 'ok' : (hasRainSource ? 'invalid_rain_delta' : 'no_rain_sensor'),\n};\n\nif (hasRain) {\n  const timestampMs = parseIsoMillis(timestamp);\n  try {\n    const baseline = await loadPreviousRainSample(timestamp);\n    if (baseline.duplicateOrFuture) {\n      d.rainDeltaStatus = 'duplicate_or_out_of_order';\n      d.rainMmDelta = null;\n    } else {\n      const previousTodayTotal = await loadTodayRainTotal(timestamp);\n      if (baseline.previous) {\n        const previousTimestampMs = parseIsoMillis(baseline.previous.recorded_at);\n        const intervalSeconds = timestampMs != null && previousTimestampMs != null\n          ? Math.round((timestampMs - previousTimestampMs) / 1000)\n          : null;\n        d.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;\n        if (d.counterIntervalSeconds != null) {\n          d.rainMmPerHour = roundTo((Number(rawRainMmDelta) / d.counterIntervalSeconds) * 3600, 3);\n          d.rainMmPer10Min = roundTo((Number(rawRainMmDelta) / d.counterIntervalSeconds) * 600, 2);\n        }\n      }\n      d.rainMmToday = roundTo((Number(previousTodayTotal && previousTodayTotal.rain_mm_today) || 0) + (Number(rawRainMmDelta) || 0), 1);\n    }\n  } catch (e) {\n    d.rainDeltaStatus = 'error';\n    d.rainMmDelta = null;\n  }\n}\n\nconst parts = [];\nif (d.ambientTemperature != null) parts.push('T ' + Number(d.ambientTemperature).toFixed(1) + ' C');\nif (d.rainMmDelta != null) parts.push('Rain ' + Number(d.rainMmDelta).toFixed(1) + ' mm');\nelse if (d.rainMmToday != null) parts.push('Today ' + Number(d.rainMmToday).toFixed(1) + ' mm');\nnode.status({ fill: 'blue', shape: 'dot', text: parts.join(' | ') || ('LoRain ' + devEui) });\n\nmsg.formattedData = d;\n// A valid dry report is evidence too (finding 6): it reaches the zone table so a\n// reporting dry gauge differs from a silent one. Only 'ok' rows qualify.\nconst rainOut = (d.rainDeltaStatus === 'ok' && d.rainMmDelta != null && Number(d.rainMmDelta) >= 0) ? msg : null;\nreturn [msg, rainOut];",
-    "outputs": 2,
+    "name": "Ingest LoRain",
+    "func": "// LoRain ingest: the one writer for Aqua-Scope LoRain uplinks (rain correctness\n// programme, migration 0071). osi-rain claims the observation identity, writes\n// rain_observations, device_data and the zone day inside one transaction; a\n// throw rolls all of it back. Nothing leaves this node before the commit.\nconst data = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\nif (!data || !data.deviceInfo) return null;\n\nconst info = data.deviceInfo || {};\nconst configuredProfileId = String(env.get('CHIRPSTACK_PROFILE_LORAIN') || '').trim();\nconst profileId = String(info.deviceProfileId || data.deviceProfileId || '').trim();\nconst profileName = String(info.deviceProfileName || data.deviceProfileName || '').trim().toUpperCase();\nconst isLoRainProfile = (configuredProfileId && profileId === configuredProfileId)\n  || profileName.indexOf('LORAIN') >= 0\n  || profileName.indexOf('AQUA-SCOPE') >= 0\n  || profileName.indexOf('AQUASCOPE') >= 0;\nif (!isLoRainProfile) return null;\n\nconst rainLoad = osiLib.require('rain');\nif (!rainLoad.ok) { node.error('lorain-ingest: osi-rain unavailable: ' + rainLoad.error); return null; }\nconst R = rainLoad.value;\n// The one authorised configuration query is NOT bench-verified: off unless\n// OSI_LORAIN_CONFIG_QUERY=1. Never enable it on a customer gateway before a bench test.\nconst configQueryEnabled = String(env.get('OSI_LORAIN_CONFIG_QUERY') || '').trim() === '1';\nconst uplink = {\n  deveui: String(info.devEui || data.devEui || '').toUpperCase(),\n  eventId: data.deduplicationId || null,\n  devAddr: data.devAddr || null,\n  fCnt: data.fCnt,\n  time: data.time,\n  fPort: data.fPort,\n  data: data.data,\n  object: data.object || {},\n  applicationId: info.applicationId || null,\n};\n\nconst db = new osiDb.Database('/data/db/farming.db');\nlet result = null;\ntry {\n  result = await db.transaction((t) => R.ingestLoRainUplink(t, uplink, { nowMs: Date.now(), configQueryEnabled }));\n  node.status({ fill: result.outcome === 'accepted' ? 'blue' : 'grey', shape: 'dot',\n    text: 'LoRain ' + result.outcome + (result.status ? ' ' + result.status : '') });\n} catch (e) {\n  node.error('lorain-ingest failed (rolled back): ' + (e && e.message ? e.message : e));\n} finally {\n  await new Promise((res) => db.close(() => res()));\n}\nif (result && result.configQuery) {\n  node.warn('lorain-ingest: configuration query sent once to ' + uplink.deveui);\n  return { topic: result.configQuery.topic, payload: JSON.stringify(result.configQuery.payload) };\n}\nreturn null;",
+    "outputs": 1,
     "noerr": 0,
     "initialize": "",
     "finalize": "",
@@ -10652,71 +10652,27 @@
     "y": 120,
     "wires": [
       [
-        "lorain-sql-fn"
-      ],
-      [
-        "lorain-rain-agg-fn"
+        "lorain-config-query-out"
       ]
     ]
   },
   {
-    "id": "lorain-sql-fn",
-    "type": "function",
+    "id": "lorain-config-query-out",
+    "type": "mqtt out",
     "z": "lorain-tab",
-    "name": "Build LoRain SQL INSERT",
-    "func": "const d = msg.formattedData;\nif (!d || !d.devEui) { node.error('formattedData missing'); return null; }\n\nfunction ss(v) { if (v == null) return 'NULL'; return \"'\" + String(v).replace(/'/g,\"''\") + \"'\"; }\nfunction sn(v) { if (v == null) return 'NULL'; const n = Number(v); return isFinite(n) ? String(n) : 'NULL'; }\n\nmsg.topic = [\n  'INSERT INTO device_data',\n  '(deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta,',\n  ' rain_mm_per_hour, rain_mm_per_10min, rain_mm_today, counter_interval_seconds, rain_delta_status)',\n  'VALUES (',\n  ss(d.devEui) + ', ' + ss(d.timestamp) + ', ' + sn(d.ambientTemperature) + ', ' + sn(d.batV) + ', ' + sn(d.rainTipsDelta) + ', ' + sn(d.rainMmDelta) + ',',\n  sn(d.rainMmPerHour) + ', ' + sn(d.rainMmPer10Min) + ', ' + sn(d.rainMmToday) + ', ' + sn(d.counterIntervalSeconds) + ', ' + ss(d.rainDeltaStatus),\n  ')'\n].join(' ');\nreturn msg;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [],
-    "x": 650,
-    "y": 100,
-    "wires": [
-      [
-        "lorain-sqlite"
-      ]
-    ]
-  },
-  {
-    "id": "lorain-sqlite",
-    "type": "sqlite",
-    "z": "lorain-tab",
-    "mydb": "734737e846d06893",
-    "sqlquery": "msg.topic",
-    "sql": "",
-    "name": "Insert LoRain Data",
-    "x": 900,
-    "y": 100,
-    "wires": [
-      []
-    ]
-  },
-  {
-    "id": "lorain-rain-agg-fn",
-    "type": "function",
-    "z": "lorain-tab",
-    "name": "Aggregate LoRain Zone Rain",
-    "func": "const d = msg.formattedData;\nif (!d || d.rainDeltaStatus !== 'ok' || d.rainMmDelta == null || !(Number(d.rainMmDelta) >= 0)) return null;\nif (!osiHistory || typeof osiHistory.startOfLocalDayMs !== 'function') { node.error('LoRain rain agg: history helper unavailable'); return null; }\n\nconst _db = new osiDb.Database('/data/db/farming.db');\nconst q = (sql, p) => new Promise((res, rej) => _db.all(sql, p || [], (e, r) => e ? rej(e) : res(r || [])));\nconst run = (sql, p) => new Promise((res, rej) => _db.run(sql, p || [], e => e ? rej(e) : res()));\nconst close = () => new Promise(res => _db.close(() => res()));\n\nfunction localDateIso(ts, tz) {\n  try {\n    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: tz || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(ts));\n    const m = {};\n    for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value;\n    return m.year + '-' + m.month + '-' + m.day;\n  } catch (_) { return new Date(ts).toISOString().slice(0, 10); }\n}\n// The zone's own day window (finding 3): a new zone day is never seeded from the host-day total.\nfunction zoneDayStartIso(tsIso, tz) { return new Date(osiHistory.startOfLocalDayMs(Date.parse(tsIso), tz)).toISOString(); }\n\ntry {\n  const zones = await q(\"SELECT d.irrigation_zone_id AS zone_id, COALESCE(iz.timezone,'UTC') AS timezone FROM devices d LEFT JOIN irrigation_zones iz ON iz.id=d.irrigation_zone_id WHERE d.deveui=? AND d.irrigation_zone_id IS NOT NULL AND d.deleted_at IS NULL\", [d.devEui]);\n  const computedAt = new Date().toISOString();\n  const delta = Number(d.rainMmDelta);\n  for (const zone of zones) {\n    // One reading of the zone timezone for the date and the window (as osi-history-helper reads it).\n    const tz = String(zone.timezone || 'UTC').trim() || 'UTC';\n    const date = localDateIso(d.timestamp, tz);\n    const prior = await q(\"SELECT COALESCE(SUM(rain_mm_delta),0) AS mm FROM device_data WHERE deveui=? AND rain_delta_status='ok' AND rain_mm_delta IS NOT NULL AND recorded_at>=? AND recorded_at<?\", [d.devEui, zoneDayStartIso(d.timestamp, tz), d.timestamp]);\n    const zoneDayTotal = Math.round(((Number(prior[0] && prior[0].mm) || 0) + delta) * 10) / 10;\n    const nextRain = \"CASE WHEN rain_source='aquascope_lorain' THEN MAX(COALESCE(rainfall_mm,0)+?, ?) ELSE ? END\";\n    // sync_version moves only when the synced values change; computed_at records the latest evidence.\n    // A zero never takes over a day another source owns (R-ZONE settles multi-source days).\n    await run(\n      'INSERT INTO zone_daily_environment(zone_id,date,rainfall_mm,flow_liters,rain_source,computed_at) VALUES(?,?,?,0,?,?) ' +\n      'ON CONFLICT(zone_id,date) DO UPDATE SET ' +\n      'sync_version = CASE WHEN (' + nextRain + ') IS NOT rainfall_mm OR rain_source IS NOT ? THEN zone_daily_environment.sync_version+1 ELSE zone_daily_environment.sync_version END, ' +\n      'rainfall_mm = ' + nextRain + ', rain_source = ?, computed_at = ? ' +\n      \"WHERE ? > 0 OR zone_daily_environment.rain_source = 'aquascope_lorain'\",\n      [zone.zone_id, date, zoneDayTotal, 'aquascope_lorain', computedAt,\n       delta, zoneDayTotal, zoneDayTotal, 'aquascope_lorain',\n       delta, zoneDayTotal, zoneDayTotal,\n       'aquascope_lorain', computedAt, delta]\n    );\n  }\n  await close();\n} catch (e) { try { await close(); } catch (_) {} node.error('LoRain rain agg failed: ' + e.message); }\nreturn null;",
-    "outputs": 1,
-    "noerr": 0,
-    "initialize": "",
-    "finalize": "",
-    "libs": [
-      {
-        "var": "osiDb",
-        "module": "osi-db-helper"
-      },
-      {
-        "var": "osiHistory",
-        "module": "osi-history-helper"
-      }
-    ],
-    "x": 660,
-    "y": 160,
-    "wires": [
-      []
-    ]
+    "name": "LoRain config query to ChirpStack",
+    "topic": "",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "b0b19352dac3fb34",
+    "x": 670,
+    "y": 120,
+    "wires": []
   },
   {
     "id": "history-rollups-schedule",

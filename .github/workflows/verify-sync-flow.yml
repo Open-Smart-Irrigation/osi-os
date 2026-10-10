@@ -228,6 +228,14 @@ jobs:
       # day. TZ pins the host clock the old 'localtime' path depended on.
       - name: LoRain dry reports and zone day window
         run: TZ=UTC node --test scripts/test-lorain-dry-zone-row.js
+      # LoRain single writer (migration 0071, osi-rain): durable observation identity,
+      # atomic persistence and rollback, the contract fixtures through lorain-ingest-fn,
+      # delayed and rejoined frames, the verified-interval rate; then the real
+      # osi-db-helper under concurrent and repeated deliveries and a restart.
+      - name: LoRain ingestion through one writer
+        run: TZ=UTC node --test scripts/test-lorain-ingest.js
+      - name: LoRain ingestion under the real database helper
+        run: TZ=UTC node --test scripts/test-lorain-ingest-concurrency.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip

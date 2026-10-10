@@ -297,9 +297,7 @@ const requiredFunctionNodes = [
   'Persist STREGA Uplink',
   'Process S2120',
   'Aggregate Zone Rain',
-  'Process LoRain',
-  'Build LoRain SQL INSERT',
-  'Aggregate LoRain Zone Rain',
+  'Ingest LoRain',
   'Insert Chameleon Reading',
   'Get Zone Assignments',
   'Auth + Set Zone Assignments',
@@ -2649,16 +2647,32 @@ expectIncludesById('post-devices-insert', '4943485448592021', 'sets the Aqua-Sco
 expectIncludesById('cs-reg-cloud-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'maps cloud LoRain registration to the LoRain ChirpStack profile');
 expectIncludesById('cs-reg-cloud-fn', '4943485448592021', 'sets the Aqua-Scope LoRain JoinEUI for cloud registration');
 expectIncludesById('cs-reg-cloud-fn', 'CHIRPSTACK_PROFILE_S2120', 'keeps cloud SenseCAP registration support while adding LoRain');
-expectIncludesById('lorain-process-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'filters LoRain uplinks by profile ID');
-expectIncludesById('lorain-process-fn', 'AQUASCOPE_LORAIN', 'guards LoRain uplinks by local device type');
-expectIncludesById('lorain-process-fn', 'duplicate_or_out_of_order', 'skips duplicate or out-of-order LoRain interval rain');
-expectIncludesById('lorain-process-fn', 'rainMmPer10Min', 'computes normalized LoRain rain telemetry per 10 minutes');
-expectIncludesById('lorain-sql-fn', 'rain_tips_delta', 'persists LoRain tip deltas');
-expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone rainfall source');
-expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
-expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
-expectLibById('lorain-rain-agg-fn', 'osiHistory', 'osi-history-helper', 'imports osi-history-helper for the zone-local day window');
-expectIncludesById('lorain-rain-agg-fn', "WHERE ? > 0 OR zone_daily_environment.rain_source = 'aquascope_lorain'", 'never lets a zero report take over a zone day another source owns');
+// LoRain has one writer (rain correctness programme, migration 0071): lorain-ingest-fn hands
+// the uplink to osi-rain inside one osiDb transaction. Behaviour: scripts/test-lorain-ingest.js,
+// scripts/test-lorain-ingest-concurrency.js, scripts/test-lorain-dry-zone-row.js.
+for (const removedId of ['lorain-process-fn', 'lorain-sql-fn', 'lorain-sqlite', 'lorain-rain-agg-fn']) {
+  expectCondition(!findNodeById(removedId), `LoRain second writer path ${removedId} is gone`, `LoRain second writer path ${removedId} is still present`);
+}
+expectCondition(JSON.stringify((findNodeById('lorain-mqtt-in') || {}).wires) === JSON.stringify([['lorain-ingest-fn']]),
+  'LoRain MQTT input feeds only lorain-ingest-fn', 'LoRain MQTT input must feed only lorain-ingest-fn');
+expectIncludesById('lorain-ingest-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'filters LoRain uplinks by profile ID');
+expectIncludesById('lorain-ingest-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib');
+expectIncludesById('lorain-ingest-fn', 'db.transaction((t) => R.ingestLoRainUplink(t, uplink,', 'ingests inside one osiDb transaction');
+expectIncludesById('lorain-ingest-fn', "String(env.get('OSI_LORAIN_CONFIG_QUERY') || '').trim() === '1'", 'keeps the unverified configuration query off unless explicitly enabled');
+expectLibById('lorain-ingest-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('lorain-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
+{
+  const rainModuleSource = fs.readFileSync(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'), 'utf8');
+  for (const [needle, description] of [
+    ["const LORAIN_TYPE_ID = 'AQUASCOPE_LORAIN';", 'guards LoRain uplinks by local device type'],
+    ["const LORAIN_RAIN_SOURCE = 'aquascope_lorain';", 'labels LoRain zone rainfall source'],
+    ["'WHERE ? = 1 OR zone_daily_environment.rain_source = ?'", 'never lets a zero report take over a zone day another source owns'],
+    ['rain_tips_delta', 'persists LoRain tip deltas'],
+    ['const PINNED_LORAIN_BUILDS = Object.freeze([]);', 'promotes no installed LoRain build until the owner confirms one'],
+  ]) {
+    expectCondition(rainModuleSource.includes(needle), `osi-rain ${description}`, `osi-rain missing: ${description}`);
+  }
+}
 
 // F83-V5: static pins so a future flows.json edit cannot silently drop the
 // uplink-dedup guard from any of the 7 device_data-writing decode functions
@@ -2668,7 +2682,8 @@ for (const dedupNodeId of [
   '81c98fb07344a787', // KIWI/CLOVER "Process Data"
   'strega-process-fn', // "Process STREGA"
   's2120-process-fn',
-  'lorain-process-fn',
+  // LoRain left this list with migration 0071: rain_observations' unique
+  // (deveui, event_id) index makes its identity durable across restarts.
   'lsn50-decode-fn', // "Decode LSN50"
   '6b28e0d879808dd9', // "UC512 Normalize + Write"
   'sdi12-gate-fn', // "SDI12 Gate + Decode"
@@ -4447,270 +4462,96 @@ if (!dendroHelperPath) {
       };
     }
 
-    function createLorainQueryHandler(options = {}) {
-      return (sql) => {
-        if (sql.includes('SELECT type_id FROM devices')) {
-          return [{ type_id: options.deviceType || 'AQUASCOPE_LORAIN' }];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_mm_delta IS NOT NULL')) {
-          return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at <') && sql.includes('rain_mm_delta IS NOT NULL')) {
-          return options.previousSample ? [options.previousSample] : [];
-        }
-        if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
-          return [{ rain_mm_today: options.todayTotal ?? 0 }];
-        }
-        return [];
+    // lorain-ingest-fn's contract with osi-rain: profile filter, the uplink it
+    // hands over, one transaction, nothing emitted before the commit, and the
+    // configuration query only when explicitly enabled. Behaviour on a real
+    // database: scripts/test-lorain-ingest*.js.
+    function lorainRainLib(result, calls) {
+      return {
+        require(name) {
+          if (name !== 'rain') return { ok: false, error: 'unexpected module ' + name };
+          return { ok: true, value: { async ingestLoRainUplink(t, uplink, opts) {
+            calls.push({ t, uplink, opts });
+            if (result instanceof Error) throw result;
+            return result;
+          } } };
+        },
       };
     }
-
-    pendingChecks.push((async () => {
-      const rejected = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({ profileId: 'profile-s2120', profileName: 'SenseCAP S2120' }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler()),
-          },
+    function lorainTxDb(log) {
+      return { Database: class LorainTxDatabase {
+        transaction(fn) {
+          log.push('BEGIN');
+          return Promise.resolve().then(() => fn({ scope: 'tx' })).then(
+            (value) => { log.push('COMMIT'); return value; },
+            (error) => { log.push('ROLLBACK'); throw error; });
         }
-      );
-      expectCondition(
-        Array.isArray(rejected) && rejected[0] === null && rejected[1] === null,
-        'LoRain branch rejects non-LoRain profiles',
-        'LoRain branch accepted a non-LoRain profile'
-      );
-    })().catch((error) => {
-      fail(`failed to execute non-LoRain rejection fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain first interval sample is valid rain');
-      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain fixture preserves interval rain delta');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain fixture preserves tip count');
-      expectEqual(formatted.counterIntervalSeconds, null, 'LoRain first interval sample does not fabricate elapsed seconds');
-      expectEqual(formatted.rainMmPer10Min, null, 'LoRain first interval sample does not fabricate a rate');
-      expectApprox(formatted.rainMmToday, 2.7, 0.000001, 'LoRain fixture accumulates local-day rain totals');
-      expectCondition(!!rainOut, 'LoRain first interval sample emits zone-rain update', 'LoRain first interval sample did not emit zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute first-sample LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          includeRainMmDelta: false,
-          includeRainTipsDelta: false,
-          rainLevel: 3,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain raw rainlevel fixture converts 0.5 mm steps to millimeters');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain raw rainlevel fixture uses raw rainlevel as tip count');
-    })().catch((error) => {
-      fail(`failed to execute raw-rainlevel LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          rainMmDelta: 2.0,
-          rainLevel: 3,
-          includeRainTipsDelta: false,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectApprox(formatted.rainMmDelta, 2.0, 0.000001, 'LoRain normalized rain_mm_delta wins over disagreeing raw rainlevel fallback');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain disagreeing-source fixture still uses raw rainlevel as fallback tip count');
-    })().catch((error) => {
-      fail(`failed to execute disagreeing-source LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          includeRainMmDelta: false,
-          includeRainTipsDelta: false,
-          rainLevel: -1,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'invalid_rain_delta', 'LoRain negative rain fixture marks invalid rain');
-      expectEqual(formatted.rainMmDelta, null, 'LoRain negative rain fixture does not persist a negative rain delta');
-      expectEqual(rainOut, null, 'LoRain negative rain fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute negative-rain LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({
-              previousSample: { recorded_at: '2026-04-21T09:50:00.000Z' },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain interval fixture marks valid rain');
-      expectApprox(formatted.rainMmPerHour, 9, 0.000001, 'LoRain interval fixture computes hourly rain rate');
-      expectApprox(formatted.rainMmPer10Min, 1.5, 0.000001, 'LoRain interval fixture computes normalized rain per 10 minutes');
-      expectEqual(formatted.counterIntervalSeconds, 600, 'LoRain interval fixture stores elapsed seconds');
-      expectCondition(!!rainOut, 'LoRain interval fixture emits zone-rain update', 'LoRain interval fixture did not emit zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute valid-interval LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({
-              duplicateOrFuture: { recorded_at: '2026-04-21T10:00:00.000Z' },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'duplicate_or_out_of_order', 'LoRain duplicate fixture skips duplicate timestamps');
-      expectEqual(formatted.rainMmDelta, null, 'LoRain duplicate fixture does not emit a duplicate rain delta');
-      expectEqual(rainOut, null, 'LoRain duplicate fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute duplicate-timestamp LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push(executeFunctionNodeById('lorain-sql-fn', {
-      formattedData: {
-        devEui: 'ABC123',
-        timestamp: '2026-04-21T10:00:00.000Z',
-        ambientTemperature: 20.5,
-        batV: 3.3,
-        rainTipsDelta: 3,
-        rainMmDelta: 1.5,
-        rainMmPerHour: 9,
-        rainMmPer10Min: 1.5,
-        rainMmToday: 2.7,
-        counterIntervalSeconds: 600,
-        rainDeltaStatus: 'ok',
-      },
-    }).then((sqlMsg) => {
-      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
-      expectCondition(
-        sql.includes('rain_tips_delta') && sql.includes('rain_mm_delta') && sql.includes('rain_mm_per_10min'),
-        'LoRain SQL insert persists normalized rain telemetry',
-        'LoRain SQL insert is missing normalized rain telemetry columns'
-      );
-      expectCondition(
-        sql.includes('3.3') && sql.includes('1.5') && sql.includes("'ok'"),
-        'LoRain SQL insert includes battery, rain-rate values, and status',
-        'LoRain SQL insert is missing battery, rain-rate values, or status'
-      );
-    }).catch((error) => {
-      fail(`failed to execute LoRain SQL fixture: ${error.message}`);
-    }));
-
-    // LoRain zone rain: the day total comes from this device's ok deltas inside the
-    // zone's own local day (here CEST, so the window opens at 22:00Z the day before),
-    // and a valid zero report writes too.
-    for (const rainMmDelta of [1.5, 0]) {
-      pendingChecks.push((async () => {
-        const writes = [];
-        const windows = [];
-        const queryHandler = (sql, params) => {
-          if (sql.includes('SELECT d.irrigation_zone_id AS zone_id')) {
-            return [{ zone_id: 7, timezone: 'Europe/Zurich' }];
-          }
-          if (sql.includes('SUM(rain_mm_delta)')) {
-            windows.push(params || []);
-            return [{ mm: 1.2 }];
-          }
-          return [];
-        };
-        queryHandler.run = (sql, params) => {
-          writes.push({ sql, params: params || [] });
-        };
-        await executeFunctionNodeById(
-          'lorain-rain-agg-fn',
-          {
-            formattedData: {
-              devEui: 'ABC123',
-              timestamp: '2026-04-21T10:00:00.000Z',
-              rainDeltaStatus: 'ok',
-              rainMmDelta,
-              rainMmToday: 9.9,
-            },
-          },
-          {
-            scope: {
-              osiDb: createMockOsiDb(queryHandler),
-              osiHistory: require(historyHelperPath),
-            },
-          }
-        );
-        const label = `LoRain zone aggregate (${rainMmDelta} mm)`;
-        const write = writes[0] || { sql: '', params: [] };
-        const expectedTotal = Math.round((1.2 + rainMmDelta) * 10) / 10;
-        expectCondition(
-          writes.length === 1 && write.sql.includes('zone_daily_environment') && write.params.includes('aquascope_lorain'),
-          `${label} writes source aquascope_lorain`,
-          `${label} did not write one aquascope_lorain row`
-        );
-        expectCondition(
-          JSON.stringify(windows[0]) === JSON.stringify(['ABC123', '2026-04-20T22:00:00.000Z', '2026-04-21T10:00:00.000Z']),
-          `${label} sums the zone-local day window`,
-          `${label} summed the wrong window: ${JSON.stringify(windows[0])}`
-        );
-        expectCondition(
-          write.sql.includes('MAX(COALESCE(rainfall_mm,0)+?, ?)') && write.params[2] === expectedTotal && write.params[5] === rainMmDelta && write.params[6] === expectedTotal && !write.params.includes(9.9),
-          `${label} adds the delta while honoring the zone-day total, never the host-day total`,
-          `${label} params ${JSON.stringify(write.params)} do not carry delta ${rainMmDelta} and zone-day total ${expectedTotal}`
-        );
-      })().catch((error) => {
-        fail(`failed to execute LoRain zone aggregate fixture: ${error.message}`);
-      }));
+        close(callback) { log.push('CLOSE'); if (callback) callback(); }
+      } };
     }
+    const lorainUplink = (profileName) => {
+      const msg = buildLorainFixture(profileName ? { profileId: 'profile-other', profileName } : {});
+      Object.assign(msg.payload, { deduplicationId: 'ev-1', devAddr: '01000001', fCnt: 7, fPort: 2, data: 'BgOBAAM=' });
+      msg.payload.deviceInfo.applicationId = 'app-1';
+      return msg;
+    };
+    const accepted = { outcome: 'accepted', status: 'accepted', observationId: 1, deviceDataId: 1, zoneDays: [], configQuery: null };
+
+    pendingChecks.push((async () => {
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink('SenseCAP S2120'), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(accepted, calls), osiDb: lorainTxDb(log) },
+      });
+      expectCondition(result === null && calls.length === 0 && log.length === 0,
+        'LoRain ingest rejects non-LoRain profiles', 'LoRain ingest accepted a non-LoRain profile');
+    })().catch((error) => fail(`failed to execute non-LoRain rejection fixture: ${error.message}`)));
+
+    pendingChecks.push((async () => {
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(accepted, calls), osiDb: lorainTxDb(log) },
+      });
+      const call = calls[0] || { uplink: {}, opts: {} };
+      expectCondition(result === null && calls.length === 1 && call.t && call.t.scope === 'tx',
+        'LoRain ingest runs osi-rain once inside the transaction and emits nothing', 'LoRain ingest did not run osi-rain once inside the transaction');
+      expectCondition(JSON.stringify(log) === JSON.stringify(['BEGIN', 'COMMIT', 'CLOSE']),
+        'LoRain ingest commits then closes its handle', `LoRain ingest transaction log ${JSON.stringify(log)}`);
+      expectCondition(call.uplink.deveui === 'ABC123' && call.uplink.eventId === 'ev-1' && call.uplink.devAddr === '01000001'
+        && call.uplink.fCnt === 7 && call.uplink.fPort === 2 && call.uplink.data === 'BgOBAAM=' && call.uplink.object.rain_tips_delta === 3
+        && call.uplink.time === '2026-04-21T10:00:00.000Z' && call.uplink.applicationId === 'app-1',
+        'LoRain ingest hands osi-rain the identity, session, payload and decoded object', `LoRain ingest uplink ${JSON.stringify(call.uplink)}`);
+      expectCondition(call.opts.configQueryEnabled === false,
+        'LoRain configuration query stays off by default', 'LoRain configuration query is on without OSI_LORAIN_CONFIG_QUERY=1');
+    })().catch((error) => fail(`failed to execute LoRain ingest fixture: ${error.message}`)));
+
+    pendingChecks.push((async () => {
+      const errors = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(new Error('disk I/O error'), []), osiDb: lorainTxDb(log) },
+        node: { error: (message) => errors.push(String(message)) },
+      });
+      expectCondition(result === null && JSON.stringify(log) === JSON.stringify(['BEGIN', 'ROLLBACK', 'CLOSE'])
+        && errors.some((m) => m.includes('rolled back') && m.includes('disk I/O error')),
+        'LoRain ingest failure rolls back, reports, and emits nothing', `LoRain ingest failure handling: ${JSON.stringify({ log, errors })}`);
+    })().catch((error) => fail(`failed to execute LoRain ingest failure fixture: ${error.message}`)));
+
+    pendingChecks.push((async () => {
+      const calls = [];
+      const query = { topic: 'application/app-1/device/abc123/command/down', payload: { devEui: 'abc123', confirmed: false, fPort: 2, data: 'AA==' } };
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain', OSI_LORAIN_CONFIG_QUERY: '1' },
+        scope: { osiLib: lorainRainLib({ ...accepted, configQuery: query }, calls), osiDb: lorainTxDb([]) },
+      });
+      expectCondition((calls[0] || { opts: {} }).opts.configQueryEnabled === true && result && result.topic === query.topic
+        && result.payload === JSON.stringify(query.payload),
+        'LoRain configuration query leaves the node only when enabled and after the commit', 'LoRain configuration query output is wrong');
+    })().catch((error) => fail(`failed to execute LoRain configuration query fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
       const processedMsg = await executeFunctionNodeById(
