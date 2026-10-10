@@ -513,6 +513,7 @@
       "etaTomorrow": "{{time}} morgen",
       "next24h": "Nächste 24 Std.",
       "next72h": "Nächste 72 Std.",
+      "coverage": "{{covered}} von {{expected}} Std.",
       "nextRain": "Nächster Regen",
       "rainHours": "Regenstunden",
       "maxHourly": "Max. stündlich",
@@ -921,5 +922,22 @@
       "invalidField": "Prüfen Sie {{field}}: ausserhalb des Bereichs.",
       "loadFailed": "Die Kalibrierung konnte nicht geladen werden."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
+    "soFar": "bisher",
+    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
+  },
+  "rain": {
+    "recordedToday": "Heute gemessener Regen",
+    "soFar": "bisher",
+    "lastReportOn": "Letzte Meldung {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Niederschlag dieses Intervalls",
+    "lastReport": "Letzte Meldung",
+    "tips_one": "{{count}} Kippung",
+    "tips_other": "{{count}} Kippungen",
+    "tipsUnavailable": "Anzahl Kippungen nicht verfügbar"
   }
 }

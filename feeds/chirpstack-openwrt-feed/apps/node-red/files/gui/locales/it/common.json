@@ -63,7 +63,8 @@
       "reason": {
         "unsupported": "Non supportato",
         "available_no_recent_data": "Nessun dato recente disponibile"
-      }
+      },
+      "showLegacy": "Mostra le stime del metodo precedente"
     },
     "range": {
       "label": "Intervallo di analisi",
@@ -92,6 +93,7 @@
       "png": "Esporta PNG",
       "allZonesCsv": "Esporta CSV di tutte le zone",
       "allZonesCsvBusy": "Esportazione…",
+      "qualityColumns": "Includi le colonne di qualità",
       "errors": {
         "tooLarge": "Questa esportazione è troppo grande. Scegli un periodo più breve o un'aggregazione più ampia.",
         "busy": "È in corso un'altra esportazione. Riprova tra poco.",
@@ -127,8 +129,11 @@
     },
     "tooltip": {
       "partialHours": " ({{count}} di {{expected}} h)",
-      "partialDays": " ({{count}} di {{expected}} gg)"
-    }
+      "partialDays": " ({{count}} di {{expected}} gg)",
+      "reportsReceived_one": " · {{count}} rilevazione ricevuta",
+      "reportsReceived_other": " · {{count}} rilevazioni ricevute"
+    },
+    "legacyEstimate": "stima, metodo precedente"
   },
   "restart": {
     "gateway_identity_change": "Identità del gateway aggiornata. I servizi verranno riavviati tra {{count}} s.",
