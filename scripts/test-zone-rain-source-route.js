@@ -32,6 +32,7 @@ const VIEWER = { userId: 3, username: 'view1' };    // granted zone 1, cannot mu
 const LORAIN = 'A840410000000001';
 const S2120 = 'A840410000000002';
 const OTHER_ZONE_GAUGE = 'A840410000000003';
+const LSN50 = 'A840410000000004';
 const GUARD_ROUTE_INDEX = 4;
 
 // Zone 1 gets two gauges: a LoRain in the zone and an S2120 weather station
@@ -45,6 +46,54 @@ function seedGauges(db) {
       ('${OTHER_ZONE_GAUGE}', 'Gauge south', 'AQUASCOPE_LORAIN', 1, 2, '2026-01-01', '2026-01-01');
     INSERT INTO weather_station_zones (deveui, zone_id) VALUES ('${S2120}', 1);
   `);
+}
+
+function addLsn50Gauge(db) {
+  db.prepare('INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, rain_gauge_enabled, created_at, updated_at) '
+    + "VALUES (?, 'Counter gauge', 'DRAGINO_LSN50', 2, 1, 1, '2026-01-01', '2026-01-01')").run(LSN50);
+}
+
+// Seed the same raw-row plus immutable 0071 attribution shape produced by the
+// LSN50 Normalize + Write transaction. Each frame covers the preceding four
+// hours; `changeAtIndex` alters the saved owner or enablement before that frame.
+function seedLsn50Day(db, day, { changeAtIndex = -1, change = null, disabled = false } = {}) {
+  const start = Date.parse(day + 'T00:00:00.000Z');
+  const state = { zoneId: 1, enabled: !disabled };
+  let cumulative = 10;
+  const times = [start - 4 * 3600000];
+  for (let hour = 0; hour <= 24; hour += 4) times.push(start + hour * 3600000);
+  times.forEach((time, index) => {
+    if (index === changeAtIndex) {
+      if (change && Object.hasOwn(change, 'zoneId')) state.zoneId = change.zoneId;
+      if (change && Object.hasOwn(change, 'enabled')) state.enabled = change.enabled;
+      db.prepare('UPDATE devices SET irrigation_zone_id = ?, rain_gauge_enabled = ? WHERE deveui = ?')
+        .run(state.zoneId, state.enabled ? 1 : 0, LSN50);
+    }
+    const amount = index === 4 ? 2 : 0;
+    cumulative += amount;
+    const receivedAt = new Date(time).toISOString();
+    const inserted = db.prepare('INSERT INTO device_data (deveui, recorded_at, rain_count_cumulative, rain_mm_delta, rain_delta_status, counter_interval_seconds) '
+      + "VALUES (?, ?, ?, ?, 'ok', ?)").run(LSN50, receivedAt, cumulative, amount, 14400);
+    const zone = state.zoneId === null ? null : db.prepare('SELECT zone_uuid, timezone FROM irrigation_zones WHERE id = ?').get(state.zoneId);
+    const zones = zone ? [state.zoneId] : [];
+    const config = {
+      frame: { rain_count_cumulative: cumulative, rain_mm_delta: amount, rain_delta_status: 'ok', counter_interval_seconds: 14400 },
+      zones,
+      zone_snapshots: zone ? [{ zone_id: state.zoneId, zone_uuid: zone.zone_uuid, timezone: zone.timezone }] : [],
+      rain_gauge_enabled: state.enabled,
+    };
+    db.prepare('INSERT INTO rain_observations (device_data_id, deveui, instrument_type, payload_digest, received_at, measured_start, measured_end, interval_basis, frame_kind, amount_mm, status, quality_reasons, config_json, zone_id, zone_uuid, timezone) '
+      + "VALUES (?, ?, 'DRAGINO_LSN50', ?, ?, ?, ?, 'protocol_verified', 'counter', ?, 'accepted', '[]', ?, ?, ?, ?)")
+      .run(Number(inserted.lastInsertRowid), LSN50, '0'.repeat(64), receivedAt,
+        new Date(time - 14400 * 1000).toISOString(), receivedAt, amount, JSON.stringify(config),
+        zone ? state.zoneId : null, zone ? zone.zone_uuid : null, zone ? zone.timezone : 'UTC');
+  });
+}
+
+function seedProjectedRow(db, day) {
+  db.prepare('INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, rain_received_mm, rain_coverage, rain_selected_deveui, rain_policy_version, rain_quality_reasons, rain_source, flow_liters, computed_at, sync_version) '
+    + "VALUES (1, ?, NULL, NULL, 'unknown', NULL, 1, '[\"gauge_ambiguous\"]', 'none', 4, ?, 3)")
+    .run(day, day + 'T23:00:00.000Z');
 }
 
 function token(identity) {
@@ -422,5 +471,59 @@ test('a selection inserts no zone day for a date that has none (A31)', async () 
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM zone_daily_environment WHERE zone_id = 1').get().n, 0);
   } finally {
     db.close();
+  }
+});
+
+test('selection re-projection retains LSN50 snapshot quality and leaves a nonselected legacy row intact', async () => {
+  const realNow = Date.now;
+  Date.now = () => Date.parse('2026-10-10T03:00:00.000Z');
+  try {
+    const day = '2026-10-08';
+    const legacyDay = '2026-10-09';
+    const scenarios = [
+      { name: 'stable enabled gauge', seed: {}, expected: [2, 2, 'complete'], reason: null },
+      { name: 'known zone move', seed: { changeAtIndex: 5, change: { zoneId: 2 } }, expected: [null, 2, 'partial'], reason: 'zone_reassigned' },
+      { name: 'known enablement change', seed: { changeAtIndex: 5, change: { enabled: false } }, expected: [null, 2, 'unknown'], reason: 'config_change' },
+      { name: 'stable disabled gauge', seed: { disabled: true }, expected: [null, null, 'unknown'], reason: 'no_gauge' },
+      { name: 'missing boundary provenance', seed: { missingBoundary: true }, expected: [null, 2, 'unknown'], reason: 'zone_provenance_unknown' },
+    ];
+    for (const scenario of scenarios) {
+      const db = seedScopedDb();
+      try {
+        seedGauges(db);
+        addLsn50Gauge(db);
+        seedLsn50Day(db, day, scenario.seed);
+        if (scenario.seed.missingBoundary) {
+          const boundary = new Date(Date.parse(day + 'T00:00:00.000Z') - 4 * 3600000).toISOString();
+          db.prepare('DELETE FROM rain_observations WHERE device_data_id = '
+            + '(SELECT id FROM device_data WHERE deveui = ? AND recorded_at = ?)').run(LSN50, boundary);
+        }
+        seedProjectedRow(db, day);
+        db.prepare('INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, sync_version) '
+          + "VALUES (1, ?, 3.5, 4, 'sensecap_s2120', ?, 9)")
+          .run(legacyDay, legacyDay + 'T23:00:00.000Z');
+        const legacyBefore = { ...db.prepare('SELECT * FROM zone_daily_environment WHERE zone_id = 1 AND date = ?').get(legacyDay) };
+        // The current candidate remains eligible even when historical frames
+        // record a disabled period or a different zone assignment.
+        db.prepare('UPDATE devices SET irrigation_zone_id = 1, rain_gauge_enabled = 1 WHERE deveui = ?').run(LSN50);
+
+        const { result } = await putRoute(db, FLAG_OFF, { body: { deveui: LSN50 }, authorization: token(OWNER) });
+        assert.equal(result.statusCode, 200, scenario.name + ': ' + JSON.stringify(result.payload));
+        assert.equal(result.payload.selected_deveui, LSN50);
+        const projected = zoneDay(db, day);
+        assert.deepEqual([projected.rainfall_mm, projected.rain_received_mm, projected.rain_coverage], scenario.expected, scenario.name);
+        assert.equal(projected.rain_selected_deveui, LSN50, scenario.name);
+        const reasons = JSON.parse(projected.rain_quality_reasons);
+        if (scenario.reason) assert.ok(reasons.includes(scenario.reason), scenario.name + ': ' + JSON.stringify(reasons));
+        else assert.deepEqual(reasons, [], scenario.name);
+
+        const legacyAfter = { ...db.prepare('SELECT * FROM zone_daily_environment WHERE zone_id = 1 AND date = ?').get(legacyDay) };
+        assert.deepEqual(legacyAfter, legacyBefore, scenario.name + ': NULL-coverage history from a nonselected source remains unchanged');
+      } finally {
+        db.close();
+      }
+    }
+  } finally {
+    Date.now = realNow;
   }
 });
