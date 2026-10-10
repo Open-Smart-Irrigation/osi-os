@@ -2514,9 +2514,11 @@ expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function recomp
 expectFileIncludes('osi-rain/index.js', rainHelperSource, 'config.rain_gauge_enabled === true', 'does not retroactively enable captured non-gauge frames');
 expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'accepted', amountMm: Number(d.rainMmDelta)", 'writes captured rain through the zone-day projection');
 expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'flow', flowLitersDelta: flowDelta", 'keeps flow arithmetic on the current owner');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const rainOk = d.rainDeltaStatus === 'ok' && d.rainMmDelta != null && Number(d.rainMmDelta) >= 0", 'only aggregates valid rain deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const flowAvailable = d.flowDeltaStatus === 'ok' && d.flowLitersDelta != null", 'only aggregates valid flow deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'const acceptedRain = rainOk && observation && observation.status === \'accepted\' && config.rain_gauge_enabled === true', 'requires an accepted enabled rain observation before zone rain projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'if (zone && flowAvailable && !flowZones.has(Number(zone.zone_id)))', 'requires a valid flow delta before current-owner flow projection');
 expectLibById('lsn50-zone-agg-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
-expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
-expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
 expectIncludesById('format-devices', 'dd.adc_ch1v', 'returns dendrometer CH1 voltage in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_ratio', 'returns dendrometer ratio in GET /api/devices');

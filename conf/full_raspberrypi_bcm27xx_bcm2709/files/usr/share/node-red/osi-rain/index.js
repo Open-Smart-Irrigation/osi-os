@@ -1644,40 +1644,28 @@ async function projectZoneDay(t, zoneId, dayIso, opts = {}) {
   let receivedMm = a.receivedMm;
   const reasons = new Set(a.reasons);
   if (instrument.typeId === LSN50_TYPE_ID) {
-    // A counter can prove a zero only for zones with stable, durable ownership
-    // and gauge-enable snapshots at both day bounds. Legacy rows stay unknown.
+    // A counter can prove a zero only when every frame used for this day has
+    // durable ownership and gauge-enable snapshots. Legacy rows stay unknown.
     const accepted = day.inWindow.filter((f) => f.status === 'accepted' && f.amountMm !== null);
     const own = accepted.filter((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
       && Array.isArray(f.zones) && f.zones.includes(zid));
-    let provenanceUnknown = accepted.some((f) => f.hasZoneSnapshot !== true
+    const contributingFrames = day.inWindow.concat(day.boundaryFrames);
+    let provenanceUnknown = contributingFrames.some((f) => f.hasZoneSnapshot !== true
       || typeof f.rainGaugeEnabled !== 'boolean' || !Array.isArray(f.zones));
     let configChanged = false;
     let noGauge = false;
-    let reassigned = accepted.some((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
-      && Array.isArray(f.zones) && f.zones.length > 0 && !f.zones.includes(zid));
-    const snapshots = day.inWindow.concat(day.boundaryFrames).filter((f) => f.hasZoneSnapshot === true
+    let reassigned = false;
+    const snapshots = contributingFrames.filter((f) => f.hasZoneSnapshot === true
       && typeof f.rainGaugeEnabled === 'boolean' && Array.isArray(f.zones));
     const enabledStates = new Set(snapshots.map((f) => f.rainGaugeEnabled));
     if (enabledStates.size > 1) configChanged = true;
     if (snapshots.length && snapshots.every((f) => f.rainGaugeEnabled === false)) noGauge = true;
-    if (accepted.some((f) => f.hasZoneSnapshot === true && f.rainGaugeEnabled === true
-      && Array.isArray(f.zones) && f.zones.length === 0)) noGauge = true;
-    if (day.boundaryFrames.length === 2) {
-      const [before, after] = day.boundaryFrames;
-      if (before.hasZoneSnapshot !== true || after.hasZoneSnapshot !== true
-        || typeof before.rainGaugeEnabled !== 'boolean' || typeof after.rainGaugeEnabled !== 'boolean'
-        || !Array.isArray(before.zones) || !Array.isArray(after.zones)) {
-        provenanceUnknown = true;
-      } else {
-        if (before.rainGaugeEnabled !== after.rainGaugeEnabled) configChanged = true;
-        if (before.rainGaugeEnabled === false && after.rainGaugeEnabled === false) noGauge = true;
-        const beforeZones = before.zones.slice().sort((a, b) => a - b);
-        const afterZones = after.zones.slice().sort((a, b) => a - b);
-        const snapshotsDiffer = beforeZones.length !== afterZones.length
-          || beforeZones.some((zone, index) => zone !== afterZones[index]);
-        if (snapshotsDiffer && (beforeZones.includes(zid) || afterZones.includes(zid))) reassigned = true;
-        else if (snapshotsDiffer || !beforeZones.includes(zid)) noGauge = true;
-      }
+    const zoneStates = new Set(snapshots.map((f) => JSON.stringify(f.zones.slice().sort((a, b) => a - b))));
+    if (zoneStates.size > 1) {
+      if (snapshots.some((f) => f.zones.includes(zid))) reassigned = true;
+      else noGauge = true;
+    } else if (snapshots.length && !snapshots[0].zones.includes(zid)) {
+      noGauge = true;
     }
     if (own.length < accepted.length || provenanceUnknown || configChanged || noGauge || reassigned) {
       if (provenanceUnknown) zoneReasons.add('zone_provenance_unknown');
