@@ -81,8 +81,10 @@ test('ingestLoRainUplink and recomputeInstrumentDay through the osi-db-helper tr
     assert.deepEqual(first.zoneDays, [{ zoneId: 1, date: '2026-10-08' }]);
     const again = await db.transaction((t) => R.ingestLoRainUplink(t, uplink, { nowMs }));
     assert.equal(again.outcome, 'duplicate');
-    const recomputed = await db.transaction((t) => R.recomputeInstrumentDay(t, 'A840410000000001', '2026-10-08', 'Europe/Zurich', { nowMs }));
-    assert.deepEqual(recomputed.zoneDays, [{ zoneId: 1, date: '2026-10-08' }]);
+    const recomputed = await db.transaction((t) => R.recomputeInstrumentDay(t, 'A840410000000001', '2026-10-08', 'Europe/Zurich', { nowMs, reassess: true }));
+    assert.deepEqual({ date: recomputed.date, timezone: recomputed.timezone, instrumentType: recomputed.instrumentType, coverage: recomputed.coverage,
+      receivedMm: recomputed.receivedMm, amountMm: recomputed.amountMm },
+    { date: '2026-10-08', timezone: 'Europe/Zurich', instrumentType: 'AQUASCOPE_LORAIN', coverage: 'unknown', receivedMm: 1, amountMm: null });
     const check = new DatabaseSync(file, { readOnly: true });
     try {
       assert.equal(check.prepare('SELECT device_data_id FROM rain_observations').get().device_data_id, first.deviceDataId);

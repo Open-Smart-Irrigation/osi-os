@@ -248,6 +248,11 @@ jobs:
         run: TZ=UTC node --test scripts/test-lorain-ingest.js
       - name: LoRain ingestion under the real database helper
         run: TZ=UTC node --test scripts/test-lorain-ingest-concurrency.js
+      # Zone-day rain projection (migration 0072, osi-rain): one selected gauge per zone
+      # (never a sum), instrument days with coverage, rainfall_mm only for a certified
+      # complete day, late corrections, the move-day rule, through the ingest nodes.
+      - name: Zone-day rain projection
+        run: TZ=UTC node --test scripts/test-rain-zone-days.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip

@@ -915,17 +915,18 @@ async function lastInsertId(t) {
   return row ? Number(row.id) : null;
 }
 
-// Re-assess the device's observations received in [fromIso, toIso) with
-// context before it; update the rows (and their device_data rows) that
-// changed. Returns the zone days whose totals may have changed.
+// Re-assess the device's LoRain observations received in [fromIso, toIso)
+// with context before it; update the rows (and their device_data rows) that
+// changed. Only AQUASCOPE_LORAIN rows: the LoRain chain never runs on another
+// instrument's observations. Returns the zone days whose totals may have changed.
 async function reassessLoRain(t, deveui, fromIso, toIso, { pinnedBuilds, newObservationId } = {}) {
   const contextIso = new Date(Date.parse(fromIso) - CONTEXT_LOOKBACK_MS).toISOString();
   const before = await t.get(
-    'SELECT * FROM rain_observations WHERE deveui = ? AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1',
-    [deveui, contextIso]);
+    'SELECT * FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1',
+    [deveui, LORAIN_TYPE_ID, contextIso]);
   const rows = await t.all(
-    'SELECT * FROM rain_observations WHERE deveui = ? AND received_at >= ? AND received_at < ? ORDER BY received_at, id',
-    [deveui, contextIso, toIso]);
+    'SELECT * FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at >= ? AND received_at < ? ORDER BY received_at, id',
+    [deveui, LORAIN_TYPE_ID, contextIso, toIso]);
   const all = before ? [before].concat(rows) : rows;
   if (!all.length) return { changedDays: [] };
   const priorState = before ? parseJson(before.config_json).state : null;
@@ -1155,22 +1156,6 @@ async function quarantineConflict(t, id) {
     [id.deveui, JSON.stringify({ eventId: id.eventId, devAddr: id.devAddr, fCnt: id.fCnt, digest: id.digest, receivedAt: id.receivedAt })]);
 }
 
-// Re-assess one gauge's observations of a zone-local day and rewrite the
-// zone rows they belong to. For recomputation after a late correction
-// (R-HIST, R-ZONE). Runs inside the caller's transaction.
-async function recomputeInstrumentDay(t, deveui, dayIso, timezone, opts = {}) {
-  const eui = String(deveui || '').trim().toUpperCase();
-  const win = zoneDateWindow(dayIso, timezone);
-  const { changedDays } = await reassessLoRain(t, eui, win.startIso, win.endIso, { pinnedBuilds: opts.pinnedBuilds });
-  const zones = await t.all(
-    'SELECT DISTINCT zone_id, timezone FROM rain_observations WHERE deveui = ? AND zone_id IS NOT NULL AND received_at >= ? AND received_at < ?',
-    [eui, win.startIso, win.endIso]);
-  const days = changedDays.map((d) => ({ ...d, allowTakeover: false }))
-    .concat(zones.map((z) => ({ zoneId: Number(z.zone_id), timezone: z.timezone, receivedAt: win.startIso, allowTakeover: false })));
-  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
-  return { zoneDays: await writeZoneDays(t, eui, days, new Date(nowMs).toISOString()) };
-}
-
 // ---------------------------------------------------------------------------
 // SenseCAP S2120 ingestion (inside the caller's transaction)
 // ---------------------------------------------------------------------------
@@ -1393,6 +1378,452 @@ async function ingestS2120Uplink(t, uplink, opts = {}) {
   return { outcome: 'accepted', status, observationId, deviceDataId, zoneDays, configQuery: null, rainDeltaStatus: rain.status, rainMmDelta: counted ? rain.deltaMm : null };
 }
 
+// ---------------------------------------------------------------------------
+// Instrument days, zone gauge selection and the zone-day projection
+// ---------------------------------------------------------------------------
+// Contract: docs/contracts/rainfall/zone-day-projection.md. Every function
+// runs inside the caller's transaction scope `t`.
+//
+// An instrument day (rain_instrument_days, migration 0072) is recomputed from
+// the instrument's frames, never incremented: LoRain and S2120 frames are
+// their rain_observations rows (dispatched by instrument_type, so LoRain rules
+// never run on S2120 rows); a local gauge (LSN50 tip counter) reads its
+// device_data counter rows. A zone uses at most one gauge per day (owner
+// decision D1): the operator's selection while it is a candidate, else the
+// only candidate; two or more candidates without a selection are ambiguous
+// and never added. zone_daily_environment.rainfall_mm carries the selected
+// instrument's amount only when its day is complete.
+const LSN50_TYPE_ID = 'DRAGINO_LSN50';
+const LOCAL_GAUGE_SOURCE = 'local_gauge';
+const RAIN_TYPE_PRIORITY = { [LORAIN_TYPE_ID]: 0, [S2120_TYPE_ID]: 1 };
+const PROJECTED_FIELDS = ['rainfall_mm', 'flow_liters', 'rain_source', 'rain_coverage', 'rain_selected_deveui',
+  'rain_policy_version', 'rain_quality_reasons', 'rain_received_mm'];
+// Triggers of a zone-day recomputation: an accepted rain observation (or an
+// LSN50 rain delta), a flow-meter write, an earlier observation re-assessed
+// or a day closed by the next frame, and an operator's gauge selection. Only
+// the first two create a row or re-project a legacy row (NULL rain_coverage).
+const CREATING_TRIGGERS = new Set(['accepted', 'flow']);
+
+function instrumentOf(typeId) {
+  const type = String(typeId || '').toUpperCase();
+  if (type === LORAIN_TYPE_ID) return { typeId: type, kind: 'interval', source: LORAIN_RAIN_SOURCE, store: 'observations' };
+  if (type === S2120_TYPE_ID) return { typeId: type, kind: 'cumulative', source: S2120_RAIN_SOURCE, store: 'observations' };
+  return { typeId: type || LSN50_TYPE_ID, kind: 'cumulative', source: LOCAL_GAUGE_SOURCE, store: 'device_data' };
+}
+
+function normalizeEui(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function parseReasons(text) {
+  if (Array.isArray(text)) return text.map(String);
+  try {
+    const parsed = JSON.parse(text || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch (_badReasons) {
+    return ['quality_reasons_unreadable'];
+  }
+}
+
+// The zones an observation was received under (snapshot): the list recorded at
+// ingestion, else its zone_id.
+function observationZones(row) {
+  const zones = parseJson(row.config_json).zones;
+  if (Array.isArray(zones)) return zones.map(Number).filter(Number.isInteger);
+  return row.zone_id === null || row.zone_id === undefined ? [] : [Number(row.zone_id)];
+}
+
+function observationFrame(row) {
+  const accepted = row.status === 'accepted';
+  return {
+    receivedAt: row.received_at,
+    tips: row.tips === null || row.tips === undefined ? null : Number(row.tips),
+    amountMm: accepted && row.amount_mm !== null && row.amount_mm !== undefined ? Number(row.amount_mm) : null,
+    deltaMm: null,
+    cumulativeMm: null,
+    status: row.status,
+    frameKind: row.frame_kind,
+    intervalBasis: row.interval_basis,
+    measuredStart: row.measured_start || null,
+    measuredEnd: row.measured_end || null,
+    devAddr: row.dev_addr || null,
+    fCnt: row.f_cnt === null || row.f_cnt === undefined ? null : Number(row.f_cnt),
+    reasons: parseReasons(row.quality_reasons),
+    zones: observationZones(row),
+  };
+}
+
+// device_data rain rows written before observations existed (no linked
+// observation): what arrived, never promoted, so never a complete day.
+function legacyFrame(row) {
+  return {
+    receivedAt: row.recorded_at, tips: null, amountMm: Number(row.rain_mm_delta), deltaMm: Number(row.rain_mm_delta), cumulativeMm: null,
+    status: 'accepted', frameKind: 'ordinary', intervalBasis: 'unknown', measuredStart: null, measuredEnd: null,
+    devAddr: null, fCnt: null, reasons: ['received_only'], zones: null,
+  };
+}
+
+// An LSN50 tip-counter row: the delta covers the time since the previous count.
+function counterRowFrame(row) {
+  const status = String(row.rain_delta_status || '');
+  const ok = status === 'ok' && row.rain_mm_delta !== null && row.rain_mm_delta !== undefined;
+  const seconds = Number(row.counter_interval_seconds);
+  const endMs = frameMs(row.recorded_at);
+  const verified = ok && Number.isFinite(seconds) && seconds > 0 && Number.isFinite(endMs);
+  const reasons = ok ? [] : [status || 'unknown_status'];
+  if (status === 'out_of_order' || status === 'duplicate_timestamp') reasons.unshift('late_counter_frame');
+  return {
+    receivedAt: row.recorded_at, tips: null, amountMm: ok ? Number(row.rain_mm_delta) : null, deltaMm: ok ? Number(row.rain_mm_delta) : null,
+    cumulativeMm: null, status: ok ? 'accepted' : 'not_additive', frameKind: 'counter',
+    intervalBasis: verified ? 'protocol_verified' : 'unknown',
+    measuredStart: verified ? new Date(endMs - seconds * 1000).toISOString() : null,
+    measuredEnd: verified ? new Date(endMs).toISOString() : null,
+    devAddr: null, fCnt: null, reasons, zones: null,
+  };
+}
+
+// The instrument's frames for one window: the last frame before it, every
+// frame in it and the first frame after it.
+async function loadInstrumentFrames(t, deveui, instrument, win) {
+  if (instrument.store === 'device_data') {
+    const cols = 'recorded_at, rain_mm_delta, rain_delta_status, counter_interval_seconds';
+    const base = 'FROM device_data WHERE deveui = ? AND rain_count_cumulative IS NOT NULL';
+    const before = await t.get(`SELECT ${cols} ${base} AND recorded_at < ? ORDER BY recorded_at DESC LIMIT 1`, [deveui, win.startIso]);
+    const inside = await t.all(`SELECT ${cols} ${base} AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at`, [deveui, win.startIso, win.endIso]);
+    const after = await t.get(`SELECT ${cols} ${base} AND recorded_at >= ? ORDER BY recorded_at LIMIT 1`, [deveui, win.endIso]);
+    return (before ? [before] : []).concat(inside, after ? [after] : []).map(counterRowFrame);
+  }
+  // S2120 weather-only frames carry no rain; an S2120 frame without identity is
+  // never a counter predecessor, so the next identified frame counts its rise.
+  const filter = instrument.typeId === S2120_TYPE_ID
+    ? " AND frame_kind IN ('counter','ordinary') AND status <> 'ambiguous_identity'" : '';
+  const base = 'FROM rain_observations WHERE deveui = ? AND instrument_type = ?' + filter;
+  const args = [deveui, instrument.typeId];
+  const before = await t.get(`SELECT * ${base} AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1`, args.concat([win.startIso]));
+  const inside = await t.all(`SELECT * ${base} AND received_at >= ? AND received_at < ? ORDER BY received_at, id`, args.concat([win.startIso, win.endIso]));
+  const after = await t.get(`SELECT * ${base} AND received_at >= ? ORDER BY received_at, id LIMIT 1`, args.concat([win.endIso]));
+  const legacy = await t.all(
+    "SELECT dd.recorded_at, dd.rain_mm_delta FROM device_data dd WHERE dd.deveui = ? AND dd.rain_delta_status = 'ok' "
+    + 'AND dd.rain_mm_delta IS NOT NULL AND dd.recorded_at >= ? AND dd.recorded_at < ? '
+    + 'AND NOT EXISTS (SELECT 1 FROM rain_observations o WHERE o.device_data_id = dd.id) ORDER BY dd.recorded_at',
+    [deveui, win.startIso, win.endIso]);
+  return (before ? [before] : []).concat(inside, after ? [after] : []).map(observationFrame).concat(legacy.map(legacyFrame));
+}
+
+async function deviceInstrument(t, deveui) {
+  const device = await t.get('SELECT type_id FROM devices WHERE deveui = ? ORDER BY deleted_at IS NOT NULL LIMIT 1', [deveui]);
+  if (device) return instrumentOf(device.type_id);
+  const observed = await t.get('SELECT instrument_type FROM rain_observations WHERE deveui = ? ORDER BY id DESC LIMIT 1', [deveui]);
+  return instrumentOf(observed ? observed.instrument_type : null);
+}
+
+// Assess one instrument day; the frames in the window come back for the
+// zone's snapshot check. A day that has not ended is assessed against its
+// latest accepted frame (or its start when nothing arrived yet).
+async function computeInstrumentDay(t, deveui, dayIso, timezone, opts = {}) {
+  const eui = normalizeEui(deveui);
+  const tz = formatterFor(timezone).timezone;
+  const cacheKey = eui + '|' + dayIso + '|' + tz;
+  if (opts.cache && opts.cache.has(cacheKey)) return opts.cache.get(cacheKey);
+  const win = zoneDateWindow(dayIso, tz);
+  const instrument = opts.instrument || await deviceInstrument(t, eui);
+  const frames = await loadInstrumentFrames(t, eui, instrument, win);
+  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const startMs = Date.parse(win.startIso);
+  const endMs = Date.parse(win.endIso);
+  let cutoffIso = null;
+  if (nowMs < endMs) {
+    const acceptedTimes = frames.filter((f) => f.status === 'accepted' && f.amountMm !== null)
+      .map((f) => frameMs(f.receivedAt)).filter((ms) => ms >= startMs && ms < endMs);
+    cutoffIso = new Date(acceptedTimes.length ? Math.max(...acceptedTimes) : startMs).toISOString();
+  }
+  const assessment = assessInstrumentDay({ kind: instrument.kind, frames, window: win, cutoffIso });
+  const inWindow = frames.filter((f) => {
+    const ms = frameMs(f.receivedAt);
+    return ms >= startMs && ms < endMs;
+  });
+  const result = { deveui: eui, date: dayIso, timezone: tz, instrument, window: win, assessment, inWindow };
+  if (opts.persist !== false) await storeInstrumentDay(t, result, nowMs);
+  if (opts.cache) opts.cache.set(cacheKey, result);
+  return result;
+}
+
+async function storeInstrumentDay(t, day, nowMs) {
+  const a = day.assessment;
+  const reasons = JSON.stringify(a.reasons);
+  await t.run(
+    'INSERT INTO rain_instrument_days (deveui, date, timezone, amount_mm, received_mm, coverage, reasons, accepted_count, observed_cutoff, policy_version, computed_at) '
+    + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(deveui, date, timezone) DO UPDATE SET '
+    + 'amount_mm = excluded.amount_mm, received_mm = excluded.received_mm, coverage = excluded.coverage, reasons = excluded.reasons, '
+    + 'accepted_count = excluded.accepted_count, observed_cutoff = excluded.observed_cutoff, policy_version = excluded.policy_version, '
+    + 'computed_at = excluded.computed_at WHERE rain_instrument_days.amount_mm IS NOT excluded.amount_mm '
+    + 'OR rain_instrument_days.received_mm IS NOT excluded.received_mm OR rain_instrument_days.coverage IS NOT excluded.coverage '
+    + 'OR rain_instrument_days.reasons IS NOT excluded.reasons OR rain_instrument_days.accepted_count IS NOT excluded.accepted_count '
+    + 'OR rain_instrument_days.observed_cutoff IS NOT excluded.observed_cutoff OR rain_instrument_days.policy_version IS NOT excluded.policy_version',
+    [day.deveui, day.date, day.timezone, a.amountMm, a.receivedMm, a.coverage, reasons, a.acceptedCount, a.observedCutoff,
+      RAIN_POLICY_VERSION, new Date(nowMs).toISOString()]);
+}
+
+// Recompute one instrument day from its frames and store it. opts: nowMs,
+// reassess (LoRain: re-assess the day's observations first, as a late
+// correction does; the ingest writers already re-assess around each frame),
+// pinnedBuilds. Returns the day, plus the zone days a re-assessment touched.
+async function recomputeInstrumentDay(t, deveui, dayIso, timezone, opts = {}) {
+  const eui = normalizeEui(deveui);
+  const tz = formatterFor(timezone).timezone;
+  const instrument = await deviceInstrument(t, eui);
+  let changedDays = [];
+  if (opts.reassess && instrument.typeId === LORAIN_TYPE_ID) {
+    const win = zoneDateWindow(dayIso, tz);
+    changedDays = (await reassessLoRain(t, eui, win.startIso, win.endIso, { pinnedBuilds: opts.pinnedBuilds })).changedDays;
+  }
+  const day = await computeInstrumentDay(t, eui, dayIso, tz, { ...opts, instrument, cache: null });
+  return { deveui: eui, date: dayIso, timezone: tz, instrumentType: instrument.typeId, ...day.assessment, changedDays };
+}
+
+async function loadZone(t, zoneId) {
+  const zone = await t.get('SELECT id, timezone, deleted_at FROM irrigation_zones WHERE id = ?', [zoneId]);
+  return zone && !zone.deleted_at ? zone : null;
+}
+
+// Candidates: the zone's rain-measuring devices (LoRain, S2120, or a device
+// with rain_gauge_enabled), its weather_station_zones gauges, and for a given
+// day the gauges whose accepted observations of that day were received under
+// this zone (a device moved away keeps its earlier days here).
+async function zoneCandidates(t, zoneId, win) {
+  const rows = await t.all(
+    'SELECT d.deveui, d.type_id, CASE WHEN d.irrigation_zone_id = ? THEN 1 ELSE 0 END AS direct '
+    + 'FROM devices d WHERE d.deleted_at IS NULL '
+    + 'AND (d.irrigation_zone_id = ? OR EXISTS (SELECT 1 FROM weather_station_zones w WHERE w.deveui = d.deveui AND w.zone_id = ?)) '
+    + "AND (d.type_id IN ('" + LORAIN_TYPE_ID + "','" + S2120_TYPE_ID + "') OR d.rain_gauge_enabled = 1)",
+    [zoneId, zoneId, zoneId]);
+  const byEui = new Map();
+  for (const r of rows) byEui.set(normalizeEui(r.deveui), { deveui: normalizeEui(r.deveui), typeId: String(r.type_id || '').toUpperCase(), tier: Number(r.direct) === 1 ? 0 : 1 });
+  if (win) {
+    const snap = await t.all(
+      'SELECT DISTINCT o.deveui, d.type_id FROM rain_observations o JOIN devices d ON d.deveui = o.deveui AND d.deleted_at IS NULL '
+      + "WHERE o.status = 'accepted' AND o.received_at >= ? AND o.received_at < ? "
+      + "AND (o.zone_id = ? OR EXISTS (SELECT 1 FROM json_each(o.config_json, '$.zones') j WHERE j.value = ?))",
+      [win.startIso, win.endIso, zoneId, zoneId]);
+    for (const r of snap) {
+      const eui = normalizeEui(r.deveui);
+      if (!byEui.has(eui)) byEui.set(eui, { deveui: eui, typeId: String(r.type_id || '').toUpperCase(), tier: 2 });
+    }
+  }
+  return [...byEui.values()];
+}
+
+// The journal v1 rain source order (osi-journal/context.js): direct zone gauge,
+// then a shared weather-station gauge; LoRain, then S2120, then others; DevEUI.
+function suggestionOrder(a, b) {
+  const pa = Object.prototype.hasOwnProperty.call(RAIN_TYPE_PRIORITY, a.typeId) ? RAIN_TYPE_PRIORITY[a.typeId] : 2;
+  const pb = Object.prototype.hasOwnProperty.call(RAIN_TYPE_PRIORITY, b.typeId) ? RAIN_TYPE_PRIORITY[b.typeId] : 2;
+  return a.tier - b.tier || pa - pb || a.deveui.localeCompare(b.deveui);
+}
+
+// One selected gauge per zone (D1). dayIso (optional) adds the gauges that
+// reported under this zone on that day.
+async function selectZoneGauge(t, zoneId, dayIso, opts = {}) {
+  const zid = Number(zoneId);
+  const zone = opts.zone || await loadZone(t, zid);
+  const none = { state: 'none', deveui: null, basis: null, candidates: [], suggestedDeveui: null, instrumentType: null };
+  if (!zone) return none;
+  const win = dayIso ? zoneDateWindow(dayIso, resolveTimezone(zone).timezone) : null;
+  const candidates = (await zoneCandidates(t, zid, win)).sort(suggestionOrder);
+  const list = candidates.map((c) => c.deveui);
+  const explicitRow = await t.get('SELECT selected_deveui FROM zone_rain_source WHERE zone_id = ?', [zid]);
+  const explicit = explicitRow ? normalizeEui(explicitRow.selected_deveui) : '';
+  const pick = (c, basis) => ({ state: 'selected', deveui: c.deveui, basis, candidates: list, suggestedDeveui: null, instrumentType: c.typeId });
+  const chosen = explicit ? candidates.find((c) => c.deveui === explicit) : null;
+  if (chosen) return pick(chosen, 'explicit');
+  if (candidates.length === 1) return pick(candidates[0], 'only_candidate');
+  if (!candidates.length) return none;
+  return { state: 'ambiguous', deveui: null, basis: null, candidates: list, suggestedDeveui: candidates[0].deveui, instrumentType: null };
+}
+
+// The zone's rain for one farm day under policy RAIN_POLICY_VERSION: the
+// selected instrument's day, restricted to the observations received under
+// this zone, with the zone's own reasons after the instrument's.
+async function projectZoneDay(t, zoneId, dayIso, opts = {}) {
+  const zid = Number(zoneId);
+  const zone = await loadZone(t, zid);
+  if (!zone) return null;
+  const tz = resolveTimezone(zone);
+  const zoneReasons = new Set();
+  if (tz.basis === 'invalid') zoneReasons.add('timezone_invalid');
+  if (tz.basis === 'abbreviation') zoneReasons.add('timezone_abbreviation');
+  const selection = await selectZoneGauge(t, zid, dayIso, { zone });
+  const base = { zoneId: zid, date: dayIso, timezone: tz.timezone, timezoneBasis: tz.basis, selection, policyVersion: RAIN_POLICY_VERSION };
+  if (selection.state !== 'selected') {
+    zoneReasons.add(selection.state === 'ambiguous' ? 'gauge_ambiguous' : 'no_gauge');
+    return { ...base, amountMm: null, receivedMm: null, coverage: 'unknown', source: 'none', deveui: null, reasons: orderReasons(zoneReasons) };
+  }
+  const instrument = instrumentOf(selection.instrumentType);
+  const day = await computeInstrumentDay(t, selection.deveui, dayIso, tz.timezone, { ...opts, instrument });
+  const a = day.assessment;
+  let coverage = a.coverage;
+  let amountMm = a.amountMm;
+  let receivedMm = a.receivedMm;
+  const reasons = new Set(a.reasons);
+  if (instrument.store === 'observations') {
+    // Move day: count only what was received under this zone; certify neither zone.
+    const accepted = day.inWindow.filter((f) => f.status === 'accepted' && f.amountMm !== null);
+    const own = accepted.filter((f) => !Array.isArray(f.zones) || f.zones.includes(zid));
+    if (own.length < accepted.length) {
+      zoneReasons.add('zone_reassigned');
+      receivedMm = own.length ? roundTo(own.reduce((s, f) => s + f.amountMm, 0), 3) : null;
+      amountMm = null;
+      if (!own.length) coverage = 'unknown';
+      else if (coverage === 'complete' || coverage === 'complete_so_far') coverage = 'partial';
+    }
+  }
+  if (tz.basis === 'invalid') {
+    coverage = 'unknown';
+    amountMm = null;
+  }
+  for (const r of zoneReasons) reasons.add(r);
+  return {
+    ...base,
+    amountMm: coverage === 'complete' ? amountMm : null,
+    receivedMm,
+    coverage,
+    source: instrument.source,
+    deveui: selection.deveui,
+    reasons: orderReasons(reasons),
+  };
+}
+
+// Read-only: the zone's rain for one farm day as it would be projected now.
+async function resolveZoneRain(t, zoneId, dayIso, opts = {}) {
+  const p = await projectZoneDay(t, zoneId, dayIso, { ...opts, persist: false });
+  if (!p) return null;
+  return { amountMm: p.amountMm, receivedMm: p.receivedMm, coverage: p.coverage, source: p.source, deveui: p.deveui, reasons: p.reasons, policyVersion: p.policyVersion };
+}
+
+function laterIso(nowMs, previousIso) {
+  const prev = frameMs(previousIso);
+  return new Date(Number.isFinite(prev) && prev >= nowMs ? prev + 1 : nowMs).toISOString();
+}
+
+// Recompute and write one zone day. Every write that changes a projected
+// field increments sync_version once and writes a new computed_at in the same
+// statement; a recomputation that changes nothing writes nothing. opts:
+//   trigger         'accepted' (default) | 'flow' | 'reassessed' | 'selection';
+//   amountMm        the triggering accepted amount (R-DRY: a zero never takes
+//                   over a legacy row another gauge source owns);
+//   flowLitersDelta flow added by the same write (lsn50-zone-agg-fn);
+//   nowMs, pinnedBuilds, cache.
+async function recomputeZoneDay(t, zoneId, dayIso, opts = {}) {
+  const trigger = opts.trigger || 'accepted';
+  const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const p = await projectZoneDay(t, zoneId, dayIso, { ...opts, nowMs });
+  if (!p) return null;
+  const flowDelta = Number.isFinite(opts.flowLitersDelta) ? opts.flowLitersDelta : 0;
+  const projected = {
+    rainfall_mm: p.amountMm,
+    rain_source: p.source,
+    rain_coverage: p.coverage,
+    rain_selected_deveui: p.deveui,
+    rain_policy_version: p.policyVersion,
+    rain_quality_reasons: JSON.stringify(p.reasons),
+    rain_received_mm: p.receivedMm,
+  };
+  const row = await t.get('SELECT * FROM zone_daily_environment WHERE zone_id = ? AND date = ?', [p.zoneId, dayIso]);
+  if (!row) {
+    if (!CREATING_TRIGGERS.has(trigger)) return { zoneId: p.zoneId, date: dayIso, written: false, projection: p };
+    await t.run(
+      'INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, rain_coverage, '
+      + 'rain_selected_deveui, rain_policy_version, rain_quality_reasons, rain_received_mm) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [p.zoneId, dayIso, projected.rainfall_mm, flowDelta, projected.rain_source, new Date(nowMs).toISOString(), projected.rain_coverage,
+        projected.rain_selected_deveui, projected.rain_policy_version, projected.rain_quality_reasons, projected.rain_received_mm]);
+    return { zoneId: p.zoneId, date: dayIso, written: 'inserted', projection: p };
+  }
+  let applyRain = true;
+  if (row.rain_coverage === null || row.rain_coverage === undefined) {
+    // A legacy row is re-projected only by an accepted observation of its own
+    // date (or a flow write, which must not leave a policy-1 row unlabelled),
+    // and a zero never takes over a day another gauge source owns.
+    if (!CREATING_TRIGGERS.has(trigger)) applyRain = false;
+    else if (trigger === 'accepted' && row.rain_source && row.rain_source !== 'none' && row.rain_source !== p.source
+      && !(Number(opts.amountMm) > 0)) applyRain = false;
+  }
+  const next = { ...row };
+  if (applyRain) Object.assign(next, projected);
+  if (flowDelta) next.flow_liters = roundTo((Number(row.flow_liters) || 0) + flowDelta, 3);
+  const changed = PROJECTED_FIELDS.filter((key) => !sameValue(next[key], row[key]));
+  if (!changed.length) return { zoneId: p.zoneId, date: dayIso, written: false, projection: p };
+  await t.run(
+    'UPDATE zone_daily_environment SET ' + PROJECTED_FIELDS.map((key) => key + ' = ?').join(', ')
+    + ', computed_at = ?, sync_version = sync_version + 1 WHERE zone_id = ? AND date = ?',
+    PROJECTED_FIELDS.map((key) => (next[key] === undefined ? null : next[key])).concat([laterIso(nowMs, row.computed_at), p.zoneId, dayIso]));
+  return { zoneId: p.zoneId, date: dayIso, written: 'updated', changed, projection: p };
+}
+
+function sameValue(a, b) {
+  const na = a === undefined ? null : a;
+  const nb = b === undefined ? null : b;
+  if (na === null || nb === null) return na === nb;
+  if (typeof na === 'number' || typeof nb === 'number') return Number(na) === Number(nb);
+  return String(na) === String(nb);
+}
+
+// The live zones a gauge serves now: its own zone and its weather-station
+// zones, with their timezones. Recorded on each observation as its snapshot.
+async function gaugeZones(t, deveui) {
+  return t.all(
+    'SELECT iz.id AS zone_id, iz.zone_uuid, iz.timezone FROM irrigation_zones iz WHERE iz.deleted_at IS NULL AND ('
+    + 'iz.id = (SELECT d.irrigation_zone_id FROM devices d WHERE d.deveui = ? AND d.deleted_at IS NULL) '
+    + 'OR iz.id IN (SELECT w.zone_id FROM weather_station_zones w WHERE w.deveui = ?)) ORDER BY iz.id',
+    [deveui, deveui]);
+}
+
+// After a writer stored a frame: recompute the instrument days and zone days
+// it touched. items: [{ receivedAt, zones: [zoneId], trigger, amountMm }].
+// The device's own day is kept for zones it serves; a gauge without a zone
+// gets its UTC day (the device timezone of osi-history-helper).
+async function recomputeRainDays(t, deveui, items, opts = {}) {
+  const eui = normalizeEui(deveui);
+  const cache = new Map();
+  const instrument = await deviceInstrument(t, eui);
+  const zoneRows = new Map();
+  const zoneTz = async (zoneId) => {
+    if (!zoneRows.has(zoneId)) zoneRows.set(zoneId, await loadZone(t, zoneId));
+    const zone = zoneRows.get(zoneId);
+    return zone ? resolveTimezone(zone).timezone : null;
+  };
+  const rank = { accepted: 3, flow: 2, reassessed: 1, selection: 0 };
+  const zoneDays = new Map();
+  const instrumentDays = new Map();
+  for (const item of items) {
+    const zones = (item.zones || []).map(Number).filter(Number.isInteger);
+    if (!zones.length) {
+      const date = zoneDayWindow(item.receivedAt, 'UTC').date;
+      instrumentDays.set(date + '|UTC', { date, tz: 'UTC' });
+    }
+    for (const zoneId of zones) {
+      const tz = await zoneTz(zoneId);
+      if (!tz) continue;
+      const date = zoneDayWindow(item.receivedAt, tz).date;
+      instrumentDays.set(date + '|' + tz, { date, tz });
+      const key = zoneId + '|' + date;
+      const prior = zoneDays.get(key);
+      const trigger = item.trigger || 'reassessed';
+      if (!prior || rank[trigger] > rank[prior.trigger] || (trigger === prior.trigger && Number(item.amountMm) > Number(prior.amountMm || 0))) {
+        zoneDays.set(key, { zoneId, date, trigger, amountMm: item.amountMm });
+      }
+    }
+  }
+  for (const d of instrumentDays.values()) {
+    await computeInstrumentDay(t, eui, d.date, d.tz, { nowMs: opts.nowMs, instrument, cache });
+  }
+  const written = [];
+  for (const z of zoneDays.values()) {
+    const out = await recomputeZoneDay(t, z.zoneId, z.date, { trigger: z.trigger, amountMm: z.amountMm, nowMs: opts.nowMs, cache });
+    if (out) written.push({ zoneId: z.zoneId, date: z.date, written: out.written });
+  }
+  return written;
+}
+
 module.exports = {
   RAIN_POLICY_VERSION,
   LORAIN_MM_PER_TIP,
@@ -1419,4 +1850,8 @@ module.exports = {
   deriveS2120Counter,
   deriveS2120Legacy,
   ingestS2120Uplink,
+  selectZoneGauge,
+  recomputeZoneDay,
+  resolveZoneRain,
+  recomputeRainDays,
 };
