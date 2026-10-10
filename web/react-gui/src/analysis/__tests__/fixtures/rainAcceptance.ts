@@ -32,13 +32,15 @@ export function a12History(day: RainHistoryDay): RainHistory {
   };
 }
 
-export const A12_DST_EXPORT: AnalysisSeries = {
-  seriesId: 'rain-dst',
-  resolved: { hubEui: 'HUB-1', zoneId: 12, cardType: 'environment', sourceKey: 'rain-acceptance', channelKey: 'rain_mm_delta' },
-  label: 'Rainfall amount', unit: 'mm', coveragePct: null,
-  points: A12_DST_DAYS.map((day) => ({ t: day.period_start!, value: day.total_mm, count: day.samples, expected: null, quality: day.quality })),
-  truncated: false, cadence: 'daily', timezone: 'Europe/Zurich',
-};
+export function a12Export(day: RainHistoryDay): AnalysisSeries {
+  return {
+    seriesId: 'rain-dst',
+    resolved: { hubEui: 'HUB-1', zoneId: 12, cardType: 'environment', sourceKey: 'rain-acceptance', channelKey: 'rain_mm_delta' },
+    label: 'Rainfall amount', unit: 'mm', coveragePct: null,
+    points: [{ t: day.period_start!, value: day.total_mm, count: day.samples, expected: null, quality: null }],
+    truncated: false, cadence: 'hourly', timezone: 'Europe/Zurich',
+  };
+}
 
 export const A19_HISTORY: RainHistory = {
   timezone: 'Europe/Zurich',
@@ -58,7 +60,7 @@ export const A19_EXPORT: AnalysisSeries = {
   resolved: { hubEui: 'HUB-1', zoneId: 12, cardType: 'environment', sourceKey: 'rain-acceptance', channelKey: 'rain_mm_delta' },
   label: 'Rainfall amount', unit: 'mm', coveragePct: null,
   points: A19_HISTORY.days.map((day) => ({ t: day.period_start!, value: day.total_mm, count: day.samples, expected: null, quality: null })),
-  truncated: false, cadence: 'daily', timezone: A19_HISTORY.timezone,
+  truncated: false, cadence: 'hourly', timezone: A19_HISTORY.timezone,
 };
 
 export const RAIN_ACCEPTANCE_CATALOG = new Map<string, AnalysisCatalogEntry>([

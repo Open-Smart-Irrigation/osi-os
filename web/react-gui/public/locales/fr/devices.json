@@ -935,7 +935,15 @@
     "soFar": "jusqu'ici",
     "timezoneCheck": "Vérifiez le fuseau horaire de la zone dans ses paramètres.",
     "exportDailyCsv": "Exporter l’historique quotidien des pluies en CSV",
-    "exportUnavailable": "Export CSV indisponible pour cet historique de passerelle"
+    "exportUnavailable": "Export CSV indisponible pour cet historique de passerelle",
+    "qualityLabel": "Qualité : {{quality}}",
+    "quality": {
+      "complete": "complète",
+      "completeSoFar": "complète jusqu’ici",
+      "partial": "partielle",
+      "receivedOnly": "reçue seulement",
+      "unknown": "couverture inconnue"
+    }
   },
   "rain": {
     "recordedToday": "Pluie mesurée aujourd'hui",

@@ -935,7 +935,15 @@
     "soFar": "até agora",
     "timezoneCheck": "Verifique o fuso horário da zona nas suas definições.",
     "exportDailyCsv": "Exportar o histórico diário de chuva em CSV",
-    "exportUnavailable": "A exportação CSV não está disponível para este histórico do gateway"
+    "exportUnavailable": "A exportação CSV não está disponível para este histórico do gateway",
+    "qualityLabel": "Qualidade: {{quality}}",
+    "quality": {
+      "complete": "completa",
+      "completeSoFar": "completa até agora",
+      "partial": "parcial",
+      "receivedOnly": "apenas recebida",
+      "unknown": "cobertura desconhecida"
+    }
   },
   "rain": {
     "recordedToday": "Chuva registada hoje",

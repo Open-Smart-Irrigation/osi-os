@@ -935,7 +935,15 @@
     "soFar": "bisher",
     "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen.",
     "exportDailyCsv": "Tägliche Niederschlagsdaten als CSV exportieren",
-    "exportUnavailable": "CSV-Export für diesen Gateway-Verlauf nicht verfügbar"
+    "exportUnavailable": "CSV-Export für diesen Gateway-Verlauf nicht verfügbar",
+    "qualityLabel": "Qualität: {{quality}}",
+    "quality": {
+      "complete": "vollständig",
+      "completeSoFar": "bisher vollständig",
+      "partial": "teilweise",
+      "receivedOnly": "nur empfangen",
+      "unknown": "Abdeckung unbekannt"
+    }
   },
   "rain": {
     "recordedToday": "Heute gemessener Regen",

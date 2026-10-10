@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import {
   Bar,
@@ -16,6 +17,7 @@ import {
   hasRainData,
   summarizeRainDays,
   summarizeRainIntervals,
+  type RainDayQuality,
   type RainHistory,
   type RainHistoryDay,
 } from '../../utils/rain';
@@ -65,6 +67,16 @@ function fmtMm(value: number | null | undefined): string {
   return value != null && Number.isFinite(value) ? `${value.toFixed(1)} mm` : '—';
 }
 
+function qualityText(t: TFunction<'devices'>, quality: RainDayQuality): string {
+  switch (quality) {
+    case 'complete': return t('rainMonitor.quality.complete');
+    case 'complete_so_far': return t('rainMonitor.quality.completeSoFar');
+    case 'partial': return t('rainMonitor.quality.partial');
+    case 'received_only': return t('rainMonitor.quality.receivedOnly');
+    default: return t('rainMonitor.quality.unknown');
+  }
+}
+
 const IntervalTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
@@ -79,7 +91,7 @@ const IntervalTooltip = ({ active, payload, label }: any) => {
 // uplinks that day) — never present it as a measured "0.0 mm" day.
 // samples > 0 with total_mm === 0 is a genuine measured-dry day. The current
 // day is labelled "so far": it ends at the request time.
-const DailyTooltip = ({ active, payload, label, soFarLabel }: any) => {
+const DailyTooltip = ({ active, payload, label, soFarLabel, qualityLabel }: any) => {
   if (!active || !payload?.length) return null;
   const row: RainChartDay | undefined = payload[0]?.payload;
   const noData = !row || row.total_mm === null;
@@ -90,6 +102,7 @@ const DailyTooltip = ({ active, payload, label, soFarLabel }: any) => {
       <p className="font-bold text-[var(--text)]">
         {row?.so_far ? `${amount} · ${soFarLabel}` : amount}
       </p>
+      {row && <p className="text-xs text-[var(--text-secondary)]">{qualityLabel(row.quality)}</p>}
     </div>
   );
 };
@@ -341,7 +354,15 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                       tickLine={false}
                       width={48}
                     />
-                    <Tooltip content={<DailyTooltip soFarLabel={t('rainMonitor.soFar', { defaultValue: 'so far' })} />} />
+                    <Tooltip
+                      filterNull={false}
+                      content={(
+                        <DailyTooltip
+                          soFarLabel={t('rainMonitor.soFar', { defaultValue: 'so far' })}
+                          qualityLabel={(quality: RainDayQuality) => t('rainMonitor.qualityLabel', { quality: qualityText(t, quality) })}
+                        />
+                      )}
+                    />
                     <Bar dataKey="total_mm" fill={RAIN_COLOR} radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
