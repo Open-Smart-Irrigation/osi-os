@@ -1175,6 +1175,31 @@ const schemaContract = {
     'id',
     'enabled',
   ],
+  rain_observations: [
+    'id',
+    'device_data_id',
+    'deveui',
+    'instrument_type',
+    'event_id',
+    'dev_addr',
+    'f_cnt',
+    'payload_digest',
+    'received_at',
+    'measured_start',
+    'measured_end',
+    'interval_basis',
+    'frame_kind',
+    'tips',
+    'amount_mm',
+    'status',
+    'quality_reasons',
+    'config_json',
+    'zone_id',
+    'zone_uuid',
+    'timezone',
+    'source_policy_version',
+    'created_at',
+  ],
 };
 
 const requiredIndexes = {
@@ -1275,6 +1300,12 @@ const requiredIndexes = {
   user_plot_assignments: [
     'uq_user_plot_active',
     'idx_user_plot_by_plot',
+  ],
+  rain_observations: [
+    'ux_rain_observations_event',
+    'idx_rain_observations_deveui_received',
+    'idx_rain_observations_zone_received',
+    'idx_rain_observations_device_data',
   ],
 };
 
@@ -1432,6 +1463,20 @@ const requiredIndexSqlFragments = {
   idx_user_plot_by_plot: [
     'on user_plot_assignments(plot_uuid)',
     'where deleted_at is null',
+  ],
+  ux_rain_observations_event: [
+    'unique index',
+    'on rain_observations(deveui, event_id)',
+    'where event_id is not null',
+  ],
+  idx_rain_observations_deveui_received: [
+    'on rain_observations(deveui, received_at)',
+  ],
+  idx_rain_observations_zone_received: [
+    'on rain_observations(zone_id, received_at)',
+  ],
+  idx_rain_observations_device_data: [
+    'on rain_observations(device_data_id)',
   ],
 };
 

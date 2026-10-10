@@ -7345,3 +7345,35 @@ BEGIN
  VALUES(lower(hex(randomblob(16))),'WATERMARK_CALIBRATION',upper(NEW.deveui),CASE WHEN NEW.deleted_at IS NULL THEN 'WATERMARK_CALIBRATION_UPSERTED' ELSE 'WATERMARK_CALIBRATION_DELETED' END,
  json_object('contract_version',1,'device_eui',upper(NEW.deveui),'gateway_device_eui',upper(COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))),'pullup_1_ohm',NEW.pullup_1_ohm,'pulldown_1_ohm',NEW.pulldown_1_ohm,'series_fwd_1_ohm',NEW.series_fwd_1_ohm,'series_rev_1_ohm',NEW.series_rev_1_ohm,'pullup_2_ohm',NEW.pullup_2_ohm,'pulldown_2_ohm',NEW.pulldown_2_ohm,'series_fwd_2_ohm',NEW.series_fwd_2_ohm,'series_rev_2_ohm',NEW.series_rev_2_ohm,'measured_at',NEW.measured_at,'method',NEW.method,'worst_residual_pct',NEW.worst_residual_pct,'notes',NEW.notes,'sync_version',NEW.sync_version,'updated_at',NEW.updated_at,'deleted_at',NEW.deleted_at),NEW.sync_version,strftime('%Y-%m-%dT%H:%M:%fZ','now'),upper(COALESCE(NULLIF(trim((SELECT gateway_device_eui FROM devices WHERE deveui=NEW.deveui AND deleted_at IS NULL)),''),NULLIF(trim((SELECT gateway_device_eui FROM sync_link_state WHERE peer_node='cloud')),''))));
 END;
+
+-- 0071__rain_observations.sql (migration-owned; durable rain observation identity)
+CREATE TABLE IF NOT EXISTS rain_observations (
+  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_data_id        INTEGER REFERENCES device_data(id) ON DELETE SET NULL,
+  deveui                TEXT NOT NULL,
+  instrument_type       TEXT NOT NULL CHECK (instrument_type IN ('AQUASCOPE_LORAIN','SENSECAP_S2120','DRAGINO_LSN50')),
+  event_id              TEXT,
+  dev_addr              TEXT,
+  f_cnt                 INTEGER,
+  payload_digest        TEXT NOT NULL,
+  received_at           TEXT NOT NULL,
+  measured_start        TEXT,
+  measured_end          TEXT,
+  interval_basis        TEXT NOT NULL CHECK (interval_basis IN ('protocol_verified','reception_gap','unknown')),
+  frame_kind            TEXT NOT NULL CHECK (frame_kind IN ('ordinary','heartbeat_zero','button','alarm','config','status','counter')),
+  tips                  INTEGER,
+  amount_mm             REAL,
+  status                TEXT NOT NULL CHECK (status IN ('accepted','ambiguous_identity','rejected_invalid','not_additive','overlap_unqualified')),
+  quality_reasons       TEXT NOT NULL DEFAULT '[]',
+  config_json           TEXT,
+  zone_id               INTEGER,
+  zone_uuid             TEXT,
+  timezone              TEXT,
+  source_policy_version INTEGER NOT NULL DEFAULT 1,
+  created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_rain_observations_event ON rain_observations(deveui, event_id) WHERE event_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_rain_observations_deveui_received ON rain_observations(deveui, received_at);
+CREATE INDEX IF NOT EXISTS idx_rain_observations_zone_received ON rain_observations(zone_id, received_at);
+-- The device_data foreign key needs a child index, or every device_data delete scans this table.
+CREATE INDEX IF NOT EXISTS idx_rain_observations_device_data ON rain_observations(device_data_id);
