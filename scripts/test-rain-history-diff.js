@@ -399,6 +399,63 @@ test('pre-0071 sole-gauge proof is withheld when another rain-capable device lac
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('pre-0071 sole-gauge proof counts orphan retained rain observations', () => {
+  const root = tmp();
+  try {
+    const db = path.join(root, 'orphan-observation-competitor.db');
+    const handle = new DatabaseSync(db);
+    handle.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER);
+      CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+      CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT);
+      INSERT INTO devices VALUES ('${E1}', 'AQUASCOPE_LORAIN', 1);
+      INSERT INTO device_data VALUES (1, '${E1}', '2026-03-29T10:00:00Z', 3, 3, 'ok');
+      INSERT INTO zone_daily_environment VALUES (1, '2026-03-29', 5, 'local_gauge');`);
+    handle.exec(fs.readFileSync(path.join(__dirname, '../database/migrations/ordered/0071__rain_observations.sql'), 'utf8'));
+    handle.exec(`PRAGMA foreign_keys = ON;
+      INSERT INTO rain_observations (device_data_id, deveui, instrument_type, payload_digest, received_at, interval_basis, frame_kind, amount_mm, status, zone_id, timezone)
+        VALUES (NULL, '${E2}', 'AQUASCOPE_LORAIN', 'synthetic-orphan', '2026-03-29T11:00:00Z', 'unknown', 'ordinary', 2, 'accepted', 1, 'Europe/Zurich');`);
+    handle.close();
+    const provenance = provenanceFile(root, [
+      { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:selected-lorain' },
+    ]);
+    const out = path.join(root, 'out');
+    const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+    assert.equal(result.status, 0, result.stderr);
+    const rows = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8'));
+    const selected = rows.find((row) => row.deveui === E1);
+    assert.equal(selected.old_zone_row_mm, '5');
+    assert.equal(selected.new_received_mm, '3');
+    assert.equal(selected.delta_mm, '');
+    assert.ok(selected.reasons.includes('old_gauge_basis_ambiguous'));
+    assert.doesNotMatch(fs.readFileSync(path.join(out, 'rain-diff-summary.md'), 'utf8'), /hypothetical daily crossing.*5 mm/i);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('pre-0071 sole-gauge proof treats orphan retained device-data identities as possible competitors', () => {
+  const root = tmp();
+  try {
+    const db = path.join(root, 'orphan-data-competitor.db');
+    const handle = new DatabaseSync(db);
+    handle.exec(`CREATE TABLE devices (deveui TEXT, type_id TEXT, irrigation_zone_id INTEGER);
+      CREATE TABLE device_data (id INTEGER PRIMARY KEY, deveui TEXT, recorded_at TEXT, rain_mm_today REAL, rain_mm_delta REAL, rain_delta_status TEXT);
+      CREATE TABLE zone_daily_environment (zone_id INTEGER, date TEXT, rainfall_mm REAL, rain_source TEXT);
+      INSERT INTO devices VALUES ('${E1}', 'AQUASCOPE_LORAIN', 1);
+      INSERT INTO device_data VALUES (1, '${E1}', '2026-03-29T10:00:00Z', 3, 3, 'ok'), (2, '${E2}', '2026-03-29T11:00:00Z', 2, 2, 'ok');
+      INSERT INTO zone_daily_environment VALUES (1, '2026-03-29', 5, 'local_gauge');`);
+    handle.close();
+    const provenance = provenanceFile(root, [
+      { deveui: E1, zoneId: 1, timezone: 'Europe/Zurich', from: '2026-03-28T23:00:00Z', to: '2026-03-29T22:00:00Z', selected: true, sourceRef: 'synthetic:selected-lorain' },
+    ]);
+    const out = path.join(root, 'out');
+    const result = run(['--db', db, '--from', '2026-03-29', '--to', '2026-03-29', '--out', out, '--provenance', provenance]);
+    assert.equal(result.status, 0, result.stderr);
+    const row = parseCsv(fs.readFileSync(path.join(out, 'rain-diff-days.csv'), 'utf8')).find((item) => item.deveui === E1);
+    assert.equal(row.new_received_mm, '3');
+    assert.equal(row.delta_mm, '');
+    assert.ok(row.reasons.includes('old_gauge_basis_ambiguous'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 for (const [type, source] of [['AQUASCOPE_LORAIN', 'aquascope_lorain'], ['SENSECAP_S2120', 'sensecap_s2120']]) {
   test(`post-0072 ${type} source matches selected instrument despite a competing gauge`, () => {
     const root = tmp();
