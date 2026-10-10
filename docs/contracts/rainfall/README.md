@@ -2,6 +2,8 @@
 
 One entry per rain instrument the edge ingests. Each entry says where the instrument's measurement rules live.
 
+Which rain amount an advice rule uses for a zone day, and what the rule may conclude from it, is the [rain-resolution policy](rain-resolution-policy.md). Edge and cloud advice apply it in the same order.
+
 | Instrument | Device type | Contract |
 |---|---|---|
 | Aqua-Scope LoRain tipping bucket | `AQUASCOPE_LORAIN` | [`lorain.md`](lorain.md): truth table `T1` to `T16`, replay fixtures in `scripts/fixtures/lorain-rain/`, test `scripts/test-lorain-rain-contract.js`. |
