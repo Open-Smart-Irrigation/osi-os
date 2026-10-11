@@ -19,6 +19,7 @@ export interface RainHistoryDay {
   total_mm: number | null; // null = no data that day, never a dry day
   samples: number;
   quality: RainDayQuality;
+  reasons?: string[]; // API quality explanations; optional for older typed fixtures
   so_far: boolean; // the current day, ending at the request time
 }
 
@@ -68,6 +69,9 @@ function parseDay(row: unknown): RainHistoryDay | null {
   const quality = record.quality === undefined
     ? 'received_only'
     : (QUALITIES as readonly unknown[]).includes(record.quality) ? (record.quality as RainDayQuality) : 'unknown';
+  const reasons = Array.isArray(record.reasons)
+    ? record.reasons.filter((reason): reason is string => typeof reason === 'string' && reason.trim() !== '')
+    : [];
   return {
     day,
     period_start: textOrNull(record.period_start),
@@ -75,6 +79,7 @@ function parseDay(row: unknown): RainHistoryDay | null {
     total_mm: typeof rawTotal === 'number' ? rawTotal : null,
     samples: Number.isFinite(samples) && samples > 0 ? Math.round(samples) : 0,
     quality,
+    reasons,
     so_far: record.so_far === true,
   };
 }

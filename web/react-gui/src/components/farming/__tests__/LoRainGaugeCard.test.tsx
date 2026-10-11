@@ -91,6 +91,32 @@ describe('LoRainGaugeCard', () => {
     expect(within(tile).getByTestId('lorain-last-report-time')).toHaveTextContent(/UTC/);
   });
 
+  it('keeps a 0.5 mm report after an unknown 90-minute gap without showing a rate or invented bounds', () => {
+    const unknownInterval = {
+      ...lorainDevice,
+      last_seen: '2026-10-08T11:15:00Z',
+      latest_data: {
+        ...lorainDevice.latest_data,
+        rain_tips_delta: 1,
+        rain_mm_delta: 0.5,
+        rain_mm_per_hour: null,
+        rain_mm_per_10min: null,
+        counter_interval_seconds: null,
+        rain_mm_today: 0.5,
+        rain_day: '2026-10-08',
+        rain_day_timezone: 'Europe/Zurich',
+        rain_day_timezone_basis: 'zone',
+      },
+    } as unknown as Device;
+    const { container } = render(<LoRainGaugeCard device={unknownInterval} removeContext="farm" />);
+
+    const interval = screen.getByText('loRain.intervalRainfall').parentElement as HTMLElement;
+    expect(interval).toHaveTextContent('0.5 mm');
+    expect(interval).toHaveTextContent('1 loRain.tips');
+    expect(container.textContent).not.toMatch(/mm\/h|10 min/);
+    expect(screen.getByTestId('lorain-last-report-time')).toHaveTextContent(/Oct 8/);
+  });
+
   it('the interval tile says when the tip count is unavailable; the last report shows a dash without a report', () => {
     const noTips = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_tips_delta: null } } as Device;
     const view = render(<LoRainGaugeCard device={noTips} removeContext="farm" />);

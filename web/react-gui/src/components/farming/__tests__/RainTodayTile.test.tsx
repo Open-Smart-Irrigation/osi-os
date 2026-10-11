@@ -86,6 +86,20 @@ describe('RainTodayTile', () => {
     expect(screen.getByText('Last report Jul 1: 1.2 mm')).toBeInTheDocument();
   });
 
+  it.each([
+    ['spring DST day', '2026-03-29T21:59:00Z', '2026-03-29', 'Mar 29'],
+    ['autumn DST day', '2026-10-25T22:59:00Z', '2026-10-25', 'Oct 25'],
+  ])('dates the last report at the farm midnight after the %s', (_label, beforeMidnight, farmDay, displayDay) => {
+    fakeClock(beforeMidnight);
+    renderTile(zurich({ rain_mm_today: 0.5, rain_day: farmDay }));
+
+    expect(screen.getByRole('button', { name: '0.5 mm' })).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(61_000); });
+
+    expect(screen.getByRole('button', { name: '—' })).toBeInTheDocument();
+    expect(screen.getByText(`Last report ${displayDay}: 0.5 mm`)).toBeInTheDocument();
+  });
+
   it('unassigned device shows dated value and names UTC', () => {
     fakeClock('2026-10-09T06:00:00Z');
     renderTile({ rain_mm_today: 1.5, rain_day: '2026-10-08', rain_day_timezone: 'UTC', rain_day_timezone_basis: 'unassigned_default' });

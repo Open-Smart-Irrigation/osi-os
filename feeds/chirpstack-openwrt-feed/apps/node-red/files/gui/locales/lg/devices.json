@@ -436,6 +436,9 @@
       "lastSevenDaysHelpLabel": "About the last 7 days",
       "setupRequiredHelpLabel": "Why effective irrigation is missing",
       "rainSourceHelpLabel": "Where this rain value comes from",
+      "rainSoFar": "so far",
+      "utcDay": "UTC day",
+      "rainReceivedOnly": "{{value}} received only (incomplete day)",
       "demandNoSource": "no weather source for this day",
       "demandMixedStation": "hours from two MeteoSwiss stations",
       "demandUnknownStation": "MeteoSwiss station unknown for these hours",
@@ -448,7 +451,11 @@
         "cloud": "ET0 from the Open-Meteo weather model (not measured at this farm); OSI Cloud applies the crop coefficient"
       },
       "modelAccuracyNote": "Model-based ET0 can differ from a local station by 10-20 % on a single day, most on cloudy, windy or mountain days; weekly totals agree better.",
-      "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud."
+      "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud.",
+      "rainCoverage": {
+        "providerPartial": "Provider amount — partial coverage",
+        "receivedOnlyLabel": "received only (incomplete day)"
+      }
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",
@@ -926,7 +933,17 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} days · daily totals ({{timezone}})",
     "soFar": "so far",
-    "timezoneCheck": "Check the zone time zone in its settings."
+    "timezoneCheck": "Check the zone time zone in its settings.",
+    "exportDailyCsv": "Export daily rain CSV",
+    "exportUnavailable": "Daily rain CSV unavailable for this gateway history",
+    "qualityLabel": "Quality: {{quality}}",
+    "quality": {
+      "complete": "complete",
+      "completeSoFar": "complete so far",
+      "partial": "partial",
+      "receivedOnly": "received only",
+      "unknown": "coverage unknown"
+    }
   },
   "rain": {
     "recordedToday": "Rain recorded today",
@@ -939,5 +956,17 @@
     "tips_one": "{{count}} tip",
     "tips_other": "{{count}} tips",
     "tipsUnavailable": "Tip count unavailable"
+  },
+  "zoneRainGauge": {
+    "label": "Rain gauge for this zone",
+    "helpLabel": "About the rain gauge",
+    "help": "When more than one rain gauge reports for this zone, the zone's daily rain comes from the gauge you choose here. Rain from two gauges is never added. A change recalculates the last 30 days.",
+    "notChosen": "— No gauge chosen —",
+    "optionShared": "{{name}} (shared weather station)",
+    "optionSuggested": "{{label}} — suggested",
+    "ambiguous": "Two rain gauges report for this zone. Until you choose one, the zone has no measured rain.",
+    "onlyCandidate": "The only rain gauge of this zone is used.",
+    "loadFailed": "The rain gauges of this zone could not be loaded.",
+    "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
   }
 }
