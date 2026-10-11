@@ -211,6 +211,9 @@ function assignmentCoversDay(intervals, bounds) {
 }
 function lsn50SnapshotEligible(observation, row) {
   if (!observation || observation.instrument_type !== 'DRAGINO_LSN50' || observation.status !== 'accepted') return false;
+  const observationMs = Date.parse(observation.received_at);
+  const rowMs = Date.parse(row.recorded_at);
+  if (!Number.isFinite(observationMs) || !Number.isFinite(rowMs) || observationMs !== rowMs) return false;
   const observedAmount = finiteNonnegative(observation.amount_mm);
   const rowAmount = finiteNonnegative(row.rain_mm_delta);
   if (observedAmount == null || rowAmount == null || Math.abs(observedAmount - rowAmount) > 0.001 || row.rain_delta_status !== 'ok') return false;
