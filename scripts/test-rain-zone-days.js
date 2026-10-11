@@ -301,6 +301,7 @@ test('(c) a late distinct observation that completes a day re-projects it and in
   assert.deepEqual(zoneRow(db, 1, '2026-10-08'), after);
   assert.deepEqual(observations(), observationsAfterCorrection, 'redelivery preserves the exact observation rows and identities');
   assert.equal(observations().length, chain.length, 'redelivery does not add an observation');
+  assert.equal(events(), eventsBefore + 1, 'redelivery emits no duplicate outbox event');
 });
 
 test('(d) a recompute that changes nothing does not increment sync_version or touch computed_at', async () => {
