@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { pathToFileURL } = require('node:url');
 const { DatabaseSync } = require('node:sqlite');
 const rain = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain');
 
@@ -65,7 +66,7 @@ function checkedDatabasePath(input) {
   try { real = fs.realpathSync(input); } catch (error) { throw new Error('database does not exist or cannot be resolved: ' + error.message); }
   if (!fs.statSync(real).isFile()) throw new Error('database path is not a regular file');
   if (isUnder(real, LIVE_ROOT)) throw new Error('refusing database path under /data');
-  for (const suffix of ['-wal', '-shm']) {
+  for (const suffix of ['-wal', '-shm', '-journal']) {
     const sidecar = real + suffix;
     if (fs.existsSync(sidecar)) throw new Error('refusing database with SQLite sidecar: ' + path.basename(sidecar));
   }
@@ -582,7 +583,7 @@ function run(options) {
   let db;
   let rows;
   try {
-    db = new DatabaseSync(dbPath, { readOnly: true });
+    db = new DatabaseSync(pathToFileURL(dbPath).href + '?mode=ro&immutable=1', { readOnly: true });
     const effectiveOptions = { ...options, from, to, hostTimezone: provenance.hostTimezone };
     const evidence = readEvidence(db, effectiveOptions, provenance);
     validateObservationProvenance(evidence, provenance);

@@ -219,6 +219,52 @@ test('refuses unsafe database paths, malformed dates, output aliases, and WAL-be
   }
 });
 
+test('reading a WAL-mode database without sidecars leaves the input byte-for-byte unchanged', () => {
+  const root = tmp();
+  try {
+    const db = path.join(root, 'legacy WAL #?.db');
+    fs.renameSync(fixture(root), db);
+    const wal = new DatabaseSync(db);
+    assert.equal(wal.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
+    wal.close();
+    const sidecars = () => ['-wal', '-shm', '-journal'].filter((suffix) => fs.existsSync(db + suffix));
+    assert.deepEqual(sidecars(), []);
+    const before = fs.readFileSync(db);
+    const beforeStat = fs.statSync(db);
+    const result = invoke(db, path.join(root, 'wal-mode-output'));
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(fs.readFileSync(db), before);
+    const afterStat = fs.statSync(db);
+    assert.equal(afterStat.size, beforeStat.size);
+    assert.equal(afterStat.mtimeMs, beforeStat.mtimeMs);
+    assert.deepEqual(sidecars(), []);
+
+    const conflicting = lsn50SnapshotDb(root);
+    fs.renameSync(conflicting, db);
+    const provenance = provenanceFile(root, [{
+      deveui: E3, zoneId: 2, timezone: 'Europe/Zurich',
+      from: '2026-03-28T23:00:00Z', to: '2026-03-31T22:00:00Z',
+      selected: false, sourceRef: 'synthetic:conflicting-observation-zone',
+    }]);
+    const failureWal = new DatabaseSync(db);
+    assert.equal(failureWal.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
+    failureWal.close();
+    const failureBefore = fs.readFileSync(db);
+    const failureStat = fs.statSync(db);
+    assert.deepEqual(sidecars(), []);
+    const failure = invoke(db, path.join(root, 'wal-mode-failure'), ['--provenance', provenance]);
+    assert.notEqual(failure.status, 0, 'conflicting observation provenance should fail after opening the database');
+    assert.match(failure.stderr, /provenance conflicts with retained observation snapshot/);
+    assert.deepEqual(fs.readFileSync(db), failureBefore);
+    const failureAfterStat = fs.statSync(db);
+    assert.equal(failureAfterStat.size, failureStat.size);
+    assert.equal(failureAfterStat.mtimeMs, failureStat.mtimeMs);
+    assert.deepEqual(sidecars(), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('conflicting historical assignments and invalid provenance are refused', () => {
   const root = tmp();
   try {
