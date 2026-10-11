@@ -1413,6 +1413,28 @@ if (bootstrapNode) {
     }
   }
 }
+// Zone-day rain quality: the bootstrap and force-sync zoneEnvironments SELECTs name
+// the five quality columns, and the reasons travel as a parsed JSON array.
+for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+  const node = flows.find((entry) => entry.id === id);
+  const func = String(node?.func || '');
+  const start = func.indexOf('const zoneEnvironments = await q([');
+  const end = start >= 0 ? func.indexOf("].join('\\n'));", start) : -1;
+  const query = start >= 0 && end > start ? func.slice(start, end) : '';
+  if (!query) {
+    fail(`${id} zoneEnvironments query not found`);
+    continue;
+  }
+  for (const column of ['sync_version', 'rain_coverage', 'rain_selected_deveui', 'rain_policy_version', 'rain_quality_reasons', 'rain_received_mm']) {
+    if (!query.includes(`'  ze.${column}`)) fail(`${id} zoneEnvironments SELECT missing ze.${column}`);
+    else console.log(`OK ${id} zoneEnvironments SELECT names ze.${column}`);
+  }
+  if (!func.includes('JSON.parse(ze.rain_quality_reasons)') || !func.includes('ze.rain_quality_reasons = null;')) {
+    fail(`${id} zoneEnvironments rain_quality_reasons is not parsed to an array (null on failure)`);
+  } else {
+    console.log(`OK ${id} zoneEnvironments rain_quality_reasons parsed to an array`);
+  }
+}
 
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Validate & decode token', 'function allowPrivateTargets()', 'supports a private-target maintenance override');
@@ -1606,6 +1628,22 @@ for (const triggerName of [
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
   expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
   expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+}
+// Zone-day rain quality (migration 0073, docs/contracts/rainfall/zone-day-projection.md):
+// both zone-environment outbox triggers carry the five keys, null on a row
+// without a rain policy version, the reasons as a JSON array.
+for (const triggerName of ['trg_dp_zone_env_outbox_ai', 'trg_dp_zone_env_outbox_au']) {
+  for (const [needle, description] of [
+    ["'rain_coverage', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_coverage END", 'rain_coverage payload key'],
+    ["'rain_selected_deveui', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_selected_deveui END", 'rain_selected_deveui payload key'],
+    ["'rain_policy_version', NEW.rain_policy_version", 'rain_policy_version payload key'],
+    ["'rain_quality_reasons', json(CASE WHEN NEW.rain_policy_version IS NOT NULL AND json_valid(NEW.rain_quality_reasons) AND json_type(NEW.rain_quality_reasons) = 'array' THEN NEW.rain_quality_reasons END)", 'rain_quality_reasons as a JSON array'],
+    ["'rain_received_mm', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_received_mm END", 'rain_received_mm payload key'],
+    ["'contract_version', 1", 'contract_version 1'],
+  ]) {
+    expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, needle, description);
+    expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, needle, description);
+  }
 }
 for (const triggerName of [
   'trg_sync_device_data_dirty_au',

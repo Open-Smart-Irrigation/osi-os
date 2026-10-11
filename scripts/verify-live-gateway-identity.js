@@ -1159,7 +1159,11 @@ if (sizeAllowances) {
     // origin/main, 46212 chars). syncCapabilities gains the three WATERMARK tokens and the
     // bootstrap carries watermark_calibrations. Re-measured fresh: origin/main 46212 ->
     // HEAD 47031 = +819.
-    'sync-bootstrap-build': 819,
+    // Zone-day rain quality sync (migration 0073): re-pinned from 819 to +1089 (the 819 is
+    // baked into origin/main, 47031 chars). The zoneEnvironments snapshot SELECT names the
+    // five rain quality columns and a map parses rain_quality_reasons to a JSON array.
+    // Re-measured fresh: origin/main 47031 -> HEAD 48120 = +1089.
+    'sync-bootstrap-build': 1089,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
     // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
     // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
@@ -1184,7 +1188,10 @@ if (sizeAllowances) {
     // 69244 chars). The force-sync builder gains the three WATERMARK capability tokens and
     // the gateway-bound live/tombstone calibration snapshot. Re-measured fresh:
     // origin/main 69244 -> HEAD 70063 = +819.
-    'sync-force-build': 819,
+    // Zone-day rain quality sync (migration 0073): re-pinned from 819 to +1089 (the 819 is
+    // baked into origin/main, 70063 chars), the same snapshot change as sync-bootstrap-build.
+    // Re-measured fresh: origin/main 70063 -> HEAD 71152 = +1089.
+    'sync-force-build': 1089,
     // Re-pinned from 975 to +2235 (the 975 is baked into origin/main, 4071 chars): the
     // batch now groups queued rows by commandId and withholds rows that disagree. The
     // restart-sentinel guard above is unchanged. Re-measured fresh:

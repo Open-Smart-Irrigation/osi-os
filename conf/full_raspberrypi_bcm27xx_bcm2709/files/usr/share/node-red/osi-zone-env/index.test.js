@@ -860,6 +860,18 @@ test('providerRainToday uses local midnight and actual 23/25-hour DST day length
     { amountMm: 0, source: 'open_meteo', period: 'farm_day', coveredHours: 23, expectedHours: 23 });
 });
 
+test('providerRainToday excludes the prior interval when Cairo DST skips midnight', () => {
+  const hours = [
+    { time: '2026-04-23T22:00:00Z', rainMm: 9 },
+    ...Array.from({ length: 23 }, (_, i) => ({
+      time: new Date(Date.parse('2026-04-23T22:00:00Z') + (i + 1) * 3600000).toISOString(), rainMm: 0.5,
+    })),
+  ];
+  const observedAt = '2026-04-24T21:00:00Z';
+  assert.deepEqual(ZE.providerRainToday({ source: 'open_meteo', observedAt, hours }, 'Africa/Cairo', '2026-04-24', Date.parse(observedAt)),
+    { amountMm: 11.5, source: 'open_meteo', period: 'farm_day', coveredHours: 23, expectedHours: 23 });
+});
+
 test('Open-Meteo forward rain excludes the interval ending exactly now and counts labelled slots', () => {
   const hours = [
     { time: '2026-10-08T11:00:00Z', rainMm: 4 },

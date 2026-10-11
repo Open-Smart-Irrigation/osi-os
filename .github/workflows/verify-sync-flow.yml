@@ -258,6 +258,11 @@ jobs:
       # complete day, late corrections, the move-day rule, through the ingest nodes.
       - name: Zone-day rain projection
         run: TZ=UTC node --test scripts/test-rain-zone-days.js
+      # Zone-day rain quality on the sync paths (migration 0073): the event payload,
+      # bootstrap and force-sync snapshot items and history rows carry the five
+      # quality fields; the history hash v1 input stays the six columns.
+      - name: Zone-day rain quality sync
+        run: TZ=UTC node --test scripts/test-zone-env-rain-quality-sync.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
