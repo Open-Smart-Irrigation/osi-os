@@ -1254,7 +1254,8 @@ function normaliseZoneRecommendation(row: any): ZoneRecommendation {
     zone_id: row.zone_id,
     date: row.date,
     zone_stress_summary: row.zone_stress_summary ?? 'none',
-    rainfall_mm: row.rainfall_mm ?? 0,
+    // Unknown rain stays null (rain-resolution policy), never 0.
+    rainfall_mm: row.rainfall_mm ?? null,
     water_delivered_liters: row.water_delivered_liters ?? 0,
     irrigation_action: row.irrigation_action ?? 'maintain',
     action_reasoning: row.action_reasoning ?? '',

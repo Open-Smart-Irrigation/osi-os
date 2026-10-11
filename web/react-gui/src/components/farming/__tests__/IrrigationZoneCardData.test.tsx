@@ -320,6 +320,68 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(waterCard.className).not.toContain('sky-100');
   });
 
+  it('shows stamped provider rain for a zone without sensors, a zone-day, or a recommendation', async () => {
+    // The provider's accepted observation stamp is the card's evidence time even
+    // when this zone has no local sensor, zone-day, or recommendation row.
+    const providerObservedAt = '2026-10-08T11:00:00.000Z';
+    const providerOnlySummary: ZoneEnvironmentSummary = {
+      ...environmentSummary,
+      generatedAt: providerObservedAt,
+      water: {
+        ...environmentSummary.water,
+        observedAt: providerObservedAt,
+        rainTodayMm: 2.6,
+        rainTodayStatus: 'observed',
+        rainTodayCoverage: 'complete',
+        rainTodayReceivedMm: null,
+        rainTodayReasons: [],
+        rainSource: 'weather_service',
+        rainStation: null,
+        irrigationTodayLiters: null,
+        irrigationTodayNetMm: null,
+        irrigationTodayMeasuredLiters: null,
+        irrigationTodayEstimatedLiters: null,
+        measuredIrrigationNetMm: null,
+        estimatedIrrigationNetMm: null,
+        waterNeededTodayMm: null,
+        balanceTodayMm: null,
+        next24hRainMm: null,
+        action: null,
+        daily: [],
+        todayDate: null,
+        sensorHealth: {
+          sensorCount: 0,
+          freshSensorCount: 0,
+          staleSensorCount: 0,
+          rainGaugePresent: false,
+          flowMeterPresent: false,
+          warnings: [],
+        },
+      },
+      forecast: {
+        available: true,
+        source: 'open_meteo',
+        cacheStatus: 'live',
+        observedAt: providerObservedAt,
+        expiresAt: null,
+        rainFocus: null,
+      },
+    };
+    apiMocks.getSummary.mockResolvedValue(providerOnlySummary);
+
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    expect(waterCard).toHaveTextContent('Water balance');
+    expect(waterCard).toHaveTextContent('Updated');
+    expect(screen.getByTestId('water-rain-tile')).toHaveTextContent('2.6 mm');
+    expect(screen.queryByTestId('water-flow-meter-tile')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Where this rain value comes from' }));
+    expect(screen.getByText('From weather data (not measured)')).toBeInTheDocument();
+  });
+
   it('says in the water card when two rain gauges report and none is chosen', async () => {
     apiMocks.getSummary.mockResolvedValue(environmentSummary);
     apiMocks.getRainSource.mockResolvedValue({

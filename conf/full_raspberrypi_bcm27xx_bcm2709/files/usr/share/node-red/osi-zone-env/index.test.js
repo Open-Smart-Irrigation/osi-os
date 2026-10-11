@@ -770,3 +770,161 @@ test('resolveRainUnknownWaterAction: withhold answers insufficient_data; a dendr
   }
   assert.equal(ZE.resolveWaterAction('2026-10-08', dendro, null, 0, 4, false, 0).source, 'dendro');
 });
+
+test('resolveDayRain: a policy-1 day counts only when certified; a legacy day follows resolveRainTodayMm', () => {
+  const policy = (fields) => ({ rain_policy_version: 1, rain_source: 'aquascope_lorain', rainfall_mm: null, rain_received_mm: null, ...fields });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete', rainfall_mm: 0 }), true, false), { rainMm: 0, coverage: 'complete', receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete', rainfall_mm: 4.25 }), false, false), { rainMm: 4.25, coverage: 'complete', receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete_so_far', rain_received_mm: 1.2 }), true, true), { rainMm: 1.2, coverage: 'complete_so_far', receivedMm: null });
+  // A complete_so_far row of an earlier day was not closed: received only.
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'complete_so_far', rain_received_mm: 1.2 }), true, false), { rainMm: null, coverage: 'complete_so_far', receivedMm: 1.2 });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'partial', rain_received_mm: 3 }), true, false), { rainMm: null, coverage: 'partial', receivedMm: 3 });
+  assert.deepEqual(ZE.resolveDayRain(policy({ rain_coverage: 'unknown' }), true, true), { rainMm: null, coverage: 'unknown', receivedMm: null });
+  // Legacy rows: the evidence rule of R-UNK-E, no coverage.
+  assert.deepEqual(ZE.resolveDayRain({ rainfall_mm: 0, rain_source: 'aquascope_lorain' }, true, true), { rainMm: 0, coverage: null, receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain({ rainfall_mm: 0, rain_source: 'local_gauge' }, false, true), { rainMm: null, coverage: null, receivedMm: null });
+  assert.deepEqual(ZE.resolveDayRain(null, true, true), { rainMm: null, coverage: null, receivedMm: null });
+});
+
+test('buildWaterDaily: policy-1 days carry their coverage and received amount; legacy days are unchanged', () => {
+  const daily = ZE.buildWaterDaily({
+    envRows: [
+      { date: '2026-09-23', rainfall_mm: null, flow_liters: 0, rain_source: 'aquascope_lorain', rain_policy_version: 1, rain_coverage: 'partial', rain_received_mm: 2 },
+      { date: '2026-09-24', rainfall_mm: 1.5, flow_liters: 0, rain_source: 'aquascope_lorain' },
+      { date: '2026-09-25', rainfall_mm: null, flow_liters: 0, rain_source: 'aquascope_lorain', rain_policy_version: 1, rain_coverage: 'complete_so_far', rain_received_mm: 0.6 },
+    ],
+    estimatedByDate: {}, agronomyRows: [], zone: {}, todayIso: '2026-09-25', waterNeededTodayMm: null, stationNames: {}, rainGaugePresent: true,
+  });
+  const day = (date) => daily.find((d) => d.date === date);
+  assert.equal(day('2026-09-23').rainMm, null);
+  assert.equal(day('2026-09-23').rainCoverage, 'partial');
+  assert.equal(day('2026-09-23').rainReceivedMm, 2);
+  assert.equal(day('2026-09-24').rainMm, 1.5);
+  assert.equal(Object.prototype.hasOwnProperty.call(day('2026-09-24'), 'rainCoverage'), false);
+  assert.equal(day('2026-09-25').rainMm, 0.6);
+  assert.equal(day('2026-09-25').rainCoverage, 'complete_so_far');
+  assert.equal(day('2026-09-25').rainReceivedMm, null);
+});
+
+test('providerRainToday certifies complete Open-Meteo farm-day slots only', () => {
+  const hours = Array.from({ length: 11 }, (_, i) => ({
+    time: new Date(Date.UTC(2026, 9, 8, i + 1)).toISOString(), rainMm: 0,
+  }));
+  const forecast = { source: 'open_meteo', observedAt: '2026-10-08T11:00:00Z', hours,
+    days: [{ date: '2026-10-08', rainMm: 8 }] };
+  assert.deepEqual(ZE.providerRainToday(forecast, 'UTC', '2026-10-08', Date.parse('2026-10-08T11:00:00Z')),
+    { amountMm: 0, source: 'open_meteo', period: 'farm_day', coveredHours: 11, expectedHours: 11 });
+  const halfHour = { ...forecast, observedAt: '2026-10-08T11:30:00Z', hours: [
+    ...hours,
+    { time: '2026-10-08T12:00:00Z', rainMm: 4 },
+  ] };
+  assert.deepEqual(ZE.providerRainToday(halfHour, 'UTC', '2026-10-08', Date.parse('2026-10-08T11:30:00Z')),
+    { amountMm: 0, source: 'open_meteo', period: 'farm_day', coveredHours: 11, expectedHours: 12 });
+  const zurichHours = Array.from({ length: 11 }, (_, i) => ({
+    time: new Date(Date.UTC(2026, 9, 7, 22 + i + 1)).toISOString(), rainMm: i === 10 ? 2 : 0,
+  }));
+  assert.deepEqual(ZE.providerRainToday({ source: 'open_meteo', observedAt: '2026-10-08T09:00:00Z', hours: zurichHours }, 'Europe/Zurich', '2026-10-08', Date.parse('2026-10-08T09:00:00Z')),
+    { amountMm: 2, source: 'open_meteo', period: 'farm_day', coveredHours: 11, expectedHours: 11 });
+});
+
+test('providerRainToday keeps stale, duplicate, missing, invalid, and future evidence bounded', () => {
+  const now = Date.parse('2026-10-08T11:00:00Z');
+  const forecast = { source: 'open_meteo', observedAt: '2026-10-08T06:00:00Z', hours: [
+    ...Array.from({ length: 6 }, (_, i) => ({ time: new Date(Date.UTC(2026, 9, 8, i + 1)).toISOString(), rainMm: 1 })),
+    { time: '2026-10-08T04:00:00Z', rainMm: 3 },
+    { time: '2026-10-08T07:00:00Z', rainMm: 9 },
+  ] };
+  assert.deepEqual(ZE.providerRainToday(forecast, 'UTC', '2026-10-08', now),
+    { amountMm: 6, source: 'open_meteo', period: 'farm_day', coveredHours: 6, expectedHours: 11 });
+  assert.deepEqual(ZE.providerRainToday({ ...forecast, observedAt: '2026-10-08T11:00:00Z', hours: [1, 2, 3, 4, 6].map((hour) => ({ time: new Date(Date.UTC(2026, 9, 8, hour)).toISOString(), rainMm: 1 })) }, 'UTC', '2026-10-08', now),
+    { amountMm: 5, source: 'open_meteo', period: 'farm_day', coveredHours: 5, expectedHours: 11 });
+  assert.equal(ZE.providerRainToday({ ...forecast, observedAt: '2026-10-08T11:00:00Z', hours: [{ time: '2026-10-08T12:00:00Z', rainMm: 8 }] }, 'UTC', '2026-10-08', now), null);
+  for (const rainMm of [null, undefined, Number.NaN, Infinity, -0.1]) {
+    assert.equal(ZE.providerRainToday({ ...forecast, observedAt: '2026-10-08T11:00:00Z', hours: [{ time: '2026-10-08T01:00:00Z', rainMm }] }, 'UTC', '2026-10-08', now), null);
+  }
+  assert.equal(ZE.providerRainToday({ ...forecast, observedAt: null }, 'UTC', '2026-10-08', now), null);
+  assert.equal(ZE.providerRainToday({ ...forecast, observedAt: 'broken' }, 'UTC', '2026-10-08', now), null);
+  assert.equal(ZE.providerRainToday({ ...forecast, source: 'openagri' }, 'UTC', '2026-10-08', now), null);
+});
+
+test('providerRainToday uses local midnight and actual 23/25-hour DST day lengths', () => {
+  const midnight = Date.parse('2026-10-08T00:00:00Z');
+  assert.equal(ZE.providerRainToday({ source: 'open_meteo', observedAt: '2026-10-08T00:00:00Z', hours: [
+    { time: '2026-10-08T00:00:00Z', rainMm: 8 },
+  ] }, 'UTC', '2026-10-08', midnight), null);
+  const fall = Array.from({ length: 25 }, (_, i) => ({ time: new Date(Date.parse('2026-10-24T22:00:00Z') + (i + 1) * 3600000).toISOString(), rainMm: 0 }));
+  assert.deepEqual(ZE.providerRainToday({ source: 'open_meteo', observedAt: '2026-10-25T23:00:00Z', hours: fall }, 'Europe/Zurich', '2026-10-25', Date.parse('2026-10-25T23:00:00Z')),
+    { amountMm: 0, source: 'open_meteo', period: 'farm_day', coveredHours: 25, expectedHours: 25 });
+  const spring = Array.from({ length: 23 }, (_, i) => ({ time: new Date(Date.parse('2026-03-28T23:00:00Z') + (i + 1) * 3600000).toISOString(), rainMm: 0 }));
+  assert.deepEqual(ZE.providerRainToday({ source: 'open_meteo', observedAt: '2026-03-29T22:00:00Z', hours: spring }, 'Europe/Zurich', '2026-03-29', Date.parse('2026-03-29T22:00:00Z')),
+    { amountMm: 0, source: 'open_meteo', period: 'farm_day', coveredHours: 23, expectedHours: 23 });
+});
+
+test('Open-Meteo forward rain excludes the interval ending exactly now and counts labelled slots', () => {
+  const hours = [
+    { time: '2026-10-08T11:00:00Z', rainMm: 4 },
+    { time: '2026-10-08T12:00:00Z', rainMm: 2 },
+  ];
+  assert.deepEqual(ZE.sumRain(hours, Date.parse('2026-10-08T11:00:00Z'), 24, { source: 'open_meteo', basis: 'end' }),
+    { totalMm: 2, coveredHours: 1, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain(hours, Date.parse('2026-10-08T11:30:00Z'), 24, { source: 'open_meteo', basis: 'end' }),
+    { totalMm: 2, coveredHours: 1, expectedHours: 24 });
+  const fullHorizon = Array.from({ length: 24 }, (_, i) => ({ time: new Date(Date.parse('2026-10-08T12:00:00Z') + i * 3600000).toISOString(), rainMm: 0 }));
+  assert.deepEqual(ZE.sumRain(fullHorizon, Date.parse('2026-10-08T11:30:00Z'), 24, { source: 'open_meteo', basis: 'end' }),
+    { totalMm: 0, coveredHours: 24, expectedHours: 24 });
+  assert.deepEqual(ZE.sumRain([{ time: '2026-10-08T12:00:00Z', rainMm: -1 }], Date.parse('2026-10-08T11:30:00Z'), 24, { source: 'open_meteo', basis: 'end' }),
+    { totalMm: null, coveredHours: 0, expectedHours: 24 });
+});
+
+test('the cutoff interval is assigned to today only, never double-counted in next24h', () => {
+  const hours = Array.from({ length: 12 }, (_, i) => ({
+    time: new Date(Date.UTC(2026, 9, 8, i + 1)).toISOString(), rainMm: i === 10 ? 4 : i === 11 ? 2 : 0,
+  }));
+  const nowMs = Date.parse('2026-10-08T11:00:00Z');
+  const forecast = { source: 'open_meteo', observedAt: new Date(nowMs).toISOString(), hours };
+  assert.deepEqual(ZE.providerRainToday(forecast, 'UTC', '2026-10-08', nowMs),
+    { amountMm: 4, source: 'open_meteo', period: 'farm_day', coveredHours: 11, expectedHours: 11 });
+  assert.deepEqual(ZE.sumRain(hours, nowMs, 24, { source: 'open_meteo', basis: 'end' }),
+    { totalMm: 2, coveredHours: 1, expectedHours: 24 });
+});
+
+test('buildForecastSection excludes the interval ending at now from forward forecast details', () => {
+  const section = ZE.buildForecastSection({ source: 'open_meteo', observedAt: '2026-10-08T11:00:00Z', hours: [
+    { time: '2026-10-08T11:00:00Z', rainMm: 4 },
+    { time: '2026-10-08T12:00:00Z', rainMm: 2 },
+  ], days: [] }, 'live', null, null, '2026-10-08T11:00:00Z');
+  assert.equal(section.rainFocus.totalNext24hMm, 2);
+  assert.equal(section.rainFocus.hourly.length, 1);
+  assert.equal(section.rainFocus.hourly[0].time, '2026-10-08T12:00:00Z');
+});
+
+test('linked water overlay honors explicit coverage, keeps received lower bound, and clears stale today metadata', () => {
+  const current = ZE.overlayLocalWaterIrrigationSplit({
+    daily: [{ date: '2026-10-08' }], rainTodayMm: 0, rainTodayStatus: 'observed',
+    rainTodayCoverage: null, rainTodayReceivedMm: 3, rainTodayReasons: ['local_partial'], rainSource: 'weather_service',
+  }, { rainTodayMm: 0, rainTodayReceivedMm: null, rainTodayCoverage: 'complete_so_far', rainTodayReasons: ['local_partial'], rainSource: 'weather_service' }, '2026-10-08');
+  assert.equal(current.rainTodayMm, 0);
+  assert.equal(current.rainTodayCoverage, null);
+  assert.equal(current.rainTodayReceivedMm, 3);
+  const stale = ZE.overlayLocalWaterIrrigationSplit({ daily: [{ date: '2026-10-07' }], rainTodayMm: 8,
+    rainTodayStatus: 'observed', rainTodayCoverage: 'complete_so_far', rainTodayReceivedMm: 6,
+    rainTodayReasons: ['old'], rainSource: 'gauge' }, { rainTodayMm: null, rainTodayStatus: 'unknown' }, '2026-10-08');
+  assert.equal(stale.rainTodayMm, null);
+  assert.equal(stale.rainTodayStatus, 'unknown');
+  assert.equal(stale.rainTodayCoverage, null);
+  assert.equal(stale.rainTodayReceivedMm, null);
+  assert.deepEqual(stale.rainTodayReasons, []);
+  assert.equal(stale.rainSource, null);
+});
+
+test('linked water overlay maps the legacy coverage alias only when the current field is absent', () => {
+  const current = { daily: [{ date: '2026-10-08' }], rainTodayMm: 0, rainCoverage: 'partial', rainTodayReceivedMm: 3 };
+  assert.equal(ZE.overlayLocalWaterIrrigationSplit(current, { rainTodayMm: 2 }, '2026-10-08').rainTodayCoverage, 'partial');
+  current.rainTodayCoverage = null;
+  assert.equal(ZE.overlayLocalWaterIrrigationSplit(current, { rainTodayMm: 2 }, '2026-10-08').rainTodayCoverage, null);
+  const unlabelled = ZE.overlayLocalWaterIrrigationSplit({ daily: [{ date: '2026-10-08' }], rainTodayMm: 0 }, { rainTodayMm: 2, rainTodayReceivedMm: 3 }, '2026-10-08');
+  assert.equal(Object.hasOwn(unlabelled, 'rainTodayCoverage'), false);
+  assert.equal(Object.hasOwn(unlabelled, 'rainTodayReceivedMm'), false);
+  assert.deepEqual(ZE.overlayLocalWaterIrrigationSplit(null, { rainTodayMm: 0, rainTodayReceivedMm: 3 }, '2026-10-08'),
+    { rainTodayMm: 0, rainTodayReceivedMm: 3 });
+});

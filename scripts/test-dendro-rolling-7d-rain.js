@@ -134,7 +134,10 @@ function addUnstressedTreeDay(db, date) {
 
 async function runDendro(db, { weather = { status: 500, body: null }, profile = PROFILES[0], envVars = {}, now = NOW_ISO } = {}) {
   const flowsPath = path.join(ROOT, profile, 'flows.json');
-  const moduleDir = path.join(ROOT, profile, 'node-red/osi-dendro-analytics');
+  const moduleDirs = {
+    'dendro-analytics': path.join(ROOT, profile, 'node-red/osi-dendro-analytics'),
+    rain: path.join(ROOT, profile, 'node-red/osi-rain'),
+  };
   const node = loadNode('dendro-compute-fn', flowsPath);
   const facade = facadeDb(db);
   const calls = [];
@@ -149,8 +152,8 @@ async function runDendro(db, { weather = { status: 500, body: null }, profile = 
   const osiDb = { Database: function Database() { return facade; } };
   const osiLib = {
     require(name) {
-      if (name !== 'dendro-analytics') return { ok: false, error: `unexpected helper ${name}` };
-      return { ok: true, value: require(moduleDir) }; // eslint-disable-line global-require
+      if (!moduleDirs[name]) return { ok: false, error: `unexpected helper ${name}` };
+      return { ok: true, value: require(moduleDirs[name]) }; // eslint-disable-line global-require
     },
   };
   const http = stubHttp(weather, calls);

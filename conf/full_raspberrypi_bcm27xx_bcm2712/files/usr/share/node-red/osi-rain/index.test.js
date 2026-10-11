@@ -579,3 +579,230 @@ test('assessInstrumentDay: no evidence at all is unknown with no amount', () => 
   assert.equal(r.amountMm, null);
   assert.equal(r.receivedMm, null);
 });
+
+// ---------------------------------------------------------------------------
+// resolveAdviceRain: the rain-resolution policy for advice
+// (docs/contracts/rainfall/rain-resolution-policy.md), against the seed schema.
+// ---------------------------------------------------------------------------
+
+const ADVICE_GAUGE = 'A840410000000001';
+const ADVICE_GAUGE_B = 'A840410000000002';
+const ADVICE_DAY = '2026-10-08';
+const ADVICE_NOW = Date.parse('2026-10-09T03:00:00.000Z'); // the day after ADVICE_DAY in UTC
+
+function adviceDb() {
+  const { DatabaseSync } = require('node:sqlite');
+  const db = new DatabaseSync(':memory:');
+  db.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
+  db.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+    INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, scheduling_mode) VALUES (1, 'Zone', 1, 'z-1', 'UTC', 'local');`);
+  return db;
+}
+function adviceScope(db) {
+  return {
+    get: async (sql, params = []) => db.prepare(sql).get(...params),
+    all: async (sql, params = []) => db.prepare(sql).all(...params),
+    run: async (sql, params = []) => { db.prepare(sql).run(...params); },
+  };
+}
+// A zone_daily_environment row; policy: false writes a legacy row (no policy columns).
+function adviceRow(db, fields) {
+  const f = { date: ADVICE_DAY, rainfall_mm: null, rain_source: 'none', policy: true, coverage: null, deveui: null, reasons: [], received: null, ...fields };
+  db.prepare('INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, rain_coverage, '
+    + 'rain_selected_deveui, rain_policy_version, rain_quality_reasons, rain_received_mm) VALUES (1, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)')
+    .run(f.date, f.rainfall_mm, f.rain_source, '2026-10-09T00:10:00.000Z', f.policy ? f.coverage : null, f.policy ? f.deveui : null,
+      f.policy ? 1 : null, f.policy ? JSON.stringify(f.reasons) : null, f.policy ? f.received : null);
+}
+function adviceDevice(db, eui, type) {
+  db.prepare("INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at) VALUES (?, ?, ?, 1, 1, '2026-01-01', '2026-01-01')")
+    .run(eui, type, type);
+}
+const OPEN_METEO_DAY = (amountMm, coveredHours = 24, expectedHours = 24) => ({ amountMm, source: 'open_meteo', period: 'farm_day', coveredHours, expectedHours });
+async function advice(db, provider, opts = {}) {
+  return R.resolveAdviceRain(adviceScope(db), 1, opts.date || ADVICE_DAY, provider, { nowMs: ADVICE_NOW, ...opts });
+}
+
+test('resolveAdviceRain: a certified local 0 mm is a measured dry day and wins over provider rain (A33)', async () => {
+  const db = adviceDb();
+  adviceRow(db, { rainfall_mm: 0, rain_source: 'aquascope_lorain', coverage: 'complete', deveui: ADVICE_GAUGE });
+  assert.deepEqual(await advice(db, OPEN_METEO_DAY(6)), {
+    amountMm: 0, lowerBoundMm: null, coverage: 'complete', source: 'local_gauge', deveui: ADVICE_GAUGE,
+    reasons: [], policyVersion: 1, coveredHours: null, expectedHours: null,
+  });
+  // The same without any provider value: still observed, no rain_unknown.
+  const alone = await advice(db, null);
+  assert.equal(alone.amountMm, 0);
+  assert.deepEqual(alone.reasons, []);
+});
+
+test('resolveAdviceRain: a certified local 10 mm wins over a dry provider (A34)', async () => {
+  const db = adviceDb();
+  adviceRow(db, { rainfall_mm: 10, rain_source: 'sensecap_s2120', coverage: 'complete', deveui: ADVICE_GAUGE });
+  const r = await advice(db, OPEN_METEO_DAY(0));
+  assert.equal(r.amountMm, 10);
+  assert.equal(r.source, 'local_gauge');
+  assert.equal(r.coverage, 'complete');
+  assert.equal(r.lowerBoundMm, null);
+  assert.equal(R.adviceSuppressionMm(r), 10);
+});
+
+test('resolveAdviceRain: a partial local day is a lower bound next to the provider amount, never the amount', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'partial', deveui: ADVICE_GAUGE, reasons: ['frame_gap'], received: 7, rain_source: 'aquascope_lorain' });
+  assert.deepEqual(await advice(db, OPEN_METEO_DAY(2)), {
+    amountMm: 2, lowerBoundMm: 7, coverage: 'complete', source: 'open_meteo', deveui: ADVICE_GAUGE,
+    reasons: ['frame_gap', 'local_partial'], policyVersion: 1, coveredHours: 24, expectedHours: 24,
+  });
+  // Suppression entry takes the larger of the two; the amount stays the provider's.
+  assert.equal(R.adviceSuppressionMm(await advice(db, OPEN_METEO_DAY(2))), 7);
+  assert.equal(R.adviceSuppressionMm(await advice(db, OPEN_METEO_DAY(10))), 10);
+  // Without a provider value the amount is unknown; the lower bound remains.
+  const alone = await advice(db, null);
+  assert.equal(alone.amountMm, null);
+  assert.equal(alone.lowerBoundMm, 7);
+  assert.equal(alone.coverage, 'unknown');
+  assert.equal(alone.source, 'none');
+  assert.deepEqual(alone.reasons, ['frame_gap', 'local_partial', 'rain_unknown']);
+  assert.equal(R.adviceSuppressionMm(alone), 7);
+});
+
+test('resolveAdviceRain: unknown local rain and no provider is unknown (null), never 0', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'unknown', deveui: ADVICE_GAUGE, reasons: ['received_only', 'build_unpinned'], rain_source: 'aquascope_lorain' });
+  assert.deepEqual(await advice(db, null), {
+    amountMm: null, lowerBoundMm: null, coverage: 'unknown', source: 'none', deveui: null,
+    reasons: ['received_only', 'build_unpinned', 'local_unknown', 'rain_unknown'], policyVersion: 1, coveredHours: null, expectedHours: null,
+  });
+  assert.equal(R.adviceSuppressionMm(await advice(db, null)), null);
+});
+
+test('resolveAdviceRain: ambiguous gauges take the provider with gauge_ambiguous; a MeteoSwiss UTC day is labelled utc_day_period', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'unknown', deveui: null, reasons: ['gauge_ambiguous'] });
+  assert.deepEqual(await advice(db, { amountMm: 3, source: 'meteoswiss_station', period: 'utc_day' }), {
+    amountMm: 3, lowerBoundMm: null, coverage: 'complete', source: 'meteoswiss_station', deveui: null,
+    reasons: ['gauge_ambiguous', 'utc_day_period'], policyVersion: 1, coveredHours: null, expectedHours: null,
+  });
+});
+
+test('resolveAdviceRain: provider tiers in order; a tier without an amount passes; partial hours are summed with their coverage', async () => {
+  const db = adviceDb();
+  const r = await advice(db, [
+    { amountMm: null, source: 'meteoswiss_station', period: 'farm_day' },
+    OPEN_METEO_DAY(1.4, 20, 24),
+  ]);
+  assert.equal(r.amountMm, 1.4);
+  assert.equal(r.source, 'open_meteo');
+  assert.equal(r.coverage, 'partial');
+  assert.equal(r.coveredHours, 20);
+  assert.equal(r.expectedHours, 24);
+  assert.deepEqual(r.reasons, ['no_gauge', 'provider_partial']);
+});
+
+test('resolveAdviceRain: a negative provider amount is invalid and falls through to the next tier', async () => {
+  const db = adviceDb();
+  const validFallback = await advice(db, [
+    { amountMm: -1, source: 'openagri', period: 'farm_day' },
+    OPEN_METEO_DAY(2),
+  ]);
+  assert.equal(validFallback.amountMm, 2);
+  assert.equal(validFallback.source, 'open_meteo');
+
+  const noFallback = await advice(adviceDb(), { amountMm: -1, source: 'open_meteo', period: 'farm_day' });
+  assert.equal(noFallback.amountMm, null);
+  assert.equal(noFallback.coverage, 'unknown');
+  assert.ok(noFallback.reasons.includes('rain_unknown'));
+});
+
+test('resolveAdviceRain: complete_so_far is certified only on the current farm day', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'complete_so_far', deveui: ADVICE_GAUGE, reasons: ['ongoing'], received: 1.2, rain_source: 'sensecap_s2120' });
+  const today = await advice(db, OPEN_METEO_DAY(4), { nowMs: Date.parse(ADVICE_DAY + 'T11:00:00.000Z') });
+  assert.equal(today.amountMm, 1.2);
+  assert.equal(today.coverage, 'complete_so_far');
+  assert.equal(today.source, 'local_gauge');
+  assert.equal(today.lowerBoundMm, null);
+  // The next day the row was not closed: it is a partial day, a lower bound only.
+  const later = await advice(db, null);
+  assert.equal(later.amountMm, null);
+  assert.equal(later.lowerBoundMm, 1.2);
+  assert.deepEqual(later.reasons, ['ongoing', 'local_partial', 'rain_unknown']);
+});
+
+test('resolveAdviceRain: the current day with a received 0 and elapsed provider hours (policy example "Today")', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'unknown', deveui: ADVICE_GAUGE, reasons: ['received_only', 'ongoing'], received: 0, rain_source: 'aquascope_lorain' });
+  const r = await advice(db, OPEN_METEO_DAY(0, 11, 11), { nowMs: Date.parse(ADVICE_DAY + 'T11:00:00.000Z') });
+  assert.deepEqual(r, {
+    amountMm: 0, lowerBoundMm: 0, coverage: 'complete', source: 'open_meteo', deveui: ADVICE_GAUGE,
+    reasons: ['received_only', 'ongoing', 'local_unknown'], policyVersion: 1, coveredHours: 11, expectedHours: 11,
+  });
+});
+
+test('resolveAdviceRain: no zone row reads the selection; a gauge without a row is local_unknown with no lower bound', async () => {
+  const db = adviceDb();
+  assert.deepEqual((await advice(db, null)).reasons, ['no_gauge', 'rain_unknown']);
+  adviceDevice(db, ADVICE_GAUGE, 'AQUASCOPE_LORAIN');
+  const one = await advice(db, null);
+  assert.deepEqual(one.reasons, ['local_unknown', 'rain_unknown']);
+  assert.equal(one.lowerBoundMm, null);
+  assert.equal(one.deveui, null);
+  adviceDevice(db, ADVICE_GAUGE_B, 'SENSECAP_S2120');
+  const two = await advice(db, OPEN_METEO_DAY(1));
+  assert.deepEqual(two.reasons, ['gauge_ambiguous']);
+  assert.equal(two.amountMm, 1);
+});
+
+test('resolveAdviceRain: a legacy row takes the consumer legacy reading and carries legacy_row', async () => {
+  const db = adviceDb();
+  adviceRow(db, { policy: false, rainfall_mm: 4, rain_source: 'aquascope_lorain' });
+  assert.deepEqual(await advice(db, OPEN_METEO_DAY(9)), {
+    amountMm: 4, lowerBoundMm: null, coverage: 'legacy_unvalidated', source: 'local_gauge', deveui: null,
+    reasons: ['legacy_row'], policyVersion: 1, coveredHours: null, expectedHours: null,
+  });
+  // A consumer-specific legacy reader (the zone water tile's evidence rule).
+  const custom = await advice(db, null, { legacyRainMm: (row) => (Number(row.rainfall_mm) > 3 ? null : 0) });
+  assert.equal(custom.amountMm, null);
+  assert.deepEqual(custom.reasons, ['legacy_row', 'rain_unknown']);
+});
+
+test('resolveAdviceRain: a legacy local 0 (e.g. an LSN50 flow-only row) is no evidence of a dry day', async () => {
+  const db = adviceDb();
+  adviceRow(db, { policy: false, rainfall_mm: 0, rain_source: 'local_gauge' });
+  const none = await advice(db, null);
+  assert.equal(none.amountMm, null);
+  assert.equal(none.coverage, 'unknown');
+  assert.deepEqual(none.reasons, ['legacy_row', 'rain_unknown']);
+  const provider = await advice(db, OPEN_METEO_DAY(6));
+  assert.equal(provider.amountMm, 6);
+  assert.equal(provider.source, 'open_meteo');
+  assert.deepEqual(provider.reasons, ['legacy_row']);
+});
+
+test('resolveAdviceRain: a policy-1 flow-only LSN50 row (unknown, no amount) is not a dry day', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'unknown', deveui: ADVICE_GAUGE, reasons: ['frame_gap'], rain_source: 'local_gauge' });
+  const r = await advice(db, null);
+  assert.equal(r.amountMm, null);
+  assert.deepEqual(r.reasons, ['frame_gap', 'local_unknown', 'rain_unknown']);
+});
+
+test('resolveAdviceRain: a coverage value outside the table, or complete without an amount, is uncertified', async () => {
+  const db = adviceDb();
+  adviceRow(db, { coverage: 'mystery', deveui: ADVICE_GAUGE, received: 2 });
+  const odd = await advice(db, null);
+  assert.equal(odd.amountMm, null);
+  assert.equal(odd.lowerBoundMm, 2);
+  assert.deepEqual(odd.reasons, ['local_unknown', 'rain_unknown']);
+  const db2 = adviceDb();
+  adviceRow(db2, { coverage: 'complete', deveui: ADVICE_GAUGE, rainfall_mm: null });
+  assert.equal((await advice(db2, null)).amountMm, null);
+});
+
+test('adviceSuppressionMm: the larger of amount and lower bound, ignoring nulls', () => {
+  assert.equal(R.adviceSuppressionMm({ amountMm: null, lowerBoundMm: null }), null);
+  assert.equal(R.adviceSuppressionMm({ amountMm: 0, lowerBoundMm: null }), 0);
+  assert.equal(R.adviceSuppressionMm({ amountMm: null, lowerBoundMm: 5 }), 5);
+  assert.equal(R.adviceSuppressionMm({ amountMm: 3, lowerBoundMm: 7 }), 7);
+  assert.equal(R.adviceSuppressionMm(null), null);
+});

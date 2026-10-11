@@ -11,6 +11,7 @@ const REPO = path.resolve(__dirname, '..');
 const SEED = path.join(REPO, 'database/seed-blank.sql');
 const FLOWS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const MODULE = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-analytics');
+const RAIN_MODULE = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain');
 const CONTRACT = path.join(REPO, 'docs/contracts/dendro');
 const CASES = path.join(CONTRACT, 'cases');
 const EDGE_CASES = path.join(CONTRACT, 'edge-node-cases');
@@ -55,16 +56,23 @@ function makeFixedDate(iso) {
 
 function makeFacadeShim(dbPath) {
   const db = new DatabaseSync(dbPath);
-  const call = (kind) => (sql, cb) => {
+  // (sql, cb) or (sql, params, cb): the node's own queries carry no parameters;
+  // osi-rain's reads (resolveAdviceRain) do.
+  const call = (kind) => (sql, paramsOrCb, maybeCb) => {
+    const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+    const cb = typeof paramsOrCb === 'function' ? paramsOrCb : maybeCb;
     try {
       let result;
-      if (kind === 'run' || kind === 'exec') {
+      if ((kind === 'run' || kind === 'exec') && !params.length) {
         db.exec(sql);
         result = undefined;
+      } else if (kind === 'run') {
+        db.prepare(sql).run(...params);
+        result = undefined;
       } else if (kind === 'get') {
-        result = db.prepare(sql).get();
+        result = db.prepare(sql).get(...params);
       } else {
-        result = db.prepare(sql).all();
+        result = db.prepare(sql).all(...params);
       }
       if (typeof cb === 'function') {
         process.nextTick(() => cb(null, result));
@@ -185,6 +193,7 @@ async function runNodeFixture() {
   const osiDb = { Database: function Database() { return makeFacadeShim(dbPath); }, verbose() { return osiDb; } };
   const osiLib = {
     require(name) {
+      if (name === 'rain') return { ok: true, value: require(RAIN_MODULE) };
       if (name !== 'dendro-analytics') return { ok: false, error: `unexpected helper ${name}` };
       return { ok: true, value: require(MODULE) };
     },

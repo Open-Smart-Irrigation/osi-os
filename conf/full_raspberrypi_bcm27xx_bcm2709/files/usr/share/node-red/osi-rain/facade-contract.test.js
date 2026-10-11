@@ -223,3 +223,31 @@ test('zoneRainSourceView and setZoneRainSource through the osi-db-helper facade 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('resolveAdviceRain through plain osi-db-helper reads (dendro-compute-fn and zone-env-fn shape)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-rain-facade-'));
+  try {
+    const file = path.join(dir, 'farming.db');
+    const native = new DatabaseSync(file);
+    native.exec(fs.readFileSync(SEED, 'utf8'));
+    native.exec(`INSERT INTO users (username, password_hash, created_at, user_uuid) VALUES ('owner', 'h', '2026-01-01', 'u-owner');
+      INSERT INTO irrigation_zones (name, user_id, zone_uuid, timezone, scheduling_mode) VALUES ('Z', 1, 'z-1', 'Europe/Zurich', 'local');
+      INSERT INTO zone_daily_environment (zone_id, date, rainfall_mm, flow_liters, rain_source, computed_at, rain_coverage,
+        rain_selected_deveui, rain_policy_version, rain_quality_reasons, rain_received_mm)
+        VALUES (1, '2026-10-08', NULL, 0, 'aquascope_lorain', '2026-10-09T00:00:00.000Z', 'partial', 'A840410000000001', 1, '["frame_gap"]', 7);`);
+    native.close();
+    const osiDb = loadOsiDbHelper();
+    const db = new osiDb.Database(file);
+    const out = await R.resolveAdviceRain(db, 1, '2026-10-08',
+      { amountMm: 2, source: 'open_meteo', period: 'farm_day', coveredHours: 24, expectedHours: 24 },
+      { nowMs: Date.parse('2026-10-09T03:00:00.000Z') });
+    assert.deepEqual(out, {
+      amountMm: 2, lowerBoundMm: 7, coverage: 'complete', source: 'open_meteo', deveui: 'A840410000000001',
+      reasons: ['frame_gap', 'local_partial'], policyVersion: 1, coveredHours: 24, expectedHours: 24,
+    });
+    assert.equal(R.adviceSuppressionMm(out), 7);
+    await new Promise((resolve) => db.close(() => resolve()));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

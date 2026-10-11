@@ -514,20 +514,82 @@ function estimateStepHours(hours) {
  * covered step means the total is unknown (null), never 0 mm; a partly
  * covered horizon keeps the sum of what is known, with its coverage.
  */
-function sumRain(hours, nowMs, horizonHours) {
+function sumRain(hours, nowMs, horizonHours, sourceBasis) {
   const endMs = nowMs + horizonHours * 3600000;
   const list = Array.isArray(hours) ? hours : [];
   const seen = new Set();
   let total = 0;
+  const endStampedHourly = sourceBasis && sourceBasis.source === 'open_meteo' && sourceBasis.basis === 'end';
   for (const hour of list) {
     const timestamp = hour && hour.time ? new Date(hour.time).getTime() : NaN;
     const rainMm = toFiniteNumber(hour && hour.rainMm);
-    if (!Number.isFinite(timestamp) || rainMm == null || timestamp < nowMs || timestamp >= endMs || seen.has(timestamp)) continue;
+    if (!Number.isFinite(timestamp) || rainMm == null || rainMm < 0 || seen.has(timestamp)) continue;
+    if (endStampedHourly) {
+      if (timestamp <= nowMs || timestamp > endMs) continue;
+    } else if (timestamp < nowMs || timestamp >= endMs) continue;
     seen.add(timestamp);
     total += rainMm;
   }
-  const coveredHours = seen.size ? Math.min(horizonHours, round(seen.size * estimateStepHours(list), 2)) : 0;
+  const coveredHours = endStampedHourly
+    ? Math.min(horizonHours, seen.size)
+    : seen.size ? Math.min(horizonHours, round(seen.size * estimateStepHours(list), 2)) : 0;
   return { totalMm: seen.size ? round(total, 2) : null, coveredHours, expectedHours: horizonHours };
+}
+
+function zonedDateTimeMs(dateIso, timezone) {
+  const date = trimToNull(dateIso);
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [year, month, day] = date.split('-').map(Number);
+  const wantedUtc = Date.UTC(year, month - 1, day);
+  let candidate = wantedUtc;
+  const calendarProbe = new Date(wantedUtc);
+  if (calendarProbe.getUTCFullYear() !== year || calendarProbe.getUTCMonth() !== month - 1 || calendarProbe.getUTCDate() !== day) return null;
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: normalizeTimezone(timezone), year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  });
+  for (let i = 0; i < 3; i++) {
+    const parts = {};
+    for (const part of formatter.formatToParts(new Date(candidate))) if (part.type !== 'literal') parts[part.type] = Number(part.value);
+    const seenUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    const delta = wantedUtc - seenUtc;
+    candidate += delta;
+    if (delta === 0) break;
+  }
+  return candidate;
+}
+
+/** Resolve trusted elapsed Open-Meteo hourly rain for the zone's local farm day. */
+function providerRainToday(forecast, timezone, todayIso, nowMs) {
+  if (!forecast || forecast.source !== 'open_meteo' || !Array.isArray(forecast.hours)) return null;
+  const observedAtMs = forecast.observedAt ? new Date(forecast.observedAt).getTime() : NaN;
+  if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs)) return null;
+  const dayStartMs = zonedDateTimeMs(todayIso, timezone);
+  const nextDate = addUtcDays(todayIso, 1);
+  const dayEndMs = zonedDateTimeMs(nextDate, timezone);
+  if (!Number.isFinite(dayStartMs) || !Number.isFinite(dayEndMs) || dayEndMs <= dayStartMs) return null;
+  const dayHours = (dayEndMs - dayStartMs) / 3600000;
+  const cutoffMs = Math.min(nowMs, observedAtMs, dayEndMs);
+  // The denominator is the number of one-hour slots needed to reach now;
+  // at 11:30 this is 12 slots, not a claim that 12 hours elapsed.
+  const expectedHours = Math.min(dayHours, Math.ceil(Math.max(0, nowMs - dayStartMs) / 3600000));
+  if (cutoffMs <= dayStartMs || expectedHours <= 0) return null;
+  const seen = new Set();
+  let amountMm = 0;
+  for (const hour of forecast.hours) {
+    const endMs = hour && hour.time ? new Date(hour.time).getTime() : NaN;
+    const rainMm = toFiniteNumber(hour && hour.rainMm);
+    const startMs = endMs - 3600000;
+    if (!Number.isFinite(endMs) || rainMm == null || rainMm < 0 || (endMs - dayStartMs) % 3600000 !== 0 || startMs < dayStartMs || endMs > cutoffMs || endMs > dayEndMs) continue;
+    if (seen.has(endMs)) continue;
+    seen.add(endMs);
+    amountMm += rainMm;
+  }
+  if (!seen.size) return null;
+  return {
+    amountMm: round(amountMm, 2), source: 'open_meteo', period: 'farm_day',
+    coveredHours: Math.min(expectedHours, seen.size), expectedHours
+  };
 }
 
 function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso) {
@@ -544,19 +606,24 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
   const nowMs = new Date(nowIso).getTime();
   const hours = Array.isArray(forecastData.hours) ? forecastData.hours.filter(hour => hour && hour.time) : [];
   const days = Array.isArray(forecastData.days) ? forecastData.days.filter(day => day && day.date) : [];
+  const endStampedHourly = forecastData.source === 'open_meteo';
+  const isForwardPoint = (timestamp) => Number.isFinite(timestamp) && (endStampedHourly
+    ? timestamp > nowMs && timestamp <= nowMs + 24 * 3600000
+    : timestamp >= nowMs && timestamp < nowMs + 24 * 3600000);
   const next24Hours = hours.filter(hour => {
     const timestamp = new Date(hour.time).getTime();
-    return Number.isFinite(timestamp) && timestamp >= nowMs && timestamp < nowMs + 24 * 3600000;
+    return isForwardPoint(timestamp);
   }).slice(0, 24);
   const maxRainHour = hours
-    .filter(hour => toFiniteNumber(hour && hour.rainMm) != null)
+    .filter(hour => toFiniteNumber(hour && hour.rainMm) != null && Number(hour.rainMm) >= 0)
     .sort((left, right) => Number(right.rainMm || 0) - Number(left.rainMm || 0))[0] || null;
   const nextRainHour = hours.find(hour => {
     const timestamp = hour && hour.time ? new Date(hour.time).getTime() : NaN;
-    return Number.isFinite(timestamp) && timestamp >= nowMs && Number(hour.rainMm || 0) > 0.05;
+    return isForwardPoint(timestamp) && Number(hour.rainMm || 0) > 0.05;
   }) || null;
-  const stepHours = estimateStepHours(hours);
-  const next24h = sumRain(hours, nowMs, 24);
+  const stepHours = forecastData.source === 'open_meteo' ? 1 : estimateStepHours(hours);
+  const sourceBasis = forecastData.source === 'open_meteo' ? { source: forecastData.source, basis: 'end' } : { source: forecastData.source, basis: 'start' };
+  const next24h = sumRain(hours, nowMs, 24, sourceBasis);
   // Each forecast day takes its own place on the FAO-56 curve (contract v2 A5).
   const kcOn = (date) => resolveKc({ ...(crop || {}), date }).kc;
   return {
@@ -567,7 +634,7 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
     expiresAt: expiresAt || null,
     rainFocus: {
       totalNext24hMm: next24h.totalMm,
-      totalNext72hMm: sumRain(hours, nowMs, 72).totalMm,
+      totalNext72hMm: sumRain(hours, nowMs, 72, sourceBasis).totalMm,
       next24hCoverage: { coveredHours: next24h.coveredHours, expectedHours: next24h.expectedHours },
       maxHourlyRainMm: maxRainHour ? round(maxRainHour.rainMm, 2) : null,
       maxHourlyRainAt: maxRainHour ? maxRainHour.time : null,
@@ -588,7 +655,7 @@ function buildForecastSection(forecastData, cacheState, expiresAt, crop, nowIso)
       hourly: next24Hours.map(hour => ({
         time: hour.time,
         tempC: hour.tempC ?? hour.airTemperatureC ?? null,
-        rainMm: hour.rainMm ?? null,
+        rainMm: toFiniteNumber(hour.rainMm) != null && Number(hour.rainMm) >= 0 ? Number(hour.rainMm) : null,
         rainProbabilityPct: hour.rainProbabilityPct ?? hour.precipitationProbabilityPct ?? null
       }))
     }
@@ -683,6 +750,27 @@ function resolveRainTodayMm(row, rainGaugePresent) {
   return round(mm, 2);
 }
 
+/**
+ * One zone day's rain for the Water tab under the rain-resolution policy
+ * (docs/contracts/rainfall/rain-resolution-policy.md). A policy-1 row
+ * (rain_policy_version set) counts only when the selected gauge certified it:
+ * 'complete' gives rainfall_mm, 'complete_so_far' gives the received amount on
+ * the current day only; any other day is unknown rain, and its received amount
+ * is returned as receivedMm, a lower bound for display, never a total. A legacy
+ * row reads as before through resolveRainTodayMm and has no coverage.
+ */
+function resolveDayRain(row, rainGaugePresent, isToday) {
+  if (!row || row.rain_policy_version == null) {
+    return { rainMm: resolveRainTodayMm(row, rainGaugePresent), coverage: null, receivedMm: null };
+  }
+  const coverage = trimToNull(row.rain_coverage) || 'unknown';
+  const amount = toFiniteNumber(row.rainfall_mm);
+  const received = toFiniteNumber(row.rain_received_mm);
+  if (coverage === 'complete' && amount != null) return { rainMm: round(amount, 2), coverage, receivedMm: null };
+  if (coverage === 'complete_so_far' && isToday && received != null) return { rainMm: round(received, 2), coverage, receivedMm: null };
+  return { rainMm: null, coverage, receivedMm: received != null ? round(received, 2) : null };
+}
+
 function toEffectiveIrrigationMm(irrigationLiters, areaM2, irrigationEfficiencyPct) {
   const liters = toFiniteNumber(irrigationLiters);
   const area = toFiniteNumber(areaM2);
@@ -714,7 +802,8 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
   const daily = [];
   for (let dateIso = startIso; dateIso && dateIso <= todayIso; dateIso = addUtcDays(dateIso, 1)) {
     const row = byDate[dateIso] || null;
-    const rainMm = resolveRainTodayMm(row, rainGaugePresent === undefined ? true : rainGaugePresent);
+    const dayRain = resolveDayRain(row, rainGaugePresent === undefined ? true : rainGaugePresent, dateIso === todayIso);
+    const rainMm = dayRain.rainMm;
     const measuredIrrigationLiters = round(row ? row.flow_liters : 0, 2) || 0;
     const estimatedIrrigationLiters = round(estimated[dateIso] || 0, 2) || 0;
     const measuredIrrigationNetMm = toEffectiveIrrigationMm(measuredIrrigationLiters, zone && zone.area_m2, zone && zone.irrigation_efficiency_pct);
@@ -731,6 +820,8 @@ function buildWaterDaily({ envRows, estimatedByDate, agronomyRows, zone, todayIs
       totalWaterMm: measuredIrrigationNetMm != null && rainMm != null ? round(rainMm + measuredIrrigationNetMm, 2) : null,
       estimatedTotalWaterMm: estimatedIrrigationNetMm != null && rainMm != null ? round(rainMm + estimatedIrrigationNetMm, 2) : null
     };
+    // Policy-1 days only: a legacy day keeps its earlier shape.
+    if (dayRain.coverage) Object.assign(day, { rainCoverage: dayRain.coverage, rainReceivedMm: dayRain.receivedMm });
     const a = agronomyByDate[dateIso] || null;
     if (dateIso === todayIso) {
       const cur = todayAgronomic && typeof todayAgronomic === 'object' ? todayAgronomic : {};
@@ -965,10 +1056,17 @@ function overlayLocalWaterIrrigationSplit(sharedWater, localWater, todayIso) {
   });
   // A bundle that ends before today describes yesterday: every "today" field
   // of the tile comes from the gateway, so the tile shows one day.
-  const today = bundleCurrent || !todayIso ? {} : {
-    rainTodayMm: localWater.rainTodayMm,
-    rainTodayStatus: localWater.rainTodayStatus,
+  const today = bundleCurrent ? (Object.prototype.hasOwnProperty.call(sharedWater, 'rainTodayCoverage')
+    ? {}
+    : Object.prototype.hasOwnProperty.call(sharedWater, 'rainCoverage')
+      ? { rainTodayCoverage: sharedWater.rainCoverage }
+      : {}) : !todayIso ? {} : {
+    rainTodayMm: localWater.rainTodayMm != null ? localWater.rainTodayMm : null,
+    rainTodayStatus: localWater.rainTodayStatus != null ? localWater.rainTodayStatus : null,
     rainSource: localWater.rainSource != null ? localWater.rainSource : null,
+    rainTodayCoverage: localWater.rainTodayCoverage != null ? localWater.rainTodayCoverage : null,
+    rainTodayReceivedMm: localWater.rainTodayReceivedMm != null ? localWater.rainTodayReceivedMm : null,
+    rainTodayReasons: Array.isArray(localWater.rainTodayReasons) ? localWater.rainTodayReasons : [],
     balanceTodayMm: localWater.balanceTodayMm,
     next24hRainMm: localWater.next24hRainMm,
     action: localWater.action
@@ -1028,12 +1126,14 @@ module.exports = {
   findMetric,
   estimateStepHours,
   sumRain,
+  providerRainToday,
   buildForecastSection,
   buildAgronomic,
   localDateIso,
   addUtcDays,
   GAUGE_RAIN_SOURCES,
   resolveRainTodayMm,
+  resolveDayRain,
   toEffectiveIrrigationMm,
   buildWaterDaily,
   buildSensorHealth,

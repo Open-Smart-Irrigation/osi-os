@@ -436,6 +436,9 @@
       "lastSevenDaysHelpLabel": "Sobre os últimos 7 dias",
       "setupRequiredHelpLabel": "Porque falta a rega efetiva",
       "rainSourceHelpLabel": "De onde vem este valor de chuva",
+      "rainSoFar": "até agora",
+      "utcDay": "dia UTC",
+      "rainReceivedOnly": "apenas {{value}} recebidos (dia incompleto)",
       "demandNoSource": "nenhuma fonte meteorológica para este dia",
       "demandMixedStation": "horas de duas estações da MeteoSwiss",
       "demandUnknownStation": "estação da MeteoSwiss desconhecida para estas horas",
@@ -448,7 +451,11 @@
         "cloud": "ET0 do modelo meteorológico Open-Meteo (não medida nesta exploração); o OSI Cloud aplica o coeficiente cultural"
       },
       "modelAccuracyNote": "A ET0 de um modelo pode diferir 10-20 % de uma estação local num único dia, sobretudo em dias nublados ou ventosos e na montanha; os totais semanais coincidem melhor.",
-      "meteoswissCloudNote": "Esta zona usa a MeteoSwiss no gateway; o histórico próprio do OSI Cloud usa a Open-Meteo até o histórico da MeteoSwiss estar disponível na nuvem."
+      "meteoswissCloudNote": "Esta zona usa a MeteoSwiss no gateway; o histórico próprio do OSI Cloud usa a Open-Meteo até o histórico da MeteoSwiss estar disponível na nuvem.",
+      "rainCoverage": {
+        "providerPartial": "Quantidade do provedor — cobertura parcial",
+        "receivedOnlyLabel": "apenas recebido (dia incompleto)"
+      }
     },
     "generatedAt": "Gerado {{time}}",
     "sectionTitle": "Ambiente e previsão do tempo",

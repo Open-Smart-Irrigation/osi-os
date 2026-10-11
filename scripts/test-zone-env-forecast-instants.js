@@ -37,16 +37,16 @@ const WHOLE_HOUR = {
     '2026-10-09T10:00:00.000Z': 2, // ends before now + 24 h
     '2026-10-09T11:00:00.000Z': 4, // ends after now + 24 h
   },
-  eta: '2026-10-08T11:00:00.000Z', maxAt: '2026-10-09T11:00:00.000Z', first: '2026-10-08T11:00:00.000Z', last: '2026-10-09T10:00:00.000Z',
+  total: 3, eta: '2026-10-08T11:00:00.000Z', maxAt: '2026-10-09T11:00:00.000Z', first: '2026-10-08T11:00:00.000Z', last: '2026-10-09T10:00:00.000Z',
 };
 const HALF_HOUR = {
   rainAt: {
     '2026-10-08T09:30:00.000Z': 3,
     '2026-10-08T11:30:00.000Z': 1,
     '2026-10-09T09:30:00.000Z': 2,
-    '2026-10-09T10:30:00.000Z': 4, // ends exactly at now + 24 h: outside
+    '2026-10-09T10:30:00.000Z': 4, // end-stamped interval exactly at the inclusive horizon boundary
   },
-  eta: '2026-10-08T11:30:00.000Z', maxAt: '2026-10-09T10:30:00.000Z', first: '2026-10-08T10:30:00.000Z', last: '2026-10-09T09:30:00.000Z',
+  total: 7, eta: '2026-10-08T11:30:00.000Z', maxAt: '2026-10-09T10:30:00.000Z', first: '2026-10-08T11:30:00.000Z', last: '2026-10-09T10:30:00.000Z',
 };
 let currentCase = WHOLE_HOUR;
 
@@ -182,7 +182,8 @@ for (const [timezone, expected] of CASES) {
     const rf = payload.forecast.rainFocus;
     assert.equal(payload.forecast.available, true);
     assert.equal(rf.nextRainEta, expected.eta);
-    assert.equal(rf.totalNext24hMm, 3);
+    assert.equal(rf.totalNext24hMm, expected.total);
+    assert.deepEqual(rf.next24hCoverage, { coveredHours: 24, expectedHours: 24 });
     assert.equal(rf.maxHourlyRainAt, expected.maxAt);
     assert.equal(rf.hourly[0].time, expected.first);
     assert.equal(rf.hourly.at(-1).time, expected.last);

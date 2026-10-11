@@ -1,7 +1,17 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import i18next from 'i18next';
+import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import enHistory from '../../../../public/locales/en/history.json';
+import deChDevices from '../../../../public/locales/de-CH/devices.json';
+import enDevices from '../../../../public/locales/en/devices.json';
+import esDevices from '../../../../public/locales/es/devices.json';
+import frDevices from '../../../../public/locales/fr/devices.json';
+import itDevices from '../../../../public/locales/it/devices.json';
+import lgDevices from '../../../../public/locales/lg/devices.json';
+import ptDevices from '../../../../public/locales/pt/devices.json';
 
 import { IrrigationZoneCard } from '../IrrigationZoneCard';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
@@ -30,25 +40,33 @@ vi.mock('../environment/EnvironmentCard', () => ({ EnvironmentCard: () => <div /
 vi.mock('../dendrometer/DendrometerSection', () => ({ DendrometerSection: () => <div /> }));
 vi.mock('../../../utils/isDesktopBrowser', () => ({ isDesktopBrowser: vi.fn(() => false) }));
 
-// Same shape as the other zone-card suites: resolve `defaultValue` and
-// `{{placeholders}}` so assertions read the English the card renders.
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    i18n: { language: 'en' },
-    t: (key: string, options?: unknown) => {
-      const statusLabel = ({
-        'history.soil.state.wet': 'Wet',
-        'history.soil.state.moist': 'Moist',
-        'history.soil.state.dry': 'Dry',
-      } as Record<string, string>)[key];
-      if (statusLabel) return statusLabel;
-      if (typeof options === 'string') return options;
-      const values = (options ?? {}) as Record<string, unknown>;
-      const template = typeof values.defaultValue === 'string' ? values.defaultValue : key;
-      return template.replace(/\{\{(\w+)\}\}/g, (_match, name: string) => String(values[name] ?? ''));
-    },
-  }),
-}));
+const localeDevices = {
+  'de-CH': deChDevices,
+  en: enDevices,
+  es: esDevices,
+  fr: frDevices,
+  it: itDevices,
+  lg: lgDevices,
+  pt: ptDevices,
+};
+
+function buildTestI18n(language: keyof typeof localeDevices = 'en') {
+  const instance = i18next.createInstance();
+  const resources = Object.fromEntries(Object.entries(localeDevices).map(([locale, devices]) => [
+    locale,
+    { devices, history: enHistory },
+  ]));
+  void instance.use(initReactI18next).init({
+    lng: language,
+    fallbackLng: 'en',
+    defaultNS: 'devices',
+    ns: ['devices', 'history'],
+    resources,
+    interpolation: { escapeValue: false },
+    initImmediate: false,
+  });
+  return instance;
+}
 
 const NOW = Date.parse('2026-07-08T12:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
@@ -103,11 +121,13 @@ function sensor(overrides: Partial<Device>): Device {
   } as Device;
 }
 
-async function openCard(devices: Device[]) {
+async function openCard(devices: Device[], language: keyof typeof localeDevices = 'en') {
   render(
-    <MemoryRouter>
-      <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
-    </MemoryRouter>,
+    <I18nextProvider i18n={buildTestI18n(language)}>
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={devices} unassignedDevices={[]} onUpdate={vi.fn()} />
+      </MemoryRouter>
+    </I18nextProvider>,
   );
   fireEvent.click(screen.getByRole('button', { expanded: false }));
   await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
@@ -377,7 +397,20 @@ describe('water card source gating', () => {
  */
 describe('water card rain source', () => {
   const RAIN_HELP = { name: 'Where this rain value comes from' };
+  const PROVIDER_PARTIAL = 'Provider amount — partial coverage';
   const payerne = { id: 'PAY', name: 'Payerne', distanceKm: 1.2, network: 'ogd-smn' };
+  const partialProviderSources = [
+    {
+      rainSource: 'weather_service',
+      rainStation: null,
+      sourceHelp: 'From weather data (not measured)',
+    },
+    {
+      rainSource: 'meteoswiss_station',
+      rainStation: payerne,
+      sourceHelp: 'Measured at MeteoSwiss Payerne (1.2 km away)',
+    },
+  ] as const;
   const soil = () => sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2 } });
 
   it('shows station rain for a zone without a gauge and names the station behind a HelpTip', async () => {
@@ -432,6 +465,69 @@ describe('water card rain source', () => {
 
     expect(screen.queryByTestId('water-rain-tile')).not.toBeInTheDocument();
   });
+
+  it.each(partialProviderSources.flatMap((sourceCase) => [false, true].map((hasLowerBound) => ({
+    ...sourceCase,
+    hasLowerBound,
+  }))))(
+    'shows actual partial $rainSource coverage despite a configured gauge, lower bound: $hasLowerBound',
+    async ({ rainSource, rainStation, sourceHelp, hasLowerBound }) => {
+      apiMocks.getSummary.mockResolvedValue({
+        ...summary,
+        water: {
+          ...summary.water,
+          rainTodayMm: 6,
+          rainTodayCoverage: 'partial',
+          rainTodayReceivedMm: hasLowerBound ? 3 : null,
+          rainSource,
+          rainStation,
+          sensorHealth: { ...summary.water.sensorHealth, rainGaugePresent: true },
+        },
+      });
+      await openCard([soil()]);
+
+      const tile = screen.getByTestId('water-rain-tile');
+      expect(tile).toHaveTextContent('6.0 mm');
+      expect(tile).toHaveTextContent(PROVIDER_PARTIAL);
+      if (hasLowerBound) {
+        expect(tile).toHaveTextContent('3.0 mm received only (incomplete day)');
+      } else {
+        expect(tile).not.toHaveTextContent(/received only/);
+      }
+      fireEvent.click(screen.getByRole('button', RAIN_HELP));
+      expect(screen.getByText(sourceHelp)).toBeInTheDocument();
+      expect(screen.getByTestId('water-action-tile')).toHaveTextContent(
+        rainSource === 'weather_service'
+          ? 'Driven by water balance · rain from weather data'
+          : 'Driven by water balance · rain measured at MeteoSwiss Payerne',
+      );
+    },
+  );
+
+  it.each(Object.keys(localeDevices) as Array<keyof typeof localeDevices>)(
+    'interpolates the received lower bound once using shipped %s wording',
+    async (language) => {
+      const devices = localeDevices[language];
+      const expectedReceived = devices.environment.water.rainReceivedOnly.replace('{{value}}', '3.0 mm');
+      apiMocks.getSummary.mockResolvedValue({
+        ...summary,
+        water: {
+          ...summary.water,
+          rainTodayMm: 6,
+          rainTodayCoverage: 'partial',
+          rainTodayReceivedMm: 3,
+          rainSource: 'weather_service',
+          sensorHealth: { ...summary.water.sensorHealth, rainGaugePresent: true },
+        },
+      });
+      await openCard([soil()], language);
+
+      const tile = screen.getByTestId('water-rain-tile');
+      expect(tile).toHaveTextContent(expectedReceived);
+      expect(tile).not.toHaveTextContent('{{value}}');
+      expect(tile.textContent?.match(/3\.0 mm/g)).toHaveLength(1);
+    },
+  );
 
   it('names no station when the source is not the station', async () => {
     apiMocks.getSummary.mockResolvedValue({

@@ -18,6 +18,7 @@ import { HelpTip } from './shared/HelpTip';
 import { DendrometerSection } from './dendrometer/DendrometerSection';
 import { EnvironmentCard } from './environment/EnvironmentCard';
 import { RainGaugeAmbiguityBanner } from './environment/RainGaugeAmbiguityBanner';
+import { rainCoverageNote } from './environment/WaterTab';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
 import { useTranslation } from 'react-i18next';
@@ -308,16 +309,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const hasFlowMeter = zoneHasFlowMeter(devices);
   const hasRainGauge = zoneHasRainGauge(devices) || (environmentSummary?.water.sensorHealth.rainGaugePresent ?? false);
   const hasForecastRain = environmentSummary?.water.next24hRainMm != null;
-  // A linked gateway can carry rain for a zone without a gauge: measured at the
-  // nearest MeteoSwiss station, or the weather service's rain for the hours of
-  // today that have passed. The zone's own gauge always wins the label, and a
-  // source with no value shows no number.
+  // The resolved amount's source wins over configured sensor presence: an
+  // uncertified gauge can coexist with a provider amount used in the balance.
   const rainSource = environmentSummary?.water.rainSource ?? null;
   const rainStation = environmentSummary?.water.rainStation ?? null;
   const rainStationName = rainStation ? rainStation.name ?? rainStation.id : null;
-  const rainSourceHelp = hasRainGauge
-    ? null
-    : rainSource === 'meteoswiss_station' && rainStation
+  const rainSourceHelp = rainSource === 'meteoswiss_station' && rainStation
       ? t('zone.water.rainFromStation', {
           station: rainStationName,
           distance: rainStation.distanceKm != null && Number.isFinite(rainStation.distanceKm) ? rainStation.distanceKm.toFixed(1) : '—',
@@ -326,10 +323,21 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
       : rainSource === 'weather_service'
         ? t('zone.water.rainFromWeather', { defaultValue: 'From weather data (not measured)' })
         : null;
-  const hasRainTile = hasRainGauge || (rainSourceHelp != null && environmentSummary?.water.rainTodayMm != null);
-  const drivenByBalanceText = !hasRainGauge && rainSource === 'meteoswiss_station' && rainStationName
+  const rainTodayCoverageNote = environmentSummary?.water.rainTodayMm != null
+    ? rainCoverageNote(t, environmentSummary.water.rainTodayCoverage, rainSource)
+    : null;
+  const rainTodayReceivedDetail = environmentSummary?.water.rainTodayReceivedMm != null
+    ? t('environment.water.rainReceivedOnly', {
+        value: formatWaterValue(environmentSummary.water.rainTodayReceivedMm, 'mm', 1),
+        defaultValue: '{{value}} received only (incomplete day)',
+      })
+    : null;
+  const hasRainTile = hasRainGauge
+    || environmentSummary?.water.rainTodayReceivedMm != null
+    || (rainSourceHelp != null && environmentSummary?.water.rainTodayMm != null);
+  const drivenByBalanceText = rainSource === 'meteoswiss_station' && rainStationName
     ? t('zone.water.drivenByWaterBalanceFromStation', { station: rainStationName, defaultValue: 'Driven by water balance · rain measured at MeteoSwiss {{station}}' })
-    : !hasRainGauge && rainSource === 'weather_service'
+    : rainSource === 'weather_service'
       ? t('zone.water.drivenByWaterBalanceFromWeather', { defaultValue: 'Driven by water balance · rain from weather data' })
       : t('zone.water.drivenByBalance', { defaultValue: 'Driven by water balance' });
   // The action tile always renders; it has its own insufficient-data state.
@@ -651,6 +659,11 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                   )}
                 </div>
                 <p className="mt-2 text-2xl font-bold text-[var(--primary)]">{formatWaterValue(environmentSummary.water.rainTodayMm, 'mm', 1)}</p>
+                {(rainTodayCoverageNote || rainTodayReceivedDetail) && (
+                  <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                    {[rainTodayCoverageNote, rainTodayReceivedDetail].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
             )}
             {/* A measured litre count needs a flow meter; without one the tile

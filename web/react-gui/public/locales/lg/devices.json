@@ -436,6 +436,9 @@
       "lastSevenDaysHelpLabel": "About the last 7 days",
       "setupRequiredHelpLabel": "Why effective irrigation is missing",
       "rainSourceHelpLabel": "Where this rain value comes from",
+      "rainSoFar": "so far",
+      "utcDay": "UTC day",
+      "rainReceivedOnly": "{{value}} received only (incomplete day)",
       "demandNoSource": "no weather source for this day",
       "demandMixedStation": "hours from two MeteoSwiss stations",
       "demandUnknownStation": "MeteoSwiss station unknown for these hours",
@@ -448,7 +451,11 @@
         "cloud": "ET0 from the Open-Meteo weather model (not measured at this farm); OSI Cloud applies the crop coefficient"
       },
       "modelAccuracyNote": "Model-based ET0 can differ from a local station by 10-20 % on a single day, most on cloudy, windy or mountain days; weekly totals agree better.",
-      "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud."
+      "meteoswissCloudNote": "This zone uses MeteoSwiss on the gateway; OSI Cloud's own history uses Open-Meteo until MeteoSwiss history is available in the cloud.",
+      "rainCoverage": {
+        "providerPartial": "Provider amount — partial coverage",
+        "receivedOnlyLabel": "received only (incomplete day)"
+      }
     },
     "generatedAt": "Generated {{time}}",
     "sectionTitle": "Environment & weather forecast",

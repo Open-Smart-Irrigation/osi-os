@@ -84,6 +84,7 @@ jobs:
           node scripts/test-zone-device-assignment-flow.js
           node scripts/test-zone-env-forecast-instants.js
           node scripts/test-zone-env-unknown-rain.js
+          node scripts/test-zone-env-rain-policy.js
           node scripts/test-zone-timezone-route.js
           node scripts/verify-chameleon-calibration.js
           node scripts/verify-lsn50-chameleon-persistence.js
@@ -270,6 +271,11 @@ jobs:
       # days, and unknown rain warns without starting rain suppression. Both profiles.
       - name: Dendro rolling 7-day rain
         run: node --test scripts/test-dendro-rolling-7d-rain.js
+      # Rain finding 7: dendro advice follows the rain-resolution policy. The zone's certified
+      # gauge day (a certified 0 mm included) outranks provider rain; an uncertified day's
+      # received amount may start suppression but is never the amount; unknown is NULL.
+      - name: Dendro rain-resolution policy
+        run: node --test scripts/test-dendro-rain-policy.js
       # osi-os #377: the valve, zone-schedule and zone-delete routes keep each
       # request's target, duration and identity on msg. Runs the shipped function
       # bodies with two requests interleaved at every sqlite boundary, flag off and
