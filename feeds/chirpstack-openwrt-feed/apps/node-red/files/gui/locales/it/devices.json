@@ -436,6 +436,9 @@
       "lastSevenDaysHelpLabel": "Informazioni sugli ultimi 7 giorni",
       "setupRequiredHelpLabel": "Perché manca l'irrigazione efficace",
       "rainSourceHelpLabel": "Da dove proviene questo valore di pioggia",
+      "rainSoFar": "finora",
+      "utcDay": "giorno UTC",
+      "rainReceivedOnly": "solo {{value}} ricevuti (giornata incompleta)",
       "demandNoSource": "nessuna fonte meteo per questo giorno",
       "demandMixedStation": "ore da due stazioni MeteoSvizzera",
       "demandUnknownStation": "stazione MeteoSvizzera sconosciuta per queste ore",
@@ -448,7 +451,11 @@
         "cloud": "ET0 dal modello meteo Open-Meteo (non misurata in questa azienda); OSI Cloud applica il coefficiente colturale"
       },
       "modelAccuracyNote": "L’ET0 da modello può discostarsi del 10-20 % da una stazione locale in un singolo giorno, soprattutto nelle giornate nuvolose o ventose e in montagna; i totali settimanali concordano meglio.",
-      "meteoswissCloudNote": "Questa zona usa MeteoSvizzera sul gateway; lo storico di OSI Cloud usa Open-Meteo finché lo storico MeteoSvizzera non è disponibile nel cloud."
+      "meteoswissCloudNote": "Questa zona usa MeteoSvizzera sul gateway; lo storico di OSI Cloud usa Open-Meteo finché lo storico MeteoSvizzera non è disponibile nel cloud.",
+      "rainCoverage": {
+        "providerPartial": "Quantità del fornitore — copertura parziale",
+        "receivedOnlyLabel": "solo ricevuti (giornata incompleta)"
+      }
     },
     "generatedAt": "Generato {{time}}",
     "sectionTitle": "Ambiente e previsioni meteo",
@@ -926,7 +933,17 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} giorni · totali giornalieri ({{timezone}})",
     "soFar": "finora",
-    "timezoneCheck": "Controlla il fuso orario della zona nelle sue impostazioni."
+    "timezoneCheck": "Controlla il fuso orario della zona nelle sue impostazioni.",
+    "exportDailyCsv": "Esporta la cronologia giornaliera della pioggia in CSV",
+    "exportUnavailable": "Esportazione CSV non disponibile per questo storico del gateway",
+    "qualityLabel": "Qualità: {{quality}}",
+    "quality": {
+      "complete": "completa",
+      "completeSoFar": "completa finora",
+      "partial": "parziale",
+      "receivedOnly": "solo ricevuta",
+      "unknown": "copertura sconosciuta"
+    }
   },
   "rain": {
     "recordedToday": "Pioggia registrata oggi",
@@ -939,5 +956,17 @@
     "tips_one": "{{count}} ribaltamento",
     "tips_other": "{{count}} ribaltamenti",
     "tipsUnavailable": "Numero di ribaltamenti non disponibile"
+  },
+  "zoneRainGauge": {
+    "label": "Pluviometro per questa zona",
+    "helpLabel": "Informazioni sul pluviometro",
+    "help": "Quando più pluviometri trasmettono per questa zona, la pioggia giornaliera della zona proviene dal pluviometro scelto qui. La pioggia di due pluviometri non viene mai sommata. Una modifica ricalcola gli ultimi 30 giorni.",
+    "notChosen": "— Nessun pluviometro scelto —",
+    "optionShared": "{{name}} (stazione meteo condivisa)",
+    "optionSuggested": "{{label}} — suggerito",
+    "ambiguous": "Due pluviometri trasmettono per questa zona. Finché non ne scegli uno, la zona non ha pioggia misurata.",
+    "onlyCandidate": "Viene usato l'unico pluviometro di questa zona.",
+    "loadFailed": "Non è stato possibile caricare i pluviometri di questa zona.",
+    "banner": "Due pluviometri trasmettono per questa zona. Scegline uno nelle impostazioni della zona."
   }
 }
