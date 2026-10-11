@@ -420,7 +420,9 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const rainCoverageDetail = water.rainTodayMm != null
     ? rainCoverageNote(t, water.rainTodayCoverage, water.rainSource)
     : null;
-  const showRainTile = hasRainGauge || (rainSourceHelp != null && water.rainTodayMm != null);
+  const showRainTile = hasRainGauge
+    || water.rainTodayReceivedMm != null
+    || (rainSourceHelp != null && water.rainTodayMm != null);
   const todayDate = water.todayDate ?? null;
   const chartData = buildWaterChartRows(water);
   // One decision for the bars, the axis and the legend (see waterChartSeries).

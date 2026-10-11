@@ -121,6 +121,46 @@ describe('WaterTab rain today under the rain-resolution policy', () => {
     expect(screen.queryByText(SO_FAR)).not.toBeInTheDocument();
   });
 
+  it('shows a persisted received lower bound without a configured or reporting gauge', () => {
+    renderTab(gaugeWater({
+      rainTodayMm: null,
+      rainTodayStatus: 'unknown',
+      rainTodayCoverage: 'unknown',
+      rainTodayReceivedMm: 3,
+      rainSource: null,
+      sensorHealth: {
+        sensorCount: 0,
+        freshSensorCount: 0,
+        staleSensorCount: 0,
+        rainGaugePresent: false,
+        flowMeterPresent: false,
+        warnings: [],
+      },
+    }));
+
+    expect(screen.getByText('3.0 mm received only (incomplete day)')).toBeInTheDocument();
+    expect(screen.queryByText('Rain today')).toBeInTheDocument();
+    expect(screen.queryByText('0.0 mm')).not.toBeInTheDocument();
+  });
+
+  it('keeps the rain tile hidden without a gauge, provider amount, or received lower bound', () => {
+    renderTab(gaugeWater({
+      rainTodayMm: null,
+      rainTodayReceivedMm: null,
+      rainSource: null,
+      sensorHealth: {
+        sensorCount: 0,
+        freshSensorCount: 0,
+        staleSensorCount: 0,
+        rainGaugePresent: false,
+        flowMeterPresent: false,
+        warnings: [],
+      },
+    }));
+
+    expect(screen.queryByText('Rain today')).not.toBeInTheDocument();
+  });
+
   it('shows a legacy day as before: no label, no warning', () => {
     renderTab(gaugeWater({ rainTodayMm: 0.8, rainTodayStatus: 'observed', rainTodayCoverage: 'legacy_unvalidated', rainTodayReceivedMm: null }));
 
