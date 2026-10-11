@@ -338,16 +338,16 @@
     "observedAt": "2026-07-11T10:00:00.000Z",
     "expiresAt": "2026-07-11T12:00:00.000Z",
     "rainFocus": {
-      "totalNext24hMm": 1.6,
-      "totalNext72hMm": 1.6,
+      "totalNext24hMm": 1.4,
+      "totalNext72hMm": 1.4,
       "next24hCoverage": {
-        "coveredHours": 9,
+        "coveredHours": 2,
         "expectedHours": 24
       },
       "maxHourlyRainMm": 1.4,
       "maxHourlyRainAt": "2026-07-11T13:00:00.000Z",
-      "nextRainEta": "2026-07-11T10:00:00.000Z",
-      "rainHoursNext24h": 6,
+      "nextRainEta": "2026-07-11T13:00:00.000Z",
+      "rainHoursNext24h": 1,
       "daily": [
         {
           "date": "2026-07-11",
@@ -375,12 +375,6 @@
         }
       ],
       "hourly": [
-        {
-          "time": "2026-07-11T10:00:00.000Z",
-          "tempC": 25.1,
-          "rainMm": 0.2,
-          "rainProbabilityPct": 30
-        },
         {
           "time": "2026-07-11T13:00:00.000Z",
           "tempC": 27.2,

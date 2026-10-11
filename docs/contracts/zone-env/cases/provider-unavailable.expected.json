@@ -242,7 +242,8 @@
       "rainGaugePresent": true,
       "flowMeterPresent": false,
       "warnings": []
-    }
+    },
+    "rainSource": "gauge"
   },
   "local": {
     "available": true,

@@ -12,9 +12,9 @@
     "available": true,
     "waterNeededTodayMm": 4.5,
     "rainTodayMm": 0.8,
-    "rainSource": null,
+    "rainSource": "gauge",
     "balanceTodayMm": -3.47,
-    "next24hRainMm": 1.6,
+    "next24hRainMm": 1.4,
     "action": {
       "code": "irrigate_today",
       "source": "dendro",
@@ -227,7 +227,12 @@
     "irrigationTodayEstimatedLiters": 12,
     "measuredIrrigationNetMm": 0.23,
     "estimatedIrrigationNetMm": 0.18,
-    "todayDate": "2026-07-11"
+    "todayDate": "2026-07-11",
+    "rainTodayCoverage": "legacy_unvalidated",
+    "rainTodayReceivedMm": null,
+    "rainTodayReasons": [
+      "legacy_row"
+    ]
   },
   "local": {
     "available": true,
@@ -348,16 +353,16 @@
     "observedAt": "2026-07-11T10:00:00.000Z",
     "expiresAt": "2026-07-11T12:00:00.000Z",
     "rainFocus": {
-      "totalNext24hMm": 1.6,
-      "totalNext72hMm": 1.6,
+      "totalNext24hMm": 1.4,
+      "totalNext72hMm": 1.4,
       "next24hCoverage": {
-        "coveredHours": 9,
+        "coveredHours": 2,
         "expectedHours": 24
       },
       "maxHourlyRainMm": 1.4,
       "maxHourlyRainAt": "2026-07-11T13:00:00.000Z",
-      "nextRainEta": "2026-07-11T10:00:00.000Z",
-      "rainHoursNext24h": 6,
+      "nextRainEta": "2026-07-11T13:00:00.000Z",
+      "rainHoursNext24h": 1,
       "daily": [
         {
           "date": "2026-07-11",
@@ -386,12 +391,6 @@
       ],
       "hourly": [
         {
-          "time": "2026-07-11T10:00:00.000Z",
-          "tempC": 25.1,
-          "rainMm": 0.2,
-          "rainProbabilityPct": 30
-        },
-        {
           "time": "2026-07-11T13:00:00.000Z",
           "tempC": 27.2,
           "rainMm": 1.4,
@@ -418,11 +417,11 @@
   "drift": {
     "active": true,
     "severity": "high",
-    "reason": "Local and OSI Server recommendations disagree on whether to irrigate. Forecast rain differs by 10.9 mm. Water balance differs by 7.8 mm.",
+    "reason": "Local and OSI Server recommendations disagree on whether to irrigate. Forecast rain differs by 11.1 mm. Water balance differs by 7.8 mm.",
     "localActionCode": "irrigate_today",
     "serverActionCode": "delay_irrigation",
     "waterNeededDeltaMm": 1.4,
-    "next24hRainDeltaMm": 10.9,
+    "next24hRainDeltaMm": 11.1,
     "balanceDeltaMm": 7.77,
     "canSwitchScheduling": true
   }

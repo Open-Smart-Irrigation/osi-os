@@ -324,7 +324,7 @@ describe('IrrigationZoneCard Data entry', () => {
     // The provider's accepted observation stamp is the card's evidence time even
     // when this zone has no local sensor, zone-day, or recommendation row.
     const providerObservedAt = '2026-10-08T11:00:00.000Z';
-    apiMocks.getSummary.mockResolvedValue({
+    const providerOnlySummary: ZoneEnvironmentSummary = {
       ...environmentSummary,
       generatedAt: providerObservedAt,
       water: {
@@ -358,8 +358,16 @@ describe('IrrigationZoneCard Data entry', () => {
           warnings: [],
         },
       },
-      forecast: { available: true },
-    } as ZoneEnvironmentSummary);
+      forecast: {
+        available: true,
+        source: 'open_meteo',
+        cacheStatus: 'live',
+        observedAt: providerObservedAt,
+        expiresAt: null,
+        rainFocus: null,
+      },
+    };
+    apiMocks.getSummary.mockResolvedValue(providerOnlySummary);
 
     renderCard();
     fireEvent.click(screen.getByRole('button', { expanded: false }));
