@@ -1,6 +1,7 @@
 'use strict';
 
 const { resolveKc } = require('../osi-crop-kc');
+const { zoneDateWindow } = require('../osi-rain');
 
 const LOCAL_METRICS = [
   { key: 'air_temperature_c', label: 'Air Temperature', unit: '°C', decimals: 2, aliases: ['ambient_temperature', 'air_temperature_c', 'temperature_2m', 'temp_c', 'temperature'] },
@@ -536,37 +537,16 @@ function sumRain(hours, nowMs, horizonHours, sourceBasis) {
   return { totalMm: seen.size ? round(total, 2) : null, coveredHours, expectedHours: horizonHours };
 }
 
-function zonedDateTimeMs(dateIso, timezone) {
-  const date = trimToNull(dateIso);
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const [year, month, day] = date.split('-').map(Number);
-  const wantedUtc = Date.UTC(year, month - 1, day);
-  let candidate = wantedUtc;
-  const calendarProbe = new Date(wantedUtc);
-  if (calendarProbe.getUTCFullYear() !== year || calendarProbe.getUTCMonth() !== month - 1 || calendarProbe.getUTCDate() !== day) return null;
-  const formatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: normalizeTimezone(timezone), year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
-  });
-  for (let i = 0; i < 3; i++) {
-    const parts = {};
-    for (const part of formatter.formatToParts(new Date(candidate))) if (part.type !== 'literal') parts[part.type] = Number(part.value);
-    const seenUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-    const delta = wantedUtc - seenUtc;
-    candidate += delta;
-    if (delta === 0) break;
-  }
-  return candidate;
-}
-
 /** Resolve trusted elapsed Open-Meteo hourly rain for the zone's local farm day. */
 function providerRainToday(forecast, timezone, todayIso, nowMs) {
   if (!forecast || forecast.source !== 'open_meteo' || !Array.isArray(forecast.hours)) return null;
   const observedAtMs = forecast.observedAt ? new Date(forecast.observedAt).getTime() : NaN;
   if (!Number.isFinite(observedAtMs) || !Number.isFinite(nowMs)) return null;
-  const dayStartMs = zonedDateTimeMs(todayIso, timezone);
-  const nextDate = addUtcDays(todayIso, 1);
-  const dayEndMs = zonedDateTimeMs(nextDate, timezone);
+  let dayWindow;
+  try { dayWindow = zoneDateWindow(todayIso, timezone); } catch (_invalidDate) { return null; }
+  if (dayWindow.date !== todayIso) return null;
+  const dayStartMs = Date.parse(dayWindow.startIso);
+  const dayEndMs = Date.parse(dayWindow.endIso);
   if (!Number.isFinite(dayStartMs) || !Number.isFinite(dayEndMs) || dayEndMs <= dayStartMs) return null;
   const dayHours = (dayEndMs - dayStartMs) / 3600000;
   const cutoffMs = Math.min(nowMs, observedAtMs, dayEndMs);
