@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
@@ -14,10 +15,8 @@ const E2 = 'A840410000000002';
 const E3 = 'A840410000000003';
 let legacyFixtureId = 0;
 
-const TMP_ROOT = '/home/phil/.cache/osi-rain-continuation-20261010/task8-prep/tmp';
-fs.mkdirSync(TMP_ROOT, { recursive: true });
 function tmp() {
-  return fs.mkdtempSync(path.join(TMP_ROOT, 'rain-diff-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'rain-diff-'));
 }
 function fixture(root) {
   const dbPath = path.join(root, 'legacy.db');
@@ -127,7 +126,7 @@ function soleGaugeProvenance(root, from = '2026-03-28T23:00:00Z', to = '2026-04-
 function run(args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, TMPDIR: '/home/phil/.cache/osi-rain-continuation-20261010/task8-prep/tmp' },
+    env: { ...process.env, TMPDIR: os.tmpdir() },
     timeout: 10000,
   });
 }
