@@ -2035,7 +2035,7 @@ export interface IrrigationActuation {
   expectationId: string;
   deviceEui: string;
   deviceName: string | null;
-  zoneId: number;
+  zoneId: number | null;
   zoneName: string | null;
   commandId: string | null;
   commandedAt: string;

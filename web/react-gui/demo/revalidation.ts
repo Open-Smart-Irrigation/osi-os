@@ -22,7 +22,8 @@ export const demoRevalidation: Middleware = useSWRNext => (key, fetcher, config)
       const {keys, handled} = (event as CustomEvent<DemoRevalidation>).detail;
       if (handled.has(cache)) return;
       handled.add(cache);
-      for (const changed of keys) void mutate(changed);
+      if (keys.includes('*')) void mutate((key: unknown) => key !== undefined);
+      else for (const changed of keys) void mutate(changed);
     };
     window.addEventListener(DEMO_REVALIDATE_EVENT, handler);
     return () => window.removeEventListener(DEMO_REVALIDATE_EVENT, handler);

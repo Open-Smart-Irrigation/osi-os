@@ -11,6 +11,7 @@ import { LoRainGaugeCard } from './LoRainGaugeCard';
 import { Sdi12SoilCard } from './Sdi12SoilCard';
 import { Sdi12SettingsModal } from './Sdi12SettingsModal';
 import { FieldTesterCard } from './FieldTesterCard';
+import { Uc512DeviceCard } from './Uc512DeviceCard';
 import { ScheduleSection, normalizeTriggerMetric } from './ScheduleSection';
 import { ZoneDeviceModal } from './ZoneDeviceModal';
 import { EditableName } from './shared/EditableName';
@@ -38,6 +39,7 @@ interface IrrigationZoneCardProps {
   irrigationActuations?: IrrigationActuation[];
   valvesByEui?: Map<string, ValveSummary>;
   canWrite?: boolean;
+  initiallyExpanded?: boolean;
 }
 
 function formatWaterValue(value: number | null | undefined, unit: string, digits = 1): string {
@@ -231,13 +233,14 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   irrigationActuations = [],
   valvesByEui,
   canWrite = true,
+  initiallyExpanded = false,
 }) => {
   const { t } = useTranslation('devices');
   const { t: tDashboard } = useTranslation('dashboard');
   const { t: tc } = useTranslation('common');
   const dateFormat = useDateFormat();
   const { swtUnit, modules } = useDisplayPreferences();
-  const [zoneCollapsed, setZoneCollapsed] = useState(true);
+  const [zoneCollapsed, setZoneCollapsed] = useState(() => !initiallyExpanded);
   const [devicesCollapsed, setDevicesCollapsed] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -287,6 +290,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const loRainGauges = devices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
   const sdi12Nodes = devices.filter((d) => d.type_id === 'DRAGINO_SDI12');
   const fieldTesters = devices.filter((d) => d.type_id === 'RAK10701_FIELD_TESTER');
+  const uc512Nodes = devices.filter((d) => d.type_id === 'MILESIGHT_UC512');
 
   const hasDendroDevices = lsn50Nodes.some(d => d.dendro_enabled === 1);
   const schedMetric = zone.schedule?.triggerMetric ?? zone.schedule?.trigger_metric;
@@ -972,6 +976,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {document.documentElement.dataset.publicSimulator === 'true' && uc512Nodes.length > 0 && (
+                <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {uc512Nodes.map(device => <Uc512DeviceCard key={device.deveui} device={device} onUpdate={onUpdate}
+                    onRemove={() => void handleRemoveDevice(device.deveui)} readOnly={!canWrite} removeContext="zone" />)}
                 </div>
               )}
             </div>

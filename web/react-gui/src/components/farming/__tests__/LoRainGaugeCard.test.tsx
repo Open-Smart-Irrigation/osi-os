@@ -97,6 +97,15 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  it('keeps explicit null rain and voltage unavailable while preserving measured zero', () => {
+    const partial = {...lorainDevice, latest_data: {...lorainDevice.latest_data, rain_mm_delta: null,
+      rain_mm_today: 0, rain_mm_per_10min: null}} as Device;
+    render(<LoRainGaugeCard device={partial} removeContext="farm" />);
+
+    expect(screen.getAllByText('0.0 mm')).toHaveLength(1);
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('renders invalid last-seen timestamps as never seen', () => {
     render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: 'not-a-date' }} removeContext="farm" />);
 

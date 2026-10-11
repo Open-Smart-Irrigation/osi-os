@@ -1,5 +1,12 @@
 import i18n, {type Resource, type ResourceKey} from 'i18next';
 import lugandaValves from './locales/lg-valves.json';
+import publicAdvisoryDE from './locales/public-advisory/de-CH.json';
+import publicAdvisoryEN from './locales/public-advisory/en.json';
+import publicAdvisoryES from './locales/public-advisory/es.json';
+import publicAdvisoryFR from './locales/public-advisory/fr.json';
+import publicAdvisoryIT from './locales/public-advisory/it.json';
+import publicAdvisoryLG from './locales/public-advisory/lg.json';
+import publicAdvisoryPT from './locales/public-advisory/pt.json';
 import {WATER_COPY} from './water-copy';
 import {initReactI18next} from 'react-i18next';
 export const SUPPORTED_LANGUAGES = [
@@ -36,6 +43,13 @@ for (const [language, resource] of Object.entries(resources)) {
 }
 void i18n.use(initReactI18next).init({resources, lng: 'en', fallbackLng: 'en', supportedLngs: SUPPORTED_LANGUAGES.map(({code}) => code),
   defaultNS: 'common', fallbackNS: ['common'], interpolation: {escapeValue: false}, react: {useSuspense: false}});
+const publicAdvisory: Record<SupportedLanguageCode, Record<string, string>> = {
+  en: publicAdvisoryEN, 'de-CH': publicAdvisoryDE, fr: publicAdvisoryFR, it: publicAdvisoryIT,
+  es: publicAdvisoryES, pt: publicAdvisoryPT, lg: publicAdvisoryLG,
+};
+for (const {code} of SUPPORTED_LANGUAGES) {
+  i18n.addResourceBundle(code, 'devices', {advancedSchedule: {publicAdvisory: publicAdvisory[code]}}, true, true);
+}
 // Keep machine-translated Luganda scoped to this build; never edit production copy.
 for (const [key, value] of Object.entries(lugandaValves)) i18n.addResource('lg', 'valves', key, value);
 for (const {code} of SUPPORTED_LANGUAGES) i18n.addResource(code, 'settings', 'valveControl', i18n.t('title', {ns:'valves',lng:code}));

@@ -6,8 +6,9 @@ import { useTranslation } from 'react-i18next';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
 export const Login: React.FC = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const publicDemo = typeof document !== 'undefined' && document.documentElement.dataset.publicSimulator === 'true';
+  const [username, setUsername] = useState(() => publicDemo ? 'Demo farmer' : '');
+  const [password, setPassword] = useState(() => publicDemo ? 'demo' : '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -39,6 +40,7 @@ export const Login: React.FC = () => {
             OSI OS v0.8.0 (Alpha)
           </h1>
           <p className="text-[var(--text-secondary)] text-base">{t('login.subtitle')}</p>
+          {publicDemo && <p className="mt-3 rounded-lg bg-[var(--secondary-bg)] p-3 text-sm text-[var(--text-secondary)]">{t('login.demoHelp')}</p>}
         </div>
 
         {error && (

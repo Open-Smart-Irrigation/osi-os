@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkPage, parseObservation } from '../NetworkPage';
 
 const mocks = vi.hoisted(() => ({
@@ -31,8 +31,25 @@ beforeEach(() => {
   vi.stubGlobal('crypto', { randomUUID: () => '11111111-1111-4111-8111-111111111111' });
   mocks.getAll.mockResolvedValue([device]); mocks.location.mockResolvedValue(null); mocks.radio.mockResolvedValue(null); mocks.observations.mockResolvedValue(emptyPage);
 });
+afterEach(() => { delete document.documentElement.dataset.publicSimulator; });
 
 describe('NetworkPage', () => {
+  it('refreshes the mounted device list on public simulator invalidation and ignores a late earlier read', async () => {
+    document.documentElement.dataset.publicSimulator = 'true';
+    let resolveFirst!: (rows: unknown[]) => void;
+    const added = {deveui: '00000000000001A1', name: 'New simulator device', type_id: 'KIWI_SENSOR'};
+    mocks.getAll.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce([device, added]);
+    renderPage();
+    await waitFor(() => expect(mocks.getAll).toHaveBeenCalledTimes(1));
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', {detail: {keys: ['*']}}));
+    await waitFor(() => expect(mocks.getAll).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('option', {name: /New simulator device/})).toBeInTheDocument();
+    resolveFirst([device]);
+    await Promise.resolve();
+    expect(screen.getByRole('option', {name: /New simulator device/})).toBeInTheDocument();
+  });
+
   it('keeps null coordinates unknown and uses gateway_id for receiver links', () => {
     const parsed = parseObservation({ deveui: device.deveui, recorded_at: '2026-09-10T00:00:00Z', metadata_json: JSON.stringify({ device_location: { latitude: null, longitude: null }, receivers: [{ gateway_id: 'GW-1', position: { latitude: 46.8, longitude: 8.2 }, rssi_dbm: -91 }] }) });
     expect(parsed.device).toBeNull();

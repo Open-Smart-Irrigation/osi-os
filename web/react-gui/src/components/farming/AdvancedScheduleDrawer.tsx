@@ -138,6 +138,36 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
     ? (DENDRO_STRESS_LABEL[Number(thresholdKpa)] ?? `Level ${thresholdKpa}`)
     : null;
   const lastTriggered = sched?.lastTriggeredAt ?? (sched as any)?.last_triggered_at;
+  const lastEvaluation = (sched as (typeof sched & { last_evaluation?: {
+    advisory?: unknown; metric?: unknown; status?: unknown; reason?: unknown; value?: unknown; threshold?: unknown; durationMinutes?: unknown; dendroEvidence?: {
+      source?: unknown; computedAt?: unknown; ageMs?: unknown; action?: unknown; actionReason?: unknown;
+      stress?: unknown; rainfallMm?: unknown; waterDeliveredLiters?: unknown; rainSuppressionActive?: unknown;
+      recoveryVerificationActive?: unknown; lowConfidenceTreeCount?: unknown; zoneConfidenceScore?: unknown;
+    } | null;
+  } }) | null)?.last_evaluation;
+  const lastEvaluationAdvisory = typeof lastEvaluation?.advisory === 'string' ? lastEvaluation.advisory : null;
+  const isPublicSimulator = document.documentElement.dataset.publicSimulator === 'true';
+  const isPublicTriggerEvaluation = isPublicSimulator && lastEvaluation != null;
+  const evaluationReason = typeof lastEvaluation?.reason === 'string' ? lastEvaluation.reason : 'unknown';
+  const reasonCopy: Record<string, string> = {
+    threshold_met: 'thresholdMet', unknown_dendro_stress: 'unknownStress', below_dendro_sensitivity: 'belowSensitivity',
+    invalid_dendro_threshold: 'invalidThreshold', invalid_response_mode: 'invalidResponseMode',
+    stale_dendro_recommendation: 'staleRecommendation', no_dendro_recommendation: 'noRecommendation',
+    below_threshold: 'belowThreshold', no_data_last_hour: 'noDataLastHour', missing_valve: 'missingValve',
+    busy: 'busy', same_logical_window: 'sameLogicalWindow',
+  };
+  const metric = typeof lastEvaluation?.metric === 'string' ? lastEvaluation.metric : (isDendro ? 'DENDRO' : 'SWT_1');
+  const metricCopy: Record<string, string> = {SWT_1: 'swt1', SWT_WM1: 'swt1', SWT_2: 'swt2', SWT_WM2: 'swt2', SWT_3: 'swt3', SWT_AVG: 'swtAvg', DENDRO: 'dendro'};
+  const metricLabel = t(`advancedSchedule.publicAdvisory.${metricCopy[metric] ?? 'dendro'}`, metric);
+  const metricUnit = metric === 'DENDRO' ? '' : ' kPa';
+  const evidence = lastEvaluation?.dendroEvidence;
+  const unknownValue = t('advancedSchedule.publicAdvisory.unknown', 'unknown');
+  const displayValue = (value: unknown, suffix = '') => value == null ? unknownValue : `${String(value)}${suffix}`;
+  const evidenceAge = typeof evidence?.ageMs === 'number' && Number.isFinite(evidence.ageMs)
+    ? `${(evidence.ageMs / 3_600_000).toFixed(1)} ${t('advancedSchedule.publicAdvisory.hours', 'hours')}`
+    : unknownValue;
+  const sourceEvidenceQuote = [evidence?.action, evidence?.actionReason]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0).join(' — ');
 
   return (
     <div>
@@ -219,6 +249,45 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
           label="Last triggered"
           value={lastTriggered ? new Date(lastTriggered).toLocaleString() : 'Never'}
         />
+        {isPublicTriggerEvaluation ? (
+          <div role="status" className="text-xs text-[var(--text-secondary)] py-2 space-y-1">
+            <p className="font-medium">
+              {t('advancedSchedule.publicAdvisory.decision', '{{metric}} simulator decision: {{status}}. {{reason}}', {
+                metric: metricLabel,
+                status: t(`advancedSchedule.publicAdvisory.${lastEvaluation?.status === 'started' ? 'started' : 'skipped'}`, lastEvaluation?.status === 'started' ? 'irrigation started' : 'irrigation skipped'),
+                reason: t(`advancedSchedule.publicAdvisory.${reasonCopy[evaluationReason] ?? 'unknownReason'}`, 'The simulator could not classify this evaluation.'),
+              })}
+            </p>
+            <p>
+              {t('advancedSchedule.publicAdvisory.decisionMetrics', 'Observed value {{value}}{{unit}}; saved threshold {{threshold}}{{unit}}; simulated duration {{duration}}.', {
+                value: displayValue(lastEvaluation?.value), threshold: displayValue(lastEvaluation?.threshold), unit: metricUnit,
+                duration: displayValue(lastEvaluation?.durationMinutes, ` ${t('advancedSchedule.publicAdvisory.minutes', 'minutes')}`),
+              })}
+            </p>
+            {evidence && <p>
+              {t('advancedSchedule.publicAdvisory.evidence', '{{source}} recommendation at {{computedAt}} ({{age}} old).', {
+                source: displayValue(evidence.source), computedAt: displayValue(evidence.computedAt), age: evidenceAge,
+              })}
+            </p>}
+            {evidence && <p>
+              {t('advancedSchedule.publicAdvisory.details', 'Stress {{stress}}; confidence {{confidence}}; low-confidence trees {{trees}}; rain {{rain}}; water delivered {{water}}; rain suppression {{rainState}}; recovery verification {{recoveryState}}.', {
+                stress: displayValue(evidence.stress), confidence: displayValue(evidence.zoneConfidenceScore),
+                trees: displayValue(evidence.lowConfidenceTreeCount), rain: displayValue(evidence.rainfallMm, ' mm'),
+                water: displayValue(evidence.waterDeliveredLiters, ' L'),
+                rainState: evidence.rainSuppressionActive == null ? unknownValue : t(`advancedSchedule.publicAdvisory.${evidence.rainSuppressionActive ? 'active' : 'inactive'}`, evidence.rainSuppressionActive ? 'active' : 'inactive'),
+                recoveryState: evidence.recoveryVerificationActive == null ? unknownValue : t(`advancedSchedule.publicAdvisory.${evidence.recoveryVerificationActive ? 'active' : 'inactive'}`, evidence.recoveryVerificationActive ? 'active' : 'inactive'),
+              })}
+            </p>}
+            {sourceEvidenceQuote && <p>
+              {t('advancedSchedule.publicAdvisory.sourceQuote', 'Source recommendation (original wording): “{{quote}}”', {quote: sourceEvidenceQuote})}
+            </p>}
+            {metric === 'DENDRO' && !evidence && <p>{t('advancedSchedule.publicAdvisory.noEvidence', 'Recommendation details are unavailable; the simulator did not infer missing source values.')}</p>}
+          </div>
+        ) : lastEvaluationAdvisory && (
+          <p role="status" className="text-xs text-[var(--text-secondary)] py-2">
+            {lastEvaluationAdvisory}
+          </p>
+        )}
 
         {/* Save button */}
         <div className="pt-2 pb-1 flex items-center gap-2">

@@ -47,6 +47,14 @@ test('one clock governs acknowledgement, pause, acceleration, cancellation and e
   assert.equal(sim.outcomes[0].status, 'CANCELLED');
 });
 
+test('presentation mode retains the original sixty-second timed valve closure', () => {
+  const sim = new Simulator();
+  sim.request('POST', `/api/valve/${VALVE_EUI}`, {action: 'OPEN_FOR_DURATION', duration_seconds: 60});
+  sim.advanceTo(DEMO_EPOCH + 60000);
+  assert.equal(sim.actuation, null);
+  assert.equal(sim.outcomes[0].observedCloseAt, new Date(DEMO_EPOCH + 60000).toISOString());
+});
+
 test('reset removes active countdown and restores exact seed', () => {
   const sim = new Simulator();
   const seed = structuredClone(sim.devices);
@@ -79,7 +87,8 @@ test('trigger configuration and synthetic device registration remain local and v
   const sim = new Simulator();
   sim.request('POST','/api/devices',{deveui:'00000000000000B0',name:'Practice',type_id:'KIWI_SENSOR'});
   assert.equal(sim.devices.length,7);
-  assert.throws(()=>sim.request('POST','/api/devices',{deveui:'1234567890123456',name:'Not a fixture',type_id:'KIWI_SENSOR'}));
+  assert.equal((sim.request('POST','/api/devices',{deveui:'1234567890123456',name:'Full hex EUI',type_id:'KIWI_SENSOR'}) as {deveui:string}).deveui,
+    '1234567890123456');
   const schedule=sim.request('PUT','/api/irrigation-zones/1/schedule',{trigger_metric:'SWT_1',threshold_kpa:70,enabled:true,duration_minutes:5});
   assert.deepEqual(sim.zones[0].schedule,schedule);
   assert.throws(()=>sim.request('PUT','/api/irrigation-zones/1/schedule',{trigger_metric:'SWT_1',threshold_kpa:0,enabled:true,duration_minutes:5}));

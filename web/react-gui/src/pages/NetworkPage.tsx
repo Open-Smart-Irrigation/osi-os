@@ -10,6 +10,7 @@ import { devicesAPI, networkAPI, type InstallationLocationRevision, type RadioCo
 import { useAuth } from '../contexts/AuthContext';
 import type { Device } from '../types/farming';
 import { useDateFormat } from '../utils/datetime';
+import { subscribePublicSimulatorInvalidation } from '../utils/publicSimulatorInvalidation';
 import { Button } from '../ui-core';
 
 const fallback = (key: string, value: string) => ({ defaultValue: value, key });
@@ -190,7 +191,28 @@ export function NetworkPage() {
   const [showAllObservations, setShowAllObservations] = useState(false);
   // Nothing selectable means the observation effect below never runs, so this
   // is the only place that can retire the observations spinner in that case.
-  useEffect(() => { devicesAPI.getAll().then(value => { setDevices(value); if (value[0]) setSelected(value[0].deveui); else setObservationsLoading(false); }).catch(() => { setError(t('network.loadError', fallback('loadError', 'Could not load devices'))); setObservationsLoading(false); }).finally(() => setDevicesLoading(false)); }, [t]);
+  useEffect(() => {
+    let active = true;
+    let sequence = 0;
+    const loadDevices = async () => {
+      const request = ++sequence;
+      setDevicesLoading(true);
+      try {
+        const value = await devicesAPI.getAll();
+        if (!active || request !== sequence) return;
+        setDevices(value);
+        setSelected(current => current && value.some(device => device.deveui === current) ? current : value[0]?.deveui ?? '');
+        if (!value.length) setObservationsLoading(false);
+      } catch {
+        if (active && request === sequence) { setError(t('network.loadError', fallback('loadError', 'Could not load devices'))); setObservationsLoading(false); }
+      } finally {
+        if (active && request === sequence) setDevicesLoading(false);
+      }
+    };
+    void loadDevices();
+    const unsubscribe = subscribePublicSimulatorInvalidation(() => void loadDevices());
+    return () => { active = false; sequence += 1; unsubscribe(); };
+  }, [t]);
   useEffect(() => {
     if (!selected) return;
     let active = true;

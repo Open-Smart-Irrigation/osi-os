@@ -128,6 +128,15 @@ afterEach(() => {
 });
 
 describe('water card sensor gating', () => {
+  it('opens the zone body on its first render when requested', () => {
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard zone={zone} devices={[]} unassignedDevices={[]} onUpdate={vi.fn()} initiallyExpanded />
+      </MemoryRouter>,
+    );
+    expect(document.querySelector('#irrigation-zone-12 button[aria-expanded]')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it.each([new Date(NOW + 24 * 60 * 60_000).toISOString(), null, 'not-a-date'])(
     'shows unavailable timing without blaming a valid measurement: %s', async (lastSeen) => {
       await openCard([sensor({ last_seen: lastSeen, latest_data: { swt_1: 90 } })]);

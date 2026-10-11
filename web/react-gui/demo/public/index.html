@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#F4F6F8">
+  <title>Explore OSI OS</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./host.css">
+</head>
+<body>
+  <main class="visitor-shell">
+    <header class="host-bar">
+      <div class="host-heading">
+        <p id="brand" class="brand">Open Smart Irrigation</p>
+        <h1 id="page-title">Explore OSI OS</h1>
+        <p id="tagline" class="tagline">A working simulation of the OSI OS farmer app.</p>
+      </div>
+      <div class="persistent-controls">
+        <span id="simulation-label" class="simulation-label">Simulated data · local session only</span>
+        <button id="open-tools" type="button" class="control-button" aria-label="Simulation controls" aria-controls="tools-dialog" aria-haspopup="dialog"><span>Simulation controls</span></button>
+        <button id="reset" type="button" class="control-button primary-control">Reset session</button>
+      </div>
+    </header>
+
+    <div class="visitor-layout">
+      <aside class="guidance" aria-labelledby="instructions-title">
+        <h2 id="instructions-title">Try these controls</h2>
+        <ol>
+          <li id="instruction-one">Choose a language from the app menu.</li>
+          <li id="instruction-two">Open a zone to inspect its readings and controls.</li>
+          <li id="instruction-three">Open a valve or try a schedule; every result stays simulated.</li>
+        </ol>
+        <p id="luganda-review" class="review-note" hidden></p>
+      </aside>
+
+      <section class="simulator" aria-label="OSI OS simulated farm">
+        <div class="phone-space">
+          <div class="phone-frame">
+            <iframe id="app" title="OSI OS simulated farmer app" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-modals"></iframe>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <p id="reset-note" class="reset-note">Reload starts a fresh simulated session. Reset restores the starting farm.</p>
+  </main>
+
+  <section id="loading" class="loading-panel" role="status" aria-live="polite">
+    <span id="loading-message">Loading the simulator…</span>
+    <button id="retry" type="button" class="control-button primary-control" hidden>Retry</button>
+  </section>
+  <p id="host-notice" role="status" aria-live="polite" hidden></p>
+
+  <dialog id="tools-dialog" aria-labelledby="tools-title">
+    <div class="drawer-heading">
+      <h2 id="tools-title">Simulation controls</h2>
+      <button id="close-tools" type="button" class="control-button" aria-label="Close">Close</button>
+    </div>
+    <p class="sim-time"><span id="simulated-time-label">Simulated time</span>: <time id="simulated-time">—</time></p>
+    <p id="tools-reset-note" class="review-note">Reload starts a fresh simulated session. Reset restores the starting farm.</p>
+    <p id="tools-luganda-review" class="review-note" hidden></p>
+    <label class="speed-control" for="speed"><span id="speed-label">Clock speed</span>
+      <select id="speed">
+        <option value="1">1×</option>
+        <option value="10">10×</option>
+        <option value="60">60×</option>
+      </select>
+    </label>
+    <button id="pause" type="button" class="control-button" aria-pressed="false">Pause time</button>
+    <button id="next-event" type="button" class="control-button">Advance to next event</button>
+    <button id="view-toggle" type="button" class="control-button" aria-pressed="false">Expanded view</button>
+  </dialog>
+
+  <script type="module" src="./host.ts"></script>
+</body>
+</html>

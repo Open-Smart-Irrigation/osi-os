@@ -368,6 +368,7 @@ export const IrrigationOutcomesPanel: React.FC<Props> = ({
   };
 
   const zoneContextFor = (row: IrrigationActuation): IrrigationOutcomeZoneContext | null => {
+    if (row.zoneId == null) return null;
     const configured = zoneContexts?.get(row.zoneId);
     if (configured) return configured;
     const timeZone = zoneTimezones?.get(row.zoneId);

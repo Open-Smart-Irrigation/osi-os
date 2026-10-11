@@ -10,6 +10,7 @@
   },
   "form": {
     "serverUrl": "Endabirwamu ya OSI Server",
+    "demoNotice": "Simulator yokka: kozesa ebikozesebwa eby’obulimba. Ebikozesebwa mu kuyingira tebibuulirwa wadde okuterekebwa, era URL eno tekozesebwa.",
     "actionLabel": "Kola",
     "actionLogin": "Yunga akawunti eyaliwo",
     "actionRegister": "Tonda akawunti empya",

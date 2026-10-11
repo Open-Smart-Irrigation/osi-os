@@ -229,6 +229,12 @@
       "issue": 384
     },
     {
+      "path": "docs/superpowers/plans/2026-10-10-public-simulator-contracts.md",
+      "max": 4,
+      "reason": "quotes four scheduler Node-RED node ids verified in maintained bcm2709 and bcm2712 flows; not device identities",
+      "issue": 384
+    },
+    {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",

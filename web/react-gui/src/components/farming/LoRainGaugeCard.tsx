@@ -33,6 +33,7 @@ const FOCUS_VISIBLE_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]';
 
 function formatNumber(value: number | null | undefined, decimals: number, unit: string): string {
+  if (value == null) return '—';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '—';
   return `${numeric.toFixed(decimals)} ${unit}`;
