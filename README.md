@@ -6,6 +6,10 @@ OSI OS is an open-source, offline-first smart irrigation platform for smallholde
 
 Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gateway-os/) (OpenWrt 24.10).
 
+[Try OSI OS with a fictional farm](https://opensmartirrigation.org/simulator/) — explore sample sensors, valve operation, schedules and automatic irrigation in your browser, with no hardware or sign-up.
+
+[![OSI OS simulator running a fictional irrigation farm](docs/images/osi-os-simulator.png)](https://opensmartirrigation.org/simulator/)
+
 ---
 
 ## Features

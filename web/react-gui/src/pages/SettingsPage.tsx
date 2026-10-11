@@ -25,6 +25,7 @@ import {
   writeDisplayPreferences,
 } from '../utils/displayPreferences';
 import { formatSwtValue, type SwtUnit } from '../utils/swt';
+import { isPublicSimulatorBuild } from '../utils/publicSimulatorDeviceDefaults';
 
 type AutoRefreshPreference = DisplayPreferences['dashboardAutoRefresh'];
 type UserRequestType = Extract<SupportRequestType, 'bug' | 'improvement'>;
@@ -232,6 +233,7 @@ export function SettingsPage() {
   const systemSettingsWritable = scopeLoading || !scopeResolved ? false : (isScoped ? isAdmin : true);
   const systemSettingsAdminOnlyTitle = systemSettingsWritable ? undefined : tc('adminOnly');
   const preferences = useDisplayPreferences();
+  const publicSimulatorBuild = isPublicSimulatorBuild();
   const [moduleNotice, setModuleNotice] = useState<string | null>(null);
   const [moduleError, setModuleError] = useState<string | null>(null);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
@@ -630,15 +632,17 @@ export function SettingsPage() {
 
         <Section title={t('modulesTitle')}>
           <div className="grid gap-3">
-            <ModuleRow
-              label={t('predictionAdvisory')}
-              warning={t('predictionAdvisoryWarning')}
-              experimental
-              enabled={preferences.modules.predictionAdvisory}
-              onChange={(enabled) => updateModule('predictionAdvisory', enabled)}
-              onLabel={t('on')}
-              offLabel={t('off')}
-            />
+            {!publicSimulatorBuild && (
+              <ModuleRow
+                label={t('predictionAdvisory')}
+                warning={t('predictionAdvisoryWarning')}
+                experimental
+                enabled={preferences.modules.predictionAdvisory}
+                onChange={(enabled) => updateModule('predictionAdvisory', enabled)}
+                onLabel={t('on')}
+                offLabel={t('off')}
+              />
+            )}
             <ModuleRow
               label={t('waterCard')}
               enabled={preferences.modules.waterCard}
@@ -677,10 +681,14 @@ export function SettingsPage() {
               module rows positionally, and the established order is part of
               what those tests pin.
             */}
-            {gatewayModuleRow('dataModuleEnabled', 'dataModule')}
-            {gatewayModuleRow('networkModuleEnabled', 'networkModule')}
-            {gatewayModuleRow('gatewayHubModuleEnabled', 'gatewayHub')}
-            {gatewayModuleRow('journalModuleEnabled', 'journalModule')}
+            {!publicSimulatorBuild && (
+              <>
+                {gatewayModuleRow('dataModuleEnabled', 'dataModule')}
+                {gatewayModuleRow('networkModuleEnabled', 'networkModule')}
+                {gatewayModuleRow('gatewayHubModuleEnabled', 'gatewayHub')}
+                {gatewayModuleRow('journalModuleEnabled', 'journalModule')}
+              </>
+            )}
           </div>
           {moduleNotice && (
             <p role="status" className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-900">
@@ -703,17 +711,19 @@ export function SettingsPage() {
           />
         </Section>
 
-        <Section title={t('journalTitle')}>
-          <SegmentedControl
-            label={t('journalDetailLevel')}
-            value={preferences.journalDetailLevel}
-            options={journalDetailOptions}
-            onChange={updateJournalDetailLevel}
-          />
-          <p className="mt-3 max-w-prose text-sm text-[var(--text-secondary)]">
-            {t('journalDetailLevelHelp')}
-          </p>
-        </Section>
+        {!publicSimulatorBuild && (
+          <Section title={t('journalTitle')}>
+            <SegmentedControl
+              label={t('journalDetailLevel')}
+              value={preferences.journalDetailLevel}
+              options={journalDetailOptions}
+              onChange={updateJournalDetailLevel}
+            />
+            <p className="mt-3 max-w-prose text-sm text-[var(--text-secondary)]">
+              {t('journalDetailLevelHelp')}
+            </p>
+          </Section>
+        )}
 
         <Section title={t('userRequestTitle')}>
           <form onSubmit={submitUserRequest} className="space-y-4 rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">

@@ -78,6 +78,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.publicSimulator;
   vi.clearAllMocks();
 });
 
@@ -128,5 +129,22 @@ describe('EnvironmentCard load-failure honesty (X-10)', () => {
     const banner = await screen.findByText(new RegExp(frDevices.environment.loadFailed));
     expect(banner).toBeInTheDocument();
     expect(screen.queryByText(/Request failed/)).not.toBeInTheDocument();
+  });
+});
+
+describe('EnvironmentCard public simulator invalidation', () => {
+  it('reloads mounted environment data on simulator revalidation and ignores late superseded requests', async () => {
+    document.documentElement.dataset.publicSimulator = 'true';
+    let resolveFirst!: (value: ZoneEnvironmentSummary) => void;
+    apiMocks.getSummary.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValue({...baseSummary, online: {...baseSummary.online, available: true, cacheStatus: 'live'}});
+    await renderExpanded('en');
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(1));
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', {detail: {keys: ['*']}}));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('Live')).toBeInTheDocument();
+    resolveFirst({...baseSummary, online: {...baseSummary.online, available: true, cacheStatus: 'miss'}});
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
   });
 });

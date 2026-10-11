@@ -10,6 +10,7 @@
   },
   "form": {
     "serverUrl": "OSI Server URL",
+    "demoNotice": "Simulator only: enter fictional values. No credentials are sent or saved, and no connection is made to this URL.",
     "actionLabel": "Action",
     "actionLogin": "Link existing account",
     "actionRegister": "Create new account",

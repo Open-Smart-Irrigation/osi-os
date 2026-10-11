@@ -1,8 +1,8 @@
 html,body{overscroll-behavior:none}body{margin:0}#demo-notice:not([hidden]){position:fixed;left:12px;right:12px;bottom:12px;z-index:1000;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:13px;box-shadow:0 4px 24px #0002;cursor:pointer}#demo-notice[hidden]{display:none}
 
-/* The simulator has no valve-time calibration or experimental modules. */
-[data-testid="water-flow-meter-tile"] > p:last-child,
-[data-experimental-module="true"] {
+/* Presentation slides hide calibration and experimental surfaces; public mode exposes the real controls. */
+#root[data-public-simulator="false"] [data-testid="water-flow-meter-tile"] > p:last-child,
+#root[data-public-simulator="false"] [data-experimental-module="true"] {
   display: none;
 }
 
@@ -14,4 +14,22 @@ html,body{overscroll-behavior:none}body{margin:0}#demo-notice:not([hidden]){posi
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
+}
+
+/* At 200% zoom a desktop browser can land exactly on Tailwind's 640px `sm`
+   breakpoint. Keep the public simulator's dashboard title above its actions
+   until there is enough width for the desktop header row. */
+@media (min-width: 640px) and (max-width: 700px) {
+  #root[data-public-simulator="true"] header > div > div[class*="sm:flex-row"] {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  #root[data-public-simulator="true"] header > div > div[class*="sm:flex-row"] > div:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+  #root[data-public-simulator="true"] header > div > div[class*="sm:flex-row"] > div:last-child {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }

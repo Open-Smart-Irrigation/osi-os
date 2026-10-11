@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Try OSI OS with a fictional irrigation farm in your browser.">
+    <title>Try OSI OS | Open Smart Irrigation</title>
+    <link rel="stylesheet" href="/website-demo/invitation.css">
+    <script src="/website-demo/invitation.js" defer></script>
+    <style>
+      body { margin: 0; overflow: auto; color: #183126; background: #f6f8f7; font: 16px/1.6 system-ui, sans-serif; }
+      #site-content { min-height: 180vh; padding-top: 64px; }
+      .site-header { position: fixed; z-index: 9999; inset: 0 0 auto; display: flex; height: 64px; align-items: center; justify-content: space-between; gap: 20px; padding: 8px max(20px, calc((100vw - 1080px) / 2)); background: #fff; }
+      .site-header a { color: #115c43; font-weight: 700; }
+      #osiUBurger { min-width: 44px; min-height: 44px; }
+      @media (min-width: 881px) { #osiUBurger { display: none; } }
+      #osiUMenu[hidden] { display: none; }
+      #osiUMenu:not([hidden]) { position: fixed; z-index: 9998; inset: 64px 0 0; display: block; background: rgb(255 255 255 / 96%); }
+      #osiUMenuAction { position: absolute; top: 8px; right: 8px; width: 110px; height: 58px; }
+      #wasag-ribbon { position: fixed; z-index: 10000; top: 0; left: 0; padding: 4px 8px; color: #fff; background: #115c43; font-size: 12px; font-weight: 700; }
+      #ordinary-site-control { position: fixed; z-index: 1; bottom: 8px; left: 8px; }
+      .site-main { max-width: 1080px; margin: 0 auto; padding: 10vh 24px; }
+      .site-main h1 { max-width: 15ch; font-size: clamp(38px, 7vw, 72px); line-height: 1.02; }
+      .site-main p { max-width: 65ch; color: #526158; }
+      .site-spacer { min-height: 90vh; }
+      @media (max-width: 560px) { .site-header { align-items: center; flex-direction: row; } .site-main { padding-top: 6vh; } }
+    </style>
+  </head>
+  <body>
+    <div id="site-content">
+      <header id="osiUHeader" class="site-header">
+        <a href="#home" aria-label="Open Smart Irrigation home">Open Smart Irrigation</a>
+        <a id="try-osi-os-link" href="/simulator/">Try OSI OS</a>
+        <button id="osiUBurger" type="button" aria-expanded="false" aria-controls="osiUMenu">Menu</button>
+      </header>
+      <nav id="osiUMenu" aria-label="Main menu" hidden>
+        <button id="osiUMenuAction" type="button">Menu action</button>
+      </nav>
+      <aside id="wasag-ribbon" aria-label="WASAG">WASAG</aside>
+      <button id="ordinary-site-control" type="button">Ordinary site control</button>
+      <main class="site-main" id="home">
+        <p>Open-source tools for practical irrigation</p>
+        <h1>Make every drop count.</h1>
+        <p>Explore the dashboard with a fictional farm, sample readings, schedules and valve controls. No hardware or account is needed.</p>
+        <p><a href="/simulator/">Open the OSI OS simulator</a></p>
+        <div class="site-spacer" aria-hidden="true"></div>
+        <p>Normal website content remains available after closing the invitation.</p>
+      </main>
+    </div>
+    <script>
+      document.addEventListener('click', event => {
+        if (event.target?.id === 'osiUBurger') {
+          const menu = document.getElementById('osiUMenu');
+          const open = menu.hidden;
+          menu.hidden = !open;
+          event.target.setAttribute('aria-expanded', String(open));
+        }
+        if (event.target?.id === 'osiUMenuAction' || event.target?.id === 'ordinary-site-control') {
+          event.target.dataset.clicked = 'yes';
+        }
+      });
+    </script>
+  </body>
+</html>

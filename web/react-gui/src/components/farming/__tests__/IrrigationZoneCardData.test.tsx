@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -150,7 +150,7 @@ function renderCard(
   devices: Device[] = [],
   zoneOverrides: Partial<IrrigationZone & { zoneUuid?: string | null; zone_uuid?: string | null }> = {},
 ) {
-  render(
+  return render(
     <MemoryRouter>
       <IrrigationZoneCard
         zone={{ ...zone, ...zoneOverrides } as IrrigationZone}
@@ -163,6 +163,7 @@ function renderCard(
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   window.localStorage.clear();
   gatewayModulesMock.value = { data: true, network: true, gatewayHub: true, journal: true };
   vi.mocked(isDesktopBrowser).mockReturnValue(false);
@@ -174,6 +175,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  delete document.documentElement.dataset.publicSimulator;
+  vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
 
@@ -205,6 +208,19 @@ describe('IrrigationZoneCard Data entry', () => {
     renderCard();
 
     expect(screen.queryByRole('link', { name: /data/i })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {browser: 'desktop', desktop: true},
+    {browser: 'mobile', desktop: false},
+  ])('keeps the standard zone History link in the public $browser build when the gateway Data module is off', ({desktop}) => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    vi.mocked(isDesktopBrowser).mockReturnValue(desktop);
+    gatewayModulesMock.value = {data: false, network: false, gatewayHub: false, journal: false};
+
+    renderCard();
+
+    expect(screen.getByRole('link', {name: 'Data'})).toHaveAttribute('href', '/history/zones/12');
   });
 
   it('builds the Journal CTA from the typed zoneUuid with URL encoding', () => {
@@ -305,6 +321,75 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(waterCard).toHaveClass('bg-[var(--card)]');
     expect(waterCard.className).not.toContain('white_55%');
     expect(waterCard.className).not.toContain('sky-100');
+  });
+
+  it('refreshes the mounted water card after public simulator revalidation', async () => {
+    document.documentElement.dataset.publicSimulator = 'true';
+    const initialSummary = {
+      ...environmentSummary,
+      water: { ...environmentSummary.water, irrigationTodayMeasuredLiters: 0 },
+    };
+    const refreshedSummary = {
+      ...environmentSummary,
+      water: { ...environmentSummary.water, irrigationTodayMeasuredLiters: 6 },
+    };
+    apiMocks.getSummary.mockResolvedValueOnce(initialSummary).mockResolvedValueOnce(refreshedSummary);
+
+    const mountedCard = renderCard([{ ...dendroDevice, flow_meter_enabled: 1 } as Device]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    expect(await screen.findByText('0 L', { exact: true })).toBeInTheDocument();
+    expect(apiMocks.getSummary).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', { detail: { keys: ['*'] } }));
+
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('6 L', { exact: true })).toBeInTheDocument();
+
+    mountedCard.unmount();
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', { detail: { keys: ['*'] } }));
+    expect(apiMocks.getSummary).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a newer water summary when an older request resolves late', async () => {
+    document.documentElement.dataset.publicSimulator = 'true';
+    let resolveInitial!: (summary: ZoneEnvironmentSummary) => void;
+    const staleSummary = {
+      ...environmentSummary,
+      water: { ...environmentSummary.water, irrigationTodayMeasuredLiters: 0 },
+    };
+    const currentSummary = {
+      ...environmentSummary,
+      water: { ...environmentSummary.water, irrigationTodayMeasuredLiters: 6 },
+    };
+    apiMocks.getSummary.mockImplementationOnce(() => new Promise(resolve => { resolveInitial = resolve; }))
+      .mockResolvedValueOnce(currentSummary);
+
+    renderCard([{ ...dendroDevice, flow_meter_enabled: 1 } as Device]);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(1));
+
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', { detail: { keys: ['*'] } }));
+
+    expect(await screen.findByText('6 L', { exact: true })).toBeInTheDocument();
+    await act(async () => {
+      resolveInitial(staleSummary);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByText('6 L', { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText('0 L', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('does not reload water summaries from public simulator events in production', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+
+    renderCard();
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalledTimes(1));
+
+    window.dispatchEvent(new CustomEvent('osi-demo:revalidate', { detail: { keys: ['*'] } }));
+
+    expect(apiMocks.getSummary).toHaveBeenCalledTimes(1);
   });
 
   it('does not expose scheduling-source controls in the water balance card', async () => {

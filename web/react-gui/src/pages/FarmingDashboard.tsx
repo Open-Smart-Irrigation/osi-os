@@ -19,6 +19,7 @@ import { ValveControlPanel } from '../components/farming/valves/ValveControlPane
 import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
 import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';
 import { FieldTesterCard } from '../components/farming/FieldTesterCard';
+import { Uc512DeviceCard } from '../components/farming/Uc512DeviceCard';
 import {
   IrrigationOutcomesPanel,
   type IrrigationOutcomeZoneContext,
@@ -41,6 +42,7 @@ export const FarmingDashboard: React.FC = () => {
   const { t: tc } = useTranslation('common');
   const { t: td } = useTranslation('devices');
   const { modules } = useDisplayPreferences();
+  const publicSimulator = document.documentElement.dataset.publicSimulator === 'true';
   // Gateway-level module switches (the hub card), separate from the per-browser
   // display preferences above.
   const gatewayModules = useGatewayModules();
@@ -173,6 +175,7 @@ export const FarmingDashboard: React.FC = () => {
   const unassignedS2120 = unassignedDevices.filter((d) => d.type_id === 'SENSECAP_S2120');
   const unassignedLoRain = unassignedDevices.filter((d) => d.type_id === 'AQUASCOPE_LORAIN');
   const unassignedSdi12 = unassignedDevices.filter((d) => d.type_id === 'DRAGINO_SDI12');
+  const unassignedUc512 = unassignedDevices.filter((d) => d.type_id === 'MILESIGHT_UC512');
   const irrigationActuations = irrigationActuationsResponse?.actuations ?? [];
   const zoneTimezones = useMemo(
     () => new Map(allZones.map((zone) => [zone.id, zone.timezone])),
@@ -291,6 +294,7 @@ export const FarmingDashboard: React.FC = () => {
                     irrigationActuations={irrigationActuations}
                     valvesByEui={valvesByEui}
                     canWrite={canWrite}
+                    initiallyExpanded={publicSimulator && zone.id === 1}
                   />
                 ))}
               </div>
@@ -395,6 +399,16 @@ export const FarmingDashboard: React.FC = () => {
                             removeContext="farm"
                           />
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {document.documentElement.dataset.publicSimulator === 'true' && unassignedUc512.length > 0 && (
+                    <div className="mt-6">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-3">Milesight UC512 Controllers</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {unassignedUc512.map(device => <Uc512DeviceCard key={device.deveui} device={device} onUpdate={handleUpdate}
+                          readOnly={!canWrite} removeContext="farm" />)}
                       </div>
                     </div>
                   )}

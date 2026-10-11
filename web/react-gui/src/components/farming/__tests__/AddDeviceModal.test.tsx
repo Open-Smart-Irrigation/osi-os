@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AddDeviceModal } from '../AddDeviceModal';
 import { devicesAPI } from '../../../services/api';
@@ -59,8 +59,90 @@ function fillRequiredFields() {
 describe('AddDeviceModal generation control', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'false');
     vi.mocked(devicesAPI.getCatalog).mockResolvedValue(catalog as any);
     vi.mocked(devicesAPI.add).mockResolvedValue({} as any);
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('prefills an editable public DevEUI and submits after entering only the name', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((bytes) => {
+      (bytes as Uint8Array).set([1, 2, 3, 4, 5, 6]);
+      return bytes;
+    });
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+
+    await screen.findByRole('option', { name: 'Kiwi Sensor' });
+    const generated = screen.getByLabelText('DevEUI');
+    expect(generated).toHaveValue('02F1010203040506');
+    expect(generated).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+
+    await waitFor(() => expect(devicesAPI.add).toHaveBeenCalledWith({
+      deveui: '02F1010203040506',
+      name: 'North Valve',
+      type_id: 'KIWI_SENSOR',
+      appkey: undefined,
+    }));
+  });
+
+  it('keeps the generated ID through edits and failed submission, then creates a fresh ID on reopen', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    let draw = 0;
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((bytes) => {
+      draw += 1;
+      (bytes as Uint8Array).fill(draw);
+      return bytes;
+    });
+    vi.mocked(devicesAPI.add).mockRejectedValueOnce({ response: { data: { message: 'temporary failure' } } });
+    const props = { onClose: vi.fn(), onDeviceAdded: vi.fn() };
+    const { rerender } = render(<AddDeviceModal isOpen {...props} />);
+    await screen.findByRole('option', { name: 'Kiwi Sensor' });
+    const firstId = screen.getByLabelText('DevEUI');
+    expect(firstId).toHaveValue('02F1010101010101');
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+    fireEvent.change(firstId, { target: { value: '02F1AAAAAAAAAAAA' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+    await screen.findByText('temporary failure');
+    expect(screen.getByLabelText('DevEUI')).toHaveValue('02F1AAAAAAAAAAAA');
+    expect(screen.getByLabelText('Device Name')).toHaveValue('North Valve');
+
+    rerender(<AddDeviceModal isOpen={false} {...props} />);
+    rerender(<AddDeviceModal isOpen {...props} />);
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText('DevEUI')).toHaveValue('02F1020202020202');
+  });
+
+  it('does not prefill DevEUI outside the public simulator build', async () => {
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await screen.findByRole('option', { name: 'Kiwi Sensor' });
+    expect(screen.getByLabelText('DevEUI')).toHaveValue('');
+  });
+
+  it('retries a document-lifetime DevEUI collision', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    let draw = 0;
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((bytes) => {
+      draw += 1;
+      (bytes as Uint8Array).fill(draw < 3 ? 0xa1 : 0xa2);
+      return bytes;
+    });
+    const props = { onClose: vi.fn(), onDeviceAdded: vi.fn() };
+    const { rerender } = render(<AddDeviceModal isOpen {...props} />);
+    await screen.findByRole('option', { name: 'Kiwi Sensor' });
+    const first = (screen.getByLabelText('DevEUI') as HTMLInputElement).value;
+
+    rerender(<AddDeviceModal isOpen={false} {...props} />);
+    rerender(<AddDeviceModal isOpen {...props} />);
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByLabelText('DevEUI')).toHaveValue('02F1A2A2A2A2A2A2');
+    expect(screen.getByLabelText('DevEUI')).not.toHaveValue(first);
+    expect(draw).toBe(3);
   });
 
   it('does not show the generation control for a non-STREGA device type', async () => {

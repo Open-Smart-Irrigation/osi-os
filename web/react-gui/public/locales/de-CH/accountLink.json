@@ -10,6 +10,7 @@
   },
   "form": {
     "serverUrl": "OSI Server URL",
+    "demoNotice": "Nur Simulator: Verwenden Sie erfundene Angaben. Zugangsdaten werden weder gesendet noch gespeichert; diese URL wird nicht aufgerufen.",
     "actionLabel": "Aktion",
     "actionLogin": "Bestehendes Konto verknüpfen",
     "actionRegister": "Neues Konto erstellen",

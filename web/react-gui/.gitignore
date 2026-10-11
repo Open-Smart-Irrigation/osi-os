@@ -3,5 +3,7 @@ dist
 .DS_Store
 /build/
 /demo-build/
+/public-demo-build/
+/website-demo-build/
 /test-results/
 /playwright-report/

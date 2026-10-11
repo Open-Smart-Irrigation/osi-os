@@ -6,14 +6,14 @@ import type { AccountLinkStatus, AccountLinkResult, ForceSyncResult, SyncStateSu
 
 export const AccountLink: React.FC = () => {
   const { t } = useTranslation('accountLink');
+  const publicDemo = typeof document !== 'undefined' && document.documentElement.dataset.publicSimulator === 'true';
 
   const [status, setStatus] = useState<AccountLinkStatus | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
 
   const [action, setAction] = useState<'login' | 'register'>('login');
-  const [serverUrl, setServerUrl] = useState(
-    import.meta.env.VITE_OSI_SERVER_URL || 'https://server.opensmartirrigation.org'
-  );
+  const [serverUrl, setServerUrl] = useState(() => publicDemo ? 'https://cloud.example.test'
+    : import.meta.env.VITE_OSI_SERVER_URL || 'https://server.opensmartirrigation.org');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -72,6 +72,10 @@ export const AccountLink: React.FC = () => {
         linkedAt: new Date().toISOString(),
         serverUrl,
       });
+      if (publicDemo) {
+        setPassword('');
+        setEmail('');
+      }
     } catch (err: any) {
       const status = err.response?.status;
       if (status === 401) {
@@ -457,7 +461,7 @@ export const AccountLink: React.FC = () => {
               {showWarning ? (
                 <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-6 mb-6">
                   <h2 className="text-xl font-bold text-yellow-800 mb-3">{t('warning.title')}</h2>
-                  <p className="text-yellow-700 mb-4">{t('warning.message')}</p>
+                  <p className="text-yellow-700 mb-4">{publicDemo ? t('form.demoNotice') : t('warning.message')}</p>
                   <div className="flex gap-3">
                     <button
                       onClick={handleProceed}
@@ -475,6 +479,8 @@ export const AccountLink: React.FC = () => {
                   </div>
                 </div>
               ) : (
+                <>
+                {publicDemo && <p className="rounded-lg border border-[var(--border)] bg-[var(--secondary-bg)] p-4 text-sm text-[var(--text-secondary)]">{t('form.demoNotice')}</p>}
                 <form onSubmit={handleSubmit} className="space-y-5">
                   <div>
                     <label className="block text-[var(--text)] font-semibold mb-2">
@@ -563,6 +569,7 @@ export const AccountLink: React.FC = () => {
                     {t('form.submit')}
                   </button>
                 </form>
+                </>
               )}
             </div>
           )}

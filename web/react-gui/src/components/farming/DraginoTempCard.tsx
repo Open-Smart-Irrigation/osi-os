@@ -15,6 +15,7 @@ import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
 import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { WatermarkProbeSection } from './shared/WatermarkProbeSection';
+import { RainMonitor } from './RainMonitor';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -150,6 +151,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
 
   const [showConfig, setShowConfig] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
+  const [showRainMonitor, setShowRainMonitor] = useState(false);
   const [sensorMonitor, setSensorMonitor] = useState<{
     field: string;
     label: string;
@@ -339,7 +341,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Gauge</p>
             <RainTodayLine data={data} />
             <button
-              onClick={() => setSensorMonitor({
+              onClick={() => {
+                if (document.documentElement.dataset.publicSimulator === 'true') { setShowRainMonitor(true); return; }
+                setSensorMonitor({
                 field: 'rain_mm_delta',
                 initialField: 'rain_mm_delta',
                 label: 'Rainfall',
@@ -350,7 +354,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                   { field: 'rain_mm_delta', label: 'This interval', unit: 'mm', color: '#38bdf8', decimals: 1 },
                   { field: 'rain_mm_per_10min', label: 'Per 10 min (rate)', unit: 'mm', color: '#0ea5e9', decimals: 1 },
                 ],
-              })}
+              });
+              }}
               className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
               title={t('common.viewHistory', { defaultValue: 'View history' })}
             >
@@ -483,6 +488,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           strokeMm={device.dendro_stroke_mm ?? null}
           onClose={() => setShowMonitor(false)}
         />
+      )}
+      {showRainMonitor && (
+        <RainMonitor deveui={device.deveui} deviceName={device.name} onClose={() => setShowRainMonitor(false)} />
       )}
       {sensorMonitor && (
         <SensorMonitor

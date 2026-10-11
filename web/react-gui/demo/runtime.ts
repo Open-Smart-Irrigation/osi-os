@@ -1,12 +1,31 @@
-import axios, {AxiosError} from 'axios';
-import {requestDemoRevalidation} from './revalidation';
-import {Simulator, DemoError} from './model';
+import {requestDemoRevalidation, shouldRevalidateDemoResponse} from './revalidation';
+import {Simulator} from './model';
+import {createDemoAdapter} from './adapter';
+import {api} from '../src/services/api';
 import {CHANNEL, isHostCommand} from './protocol';
 import i18n from './i18n';
+import {readDisplayPreferences} from '../src/utils/displayPreferences';
+import {setGatewayTimezone} from './timezone-store';
+import {createObjectUrlBoundary} from './public-boundary';
+import {applyPublicSupportReceiptCopy} from './public-copy';
+import {installDemoNavigationGuard} from './public-navigation';
+import {getAuthSession, subscribeAuthSession} from '../src/services/authSession';
+import {getDemoMessages, normalizeDemoLanguage, type DemoLanguage} from './public/messages';
 
-// This entry is emitted only by vite.demo.config.ts. No production switch enables it.
-if (!['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) throw new Error('Demo requires localhost');
-const sim = new Simulator();
+const publicMode = import.meta.env.VITE_PUBLIC_SIMULATOR === 'true';
+// Only the separately compiled public artifact may run on a public hostname.
+if (!publicMode && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) throw new Error('Demo requires localhost');
+if (publicMode) applyPublicSupportReceiptCopy(i18n);
+const sim = new Simulator({mode: publicMode ? 'public' : 'presentation'});
+document.documentElement.dataset.publicSimulator = publicMode ? 'true' : 'false';
+document.getElementById('root')!.dataset.publicSimulator = publicMode ? 'true' : 'false';
+const objectUrlBoundary = createObjectUrlBoundary({
+  createObjectURL: URL.createObjectURL.bind(URL),
+  revokeObjectURL: URL.revokeObjectURL.bind(URL),
+});
+URL.createObjectURL = ((blob: Blob) => objectUrlBoundary.create(blob)) as typeof URL.createObjectURL;
+URL.revokeObjectURL = ((url: string) => objectUrlBoundary.revoke(url)) as typeof URL.revokeObjectURL;
+window.addEventListener('pagehide', () => objectUrlBoundary.releaseAll(), {once: true});
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
   get length() {return this.values.size;}
@@ -18,11 +37,14 @@ class MemoryStorage implements Storage {
 }
 Object.defineProperty(window, 'localStorage', {value: new MemoryStorage()});
 Object.defineProperty(window, 'sessionStorage', {value: new MemoryStorage()});
-localStorage.setItem('auth_token', 'inert-demo-session-not-a-jwt');
-localStorage.setItem('username', 'MUARIK · Demo');
+localStorage.setItem('auth_token', publicMode ? 'public-demo-session' : 'inert-demo-session-not-a-jwt');
+localStorage.setItem('username', publicMode ? 'Demo farmer' : 'MUARIK · Demo');
 localStorage.setItem('osi.display.theme', 'light');
-localStorage.setItem('osi.modules.environment', 'false');
+if (!publicMode) localStorage.setItem('osi.modules.environment', 'false');
 localStorage.setItem('osi.defaults.timezone', 'Africa/Kampala');
+window.addEventListener('osi-display-preferences', () => {
+  sim.state.settings.defaultTimezone = readDisplayPreferences().defaultTimezone ?? '';
+});
 
 const NativeDate = Date;
 window.Date = new Proxy(NativeDate, {
@@ -40,19 +62,32 @@ const strings = {
     assigned: 'Cet appareil est déjà affecté à une autre zone.', duplicate: 'Cet appareil de démonstration existe déjà.', busy: 'Annulez d’abord l’ouverture en cours.',
     demo_device: 'Utilisez un identifiant fictif de 00000000000000B0 à 00000000000000CF, choisissez Kiwi et laissez AppKey vide.'},
 };
+type PublicNoticeKey = 'noticeUnsupported' | 'noticeProtected' | 'noticeInvalid' | 'noticeBlocked' | 'noticeMissing'
+  | 'noticeAssigned' | 'noticeDuplicate' | 'noticeBusy' | 'noticeDemoDevice' | 'noticeNoEvent';
+const noticeKeys: Record<string, PublicNoticeKey> = {
+  unsupported: 'noticeUnsupported', protected: 'noticeProtected', invalid: 'noticeInvalid', blocked: 'noticeBlocked',
+  missing: 'noticeMissing', assigned: 'noticeAssigned', duplicate: 'noticeDuplicate', busy: 'noticeBusy', demo_device: 'noticeDemoDevice',
+  no_event: 'noticeNoEvent',
+};
+function publicLanguage(): DemoLanguage {return normalizeDemoLanguage(i18n.resolvedLanguage ?? i18n.language);}
+function noticeText(key: keyof typeof strings.en | 'no_event'): string {
+  if (publicMode) return getDemoMessages(publicLanguage())[noticeKeys[key] ?? 'noticeInvalid'];
+  if (key === 'no_event') return strings.en.invalid;
+  return strings[i18n.language === 'fr' ? 'fr' : 'en'][key];
+}
 function notice(message: string) {
   const el = document.getElementById('demo-notice');
   if (el && parent === window) {el.textContent = message; el.hidden = !message;}
   parent.postMessage({channel: CHANNEL, type: 'notice', message}, location.origin);
 }
-function block(): never { const message = strings[i18n.language === 'fr' ? 'fr' : 'en'].blocked; notice(message); throw new Error(message); }
+function block(): never { const message = noticeText('blocked'); notice(message); throw new Error(message); }
 window.fetch = async () => block();
 window.XMLHttpRequest = class { constructor() {block();} } as unknown as typeof XMLHttpRequest;
 window.WebSocket = class { constructor() {block();} } as unknown as typeof WebSocket;
 window.EventSource = class { constructor() {block();} } as unknown as typeof EventSource;
 navigator.sendBeacon = () => {block();};
 const locationUnavailable = (_success: PositionCallback, error?: PositionErrorCallback | null) => {
-  notice(strings[i18n.language === 'fr' ? 'fr' : 'en'].unsupported);
+  notice(noticeText('unsupported'));
   error?.({code: 2, message: 'Simulated environment: location unavailable', PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3});
 };
 Object.defineProperty(navigator, 'geolocation', {value: {getCurrentPosition: locationUnavailable,
@@ -62,47 +97,42 @@ Object.defineProperty(window, 'AndroidBridge', {value: undefined});
 Object.defineProperty(window, 'webkit', {value: undefined});
 
 // Guard link/form navigation too: sandbox + CSP are a second independent boundary.
-document.addEventListener('click', e => {
-  const action = (e.target as Element)?.closest?.('[data-action]')?.getAttribute('data-action');
-  if (action === 'logout' || action === 'osi-server') {
-    e.preventDefault(); e.stopPropagation();
-    notice(strings[i18n.language === 'fr' ? 'fr' : 'en'].unsupported);
-    return;
-  }
-  const anchor = (e.target as Element)?.closest?.('a');
-  if (!anchor) return;
-  const next = new URL(anchor.href, location.href);
-  if (next.origin !== location.origin || next.pathname !== location.pathname) {e.preventDefault(); notice(strings[i18n.language === 'fr' ? 'fr' : 'en'].unsupported);}
-}, true);
+installDemoNavigationGuard(document, () => new URL(location.href), publicMode ? 'public' : 'presentation', objectUrlBoundary,
+  () => notice(noticeText('unsupported')));
 window.addEventListener('hashchange', () => notice(''));
 document.addEventListener('submit', e => e.preventDefault(), true);
-axios.defaults.adapter = async config => {
-  try {
-    const resolved = new URL(config.url ?? '', location.origin);
-    if (resolved.origin !== location.origin || (config.baseURL && !['/', location.origin].includes(config.baseURL))) throw new DemoError(403, 'blocked');
-    for (const [key, value] of Object.entries(config.params ?? {})) resolved.searchParams.set(key, String(value));
-    const body = typeof config.data === 'string' ? JSON.parse(config.data) : config.data ?? {};
-    const data = sim.request(config.method ?? 'GET', resolved.pathname + resolved.search, body);
-    if (config.method?.toUpperCase() === 'PUT' && resolved.pathname.endsWith('/schedule')) notice(i18n.language === 'fr'
-      ? 'Déclencheur enregistré pour la démonstration. L’exécution automatique des déclencheurs n’est pas simulée.'
-      : 'Demo trigger saved. Automatic trigger execution is not simulated.');
-    return {data, status: 200, statusText: 'OK', headers: {}, config};
-  } catch (error) {
-    const code = error instanceof DemoError ? error.code : 'invalid';
-    const translations = strings[i18n.language === 'fr' ? 'fr' : 'en'];
-    const message = code.startsWith('name_') ? i18n.t(`rename.reason.${code}`, {ns: 'devices', defaultValue: translations.invalid}) : translations[code as keyof typeof translations] ?? translations.invalid;
-    notice(message);
-    throw new AxiosError(message, 'ERR_DEMO', config, undefined, {data: {message, reason: code}, status: error instanceof DemoError ? error.status : 422, statusText: 'Demo', headers: {}, config});
+api.defaults.adapter = createDemoAdapter(sim, (code) => {
+  const translations = strings[i18n.language === 'fr' ? 'fr' : 'en'];
+  const key = code.startsWith('name_') ? 'invalid' : code as keyof typeof strings.en;
+  const message = code.startsWith('name_') ? i18n.t(`rename.reason.${code}`, {ns: 'devices', defaultValue: noticeText('invalid')}) : noticeText(key) ?? translations.invalid;
+  notice(message);
+}, (method, path, wire) => {
+  if (shouldRevalidateDemoResponse(method, path, wire.status)) requestDemoRevalidation(['*']);
+  if (publicMode && path.split('?')[0] === '/api/system/settings' && wire.status < 400 && wire.data && typeof wire.data === 'object') {
+    const timezone = (wire.data as {gatewayTimezone?: unknown}).gatewayTimezone;
+    if (typeof timezone === 'string') setGatewayTimezone(timezone);
   }
-};
+  if (!publicMode && method === 'PUT' && path.endsWith('/schedule') && wire.status < 400) notice(i18n.language === 'fr'
+    ? 'Déclencheur enregistré pour la démonstration. L’exécution automatique des déclencheurs n’est pas simulée.'
+    : 'Demo trigger saved. Automatic trigger execution is not simulated.');
+});
 
 let last = performance.now();
 let hostActive = true;
+let lastReportedMinute = -1;
+function reportSimulatedTime(force = false): void {
+  if (!publicMode) return;
+  const minute = Math.floor(sim.now / 60_000);
+  if (!force && minute === lastReportedMinute) return;
+  lastReportedMinute = minute;
+  parent.postMessage({channel: CHANNEL, type: 'time', value: sim.now}, location.origin);
+}
 function tick() {
   const current = performance.now();
   sim.active = hostActive && !document.hidden;
   const changed = sim.advance(current - last); last = current;
-  if (changed) requestDemoRevalidation(['/api/devices', '/api/valves', '/api/irrigation/recent-actuations']);
+  if (changed) requestDemoRevalidation(['*']);
+  reportSimulatedTime();
 }
 const timer = window.setInterval(tick, 100);
 document.addEventListener('visibilitychange', () => {last = performance.now();});
@@ -111,12 +141,28 @@ window.addEventListener('message', event => {
   if (event.origin !== location.origin || event.source !== parent || !isHostCommand(event.data)) return;
   tick();
   if (event.data.type === 'active') hostActive = event.data.value;
-  else sim.speed = event.data.value;
+  else if (event.data.type === 'speed') sim.speed = event.data.value;
+  else if (!sim.jumpToNextEvent()) notice(noticeText('no_event'));
+  else {requestDemoRevalidation(['*']); reportSimulatedTime(true);}
 });
 window.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && e.shiftKey) {e.preventDefault(); parent.postMessage({channel: CHANNEL, type: 'focus'}, location.origin);}
+  if (!publicMode && e.key === 'Escape' && e.shiftKey) {e.preventDefault(); parent.postMessage({channel: CHANNEL, type: 'focus'}, location.origin);}
 });
 // All setup above runs before the application creates its API instance or reads storage.
 document.getElementById('demo-notice')!.onclick = () => {document.getElementById('demo-notice')!.hidden = true;};
-await import('./mount');
-parent.postMessage({channel: CHANNEL, type: 'ready'}, location.origin);
+if (publicMode) subscribeAuthSession(() => sim.setSessionUser(getAuthSession().username));
+if (publicMode) {
+  const sendLanguage = (value: string) => parent.postMessage({channel: CHANNEL, type: 'language', value: normalizeDemoLanguage(value)}, location.origin);
+  sendLanguage(i18n.resolvedLanguage ?? i18n.language);
+  i18n.on('languageChanged', sendLanguage);
+  reportSimulatedTime(true);
+}
+try {
+  await import('./mount');
+  if (!publicMode) parent.postMessage({channel: CHANNEL, type: 'ready'}, location.origin);
+} catch {
+  // An unmounted application cannot reliably report a failed first chunk.
+  // The public host's readiness deadline owns that case; render-time failures
+  // after mount are reported by StartupErrorBoundary in mount.tsx.
+  if (!publicMode) throw new Error('Demo application failed to start');
+}

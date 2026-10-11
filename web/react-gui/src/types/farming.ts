@@ -408,6 +408,7 @@ export interface IrrigationZone {
   stage_started_on?: string | null;
   /** 'auto' | 'open_meteo' | 'meteoswiss' | 'local', or a provider only the cloud implements. */
   weather_source?: string | null;
+  weather_source_default?: 'open_meteo' | 'meteoswiss' | null;
 
   // Compat aliases (server uses camelCase)
   stageStartedOn?: string | null;
@@ -629,6 +630,7 @@ export interface WaterAction {
 export interface WaterDay {
   date: string;
   rainMm: number | null;
+  forecastRainMm?: number | null;
   irrigationLiters: number | null;
   irrigationNetMm: number | null;
   measuredIrrigationLiters?: number | null;
@@ -643,12 +645,20 @@ export interface WaterDay {
   et0Mm?: number | null;
   et0Source?: string | null;
   et0Tier?: 'station_fao56' | 'provider_hourly_sum' | 'hargreaves_station' | 'open_meteo_daily' | null;
+  sourceProvider?: 'open_meteo' | 'meteoswiss' | null;
+  sourceCapturedAt?: string | null;
+  sourceAvailable?: boolean;
+  coveragePct?: number | null;
+  locationKey?: string | null;
   et0StationId?: string | null;
   et0StationName?: string | null;
   kc?: number | null;
   kcSource?: string | null;
   cropType?: string | null;
   phenologicalStage?: string | null;
+  stageStartedOn?: string | null;
+  areaM2?: number | null;
+  irrigationEfficiencyPct?: number | null;
   hoursPresent?: number | null;
   expectedHours?: number | null;
   /** Why a day has no demand: `pending`, `partial_day`, `no_source`, `no_location`, ... */
@@ -706,7 +716,7 @@ export interface LocalSensorDevice {
 
 export interface OnlineEnvironment {
   available: boolean;
-  source: 'openagri' | 'open_meteo' | 'unavailable';
+  source: 'openagri' | 'open_meteo' | 'meteoswiss' | 'unavailable';
   cacheStatus: 'live' | 'stale' | 'miss';
   observedAt: string | null;
   expiresAt: string | null;
@@ -748,7 +758,7 @@ export interface AgronomicCurrent {
 
 export interface ForecastEnvironment {
   available: boolean;
-  source: 'openagri' | 'open_meteo' | 'unavailable';
+  source: 'openagri' | 'open_meteo' | 'meteoswiss' | 'unavailable';
   cacheStatus: 'live' | 'stale' | 'miss';
   observedAt: string | null;
   expiresAt: string | null;

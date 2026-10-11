@@ -1,0 +1,77 @@
+name: Public simulator
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+permissions:
+  contents: read
+defaults:
+  run:
+    working-directory: web/react-gui
+jobs:
+  source-builds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --version && npm --version
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run demo:test
+      - run: ./node_modules/.bin/tsc -p demo/tsconfig.json --noEmit
+      - run: npm run demo:build
+      - run: npm run demo:build:public
+      - run: npm run build
+      - run: node demo/check-build-isolation.mjs --production build --public public-demo-build --source src
+
+  public-browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --version && npm --version
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox
+      - run: npm run demo:test:public
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-simulator-browser-results
+          path: web/react-gui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  presentation-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --version && npm --version
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run demo:build
+      - run: npm run demo:test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: presentation-simulator-browser-results
+          path: web/react-gui/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

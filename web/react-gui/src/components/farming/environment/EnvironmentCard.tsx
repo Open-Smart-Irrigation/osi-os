@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 import { useDateFormat } from '../../../utils/datetime';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
+import { subscribePublicSimulatorInvalidation } from '../../../utils/publicSimulatorInvalidation';
 import { LocalTab } from './LocalTab';
 import { AgronomicTab } from './AgronomicTab';
 import { WaterTab } from './WaterTab';
@@ -114,13 +115,15 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
   useEffect(() => {
     let cancelled = false;
+    let requestSequence = 0;
 
     const load = async () => {
+      const request = ++requestSequence;
       setLoading(true);
       setError(null);
       try {
         const summary = await environmentAPI.getSummary(zone.id);
-        if (cancelled) return;
+        if (cancelled || request !== requestSequence) return;
         setData(summary);
         setActiveTab((previous) => previous || 'water');
       } catch (e: any) {
@@ -128,20 +131,23 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         // axios's own English `e.message`) — only the translated generic
         // key, with the HTTP status appended as a code when there is one
         // (X-10: "any other backend English on screen" in this card).
-        if (!cancelled) {
+        if (!cancelled && request === requestSequence) {
           const status = e?.response?.status;
           const detail = typeof status === 'number' ? ` (${status})` : '';
           setError(`${t('environment.loadFailed', { defaultValue: 'Failed to load environment data' })}${detail}`);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && request === requestSequence) setLoading(false);
       }
     };
 
     void load();
+    const unsubscribe = subscribePublicSimulatorInvalidation(() => void load());
     const interval = setInterval(() => void load(), 5 * 60 * 1000);
     return () => {
       cancelled = true;
+      requestSequence += 1;
+      unsubscribe();
       clearInterval(interval);
     };
   }, [zone.id]);

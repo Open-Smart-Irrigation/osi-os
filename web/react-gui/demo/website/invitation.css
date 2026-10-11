@@ -1,0 +1,120 @@
+#osi-simulator-invitation {
+  --osi-ink: #18212b;
+  position: fixed;
+  z-index: 9997;
+  top: var(--osi-invitation-top, 80px);
+  right: max(8px, env(safe-area-inset-right));
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  color: var(--osi-ink);
+  font: 600 12px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  pointer-events: none;
+}
+
+#osi-simulator-invitation[hidden] {
+  display: none;
+}
+
+.osi-simulator-invitation__entry,
+.osi-simulator-invitation__close {
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  pointer-events: auto;
+}
+
+.osi-simulator-invitation__entry {
+  display: grid;
+  width: max(44px, 7dvh);
+  height: max(44px, 10dvh);
+  place-items: center;
+  border-radius: 7px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.osi-simulator-invitation__visual {
+  display: flex;
+  width: 100%;
+  height: 10dvh;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.osi-simulator-invitation__phone {
+  display: block;
+  width: auto;
+  height: calc(100% - 12px);
+  max-width: 100%;
+  aspect-ratio: 0.48;
+  overflow: hidden;
+  border: 1px solid #fff;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 25%);
+}
+
+.osi-simulator-invitation__phone img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.osi-simulator-invitation__caption {
+  display: block;
+  flex: none;
+  padding-top: 2px;
+  color: #fff;
+  font-size: clamp(8px, 1.35dvh, 12px);
+  font-weight: 750;
+  line-height: 10px;
+  text-align: center;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 85%);
+  white-space: nowrap;
+}
+
+.osi-simulator-invitation__close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 88%);
+  border-radius: 50%;
+  color: #fff;
+  background: rgb(24 33 43 / 78%);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 25%);
+  font: 28px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.osi-simulator-invitation__entry:hover .osi-simulator-invitation__phone {
+  box-shadow: 0 3px 12px rgb(15 23 42 / 42%);
+}
+
+.osi-simulator-invitation__close:hover {
+  background: rgb(24 33 43 / 96%);
+}
+
+.osi-simulator-invitation__close:focus-visible,
+.osi-simulator-invitation__entry:focus-visible {
+  outline: 3px solid #e2a62c;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #osi-simulator-invitation,
+  #osi-simulator-invitation * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+  }
+}

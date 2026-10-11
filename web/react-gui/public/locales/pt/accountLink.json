@@ -10,6 +10,7 @@
   },
   "form": {
     "serverUrl": "URL do servidor OSI",
+    "demoNotice": "Apenas simulador: introduza valores fictícios. As credenciais não são enviadas nem guardadas e este URL não é contactado.",
     "actionLabel": "Ação",
     "actionLogin": "Vincular conta existente",
     "actionRegister": "Criar nova conta",

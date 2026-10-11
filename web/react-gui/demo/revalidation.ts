@@ -11,6 +11,13 @@ const DEMO_REVALIDATE_EVENT = 'osi-demo:revalidate';
 
 type DemoRevalidation = {keys: readonly string[]; handled: WeakSet<Cache>};
 
+/** Successful local writes refresh public readers; the analysis-series POST is read-only. */
+export function shouldRevalidateDemoResponse(method: string, path: string, status: number): boolean {
+  const verb = method.toUpperCase();
+  if (status < 200 || status >= 300 || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(verb)) return false;
+  return !(verb === 'POST' && path.split('?')[0] === '/api/analysis/series');
+}
+
 export function requestDemoRevalidation(keys: readonly string[]): void {
   window.dispatchEvent(new CustomEvent<DemoRevalidation>(DEMO_REVALIDATE_EVENT, {detail: {keys, handled: new WeakSet()}}));
 }
@@ -22,7 +29,8 @@ export const demoRevalidation: Middleware = useSWRNext => (key, fetcher, config)
       const {keys, handled} = (event as CustomEvent<DemoRevalidation>).detail;
       if (handled.has(cache)) return;
       handled.add(cache);
-      for (const changed of keys) void mutate(changed);
+      if (keys.includes('*')) void mutate((key: unknown) => key !== undefined);
+      else for (const changed of keys) void mutate(changed);
     };
     window.addEventListener(DEMO_REVALIDATE_EVENT, handler);
     return () => window.removeEventListener(DEMO_REVALIDATE_EVENT, handler);

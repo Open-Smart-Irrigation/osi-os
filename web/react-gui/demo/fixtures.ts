@@ -2,6 +2,7 @@ import {classifySwtWaterStatus} from '../src/utils/swt';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../src/types/farming';
 import {DEMO_EPOCH, sensorSnapshot, waterReading, waterDays} from './history';
 export {DEMO_EPOCH};
+export const PUBLIC_EPOCH = Date.parse('2026-10-10T02:59:50.000Z');
 export const VALVE_EUI = '00000000000000D1';
 export const SPARE_EUI = '00000000000000A3';
 export const iso = (time: number) => new Date(time).toISOString();

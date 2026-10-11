@@ -184,6 +184,7 @@ function renderSettings() {
 }
 
 beforeEach(() => {
+  vi.unstubAllEnvs();
   window.localStorage.clear();
   document.documentElement.removeAttribute('data-theme');
   i18nMock.language = 'en';
@@ -218,6 +219,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -353,6 +355,31 @@ describe('SettingsPage', () => {
     expect(within(moduleRows[6]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[7]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
     expect(within(moduleRows[8]).getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('keeps stable modules while omitting experimental controls in the public build', () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    renderSettings();
+
+    const modules = screen.getByRole('region', {name: 'Modules'});
+    for (const name of ['Prediction advisory', 'Data view', 'Network', 'Gateway', 'Field journal']) {
+      expect(within(modules).queryByRole('group', {name})).not.toBeInTheDocument();
+    }
+    for (const name of ['Water balance', 'Irrigation schedule', 'Valve control', 'Environment & weather forecast']) {
+      expect(within(modules).getByRole('group', {name})).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('region', {name: 'Journal'})).not.toBeInTheDocument();
+  });
+
+  it('keeps the existing experimental settings in non-public builds', () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'false');
+    renderSettings();
+
+    const modules = screen.getByRole('region', {name: 'Modules'});
+    for (const name of ['Prediction advisory', 'Data view', 'Network', 'Gateway', 'Field journal']) {
+      expect(within(modules).getByRole('group', {name})).toBeInTheDocument();
+    }
+    expect(screen.getByRole('region', {name: 'Journal'})).toBeInTheDocument();
   });
 
   // Phil, 2026-09-17: each of the four gateway-level modules carries an

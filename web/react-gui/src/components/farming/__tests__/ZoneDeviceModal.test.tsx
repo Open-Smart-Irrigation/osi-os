@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZoneDeviceModal } from '../ZoneDeviceModal';
 import { devicesAPI, irrigationZonesAPI } from '../../../services/api';
 
@@ -28,6 +28,7 @@ const devices = [
 describe('ZoneDeviceModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'false');
     // Two entries, deliberately: with a single-item catalog `catalog[0].id` and
     // the selected option are the same string, so the assertion below cannot
     // tell "sent the selection" from "sent the first catalog row".
@@ -38,6 +39,8 @@ describe('ZoneDeviceModal', () => {
     vi.mocked(devicesAPI.add).mockResolvedValue({} as never);
     vi.mocked(irrigationZonesAPI.assignDevice).mockResolvedValue(undefined);
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   const renderModal = (onChanged = vi.fn()) => {
     render(
@@ -140,6 +143,81 @@ describe('ZoneDeviceModal', () => {
       }),
     );
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it('prefills an editable public DevEUI and registers after entering only the name', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((bytes) => {
+      (bytes as Uint8Array).set([6, 5, 4, 3, 2, 1]);
+      return bytes;
+    });
+    renderModal();
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await screen.findByRole('option', { name: 'Dragino LSN50' });
+
+    const generated = screen.getByLabelText('addModal.deveui');
+    expect(generated).toHaveValue('02F1060504030201');
+    expect(generated).toBeEnabled();
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), { target: { value: 'New tree' } });
+    fireEvent.click(screen.getByRole('button', { name: 'zoneDeviceModal.registerSubmit' }));
+
+    await waitFor(() => expect(devicesAPI.add).toHaveBeenCalledWith({
+      deveui: '02F1060504030201',
+      name: 'New tree',
+      type_id: 'DRAGINO_LSN50',
+      appkey: undefined,
+      zone_id: 7,
+    }));
+  });
+
+  it('keeps edited public registration values after failure and creates a fresh ID on reopen', async () => {
+    vi.stubEnv('VITE_PUBLIC_SIMULATOR', 'true');
+    let draw = 0;
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation((bytes) => {
+      draw += 1;
+      (bytes as Uint8Array).fill(draw);
+      return bytes;
+    });
+    const props = { onClose: vi.fn(), onChanged: vi.fn(), zoneId: 7, zoneName: 'North Block', availableDevices: devices };
+    const { rerender } = render(<ZoneDeviceModal isOpen {...props} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await screen.findByRole('option', { name: 'Dragino LSN50' });
+    const firstId = screen.getByLabelText('addModal.deveui');
+    expect(firstId).toHaveValue('02F1010101010101');
+    fireEvent.change(screen.getByLabelText('addModal.deviceType'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), { target: { value: 'North valve' } });
+    fireEvent.change(firstId, { target: { value: '02F1AAAAAAAAAAAA' } });
+    vi.mocked(devicesAPI.add).mockRejectedValueOnce({ response: { data: { message: 'temporary failure' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'zoneDeviceModal.registerSubmit' }));
+    await screen.findByText('temporary failure');
+    expect(screen.getByLabelText('addModal.deviceName')).toHaveValue('North valve');
+    expect(screen.getByLabelText('addModal.deveui')).toHaveValue('02F1AAAAAAAAAAAA');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabAssign' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    expect(screen.getByLabelText('addModal.deveui')).toHaveValue('02F1AAAAAAAAAAAA');
+
+    rerender(<ZoneDeviceModal isOpen={false} {...props} />);
+    rerender(<ZoneDeviceModal isOpen {...props} />);
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    expect(screen.getByLabelText('addModal.deveui')).toHaveValue('02F1020202020202');
+  });
+
+  it('leaves the zone registration draft unchanged outside the public simulator build', async () => {
+    const props = { onClose: vi.fn(), onChanged: vi.fn(), zoneId: 7, zoneName: 'North Block', availableDevices: devices };
+    const { rerender } = render(<ZoneDeviceModal isOpen {...props} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    await screen.findByRole('option', { name: 'Dragino LSN50' });
+    fireEvent.change(screen.getByLabelText('addModal.deviceName'), { target: { value: 'Private draft' } });
+    fireEvent.change(screen.getByLabelText('addModal.deveui'), { target: { value: 'BBBB000000000005' } });
+
+    rerender(<ZoneDeviceModal isOpen={false} {...props} />);
+    rerender(<ZoneDeviceModal isOpen {...props} />);
+    await waitFor(() => expect(devicesAPI.getCatalog).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('tab', { name: 'zoneDeviceModal.tabRegister' }));
+    expect(screen.getByLabelText('addModal.deviceName')).toHaveValue('Private draft');
+    expect(screen.getByLabelText('addModal.deveui')).toHaveValue('BBBB000000000005');
   });
 
   it('exposes tab panels and moves focusable selection with arrow keys', () => {

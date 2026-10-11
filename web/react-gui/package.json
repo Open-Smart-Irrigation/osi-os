@@ -25,11 +25,16 @@
     "test:unit:tsx-runner": "node scripts/run-tsx-tests.mjs 'tests/**/*.test.ts'",
     "test:unit:vitest": "vitest run src/hooks/__tests__ src/analysis/__tests__ src/components/analysis/__tests__ src/components/farming/__tests__ src/components/farming/valves/__tests__ src/components/history/__tests__ src/components/__tests__ src/pages/__tests__ src/utils/__tests__ src/channels/__tests__ src/history/__tests__ src/services/__tests__ src/components/journal/__tests__ src/journal/__tests__ src/agronomy/__tests__ src/components/farming/environment/__tests__ src/components/journal/capture/__tests__ src/components/journal/desktop/__tests__ src/components/journal/markers/__tests__ src/contexts/__tests__ src/ui-core/__tests__",
     "typecheck": "tsc --noEmit",
-    "demo:build": "vite build --config vite.demo.config.ts",
+    "demo:generate-sdi12-profiles": "node scripts/generate-sdi12-profiles.mjs",
+    "demo:build": "npm run demo:generate-sdi12-profiles && vite build --config vite.demo.config.ts",
     "demo:serve": "node demo/serve.mjs",
     "demo:start": "npm run demo:build && npm run demo:serve",
-    "demo:test": "node scripts/run-tsx-tests.mjs 'demo/tests/*.test.ts'",
-    "demo:test:browser": "playwright test --config demo/playwright.config.ts"
+    "demo:test": "node scripts/run-tsx-tests.mjs 'demo/tests/*.test.ts' 'demo/tests/public/*.test.ts'",
+    "demo:test:browser": "playwright test --config demo/playwright.config.ts",
+    "demo:build:public": "vite build --config vite.demo.config.ts --mode public",
+    "demo:serve:public": "node demo/public/serve.mjs",
+    "demo:test:public": "playwright test --config demo/playwright.public.config.ts",
+    "demo:build:website": "node demo/website/package.mjs"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.12",
