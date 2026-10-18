@@ -267,3 +267,18 @@ test('CMD-04 PR0 (C): two quick schedule edits supersede the first snapshot; GET
   db.close();
   assert.deepEqual(states.map((r) => [r.state, r.n]), [['QUEUED', 8], ['SUPERSEDED', 8]]);
 });
+
+test('R5 M3: pause is not refused when the stored plan has a plan_conflict; the status goes out alone', async () => {
+  const { path } = await tempDb();
+  const db = new TestDatabase(path);
+  for (let i = 1; i <= 5; i += 1) await store.insertSchedule(db, { schedule_uuid: 'x' + i, device_eui: FIXTURE_EUI, kind: 'WEEKLY', label: null, weekdays_mask: 4, start_time: '0' + i + ':00', duration_minutes: 10, timezone: 'UTC', enabled: 1 });
+  db.close();
+  const out = await call(path, req('POST', '/api/valves/' + FIXTURE_EUI + '/scheduler-status', { status: 'DEACTIVATED' }));
+  assert.equal(out.statusCode, 202);
+  const db2 = new TestDatabase(path);
+  const marker = await store.getSnapshotPending(db2, FIXTURE_EUI);
+  const snap = await store.queuedPushesById(db2, FIXTURE_EUI, marker.push_ids);
+  assert.deepEqual(snap.map((r) => [r.fport, r.payload_hex]), [[21, '32']]);
+  assert.equal((await store.getSettings(db2, FIXTURE_EUI)).scheduler_status, 'DEACTIVATED');
+  db2.close();
+});

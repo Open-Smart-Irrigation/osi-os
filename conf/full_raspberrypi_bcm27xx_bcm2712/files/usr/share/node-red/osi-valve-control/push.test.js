@@ -58,7 +58,7 @@ test('status and clock pushes', () => {
 const { tempDb, linkCloud, FIXTURE_EUI: EUI, fakeChirpStack, applyToValve } = require('./test-helpers');
 const store = require('./store');
 const workers = require('./workers');
-const { compileAndQueue, queuePushes, emitPendingSnapshots, SNAPSHOT_DEBOUNCE_MS } = require('./push');
+const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS } = require('./push');
 
 const T0 = Date.parse('2026-08-19T10:00:00Z');
 const at = (sec) => new Date(T0 + sec * 1000);
@@ -109,7 +109,7 @@ test('snapshot: a GEN1 compile writes 7 weekday plans + status, sends nothing un
   await store.insertSchedule(db, weekly('u1', 0x02, '06:00', 30));
   const r = await h.compile(0);
   assert.deepEqual(r.rows.map((row) => [row.purpose, row.weekday]),
-    [0, 1, 2, 3, 4, 5, 6].map((d) => ['WEEKDAY_PLAN', d]).concat([['SCHEDULER_STATUS', null]]));
+    [['SCHEDULER_STATUS', null]].concat([0, 1, 2, 3, 4, 5, 6].map((d) => ['WEEKDAY_PLAN', d])), 'status first (R5 M1)');
   assert.equal(r.rows.some((row) => row.purpose === 'CLOCK_SYNC'), false, 'CLOCK_SYNC is never part of a compile');
   assert.deepEqual(r.messages, [], 'the snapshot is emitted by the valve tick, not by the edit');
   assert.equal(h.cs.log.flushes, 1);
@@ -250,7 +250,7 @@ test('acceptance 5 (GEN2 completeness): every snapshot covers all 7 days, empty 
   await store.softDeleteSchedule(db, 'a', EUI);
   await store.softDeleteSchedule(db, 'b', EUI);
   const s4 = await h.compile(30);
-  assert.deepEqual(s4.rows.map((row) => row.payload_hex), ['80', '30'], 'no schedules left: one all-days clear + status');
+  assert.deepEqual(s4.rows.map((row) => row.payload_hex), ['30', '80'], 'no schedules left: status + one all-days clear');
   db.close();
 });
 
@@ -390,7 +390,7 @@ test('snapshot: a scheduler-status change on a programmed valve sends the full p
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const r = await h.compile(0, { schedulerStatus: 'SKIP_TODAY' });
   assert.equal(r.rows.length, 8);
-  assert.equal(r.rows[7].payload_hex, '31');
+  assert.equal(r.rows[0].payload_hex, '31');
   await assert.rejects(() => h.compile(5, { schedulerStatus: 'NONSENSE' }));
   db.close();
 });
@@ -407,7 +407,9 @@ test('snapshot: without a flush (an open still awaiting observation) older rows 
   await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
   const c2 = await h.compile(100);
   assert.equal(c2.flushed, false);
-  await h.emit(100 + WINDOW_SEC);
+  assert.equal((await h.emit(100 + WINDOW_SEC)).messages.length, 0, 'held while the open is unobserved (R5 M5)');
+  await db.run("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING' WHERE expectation_id='e1'");
+  await h.emit(200 + WINDOW_SEC);
   assert.deepEqual(h.cs.getQueue(), asItems(c1.rows).concat(asItems(c2.rows)), 'FIFO: the valve applies snapshot 1, then snapshot 2, and ends on 2');
   assert.deepEqual([...new Set((await statesById(db, c1.rows.map((row) => row.push_id))).map((s) => s.state))], ['SUPERSEDED']);
   db.close();
@@ -421,7 +423,7 @@ test('MAJOR-A: a Gen1->Gen2 self-correction snapshot supersedes the abandoned WE
   assert.equal((await store.pushSummary(db, EUI, at(0))).queued, 7);
   await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
   const r2 = await h.compile(10, { force: true });
-  assert.deepEqual(r2.rows.map((row) => row.payload_hex), ['8086000630', '30']);
+  assert.deepEqual(r2.rows.map((row) => row.payload_hex), ['30', '8086000630']);
   const weekdayStates = await db.all("SELECT state FROM valve_schedule_pushes WHERE purpose='WEEKDAY_PLAN'");
   assert.deepEqual(new Set(weekdayStates.map((r) => r.state)), new Set(['SUPERSEDED']));
   const after = await store.pushSummary(db, EUI, at(10));
@@ -497,5 +499,170 @@ test('P3-E1: a snapshot compile still commits its ledger writes when the runtime
   assert.equal((await db.all("SELECT 1 FROM valve_schedule_pushes WHERE state='QUEUED'")).length, 8);
   assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 0);
   assert.ok(warnings.some((w) => /runtime emit failed/.test(w)));
+  db.close();
+});
+
+// ---------------------------------------------------------------------------------------------
+// R5 review fixes (H1, M1, M2, M3, M5, L1, L3, G1).
+// ---------------------------------------------------------------------------------------------
+const { cancelActuation } = require('./cancel');
+
+async function runningOpen(db, id) {
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) VALUES (?, ?, '2026-08-19T10:01:00.000Z', 900, '2026-08-19T10:16:00.000Z', 'unknown', 'OBSERVED_RUNNING', 'manual', '2026-08-19T10:01:00.000Z')",
+    [id, EUI]);
+}
+
+test('H1 (probe C): a whole-queue cancel flush after the clears left marks them LOST at once, surfaced, and nothing re-sends them', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  workers._resetHousekeepingForTests();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
+  await h.compile(0);
+  await h.emit(WINDOW_SEC);
+  await store.softDeleteSchedule(db, 'a', EUI);
+  const clears = await h.compile(100);
+  await h.emit(100 + WINDOW_SEC); // the clears are on the air
+  assert.equal(h.cs.getQueue().length, 8);
+  await runningOpen(db, 'e-run');
+
+  const out = await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: h.cs.flushQueue, now: at(200) });
+  assert.equal(out.ok, true);
+  assert.equal(h.cs.getQueue().length, 0, 'D19 (a): the whole queue went, clears included');
+  const states = await statesById(db, clears.rows.map((r) => r.push_id));
+  for (const s of states) assert.deepEqual({ state: s.state, error: s.error }, { state: 'FAILED', error: 'not_resent_q02c' });
+  const summary = await store.pushSummary(db, EUI, at(200));
+  assert.equal(summary.lost, 7);
+  assert.equal(summary.scheduler_status_lost, true);
+  const payload = JSON.parse((await db.get("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED' ORDER BY rowid DESC LIMIT 1")).payload_json);
+  assert.equal(payload.push_state.lost, 7, 'the GUI and the cloud see it immediately, not after 24 h');
+
+  const before = h.cs.log.enqueued.length;
+  for (let s = 260; s <= 260 + 7200; s += 600) await h.tick(s);
+  assert.equal(h.cs.log.enqueued.slice(before).filter((i) => i.fPort !== 12).length, 0, 'nothing re-sends the clears (owner question: D03 vs Q02 c)');
+  db.close();
+});
+
+test('H1: a snapshot still waiting out the debounce window is not in the radio queue, so a cancel flush leaves it pending and it is still sent', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const snap = await h.compile(0);
+  await runningOpen(db, 'e-run');
+  await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: h.cs.flushQueue, now: at(5) });
+  assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED']);
+  await h.emit(WINDOW_SEC + 5);
+  assert.deepEqual(h.cs.getQueue(), asItems(snap.rows));
+  db.close();
+});
+
+test('M1: SCHEDULER_STATUS is the first row of every snapshot (GEN1, GEN2, status change, decommission)', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  assert.equal((await h.compile(0)).rows[0].purpose, 'SCHEDULER_STATUS');
+  assert.equal((await h.compile(5, { schedulerStatus: 'DEACTIVATED' })).rows[0].payload_hex, '32');
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
+  assert.equal((await h.compile(10)).rows[0].purpose, 'SCHEDULER_STATUS');
+  const decom = buildSnapshotPushes({ generation: 'GEN1', days: Array.from({ length: 7 }, () => []), schedulerStatus: 'DEACTIVATED', includePlan: true });
+  assert.equal(decom[0].purpose, 'SCHEDULER_STATUS');
+  db.close();
+});
+
+test('M3: a plan_conflict in the stored schedules does not block pause/skip/resume: the status goes out alone', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  for (let i = 1; i <= 5; i += 1) await store.insertSchedule(db, weekly('x' + i, 4, '0' + i + ':00', 10)); // 5 windows on Tuesday
+  const warnings = [];
+  const r = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: h.cs.flushQueue, warn: (m) => warnings.push(m), schedulerStatus: 'DEACTIVATED', statusOnlyOnConflict: true });
+  assert.deepEqual(r.rows.map((row) => [row.purpose, row.payload_hex]), [['SCHEDULER_STATUS', '32']]);
+  assert.ok(warnings.some((w) => /plan_conflict/.test(w)));
+  await assert.rejects(() => compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(5), flushQueue: h.cs.flushQueue, warn: () => {} }), (e) => e.code === 'plan_conflict');
+  db.close();
+});
+
+test('M2: a compile that races another compile during its flush builds its snapshot from the schedules as they are at write time', async () => {
+  const { db } = await tempDb();
+  const cs = fakeChirpStack();
+  await store.insertSchedule(db, weekly('keep', 0x02, '06:00', 30));
+  await store.insertSchedule(db, weekly('gone', 0x10, '07:00', 30)); // Thursday
+  // While A's flush is in flight, B deletes 'gone' and compiles (the cloud bridge, another DB handle).
+  let raced = false;
+  const racingFlush = async (eui) => {
+    if (!raced) {
+      raced = true;
+      await store.softDeleteSchedule(db, 'gone', EUI);
+      await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(1), flushQueue: cs.flushQueue, warn: () => {} });
+    }
+    return cs.flushQueue(eui);
+  };
+  const a = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(2), flushQueue: racingFlush, warn: () => {} });
+  const thursday = a.rows.find((row) => row.weekday === 4);
+  assert.equal(thursday.payload_hex, EMPTY_GEN1, 'A must not resurrect the schedule B deleted');
+  const marker = await store.getSnapshotPending(db, EUI);
+  assert.deepEqual(marker.push_ids, a.rows.map((row) => row.push_id));
+  db.close();
+});
+
+test('M5: while an open awaits observation the pending snapshot is held, so edit bursts append one snapshot, not one per burst', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const c1 = await h.compile(0);
+  await h.emit(WINDOW_SEC);
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES ('e1', ?, '2026-08-19T10:01:00Z', 600, '2026-08-19T10:11:00Z', 'unknown', 'PENDING_OBSERVATION', '2026-08-19T10:01:00Z')",
+    [EUI]);
+  let last = null;
+  for (let i = 0; i < 3; i += 1) {
+    await store.updateSchedule(db, 'a', { start_time: '0' + (7 + i) + ':00' }, EUI);
+    last = await h.compile(100 + i * 100);
+    assert.equal((await h.emit(100 + i * 100 + WINDOW_SEC + 5)).messages.length, 0, 'held while the open is unobserved');
+  }
+  await db.run("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING' WHERE expectation_id='e1'");
+  await h.emit(1000);
+  assert.deepEqual(h.cs.getQueue(), asItems(c1.rows).concat(asItems(last.rows)), 'one held snapshot appended behind the unflushed one');
+  db.close();
+});
+
+test('L3: the debounce has an upper bound: edits every 20 s still send a snapshot within 5 minutes of the first one', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  let emittedAt = null;
+  for (let sec = 0; sec <= 600 && emittedAt === null; sec += 20) {
+    await store.updateSchedule(db, 'a', { duration_minutes: 30 + (sec / 20) % 60 }, EUI);
+    await h.compile(sec);
+    if ((await h.emit(sec + 10)).messages.length) emittedAt = sec + 10;
+  }
+  assert.ok(emittedAt !== null && emittedAt <= 300 + 20, 'emitted by the max-age bound, at ' + emittedAt);
+  db.close();
+});
+
+test('L1: deleting the only WEEKLY schedule of a valve with no plan history still clears the valve (the tombstone is the intent)', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30)); // e.g. a restored DB: schedule on record, no push on record
+  await store.softDeleteSchedule(db, 'a', EUI);
+  const r = await h.compile(0);
+  assert.equal(r.rows.length, 8);
+  assert.ok(r.rows.filter((row) => row.purpose === 'WEEKDAY_PLAN').every((row) => row.payload_hex === EMPTY_GEN1));
+  db.close();
+});
+
+test('G1: the GEN2 whole-plan clear prefix is off by default and, when set, sends status, 80, then only the non-empty groups', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x22, '06:00', 30)); // Mon + Fri
+  const plain = await h.compile(0);
+  assert.deepEqual(plain.rows.map((row) => row.payload_hex), ['30', '5D', '2286000630'], 'default: gen2Groups with the zero-window frame for the other days');
+  await db.run("INSERT INTO app_settings(key, value) VALUES ('valve_gen2_snapshot_clear_prefix', '1')");
+  const prefixed = await h.compile(10);
+  assert.deepEqual(prefixed.rows.map((row) => row.payload_hex), ['30', '80', '2286000630'], 'fail-dry: clear everything, then program what is wanted');
+  await store.softDeleteSchedule(db, 'a', EUI);
+  const cleared = await h.compile(20);
+  assert.deepEqual(cleared.rows.map((row) => row.payload_hex), ['30', '80']);
   db.close();
 });

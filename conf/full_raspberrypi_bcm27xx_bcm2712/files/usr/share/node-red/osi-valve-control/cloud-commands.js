@@ -207,7 +207,7 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
   if (!device) return { ok: false, error: 'not_found' };
   if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
   // CMD-04 PR0 (C): a snapshot carrying the new status, as the REST route does.
-  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, now, flushQueue, warn, schedulerStatus: status });
+  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, now, flushQueue, warn, schedulerStatus: status, statusOnlyOnConflict: true }); // R5 M3: a pause never depends on plan validity
   const tz = device.zone_timezone || tzFallback;
   const lp = P.localParts(now, tz);
   await store.upsertSettings(db, eui, {

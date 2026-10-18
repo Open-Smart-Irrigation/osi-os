@@ -28,6 +28,7 @@
 // the REST route's contract as a side effect of adding the cloud path.
 
 const runtime = require('./runtime');
+const store = require('./store');
 
 const ACTIVE_STATES = "('PENDING_OBSERVATION','OBSERVED_RUNNING')";
 
@@ -285,6 +286,9 @@ async function cancelActuation({ db, deviceEui, expectationId, all, reason, flus
     : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, warn });
 
   await db.transaction(async (tx) => {
+    // (R5 H1) A whole-queue flush also removed the plan snapshot on the air: surface it as LOST
+    // now. Not re-sent (Q02 c); whether a cancel may arm a fresh snapshot is an owner question.
+    if (queue.scope === 'full_flush') await store.markFlushedSnapshotLost(tx, eui);
     for (const target of targets) {
       await tx.run(
         "UPDATE valve_actuation_expectations SET reconciliation_state='CANCELLED', cancel_reason=? " +

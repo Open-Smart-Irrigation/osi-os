@@ -170,8 +170,8 @@ async function softDeleteSchedule(db, scheduleUuid, deviceEui) {
 // valve_schedule_pushes.state admits only QUEUED/ACKED/FAILED/SUPERSEDED, and widening it is a
 // table rebuild, so LOST is stored as state FAILED with one of these errors and read back as
 // LOST (isLostRow, weekdayPushStates). 'stale_unconfirmed' is what failStalePushes writes;
-// 'not_resent_q02c' is the shared convention's flush-loss reason, which the snapshot design no
-// longer produces but still reads. Same strings as the conditional-scheduling branch.
+// 'not_resent_q02c' is the flush-loss reason markFlushedSnapshotLost writes when a cancel or
+// unclaim flush drops a snapshot that was already on the air (R5 H1). Same strings as the conditional-scheduling branch.
 const LOST_STALE = 'stale_unconfirmed';
 const LOST_NOT_RESENT = 'not_resent_q02c';
 const LOST_REASONS = [LOST_STALE, LOST_NOT_RESENT];
@@ -375,6 +375,30 @@ async function supersedeOutstanding(db, deviceEui, purposes) {
   return rows.length;
 }
 
+// (R5 L1) Has the valve ever had a WEEKLY schedule here, tombstones included? (Bluetooth
+// guard in push.compileAndQueue, together with hasPlanHistory.)
+async function hasWeeklyEver(db, deviceEui) {
+  const row = await db.get("SELECT 1 AS x FROM valve_schedules WHERE UPPER(device_eui)=UPPER(?) AND kind='WEEKLY' LIMIT 1", [deviceEui]);
+  return !!row;
+}
+
+// (R5 H1) A whole-queue flush outside a snapshot compile (cancel, unclaim's cancel, the cloud
+// cancel) removes whatever was on the air. The latest snapshot's rows still QUEUED there are
+// LOST: marked FAILED 'not_resent_q02c' at once so "device may not hold this plan" shows now,
+// not after the 24 h sweep. Nothing re-sends them (Q02 c). A snapshot still waiting out the
+// debounce window was never in the radio queue, so its rows are left alone and still sent. A
+// flushed, unconfirmed CLOCK_SYNC is SUPERSEDED and the valve made due for a fresh one.
+async function markFlushedSnapshotLost(db, deviceEui) {
+  const pending = await getSnapshotPending(db, deviceEui);
+  const keep = new Set(pending ? pending.push_ids : []);
+  const rows = await db.all("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS')", [deviceEui]);
+  const lost = rows.filter((r) => !keep.has(r.push_id));
+  for (const r of lost) await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [LOST_NOT_RESENT, r.push_id]);
+  const clocks = await supersedeOutstanding(db, deviceEui, ['CLOCK_SYNC']);
+  if (clocks) await upsertSettings(db, deviceEui, { last_clock_sync_queued_at: null });
+  return { lost: lost.length, clocksSuperseded: clocks };
+}
+
 // Has this gateway ever queued a plan for the valve? (Bluetooth guard in push.compileAndQueue.)
 async function hasPlanHistory(db, deviceEui) {
   const row = await db.get("SELECT 1 AS x FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') LIMIT 1", [deviceEui]);
@@ -389,9 +413,9 @@ const SNAPSHOT_PENDING_PREFIX = 'valve_snapshot_pending:';
 function parsePending(key, raw) {
   try {
     const v = JSON.parse(raw);
-    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: v.edited_at || null, push_ids: Array.isArray(v.push_ids) ? v.push_ids : [], raw };
+    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: v.edited_at || null, first_edited_at: v.first_edited_at || null, push_ids: Array.isArray(v.push_ids) ? v.push_ids : [], raw };
   } catch (_) {
-    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: null, push_ids: [], raw };
+    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: null, first_edited_at: null, push_ids: [], raw };
   }
 }
 
@@ -501,4 +525,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { supersedeOutstanding, hasPlanHistory, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

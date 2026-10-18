@@ -856,3 +856,11 @@ test('F144: every schedule-mutating rejection stays well inside the cloud mirror
     assert.ok(r.error.length > 0 && r.error.length <= 255, 'the bridge ships out.error verbatim as the command_ack error field: ' + r.error.length + ' chars');
   }
 });
+
+test('R5 M3: SET_VALVE_SCHEDULER_STATUS is not refused by a plan_conflict in the stored schedules', async () => {
+  const { db } = await tempDb();
+  for (let i = 1; i <= 5; i += 1) await store.insertSchedule(db, { schedule_uuid: 'x' + i, device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 4, start_time: '0' + i + ':00', duration_minutes: 10, timezone: 'UTC', enabled: 1 });
+  const out = await apply(db, { commandType: 'SET_VALVE_SCHEDULER_STATUS', device_eui: EUI, status: 'DEACTIVATED' });
+  assert.equal(out.ok, true);
+  assert.deepEqual((await pendingSnapshot(db)).map((r) => [r.fport, r.payload_hex]), [[21, '32']]);
+});

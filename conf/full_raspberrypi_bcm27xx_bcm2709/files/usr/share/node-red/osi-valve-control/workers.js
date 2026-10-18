@@ -285,8 +285,10 @@ async function runHousekeeping({ db, now, appId, warn }) {
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
   const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
   const out = { resets: 0, clockJump: false, decommissioned: 0, snapshotsEmitted: 0, messages: [] };
-  // (d) CMD-04 PR0 (C): send the plan snapshots whose debounce window has passed. First, so a
-  // clock sync queued by runClockTick in the same tick lands behind the snapshot.
+  // (d) CMD-04 PR0 (C): send the plan snapshots whose debounce window has passed. Run before
+  // runClockTick, so a clock sync queued in the same tick lands behind the snapshot. A clock
+  // re-queued on an earlier tick (after the compile's flush superseded the old one) lands
+  // ahead of it; either order is harmless (R5 L2).
   const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn });
   out.snapshotsEmitted = snaps.emitted;
   out.messages.push(...snaps.messages);
