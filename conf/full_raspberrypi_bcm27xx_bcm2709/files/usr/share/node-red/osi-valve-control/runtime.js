@@ -91,9 +91,10 @@ async function buildRuntimePayload(db, deviceEui, now) {
     queued: Number(pushes.queued || 0),
     acked: Number(pushes.acked || 0),
     failed: Number(pushes.failed || 0),
-    // CMD-04 PR0 (Q02 c), additive: slots a queue flush dropped unsent (a subset of `failed`,
-    // so an older cloud that ignores this key still shows them as failed), and whether the
-    // newest scheduler-status push was dropped the same way. The cloud stores push_state as an
+    // CMD-04 PR0 (Q02 c), additive: LOST slots -- latest-snapshot rows the 24 h sweep found
+    // unacknowledged (a subset of `failed`, so an older cloud that ignores this key still shows
+    // them as failed) -- and whether the newest scheduler-status push is LOST the same way.
+    // The cloud stores push_state as an
     // opaque JSONB passthrough, so unknown keys are tolerated.
     lost: Number(pushes.lost || 0),
     scheduler_status_lost: !!pushes.scheduler_status_lost,

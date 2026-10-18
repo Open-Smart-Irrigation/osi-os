@@ -13432,13 +13432,13 @@
     "id": "valve-clock-tick",
     "type": "inject",
     "z": "valve-control-tab",
-    "name": "Valve clock sync tick (10m)",
+    "name": "Valve tick: plan snapshots, clock sync, stale pushes (60s)",
     "props": [
       {
         "p": "payload"
       }
     ],
-    "repeat": "600",
+    "repeat": "60",
     "crontab": "",
     "once": true,
     "onceDelay": 90,

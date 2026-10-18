@@ -7,6 +7,7 @@ const { handleHttpRequest } = require('./api');
 const { DatabaseSync } = require('node:sqlite');
 // The router takes a Database constructor; hand it one backed by node:sqlite.
 function TestDatabase(dbPath) { return facade(new DatabaseSync(dbPath)); }
+const store = require('./store');
 
 const SECRET = 'test-secret';
 function token(userId) {
@@ -80,8 +81,8 @@ test('POST schedule creates, compiles, queues pushes and exposes mqtt messages; 
   const out = await call(path, req('POST', '/api/valves/0016C001F1000001/schedules', { kind: 'WEEKLY', weekdays_mask: 3, start_time: '06:00', duration_minutes: 30, label: 'Slot' }));
   assert.equal(out.statusCode, 201);
   assert.ok(out.payload.schedule.schedule_uuid);
-  assert.equal(out.payload.pushes_queued, 8); // 7 weekdays + clock sync
-  assert.equal(out.valvePushMessages.length, 8);
+  assert.equal(out.payload.pushes_queued, 8); // CMD-04 PR0 (C): 7 weekdays + scheduler status, no clock sync
+  assert.equal(out.valvePushMessages, undefined, 'the snapshot leaves with the valve tick after the debounce window');
   const list = await call(path, req('GET', '/api/valves/0016C001F1000001/schedules'));
   assert.equal(list.payload.schedules.length, 1);
   assert.equal(list.payload.compiled.days[0].length, 1);
@@ -113,8 +114,11 @@ test('scheduler-status SKIP_TODAY queues FPort 21 "1" and records the local date
   const { path } = await tempDb();
   const out = await call(path, req('POST', '/api/valves/0016C001F1000001/scheduler-status', { status: 'SKIP_TODAY' }));
   assert.equal(out.statusCode, 202);
-  assert.equal(out.valvePushMessages[0].payload.fPort, 21);
-  assert.equal(Buffer.from(out.valvePushMessages[0].payload.data, 'base64').toString('ascii'), '1');
+  const db = new TestDatabase(path);
+  const marker = await store.getSnapshotPending(db, require('./test-helpers').FIXTURE_EUI);
+  const snap = await store.queuedPushesById(db, require('./test-helpers').FIXTURE_EUI, marker.push_ids);
+  assert.deepEqual(snap.map((r) => [r.fport, Buffer.from(r.payload_hex, 'hex').toString('ascii')]), [[21, '1']]);
+  db.close();
 });
 
 test('settings PUT validates flow rate and generation', async () => {
@@ -248,20 +252,18 @@ test('F144: DELETE /api/valves/<B>/schedules/<A-owned uuid> -> 404 and A\'s row 
 
 const { FIXTURE_EUI } = require('./test-helpers');
 
-test('CMD-04 PR0: a second schedule edit that flushes the queue sends only its own pushes; GET /api/valves surfaces the LOST rows', async () => {
+test('CMD-04 PR0 (C): two quick schedule edits supersede the first snapshot; GET /api/valves shows the second as queued, nothing LOST', async () => {
   const { path } = await tempDb();
   const first = await call(path, req('POST', '/api/valves/' + FIXTURE_EUI + '/schedules', { kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30 }));
   assert.equal(first.statusCode, 201);
   const second = await call(path, req('POST', '/api/valves/' + FIXTURE_EUI + '/schedules', { kind: 'WEEKLY', weekdays_mask: 4, start_time: '07:00', duration_minutes: 30 }));
   assert.equal(second.statusCode, 201);
-  assert.equal(second.payload.pushes_queued, 1, 'only Tuesday changed');
-  assert.equal(second.valvePushMessages.length, 1, 'no re-emission of the first edit\'s still-queued rows');
+  assert.equal(second.payload.pushes_queued, 8, 'a full snapshot');
   const list = await call(path, req('GET', '/api/valves'));
   const ps = list.payload.valves[0].push_state;
-  assert.equal(ps.lost, 6, 'the six weekdays the second flush dropped are LOST');
-  assert.equal(ps.failed, 6);
-  assert.equal(ps.queued, 1);
-  assert.equal(ps.scheduler_status_lost, false);
-  const sched = await call(path, req('GET', '/api/valves/' + FIXTURE_EUI + '/schedules'));
-  assert.equal(sched.payload.push_state.filter((r) => r.state === 'LOST').length, 6);
+  assert.deepEqual({ queued: ps.queued, lost: ps.lost, failed: ps.failed, scheduler_status_lost: ps.scheduler_status_lost }, { queued: 7, lost: 0, failed: 0, scheduler_status_lost: false });
+  const db = new TestDatabase(path);
+  const states = await db.all("SELECT state, COUNT(*) AS n FROM valve_schedule_pushes GROUP BY state ORDER BY state");
+  db.close();
+  assert.deepEqual(states.map((r) => [r.state, r.n]), [['QUEUED', 8], ['SUPERSEDED', 8]]);
 });

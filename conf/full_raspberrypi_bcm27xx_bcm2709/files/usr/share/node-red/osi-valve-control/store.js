@@ -165,11 +165,17 @@ async function softDeleteSchedule(db, scheduleUuid, deviceEui) {
   await db.run("UPDATE valve_schedules SET deleted_at=datetime('now'), sync_version=COALESCE(sync_version,0)+1, updated_at=datetime('now') WHERE schedule_uuid=? AND UPPER(device_eui)=? AND deleted_at IS NULL", [scheduleUuid, eui]);
 }
 
-// CMD-04 PR0 (owner decision Q02 = (c)): reason stored on a push row a queue flush dropped
-// without re-sending it. Shared with the scheduling branch's convention (state LOST, reason
-// not_resent_q02c, GUI "device may not hold this plan").
+// CMD-04 PR0 (owner decision Q02 = (c)): a LOST push is a row of the latest snapshot that the
+// 24 h sweep found unacknowledged -- the valve may not hold that plan. 0022's CHECK on
+// valve_schedule_pushes.state admits only QUEUED/ACKED/FAILED/SUPERSEDED, and widening it is a
+// table rebuild, so LOST is stored as state FAILED with one of these errors and read back as
+// LOST (isLostRow, weekdayPushStates). 'stale_unconfirmed' is what failStalePushes writes;
+// 'not_resent_q02c' is the shared convention's flush-loss reason, which the snapshot design no
+// longer produces but still reads. Same strings as the conditional-scheduling branch.
+const LOST_STALE = 'stale_unconfirmed';
 const LOST_NOT_RESENT = 'not_resent_q02c';
-function isLostRow(r) { return !!r && r.state === 'FAILED' && r.error === LOST_NOT_RESENT; }
+const LOST_REASONS = [LOST_STALE, LOST_NOT_RESENT];
+function isLostRow(r) { return !!r && r.state === 'FAILED' && LOST_REASONS.includes(r.error); }
 
 // A DAYMASK_PLAN row's mask, decoded from its payload's first hex byte, with the 0x80
 // "all-days" sentinel normalized to the literal 7-bit mask (0x7F) it represents.
@@ -178,37 +184,8 @@ function daymaskOf(payloadHex) {
   return raw === 0x80 ? 0x7F : raw;
 }
 
-// CMD-04 PR0 (owner decision Q02 = (c), no automatic configuration re-send): FAILED rows count
-// as "last pushed" too. A FAILED row is either a plan the 24 h sweep gave up on (no_ack_24h) or
-// one a flush made LOST (LOST_NOT_RESENT). Before this, both dropped out of the diff basis, so
-// the slot fell back to an older ACKED hash (or to none) and the next compile for ANY unrelated
-// edit silently re-sent that weekday's plan. Only an explicit operator "Resend plan"
-// (compileAndQueue force) or a real change to that weekday sends it again now.
-async function lastPushHashes(db, deviceEui) {
-  const rows = await db.all("SELECT purpose, weekday, payload_hex, plan_hash, state, queued_at FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') ORDER BY rowid DESC", [deviceEui]);
-  const out = {};
-  for (const r of rows) {
-    if (r.purpose === 'WEEKDAY_PLAN') {
-      const key = 'WEEKDAY_PLAN:' + r.weekday;
-      if (!(key in out)) out[key] = r.plan_hash;
-      continue;
-    }
-    // GEN2 diffing is per-weekday, not per-group (CRITICAL 2, review round 1): a group's
-    // daymask can legitimately change across compiles (windows re-split/re-merge across
-    // weekdays) while a given weekday's own compiled window stays identical or reverts to an
-    // earlier value. Keying the diff on the group's mask made a reverted plan look "already
-    // pushed" under a stale per-group key and silently skip the re-push. Expanding each row
-    // to the individual weekdays it covers, newest-first-wins, makes the diff correct
-    // regardless of how groups are drawn on either side of the comparison.
-    const mask = daymaskOf(r.payload_hex);
-    for (let d = 0; d < 7; d += 1) {
-      if (!((mask >> d) & 1)) continue;
-      const key = 'GEN2DAY:' + d;
-      if (!(key in out)) out[key] = r.plan_hash;
-    }
-  }
-  return out;
-}
+// (CMD-04 PR0) lastPushHashes, the per-weekday diff basis, is gone: every compile is now a full
+// snapshot (push.compileAndQueue), so nothing decides "already pushed" any more.
 
 async function insertPushes(db, rows) {
   for (const r of rows) {
@@ -252,6 +229,13 @@ async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atI
   const selParams = [deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
   const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY rowid DESC LIMIT 1', selParams);
   if (!row) return 0;
+  // CMD-04 PR0: a snapshot still waiting out the debounce window has not been sent, so an ACK
+  // arriving now answers an earlier (superseded) push and must not confirm the new row.
+  // SUPERSEDED and LOST rows are never matched (state='QUEUED' above). The remaining weak spot,
+  // recorded for CMD-04 proper: once the new snapshot is on the air, an earlier push's late ACK
+  // on the same port/purpose/weekday still credits the new row.
+  const pendingSnap = await getSnapshotPending(db, deviceEui);
+  if (pendingSnap && pendingSnap.push_ids.includes(row.push_id)) return 0;
   await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=? WHERE push_id=?", [status, atIso, row.push_id]);
   return 1;
 }
@@ -264,7 +248,10 @@ async function failStalePushes(db, olderThanIso) {
   // reads as "less than" the ISO cutoff regardless of the actual clock time, failing healthy
   // pushes early. Wrapping both sides in datetime() normalizes them to the same canonical form
   // before comparing.
-  return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='no_ack_24h' WHERE state='QUEUED' AND datetime(queued_at) < datetime(?)", [olderThanIso]);
+  // CMD-04 PR0: a plan or scheduler-status row still QUEUED here belongs to the latest snapshot
+  // (every compile supersedes the older ones), so it becomes LOST ('stale_unconfirmed') and is
+  // surfaced; nothing re-sends it. A CLOCK_SYNC keeps the plain 'no_ack_24h' failure.
+  return db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=CASE WHEN purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS') THEN ? ELSE 'no_ack_24h' END WHERE state='QUEUED' AND datetime(queued_at) < datetime(?)", [LOST_STALE, olderThanIso]);
 }
 
 // P3-E1 review fix (IMPORTANT 1): devices with a QUEUED WEEKDAY_PLAN/DAYMASK_PLAN row past
@@ -277,7 +264,7 @@ async function failStalePushes(db, olderThanIso) {
 // in the cloud forever, since nothing else touches push_state until the next unrelated seam fires.
 async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
   const rows = await db.all(
-    "SELECT DISTINCT device_eui FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND datetime(queued_at) < datetime(?)",
+    "SELECT DISTINCT device_eui FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS') AND datetime(queued_at) < datetime(?)",
     [olderThanIso]
   );
   return rows.map((r) => r.device_eui);
@@ -291,7 +278,7 @@ async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
 // to do with the weekday plan. Fixed to latest-per-slot semantics, matching how the schedule
 // dialog's own per-weekday badges are derived (latestPush() in ValveScheduleDialog.tsx): group
 // rows by weekday slot (GEN1: the row's own `weekday`; GEN2: every weekday bit set in the
-// row's decoded daymask, via the same daymaskOf() used by lastPushHashes), keep only the
+// row's decoded daymask, via daymaskOf()), keep only the
 // newest row per slot, and count states from that reduced set. last_plan_queued_at/
 // last_plan_acked_at are unrelated to the per-slot ratio and keep their prior semantics.
 // PR-H: the 30-day lookback below used to be SQLite's own wall clock (bare `datetime('now',
@@ -307,8 +294,8 @@ async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
 // past 2026-08-19. `now` is optional (ISO string or Date, default `new Date()`) so callers with
 // no clock of their own keep exactly the previous (real-wall-clock) behaviour.
 // Newest per slot means LAST INSERTED: every newest-per-slot read of valve_schedule_pushes
-// (lastPushHashes, ackPush, pushSummary, weekdayPushStates, and listQueued's oldest-first
-// listing) orders by rowid alone. The ledger is append-only (no DELETE, no INSERT OR REPLACE;
+// (ackPush, pushSummary, weekdayPushStates, and queuedPushesById's
+// oldest-first listing) orders by rowid alone. The ledger is append-only (no DELETE, no INSERT OR REPLACE;
 // state changes are UPDATEs, which keep the rowid) and the table has no AUTOINCREMENT, so a
 // new row always gets a rowid above every existing one: rowid order is insertion order, which
 // is the order ChirpStack delivers downlinks in and therefore what the valve holds last.
@@ -319,7 +306,7 @@ async function staleQueuedPlanDeviceEuis(db, olderThanIso) {
 // three plan pushes sat QUEUED). And it is the gateway's wall clock, which can step backwards
 // (see runHousekeeping's clock-jump detector): a push queued after the step carries an earlier
 // timestamp than the push before it, and a queued_at-first order would keep treating the
-// earlier push as current -- lastPushHashes would then skip re-pushing a weekday reverted to
+// earlier push as current -- the old per-weekday diff (since replaced by full snapshots) would then skip re-pushing a weekday reverted to
 // that earlier plan, leaving the valve on the plan it actually holds. queued_at still bounds
 // the 30-day window below; it no longer decides which row is newest.
 async function pushSummary(db, deviceEui, now) {
@@ -339,7 +326,7 @@ async function pushSummary(db, deviceEui, now) {
       if (!(key in latestBySlot)) latestBySlot[key] = r;
       continue;
     }
-    // Same per-weekday expansion as lastPushHashes: a DAYMASK_PLAN row covers every weekday
+    // Per-weekday expansion: a DAYMASK_PLAN row covers every weekday
     // bit set in its decoded mask, and the newest row wins each of those slots individually.
     const mask = daymaskOf(r.payload_hex);
     for (let d = 0; d < 7; d += 1) {
@@ -377,26 +364,76 @@ async function pushSummary(db, deviceEui, now) {
   };
 }
 
-// Rows the ledger still considers outstanding for this device, oldest first (insertion order,
-// which is ChirpStack's FIFO delivery order; see the rowid note above pushSummary for why that
-// is rowid, not queued_at). push.js reads it after a queue flush to find the rows the flush
-// dropped; since CMD-04 PR0 they are marked LOST, never re-emitted.
-async function listQueued(db, deviceEui) {
-  return db.all(
-    "SELECT push_id, purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' ORDER BY rowid",
-    [deviceEui]
+// CMD-04 PR0: mark every QUEUED row of these purposes SUPERSEDED (a snapshot replaces them all)
+// and return how many there were. SELECT first: the live osi-db-helper facade's run() returns
+// no change count.
+async function supersedeOutstanding(db, deviceEui, purposes) {
+  const marks = purposes.map(() => '?').join(',');
+  const where = "UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND purpose IN (" + marks + ')';
+  const rows = await db.all('SELECT push_id FROM valve_schedule_pushes WHERE ' + where, [deviceEui].concat(purposes));
+  if (rows.length) await db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE " + where, [deviceEui].concat(purposes));
+  return rows.length;
+}
+
+// Has this gateway ever queued a plan for the valve? (Bluetooth guard in push.compileAndQueue.)
+async function hasPlanHistory(db, deviceEui) {
+  const row = await db.get("SELECT 1 AS x FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') LIMIT 1", [deviceEui]);
+  return !!row;
+}
+
+// The snapshot waiting for the debounced emitter (push.emitPendingSnapshots), one per valve, in
+// the gateway key/value store app_settings (no trigger, not synced): key
+// 'valve_snapshot_pending:<EUI>', value JSON { edited_at, push_ids }.
+const SNAPSHOT_PENDING_PREFIX = 'valve_snapshot_pending:';
+
+function parsePending(key, raw) {
+  try {
+    const v = JSON.parse(raw);
+    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: v.edited_at || null, push_ids: Array.isArray(v.push_ids) ? v.push_ids : [], raw };
+  } catch (_) {
+    return { device_eui: key.slice(SNAPSHOT_PENDING_PREFIX.length), edited_at: null, push_ids: [], raw };
+  }
+}
+
+async function setSnapshotPending(db, deviceEui, value) {
+  await db.run(
+    "INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+    [SNAPSHOT_PENDING_PREFIX + String(deviceEui).toUpperCase(), JSON.stringify(value)]
   );
 }
 
-// CMD-04 PR0: a QUEUED row whose downlink a queue flush removed and that nothing replaced. It is
-// not re-sent (owner decision Q02 = (c)); it becomes LOST. valve_schedule_pushes.state has a
-// CHECK (0022) that admits only QUEUED/ACKED/FAILED/SUPERSEDED, and widening it is a table
-// rebuild, so LOST is stored as state FAILED with error LOST_NOT_RESENT and read back as 'LOST'
-// (isLostRow, weekdayPushStates). Guarded on state='QUEUED' so an ACK that raced the flush wins.
-async function markPushesLost(db, pushIds, reason) {
-  for (const id of pushIds || []) {
-    await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [reason || LOST_NOT_RESENT, id]);
-  }
+async function clearSnapshotPending(db, deviceEui) {
+  await db.run('DELETE FROM app_settings WHERE key = ?', [SNAPSHOT_PENDING_PREFIX + String(deviceEui).toUpperCase()]);
+}
+
+// Reads tolerate a DB that predates app_settings (migration 0023): nothing can be pending there.
+function isMissingAppSettings(error) {
+  return /no such table:\s*app_settings\b/i.test(String(error && error.message ? error.message : error));
+}
+
+async function getSnapshotPending(db, deviceEui) {
+  const key = SNAPSHOT_PENDING_PREFIX + String(deviceEui).toUpperCase();
+  let row = null;
+  try { row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]); }
+  catch (error) { if (isMissingAppSettings(error)) return null; throw error; }
+  return row ? parsePending(key, row.value) : null;
+}
+
+async function listSnapshotPending(db) {
+  let rows = [];
+  try { rows = await db.all("SELECT key, value FROM app_settings WHERE key LIKE 'valve_snapshot_pending:%' ORDER BY key"); }
+  catch (error) { if (isMissingAppSettings(error)) return []; throw error; }
+  return rows.map((r) => parsePending(r.key, r.value));
+}
+
+// The still-QUEUED rows among push_ids, in insertion order (ChirpStack delivers FIFO).
+async function queuedPushesById(db, deviceEui, pushIds) {
+  if (!pushIds || !pushIds.length) return [];
+  const rows = await db.all(
+    "SELECT push_id, purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND push_id IN (" + pushIds.map(() => '?').join(',') + ') ORDER BY rowid',
+    [deviceEui].concat(pushIds)
+  );
+  return rows;
 }
 
 // Single-device counterpart of VALVE_LIST_SQL's active_expectation_id/active_reconciliation_state/
@@ -433,7 +470,7 @@ async function hasPendingObservation(db, deviceEui) {
 }
 
 async function weekdayPushStates(db, deviceEui) {
-  // CMD-04 PR0: a LOST row (stored FAILED + LOST_NOT_RESENT, see markPushesLost) is reported as
+  // CMD-04 PR0: a LOST row (stored FAILED + a LOST_REASONS error, see isLostRow) is reported as
   // state 'LOST' to the edge API/GUI. runtime.js maps it back to FAILED + lost:true for the
   // synced ValveRuntime, whose contract enum an older cloud still renders.
   const rows = await db.all("SELECT purpose, weekday, payload_hex, state, queued_at, acked_at, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND state IN ('QUEUED','ACKED','FAILED') ORDER BY rowid DESC", [deviceEui]);
@@ -464,4 +501,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { listQueued, markPushesLost, isLostRow, daymaskOf, LOST_NOT_RESENT, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, lastPushHashes, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { supersedeOutstanding, hasPlanHistory, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

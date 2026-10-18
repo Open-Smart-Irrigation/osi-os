@@ -86,4 +86,41 @@ async function linkCloud(db, opts) {
   );
 }
 
-module.exports = { tempDb, facade, linkCloud, trackedTempDirs, FIXTURE_EUI };
+// A ChirpStack device queue for one valve, FIFO like the real one: flushQueue() empties it,
+// enqueue() appends the MQTT downlink messages push.js builds, getQueue() reads it, and
+// drain(n) removes the first n items as the valve's uplinks would (Class A: one downlink per
+// uplink). Each item keeps fPort and the payload as upper-case hex.
+function fakeChirpStack() {
+  const queue = [];
+  const log = { flushes: 0, enqueued: [] };
+  return {
+    log,
+    flushQueue: async () => { log.flushes += 1; queue.length = 0; return { statusCode: 200 }; },
+    enqueue(messages) {
+      for (const m of messages || []) {
+        const item = { fPort: Number(m.payload.fPort), hex: Buffer.from(m.payload.data, 'base64').toString('hex').toUpperCase() };
+        queue.push(item);
+        log.enqueued.push(item);
+      }
+    },
+    getQueue: () => queue.map((q) => Object.assign({}, q)),
+    drain: (n) => queue.splice(0, n == null ? queue.length : n),
+  };
+}
+
+// What a STREGA holds after applying downlinks in order: GEN1 one 24-byte plan per weekday
+// (FPort 14..20), GEN2 the window bytes per weekday from FPort 25 frames (0x80 = every day),
+// and the scheduler status from FPort 21.
+function applyToValve(state, items) {
+  const s = state || { gen1: Array(7).fill(null), gen2: Array(7).fill(null), status: null };
+  for (const it of items || []) {
+    if (it.fPort >= 14 && it.fPort <= 20) s.gen1[it.fPort - 14] = it.hex;
+    else if (it.fPort === 25) {
+      const mask = parseInt(it.hex.slice(0, 2), 16);
+      for (let d = 0; d < 7; d += 1) if (mask === 0x80 || ((mask >> d) & 1)) s.gen2[d] = it.hex.slice(2);
+    } else if (it.fPort === 21) s.status = Buffer.from(it.hex, 'hex').toString('ascii');
+  }
+  return s;
+}
+
+module.exports = { tempDb, facade, linkCloud, trackedTempDirs, FIXTURE_EUI, fakeChirpStack, applyToValve };

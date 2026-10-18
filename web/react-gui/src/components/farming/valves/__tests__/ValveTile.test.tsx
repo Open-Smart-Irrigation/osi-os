@@ -202,7 +202,7 @@ describe("ValveTile plan line", () => {
     expect(screen.getByText("Not yet confirmed on the valve for 1 day(s) — resend the plan")).toBeInTheDocument();
   });
 
-  // CMD-04 PR0 (owner decision Q02 c): a plan a queue flush dropped is not re-sent; it is LOST
+  // CMD-04 PR0 (owner decision Q02 c): a plan the valve did not confirm within 24 h is LOST, not re-sent,
   // and the tile says so instead of the generic not-yet-confirmed line.
   it("says the device may not hold this plan when plan slots are LOST", () => {
     renderTile({

@@ -245,14 +245,15 @@ async function runClockTick({ db, now, appId, warn }) {
     const due = nowDate.getTime() - last >= CLOCK_PERIOD_MS;
     const dst = last && P.isDstTransitionWithin(tz, last, nowDate.getTime());
     if (!due && !dst) continue;
-    const q = await push.queuePushes({ db, deviceEui: v.deveui, appId, pushes: [push.buildClockPush(v.strega_generation || 'GEN1', nowDate, tz)], flushQueue: null, warn });
+    const q = await push.queuePushes({ db, deviceEui: v.deveui, appId, pushes: [push.buildClockPush(v.strega_generation || 'GEN1', nowDate, tz)], warn });
     await store.upsertSettings(db, v.deveui, { last_clock_sync_queued_at: nowDate.toISOString() });
     messages.push(...q.messages);
   }
   return { messages };
 }
 
-// Housekeeping that rides on the clock tick (the tick itself runs every 10 minutes, not hourly):
+// Housekeeping that rides on the clock tick (the tick runs every 60 seconds since CMD-04 PR0, so
+// a debounced plan snapshot leaves within a minute of its window; it ran every 10 minutes before):
 //  (a) SKIP_TODAY resets to ACTIVE once the valve's local date has moved past skip_today_date;
 //  (b) (C1) a gateway clock jump forces a GEN1 clock re-sync for every scheduled valve. The
 //      clock tick actually runs every 10 minutes (not hourly, despite the name/original 1h
@@ -269,6 +270,8 @@ async function runClockTick({ db, now, appId, warn }) {
 //      everywhere in production) — wrapped in datetime() so the comparison is apples-to-apples;
 //      unwrapped, the sweep could silently repeat on every tick for the rest of the day (see
 //      failStalePushes above for the same class of bug in detail).
+//  (d) CMD-04 PR0 (C): push.emitPendingSnapshots sends the plan snapshots whose debounce window
+//      has passed (push.js, SNAPSHOT_DEBOUNCE_MS).
 let lastClockTickMs = null;
 // Test-only: the clock-jump detector's "delta since the previous tick" state is deliberately
 // module-scoped (production wants it to persist across ticks within one Node-RED runtime; the
@@ -281,7 +284,12 @@ async function runHousekeeping({ db, now, appId, warn }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
   const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
-  const out = { resets: 0, clockJump: false, decommissioned: 0, messages: [] };
+  const out = { resets: 0, clockJump: false, decommissioned: 0, snapshotsEmitted: 0, messages: [] };
+  // (d) CMD-04 PR0 (C): send the plan snapshots whose debounce window has passed. First, so a
+  // clock sync queued by runClockTick in the same tick lands behind the snapshot.
+  const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn });
+  out.snapshotsEmitted = snaps.emitted;
+  out.messages.push(...snaps.messages);
   const skips = await db.all("SELECT vs.device_eui, vs.skip_today_date, iz.timezone AS zone_timezone FROM valve_settings vs JOIN devices d ON d.deveui = vs.device_eui LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE vs.scheduler_status='SKIP_TODAY'");
   for (const s of skips) {
     const lp = P.localParts(nowDate, s.zone_timezone || gatewayTimezone || 'UTC');
@@ -298,8 +306,10 @@ async function runHousekeeping({ db, now, appId, warn }) {
   const gone = await db.all("SELECT d.deveui, COALESCE(vs.strega_generation,'GEN1') AS gen FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.type_id='STREGA_VALVE' AND d.deleted_at IS NOT NULL AND EXISTS (SELECT 1 FROM valve_schedule_pushes p WHERE p.device_eui = d.deveui AND p.purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') AND p.state='ACKED' AND p.plan_hash <> ?) AND NOT EXISTS (SELECT 1 FROM valve_schedule_pushes p2 WHERE p2.device_eui = d.deveui AND p2.purpose='SCHEDULER_STATUS' AND p2.payload_hex='32' AND datetime(p2.queued_at) > datetime(d.deleted_at))", [P.planHash([])]);
   for (const g of gone) {
     const days = Array.from({ length: 7 }, () => []);
-    const pushes = push.buildPlanPushes({ generation: g.gen, days, lastHashes: {}, force: true }).concat([push.buildStatusPush('2')]);
-    const q = await push.queuePushes({ db, deviceEui: g.deveui, appId, pushes, flushQueue: null, warn });
+    // A snapshot of the cleared plan + deactivate, sent at once (this already is the tick); no
+    // flush, so an open still queued for the valve is not dropped.
+    const pushes = push.buildSnapshotPushes({ generation: g.gen, days, schedulerStatus: 'DEACTIVATED', includePlan: true });
+    const q = await push.queueSnapshot({ db, deviceEui: g.deveui, appId, pushes, flushQueue: null, warn, now: nowDate, emitNow: true });
     out.messages.push(...q.messages); out.decommissioned += 1;
   }
   return out;

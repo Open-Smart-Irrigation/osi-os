@@ -9,6 +9,7 @@ const { clearValveOnUnclaim } = require('./unclaim');
 const { handleHttpRequest } = require('./api');
 const crypto = require('node:crypto');
 const push = require('./push');
+const store = require('./store');
 
 const EUI = '0016C001F1000001';
 const EMPTY_DAY_HEX = 'FF'.repeat(24); // encodeGen1Day([]) -- the plan that clears a Gen1 valve
@@ -43,18 +44,8 @@ async function queuedPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' ORDER BY purpose, fport, weekday, payload_hex");
 }
 
-// Plan rows that are QUEUED or that a flush dropped unsent (LOST: FAILED + 'not_resent_q02c'),
-// without the state column. SUPERSEDED rows are excluded: a later compile replaced them.
-// CLOCK_SYNC is left out on purpose: when a flush drops the seed's clock sync, the next compile
-// queues a freshly computed one, so the two-delete path has one more clock row than the
-// single-compile unclaim path.
-async function intendedPushes(db) {
-  return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS') AND (state='QUEUED' OR (state='FAILED' AND error='not_resent_q02c')) ORDER BY purpose, fport, weekday, payload_hex");
-}
-
-// The seed's one-off CLOCK_SYNC is not replaced by a later compile (since CMD-04 PR0 a flushing
-// compile marks it LOST), so the plan-shaped assertions look only at the rows that carry the
-// on-valve schedule.
+// The plan-shaped assertions look only at the rows that carry the on-valve schedule (the
+// snapshot also carries a SCHEDULER_STATUS row).
 async function queuedPlanPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') ORDER BY fport, weekday, payload_hex");
 }
@@ -85,8 +76,12 @@ test('unclaiming a valve tombstones every schedule and queues the clearing plan 
     assert.equal(row.payload_hex, EMPTY_DAY_HEX, 'the clearing plan is the all-FF day, not a partial one');
     assert.equal(row.fport, 14 + row.weekday);
   }
-  assert.equal(out.pushes_queued, 7);
-  assert.ok(out.messages.length >= 7, 'the caller must get a downlink message for every queued clearing plan');
+  // CMD-04 PR0 (C): the clearing is a full snapshot (7 empty days + scheduler status) that the
+  // valve tick sends once the debounce window has passed, so the unclaim itself sends nothing.
+  assert.equal(out.pushes_queued, 8);
+  assert.deepEqual(out.messages, []);
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  assert.equal((await store.queuedPushesById(t.db, EUI, marker.push_ids)).length, 8, 'the clearing snapshot is pending for the valve tick');
   t.db.close();
 });
 
@@ -114,16 +109,12 @@ test('unclaiming a valve queues exactly the downlinks the explicit schedule dele
   await unclaim(viaUnclaim.db);
   await clearValveOnUnclaim({ db: viaUnclaim.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
 
-  // CMD-04 PR0 (Q02 c): each schedule delete compiles and flushes on its own, and a flush no
-  // longer re-sends what an earlier compile left queued. After the two deletes, the first
-  // delete's clearing plans for weekdays 2-6 are LOST (surfaced, not re-sent) while the unclaim's
-  // single compile still has them queued. Parity is therefore on what each path intends the
-  // valve to hold -- the outstanding (QUEUED) plus the LOST rows -- not on transport state.
-  assert.deepEqual(await intendedPushes(viaUnclaim.db), await intendedPushes(viaScheduleDelete.db),
-    'the downlinks an unclaim intends must equal the ones the explicit delete intends');
-  const lostAfterDeletes = await viaScheduleDelete.db.all("SELECT weekday FROM valve_schedule_pushes WHERE purpose='WEEKDAY_PLAN' AND state='FAILED' AND error='not_resent_q02c' ORDER BY weekday");
-  assert.deepEqual(lostAfterDeletes.map((r) => r.weekday), [2, 3, 4, 5, 6],
-    'two quick deletes: the first delete\'s clearing plans the second flush dropped are LOST, not re-sent');
+  // CMD-04 PR0 (C): every compile is a full snapshot, so after two deletes the queued rows are
+  // the second delete's complete snapshot -- the same as the unclaim's single compile -- and the
+  // first delete's snapshot is SUPERSEDED, not lost.
+  assert.deepEqual(await queuedPushes(viaUnclaim.db), await queuedPushes(viaScheduleDelete.db),
+    'the outstanding downlinks after an unclaim must equal the ones the explicit delete leaves');
+  assert.equal((await viaScheduleDelete.db.all("SELECT 1 FROM valve_schedule_pushes WHERE state='FAILED'")).length, 0, 'nothing is LOST');
   viaUnclaim.db.close();
   viaScheduleDelete.db.close();
 });
@@ -148,12 +139,15 @@ test('an in-flight actuation is cancelled through the shared cancel path, never 
   assert.equal(device.target_state, 'CLOSED');
   // Nothing on the wire may be an actuation. STREGA opens and closes ride fPorts 1/2; the
   // only downlinks this path may produce are schedule plans (14..20 Gen1, 25 Gen2) and the
-  // scheduler clock/status ports (12/13, 21) the shared compile re-emits after its flush.
+  // scheduler status port (21) the snapshot carries; clock sync (12/13) comes from the valve tick.
   const allowedPorts = new Set([12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 25]);
-  for (const m of out.messages) {
-    assert.ok(allowedPorts.has(m.payload.fPort), 'unexpected downlink on fPort ' + m.payload.fPort);
-    assert.notEqual(m.payload.fPort, 1, 'a valve action must never leave the unclaim path');
-    assert.notEqual(m.payload.fPort, 2, 'a valve action must never leave the unclaim path');
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  const pendingPorts = (await store.queuedPushesById(t.db, EUI, marker.push_ids)).map((r) => r.fport);
+  assert.ok(pendingPorts.length > 0);
+  for (const fPort of out.messages.map((m) => m.payload.fPort).concat(pendingPorts)) {
+    assert.ok(allowedPorts.has(fPort), 'unexpected downlink on fPort ' + fPort);
+    assert.notEqual(fPort, 1, 'a valve action must never leave the unclaim path');
+    assert.notEqual(fPort, 2, 'a valve action must never leave the unclaim path');
   }
   t.db.close();
 });
@@ -247,7 +241,7 @@ test('an unreachable ChirpStack does not stop the plan from being cleared', asyn
 
   assert.equal(out.applicable, true);
   assert.equal(out.cancelled.ok, false, 'the cancel fails closed when the queue cannot be flushed');
-  assert.equal(out.pushes_queued, 7, 'the clearing plans are still queued and go out when the valve is next reachable');
+  assert.equal(out.pushes_queued, 8, 'the clearing snapshot is still queued and goes out when the valve is next reachable');
   assert.equal((await queuedPlanPushes(t.db)).length, 7);
   t.db.close();
 });
