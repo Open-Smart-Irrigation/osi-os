@@ -53,13 +53,19 @@ Interactive measurement responses on both hosts expose a total point limit of
 `30000` in `limits.maxPointsTotal`, alongside the existing `2000`
 per-series limit and `30000` raw-row limit. For aggregated responses, the
 eligible physical source/channel grid is counted before retained reads and
-grid allocation, including null gap cells. For raw responses, eligible
-returned physical points are counted after each host's existing deduplication
-and validity rules and before DTO expansion. A request at exactly `30000`
-points succeeds; a request over either point bound returns the complete set of
-authorized source descriptors with empty point arrays, `truncated: true`, and
+grid allocation, including null gap cells. Edge also preflights resolved
+non-raw grids that are derived from short-range raw observations, using the
+same floored bucket geometry as its output path. For resolved raw responses,
+eligible returned physical points are counted after each host's existing
+deduplication and validity rules and before DTO expansion. A request at
+exactly `30000` points succeeds. A request over either point bound returns the
+complete set of authorized source descriptors with empty point arrays and
 `point_budget_exceeded` plus
-`select_fewer_sources_or_coarser_aggregation`. The response retains
+`select_fewer_sources_or_coarser_aggregation`; neither host returns partial
+measurements. The host's legacy `limits.truncated` metadata differs: edge
+returns `false` for this whole-request rejection, while cloud returns `true`.
+Clients must use `availability.available: false` and its reasons as the
+authoritative rejection signal. The response retains
 `limits.maxPointsTotal: 30000` so clients can recover by selecting fewer
 sources or a coarser aggregation. Raw-row overflow remains distinct and
 returns `raw_read_limit_exceeded` plus
