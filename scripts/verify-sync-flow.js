@@ -1705,6 +1705,8 @@ expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_v
 expectIncludes('Build History Manifest', "].join('\\n')", 'uses a real newline separator for history manifest SQL');
 expectExcludes('Build History Manifest', "].join('\\\\n')", 'does not use a literal backslash-n separator for history manifest SQL');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
+expectIncludes('Build History Manifest', "flow.get('history_manifest_cursor')", 'pages history manifests with a segment cursor');
+expectExcludes('Build History Manifest', "'LIMIT 500'", 'does not cap history manifests at the first 500 segments');
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');

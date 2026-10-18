@@ -550,8 +550,8 @@
       "reason": "History tail cursor: only backfill and tail ACKs move last_acked_id / last_acked_key, and only forward. The cursor columns are written by a CASE that keeps the stored value unless the new one is greater (numeric for ids, text order for keys), so a late older ACK or a write that raced the mark read cannot rewind it; repair, correction and derived ACKs update the batch metadata, the dirty keys and the segments but not the cursor (+800). Supersedes the history correction queue entry (+1467), which origin/main already measures. Measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 11807 -> HEAD 12607 = +800."
     },
     "sync-history-manifest-build": {
-      "delta": 73,
-      "reason": "Wave 3 durable-history-batch promotion (AgroLink 7e30e6a4, renumbered migration 0051, port/wave3-edge-durable): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 3431 -> HEAD 3504 = +73. Manifest segments now report tombstone_count."
+      "delta": 841,
+      "reason": "History manifest paging: Build History Manifest read ORDER BY table_name, segment_key LIMIT 500 with no cursor, so on a gateway with more than 500 segments the same first page went out every 300 s and every later segment was never compared or repaired. The node now pages through sync_history_segments with a cursor (table_name, segment_key, hash_version) kept in flow context: at most 500 segments per request, the cursor moves at build time so a failed page cannot stall the pass, a short page ends the pass, and a cursor past the last segment restarts from the first in the same turn. Request shape unchanged. Supersedes the Wave 3 durable-history-batch entry (+73), which origin/main already measures. Measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 3504 -> HEAD 4345 = +841."
     },
     "sync-history-manifest-mark": {
       "delta": 454,

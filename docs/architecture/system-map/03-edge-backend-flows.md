@@ -156,6 +156,11 @@ Everything that talks to the cloud lives here; chapter
   **POST History Manifest** / **Mark History Manifest ACK** (every 5 min)
   stream *historical* table segments to the cloud with content hashes, so the
   cloud mirror can prove it holds exactly what the edge holds.
+  Each manifest carries one page of at most 500 segments; a cursor in flow
+  context moves through all segments in `(table_name, segment_key,
+  hash_version)` order and starts again after a short page, so a full pass
+  takes one 5-minute turn per 500 segments. The cursor lives in memory: a
+  Node-RED restart starts the pass from the first segment again.
 - **Command intake**: **Build Pending Command Pull** / **GET Pending Commands
   IPv4** (every 30 s) fetch cloud-originated commands; **Deduplicate Pending
   Command** consults the `sync_inbox` so a re-delivered command is never applied
