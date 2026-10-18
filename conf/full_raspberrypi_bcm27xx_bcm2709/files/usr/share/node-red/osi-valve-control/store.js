@@ -382,15 +382,47 @@ async function hasWeeklyEver(db, deviceEui) {
   return !!row;
 }
 
+// (R5 re-review N3) The last snapshot the tick emitted for a valve: app_settings key
+// 'valve_snapshot_emitted:<EUI>', value JSON { emitted_at (wall clock), push_ids }.
+const SNAPSHOT_EMITTED_PREFIX = 'valve_snapshot_emitted:';
+
+async function setSnapshotEmitted(db, deviceEui, value) {
+  await db.run(
+    "INSERT INTO app_settings(key, value, updated_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+    [SNAPSHOT_EMITTED_PREFIX + String(deviceEui).toUpperCase(), JSON.stringify(value)]
+  );
+}
+
+async function getSnapshotEmitted(db, deviceEui) {
+  let row = null;
+  try { row = await db.get('SELECT value FROM app_settings WHERE key = ?', [SNAPSHOT_EMITTED_PREFIX + String(deviceEui).toUpperCase()]); }
+  catch (error) { if (isMissingAppSettings(error)) return null; throw error; }
+  if (!row) return null;
+  try {
+    const v = JSON.parse(row.value);
+    return { emitted_at: v.emitted_at || null, push_ids: Array.isArray(v.push_ids) ? v.push_ids : [] };
+  } catch (_) {
+    return null;
+  }
+}
+
 // (R5 H1) A whole-queue flush outside a snapshot compile (cancel, unclaim's cancel, the cloud
 // cancel) removes whatever was on the air. The latest snapshot's rows still QUEUED there are
 // LOST: marked FAILED 'not_resent_q02c' at once so "device may not hold this plan" shows now,
 // not after the 24 h sweep. Nothing re-sends them (Q02 c). A snapshot still waiting out the
 // debounce window was never in the radio queue, so its rows are left alone and still sent. A
 // flushed, unconfirmed CLOCK_SYNC is SUPERSEDED and the valve made due for a fresh one.
-async function markFlushedSnapshotLost(db, deviceEui) {
+// (R5 re-review N3) `flushStartedAtMs`: rows the tick emitted at or after that instant were
+// enqueued behind the flush and are still on the air, so they are not LOST either.
+async function markFlushedSnapshotLost(db, deviceEui, opts) {
   const pending = await getSnapshotPending(db, deviceEui);
   const keep = new Set(pending ? pending.push_ids : []);
+  const flushStartedAtMs = opts && Number.isFinite(opts.flushStartedAtMs) ? opts.flushStartedAtMs : null;
+  if (flushStartedAtMs != null) {
+    const emitted = await getSnapshotEmitted(db, deviceEui);
+    const emittedMs = emitted ? Date.parse(emitted.emitted_at) : NaN;
+    if (Number.isFinite(emittedMs) && emittedMs >= flushStartedAtMs) for (const id of emitted.push_ids) keep.add(id);
+  }
   const rows = await db.all("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS')", [deviceEui]);
   const lost = rows.filter((r) => !keep.has(r.push_id));
   for (const r of lost) await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [LOST_NOT_RESENT, r.push_id]);
@@ -525,4 +557,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmitted, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

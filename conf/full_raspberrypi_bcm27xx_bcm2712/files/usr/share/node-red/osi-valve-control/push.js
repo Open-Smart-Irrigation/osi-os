@@ -201,16 +201,26 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs }) {
   for (const p of pending) {
     const editedMs = Date.parse(p.edited_at);
     const firstMs = Date.parse(p.first_edited_at || p.edited_at);
-    const due = !Number.isFinite(editedMs) || nowMs - editedMs >= windowMs || editedMs - nowMs > windowMs
-      || (Number.isFinite(firstMs) && nowMs - firstMs >= SNAPSHOT_MAX_DELAY_MS);
+    const capReached = Number.isFinite(firstMs) && nowMs - firstMs >= SNAPSHOT_MAX_DELAY_MS;
+    const due = capReached || !Number.isFinite(editedMs) || nowMs - editedMs >= windowMs || editedMs - nowMs > windowMs;
     if (!due) continue;
-    if (await store.hasPendingObservation(db, p.device_eui)) continue;
+    // (R5 re-review N1) The M5 hold never outlasts the 5-minute cap: a delete compiled during
+    // an unobserved open must not wait for the open (plus the 30-min reconciliation grace) to
+    // end. At the cap the snapshot is appended behind the unflushed queue, so the queue grows
+    // by at most one snapshot per 5 minutes per unobserved open. No separate bypass for
+    // snapshots that carry clears: the cap already bounds every snapshot, clears included, and
+    // telling "carries a clear" apart would need the previous snapshot's content.
+    if (!capReached && await store.hasPendingObservation(db, p.device_eui)) continue;
     let rows = [];
     await db.transaction(async (tx) => {
       const current = await store.getSnapshotPending(tx, p.device_eui);
       if (!current || current.raw !== p.raw) return; // re-edited since the read: the next tick decides
       await store.clearSnapshotPending(tx, p.device_eui);
       rows = await store.queuedPushesById(tx, p.device_eui, current.push_ids);
+      // (R5 re-review N3) Real wall-clock time, not the injected `now`: a cancel compares it
+      // with the instant its own flush started, to tell rows emitted after that flush (still on
+      // the air) from rows the flush removed.
+      if (rows.length) await store.setSnapshotEmitted(tx, p.device_eui, { emitted_at: new Date().toISOString(), push_ids: rows.map((r) => r.push_id) });
     });
     if (!rows.length) continue;
     out.emitted += 1;
@@ -226,11 +236,18 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs }) {
 // stored plan that compileWindows rejects must not block pause/skip/resume, so the snapshot
 // falls back to the status alone. timeZoneFallback is unused since CLOCK_SYNC left the
 // compile; it stays in the signature for the callers.
-async function compileAndQueue({ db, deviceEui, appId, now, flushQueue, warn, schedulerStatus, statusOnlyOnConflict }) {
+async function compileAndQueue({ db, deviceEui, appId, now, flushQueue, warn, schedulerStatus, statusOnlyOnConflict, settingsPatch }) {
   const eui = String(deviceEui).toUpperCase();
   const prefixSetting = await store.getGatewaySetting(db, GEN2_CLEAR_PREFIX_KEY, warn);
   const gen2ClearPrefix = ['1', 'true', 'yes', 'on'].includes(String(prefixSetting == null ? '' : prefixSetting).trim().toLowerCase());
-  const build = async (q) => {
+  // (R5 re-review N2) `settingsPatch` (the status routes: scheduler_status, skip_today_date) is
+  // written inside the snapshot transaction, before the snapshot is built from the settings,
+  // so the stored status and the newest snapshot agree by construction: a compile from another
+  // origin that commits afterwards reads the new status. The pre-flush validation build uses
+  // the patch's status as an override, since nothing is written yet.
+  const patchedStatus = settingsPatch && settingsPatch.scheduler_status != null ? settingsPatch.scheduler_status : null;
+  const statusOverride = schedulerStatus != null ? schedulerStatus : patchedStatus;
+  const build = async (q, override) => {
     const schedules = await store.listSchedules(q, eui);
     const settings = await store.getSettings(q, eui);
     const compiled = P.compileWindows(schedules);
@@ -241,14 +258,18 @@ async function compileAndQueue({ db, deviceEui, appId, now, flushQueue, warn, sc
       if (!statusOnlyOnConflict) throw planConflictError(compiled.errors);
       includePlan = false;
     }
-    const status = schedulerStatus != null ? schedulerStatus : settings.scheduler_status;
+    const status = override != null ? override : settings.scheduler_status;
     const pushes = buildSnapshotPushes({ generation: settings.strega_generation, days: compiled.days, schedulerStatus: status, includePlan, gen2ClearPrefix });
     return { compiled, pushes };
   };
   // Validate before the flush: a refused compile must not touch the radio queue.
-  let built = await build(db);
+  let built = await build(db, statusOverride);
   if (built.compiled.errors.length && warn) warn('[valve-control] ' + eui + ': plan_conflict in the stored schedules; sending the scheduler status alone');
-  const queued = await queueSnapshot({ db, deviceEui: eui, appId, flushQueue, warn, now, build: async (tx) => { built = await build(tx); return built.pushes; } });
+  const queued = await queueSnapshot({ db, deviceEui: eui, appId, flushQueue, warn, now, build: async (tx) => {
+    if (settingsPatch) await store.upsertSettings(tx, eui, settingsPatch);
+    built = await build(tx, schedulerStatus);
+    return built.pushes;
+  } });
   return Object.assign({ compiled: built.compiled }, queued);
 }
 

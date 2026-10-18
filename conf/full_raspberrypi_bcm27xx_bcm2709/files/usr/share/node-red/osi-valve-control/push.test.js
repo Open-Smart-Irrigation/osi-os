@@ -58,7 +58,7 @@ test('status and clock pushes', () => {
 const { tempDb, linkCloud, FIXTURE_EUI: EUI, fakeChirpStack, applyToValve } = require('./test-helpers');
 const store = require('./store');
 const workers = require('./workers');
-const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS } = require('./push');
+const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS } = require('./push');
 
 const T0 = Date.parse('2026-08-19T10:00:00Z');
 const at = (sec) => new Date(T0 + sec * 1000);
@@ -664,5 +664,93 @@ test('G1: the GEN2 whole-plan clear prefix is off by default and, when set, send
   await store.softDeleteSchedule(db, 'a', EUI);
   const cleared = await h.compile(20);
   assert.deepEqual(cleared.rows.map((row) => row.payload_hex), ['30', '80']);
+  db.close();
+});
+
+// ---------------------------------------------------------------------------------------------
+// R5 re-review fixes (N1, N2, N3) -- probes D, G and H.
+// ---------------------------------------------------------------------------------------------
+
+test('N1 (probe D): a delete compiled during an unobserved manual open is not held past the 5-minute cap', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
+  await h.compile(0);
+  await h.emit(WINDOW_SEC);
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES ('e-open', ?, '2026-08-19T10:01:00Z', 7200, '2026-08-19T12:01:00Z', 'unknown', 'PENDING_OBSERVATION', '2026-08-19T10:01:00Z')",
+    [EUI]);
+  await store.softDeleteSchedule(db, 'a', EUI);
+  const clears = await h.compile(100);
+  let emittedAt = null;
+  for (let sec = 160; sec <= 3600 && emittedAt === null; sec += 60) {
+    if ((await h.emit(sec)).messages.length) emittedAt = sec;
+  }
+  assert.ok(emittedAt !== null && emittedAt - 100 <= SNAPSHOT_MAX_DELAY_MS / 1000 + 60, 'the clears left ' + emittedAt + ' s in, within the cap');
+  assert.ok(emittedAt - 100 >= WINDOW_SEC, 'but not before the debounce window');
+  const tail = h.cs.getQueue().slice(-clears.rows.length);
+  assert.deepEqual(tail, asItems(clears.rows), 'appended behind the unflushed queue');
+  db.close();
+});
+
+test('N2 (probe G): a pause is written in the snapshot transaction, so a compile from another origin right after it carries DEACTIVATED', async () => {
+  const { path, db: setupDb } = await tempDb();
+  await store.insertSchedule(setupDb, weekly('a', 0x02, '06:00', 30));
+  await compileAndQueue({ db: setupDb, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: async () => {}, warn: () => {} });
+  setupDb.close();
+  const { handleHttpRequest } = require('./api');
+  const { DatabaseSync } = require('node:sqlite');
+  const { facade } = require('./test-helpers');
+  // After the pause's snapshot transaction commits, the cloud bridge (another DB handle)
+  // compiles an edit before the route returns.
+  function RacingDatabase(dbPath) {
+    const d = facade(new DatabaseSync(dbPath));
+    const tx = d.transaction.bind(d);
+    let raced = false;
+    d.transaction = async (executor) => {
+      const out = await tx(executor);
+      if (!raced) {
+        raced = true;
+        const other = facade(new DatabaseSync(dbPath));
+        await compileAndQueue({ db: other, deviceEui: EUI, appId: 'app', now: at(10), flushQueue: async () => {}, warn: () => {} });
+        other.close();
+      }
+      return out;
+    };
+    return d;
+  }
+  const crypto = require('node:crypto');
+  const SECRET = 'test-secret';
+  const token = Buffer.from(JSON.stringify({ userId: 1, username: 'u', exp: Date.now() + 60000 })).toString('base64url');
+  const auth = 'Bearer ' + token + '.' + crypto.createHmac('sha256', SECRET).update(token).digest('base64url');
+  const out = await handleHttpRequest({
+    msg: { req: { method: 'POST', url: '/api/valves/' + EUI + '/scheduler-status', headers: { authorization: auth }, params: {} }, payload: { status: 'DEACTIVATED' } },
+    Database: RacingDatabase, environment: { authTokenSecret: SECRET, dbPath: path }, appId: 'app', flushQueue: async () => {}, now: at(5), warn: () => {},
+  });
+  assert.equal(out.statusCode, 202);
+  const check = facade(new DatabaseSync(path));
+  assert.equal((await store.getSettings(check, EUI)).scheduler_status, 'DEACTIVATED');
+  const marker = await store.getSnapshotPending(check, EUI);
+  const pending = await store.queuedPushesById(check, EUI, marker.push_ids);
+  assert.equal(pending[0].payload_hex, '32', 'the newest snapshot carries the pause, not the old status');
+  check.close();
+});
+
+test('N3 (probe H): a tick that emits between a cancel\'s flush and its transaction does not get its rows marked LOST', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const snap = await h.compile(0);
+  await runningOpen(db, 'e-run');
+  const flushThenTick = async (eui) => {
+    const r = await h.cs.flushQueue(eui);
+    await h.emit(WINDOW_SEC + 30); // the valve tick fires inside the cancel's gap
+    return r;
+  };
+  const out = await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: flushThenTick, now: at(WINDOW_SEC + 30) });
+  assert.equal(out.ok, true);
+  assert.deepEqual(h.cs.getQueue(), asItems(snap.rows), 'the snapshot is on the air');
+  assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED'], 'so it is not LOST');
   db.close();
 });
