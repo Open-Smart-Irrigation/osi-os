@@ -283,16 +283,18 @@ function assertNoValveAction(downlinks) {
   }
 }
 
-test('outcome: a programmed valve reports the clearing as sent, the plan as possibly still held, and the whole-queue flush', async () => {
+test('outcome: a programmed valve reports the clearing as scheduled for the valve tick, the plan as possibly still held, and the whole-queue flush', async () => {
   const t = await seedProgrammedValve();
   await unclaim(t.db);
   const out = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
-  assert.equal(out.cleanup.outcome, 'clearing_sent');
+  assert.equal(out.cleanup.outcome, 'clearing_scheduled', 'PR0: the snapshot leaves with the valve tick, not with the request');
   assert.equal(out.cleanup.attempted, true);
   assert.equal(out.cleanup.device_eui, EUI);
   assert.equal(out.cleanup.schedules_cleared, 2);
-  assert.equal(out.cleanup.clearing_downlinks_sent, out.downlinks.length);
-  assert.ok(out.downlinks.length >= 7);
+  assert.equal(out.cleanup.clearing_downlinks_sent, 0);
+  assert.deepEqual(out.downlinks, []);
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  assert.ok(marker && (await store.queuedPushesById(t.db, EUI, marker.push_ids)).length >= 7, 'the clearing snapshot waits for the tick');
   assert.equal(out.cleanup.may_still_hold_plan, true, 'nothing confirms the valve dropped its plan yet');
   assert.equal(out.cleanup.plan_clear_confirmed, false);
   assert.equal(out.cleanup.in_flight_cancel, 'none_active');

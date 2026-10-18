@@ -119,6 +119,14 @@ async function cloudUnclaim(t, deviceEui, opts = {}) {
   return { ack: JSON.parse(ackMsg.payload), ackTopic: ackMsg.topic, downlinks: cleaned[1] || [], flushCalls, logs };
 }
 
+// Rehearsal merge W1+W9: PR0 parks the clearing snapshot behind an app_settings marker.
+function assertSnapshotPending(t, eui) {
+  const row = t.raw.prepare('SELECT value FROM app_settings WHERE key = ?').get('valve_snapshot_pending:' + eui);
+  assert.ok(row, 'a pending clearing snapshot marker exists');
+  const ids = JSON.parse(row.value).push_ids || [];
+  assert.ok(ids.length >= 7, 'the clearing snapshot covers the plan groups');
+}
+
 function assertNoValveAction(downlinks) {
   for (const m of downlinks) {
     assert.notEqual(m.payload.fPort, 1, 'unclaim must never send a valve action');
@@ -142,12 +150,14 @@ test('cloud unclaim of a programmed valve clears its plan the local way and says
     assert.equal(out.ack.result, 'SUCCESS', 'the ownership detach did apply; a FAILED would read as FAILED_EDGE_REMOVAL in the cloud');
     assert.equal(out.ack.commandType, 'UNCLAIM_DEVICE');
     assert.equal(out.ack.commandId, 41);
-    assert.equal(out.ack.valveCleanup.outcome, 'clearing_sent');
+    assert.equal(out.ack.valveCleanup.outcome, 'clearing_scheduled', 'CMD-04 PR0: the valve tick sends the clearing snapshot');
     assert.equal(out.ack.valveCleanup.may_still_hold_plan, true);
     assert.equal(out.ack.valveCleanup.plan_clear_confirmed, false);
     assert.equal(out.ack.valveCleanup.whole_queue_flushed, true);
-    assert.match(out.ack.reason, /^valve_cleanup_clearing_sent/);
-    assert.ok(out.downlinks.length >= 7, 'the clearing plans go to ChirpStack');
+    assert.match(out.ack.reason, /^valve_cleanup_clearing_scheduled/);
+    assert.equal(out.ack.valveCleanup.clearing_downlinks_sent, 0);
+    assert.equal(out.downlinks.length, 0, 'nothing leaves with the ACK; the tick sends the snapshot');
+    assertSnapshotPending(t, EUI);
     assertNoValveAction(out.downlinks);
     assert.ok(out.flushCalls.includes(EUI));
     const device = t.raw.prepare('SELECT user_id, irrigation_zone_id FROM devices WHERE deveui = ?').get(EUI);
@@ -214,15 +224,16 @@ async function localDelete(t, deviceEui, { env, missing } = {}) {
   return { response: out[0], downlinks: out[1] || [], logs };
 }
 
-test('local delete: the 200 response carries the cleanup outcome when the clearing was sent', async () => {
+test('local delete: the 200 response carries the cleanup outcome when the clearing is scheduled', async () => {
   const t = await seedProgrammedValve();
   try {
     const out = await localDelete(t, EUI);
     assert.equal(out.response.statusCode, 200);
     assert.equal(out.response.payload.message, 'Device removed successfully');
-    assert.equal(out.response.payload.valve_cleanup.outcome, 'clearing_sent');
+    assert.equal(out.response.payload.valve_cleanup.outcome, 'clearing_scheduled');
     assert.equal(out.response.payload.valve_cleanup.may_still_hold_plan, true);
-    assert.ok(out.downlinks.length >= 7);
+    assert.equal(out.downlinks.length, 0);
+    assertSnapshotPending(t, EUI);
     assertNoValveAction(out.downlinks);
   } finally { t.cleanup(); }
 });
