@@ -639,7 +639,11 @@ function shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested)
 // a merged bucket cannot be separated again, so a soil card with such a source
 // reads raw device_data. Every other card, and every soil card without such a
 // source, follows the range/aggregation rule above.
-function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested) {
+function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested, options = {}) {
+  // An explicit merged-card source selection has source-keyed rollups, so it
+  // is safe to use them even when another selected source is a plain LSN50.
+  // The pooled compatibility path keeps the historical plain-LSN guard.
+  if (options && options.sourceAware) return shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested);
   if (card && card.cardType === 'soil' && (sourceDevices || []).some(function(device) {
     return !isLsn50Swt3Eligible(device);
   })) return false;

@@ -24,6 +24,14 @@ selector remains `soil-src-*` or `env-src-*` by card. They identify the same
 current authorized device but are host specific. Authorization is evaluated
 against the requested account, gateway, and zone before a source is returned.
 
+An edge HTTP request that names a source resolves an explicit, authorized
+physical-device list. Its retained reads use that device's source-keyed rollups
+and keep the device/channel partition, including the per-device SWT3 eligibility
+rule. A source-filtered request without that authoritative device list stays on
+raw source-filtered reads and cannot fall back to pooled rollups. An
+authoritatively empty source list returns unavailable measurement data; it does
+not broaden the query to pooled or all-device history.
+
 ## Time and values
 
 Raw values retain their stored precision. Fixed buckets retain the host's
@@ -40,6 +48,15 @@ stored and fall back to the bucket start. Edge rollups have no stored
 latest-observation timestamp, so their `t` is the bucket start. The shared
 response fixture records `t`, `bucketStart`, and `bucketEnd` so a consumer can
 distinguish plot placement from the covered interval.
+
+Interactive edge measurement responses accept at most 30,000 retained points
+across the complete source-by-channel bucket grid, in addition to the existing
+2,000-point per-series bound. The grid count includes null gap cells and is
+checked before retained reads and response allocation. A request over either
+bound returns the authorized source descriptors with empty point arrays and
+`point_budget_exceeded` plus a request-shaping suggestion. Raw responses count
+after equal-time deduplication and validity filtering; the legacy and CSV
+interfaces keep their existing limits.
 
 Within each source, the affected sensor plots use the latest observation in a
 bucket. Specialized rain, counter, and analysis reducers keep their existing

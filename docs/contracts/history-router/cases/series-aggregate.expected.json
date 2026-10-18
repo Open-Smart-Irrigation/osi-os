@@ -33,6 +33,7 @@
     },
     "limits": {
       "maxPointsPerSeries": 2000,
+      "maxPointsTotal": 30000,
       "maxEvents": 200,
       "maxInterpretations": 20,
       "truncated": false

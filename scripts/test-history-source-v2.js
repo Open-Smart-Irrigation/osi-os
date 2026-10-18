@@ -440,6 +440,204 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: explicit source selection reads source-keyed rollups and filters plain-LSN SWT3`, async () => {
+    const helper = loadHelper(profile);
+    const sourceA = 'A8404100000000A1';
+    const sourceB = 'A8404100000000B1';
+    const devices = [
+      { deveui: sourceA, name: 'Chameleon A', type_id: 'KIWI_SENSOR' },
+      { deveui: sourceB, name: 'Plain LSN B', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 },
+    ];
+    const rollupRows = devices.flatMap((device, index) => {
+      const logicalSourceKey = sourceKey('soil', device.deveui);
+      return [
+        {
+          logical_source_key: logicalSourceKey,
+          channel_id: 'swt_1',
+          bucket_level: 'daily',
+          bucket_start: '2026-10-01T00:00:00.000Z',
+          bucket_end: '2026-10-02T00:00:00.000Z',
+          min_value: 10 + index,
+          max_value: 10 + index,
+          mean_value: 10 + index,
+          median_value: 10 + index,
+          latest_value: 10 + index,
+          coverage_pct: 100,
+          coverage_confidence: 'configured',
+          sample_count: 1,
+          event_count: 0,
+          threshold_crossing_count: 0,
+          unit: 'kPa',
+        },
+        {
+          logical_source_key: logicalSourceKey,
+          channel_id: 'swt_3',
+          bucket_level: 'daily',
+          bucket_start: '2026-10-01T00:00:00.000Z',
+          bucket_end: '2026-10-02T00:00:00.000Z',
+          min_value: 30 + index,
+          max_value: 30 + index,
+          mean_value: 30 + index,
+          median_value: 30 + index,
+          latest_value: 30 + index,
+          coverage_pct: 100,
+          coverage_confidence: 'configured',
+          sample_count: 1,
+          event_count: 0,
+          threshold_crossing_count: 0,
+          unit: 'kPa',
+        },
+      ];
+    });
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return rollupRows;
+        return [];
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: devices.map((device) => device.deveui),
+      sourceDevices: devices,
+      sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-02T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [
+        { id: 'swt_1', field: 'swt_1', unit: 'kPa' },
+        { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
+      ],
+    });
+    const bySourceChannel = new Map(aggregate.sourceAggregates.map((entry) => [`${entry.sourceKey}|${entry.channelKey}`, entry]));
+    assert.equal(bySourceChannel.get(`${sourceA}|swt_1`).buckets[0].series.swt_1.latest, 10);
+    assert.equal(bySourceChannel.get(`${sourceA}|swt_3`).buckets[0].series.swt_3.latest, 30);
+    assert.equal(bySourceChannel.get(`${sourceB}|swt_1`).buckets[0].series.swt_1.latest, 11);
+    assert.equal(bySourceChannel.has(`${sourceB}|swt_3`), false);
+  });
+
+  test(`${profile}: descriptor-less source filters cannot consume pooled rollups`, async () => {
+    const helper = loadHelper(profile);
+    let rollupQueries = 0;
+    const source = 'A8404100000000A1';
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) {
+          rollupQueries += 1;
+          throw new Error('descriptor-less source filter must not read pooled rollups');
+        }
+        return [];
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-02T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(rollupQueries, 0);
+    assert.equal(aggregate.sourceAggregates[0].buckets[0].series.swt_1.latest, null);
+  });
+
+  test(`${profile}: interactive aggregate point budget counts source-channel grid before reads`, async () => {
+    const helper = loadHelper(profile);
+    const channel = (id) => ({ id, field: id, unit: 'kPa' });
+    const devices = Array.from({ length: 6 }, (_, index) => ({
+      deveui: `A84041000000${String(index + 1).padStart(4, '0')}`,
+      type_id: 'KIWI_SENSOR',
+    }));
+    const start = Date.parse('2026-01-01T00:00:00Z');
+    const hours = 1667;
+    const end = new Date(start + hours * 60 * 60 * 1000).toISOString();
+    let overBudgetReads = 0;
+    const overBudget = await helper.aggregateDeviceData({
+      all() {
+        overBudgetReads += 1;
+        throw new Error('point-budget preflight must not read history');
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: devices.map((device) => device.deveui),
+      sourceDevices: devices,
+      start: '2026-01-01T00:00:00Z',
+      end,
+      aggregation: 'hourly',
+      useRollups: true,
+      channels: [channel('swt_1'), channel('swt_2'), channel('swt_3')],
+      maxPointsTotal: 30000,
+      maxPointsPerSeries: 2000,
+    });
+    assert.equal(overBudgetReads, 0);
+    assert.deepEqual(overBudget.availability, {
+      available: false,
+      reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+    });
+    assert.equal(overBudget.sourceAggregates.length, 18);
+    assert.ok(overBudget.sourceAggregates.every((entry) => entry.buckets.length === 0 && entry.series[entry.channelKey].points.length === 0));
+
+    const exactDevices = devices.slice(0, 5);
+    const exactEnd = new Date(start + 2000 * 60 * 60 * 1000).toISOString();
+    const exact = await helper.aggregateDeviceData({ all() { return []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: exactDevices.map((device) => device.deveui),
+      sourceDevices: exactDevices,
+      start: '2026-01-01T00:00:00Z',
+      end: exactEnd,
+      aggregation: 'hourly',
+      useRollups: true,
+      channels: [channel('swt_1'), channel('swt_2'), channel('swt_3')],
+      maxPointsTotal: 30000,
+      maxPointsPerSeries: 2000,
+    });
+    assert.equal(exact.availability, undefined);
+    assert.equal(exact.sourceAggregates.length, 15);
+    assert.equal(exact.sourceAggregates[0].buckets.length, 2000);
+  });
+
+  test(`${profile}: raw point budget counts deduplicated valid points`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const device = { deveui: source, type_id: 'KIWI_SENSOR' };
+    const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+    const rows = [
+      { id: 1, deveui: source, recorded_at: '2026-10-01T00:00:00Z', swt_1: 10 },
+      { id: 2, deveui: source, recorded_at: '2026-10-01T00:00:00Z', swt_1: null },
+      { id: 3, deveui: source, recorded_at: '2026-10-01T01:00:00Z', swt_1: 11 },
+    ];
+    const within = await helper.aggregateDeviceData({ all() { return rows; } }, {
+      deveuis: [source], sourceDevices: [device], sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z', aggregation: 'raw',
+      useRollups: false, channels: [channel], maxPointsTotal: 1,
+    });
+    assert.equal(within.availability, undefined);
+    assert.deepEqual(within.sourceAggregates[0].series.swt_1.points.map((point) => point.value), [11]);
+
+    const over = await helper.aggregateDeviceData({ all() { return rows.concat({
+      id: 4, deveui: source, recorded_at: '2026-10-01T02:00:00Z', swt_1: 12,
+    }); } }, {
+      deveuis: [source], sourceDevices: [device], sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z', aggregation: 'raw',
+      useRollups: false, channels: [channel], maxPointsTotal: 1,
+    });
+    assert.deepEqual(over.availability, {
+      available: false,
+      reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+    });
+    assert.deepEqual(over.sourceAggregates[0].series.swt_1.points, []);
+  });
+
   test(`${profile}: alternating rollup gaps use one bounded source range`, async () => {
     const helper = loadHelper(profile);
     const database = alternatingRollupDatabase();

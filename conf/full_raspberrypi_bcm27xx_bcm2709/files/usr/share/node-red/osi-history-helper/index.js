@@ -1827,6 +1827,7 @@ function sourceRollupResults(rows, query, channels, sourceDevices) {
     const sourceRows = byLogicalKey.get(logicalKey) || [];
     const result = rollupRowsToResult(sourceRows, { ...query, logicalSourceKey: logicalKey }, channels);
     for (const channel of channels) {
+      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] })) continue;
       aggregates.push({
         sourceKey,
         channelKey: channel.id,
@@ -2120,17 +2121,27 @@ async function aggregateDeviceData(db, query = {}) {
     };
   }
   const maxPointsPerSeries = toFiniteNumber(query.maxPointsPerSeries ?? query.max_points_per_series);
+  const maxPointsTotal = toFiniteNumber(query.maxPointsTotal ?? query.max_points_total);
+  let preflightBuckets = null;
+  if ((maxPointsPerSeries !== null && maxPointsPerSeries > 0) || (maxPointsTotal !== null && maxPointsTotal > 0)) {
+    if (aggregation === 'raw') {
+      // Raw responses are counted after SQL row limiting and source/time
+      // deduplication below; there is no bucket grid to preflight here.
+      preflightBuckets = null;
+    } else {
+      preflightBuckets = aggregateRowsPooled([], {
+        ...query,
+        aggregation,
+        channels: channels.length ? [channels[0]] : channels,
+        start,
+        end,
+        timezone: query.timezone || query.time_zone || 'UTC',
+        nowMs: query.nowMs,
+      }).buckets || [];
+    }
+  }
   if (maxPointsPerSeries !== null && maxPointsPerSeries > 0 && aggregation !== 'raw') {
-    const preflight = aggregateRowsPooled([], {
-      ...query,
-      aggregation,
-      channels: channels.length ? [channels[0]] : channels,
-      start,
-      end,
-      timezone: query.timezone || query.time_zone || 'UTC',
-      nowMs: query.nowMs,
-    });
-    if ((preflight.buckets || []).length > maxPointsPerSeries) {
+    if ((preflightBuckets || []).length > maxPointsPerSeries) {
       return {
         aggregation,
         aggregationRequested: aggregationInfo.requested,
@@ -2138,6 +2149,33 @@ async function aggregateDeviceData(db, query = {}) {
         source: 'device_data',
         sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType),
         sourceIdentityVersion: 2,
+        maxPointsTotal: maxPointsTotal !== null && maxPointsTotal > 0 ? maxPointsTotal : null,
+        coverageConfidence: 'unknown',
+        coveragePct: null,
+        buckets: [],
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
+  if (maxPointsTotal !== null && maxPointsTotal > 0 && aggregation !== 'raw') {
+    const eligibleSourceChannelCount = sourceDevices.reduce((count, device) => {
+      const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+      if (!sourceKey) return count;
+      return count + channels.filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] })).length;
+    }, 0);
+    const estimatedPointCount = (preflightBuckets || []).length * eligibleSourceChannelCount;
+    if (estimatedPointCount > maxPointsTotal) {
+      return {
+        aggregation,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+        source: 'device_data',
+        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType),
+        sourceIdentityVersion: 2,
+        maxPointsTotal,
         coverageConfidence: 'unknown',
         coveragePct: null,
         buckets: [],
@@ -2149,7 +2187,7 @@ async function aggregateDeviceData(db, query = {}) {
     }
   }
   const shouldUseRollups =
-    !hasSourceFilter
+    (!hasSourceFilter || (hasExplicitSourceDevices && sourceDevices.length > 0))
     && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
   if (shouldUseRollups && !hasExplicitSourceDevices && logicalSourceKey) {
     const compatibility = await aggregatePooledRollupCompatibility(db, query, channels, aggregationInfo, logicalSourceKey, deveuis, start, end);
@@ -2281,6 +2319,22 @@ async function aggregateDeviceData(db, query = {}) {
       return {
         ...unavailable,
         source: 'device_data',
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
+  if (aggregation === 'raw' && maxPointsTotal !== null && maxPointsTotal > 0) {
+    const partitions = sourcePartitions(rows, channels, { ...query, sourceDevices, sourceKeys: deveuis, start, end });
+    const validPointCount = Array.from(partitions.values()).reduce((count, partition) => count + partition.entries.filter((entry) => channelValue(entry.row, partition.channel) !== null).length, 0);
+    if (validPointCount > maxPointsTotal) {
+      const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
+      return {
+        ...unavailable,
+        source: 'device_data',
+        maxPointsTotal,
         availability: {
           available: false,
           reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
