@@ -18,6 +18,75 @@ const PROFILES = [
 const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')).fiveObservationCase;
 const seed = fs.readFileSync(SEED_PATH, 'utf8');
 
+function compareExpectedSeries(expectedSeries, actualSeries, tolerance) {
+  const mismatches = [];
+  if (actualSeries.length !== expectedSeries.length) {
+    mismatches.push(`series count: expected ${expectedSeries.length}, got ${actualSeries.length}`);
+  }
+  const metadataKeys = [
+    'id',
+    'deviceSourceId',
+    'sourceKey',
+    'channelKey',
+    'sourceLabel',
+    'label',
+    'unit',
+    'depthCm',
+    'metadataBasis',
+  ];
+  for (let index = 0; index < expectedSeries.length; index += 1) {
+    const expected = expectedSeries[index];
+    const actual = actualSeries.find((series) => series.id === expected.id) || actualSeries[index];
+    if (!actual) {
+      mismatches.push(`series ${expected.id}: missing`);
+      continue;
+    }
+    const expectedMetadata = {
+      id: expected.id,
+      deviceSourceId: expected.deviceSourceId,
+      sourceKey: expected.sourceKey,
+      channelKey: expected.channelKey,
+      sourceLabel: expected.sourceLabel,
+      label: expected.label,
+      unit: expected.unit,
+      depthCm: expected.depthCm,
+      metadataBasis: expected.metadataBasis,
+    };
+    for (const key of metadataKeys) {
+      if (actual[key] !== expectedMetadata[key]) {
+        mismatches.push(`series ${expected.id}.${key}: expected ${JSON.stringify(expectedMetadata[key])}, got ${JSON.stringify(actual[key])}`);
+      }
+    }
+    const actualPoints = Array.isArray(actual.points) ? actual.points : [];
+    if (actualPoints.length !== expected.points.length) {
+      mismatches.push(`series ${expected.id}.points count: expected ${expected.points.length}, got ${actualPoints.length}`);
+    }
+    for (let pointIndex = 0; pointIndex < expected.points.length; pointIndex += 1) {
+      const expectedPoint = expected.points[pointIndex];
+      const actualPoint = actualPoints[pointIndex];
+      if (!actualPoint) {
+        mismatches.push(`series ${expected.id}.points[${pointIndex}]: missing`);
+        continue;
+      }
+      for (const key of ['t', 'bucketStart', 'bucketEnd']) {
+        const actualTime = new Date(actualPoint[key]).toISOString();
+        const expectedTime = new Date(expectedPoint[key]).toISOString();
+        if (actualTime !== expectedTime) {
+          mismatches.push(`series ${expected.id}.points[${pointIndex}].${key}: expected ${expectedTime}, got ${actualTime}`);
+        }
+      }
+      if (expectedPoint.value === null || actualPoint.value === null) {
+        if (actualPoint.value !== expectedPoint.value) {
+          mismatches.push(`series ${expected.id}.points[${pointIndex}].value: expected ${expectedPoint.value}, got ${actualPoint.value}`);
+        }
+      } else if (Math.abs(actualPoint.value - expectedPoint.value) > tolerance) {
+        mismatches.push(`series ${expected.id}.points[${pointIndex}].value: expected ${expectedPoint.value}, got ${actualPoint.value}`);
+      }
+    }
+  }
+  return mismatches;
+}
+
 function databaseForFixture() {
   const raw = new DatabaseSync(':memory:');
   raw.exec(seed);
@@ -81,7 +150,6 @@ for (const profile of PROFILES) {
         channels: [{ id: fixture.channelKey, field: fixture.channelKey, unit: fixture.unit }],
       });
 
-      const expectedSeriesIds = fixture.expectedSeries.map((series) => `${series.deviceSourceId}:${series.channelKey}`);
       const responseSeries = router.buildSeriesFromAggregate(
         { cardType: 'soil' },
         result,
@@ -90,11 +158,53 @@ for (const profile of PROFILES) {
           name: device.name,
           type_id: 'KIWI_SENSOR',
           chameleon_enabled: 0,
+          soil_moisture_probe_depths_json: JSON.stringify({ swt_1: device.depthCm }),
           irrigation_zone_id: 1,
         }))
       );
-      const actualSeriesIds = responseSeries.map((series) => series.id);
-      assert.deepEqual(actualSeriesIds.sort(), expectedSeriesIds.sort(), JSON.stringify(result));
+      // buildSeriesFromAggregate is a series projection helper, not the HTTP
+      // response boundary. The boundary marker is asserted by Task 2/3 route
+      // tests; adding it here would make this series-only test fabricate it.
+      const expectedResponseSeries = fixture.expectedResponses.edge.series;
+      const mismatches = compareExpectedSeries(
+        expectedResponseSeries,
+        responseSeries,
+        fixture.edgeAggregateToleranceKpa
+      );
+
+      const rawResult = await helper.aggregateDeviceData(facade(raw), {
+        device_euis: fixture.devices.map((device) => device.deveui),
+        start: fixture.request.from,
+        end: fixture.request.to,
+        aggregation: 'raw',
+        timezone: fixture.request.timezone,
+        sourceFilterActive: true,
+        useRollups: false,
+        channels: [{ id: fixture.channelKey, field: fixture.channelKey, unit: fixture.unit }],
+      });
+      const rawSeries = router.buildSeriesFromAggregate(
+        { cardType: 'soil' },
+        rawResult,
+        fixture.devices.map((device) => ({
+          deveui: device.deveui,
+          name: device.name,
+          type_id: 'KIWI_SENSOR',
+          chameleon_enabled: 0,
+          soil_moisture_probe_depths_json: JSON.stringify({ swt_1: device.depthCm }),
+          irrigation_zone_id: 1,
+        }))
+      );
+      const actualRawPoints = rawSeries
+        .flatMap((series) => series.points.map((point) => ({ t: point.t, value: point.value })))
+        .sort((left, right) => left.t.localeCompare(right.t));
+      const expectedRawPoints = fixture.devices
+        .flatMap((device) => device.observations.map((observation) => ({
+          t: new Date(observation.recordedAt).toISOString(),
+          value: observation.value,
+        })))
+        .sort((left, right) => left.t.localeCompare(right.t));
+      assert.deepEqual(actualRawPoints, expectedRawPoints);
+      assert.deepEqual(mismatches, [], JSON.stringify({ result, responseSeries, expectedResponseSeries }));
     } finally {
       raw.close();
     }
