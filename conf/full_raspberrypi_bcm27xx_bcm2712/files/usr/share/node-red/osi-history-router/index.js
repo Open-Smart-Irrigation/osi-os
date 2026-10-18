@@ -673,15 +673,23 @@ function pointValueForCalendar(point) {
 function calendarRowsFromSeries(series) {
   const rowsByTime = {};
   for (const entry of series || []) {
-    const channelId = String(entry && entry.id || '').trim();
+    const channelId = String(entry && (entry.channelKey || entry.id) || '').trim();
+    const sourceId = String(entry && (entry.deviceSourceId || entry.sourceKey || '') || '').trim();
+    const sourceAware = Boolean(entry && (entry.channelKey || entry.deviceSourceId || entry.sourceKey));
     if (!channelId || !Array.isArray(entry.points)) continue;
     for (const point of entry.points) {
       const t = point && (point.t || point.bucketStart || point.bucket_start);
       if (!t) continue;
-      if (!rowsByTime[t]) rowsByTime[t] = { recorded_at: t };
-      rowsByTime[t][channelId] = pointValueForCalendar(point);
-      if (point.coveragePct !== undefined) rowsByTime[t].coveragePct = point.coveragePct;
-      if (point.coverage_pct !== undefined) rowsByTime[t].coverage_pct = point.coverage_pct;
+      const value = pointValueForCalendar(point);
+      // Null gap points describe missing coverage and must not become a
+      // measurement row or inflate calendar sample counts.
+      if (value === null || value === undefined) continue;
+      const rowKey = sourceAware ? `${t}|${sourceId || 'source'}` : t;
+      if (!rowsByTime[rowKey]) rowsByTime[rowKey] = { recorded_at: t };
+      const row = rowsByTime[rowKey];
+      row[channelId] = value;
+      if (point.coveragePct !== undefined) row.coveragePct = point.coveragePct;
+      if (point.coverage_pct !== undefined) row.coverage_pct = point.coverage_pct;
     }
   }
   return Object.keys(rowsByTime).sort().map(function(key) { return rowsByTime[key]; });

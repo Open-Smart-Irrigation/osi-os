@@ -513,9 +513,12 @@ function filterSoilRowsForSources(rows, sourceDevices) {
   return (Array.isArray(rows) ? rows : []).map((row) => {
     const eui = normalizeDeveui(row && (row.deveui || row.device_eui || row.deviceEui));
     const device = eui ? byEui.get(eui) : null;
-    if (!device || isLsn50Swt3Eligible(device)) return row;
+    // An explicit source list is authoritative. Rows from another device
+    // must not be relabeled into the requested source's series.
+    if (!device) return null;
+    if (isLsn50Swt3Eligible(device)) return row;
     return { ...row, swt_3: null };
-  });
+  }).filter(Boolean);
 }
 
 function deviceBelongsToZone(device, zone) {
@@ -1866,54 +1869,55 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
         nowMs: query.nowMs,
       });
       const missing = (skeleton.buckets || []).filter((bucket) => !existingStarts.has(String(bucket.bucketStart)));
-      let cursor = 0;
-      while (cursor < missing.length) {
-        let last = cursor;
-        while (last + 1 < missing.length
-          && String(missing[last + 1].bucketStart) === String(missing[last].bucketEnd)) last += 1;
-        const gapStart = missing[cursor].bucketStart;
-        const gapEnd = missing[last].bucketEnd;
-        const range = recordedAtRangeSql('recorded_at', gapStart, gapEnd);
-        const sql = `SELECT id, deveui, recorded_at, ${Array.from(new Set(channelFieldNames(channel))).join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
-        const rows = (await dbAll(db, sql, [sourceKey].concat(range.params))).filter(recordedAtRangeFilter(gapStart, gapEnd));
-        if (rows.length > RAW_HISTORY_MAX_ROWS) {
-          recovered.rawScanOverflow = true;
-          recovered.push({
-            sourceKey,
-            channelKey: channel.id,
-            unit: channel.unit || null,
-            aggregation,
-            series: { [channel.id]: { unit: channel.unit || null, points: [] } },
-            buckets: [],
-          });
-          return recovered;
-        }
-        const aggregate = aggregateRows(rows, {
-          aggregation,
-          aggregationRequested: query.aggregationRequested || aggregation,
-          channels: [channel],
-          sourceDevices: [device],
-          sourceKeys: [sourceKey],
-          start: gapStart,
-          end: gapEnd,
-          timezone: query.timezone || query.time_zone || 'UTC',
-          nowMs: query.nowMs,
-        });
-        const sourceAggregate = (aggregate.sourceAggregates || []).find((entry) => entry.sourceKey === sourceKey && entry.channelKey === channel.id);
+      if (!missing.length) continue;
+      // Read one bounded source/channel range for the whole missing span. A
+      // query per contiguous gap makes alternating rollup holes proportional
+      // to the number of holes and can exhaust the request before the live
+      // tail is read. The existing raw scan sentinel bounds the batch.
+      const gapStart = missing[0].bucketStart;
+      const gapEnd = missing[missing.length - 1].bucketEnd;
+      const range = recordedAtRangeSql('recorded_at', gapStart, gapEnd);
+      const sql = `SELECT id, deveui, recorded_at, ${Array.from(new Set(channelFieldNames(channel))).join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
+      const rows = (await dbAll(db, sql, [sourceKey].concat(range.params))).filter(recordedAtRangeFilter(gapStart, gapEnd));
+      if (rows.length > RAW_HISTORY_MAX_ROWS) {
+        recovered.rawScanOverflow = true;
         recovered.push({
           sourceKey,
           channelKey: channel.id,
           unit: channel.unit || null,
           aggregation,
-          bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
-          coverageConfidence: sourceAggregate ? sourceAggregate.coverageConfidence : aggregate.coverageConfidence,
-          coveragePct: sourceAggregate ? sourceAggregate.coveragePct : aggregate.coveragePct,
-          sourceCadences: sourceAggregate ? sourceAggregate.sourceCadences : aggregate.sourceCadences,
-          series: sourceAggregate ? sourceAggregate.series : aggregate.series,
-          buckets: sourceAggregate ? sourceAggregate.buckets : (aggregate.buckets || []),
+          series: { [channel.id]: { unit: channel.unit || null, points: [] } },
+          buckets: [],
         });
-        cursor = last + 1;
+        return recovered;
       }
+      const aggregate = aggregateRows(rows, {
+        aggregation,
+        aggregationRequested: query.aggregationRequested || aggregation,
+        channels: [channel],
+        sourceDevices: [device],
+        sourceKeys: [sourceKey],
+        start: gapStart,
+        end: gapEnd,
+        timezone: query.timezone || query.time_zone || 'UTC',
+        nowMs: query.nowMs,
+      });
+      const sourceAggregate = (aggregate.sourceAggregates || []).find((entry) => entry.sourceKey === sourceKey && entry.channelKey === channel.id);
+      const missingStarts = new Set(missing.map((bucket) => String(bucket.bucketStart)));
+      const recoveredBuckets = (sourceAggregate ? sourceAggregate.buckets : (aggregate.buckets || []))
+        .filter((bucket) => missingStarts.has(String(bucket.bucketStart)));
+      recovered.push({
+        sourceKey,
+        channelKey: channel.id,
+        unit: channel.unit || null,
+        aggregation,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+        coverageConfidence: sourceAggregate ? sourceAggregate.coverageConfidence : aggregate.coverageConfidence,
+        coveragePct: sourceAggregate ? sourceAggregate.coveragePct : aggregate.coveragePct,
+        sourceCadences: sourceAggregate ? sourceAggregate.sourceCadences : aggregate.sourceCadences,
+        series: sourceAggregate ? sourceAggregate.series : aggregate.series,
+        buckets: recoveredBuckets,
+      });
     }
   }
   return recovered;
@@ -1992,7 +1996,20 @@ async function aggregatePooledRollupCompatibility(db, query, channels, aggregati
     const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
     const range = recordedAtRangeSql('recorded_at', splitIso, end);
     const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC`;
-    const rows = await dbAll(db, sql, deveuis.concat(range.params));
+    const rows = await dbAll(db, `${sql} LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`, deveuis.concat(range.params));
+    if (rows.length > RAW_HISTORY_MAX_ROWS) {
+      return {
+        aggregation: aggregationInfo.level,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregationInfo.level] || null,
+        source: 'device_data',
+        buckets: [],
+        availability: {
+          available: false,
+          reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+        },
+      };
+    }
     live = aggregateRowsPooled(rows, { ...query, aggregation: aggregationInfo.level, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
   }
   if (!completed && !live) return null;
@@ -2156,14 +2173,20 @@ async function aggregateDeviceData(db, query = {}) {
       )
       : [];
     let live = null;
+    let liveOverflow = false;
     const hasTrailingWindow = splitMs < endMs;
     if (hasTrailingWindow && deveuis.length > 0) {
       const livePlaceholders = deveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
       const range = recordedAtRangeSql('recorded_at', splitIso, end);
-      const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC`;
+      const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
       const rows = await dbAll(db, sql, deveuis.concat(range.params));
-      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+      if (rows.length > RAW_HISTORY_MAX_ROWS) {
+        liveOverflow = true;
+        live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+      } else {
+        live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+      }
     }
     if (rollupRows.length || recoveredSources.length || live) {
       const sourceAggregates = mergeSourceAggregates(
@@ -2186,7 +2209,7 @@ async function aggregateDeviceData(db, query = {}) {
         coverageConfidence,
         coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
         buckets,
-        ...(recoveredSources.rawScanOverflow ? {
+        ...(recoveredSources.rawScanOverflow || liveOverflow ? {
           availability: {
             available: false,
             reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
@@ -2354,7 +2377,8 @@ async function rawLegacySensorHistory(db, options = {}) {
       AND ${range.sql}
     ORDER BY dd.recorded_at ASC, dd.id ASC
     LIMIT ?
-  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit]));
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit + 1]));
+  if (rows.length > limit) throw legacyRawLimitError();
   return dedupeLegacyHistoryRows(rows.filter(recordedAtRangeFilter(start, end)))
     .map((row) => ({ t: canonicalRecordedAt(row.recorded_at), value: toFiniteNumber(row.value) }));
 }
@@ -2404,6 +2428,15 @@ function dendroHistoryRow(row) {
   };
 }
 
+function legacyRawLimitError() {
+  const error = new Error('History raw row limit exceeded; select a shorter interval or fewer sources');
+  error.statusCode = 413;
+  error.code = 'HISTORY_RAW_LIMIT_EXCEEDED';
+  error.reason = 'raw_read_limit_exceeded';
+  error.reasons = ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'];
+  return error;
+}
+
 async function rawLegacyDendroHistory(db, options = {}) {
   const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   if (!normalizedDeveui) return [];
@@ -2412,6 +2445,7 @@ async function rawLegacyDendroHistory(db, options = {}) {
   if (!start || !end) throw new Error('rawLegacyDendroHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
   const range = recordedAtRangeSql('dd.recorded_at', start, end);
+  const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
   const rows = await dbAll(db, `
     SELECT
       dd.id,
@@ -2434,8 +2468,9 @@ async function rawLegacyDendroHistory(db, options = {}) {
       AND ${range.sql}
       AND (dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)
     ORDER BY dd.recorded_at ASC, dd.id ASC
-    LIMIT 30000
-  `, [normalizedDeveui].concat(ownerFilter.params, range.params));
+    LIMIT ?
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit + 1]));
+  if (rows.length > limit) throw legacyRawLimitError();
   return dedupeLegacyHistoryRows(rows.filter(recordedAtRangeFilter(start, end)))
     .map((row) => dendroHistoryRow(row));
 }
@@ -2514,6 +2549,11 @@ async function legacySensorHistory(db, options = {}) {
     timezone: key.timezone,
     nowMs: endMs,
   });
+  if (result && result.availability && result.availability.available === false) {
+    const error = legacyRawLimitError();
+    error.reasons = result.availability.reasons || error.reasons;
+    throw error;
+  }
   return flattenLegacyAggregate(result, key.channelId);
 }
 

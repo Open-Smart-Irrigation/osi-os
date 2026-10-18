@@ -149,6 +149,66 @@ function databaseForPartialRollup() {
   return raw;
 }
 
+function databaseForLegacyBoundaries() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(seed);
+  raw.exec(`
+    INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'legacy-boundaries', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'legacy-boundaries-user');
+    INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+    VALUES (1, 'Legacy boundaries', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES
+      ('A8404100000000A1', 'Legacy A', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+      ('A8404100000000B1', 'Legacy B', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+  `);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-02T12:00:00Z', 48);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-03T12:00:00Z', 24);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-03T13:00:00Z', 23);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000B1', '2026-10-03T13:00:00Z', 99);
+  return raw;
+}
+
+function alternatingRollupDatabase() {
+  const startMs = Date.parse('2020-01-01T00:00:00Z');
+  const endMs = startMs + (2000 * 24 * 60 * 60 * 1000);
+  const logicalSourceKey = sourceKey('soil', 'A8404100000000A1');
+  const rollups = [];
+  for (let index = 0; index < 2000; index += 2) {
+    const bucketStart = new Date(startMs + (index * 24 * 60 * 60 * 1000)).toISOString();
+    const bucketEnd = new Date(startMs + ((index + 1) * 24 * 60 * 60 * 1000)).toISOString();
+    rollups.push({
+      logical_source_key: logicalSourceKey,
+      channel_id: 'swt_1',
+      bucket_start: bucketStart,
+      bucket_end: bucketEnd,
+      min_value: 10,
+      max_value: 10,
+      mean_value: 10,
+      median_value: 10,
+      latest_value: 10,
+      coverage_pct: 100,
+      coverage_confidence: 'configured',
+      sample_count: 1,
+      event_count: 0,
+      threshold_crossing_count: 0,
+      unit: 'kPa',
+    });
+  }
+  let rawQueries = 0;
+  return {
+    range: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
+    facade: {
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return rollups;
+        rawQueries += 1;
+        return [];
+      },
+    },
+    rawQueryCount: () => rawQueries,
+  };
+}
+
 function loadHelper(profile) {
   return require(path.join(
     ROOT,
@@ -364,5 +424,110 @@ for (const profile of PROFILES) {
     } finally {
       raw.close();
     }
+  });
+
+  test(`${profile}: alternating rollup gaps use one bounded source range`, async () => {
+    const helper = loadHelper(profile);
+    const database = alternatingRollupDatabase();
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: database.range.start,
+      end: database.range.end,
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(database.rawQueryCount(), 1);
+    assert.equal(aggregate.sourceAggregates[0].buckets.length, 2000);
+    assert.equal(aggregate.availability, undefined);
+  });
+
+  test(`${profile}: live-tail raw overflow returns actionable availability`, async () => {
+    const helper = loadHelper(profile);
+    let rawQuery = 0;
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [];
+        rawQuery += 1;
+        if (rawQuery === 1) return [];
+        return Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          deveui: 'A8404100000000A1',
+          recorded_at: new Date(Date.parse('2026-10-04T00:00:00Z') + index * 1000).toISOString(),
+          swt_1: 1,
+        }));
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: '2026-10-02T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+  });
+
+  test(`${profile}: legacy 24h and 48h boundaries stay source isolated`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      const exact24 = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(exact24.map((point) => point.value), [24, 23]);
+      const exact48 = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 48, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(exact48.map((point) => point.value), [48, 24, 23]);
+      assert.ok(exact48.every((point) => point.value !== 99));
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy raw entry rejects the 30001st row`, async () => {
+    const helper = loadHelper(profile);
+    const oversized = (dendro) => helper.legacySensorHistory({
+      all(sql, params, callback) {
+        callback(null, Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          recorded_at: new Date(Date.parse(params[params.length - 2]) + index * 1000).toISOString(),
+          value: 1,
+          ...(dendro ? { dendro_position_mm: 1 } : {}),
+        })));
+      },
+    }, {
+      deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+    });
+    const error = await oversized(false).then(() => null, (caught) => caught);
+    assert.equal(error.statusCode, 413);
+    assert.equal(error.code, 'HISTORY_RAW_LIMIT_EXCEEDED');
+    const dendroError = await helper.legacySensorHistory({
+      all(sql, params, callback) {
+        callback(null, Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          recorded_at: new Date(Date.parse(params[params.length - 2]) + index * 1000).toISOString(),
+          dendro_position_mm: 1,
+        })));
+      },
+    }, {
+      deveui: 'A8404100000000A1', mode: 'dendro', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+    }).then(() => null, (caught) => caught);
+    assert.equal(dendroError.statusCode, 413);
+    assert.equal(dendroError.code, 'HISTORY_RAW_LIMIT_EXCEEDED');
   });
 }

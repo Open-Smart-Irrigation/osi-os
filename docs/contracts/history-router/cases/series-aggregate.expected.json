@@ -1422,38 +1422,48 @@
         {
           "date": "2026-07-09",
           "state": "no_data",
-          "coveragePct": 25,
-          "coverageConfidence": "derived",
+          "coveragePct": null,
+          "coverageConfidence": "unknown",
           "summary": {
             "key": "history.calendar.summary.soil.no_data",
             "params": {
-              "sampleCount": 10,
+              "sampleCount": 0,
               "eventCount": 0
             }
           },
           "metrics": {
-            "sampleCount": 10,
+            "sampleCount": 0,
             "eventCount": 0
           },
           "markers": []
         },
         {
           "date": "2026-07-10",
-          "state": "no_data",
+          "state": "optimal",
           "coveragePct": 25,
           "coverageConfidence": "derived",
           "summary": {
-            "key": "history.calendar.summary.soil.no_data",
+            "key": "history.calendar.summary.soil.optimal",
             "params": {
-              "sampleCount": 14,
+              "sampleCount": 6,
               "eventCount": 0
             }
           },
           "metrics": {
-            "sampleCount": 14,
+            "sampleCount": 6,
             "eventCount": 0
           },
-          "markers": []
+          "markers": [
+            {
+              "type": "state",
+              "severity": "info",
+              "labelKey": "history.calendar.marker.soil.optimal",
+              "params": {
+                "sampleCount": 6,
+                "eventCount": 0
+              }
+            }
+          ]
         }
       ]
     },
