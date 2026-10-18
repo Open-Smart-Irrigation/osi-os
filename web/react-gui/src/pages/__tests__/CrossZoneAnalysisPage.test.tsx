@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AnalysisCatalogEntry, AnalysisCatalogResponse } from '../../analysis/types';
+import { writeDisplayPreferences } from '../../utils/displayPreferences';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 vi.mock('../../components/analysis/EChart', () => ({ EChart: () => <div data-testid="echart" /> }));
@@ -61,6 +62,10 @@ const STORAGE_KEY = 'osi.analysis.workspace.v1';
 const ambientTemperatureSeriesId = '52f63dffa76919e6';
 const legacyTemperatureSeriesId = 'aa7ae37051ff2a50';
 let appliedAggregation = 'hourly';
+let seriesState: Array<{
+  seriesId: string; resolved: { hubEui: string | null; zoneId: number | null; cardType: string; sourceKey: string; channelKey: string };
+  label: string; unit: string | null; coveragePct: number | null; points: Array<{ t: string; value: number | null; count: number; quality: string | null }>; truncated: boolean; cadence: 'hourly'; timezone: null;
+}> = [];
 let catalogState: {
   catalog: AnalysisCatalogResponse | null;
   isLoading: boolean;
@@ -84,7 +89,7 @@ vi.mock('../../analysis/useAnalysisSeries', () => ({
         },
         aggregation: { requested: 'auto', applied: appliedAggregation, bucketSizeSeconds: 3600 },
         grid: { stepSeconds: 3600, from: '2026-06-01T00:00:00Z', to: '2026-06-07T23:59:59Z', bucketCount: 1 },
-        series: [],
+        series: seriesState,
         dropped: [],
       } : undefined,
       isLoading: false,
@@ -145,6 +150,7 @@ afterEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   appliedAggregation = 'hourly';
+  seriesState = [];
   catalogState = loadedCatalogState();
   scopeState.isAdmin = true;
   scopeState.isScoped = false;
@@ -221,6 +227,28 @@ describe('CrossZoneAnalysisPage', () => {
     expect(getSeries).toHaveBeenLastCalledWith(
       expect.objectContaining({ selectors: [{ seriesId: 's1' }] }),
     );
+  });
+
+  it('reprojects mounted selected SWT chart and CSV inputs when the display preference changes without another request', () => {
+    seriesState = [{
+      seriesId: 's1',
+      resolved: { hubEui: 'HUB-1', zoneId: 1, cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1' },
+      label: 'SWT 1', unit: 'kPa', coveragePct: null,
+      points: [{ t: '2026-10-16T08:00:00Z', value: 1.97, count: 1, quality: 'ok' }],
+      truncated: false, cadence: 'hourly', timezone: null,
+    }];
+    render(<CrossZoneAnalysisPage />, { wrapper: MemoryRouter });
+    fireEvent.click(screen.getByText('SWT 1'));
+
+    act(() => writeDisplayPreferences({ swtUnit: 'pF' }));
+
+    expect(getSeries).toHaveBeenLastCalledWith(expect.objectContaining({ selectors: [{ seriesId: 's1' }] }));
+    expect(exportMenuProps).toHaveBeenLastCalledWith(expect.objectContaining({
+      series: [expect.objectContaining({ unit: 'pF', points: [expect.objectContaining({ value: 1.294466226161593 })] })],
+      catalogById: expect.any(Map),
+    }));
+    const catalogById = exportMenuProps.mock.calls[exportMenuProps.mock.calls.length - 1]?.[0].catalogById as Map<string, AnalysisCatalogEntry>;
+    expect(catalogById.get('s1')?.unit).toBe('pF');
   });
 
   it('loads a saved view into the workspace and requests its series', () => {

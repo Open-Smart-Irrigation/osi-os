@@ -12,7 +12,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => STATUS_LABELS[key] ?? key }),
+  useTranslation: () => ({ t: (key: string, options?: { value?: string }) => key === 'watermark.soilTemp'
+    ? `Soil ${options?.value} °C`
+    : STATUS_LABELS[key] ?? key }),
 }));
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
@@ -126,6 +128,7 @@ const watermarkDevice: Device = {
   type_id: 'DRAGINO_LSN50',
   last_seen: FRESH,
   latest_data: {
+    ext_temperature_c: 16.8,
     watermark: {
       recorded_at: FRESH,
       supply_mv: 3300,
@@ -151,6 +154,8 @@ describe('DraginoTempCard WATERMARK probe section', () => {
     expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
     expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
     expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+    expect(screen.getByText(/16\.8/)).toBeInTheDocument();
+    expect(screen.queryByText(/19\.9/)).not.toBeInTheDocument();
   });
 
   it('renders no WATERMARK section when latest_data.watermark is absent', () => {
@@ -193,7 +198,7 @@ describe('DraginoTempCard WATERMARK history', () => {
   it('opens the soil temperature series from the measured soil temperature', async () => {
     const { sensorAPI } = await import('../../../services/api');
     render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
-    fireEvent.click(screen.getByRole('button', { name: 'watermark.soilTemp' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Soil 16.8 °C' }));
     expect(await screen.findByRole('dialog', { name: 'environment.soil.temperature' })).toBeInTheDocument();
     await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'ext_temperature_c', 24));
   });

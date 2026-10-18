@@ -7414,3 +7414,53 @@ CREATE TABLE IF NOT EXISTS zone_rain_source (
   selected_by_uuid TEXT,
   updated_at       TEXT NOT NULL
 );
+
+-- risk: additive
+-- 0074: Retain addressed Tensiomark evidence linked to canonical readings.
+CREATE TABLE IF NOT EXISTS tensiomark_observations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  device_data_id INTEGER REFERENCES device_data(id) ON DELETE SET NULL,
+  deveui TEXT NOT NULL,
+  recorded_at TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  raw_response TEXT NOT NULL,
+  payload_base64 TEXT,
+  configuration_hash TEXT NOT NULL,
+  configuration_json TEXT NOT NULL,
+  disposition TEXT NOT NULL CHECK (disposition IN (
+    'accepted', 'rejected_framing', 'rejected_addresses', 'rejected_values'
+  )),
+  normalized_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tensiomark_observations_device_time
+  ON tensiomark_observations(deveui, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_tensiomark_observations_device_data
+  ON tensiomark_observations(device_data_id);
+
+CREATE TRIGGER trg_sync_tensiomark_observations_dirty_au
+AFTER UPDATE ON tensiomark_observations
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM sync_link_state
+   WHERE peer_node = 'cloud' AND linked = 1
+)
+AND COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') <> ''
+BEGIN
+  INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, change_kind, source_row_id, changed_at)
+  VALUES(
+    'cloud',
+    'tensiomark_observations',
+    'TENSIOMARK_OBSERVATION|' || COALESCE((SELECT gateway_device_eui FROM devices WHERE deveui = NEW.deveui AND deleted_at IS NULL), (SELECT gateway_device_eui FROM sync_link_state WHERE peer_node = 'cloud'), '') || '|' || NEW.id,
+    'correction',
+    NEW.id,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  )
+  ON CONFLICT(peer_node, table_name, row_key) DO UPDATE SET
+    change_kind = excluded.change_kind,
+    source_row_id = excluded.source_row_id,
+    changed_at = excluded.changed_at,
+    status = 'pending',
+    attempts = 0,
+    next_attempt_at = NULL,
+    last_error = NULL;
+END;

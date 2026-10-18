@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 const ch = (over: Partial<WatermarkChannelLatest>): WatermarkChannelLatest => ({
   status: 'ok', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null, ...over,
 });
-const base = { swtUnit: 'kPa' as const, soilTempC: 19.9, soilTempMeasured: true, dieTempC: 21.5, supplyMv: 3300 };
+const base = { swtUnit: 'kPa' as const, soilTempC: 19.9, dieTempC: 21.5, supplyMv: 3300 };
 
 describe('WatermarkProbeSection', () => {
   it('shows kPa with the shared soil status colour', () => {
@@ -28,21 +28,22 @@ describe('WatermarkProbeSection', () => {
     expect(screen.getByText('Dry')).toBeInTheDocument();
   });
 
-  it('colours a clipped probe wet only when its tension bound is itself wet', () => {
+  it('shows the canonical clipped estimate as ordinary SWT', () => {
     render(<WatermarkProbeSection {...base} probes={[
-      { key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa_upper_bound: 11.2, r_upper_bound: 1325, offset_mv: 114.9 }) },
+      { key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa: 11.2, kpa_upper_bound: 11.2, r_upper_bound: 1325, offset_mv: 114.9 }) },
     ]} />);
-    expect(screen.getByText(/watermark\.wetUpTo/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.wetUpTo/)).not.toBeInTheDocument();
     expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
-  it('shows a clipped probe with a high bound as a bound, without colour', () => {
+  it('uses the same dry colour for a high canonical clipped estimate', () => {
     render(<WatermarkProbeSection {...base} probes={[
-      { key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa_upper_bound: 93.2, r_upper_bound: 8502 }) },
+      { key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa: 93.2, kpa_upper_bound: 93.2, r_upper_bound: 8502 }) },
     ]} />);
-    expect(screen.getByText(/watermark\.wetUpTo/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.wetUpTo/)).not.toBeInTheDocument();
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
-    expect(screen.queryByText('Dry')).not.toBeInTheDocument();
+    expect(screen.getByText('93.2 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
   });
 
   it('shows the unbounded status text (not the "at most" promise) when a clipped reading has no upper bound', () => {
@@ -51,7 +52,7 @@ describe('WatermarkProbeSection', () => {
     ]} />);
     expect(screen.getByText('watermark.status.wet_offset_clipped_unbounded')).toBeInTheDocument();
     expect(screen.queryByText('watermark.status.wet_offset_clipped')).not.toBeInTheDocument();
-    expect(screen.getByText(/watermark\.resistanceUpTo/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.resistanceUpTo/)).not.toBeInTheDocument();
     expect(screen.getByText('—')).toBeInTheDocument();
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
   });
@@ -71,18 +72,18 @@ describe('WatermarkProbeSection', () => {
     expect(screen.getByText(/watermark\.status\.calibration_required/)).toBeInTheDocument();
   });
 
-  it('shows the value of an unsettled reading and keeps its status visible (#415)', () => {
+  it('shows an unsettled numerical value without ordinary-card diagnostics', () => {
     render(<WatermarkProbeSection {...base} probes={[
       { key: 'swt_1', label: 'Probe 1', depthLabel: '20 cm', channel: ch({ status: 'unsettled', kpa: 26.8, r_solved: 4953, offset_mv: 70 }) },
     ]} />);
     expect(screen.getByText('26.8 kPa')).toBeInTheDocument();
-    expect(screen.getByText(/watermark\.status\.unsettled/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.status\.unsettled/)).not.toBeInTheDocument();
     expect(screen.getByText('Moist')).toBeInTheDocument();
   });
 
-  it('says supply, never battery', () => {
+  it('keeps electrical diagnostics off the ordinary card', () => {
     render(<WatermarkProbeSection {...base} probes={[]} />);
-    expect(screen.getByText(/watermark\.supply/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.supply|watermark\.dieTemp/)).not.toBeInTheDocument();
   });
 });
 
@@ -121,14 +122,27 @@ describe('WatermarkProbeSection history', () => {
     expect(onOpenHistory).toHaveBeenCalledWith('ext_temperature_c');
   });
 
-  it('offers no soil temperature history when the soil temperature is not measured', () => {
-    render(<WatermarkProbeSection {...base} soilTempMeasured={false} probes={probes} onOpenHistory={vi.fn()} />);
+  it('omits soil temperature when the canonical reading is absent', () => {
+    render(<WatermarkProbeSection {...base} soilTempC={null} probes={probes} onOpenHistory={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /watermark\.soilTemp/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/watermark\.soilTempNotMeasured/)).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.soilTempNotMeasured/)).not.toBeInTheDocument();
   });
 
   it('shows no history cue without a handler', () => {
     render(<WatermarkProbeSection {...base} probes={probes} />);
     expect(screen.queryAllByTitle(/common\.viewHistory/)).toHaveLength(0);
+  });
+});
+
+describe('ordinary WATERMARK presentation', () => {
+  it('does not reconstruct missing canonical kPa from diagnostic bounds', () => {
+    render(<WatermarkProbeSection {...base} probes={[{ key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa_upper_bound: 11.2 }) }]} />);
+    expect(screen.queryByText(/11.2/)).not.toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+  it('uses the common pF conversion for a clipped canonical value', () => {
+    render(<WatermarkProbeSection {...base} swtUnit="pF" probes={[{ key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ status: 'wet_offset_clipped', kpa: 30, kpa_upper_bound: 30, offset_mv: 100 }) }]} />);
+    expect(screen.getByText('2.48 pF')).toBeInTheDocument();
+    expect(screen.queryByText(/watermark\.offset|watermark\.status\.wet_offset_clipped/)).not.toBeInTheDocument();
   });
 });

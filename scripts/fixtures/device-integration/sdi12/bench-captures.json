@@ -1,0 +1,1969 @@
+[
+  {
+    "name": "pr2-four-serial",
+    "description": "PR2/4 serial evidence with four opaque readbacks. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "pr2-four-serial",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_4",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_4",
+          "profile_version": 2,
+          "address": "A",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "AM3!",
+          "response": "A0024\r\n",
+          "blocks": [
+            {
+              "command": "AD0!",
+              "response": "A+10+20+30+40\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "AI!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S1!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S2!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S3!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S4!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          22100
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "consistent",
+      "evidence": "synthetic",
+      "qualification": "not_assessed"
+    }
+  },
+  {
+    "name": "pr2-six-radio",
+    "description": "PR2/6 split exchange matched to a 58-byte radio payload in slots 3, 5 and 7. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "radio",
+      "capture_id": "pr2-six-radio",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_6",
+        "converter_model": "Synthetic converter",
+        "converter_firmware": "synthetic-unverified",
+        "converter_settings_text": "SYNTHETIC settings hypothesis: DATAUP=0, PAYVER=1, ALLDATAMOD=1, no cuts/conversion, EXT=0,0,0. No installed readback."
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_6",
+          "profile_version": 2,
+          "address": "0",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40,
+            60,
+            100
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 80
+        },
+        "exchange": {
+          "command": "0M3!",
+          "response": "00026\r\n",
+          "blocks": [
+            {
+              "command": "0D0!",
+              "response": "0+12.34+23.45+34.56\r\n"
+            },
+            {
+              "command": "0D1!",
+              "response": "0+45.67+56.78+67.89\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "0I!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S1!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S2!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S3!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S4!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S5!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S6!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          22100,
+          22200
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": {
+        "received_at": "2026-10-05T10:01:00.000Z",
+        "dev_eui": "0123456789ABCDEF",
+        "session_ref": "synthetic-session-1",
+        "fcnt_up": 42,
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            228,
+            1,
+            243,
+            7,
+            48,
+            48,
+            48,
+            50,
+            54,
+            13,
+            10,
+            245,
+            21,
+            48,
+            43,
+            49,
+            50,
+            46,
+            51,
+            52,
+            43,
+            50,
+            51,
+            46,
+            52,
+            53,
+            43,
+            51,
+            52,
+            46,
+            53,
+            54,
+            13,
+            10,
+            247,
+            21,
+            48,
+            43,
+            52,
+            53,
+            46,
+            54,
+            55,
+            43,
+            53,
+            54,
+            46,
+            55,
+            56,
+            43,
+            54,
+            55,
+            46,
+            56,
+            57,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 3,
+            "response_command": "0M3!"
+          },
+          {
+            "slot": 5,
+            "response_command": "0D0!"
+          },
+          {
+            "slot": 7,
+            "response_command": "0D1!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "consistent",
+      "evidence": "synthetic",
+      "qualification": "not_assessed"
+    }
+  },
+  {
+    "name": "teros-eleven-crc-radio",
+    "description": "TEROS 11 CRC exchange preserved through radio wrapper. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "radio",
+      "capture_id": "teros-eleven-crc-radio",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic METER_TEROS_11",
+        "converter_model": "Synthetic converter",
+        "converter_firmware": "synthetic-unverified",
+        "converter_settings_text": "SYNTHETIC settings hypothesis: DATAUP=0, PAYVER=1, ALLDATAMOD=1, no cuts/conversion, EXT=0,0,0. No installed readback."
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "METER_TEROS_11",
+          "profile_version": 2,
+          "address": "1",
+          "settings": {
+            "calibration": "mineral"
+          },
+          "depths": [
+            30
+          ]
+        },
+        "command_family": "MC",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "1MC!",
+          "response": "10012\r\n",
+          "blocks": [
+            {
+              "command": "1D0!",
+              "response": "1+2650+20A_j\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "1I!",
+          "response_bytes": [
+            49,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          21100
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": {
+        "received_at": "2026-10-05T10:01:00.000Z",
+        "dev_eui": "0123456789ABCDEF",
+        "session_ref": "synthetic-session-1",
+        "fcnt_up": 42,
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            228,
+            1,
+            243,
+            7,
+            49,
+            48,
+            48,
+            49,
+            50,
+            13,
+            10,
+            245,
+            14,
+            49,
+            43,
+            50,
+            54,
+            53,
+            48,
+            43,
+            50,
+            48,
+            65,
+            95,
+            106,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 3,
+            "response_command": "1MC!"
+          },
+          {
+            "slot": 5,
+            "response_command": "1D0!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "consistent",
+      "evidence": "synthetic",
+      "qualification": "not_assessed"
+    }
+  },
+  {
+    "name": "teros-twelve-serial",
+    "description": "TEROS 12 raw three-value serial transcript. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "teros-twelve-serial",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic METER_TEROS_12",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "METER_TEROS_12",
+          "profile_version": 2,
+          "address": "1",
+          "settings": {
+            "calibration": "mineral"
+          },
+          "depths": [
+            30
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "1M!",
+          "response": "10013\r\n",
+          "blocks": [
+            {
+              "command": "1D0!",
+              "response": "1+2999.25-10+0\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "1I!",
+          "response_bytes": [
+            49,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          21100
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "consistent",
+      "evidence": "synthetic",
+      "qualification": "not_assessed"
+    }
+  },
+  {
+    "name": "tensiomark-serial",
+    "description": "Tensiomark raw pair with a recorded 900-second previous-start gap. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "tensiomark-serial",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic TENSIOMARK",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "TENSIOMARK",
+          "profile_version": 3,
+          "address": "0",
+          "settings": {
+            "source_unit": "pF",
+            "variant": "1",
+            "field_order": "pf_temperature"
+          },
+          "depths": [
+            30
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "0M!",
+          "response": "00082\r\n",
+          "blocks": [
+            {
+              "command": "0D0!",
+              "response": "0+4+20\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "0I!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          28100
+        ],
+        "since_previous_start_ms": 900000,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "consistent",
+      "evidence": "synthetic",
+      "qualification": "not_assessed"
+    }
+  },
+  {
+    "name": "incomplete-template",
+    "description": "Unfilled PR2 template remains incomplete. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": null,
+      "captured_at": null,
+      "setup": {
+        "sensor_label": null,
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_4",
+          "profile_version": 2,
+          "address": "A",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": null
+      },
+      "discovery": [
+        {
+          "command": "AI!",
+          "response_bytes": null
+        },
+        {
+          "command": "AXRM3S1!",
+          "response_bytes": null
+        },
+        {
+          "command": "AXRM3S2!",
+          "response_bytes": null
+        },
+        {
+          "command": "AXRM3S3!",
+          "response_bytes": null
+        },
+        {
+          "command": "AXRM3S4!",
+          "response_bytes": null
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": null,
+        "announcement_received_ms": null,
+        "data_requested_ms": [],
+        "since_previous_start_ms": null,
+        "power_on_ms": null
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "incomplete",
+      "code": "capture_incomplete"
+    }
+  },
+  {
+    "name": "equal-numbers-different-bytes",
+    "description": "Radio adds a leading zero: equal numeric values but different bytes. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "radio",
+      "capture_id": "equal-numbers-different-bytes",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_6",
+        "converter_model": "Synthetic converter",
+        "converter_firmware": "synthetic-unverified",
+        "converter_settings_text": "SYNTHETIC settings hypothesis: DATAUP=0, PAYVER=1, ALLDATAMOD=1, no cuts/conversion, EXT=0,0,0. No installed readback."
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_6",
+          "profile_version": 2,
+          "address": "0",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40,
+            60,
+            100
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 80
+        },
+        "exchange": {
+          "command": "0M3!",
+          "response": "00026\r\n",
+          "blocks": [
+            {
+              "command": "0D0!",
+              "response": "0+12.34+23.45+34.56\r\n"
+            },
+            {
+              "command": "0D1!",
+              "response": "0+45.67+56.78+67.89\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "0I!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S1!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S2!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S3!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S4!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S5!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S6!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          22100,
+          22200
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": {
+        "received_at": "2026-10-05T10:01:00.000Z",
+        "dev_eui": "0123456789ABCDEF",
+        "session_ref": "synthetic-session-1",
+        "fcnt_up": 42,
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            228,
+            1,
+            243,
+            7,
+            48,
+            48,
+            48,
+            50,
+            54,
+            13,
+            10,
+            245,
+            22,
+            48,
+            43,
+            48,
+            49,
+            50,
+            46,
+            51,
+            52,
+            43,
+            50,
+            51,
+            46,
+            52,
+            53,
+            43,
+            51,
+            52,
+            46,
+            53,
+            54,
+            13,
+            10,
+            247,
+            21,
+            48,
+            43,
+            52,
+            53,
+            46,
+            54,
+            55,
+            43,
+            53,
+            54,
+            46,
+            55,
+            56,
+            43,
+            54,
+            55,
+            46,
+            56,
+            57,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 3,
+            "response_command": "0M3!"
+          },
+          {
+            "slot": 5,
+            "response_command": "0D0!"
+          },
+          {
+            "slot": 7,
+            "response_command": "0D1!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "code": "radio_exchange_mismatch"
+    }
+  },
+  {
+    "name": "early-data-request",
+    "description": "D request arrives one millisecond before the conservative post-announcement wait. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "early-data-request",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic METER_TEROS_12",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "METER_TEROS_12",
+          "profile_version": 2,
+          "address": "1",
+          "settings": {
+            "calibration": "mineral"
+          },
+          "depths": [
+            30
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "1M!",
+          "response": "10013\r\n",
+          "blocks": [
+            {
+              "command": "1D0!",
+              "response": "1+2999.25-10+0\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "1I!",
+          "response_bytes": [
+            49,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          21099
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "announced_wait_not_observed"
+    }
+  },
+  {
+    "name": "tensiomark-short-observed-cycle",
+    "description": "Tensiomark observed gap is one millisecond below 15 minutes. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "tensiomark-short-observed-cycle",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic TENSIOMARK",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "TENSIOMARK",
+          "profile_version": 3,
+          "address": "0",
+          "settings": {
+            "source_unit": "pF",
+            "variant": "1",
+            "field_order": "pf_temperature"
+          },
+          "depths": [
+            30
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "0M!",
+          "response": "00082\r\n",
+          "blocks": [
+            {
+              "command": "0D0!",
+              "response": "0+4+20\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "0I!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          28100
+        ],
+        "since_previous_start_ms": 899999,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "measurement_interval_not_observed"
+    }
+  },
+  {
+    "name": "fragment-diagnostic",
+    "description": "DATAUP=1 fragment remains diagnostic without reassembly. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "radio",
+      "capture_id": "fragment-diagnostic",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_6",
+        "converter_model": "Synthetic converter",
+        "converter_firmware": "synthetic-unverified",
+        "converter_settings_text": "SYNTHETIC settings hypothesis: DATAUP=0, PAYVER=1, ALLDATAMOD=1, no cuts/conversion, EXT=0,0,0. No installed readback."
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_6",
+          "profile_version": 2,
+          "address": "0",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40,
+            60,
+            100
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 80
+        },
+        "exchange": {
+          "command": "0M3!",
+          "response": "00026\r\n",
+          "blocks": [
+            {
+              "command": "0D0!",
+              "response": "0+12.34+23.45+34.56\r\n"
+            },
+            {
+              "command": "0D1!",
+              "response": "0+45.67+56.78+67.89\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "0I!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S1!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S2!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S3!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S4!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S5!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "0XRM3S6!",
+          "response_bytes": [
+            48,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          22100,
+          22200
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": {
+        "received_at": "2026-10-05T10:01:00.000Z",
+        "dev_eui": "0123456789ABCDEF",
+        "session_ref": "synthetic-session-1",
+        "fcnt_up": 42,
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            228,
+            1,
+            2,
+            0,
+            243,
+            7,
+            48,
+            48,
+            48,
+            50,
+            54,
+            13,
+            10,
+            245,
+            21,
+            48,
+            43,
+            49,
+            50,
+            46,
+            51,
+            52,
+            43,
+            50,
+            51,
+            46,
+            52,
+            53,
+            43,
+            51,
+            52,
+            46,
+            53,
+            54,
+            13,
+            10,
+            247,
+            21,
+            48,
+            43,
+            52,
+            53,
+            46,
+            54,
+            55,
+            43,
+            53,
+            54,
+            46,
+            55,
+            56,
+            43,
+            54,
+            55,
+            46,
+            56,
+            57,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 1,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 3,
+            "response_command": "0M3!"
+          },
+          {
+            "slot": 5,
+            "response_command": "0D0!"
+          },
+          {
+            "slot": 7,
+            "response_command": "0D1!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "code": "radio_not_complete",
+      "radio_check.wrapper.code": "fragment_requires_reassembly"
+    }
+  },
+  {
+    "name": "no-announcement",
+    "description": "No announcement is retained as a failed capture. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "no-announcement",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_4",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_4",
+          "profile_version": 2,
+          "address": "A",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "AM3!",
+          "response": "",
+          "blocks": []
+        }
+      },
+      "discovery": [
+        {
+          "command": "AI!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S1!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S2!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S3!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S4!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": null,
+        "data_requested_ms": [],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "invalid_announcement"
+    }
+  },
+  {
+    "name": "empty-data-abort",
+    "description": "Empty D reply aborts measurement instead of supplying values. All evidence is synthetic.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352",
+    "transformation": "Reuses synthetic recipe transcript. Discovery bytes, clocks, converter settings, header, slots, counters and session are constructed. Wrapper bytes are literal arrays; no physical capture or calibration acceptance.",
+    "input": {
+      "version": 1,
+      "evidence": "synthetic",
+      "scope": "serial",
+      "capture_id": "empty-data-abort",
+      "captured_at": "2026-10-05T10:00:00.000Z",
+      "setup": {
+        "sensor_label": "Synthetic DELTAT_PR2_4",
+        "converter_model": null,
+        "converter_firmware": null,
+        "converter_settings_text": null
+      },
+      "recipe_input": {
+        "configuration": {
+          "version": 1,
+          "profile_id": "DELTAT_PR2_4",
+          "profile_version": 2,
+          "address": "A",
+          "settings": {
+            "measurement_mode": "mineral_vwc_percent"
+          },
+          "depths": [
+            10,
+            20,
+            30,
+            40
+          ]
+        },
+        "command_family": "M",
+        "supply_v": 12,
+        "power_mode": "switched",
+        "interval_seconds": 1200,
+        "converter": {
+          "battery_mv": 3300,
+          "interrupt": false,
+          "payver": 1,
+          "max_slots": 8,
+          "max_payload_bytes": 51
+        },
+        "exchange": {
+          "command": "AM3!",
+          "response": "A0024\r\n",
+          "blocks": [
+            {
+              "command": "AD0!",
+              "response": "A\r\n"
+            }
+          ]
+        }
+      },
+      "discovery": [
+        {
+          "command": "AI!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S1!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S2!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S3!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        },
+        {
+          "command": "AXRM3S4!",
+          "response_bytes": [
+            65,
+            83,
+            89,
+            78,
+            84,
+            72,
+            69,
+            84,
+            73,
+            67,
+            13,
+            10
+          ]
+        }
+      ],
+      "timing": {
+        "measurement_started_ms": 20000,
+        "announcement_received_ms": 20100,
+        "data_requested_ms": [
+          22100
+        ],
+        "since_previous_start_ms": null,
+        "power_on_ms": 0
+      },
+      "radio": null
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "aborted",
+      "code": "measurement_aborted"
+    }
+  }
+]

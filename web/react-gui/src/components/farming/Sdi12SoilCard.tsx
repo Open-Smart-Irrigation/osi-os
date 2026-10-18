@@ -7,7 +7,8 @@ import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
-import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue } from '../../utils/swt';
+import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { SensorMonitor } from './SensorMonitor';
 import {
@@ -34,6 +35,12 @@ interface Sdi12SoilCardProps {
 }
 
 type SoilChannel = 'vwc' | 'soil_vic' | 'soil_temp' | 'soil_ec' | 'swt';
+interface SoilRow {
+  index: number;
+  address?: string;
+  depthCm: number | null;
+  values: Array<{ kind: SoilChannel; value: number | null }>;
+}
 
 const CHANNELS: Array<{ kind: SoilChannel; unit: string; decimals: number }> = [
   { kind: 'vwc', unit: '%', decimals: 1 },
@@ -79,23 +86,20 @@ const HISTORY_COLORS: Record<SoilChannel, string> = {
 
 // One series of the history view: `${kind}_${channel}` in device_data. SWT
 // history is kPa whatever the display unit, as on the other soil cards.
-function historySeries(kind: SoilChannel, index: number, depthText: string): CardHistorySeries {
+function historySeries(kind: SoilChannel, index: number, depthText: string, label = channelLabel(kind)): CardHistorySeries {
   const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
   return {
     field: `${kind}_${index}`,
-    label: `${channelLabel(kind)} · ${depthText}`,
+    label: `${label} · ${depthText}`,
     unit: channel?.unit ?? '',
     color: HISTORY_COLORS[kind],
     decimals: channel?.decimals ?? 1,
   };
 }
 
-function formatChannelValue(kind: SoilChannel, value: number): string | null {
+function formatChannelValue(kind: SoilChannel, value: number, swtUnit: 'kPa' | 'pF'): string | null {
   if (kind === 'swt') {
-    const kpa = formatSwtCardValue(value, 'kPa');
-    if (kpa === null) return null;
-    const pf = formatSwtValue(value, 'pF');
-    return pf ? `${kpa} · ${pf}` : kpa;
+    return formatSwtCardValue(value, swtUnit);
   }
   const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
   return `${formatNumber(value, channel?.decimals ?? 1)} ${channel?.unit ?? ''}`.trim();
@@ -117,6 +121,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
+  const { swtUnit } = useDisplayPreferences();
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -136,8 +141,23 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
     ? t('sdi12.active')
     : deployment ? t('sdi12.deploymentStatus', { status: deployment.status }) : null;
 
-  const configuredSensors = device.sdi12_channel_layout_json?.sensors ?? [];
-  const rows = configuredSensors.length > 0
+  const layout = device.sdi12_channel_layout_json;
+  const configuredSensors = layout && !('kind' in layout) ? layout.sensors : [];
+  const tensiomarkSensors = layout && 'kind' in layout && layout.kind === 'tensiomark' ? layout.sensors : [];
+  const hasTensiomarkLayout = tensiomarkSensors.length > 0;
+  const rows: SoilRow[] = tensiomarkSensors.length > 0
+    ? [...tensiomarkSensors]
+      .sort((left, right) => left.channel - right.channel)
+      .map((sensor) => ({
+        index: sensor.channel,
+        address: sensor.address,
+        depthCm: sensor.depth_cm,
+        values: [
+          { kind: 'swt' as const, value: finiteValue(data[`swt_${sensor.channel}` as keyof typeof data]) },
+          { kind: 'soil_temp' as const, value: finiteValue(data[`soil_temp_${sensor.channel}` as keyof typeof data]) },
+        ],
+      }))
+    : configuredSensors.length > 0
     ? [...configuredSensors]
       .sort((left, right) => left.depth_cm - right.depth_cm)
       .map((sensor) => ({
@@ -245,34 +265,47 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 
       {rows.length > 0 ? (
         <div className="space-y-2">
-          {rows.map(({ index, depthCm, values }) => {
-            const depthText = depthCm == null ? depthLabel(device, index) : `${depthCm} cm`;
+          {rows.map(({ index, depthCm, values, address }) => {
+            const depthText = address && hasTensiomarkLayout
+              ? t('sdi12.tensiomark.addressDepth', {
+                address,
+                depth: depthCm == null
+                  ? t('sdi12.tensiomark.depthUnknown')
+                  : t('sdi12.tensiomark.depthCm', { depth: depthCm }),
+              })
+              : depthCm == null ? depthLabel(device, index) : `${depthCm} cm`;
+            const tensiomarkChannelLabel = (kind: SoilChannel) => kind === 'swt'
+              ? t('sdi12.tensiomark.swt')
+              : t('sdi12.tensiomark.soilTemperature');
+            const valueLabel = (kind: SoilChannel) => address && hasTensiomarkLayout
+              ? tensiomarkChannelLabel(kind)
+              : channelLabel(kind);
             const seriesOptions = values
               .filter(({ kind }) => isCardHistorySeriesKey(`${kind}_${index}`))
-              .map(({ kind }) => historySeries(kind, index, depthText));
+              .map(({ kind }) => historySeries(kind, index, depthText, valueLabel(kind)));
             return (
               <div key={index} className="rounded-lg bg-[var(--card)] p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-                  Depth {depthText}
+                  {address ? depthText : `Depth ${depthText}`}
                 </p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
                   {values.map(({ kind, value }) => {
-                    const formatted = value == null ? null : formatChannelValue(kind, value);
+                    const formatted = value == null ? null : formatChannelValue(kind, value, swtUnit);
                     const opensHistory = formatted != null && isCardHistorySeriesKey(`${kind}_${index}`);
                     return (
                       <span key={kind} className="inline-flex flex-wrap items-center gap-2">
                         <span>
-                          <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
+                          <span className="text-[var(--text-tertiary)]">{valueLabel(kind)}: </span>
                           {opensHistory ? (
                             <button
                               type="button"
                               onClick={() => setSensorMonitor({
-                                ...historySeries(kind, index, depthText),
+                                ...historySeries(kind, index, depthText, valueLabel(kind)),
                                 initialField: `${kind}_${index}`,
                                 seriesOptions,
                               })}
                               title={historyTitle}
-                              aria-label={`${channelLabel(kind)}, ${depthText}: ${formatted}`}
+                              aria-label={`${valueLabel(kind)}, ${depthText}: ${formatted}`}
                               className={`text-left tabular-nums ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
                             >
                               {formatted}
@@ -281,7 +314,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
                             <span className="tabular-nums">{formatted ?? '—'}</span>
                           )}
                         </span>
-                        {kind === 'swt' && value != null && (
+                        {kind === 'swt' && (
                           <SwtStatusIndicator status={classifySwtWaterStatus(value)} />
                         )}
                       </span>

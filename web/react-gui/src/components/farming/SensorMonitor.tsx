@@ -11,6 +11,9 @@ import {
 import { useModalFocus } from '../../hooks/useModalFocus';
 import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
+import { canonicalize } from '../../channels/registry';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { kpaToPf } from '../../utils/swt';
 
 interface Props {
   deveui: string;
@@ -38,6 +41,11 @@ const TIME_WINDOWS = [
   { label: '30 d', hours: 720 },
   { label: '90 d', hours: 2160 },
 ];
+const SWT_FIELDS = new Set(['swt_1', 'swt_2', 'swt_3']);
+
+function isCanonicalSwt(field: string, unit: string): boolean {
+  return unit === 'kPa' && SWT_FIELDS.has(canonicalize(field));
+}
 
 function fmtTick(iso: string, hours: number, format: DateFormatter): string {
   if (hours <= 24) return format.time(iso) ?? '—';
@@ -71,12 +79,13 @@ export const SensorMonitor: React.FC<Props> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, true, onClose);
   const format = useDateFormat();
+  const { swtUnit } = useDisplayPreferences();
   const effectiveSeriesOptions = seriesOptions?.length
     ? seriesOptions
     : [{ field, label, unit, color, decimals }];
   const [selectedField, setSelectedField] = useState(initialField ?? field);
   const [hours, setHours] = useState(24);
-  const [data, setData] = useState<SensorHistoryPoint[]>([]);
+  const [canonicalData, setCanonicalData] = useState<SensorHistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,9 +95,16 @@ export const SensorMonitor: React.FC<Props> = ({
 
   const activeSeries = effectiveSeriesOptions.find((option) => option.field === selectedField) ?? effectiveSeriesOptions[0];
   const activeLabel = activeSeries.label;
-  const activeUnit = activeSeries.unit;
+  const presentsSwt = isCanonicalSwt(activeSeries.field, activeSeries.unit);
+  const activeUnit = presentsSwt && swtUnit === 'pF' ? 'pF' : activeSeries.unit;
   const activeColor = activeSeries.color ?? color;
-  const activeDecimals = activeSeries.decimals ?? decimals;
+  const activeDecimals = presentsSwt && swtUnit === 'pF' ? 2 : activeSeries.decimals ?? decimals;
+  const data = useMemo(
+    () => presentsSwt && swtUnit === 'pF'
+      ? canonicalData.map((point) => ({ ...point, value: kpaToPf(point.value) }))
+      : canonicalData,
+    [canonicalData, presentsSwt, swtUnit],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +113,7 @@ export const SensorMonitor: React.FC<Props> = ({
     sensorAPI.getHistory(deveui, selectedField, hours)
       .then((rows) => {
         if (!cancelled) {
-          setData(rows);
+          setCanonicalData(rows);
           setLoading(false);
         }
       })

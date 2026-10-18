@@ -38,6 +38,8 @@ import { HelpTip } from '../components/farming/shared/HelpTip';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
 import { useGatewayModules } from '../hooks/useGatewayModules';
+import { useDisplayPreferences } from '../utils/displayPreferences';
+import { presentSwtCatalog, presentSwtSeries } from '../analysis/swtPresentation';
 
 function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   if (ws.selectors.length === 0) return null;
@@ -49,6 +51,7 @@ export function CrossZoneAnalysisPage() {
   const { username, logout } = useAuth();
   const { isAdmin, loading: scopeLoading } = useScope();
   const gatewayModules = useGatewayModules();
+  const { swtUnit } = useDisplayPreferences();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
@@ -73,33 +76,37 @@ export function CrossZoneAnalysisPage() {
     [activeWorkspace, catalog],
   );
   const { data, isLoading: seriesLoading, error: seriesError } = useAnalysisSeries(request);
-  const channelMeta = useMemo(() => channelMetaFromCatalog(catalog?.channels ?? []), [catalog]);
+  const displayedCatalog = useMemo(
+    () => presentSwtCatalog(catalog?.channels ?? [], swtUnit),
+    [catalog, swtUnit],
+  );
+  const channelMeta = useMemo(() => channelMetaFromCatalog(displayedCatalog), [displayedCatalog]);
   const catalogById = useMemo(
-    () => new Map((catalog?.channels ?? []).map((c) => [c.seriesId, c])),
-    [catalog],
+    () => new Map(displayedCatalog.map((c) => [c.seriesId, c])),
+    [displayedCatalog],
   );
   // Legacy estimates are not offered as presets; the tray lists them on request.
-  const offeredChannels = useMemo(() => (catalog?.channels ?? []).filter((c) => !c.legacy), [catalog]);
+  const offeredChannels = useMemo(() => displayedCatalog.filter((c) => !c.legacy), [displayedCatalog]);
   const zoneNameById = useMemo(
     () => new Map(
-      (catalog?.channels ?? [])
+      displayedCatalog
         .filter((c): c is typeof c & { zoneId: number; zoneName: string } => c.zoneId !== null && c.zoneName !== null)
         .map((c) => [c.zoneId, c.zoneName]),
     ),
-    [catalog],
+    [displayedCatalog],
   );
   const appliedAggregation = data?.aggregation.applied;
   // A rain amount is named for the applied aggregation ("this interval" raw,
   // "amount" summed) and a legacy estimate says so; a user's rename still wins.
   const presentedSeries = useMemo(
-    () => (data?.series ?? []).map((item) => {
+    () => presentSwtSeries(data?.series ?? [], swtUnit).map((item) => {
       const entry = catalogById.get(item.seriesId);
       if (!entry) return item;
       const name = presentRainfallName(entry, appliedAggregation);
       const label = entry.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
       return label === item.label ? item : { ...item, label };
     }),
-    [appliedAggregation, catalogById, data, t],
+    [appliedAggregation, catalogById, data, swtUnit, t],
   );
   const displayedSeries = useMemo(
     () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
@@ -196,7 +203,7 @@ export function CrossZoneAnalysisPage() {
       <div className="analysis-layout mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-4 overflow-hidden px-4 py-4 lg:flex-row">
         <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
           <AnalysisSeriesTray
-            channels={catalog?.channels ?? []}
+            channels={displayedCatalog}
             sources={catalog?.sources}
             gatewayModules={gatewayModules}
             selectedIds={selectedIds}

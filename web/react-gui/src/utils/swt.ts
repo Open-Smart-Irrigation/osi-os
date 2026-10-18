@@ -1,4 +1,5 @@
 import type { Device } from '../types/farming';
+import { kpaToPf as toMatricPotentialPf, pfToKpa as toMatricPotentialKpa } from './matricPotential';
 
 type LatestData = Device['latest_data'] | null | undefined;
 
@@ -28,39 +29,26 @@ export function summarizeSwtValues(values: number[]): { status: SwtWaterStatus |
   return { status, swt: status === null ? null : mean };
 }
 
+// Common consumer domain; each device validates its physical range at ingestion.
+export const SWT_KPA_RANGE = [0, 1_000_000] as const;
+
 export type SwtUnit = 'kPa' | 'pF';
 export type SwtWaterStatus = 'wet' | 'moist' | 'dry';
 
 export function classifySwtWaterStatus(value: unknown): SwtWaterStatus | null {
   const kpa = toFiniteSwtValue(value);
-  if (kpa === null || kpa < 0 || kpa > 300) return null;
+  if (kpa === null || kpa < SWT_KPA_RANGE[0] || kpa > SWT_KPA_RANGE[1]) return null;
   if (kpa < 20) return 'wet';
   if (kpa <= 50) return 'moist';
   return 'dry';
 }
 
-/** Tension at or below which pF shows its floor of 0 (log10(0.1 * 10) = 0). */
-export const PF_FLOOR_KPA = 0.1;
-
-// pF = log10(tension in hPa); 1 kPa = 10 hPa. pF is never shown below 0: a
-// finite tension at or below 0.1 kPa (where the formula gives 0, a negative
-// or no value, e.g. a saturated probe at 0 kPa) derives the 0 pF floor.
-// A missing or non-finite reading stays null (no value).
 export function kpaToPf(kpa: unknown): number | null {
-  const value = toFiniteSwtValue(kpa);
-  if (value === null) return null;
-  if (value <= PF_FLOOR_KPA) return 0;
-  return Math.log10(value * 10);
+  return toMatricPotentialPf(toFiniteSwtValue(kpa));
 }
 
-// Inverse of kpaToPf, exact above the floor. 0 pF maps to the 0.1 kPa floor,
-// so an entered 0 pF means "0.1 kPa", the wettest tension pF can tell apart.
-// A negative pF is never shown and is rejected.
 export function pfToKpa(pf: unknown): number | null {
-  const value = toFiniteSwtValue(pf);
-  if (value === null || value < 0) return null;
-  const result = Math.pow(10, value) / 10;
-  return Number.isFinite(result) ? result : null;
+  return toMatricPotentialKpa(toFiniteSwtValue(pf));
 }
 
 export function formatSwtValue(kpa: unknown, unit: SwtUnit): string | null {
@@ -73,9 +61,17 @@ export function formatSwtValue(kpa: unknown, unit: SwtUnit): string | null {
   return `${value.toFixed(1)} kPa`;
 }
 
-// Cards show only readings inside the sensor range (0..300 kPa) in either unit;
-// a saturated 0 kPa reading shows the 0 pF floor in pF mode.
+/**
+ * `formatSwtValue` for a measured value on screen, except that a measured 0 kPa in pF mode
+ * shows `0.0 kPa` instead of nothing. pF has no value at zero tension, and a saturated probe
+ * must not read as a missing one (owner zero ruling, as the cloud card does).
+ */
+export function formatMeasuredSwtValue(kpa: unknown, unit: SwtUnit): string | null {
+  return formatSwtValue(kpa, unit) ?? (toFiniteSwtValue(kpa) === 0 ? formatSwtValue(0, 'kPa') : null);
+}
+
+/** The value a device card shows: `formatMeasuredSwtValue` within the shared canonical SWT domain. */
 export function formatSwtCardValue(kpa: unknown, unit: SwtUnit): string | null {
   if (classifySwtWaterStatus(kpa) === null) return null;
-  return formatSwtValue(kpa, unit);
+  return formatMeasuredSwtValue(kpa, unit);
 }

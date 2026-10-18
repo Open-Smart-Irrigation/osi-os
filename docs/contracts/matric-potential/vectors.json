@@ -1,0 +1,125 @@
+{
+  "convention": "matric-potential-hpa-v1",
+  "relative_tolerance": 2e-14,
+  "absolute_tolerance": 2e-14,
+  "kpa_to_pf": [
+    {
+      "input": 30.0,
+      "expected": 2.4771212547196626
+    },
+    {
+      "input": -30.0,
+      "expected": 2.4771212547196626
+    },
+    {
+      "input": 0.05,
+      "expected": -0.3010299956639812
+    },
+    {
+      "input": -0.05,
+      "expected": -0.3010299956639812
+    },
+    {
+      "input": 0.1,
+      "expected": 0.0
+    },
+    {
+      "input": 10.0,
+      "expected": 2.0
+    },
+    {
+      "input": 60.0,
+      "expected": 2.7781512503836434
+    },
+    {
+      "input": 300.0,
+      "expected": 3.4771212547196626
+    },
+    {
+      "input": 0.0,
+      "expected": null
+    },
+    {
+      "input": -0.0,
+      "expected": null
+    },
+    {
+      "input": null,
+      "expected": null
+    },
+    {
+      "input": "NaN",
+      "expected": null
+    },
+    {
+      "input": "Infinity",
+      "expected": null
+    },
+    {
+      "input": "-Infinity",
+      "expected": null
+    }
+  ],
+  "pf_to_kpa": [
+    {
+      "input": -1.0,
+      "expected": 0.01
+    },
+    {
+      "input": 0.0,
+      "expected": 0.1
+    },
+    {
+      "input": 0.164,
+      "expected": 0.14588142602753484
+    },
+    {
+      "input": 1.395,
+      "expected": 2.48313310529557
+    },
+    {
+      "input": 1.73,
+      "expected": 5.370317963702528
+    },
+    {
+      "input": 2.48,
+      "expected": 30.19951720402016
+    },
+    {
+      "input": 5.359,
+      "expected": 22855.9880337543
+    },
+    {
+      "input": 7.0,
+      "expected": 1000000.0
+    },
+    {
+      "input": 309.0,
+      "expected": 1e+308
+    },
+    {
+      "input": -400.0,
+      "expected": null
+    },
+    {
+      "input": 400.0,
+      "expected": null
+    },
+    {
+      "input": null,
+      "expected": null
+    },
+    {
+      "input": "NaN",
+      "expected": null
+    },
+    {
+      "input": "Infinity",
+      "expected": null
+    },
+    {
+      "input": "-Infinity",
+      "expected": null
+    }
+  ]
+}

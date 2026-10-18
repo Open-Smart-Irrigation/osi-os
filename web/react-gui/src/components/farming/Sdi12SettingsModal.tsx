@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { Device, Sdi12Profile, SentekChannelSensor, SentekSensorType } from '../../types/farming';
+import type { Device, Sdi12Profile, SentekChannelSensor, SentekSensorType, TensiomarkChannelLayout, TensiomarkChannelSensor } from '../../types/farming';
 import {
   devicesAPI,
   fetchSdi12Profiles,
@@ -82,7 +82,78 @@ function canonicalSentekLayout(address: string, sensors: SentekChannelSensor[]):
 
 function canonicalStoredSentekLayout(device: Device): string | null {
   const layout = device.sdi12_channel_layout_json;
-  return layout ? canonicalSentekLayout(layout.address, layout.sensors) : null;
+  return layout && !('kind' in layout) ? canonicalSentekLayout(layout.address, layout.sensors) : null;
+}
+
+function storedSentekLayout(device: Device) {
+  const layout = device.sdi12_channel_layout_json;
+  return layout && !('kind' in layout) ? layout : null;
+}
+
+function storedTensiomarkLayout(device: Device): TensiomarkChannelLayout | null {
+  const layout = device.sdi12_channel_layout_json;
+  return layout && 'kind' in layout && layout.kind === 'tensiomark' ? layout : null;
+}
+
+function blankTensiomarkSensor(channel: 1 | 2): TensiomarkChannelSensor {
+  return { address: '', channel, identity: '', depth_cm: null, calibration_range: 'unverified' };
+}
+
+// Identify stores the raw `aI!` reply. When it is a Tensiomark identity, it
+// prefills the first sensor's address and identity; otherwise a discovered
+// address prefills the address alone.
+function initialTensiomarkSensor(device: Device): TensiomarkChannelSensor {
+  const sensor = blankTensiomarkSensor(1);
+  const identity = typeof device.sdi12_identity === 'string' ? device.sdi12_identity.trim() : '';
+  const match = /^([0-9A-Za-z])11TENSIOMARK_2Vh_10A\d{5}$/.exec(identity);
+  if (match) return { ...sensor, address: match[1], identity };
+  return { ...sensor, address: normalizedDiscoveredSdi12Address(device.sdi12_discovered_address) ?? '' };
+}
+
+type TensiomarkLayoutError =
+  | 'sensorCount' | 'addressInvalid' | 'channelInvalid' | 'identityInvalid' | 'depthInvalid'
+  | 'calibrationInvalid' | 'duplicateAddress' | 'duplicateIdentity' | 'duplicateChannel';
+
+type TensiomarkLayoutResult =
+  | { ok: true; layout: TensiomarkChannelLayout }
+  | { ok: false; error: TensiomarkLayoutError; row: number; address?: string; channel?: number };
+
+// Mirrors the backend validator (osi-sdi12-normalize/tensiomark-live.js) and
+// names the first failing row (1-based) and field.
+function validateTensiomarkLayout(sensors: TensiomarkChannelSensor[]): TensiomarkLayoutResult {
+  if (sensors.length < 1 || sensors.length > 2) return { ok: false, error: 'sensorCount', row: 0 };
+  const addresses = new Set<string>();
+  const identities = new Set<string>();
+  const channels = new Set<number>();
+  for (const [index, sensor] of sensors.entries()) {
+    const row = index + 1;
+    if (!/^[0-9A-Za-z]$/.test(sensor.address)) return { ok: false, error: 'addressInvalid', row };
+    if (addresses.has(sensor.address)) return { ok: false, error: 'duplicateAddress', row, address: sensor.address };
+    if (sensor.channel !== 1 && sensor.channel !== 2) return { ok: false, error: 'channelInvalid', row };
+    if (channels.has(sensor.channel)) return { ok: false, error: 'duplicateChannel', row, channel: sensor.channel };
+    if (!new RegExp(`^${sensor.address}11TENSIOMARK_2Vh_10A\\d{5}$`).test(sensor.identity)) {
+      return { ok: false, error: 'identityInvalid', row, address: sensor.address };
+    }
+    if (identities.has(sensor.identity)) return { ok: false, error: 'duplicateIdentity', row };
+    if (sensor.depth_cm !== null && (!Number.isInteger(sensor.depth_cm) || sensor.depth_cm < 1 || sensor.depth_cm > 1000)) {
+      return { ok: false, error: 'depthInvalid', row };
+    }
+    if (sensor.calibration_range !== 'unverified') return { ok: false, error: 'calibrationInvalid', row };
+    addresses.add(sensor.address);
+    identities.add(sensor.identity);
+    channels.add(sensor.channel);
+  }
+  return {
+    ok: true,
+    layout: {
+      version: 1,
+      kind: 'tensiomark',
+      source_unit: 'pF',
+      field_order: 'temperature_pf',
+      qualification: 'bench_observed',
+      sensors: [...sensors].sort((left, right) => left.channel - right.channel),
+    },
+  };
 }
 
 function normalizedDiscoveredSdi12Address(address: string | null | undefined): string | null {
@@ -101,11 +172,12 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const [initialDepthInputs, setInitialDepthInputs] = useState<Record<string, string>>({});
   const [valueCountInput, setValueCountInput] = useState('');
   const [sentekAddress, setSentekAddress] = useState(
-    device.sdi12_channel_layout_json?.address ?? normalizedDiscoveredSdi12Address(device.sdi12_discovered_address) ?? '',
+    storedSentekLayout(device)?.address ?? normalizedDiscoveredSdi12Address(device.sdi12_discovered_address) ?? '',
   );
   const [sentekAddressTouched, setSentekAddressTouched] = useState(false);
   const [sentekSensors, setSentekSensors] = useState<SentekChannelSensor[]>(() => {
-    if (device.sdi12_channel_layout_json?.sensors?.length) return device.sdi12_channel_layout_json.sensors;
+    const layout = storedSentekLayout(device);
+    if (layout?.sensors.length) return layout.sensors;
     const count = Math.max(1, Math.min(8, device.sdi12_value_count ?? 1));
     return Array.from({ length: count }, (_, index) => ({
       channel: index + 1,
@@ -114,6 +186,10 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
       type: 'ENVIROSCAN' as const,
     }));
   });
+  const [tensiomarkSensors, setTensiomarkSensors] = useState<TensiomarkChannelSensor[]>(() => (
+    storedTensiomarkLayout(device)?.sensors ?? [initialTensiomarkSensor(device)]
+  ));
+  const [tensiomarkConfirmed, setTensiomarkConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<'identify' | 'save' | 'apply' | 'rollback' | null>(null);
   const [showApplyConfirm, setShowApplyConfirm] = useState(false);
@@ -164,10 +240,10 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
 
   useEffect(() => {
     const discoveredAddress = normalizedDiscoveredSdi12Address(device.sdi12_discovered_address);
-    if (!sentekAddressTouched && sentekAddress === '' && !device.sdi12_channel_layout_json && discoveredAddress) {
+    if (!sentekAddressTouched && sentekAddress === '' && !storedSentekLayout(device) && discoveredAddress) {
       setSentekAddress(discoveredAddress);
     }
-  }, [device.sdi12_channel_layout_json, device.sdi12_discovered_address, sentekAddress, sentekAddressTouched]);
+  }, [device, sentekAddress, sentekAddressTouched]);
 
   // Variable-count profiles have no fixed expectedValues -- this is the same
   // set the edge normalizer treats as learnable (SENTEK_ENVIROSCAN,
@@ -176,9 +252,11 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   // never show this field.
   const isVariableCountProfile = selectedProfile ? selectedProfile.expectedValues == null : false;
   const isSentekProfile = selectedProfileId === 'SENTEK_ENVIROSCAN';
+  const isTensiomarkProfile = selectedProfileId === 'TENSIOMARK';
 
   const handleProfileChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedProfileId(event.target.value);
+    setTensiomarkConfirmed(false);
     setError(null);
     setInfo(null);
   };
@@ -186,6 +264,33 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
   const handleSave = async () => {
     if (!selectedProfile) {
       setError('Select a probe profile.');
+      return;
+    }
+    if (isTensiomarkProfile) {
+      if (!tensiomarkConfirmed) {
+        setError(t('sdi12.tensiomark.confirmRequired'));
+        return;
+      }
+      const validation = validateTensiomarkLayout(tensiomarkSensors);
+      if (!validation.ok) {
+        setError(t(`sdi12.tensiomark.errors.${validation.error}`, {
+          row: validation.row, address: validation.address ?? '', channel: validation.channel ?? '',
+        }));
+        return;
+      }
+      const layout = validation.layout;
+      setBusy('save');
+      setError(null);
+      setInfo(null);
+      try {
+        await putSdi12Config(device.deveui, { probe_profile: 'TENSIOMARK', tensiomark_layout: layout });
+        setInfo(t('sdi12.tensiomark.saved'));
+        onUpdate();
+      } catch (err: unknown) {
+        setError(getApiErrorMessage(err, 'Failed to save SDI-12 configuration.'));
+      } finally {
+        setBusy(null);
+      }
       return;
     }
     if (isSentekProfile) {
@@ -442,7 +547,49 @@ export const Sdi12SettingsModal: React.FC<Sdi12SettingsModalProps> = ({
             </div>
           )}
 
-          {selectedProfile && !isSentekProfile && depthSlots(selectedProfile).length > 0 && (
+          {isTensiomarkProfile && (
+            <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('sdi12.tensiomark.title')}</p>
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('sdi12.tensiomark.qualification')}</p>
+              <div className="mt-3 space-y-2">
+                {tensiomarkSensors.map((sensor, rowIndex) => (
+                  <div key={`${sensor.channel}-${rowIndex}`} className="grid grid-cols-2 gap-2 rounded-lg border border-[var(--border)] p-2 sm:grid-cols-4">
+                    <label className="text-xs">{t('sdi12.tensiomark.address')}<input aria-label={t('sdi12.tensiomark.addressAria', { row: rowIndex + 1 })} value={sensor.address} maxLength={1} disabled={busy !== null}
+                      onChange={(event) => setTensiomarkSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, address: event.target.value } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <label className="text-xs">{t('sdi12.tensiomark.channel')}<select aria-label={t('sdi12.tensiomark.channelAria', { row: rowIndex + 1 })} value={sensor.channel} disabled={busy !== null}
+                      onChange={(event) => setTensiomarkSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, channel: Number(event.target.value) as 1 | 2 } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1"><option value={1}>1</option><option value={2}>2</option></select></label>
+                    <label className="text-xs">{t('sdi12.tensiomark.identity')}<input aria-label={t('sdi12.tensiomark.identityAria', { row: rowIndex + 1 })} value={sensor.identity} disabled={busy !== null}
+                      placeholder={t('sdi12.tensiomark.identityExample', { address: sensor.address || '1' })}
+                      onChange={(event) => setTensiomarkSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, identity: event.target.value } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <label className="text-xs">{t('sdi12.tensiomark.depthCmLabel')}<input aria-label={t('sdi12.tensiomark.depthAria', { row: rowIndex + 1 })} type="number" min={1} max={1000} value={sensor.depth_cm ?? ''} disabled={busy !== null}
+                      onChange={(event) => setTensiomarkSensors((rows) => rows.map((row, index) => index === rowIndex ? { ...row, depth_cm: event.target.value === '' ? null : Number(event.target.value) } : row))}
+                      className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1" /></label>
+                    <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 sm:col-span-4">
+                      <p className="text-xs text-[var(--text-tertiary)]">{t('sdi12.tensiomark.calibrationRange')}</p>
+                      {tensiomarkSensors.length > 1 && (
+                        <button type="button" disabled={busy !== null} aria-label={t('sdi12.tensiomark.removeSensorAria', { row: rowIndex + 1 })}
+                          onClick={() => setTensiomarkSensors((rows) => rows.filter((_, index) => index !== rowIndex))}
+                          className="rounded border border-[var(--border)] px-2 py-1 text-xs">{t('sdi12.tensiomark.removeSensor')}</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {tensiomarkSensors.length < 2 && (
+                <button type="button" disabled={busy !== null} onClick={() => setTensiomarkSensors((rows) => [...rows, blankTensiomarkSensor(rows.some((row) => row.channel === 1) ? 2 : 1)])}
+                  className="mt-3 rounded border border-[var(--border)] px-3 py-1.5 text-sm">{t('sdi12.tensiomark.addSensor')}</button>
+              )}
+              <label className="mt-3 flex items-start gap-2 text-sm text-[var(--text)]">
+                <input type="checkbox" checked={tensiomarkConfirmed} disabled={busy !== null} onChange={(event) => setTensiomarkConfirmed(event.target.checked)} />
+                {t('sdi12.tensiomark.confirmation')}
+              </label>
+            </div>
+          )}
+
+          {selectedProfile && !isSentekProfile && !isTensiomarkProfile && depthSlots(selectedProfile).length > 0 && (
             <div className="mt-3 rounded-lg border border-[var(--border)] bg-[var(--card)] p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Probe depths</p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">

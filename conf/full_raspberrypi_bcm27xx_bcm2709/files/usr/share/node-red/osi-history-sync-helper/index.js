@@ -1,6 +1,13 @@
 const crypto = require('crypto');
 
 const TABLE_COLUMNS = {
+  tensiomark_observations: [
+    ['id', 'INTEGER'], ['device_data_id', 'INTEGER'], ['deveui', 'TEXT'],
+    ['recorded_at', 'TIMESTAMP'], ['received_at', 'TIMESTAMP'],
+    ['raw_response_hex', 'TEXT'], ['payload_base64', 'TEXT'],
+    ['configuration_hash', 'TEXT'], ['configuration_json', 'TEXT'],
+    ['disposition', 'TEXT'], ['normalized_json', 'TEXT']
+  ],
   radio_uplinks: [
     ['id', 'INTEGER'], ['installation_uuid', 'TEXT'], ['deveui', 'TEXT'],
     ['recorded_at', 'TIMESTAMP'], ['deduplication_id', 'TEXT'], ['metadata_json', 'JSON']
@@ -147,6 +154,14 @@ const TABLE_DEFINITIONS = {
   }
 };
 
+// SQL hex reads every stored byte, including NUL that some SQLite bindings
+// truncate when returning TEXT. Every observation query uses this projection.
+TABLE_DEFINITIONS.tensiomark_observations = {
+  cursor: 'id',
+  select: 'SELECT id,device_data_id,deveui,recorded_at,received_at,hex(CAST(raw_response AS BLOB)) AS raw_response_hex,payload_base64,configuration_hash,configuration_json,disposition,normalized_json FROM tensiomark_observations',
+  cursorExpression: 'id', segmentOwner: 'deveui', segmentDate: 'recorded_at'
+};
+
 const TABLE_NAMES = Object.freeze(Object.keys(TABLE_DEFINITIONS));
 
 function definition(tableName) {
@@ -272,6 +287,7 @@ function historyKey(tableName, gatewayEui, row) {
   const gateway = String(gatewayEui || '').trim().toUpperCase();
   if (tableName === 'radio_uplinks') return `RADIO_UPLINK|${gateway}|${row.id}`;
   if (tableName === 'device_data') return `DEVICE_DATA|${gateway}|${row.id}`;
+  if (tableName === 'tensiomark_observations') return `TENSIOMARK_OBSERVATION|${gateway}|${row.id}`;
   if (tableName === 'chameleon_readings') return `CHAMELEON_READING|${gateway}|${row.id}`;
   if (tableName === 'dendrometer_readings') return `DENDRO_READING|${gateway}|${row.id}`;
   if (tableName === 'dendrometer_daily') return `DENDRO_DAILY|${String(row.deveui || '').toUpperCase()}|${row.date}`;
@@ -286,7 +302,7 @@ function historyKey(tableName, gatewayEui, row) {
 
 function naturalKey(tableName, row) {
   if (tableName === 'radio_uplinks') return `${row.installation_uuid}|${row.deduplication_id}`;
-  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings') {
+  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings' || tableName === 'tensiomark_observations') {
     return `${String(row.deveui || '').toUpperCase()}|${encodeTimestamp(row.recorded_at)}|${encodeInteger(row.id)}`;
   }
   if (tableName === 'dendrometer_daily') {
@@ -311,10 +327,10 @@ function cursorValue(tableName, row) {
 }
 
 function nextRawQuery(tableName) {
-  if (!['radio_uplinks', 'device_data', 'chameleon_readings', 'dendrometer_readings'].includes(tableName)) {
+  if (!['radio_uplinks', 'device_data', 'chameleon_readings', 'dendrometer_readings', 'tensiomark_observations'].includes(tableName)) {
     throw new Error(`not a raw id-cursor table ${tableName}`);
   }
-  return `SELECT * FROM ${tableName} WHERE id > ? ORDER BY id ASC LIMIT ?`;
+  return `${definition(tableName).select} WHERE id > ? ORDER BY id ASC LIMIT ?`;
 }
 
 function cursorPatchFromResponse(response) {
@@ -461,9 +477,9 @@ function splitOwnerAndDay(key) {
 
 function segmentQuery(tableName, key) {
   const [owner, segmentDay] = splitOwnerAndDay(key);
-  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings') {
+  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings' || tableName === 'tensiomark_observations') {
     return {
-      sql: `SELECT * FROM ${tableName} WHERE upper(deveui) = ? AND substr(recorded_at, 1, 10) = ? ORDER BY id ASC`,
+      sql: `${definition(tableName).select} WHERE upper(deveui) = ? AND substr(recorded_at, 1, 10) = ? ORDER BY id ASC`,
       params: [owner.toUpperCase(), segmentDay]
     };
   }
@@ -497,7 +513,7 @@ function segmentQuery(tableName, key) {
 
 function rowByHistoryKeyQuery(tableName, key) {
   const parts = String(key || '').split('|');
-  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings') {
+  if (tableName === 'radio_uplinks' || tableName === 'device_data' || tableName === 'chameleon_readings' || tableName === 'dendrometer_readings' || tableName === 'tensiomark_observations') {
     return {
       sql: `${definition(tableName).select} WHERE id = ? LIMIT 1`,
       params: [parts[parts.length - 1]]

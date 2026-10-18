@@ -235,3 +235,14 @@ and from the table above in the same change.
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.
+
+## `devices.json` — Tensiomark settings and SDI-12 card
+
+| Keys | Reason |
+|---|---|
+| `sdi12.tensiomark.*` (all 32 keys in `devices.json`: `title`, `qualification`, `calibrationRange`, `addressDepth`, `depthUnknown`, `depthCm`, `swt`, `soilTemperature`, `addSensor`, `confirmation`, `confirmRequired`, `saved`, `address`, `channel`, `identity`, `depthCmLabel`, `addressAria`, `channelAria`, `identityAria`, `depthAria`, `identityExample`, `removeSensor`, `removeSensorAria`, and `errors.sensorCount`, `errors.addressInvalid`, `errors.channelInvalid`, `errors.identityInvalid`, `errors.depthInvalid`, `errors.calibrationInvalid`, `errors.duplicateAddress`, `errors.duplicateIdentity`, `errors.duplicateChannel`) | Added for the Tensiomark layout editor in the SDI-12 settings modal (labels, screen-reader labels, row removal, per-field validation errors and the pF/temperature-order confirmation) and the address and depth labels on the SDI-12 soil card. de-CH/es/fr/it/pt carry translations. The confirmation sentence and the error texts carry operational meaning, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/tensiomarkLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.

@@ -54,6 +54,9 @@ import type {
   Sdi12Profile,
   SentekChannelLayout,
   SentekChannelSensor,
+  TensiomarkChannelLayout,
+  TensiomarkChannelSensor,
+  Sdi12ChannelLayout,
   Sdi12RecipeDeployment,
   Sdi12RecipeDeploymentStatus,
   AddDeviceRequest,
@@ -362,6 +365,66 @@ function normaliseSentekLayout(value: unknown): SentekChannelLayout | null {
   return { version: 1, address: layout.address, sensors };
 }
 
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function parseSdi12Layout(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normaliseTensiomarkLayout(value: unknown): TensiomarkChannelLayout | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const layout = value as Record<string, unknown>;
+  if (!exactKeys(layout, ['version', 'kind', 'source_unit', 'field_order', 'qualification', 'sensors'])
+    || layout.version !== 1 || layout.kind !== 'tensiomark' || layout.source_unit !== 'pF'
+    || layout.field_order !== 'temperature_pf' || layout.qualification !== 'bench_observed'
+    || !Array.isArray(layout.sensors) || layout.sensors.length < 1 || layout.sensors.length > 2) return null;
+
+  const addresses = new Set<string>();
+  const identities = new Set<string>();
+  const channels = new Set<number>();
+  const sensors: TensiomarkChannelSensor[] = [];
+  for (const valueSensor of layout.sensors) {
+    if (!valueSensor || typeof valueSensor !== 'object' || Array.isArray(valueSensor)) return null;
+    const sensor = valueSensor as Record<string, unknown>;
+    const depthCm = sensor.depth_cm;
+    if (!exactKeys(sensor, ['address', 'channel', 'identity', 'depth_cm', 'calibration_range'])
+      || typeof sensor.address !== 'string' || !/^[0-9A-Za-z]$/.test(sensor.address)
+      || (sensor.channel !== 1 && sensor.channel !== 2)
+      || typeof sensor.identity !== 'string'
+      || !new RegExp(`^${sensor.address}11TENSIOMARK_2Vh_10A\\d{5}$`).test(sensor.identity)
+      || (depthCm !== null && (typeof depthCm !== 'number' || !Number.isInteger(depthCm) || depthCm < 1 || depthCm > 1000))
+      || sensor.calibration_range !== 'unverified') return null;
+    if (addresses.has(sensor.address) || identities.has(sensor.identity) || channels.has(sensor.channel)) return null;
+    addresses.add(sensor.address);
+    identities.add(sensor.identity);
+    channels.add(sensor.channel);
+    sensors.push({
+      address: sensor.address,
+      channel: sensor.channel,
+      identity: sensor.identity,
+      depth_cm: depthCm,
+      calibration_range: sensor.calibration_range,
+    });
+  }
+  return {
+    version: 1,
+    kind: 'tensiomark',
+    source_unit: 'pF',
+    field_order: 'temperature_pf',
+    qualification: 'bench_observed',
+    sensors: sensors.sort((left, right) => left.channel - right.channel),
+  };
+}
+
 const SDI12_DEPLOYMENT_STATUSES = new Set<Sdi12RecipeDeploymentStatus>([
   'not_applied', 'queueing', 'queued', 'observed_once', 'observed_compatible', 'degraded',
 ]);
@@ -413,8 +476,16 @@ export function normaliseDevice(device: any): Device {
     : configuredFlag === false || configuredFlag === 0
       ? false
       : undefined;
-  const rawSentekLayout = device?.sdi12_channel_layout_json;
-  const sentekLayout = normaliseSentekLayout(rawSentekLayout);
+  const rawSdi12Layout = device?.sdi12_channel_layout_json
+    ?? device?.sdi12ChannelLayoutJson
+    ?? device?.sdi12_channel_layout
+    ?? device?.sdi12ChannelLayout;
+  const parsedSdi12Layout = parseSdi12Layout(rawSdi12Layout);
+  const hasLayoutKind = Boolean(parsedSdi12Layout && typeof parsedSdi12Layout === 'object'
+    && !Array.isArray(parsedSdi12Layout) && Object.prototype.hasOwnProperty.call(parsedSdi12Layout, 'kind'));
+  const sdi12Layout: Sdi12ChannelLayout | null = hasLayoutKind
+    ? (parsedSdi12Layout as { kind?: unknown }).kind === 'tensiomark' ? normaliseTensiomarkLayout(parsedSdi12Layout) : null
+    : normaliseSentekLayout(parsedSdi12Layout);
   const deployment = normaliseSdi12RecipeDeployment(device?.sdi12_recipe_deployment);
   const discoveredAddress = typeof device?.sdi12_discovered_address === 'string'
     && /^[0-9A-Za-z]$/.test(device.sdi12_discovered_address)
@@ -446,10 +517,13 @@ export function normaliseDevice(device: any): Device {
     sdi12_probe_status: device?.sdi12_probe_status ?? null,
     sdi12_identity: device?.sdi12_identity ?? null,
     sdi12_value_count: device?.sdi12_value_count ?? null,
-    sdi12_channel_layout_json: sentekLayout,
+    sdi12_channel_layout_json: sdi12Layout,
+    sdi12ChannelLayoutJson: sdi12Layout,
+    sdi12_channel_layout: sdi12Layout,
+    sdi12ChannelLayout: sdi12Layout,
     sdi12_recipe_deployment: deployment,
     sdi12_discovered_address: discoveredAddress,
-    sdi12_layout_status: rawSentekLayout != null && !sentekLayout ? 'invalid' : (device?.sdi12_layout_status ?? null),
+    sdi12_layout_status: rawSdi12Layout != null && !sdi12Layout ? 'invalid' : (device?.sdi12_layout_status ?? null),
     soilMoistureProbeDepths,
     soilMoistureProbeDepthsConfigured,
     activeValveActuation,
@@ -537,6 +611,7 @@ export interface Sdi12ConfigRequest {
   value_count?: number | null;
   address?: string;
   sensors?: SentekChannelSensor[];
+  tensiomark_layout?: TensiomarkChannelLayout;
 }
 
 export const fetchSdi12Profiles = async (): Promise<{ profiles: Sdi12Profile[] }> => {

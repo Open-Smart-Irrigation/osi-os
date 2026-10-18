@@ -21,7 +21,7 @@ test('radio correction reuses key but changes payload hash; JSON object key orde
  assert.notEqual(initial.payloadHash,correction.payloadHash);
 });
 
-test('radio disabled by default preserves the original source database registry',()=>{ assert.equal(helper.tableNames().includes('radio_uplinks'),false); assert.equal(helper.tableNames().length,8); });
+test('radio disabled by default preserves the original source database registry',()=>{ assert.equal(helper.tableNames().includes('radio_uplinks'),false); assert.equal(helper.tableNames().length,9); });
 
 test('radio golden vector matches canonical columns and history hash',()=>{
  const fixture=require('../docs/contracts/radio-observations/fixtures/uplink-v1.json');

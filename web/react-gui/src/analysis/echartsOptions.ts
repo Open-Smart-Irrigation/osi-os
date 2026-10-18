@@ -37,8 +37,8 @@ export function formatPointNote(point: AnalysisPoint, item: AnalysisSeries, t: P
   return t(key, { count: point.count, expected: point.expected });
 }
 
-const tooltipValueFormatter = (value: number | null | undefined) => (
-  value == null ? '–' : Number(value).toFixed(1)
+const tooltipValueFormatter = (value: number | null | undefined, unit?: string | null) => (
+  value == null || !Number.isFinite(Number(value)) ? '–' : Number(value).toFixed(unit === 'pF' ? 2 : 1)
 );
 
 const NAME_STYLE = {
@@ -89,7 +89,10 @@ interface AxisTooltipParam {
 // (seriesIndex, dataIndex) finds its AnalysisPoint and the partial marker.
 function axisTooltip(drawn: AnalysisSeries[], formatPartial?: PartialFormatter): Record<string, unknown> {
   // Callers without formatPartial (the builder tests) keep ECharts' own tooltip.
-  if (!formatPartial) return { trigger: 'axis', valueFormatter: tooltipValueFormatter };
+  if (!formatPartial) return {
+    trigger: 'axis',
+    valueFormatter: (value: number | null | undefined) => tooltipValueFormatter(value, drawn.length === 1 ? drawn[0]?.unit : null),
+  };
   return {
     trigger: 'axis',
     valueFormatter: tooltipValueFormatter,
@@ -99,7 +102,7 @@ function axisTooltip(drawn: AnalysisSeries[], formatPartial?: PartialFormatter):
         const item = drawn[param.seriesIndex ?? -1];
         const point = item?.points[param.dataIndex ?? -1];
         const raw = Array.isArray(param.value) ? param.value[1] : param.value;
-        const text = tooltipValueFormatter(typeof raw === 'number' ? raw : null);
+        const text = tooltipValueFormatter(typeof raw === 'number' ? raw : null, item?.unit);
         const suffix = item && point ? formatPartial(point, item) : '';
         return tooltipRow(param.marker ?? '', param.seriesName ?? '', `${text}${suffix}`, index > 0 ? 10 : 0);
       }).join('');
@@ -217,6 +220,7 @@ function lineSeries(
     connectNulls: false,
     xAxisIndex: stacked ? axisIndex : 0,
     yAxisIndex: axisIndex,
+    tooltip: { valueFormatter: (value: number | null | undefined) => tooltipValueFormatter(value, s.unit) },
     data: seriesData(s, normalize),
   };
 }
@@ -325,6 +329,7 @@ export function buildSmallMultiplesOption(
     connectNulls: false,
     xAxisIndex: i,
     yAxisIndex: i,
+    tooltip: { valueFormatter: (value: number | null | undefined) => tooltipValueFormatter(value, s.unit) },
     data: seriesData(s, normalize),
   }));
   return {
@@ -341,13 +346,25 @@ export interface CorrelationOptionInput {
   zonePairs: ZonePairs[];
   channelXLabel: string;
   channelYLabel: string;
+  channelXUnit?: string | null;
+  channelYUnit?: string | null;
 }
 
 export function buildCorrelationOption(input: CorrelationOptionInput): Record<string, unknown> {
   const displayLabels = uniqueDisplayLabels(input.zonePairs.map((zone) => ({ identity: zone.groupId, label: zone.label })));
+  const correlationTooltip = input.channelXUnit === 'pF' || input.channelYUnit === 'pF'
+    ? {
+      trigger: 'item',
+      formatter: (param: { value?: unknown; seriesName?: unknown }) => {
+        const value = Array.isArray(param.value) ? param.value : [];
+        const name = typeof param.seriesName === 'string' ? `${escapeHtml(param.seriesName)}<br/>` : '';
+        return `${name}${escapeHtml(input.channelXLabel)}: ${tooltipValueFormatter(value[0] as number | null, input.channelXUnit)}<br/>${escapeHtml(input.channelYLabel)}: ${tooltipValueFormatter(value[1] as number | null, input.channelYUnit)}`;
+      },
+    }
+    : { trigger: 'item', valueFormatter: tooltipValueFormatter };
   return {
     color: SERIES_PALETTE,
-    tooltip: { trigger: 'item', valueFormatter: tooltipValueFormatter },
+    tooltip: correlationTooltip,
     legend: { type: 'scroll' },
     grid: [{ left: 64, right: 24, top: 32, bottom: 56 }],
     xAxis: [{

@@ -1620,7 +1620,7 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
         'PUT',
         `/api/devices/${deveui}/sdi12/config`,
         { deveui },
-        { probe_profile: 'TENSIOMARK' }
+        { probe_profile: 'HYDRASCOUT' }
       ),
       env: ENV,
       db,
@@ -1653,7 +1653,7 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
         'PUT',
         `/api/devices/${deveui}/sdi12/config`,
         { deveui },
-        { probe_profile: 'TENSIOMARK' }
+        { probe_profile: 'HYDRASCOUT' }
       ),
       env: ENV,
       db,
@@ -1668,12 +1668,98 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
       env: ENV,
       db,
     });
-    assert.equal(saved.result.payload.probe_profile, 'TENSIOMARK');
+    assert.equal(saved.result.payload.probe_profile, 'HYDRASCOUT');
     assert.equal(
       db.prepare('SELECT sdi12_probe_profile FROM devices WHERE deveui = ?').get(deveui).sdi12_probe_profile,
-      'TENSIOMARK',
+      'HYDRASCOUT',
       'authorized SDI-12 config must persist the selected profile'
     );
+  } finally {
+    db.close();
+  }
+});
+
+test('IB1: an unassigned SDI-12 node can be configured only by its owner or an admin', async () => {
+  const db = seedScopedDb();
+  const deveui = 'AABBCCDDEEFF0002';
+  try {
+    db.prepare(
+      `INSERT INTO devices (
+         deveui, name, type_id, user_id, irrigation_zone_id,
+         created_at, updated_at, sdi12_probe_profile
+       ) VALUES (?, ?, 'DRAGINO_SDI12', ?, NULL, ?, ?, ?)`
+    ).run(deveui, 'Unassigned SDI-12 test', 2, '2026-01-01', '2026-01-01', 'GENERIC_VWC');
+    const guard = loadNode('scoped-device-config-guard');
+
+    for (const [userId, username, expectedUuid] of [
+      [2, 'res1', 'u-res1'],
+      [1, 'admin1', 'u-admin'],
+    ]) {
+      scopeHelper._resetForTests();
+      const allowed = await executeFunction(guard, {
+        msg: scopedRequest(
+          userId,
+          username,
+          'PUT',
+          `/api/devices/${deveui}/sdi12/config`,
+          { deveui },
+          { probe_profile: 'TENSIOMARK' }
+        ),
+        env: ENV,
+        db,
+      });
+      assert.equal(allowed.result[24].actor_user_uuid, expectedUuid, username);
+      assert.equal(allowed.result.filter(Boolean).length, 1, username);
+    }
+
+    scopeHelper._resetForTests();
+    const viewer = await executeFunction(guard, {
+      msg: scopedRequest(
+        3,
+        'view1',
+        'PUT',
+        `/api/devices/${deveui}/sdi12/config`,
+        { deveui },
+        { probe_profile: 'TENSIOMARK' }
+      ),
+      env: ENV,
+      db,
+    });
+    assert.equal(viewer.result.at(-1).statusCode, 403);
+    assert.equal(viewer.result.filter(Boolean).length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('IB1: a researcher cannot configure an unassigned SDI-12 node owned by someone else', async () => {
+  const db = seedScopedDb();
+  const deveui = 'AABBCCDDEEFF0003';
+  try {
+    // Owned by the admin, in no zone: res1's zone assignments grant nothing here.
+    db.prepare(
+      `INSERT INTO devices (
+         deveui, name, type_id, user_id, irrigation_zone_id,
+         created_at, updated_at, sdi12_probe_profile
+       ) VALUES (?, ?, 'DRAGINO_SDI12', ?, NULL, ?, ?, ?)`
+    ).run(deveui, 'Unassigned SDI-12 other owner', 1, '2026-01-01', '2026-01-01', 'GENERIC_VWC');
+    scopeHelper._resetForTests();
+    const denied = await executeFunction(loadNode('scoped-device-config-guard'), {
+      msg: scopedRequest(
+        2,
+        'res1',
+        'PUT',
+        `/api/devices/${deveui}/sdi12/config`,
+        { deveui },
+        { probe_profile: 'GENERIC_VWC' }
+      ),
+      env: ENV,
+      db,
+    });
+    // No device access at all: the guard answers 404 rather than reveal the node.
+    assert.equal(denied.result.at(-1).statusCode, 404);
+    assert.equal(denied.result.filter(Boolean).length, 1);
+    assert.equal(denied.result[24], null);
   } finally {
     db.close();
   }

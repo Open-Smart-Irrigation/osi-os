@@ -136,6 +136,7 @@ jobs:
         env:
           OSI_SERVER_ROOT: osi-server
       - run: node scripts/verify-osi-lib-db-caller-binding.js
+      - run: node --test scripts/verify-osi-lib-db-caller-binding.test.js
       - run: |
           node scripts/run-module-tests.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-writer/facade-contract.test.js \

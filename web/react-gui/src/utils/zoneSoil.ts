@@ -1,4 +1,5 @@
 import type { Device } from '../types/farming';
+import { SWT_KPA_RANGE } from './swt';
 
 /**
  * Soil-sensor presence and freshness for a zone.
@@ -28,8 +29,6 @@ export function isSensorObservationFresh(
     && ageMs <= SENSOR_FRESHNESS_WINDOW_MS;
 }
 
-/** Chameleon's resistance→kPa conversion clamps to [0, 300]; readings outside it are a fault, not a dry soil. */
-const SWT_KPA_RANGE: readonly [number, number] = [0, 300];
 const VWC_PCT_RANGE: readonly [number, number] = [0, 100];
 const VWC_CHANNEL_COUNT = 10;
 
@@ -308,7 +307,8 @@ function summarizeTension(
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
-      const faulted = chameleonChannelFaulted(device, channel) || watermarkChannelFaulted(device, channel);
+      const faulted = chameleonChannelFaulted(device, channel)
+        || ((raw === null || raw === undefined) && watermarkChannelFaulted(device, channel));
       if ((raw === null || raw === undefined) && !faulted) continue;
       if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {

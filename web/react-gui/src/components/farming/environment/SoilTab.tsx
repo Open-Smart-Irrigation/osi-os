@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Device, LocalEnvironment } from '../../../types/farming';
 import { useDisplayPreferences } from '../../../utils/displayPreferences';
-import { collectDeviceSwtValues, formatSwtValue } from '../../../utils/swt';
+import { collectDeviceSwtValues, formatMeasuredSwtValue } from '../../../utils/swt';
 
 interface Props {
   local: LocalEnvironment;
@@ -46,7 +46,7 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
           {hasSwt && hasVwc ? (
             <div className="mt-2 flex items-baseline gap-3">
               <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
-                {formatSwtValue(representativeSwt, swtUnit)}
+                {formatMeasuredSwtValue(representativeSwt, swtUnit)}
               </span>
               <span className="text-2xl font-bold tabular-nums text-[var(--text)]">
                 {soilMoistureMetric!.median.toFixed(1)} %
@@ -54,7 +54,7 @@ export const SoilTab: React.FC<Props> = ({ local, devices }) => {
             </div>
           ) : hasSwt ? (
             <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">
-              {formatSwtValue(representativeSwt, swtUnit)}
+              {formatMeasuredSwtValue(representativeSwt, swtUnit)}
             </p>
           ) : hasVwc ? (
             <p className="mt-2 text-2xl font-bold tabular-nums text-[var(--text)]">

@@ -839,7 +839,7 @@ test('aggregates rows into raw, 15m, hourly, daily, and weekly buckets', () => {
   assert.strictEqual(hourly.buckets.length, 2);
   assert.strictEqual(hourly.buckets[0].series.swt_1.min, 10);
   assert.strictEqual(hourly.buckets[0].series.swt_1.max, 40);
-  assert.strictEqual(hourly.buckets[0].series.swt_1.mean, 23.333);
+  assert.strictEqual(hourly.buckets[0].series.swt_1.mean, 70 / 3);
   assert.strictEqual(hourly.buckets[0].series.swt_1.median, 20);
   assert.strictEqual(hourly.buckets[0].series.swt_1.latest, 40);
   assert.strictEqual(hourly.buckets[0].coveragePct, 75);
@@ -1409,9 +1409,9 @@ test('kpaToPf matches the contract golden vectors', () => {
   assert.ok(Math.abs(helper.kpaToPf(60) - 2.7781512503836436) < 1e-12);
   assert.ok(Math.abs(helper.kpaToPf(300) - 3.4771212547196626) < 1e-12);
   assert.strictEqual(helper.kpaToPf(0.1), 0);
-  assert.strictEqual(helper.kpaToPf(0.05), 0);
-  assert.strictEqual(helper.kpaToPf(0), 0);
-  assert.strictEqual(helper.kpaToPf(-4), 0);
+  assert.ok(Math.abs(helper.kpaToPf(0.05) - (-0.3010299956639812)) < 2e-14);
+  assert.strictEqual(helper.kpaToPf(0), null);
+  assert.ok(Math.abs(helper.kpaToPf(-4) - 1.6020599913279624) < 2e-14);
   assert.strictEqual(helper.kpaToPf(null), null);
   assert.strictEqual(helper.kpaToPf('nope'), null);
 });
@@ -1440,7 +1440,7 @@ test('raw zone export pairs every SWT kPa row with a derived pF row', async () =
     assert.ok(kpaRow, 'kPa row present');
     assert.ok(pfRow, 'pF row present');
     assert.strictEqual(pfRow.unit, 'pF');
-    assert.strictEqual(pfRow.value, 1.7924);
+    assert.ok(Math.abs(pfRow.value - 1.792391689498254) < 2e-14);
     assert.strictEqual(pfRow.timestamp, kpaRow.timestamp);
     assert.strictEqual(pfRow.depth_cm, kpaRow.depth_cm);
     assert.strictEqual(pfRow.source_key, kpaRow.source_key);
@@ -1450,8 +1450,7 @@ test('raw zone export pairs every SWT kPa row with a derived pF row', async () =
   }
 });
 
-// Before the pF floor rule, 0 kPa had no pF row and 0.05 kPa wrote -0.301.
-test('zone export writes the 0 pF floor for kPa at or below 0.1', async () => {
+test('zone export preserves negative pF and excludes undefined zero-potential conversion', async () => {
   const db = createCliSqliteDb();
   try {
     db.runSql(`
@@ -1479,12 +1478,22 @@ test('zone export writes the 0 pF floor for kPa at or below 0.1', async () => {
       .map((row) => [row.timestamp.slice(11, 16), row.value]);
     assert.deepStrictEqual(values('swt_1'), [['08:00', 0], ['08:10', 0.05], ['08:20', 0.1], ['08:30', 0.11], ['08:40', -2]],
       'kPa rows unchanged, missing reading has no row');
-    assert.deepStrictEqual(values('swt_1_pf'), [['08:00', 0], ['08:10', 0], ['08:20', 0], ['08:30', 0.0414], ['08:40', 0]],
-      'pF rows floored at 0, never negative');
+    const expected = [['08:10', -0.3010299956639812], ['08:20', 0], ['08:30', 0.04139268515822504], ['08:40', 1.3010299956639813]];
+    assert.deepStrictEqual(values('swt_1_pf').map(([time]) => time), expected.map(([time]) => time));
+    values('swt_1_pf').forEach(([, value], index) => assert.ok(Math.abs(value - expected[index][1]) < 2e-14));
     assert.ok(res.rows.filter((row) => row.channel_key === 'swt_1_pf').every((row) => row.unit === 'pF'));
     const csv = helper.toCsv(res.columns, res.rows);
-    assert.match(csv, /,swt_1_pf,[^,]*,[^,]*,pF,0\n/, 'floored pF written as 0 in the CSV body');
-    assert.ok(!/,pF,-/.test(csv), 'no negative pF in the CSV body');
+    // CSV text matches the cloud export (Java Double.toString for pF, plain decimal for kPa).
+    const swtCells = csv.split('\n')
+      .filter((line) => /,swt_1(_pf)?,/.test(line))
+      .map((line) => line.split(',').slice(-2).join(','));
+    assert.deepStrictEqual(swtCells, [
+      'kPa,0',
+      'kPa,0.05', 'pF,-0.30102999566398125',
+      'kPa,0.1', 'pF,0.0',
+      'kPa,0.11', 'pF,0.04139268515822503',
+      'kPa,-2', 'pF,1.3010299956639813',
+    ], '0.1 kPa writes pF 0.0, negative pF and negative kPa keep full precision, 0 kPa has no pF row');
   } finally {
     db.close();
   }
@@ -1512,7 +1521,7 @@ test('aggregate zone export derives pF from the aggregated kPa mean', async () =
     const pfRow = res.rows.find((row) => row.channel_key === 'swt_1_pf');
     assert.ok(pfRow, 'aggregate pF row present');
     assert.strictEqual(pfRow.unit, 'pF');
-    assert.strictEqual(pfRow.value, 1.7993);
+    assert.ok(Math.abs(pfRow.value - 1.7993405494535817) < 2e-14);
   } finally {
     db.close();
   }

@@ -86,7 +86,7 @@ describe('ingestProfile3', () => {
     const dd = ctx.native.prepare('SELECT swt_1, swt_2 FROM device_data WHERE deveui = ?').get(DEVEUI);
     assert.deepEqual({ ...dd }, { swt_1: 56.4, swt_2: 0 });
     const wr = ctx.native.prepare('SELECT ch1_r_solved, ch2_status, calibration_sync_version, conversion_version FROM watermark_readings').get();
-    assert.deepEqual({ ...wr }, { ch1_r_solved: 9977, ch2_status: 'saturated', calibration_sync_version: 1, conversion_version: 'wm-lsn50-p3-v2' });
+    assert.deepEqual({ ...wr }, { ch1_r_solved: 9977, ch2_status: 'saturated', calibration_sync_version: 1, conversion_version: 'wm-lsn50-p3-v3' });
   });
 
   it('keeps a rejected frame as raw only', async () => {
@@ -215,7 +215,7 @@ describe('calibration store', () => {
     const saved = await wm.saveCalibration(ctx.db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 0 } });
     assert.deepEqual([saved.sync_version, saved.backfilled], [1, 1]);
     const dd = ctx.native.prepare('SELECT swt_1, swt_2 FROM device_data').get();
-    assert.deepEqual({ ...dd }, { swt_1: 56.4, swt_2: null });
+    assert.deepEqual({ ...dd }, { swt_1: 56.4, swt_2: 11.7 });
     const wr = ctx.native.prepare('SELECT ch1_status, ch2_status, ch2_r_upper_bound, ch2_kpa_upper_bound FROM watermark_readings').get();
     assert.deepEqual({ ...wr }, { ch1_status: 'ok', ch2_status: 'wet_offset_clipped', ch2_r_upper_bound: 1439, ch2_kpa_upper_bound: 11.7 });
   });
@@ -457,5 +457,22 @@ describe('bounded backfill (Fable final review Minor 4)', () => {
     assert.equal(waiting, WAITING - wm.BACKFILL_BATCH_SIZE);
     const again = await wm.saveCalibration(db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 2 } });
     assert.equal(again.backfilled, WAITING - wm.BACKFILL_BATCH_SIZE);
+  });
+});
+
+describe('canonical clipped estimates', () => {
+  it('persists the finite estimate identically in raw channel and ordinary SWT', async () => {
+    const ctx = freshDb();
+    await wm.saveCalibration(ctx.db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 0 } });
+    await ingestAt(ctx.db, T1, frameB64([276, 4095], [276, 4095]));
+    const row = ctx.native.prepare('SELECT dd.swt_1,dd.swt_2,wr.ch1_kpa,wr.ch2_kpa,wr.ch1_kpa_upper_bound,wr.ch2_kpa_upper_bound,wr.ch1_status FROM device_data dd JOIN watermark_readings wr ON wr.device_data_id=dd.id').get();
+    assert.equal(row.swt_1, 11.2);
+    assert.equal(row.swt_2, 11.7);
+    assert.equal(row.ch1_kpa, row.swt_1);
+    assert.equal(row.ch2_kpa, row.swt_2);
+    assert.equal(row.ch1_kpa_upper_bound, row.swt_1);
+    assert.equal(row.ch2_kpa_upper_bound, row.swt_2);
+    assert.equal(row.ch1_status, 'wet_offset_clipped');
+    ctx.native.close();
   });
 });

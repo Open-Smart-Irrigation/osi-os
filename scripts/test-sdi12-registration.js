@@ -108,7 +108,7 @@ test('A2: identify still 409s when CHIRPSTACK_APP_SENSORS is unset (no fabricate
   }
 });
 
-test('A4: a cloud-registered SDI-12 device also gets an auto-identify trigger', async () => {
+test('A4: cloud registration defers discovery until configuration or first Sentek uplink', async () => {
   const db = seedTestDb();
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
@@ -116,19 +116,9 @@ test('A4: a cloud-registered SDI-12 device also gets an auto-identify trigger', 
       env: ENV, db,
       libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => ({ ensureDeviceProvisioned: async () => ({}), close: () => {} }) } },
     });
-    // Feed the success msg (response.result[0]) into sdi12-post-reg-hook-fn exactly
-    // as the flow wiring will once this task adds the missing link -- prove the
-    // hook actually recognizes a cloud-path deviceRegistration, not just the
-    // local-path one.
+    // Registration must leave a window to save a multi-address interpretation.
     const hookOut = await executeFunction(loadNode('sdi12-post-reg-hook-fn'), { msg: response.result[0], env: ENV, db });
-    // sdi12-post-reg-hook-fn has a single output (outputs: 1) and returns a
-    // bare `msg`, not `[msg]` -- hookOut.result IS the msg object directly.
-    // (The plan's literal draft indexed hookOut.result[0], which reads
-    // undefined off a plain object; corrected here against the node's real
-    // outputs shape, confirmed by direct inspection.)
-    assert.ok(hookOut.result && hookOut.result.deviceRow, 'cloud-path registration must also stage an identify trigger');
-    assert.equal(hookOut.result.deviceRow.deveui, 'A840410000000105');
-    assert.equal(hookOut.result.deviceRow.chirpstack_app_id, 'app-sensors-uuid');
+    assert.equal(hookOut.result, null, 'registration must not queue wildcard discovery');
   } finally {
     db.close();
   }

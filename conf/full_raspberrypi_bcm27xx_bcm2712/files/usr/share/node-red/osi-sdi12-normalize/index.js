@@ -7,9 +7,10 @@
 
 var VALUE_RE = /^([+-]\d+(?:\.\d+)?)+$/;
 var EXTRACT_RE = /[+-]\d+(?:\.\d+)?/g;
+var matricPotential = require('../osi-matric-potential');
 
 var TRANSFORMS = {
-  pf_to_kpa: function (v) { return Math.pow(10, v) / 10; },
+  pf_to_kpa: matricPotential.pfToKpa,
   hpa_to_kpa: function (v) { return v / 10; },
   // Legacy EnviroSCAN TriSCAN moisture rows are auto-configured with the
   // identity coefficients A=1, B=1, C=0. Their aM! value is therefore the
@@ -378,12 +379,28 @@ function normalize(decoded, deviceConfig, meta) {
   var profileId = deviceConfig && deviceConfig.probeProfile;
   var profile = profileId ? getProfile(profileId) : null;
 
+  if (profile && profile.id === 'TENSIOMARK') {
+    // Addressed Tensiomark replies become measurable only after an explicit
+    // field layout has passed the strict, bench-observed contract. Invalid or
+    // missing layouts deliberately retain the legacy quarantine path below.
+    var tensiomarkLayout = deviceConfig && deviceConfig.sdi12ChannelLayout;
+    var tensiomark = require('./tensiomark-live');
+    var validatedTensiomark = tensiomark.validateTensiomarkLayout(tensiomarkLayout);
+    if (validatedTensiomark.ok) {
+      return tensiomark.normalizeTensiomark(decoded, validatedTensiomark, meta);
+    }
+  }
+
   if (raw === 'NULL' || raw === '') {
     // Exact NULL or empty match only: probe did not answer. Alive node, no
     // data, never fabricate values. An embedded NULL is garbage, handled below.
     noResponse = true;
   } else if (!profile) {
     unknown.sdi12_unconfigured = raw || '(empty)';
+  } else if (profile.id === 'TENSIOMARK') {
+    // The unversioned path cannot establish pF mode or response ordering.
+    // Retain the complete decoded input; candidate interpretation stays offline.
+    unknown.sdi12_tensiomark_unqualified = decoded.data_sum;
   } else {
     var values = parseSdi12Values(raw);
     var sentekLayout = null;
@@ -489,6 +506,14 @@ function normalize(decoded, deviceConfig, meta) {
 }
 
 module.exports = {
+  // Additive preparation APIs. Lazy loading leaves the deployed legacy path
+  // independent of the candidate configuration module and its manifest lookup.
+  resolveConfiguration: function (input) { return require('./configuration').resolveConfiguration(input); },
+  resolveLegacyConfiguration: function (input) { return require('./configuration').resolveLegacyConfiguration(input); },
+  normalizeConfigured: function (decoded, input, meta) { return require('./configuration').normalizeConfigured(decoded, input, meta); },
+  validateTensiomarkLayout: function (input) { return require('./tensiomark-live').validateTensiomarkLayout(input); },
+  normalizeTensiomark: function (decoded, layout, meta) { return require('./tensiomark-live').normalizeTensiomark(decoded, layout, meta); },
+  normalizeTensiomarkUplink: function (info, layout, meta) { return require('./tensiomark-live').normalizeTensiomarkUplink(info, layout, meta); },
   normalize: normalize,
   parseSdi12Values: parseSdi12Values,
   parseIdentity: parseIdentity,

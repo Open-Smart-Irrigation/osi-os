@@ -628,6 +628,11 @@ async function observeAcquisition(db, input) {
 }
 
 module.exports = {
+  ...require('./tensiomark'),
+  ...require('./config-handler'),
+  ...require('./write-handler'),
+  ...require('./gate-handler'),
+  ...require('./identify-handler'),
   saveSentekLayout,
   applyDesiredRecipe,
   rollbackCompatibleRecipe,

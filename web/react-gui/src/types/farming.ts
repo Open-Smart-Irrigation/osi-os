@@ -30,6 +30,22 @@ export interface SentekChannelLayout {
   address: string;
   sensors: SentekChannelSensor[];
 }
+export interface TensiomarkChannelSensor {
+  address: string;
+  channel: 1 | 2;
+  identity: string;
+  depth_cm: number | null;
+  calibration_range: 'unverified';
+}
+export interface TensiomarkChannelLayout {
+  version: 1;
+  kind: 'tensiomark';
+  source_unit: 'pF';
+  field_order: 'temperature_pf';
+  qualification: 'bench_observed';
+  sensors: TensiomarkChannelSensor[];
+}
+export type Sdi12ChannelLayout = SentekChannelLayout | TensiomarkChannelLayout;
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
@@ -103,7 +119,7 @@ export interface Device {
   sdi12_probe_status?: Sdi12ProbeStatus | null;
   sdi12_identity?: string | null;
   sdi12_value_count?: number | null;
-  sdi12_channel_layout_json?: SentekChannelLayout | null;
+  sdi12_channel_layout_json?: Sdi12ChannelLayout | null;
   sdi12_recipe_deployment?: Sdi12RecipeDeployment | null;
   sdi12_discovered_address?: string | null;
   sdi12_layout_status?: 'legacy_count' | 'configured' | 'active_vwc' | 'vic_framing_unverified' | 'invalid' | null;

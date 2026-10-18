@@ -1,0 +1,1343 @@
+{
+ "package": "pr2",
+ "accessed": "2026-10-04",
+ "sources": [
+  {
+   "id": "S1",
+   "title": "User Manual for the SDI-12 Profile Probe, Type SDI PR2/4 and SDI PR2/6 (PR2 SDI-12-UM-4.1)",
+   "edition": "Version 4.1 May 2016",
+   "publisher": "Delta-T Devices Ltd",
+   "host_type": "manufacturer",
+   "url": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+   "sha256": "3ba6c09af9f9991f3648012a400f767af3e22c92f4a7dff37961bb062b4cf290",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "S2",
+   "title": "SDI-12 A Serial-Digital Interface Standard for Microprocessor-Based Sensors",
+   "edition": "Version 1.4, February 20, 2023",
+   "publisher": "SDI-12 Support Group",
+   "host_type": "standards_body",
+   "url": "https://www.sdi-12.org/current_specification/SDI-12%20Specification%201.4%20February%2020%202023.pdf",
+   "sha256": "d4e1edf584e8d34deeb64054a2fc03e56f1623be00845f7ca57653f7f299a768",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S3",
+   "title": "PR2 Profile Probe product page (HTML, dynamic)",
+   "edition": "live page as of 2026-10-04",
+   "publisher": "Delta-T Devices Ltd",
+   "host_type": "manufacturer",
+   "url": "https://delta-t.co.uk/product/pr2/",
+   "sha256": "bce3900f7220aed84e7d563d599d07c19570a36a4838f09254824c48bdefd4fe",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S4",
+   "title": "PR2 Profile Probe - SDI-12 version page (HTML, dynamic)",
+   "edition": "live page as of 2026-10-04",
+   "publisher": "Delta-T Devices Ltd",
+   "host_type": "manufacturer",
+   "url": "https://www.delta-t.co.uk/pr2-profile-probe-sdi-12-version/",
+   "sha256": "4f141179a5ee98020f43569349d2847903422abeeef50bd07e92cb57e5a2b85c",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S5",
+   "title": "Soil Moisture Measurement Catalogue (Soil_Moisture_Catalogue_v_5-3_web 07.04.26)",
+   "edition": "v5-3, PDF creation date 2026-09-23",
+   "publisher": "Delta-T Devices Ltd",
+   "host_type": "manufacturer",
+   "url": "https://delta-t.co.uk/download/2661/",
+   "sha256": "054741c733c88f729732fabf930afca8a27331d13d3837d92bd1ee25e75586ce",
+   "retrieved": "2026-10-04"
+  }
+ ],
+ "claims": [
+  {
+   "id": "c1",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.49, table \"Interpreting Measurement Commands\" (rendered image read)",
+   "quote": "Command column: \"aM! / aC!\" over \"aMC! / aCC!\"; Response column: \"PR2/6 a0026<CR><LF>\" over \"PR2/4 a0024<CR><LF>\"",
+   "derived_rule": "The two lines in the Command cell are NOT aligned with the two lines in the Response cell. aM!/aC! = sequential/concurrent; aMC!/aCC! = the same commands requesting CRC (SDI-12 4.4.12). They are not PR2/4 vs PR2/6 variants; the PR2/4 vs PR2/6 split is in the Response column. p.49 callouts: \"Sequential\" over aM!, \"Concurrent\" over aC!, \"With Cyclic Redundancy Test\" pointing at aMC!/aCC!.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Column headings printed are only \"Command\" and \"Response\" plus an unlabelled third (description) column."
+  },
+  {
+   "id": "c2",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.49 callout",
+   "quote": "\"I will be ready in 2 seconds with 4 readings\"",
+   "derived_rule": "For aM!/aC! on PR2/4: reply a0024 => ttt=002 s, n=4. Handwritten-style callout pointing at the PR2/4 line.",
+   "category": "vendor_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Callout covers PR2/4 only; PR2/6 meaning (ttt=002, n=6) is derived by the same digit split."
+  },
+  {
+   "id": "c3",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM! / aC!  (aMC! / aCC!) => PR2/6 a0026<CR><LF>; PR2/4 a0024<CR><LF> (permittivity (e'))",
+   "derived_rule": "Printed replies: PR2/6 a0026, PR2/4 a0024 => ttt=002 n=6 / ttt=002 n=4. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c4",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM1! / aC1! => PR2/6 a0026<CR><LF>; PR2/4 a0024<CR><LF> (Theta m3.m-3, Mineral)",
+   "derived_rule": "Printed replies: PR2/6 a0026, PR2/4 a0024 => same. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c5",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM2! / aC2! => PR2/6 a0026<CR><LF>; PR2/4 a0024<CR><LF> (Theta m3.m-3, Organic)",
+   "derived_rule": "Printed replies: PR2/6 a0026, PR2/4 a0024 => same. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c6",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM3! / aC3! => PR2/6 a0026<CR><LF>; PR2/4 a0024<CR><LF> (percent volumetric, Mineral)",
+   "derived_rule": "Printed replies: PR2/6 a0026, PR2/4 a0024 => same. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c7",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM4! / aC4! => PR2/6 a0026<CR><LF>; PR2/4 a0024<CR><LF> (percent volumetric, Organic)",
+   "derived_rule": "Printed replies: PR2/6 a0026, PR2/4 a0024 => same. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c8",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM5! / aC5! => PR2/6 (blank)<CR><LF>; PR2/4 (blank)<CR><LF> (\"Defaults to same as M4. Can be used for custom settings.\")",
+   "derived_rule": "Printed replies: PR2/6 (blank), PR2/4 (blank) => reply cell empty. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No reply printed for M5/M6 in either model column; n for M5/M6 is unknown from the document."
+  },
+  {
+   "id": "c9",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM6! / aC6! => PR2/6 (blank)<CR><LF>; PR2/4 (blank)<CR><LF> (\"Defaults to same as M5. Can be used for custom settings\")",
+   "derived_rule": "Printed replies: PR2/6 (blank), PR2/4 (blank) => reply cell empty. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No reply printed for M5/M6 in either model column; n for M5/M6 is unknown from the document."
+  },
+  {
+   "id": "c10",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM7! / aC7! => PR2/6 a0027<CR><LF>; PR2/4 a0025<CR><LF> (mV, \"Also includes the auto-zero channel as first value.\")",
+   "derived_rule": "Printed replies: PR2/6 a0027, PR2/4 a0025 => ttt=002 n=7 / n=5. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c11",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM8! / aC8! => PR2/6 a0027<CR><LF>; PR2/4 a0025<CR><LF> (\"Un-calibrated sensor measurement in millivolt (mV).\" + auto-zero first)",
+   "derived_rule": "Printed replies: PR2/6 a0027, PR2/4 a0025 => n=7 / n=5. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c12",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Measurement Commands\" table",
+   "quote": "aM9! / aC9! => PR2/6 a0027<CR><LF>; PR2/4 a0025<CR><LF> (raw ADC conversion (0-4095) + auto-zero first)",
+   "derived_rule": "Printed replies: PR2/6 a0027, PR2/4 a0025 => n=7 / n=5. Command strings printed exactly as in col 1 (CRC forms aMCn!/aCCn! printed on the second line of the cell, n=1..9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed aC reply uses the 4-digit \"atttn\" shape; SDI-12 1.4 4.4.7 defines the C reply as atttnn (2-digit nn). The manual does not print a 2-digit nn form."
+  },
+  {
+   "id": "c13",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, note under Measurement Commands table",
+   "quote": "\"Note: the soil type settings associated with Measurement Commands M2 to M4 are default values, which can be modified for particular sensor positons using the Extended Commands.\"",
+   "derived_rule": "M2-M4 soil settings are modifiable per sensor position; the note does not mention M, M1, M5, M6.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Note says M2 to M4 although M2 is organic Theta, M3 mineral %, M4 organic % per the table."
+  },
+  {
+   "id": "c14",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.21 section 3 table",
+   "quote": "You type \"aI!\" / Reply \"a13Delta-T PR2SDI00200000000010001<CR><LF>\"",
+   "derived_rule": "Printed string is 34 chars incl. leading a and excluding terminator.",
+   "category": "vendor_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Differs by one extra \"0\" from the p.21 callout and p.49 table (see next claim). No decimals/values involved."
+  },
+  {
+   "id": "c15",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.21 callout box and p.49 table row aI!",
+   "quote": "\"a13Delta-T PR2SDI0020000000010001<CR><LF>\" with callout labels: Sensor address, SDI-12 standard vesion 1.3, Manufacturer, Sensor model number, Version, Serial number, Carriage return linefeed",
+   "derived_rule": "Split per SDI-12 1.4 Table 7 (allccccccccmmmmmmvvvxxx...): a=address; ll=13; cccccccc=\"Delta-T \" (8 chars incl trailing space); mmmmmm=\"PR2SDI\"; vvv=\"002\"; xxx...=\"0000000010001\" (13 chars, the optional-field maximum). The p.21 table string has 14 trailing chars (one extra 0), exceeding the spec maximum of 13, so it is most likely a typo.",
+   "category": "derived_expectation",
+   "test": {
+    "input": "a13Delta-T PR2SDI0020000000010001",
+    "expected": "ll=13; vendor=\"Delta-T \"; model=\"PR2SDI\"; version=\"002\"; optional=\"0000000010001\""
+   },
+   "confidence": "medium",
+   "limitation": "The callout labels bracket the characters but the exact boundaries of the printed brackets are read visually; model string is identical for /4 and /6 in the manual (no per-model aI! string printed)."
+  },
+  {
+   "id": "c16",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.22 section 4",
+   "quote": "You type \"aAb!\" Reply \"b<CR><LF>\"; \"It could be anything from a to z, A to Z or 0 to 9. Avoid address 0 as it tends to be the default used in new sensors and putting more than one sensor on the network with the same address will crash the network.\"",
+   "derived_rule": "Address chars 0-9 a-z A-Z, as SDI-12 4.3.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c17",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "pp.21, 49",
+   "quote": "\"?!\" -> \"a<CR><LF>\"; \"a!\" -> \"a<CR><LF>\"",
+   "derived_rule": "Standard.",
+   "category": "vendor_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c18",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.40 \"How to take a reading in mV\"",
+   "quote": "\"send the aC7 command. This will issue a concurrent reading command to read all the sensor positions on the probe at SDI-12 address \\\"a\\\". Wait at least 2 seconds for the reading to complete and then send the aD0 Send Data command. Five measurements are returned from a PR2/4 and 7 from a PR2/6. You can ignore the first in both cases - it being an auto zero channel. This is followed by readings from each sensor position in turn, from 1 through to 4 or 6.\"",
+   "derived_rule": "aC7! then aD0! (all values in one D0 as stated), value order = [auto-zero, pos1..pos4 (or ..pos6)].",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Prose, not a transcript: no reply characters printed. States D0 only; whether this fits 35/75 chars depends on unprinted value widths (derived below)."
+  },
+  {
+   "id": "c19",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.27 item 7",
+   "quote": "\"The Dn command is sent by the logger to retrieve the results when the sensor is ready (n can be 0 to 8). In reply the sensor may send up to 76 characters to the logger. The number of characters required for each reading can vary: depending, for instance , on whether readings are concurrent or sequential. So additional commands, D1-D8, are available if necessary.\"",
+   "derived_rule": "Manual says D0..D8 and 76 chars; SDI-12 1.4 4.4.8 says D0..D9 and 35/75. Manual is internally inconsistent with p.50 (35/75, D0...D9).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Describes GP2/DeltaLINK program settings, not sensor firmware. The 76 vs 75 discrepancy is unexplained."
+  },
+  {
+   "id": "c20",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50, \"Send Data Commands\" table",
+   "quote": "\"aD0!...aD9!\" => \"a<values><CR><LF> or a<values><CRC><CR><LF>\". \"Sequential (M command) measurement may require multiple Send Data commands due to a character limit of 35. Concurrent (C command) measurements can be retrieved in a single request due to an increased character limit of 75\"",
+   "derived_rule": "Matches SDI-12 4.4.8 limits (35 after M, 75 after C).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Table page ends at \"limit of 75\"; the table continues no further on p.51."
+  },
+  {
+   "id": "c21",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "whole manual (pp.21-52 searched, text + images pp.21-23,27,31-35,39-42,49-52)",
+   "quote": "No printed aD0!/aD1! reply containing measurement values",
+   "derived_rule": "There is no printed example of value characters; per-value width, sign, decimals, and unit-mode formatting are UNKNOWN. Searched text for \"D0!\" and regex [+-]digit.digit: only hits are unrelated (calibration slope table, p.35).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Absence was verified on the extracted text and on all rendered pages listed; pages not rendered (1-20, 24-26, 28-30, 36-38, 43-48, 53-64) were text-searched only."
+  },
+  {
+   "id": "c22",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "sec. 4.4 p.8-9 and sec. 4.4.8 p.16",
+   "quote": "\"The maximum number of characters that can be returned in the <values> part of the response to a D command is either 35 or 75. If the D command is issued to retrieve data in response to a concurrent measurement command, or in response to a high-volume ASCII measurement command, the maximum is 75. The maximum is also 75 in response to a continuous measurement command. Otherwise, the maximum is 35.\"",
+   "derived_rule": "M/MC then D: <=35 chars in <values>; C/CC then D: <=75; R: 75. The \"a\", <CRC> and <CR><LF> are outside <values>.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "SDI-12 does not say whether the 3 CRC chars count; it says the limit is for the <values> part."
+  },
+  {
+   "id": "c23",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "Table 11, p.15",
+   "quote": "\"<values> - pd.d ... the maximum number of digits for a data value is 7, even without a decimal point ... the minimum number of digits for a data value (excluding the decimal point) is 1 ... the maximum number of characters in a data value is 9 (the (polarity sign + 7 digits + the decimal point))\"",
+   "derived_rule": "Value = sign (+/-) + 1..7 digits + optional \".\". Width w is 2..9 chars; sign is always present in the grammar (p is required).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c24",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "Table 9 p.11; Table 10 p.14",
+   "quote": "M reply \"atttn\": \"n is a single digit integer with a valid range of 1 to 9\"; C reply \"atttnn\": \"nn - the number of measurement values the sensor will make and return in response to one or more subsequent D commands\"",
+   "derived_rule": "M: max 9 values (5 chars a+ttt+n). C: 2-digit nn, no explicit maximum stated in text read. An unused additional M returns a0000, unused C returns a00000 (4.4.9, 4.4.10).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "C maximum number of values is not stated explicitly; derived only from the 2-digit field."
+  },
+  {
+   "id": "c25",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.4.8.3 p.16-17",
+   "quote": "\"If the total number of characters exceeds the maximum length of the <values> field, the sensor fragments the response, sending the first group of measurements in response to D0, the next group in response to D1, and so on. A group can have one or more measurements; data collection always begins with the D0 command.\" \"The sensor must never split individual data values...\" \"If possible, a sensor should return all measurements in response to the D0 command. This is not, however, a requirement.\"",
+   "derived_rule": "Split is on whole-value boundaries; a sensor MAY return fewer values per block than the maximum (example e: one value per block is compliant), so block count is not forced by the spec.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Exact fill policy of PR2 firmware is unknown."
+  },
+  {
+   "id": "c26",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "p.15 below Table 11",
+   "quote": "\"If the response to a D command is valid, but no data are returned, the sensor has aborted the measurement. To obtain data the recorder must issue another M, C, or V command.\"",
+   "derived_rule": "Address-only reply a<CR><LF> (or a<CRC><CR><LF>) means no data/aborted. The spec text read does not separately say what a Dn beyond the last block returns.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Behaviour for D(n+1) after complete retrieval is not explicitly specified in the text I read."
+  },
+  {
+   "id": "c27",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.4.5.1 p.12-13; 4.4.7.1 p.14",
+   "quote": "\"If a sensor detects a break after it receives an M command, but before it issues a service request, it must abort its measurement procedure. The sensor address, followed by <CR><LF>, ... should be returned in response to subsequent D commands.\" C: \"If a sensor receives a valid command addressed to it while it is in the process of a concurrent measurement, it should abort the measurement procedure.\"",
+   "derived_rule": "New command before data retrieval aborts; later Dn returns address-only. Also \"the sensor must retain the measured data in memory until it receives another M or V command, or another command that returns data via the D0 command\" (p.12).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c28",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.4.6 p.13",
+   "quote": "\"A sensor is required to issue a service request if it indicates that it will take one second or longer before data are ready, in response to an M or V command. If a sensor says it will take zero seconds before the data are ready, then a sensor must not issue a service request.\" C: \"The sensor will not issue a service request when it has completed the measurement.\" (4.4.7 p.13)",
+   "derived_rule": "M with ttt=002 => service request a<CR><LF> expected; C => none, recorder waits ttt.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Whether the PR2 actually issues the M service request is not documented in the PR2 manual."
+  },
+  {
+   "id": "c29",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.4.12 p.20, Table 11 p.15",
+   "quote": "\"These commands use the existing command letters with a C appended, namely: aMC!, aMC1! ... aMC9!, aCC!, aCC1! ... aCC9!, and aRC0! ... aRC9!.\" \"<CRC> - 3 character CRC code\". Encoding 4.4.12.2: \"1st character = 0x40 OR (CRC shifted right 12 bits)\", 2nd \"0x40 OR ((CRC shifted right 6 bits) AND 0x3F)\", 3rd \"0x40 OR (CRC AND 0x3F)\"",
+   "derived_rule": "Confirms aMC!/aCC! are CRC-requesting forms. Reply to MC is still atttn(n), CRC is appended to D replies before <CR><LF>.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c30",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.3 p.7",
+   "quote": "\"ASCII '0' through ASCII '9' are the standard addresses ... use an address in the range ASCII 'A' through ASCII 'Z' ... and ASCII 'a' through ASCII 'z'\"",
+   "derived_rule": "62 legal address chars.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c31",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "sec. 7 p.34-35; 7.1 p.35",
+   "quote": "\"A data recorder transmits a break by setting the data line to spacing for at least 12 milliseconds.\" \"Upon receiving a break, a sensor must detect 8.33 milliseconds of marking on the data line before it looks for an address.\" \"a break must precede a command whenever a new sensor is addressed and after 87 milliseconds of marking on the data line.\" \"within 100 milliseconds after detecting a break\" sensor must be ready; sensor responds after 8.33 ms marking, first response start bit within 15 ms.",
+   "derived_rule": "Timing facts, 1200 baud 7E1 (sec. 4.1).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c32",
+   "model": "any",
+   "firmware": "SDI-12 v1.4",
+   "source_id": "S2",
+   "locator": "4.4.13 p.22",
+   "quote": "\"An extended command must be prefixed with an address ... terminated with an exclamation point ... the response must be prefixed with an address ... terminated with <CR><LF>\"",
+   "derived_rule": "PR2 aXRMxSy!/aXW...! are extended commands in this sense.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c33",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "computed with node, Q3 table",
+   "quote": "Blocks = ceil(k / floor(cap / w)), cap=35 (M) or 75 (C), k = number of values, w = chars per value (sign + digits + point)",
+   "derived_rule": "Table (blocks M/C): k=4: w4-8 -> 1/1, w9 -> 2/1. k=5 (PR2/4 M7-9): w4-7 -> 1/1, w8-9 -> 2/1. k=6: w4-5 -> 1/1, w6-9 -> 2/1. k=7 (PR2/6 M7-9): w4-5 -> 1/1, w6-8 -> 2/1, w9 -> 3/1. Values per D0 under M: floor(35/w) = 8,7,5,5,4,3 for w=4..9; under C floor(75/w) = 18,15,12,10,9,8. Example arithmetic k=6,w=6: 36 > 35 -> 2 blocks (5+1) under M; 36 <= 75 -> 1 block under C.",
+   "category": "derived_expectation",
+   "test": {
+    "input": "k=6 values, w=6 chars each, M command",
+    "expected": "2 D blocks (D0 has 5 values = 30 chars, D1 has 1)"
+   },
+   "confidence": "high",
+   "limitation": "The manual does not fix w (no printed value example), so the real split cannot be determined from documents. At w<=5, 6 values fit in one M block (30 chars); at w>=6 they do not."
+  },
+  {
+   "id": "c34",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.33 table (image read)",
+   "quote": "\"Mineral soils a0 1.6 a1 8.4; Organic soils a0 1.3 a1 7.7\"",
+   "derived_rule": "Defaults.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c35",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.32 equation [1] (image read)",
+   "quote": "\"sqrt(eps) = a0 + a1 x theta\"  [1]; text: \"soil moisture (theta) determines sqrt(eps)\"",
+   "derived_rule": "theta = (sqrt(eps) - a0)/a1.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "The equation is a typeset image; the symbol reading is from the render."
+  },
+  {
+   "id": "c36",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.34 equations [2],[3] (image read)",
+   "quote": "[2] sqrt(eps) = 1.125 - 5.53V + 67.17V^2 - 234.42V^3 + 413.56V^4 - 356.68V^5 + 121.53V^6 (\"fitted very precisely up to ~ 0.5 m3.m-3\"); [3] sqrt(eps) = 0.37 + 4.43V (\"Up to 0.3 m3.m-3\")",
+   "derived_rule": "V in volts (0..1.0).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c37",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.35 (image read)",
+   "quote": "theta_min = -0.057 - 0.66V + 8.00V^2 - 27.91V^3 + 49.23V^4 - 42.46V^5 + 14.47V^6 ; theta_org = -0.023 - 0.72V + 8.72V^2 - 30.44V^3 + 53.71V^4 - 46.32V^5 + 15.78V^6 (m3.m-3). Slope/offset table: Mineral 0.528 / -0.146; Organic 0.575 / -0.121 (m3.m-3 per V, m3.m-3)",
+   "derived_rule": "Polynomial = eq [2] minus a0 over a1.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "The manual does not say which of these the sensor firmware uses internally for the M1-M4 modes."
+  },
+  {
+   "id": "c38",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "eps=1 (air), mineral: theta = (1-1.6)/8.4 = -0.6/8.4",
+   "derived_rule": "theta = -0.07143 (-7.14 %)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=1 mineral",
+    "expected": "-0.07143 (-7.14 %)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c39",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "eps=1, organic: theta = (1-1.3)/7.7 = -0.3/7.7",
+   "derived_rule": "theta = -0.03896 (-3.90 %)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=1 organic",
+    "expected": "-0.03896 (-3.90 %)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c40",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "eps=81 (water), mineral: theta = (9-1.6)/8.4 = 7.4/8.4",
+   "derived_rule": "theta = 0.88095 (88.10 %)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=81 mineral",
+    "expected": "0.88095 (88.10 %)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c41",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "eps=81, organic: theta = (9-1.3)/7.7 = 7.7/7.7",
+   "derived_rule": "theta = 1.00000 (100.00 %)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=81 organic",
+    "expected": "1.00000 (100.00 %)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c42",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=0, mineral: eps=1.6^2: theta = sqrt(2.56)=1.6",
+   "derived_rule": "theta = 0 (eps 2.56)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=2.56 mineral",
+    "expected": "0 (eps 2.56)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c43",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=0, organic: eps=1.3^2: theta = sqrt(1.69)=1.3",
+   "derived_rule": "theta = 0 (eps 1.69)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=1.69 organic",
+    "expected": "0 (eps 1.69)"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c44",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=0.4, mineral: sqrt=1.6+8.4*0.4=4.96: theta = 4.96^2",
+   "derived_rule": "theta = 0.4 (40 %) at eps 24.6016",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=24.6016 mineral",
+    "expected": "0.4 (40 %) at eps 24.6016"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c45",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=0.4, organic: sqrt=1.3+7.7*0.4=4.38: theta = 4.38^2",
+   "derived_rule": "theta = 0.4 at eps 19.1844",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=19.1844 organic",
+    "expected": "0.4 at eps 19.1844"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c46",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=1.0, mineral: sqrt=1.6+8.4=10.0: theta = 10^2",
+   "derived_rule": "theta = 1.0 (100 %) at eps 100",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=100 mineral",
+    "expected": "1.0 (100 %) at eps 100"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c47",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.32 eq [1] with p.33 coefficients",
+   "quote": "theta=1.0, organic: sqrt=1.3+7.7=9.0: theta = 9^2",
+   "derived_rule": "theta = 1.0 at eps 81",
+   "category": "derived_expectation",
+   "test": {
+    "input": "eps=81 organic",
+    "expected": "1.0 at eps 81"
+   },
+   "confidence": "high",
+   "limitation": "Arithmetic from printed equation/coefficients only; not a statement about what the firmware outputs, including whether it clamps or rounds."
+  },
+  {
+   "id": "c48",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.35 slope/offset check",
+   "quote": "Mineral slope 4.43/8.4 = 0.52738 (printed 0.528); offset (0.37-1.6)/8.4 = -0.14643 (printed -0.146); organic 4.43/7.7 = 0.57532 (0.575); (0.37-1.3)/7.7 = -0.12078 (-0.121)",
+   "derived_rule": "Printed table matches equation [3]/[1] rounding.",
+   "category": "derived_expectation",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c49",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "derived",
+   "locator": "p.34 poly [2] at p.39-40 reference mV",
+   "quote": "V=0.075 (air 75 mV): sqrt(eps)=1.0014, eps=1.003; V=0.055..0.095: sqrt 0.9886..1.0359. V=1.02: sqrt=7.309, eps=53.4; V=1.10: sqrt=10.659, eps=113.6 (mineral theta 0.679 / 1.079 via p.35 poly)",
+   "derived_rule": "Air reading is consistent with eps 1. Water reading 1020-1100 mV maps to theta 0.68-1.08 (mineral), i.e. can exceed 1.0; manual says this is outside the specified accuracy range.",
+   "category": "derived_expectation",
+   "test": {
+    "input": "V=0.075 mineral polynomial p.35",
+    "expected": "theta=-0.0718"
+   },
+   "confidence": "medium",
+   "limitation": "Polynomial is stated valid only to ~0.5 m3.m-3; extrapolation is mine."
+  },
+  {
+   "id": "c50",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.51 (image read)",
+   "quote": "\"aXWMnU <value> Sets additional measurement (n where n=1-6) to one of the following types of unit U where <value> can be 0 = Raw ADC 1 = mV Uncalibrated 2 = mV Calibrated 3 = Permittivity T or 4 = Theta V or 5 = Percent Volumetric. Examples: 0XWM5UT - Set measurement 5 to Theta reading; 0XWM6UV - Set measurement 6 to read % Volumetric; 0XWM5U1 - Set measurement 5 to read Calibrated mV.\"",
+   "derived_rule": "Units for n=1..6 per this row. Note the example \"5U1\" is labelled \"Calibrated mV\" though code 1 is listed as \"mV Uncalibrated\" and 2 as \"mV Calibrated\": printed inconsistency. Also M-numbers 1-4 are mapped by the p.50 table to fixed types.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Inconsistency between code table and example text; the reply to aXWMnU is not printed."
+  },
+  {
+   "id": "c51",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.51",
+   "quote": "\"aXWMnSzX <value> Soil calibration a0 value (X) ... z = sensor position, 1 - 6 or * = all sensor positions; n = Measurement number 2-6; e.g. aXWM5S1X1.6 sets measurement 5 sensor position 1 a0 to 1.6; aXWM5S2X+1.3, sets measurement 5 sensor position 2 a0 to 1.3\"; aXWMnSzY: same for a1, \"aXWM5S1Y8.6\", \"aXWM5S2Y+7.4\"",
+   "derived_rule": "Syntax aXWM<n>S<z>X<value>! / ...Y<value>!; n=2..6 per this row, z=1..6 or *.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No reply printed. Row says n = 2-6 while the units row says n=1-6."
+  },
+  {
+   "id": "c52",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.51",
+   "quote": "\"aXW# Save to flash, commits changes in ram to flash\"; \"aXW$ Restores custom user settings to defaults\"; \"aXW~ Abort changes, invalidates changes in RAM\"; intro: \"Use the Save command aXW# to ensure the setting is not lost when power to the PR2 is removed.\"",
+   "derived_rule": "Unsaved changes are RAM-only.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No printed replies."
+  },
+  {
+   "id": "c53",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.51 Note*",
+   "quote": "\"Decimal number can include a sign (+ or -) and a decimal point. It does not require a leading zero before the decimal point. It will not accept a comma instead of a dot for use as the decimal separator. Up to 3 decimal places may be used e.g. 1.234\"",
+   "derived_rule": "Calibration values accept sign, dot, <=3 decimals.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c54",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.52 (image read)",
+   "quote": "\"aXRMxSy Additional measurement type and soil calibration settings; a= sensor's SDI-12 address; x = Measurement number 1-9; y = Sensor position 1-6. Example: Command: aXRM2S6! (See *note) Reply: B M2 U=V,S6,a0=1.2 a1=8.2 Where: B = address, M2 = measurement number 2, U = type of units: If U=T, units will be Theta (0-1); If U=V, units will be % Volumetric (0-100%), S6 = Sensor position 6, a0 = soil parameter, a1 = soil parameter\"",
+   "derived_rule": "Read-back syntax aXRM<x>S<y>! with x=1..9, y=1..6. Reply shape \"<addr> M<x> U=<T|V>,S<y>,a0=<v> a1=<v>\".",
+   "category": "vendor_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Printed reply lacks <CR><LF>; the example uses address B while the command uses a. Only U=T and U=V are explained, although U codes 0-5 exist in the write command. No sensor-count, serial or version command is printed anywhere."
+  },
+  {
+   "id": "c55",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.52 (image read), paragraph above the read-back heading",
+   "quote": "\"For instance, if your soil is mineral apart from sensor position 1 (i.e. at 100mm) then you can send an extended command to the PR2 to tell it to treat position 1 as a mineral soil. If you then send an M1 or M3 command to initiate a reading, the default reading will be for a mineral soil at all sensor positions apart from sensor position 1 which is now organic.\"",
+   "derived_rule": "The paragraph is self-contradictory: first sentence says \"treat position 1 as a mineral soil\" although soil is mineral everywhere except position 1; last clause says position 1 \"is now organic\". Intended reading is probably: set position 1 to organic (a0=1.3,a1=7.7). It implies that M1 and M3 (mineral modes) honour per-position a0/a1 overrides, which conflicts with the p.51 \"n = Measurement number 2-6\" for a0/a1 and the p.50 note naming only M2 to M4 as modifiable. Whether M and M1/M3 can actually be redefined is unknown from documents.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Authoritative statement is ambiguous; needs vendor confirmation or a bench test (not possible here)."
+  },
+  {
+   "id": "c56",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.50 table and p.51",
+   "quote": "M5 \"Defaults to same as M4. Can be used for custom settings.\" M6 \"Defaults to same as M5. Can be used for custom settings.\" Measurement-number ranges printed: XWMnU n=1-6; XWMnSzX/Y n=2-6; XRMxSy x=1-9.",
+   "derived_rule": "Only M5 and M6 are described as for custom settings. M7-M9 are fixed raw/mV/ADC. M and M1 (and by the note M2-M4) are described only as defaults; modifiability of M, M1 is not stated.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Interpretation across three printed ranges; they do not agree with each other."
+  },
+  {
+   "id": "c57",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.42 Specifications (image read)",
+   "quote": "\"Power requirement: 7.2 to 16 VDC, 720 mW (awake), < 60mA at 12 VDC (awake), 0.4 mA at 12V (asleep)\"; \"Stabilisation: Full accuracy achieved within 1s from power-up.\"; \"Cable: 5-core screened. Maximum length: 60m\"",
+   "derived_rule": "Supply 7.2-16 V; 60 mA awake; 0.4 mA asleep; 1 s stabilisation.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Product page and catalogue say sleep current \"<2 mA at 12 V DC\" (see claim below); manual p.16 also says each probe takes \"~2 mA from the SDI-12 network\" when not taking a reading, while pp.16-17 say ~0.4 mA asleep."
+  },
+  {
+   "id": "c58",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.17 \"Input voltage and power consumption\"",
+   "quote": "\"With a 12 VDC supply the sensor warmup and reading will consume 60 mA and take 1 second. Reporting back the result will typically take another 2 seconds but only consume 2mA (for a sequential reading). The sensor will then fall asleep, consuming ~0.4 mA until the next reading.\" Also: \"Note: For best economy the Profile Probe should be powered up using a 1 second warm-up time.\"",
+   "derived_rule": "Warm-up 1 s; measurement ~1 s total with warm-up; reply phase ~2 s. Printed ttt = 002.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "\"Powered up\" strategy applies to the GP2 relay case. Whether the sensor accepts SDI-12 commands immediately after power-up is not stated."
+  },
+  {
+   "id": "c59",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.16 Power supply / Use of Continuous Power",
+   "quote": "\"Power can be applied continuously, or via a warm-up relay for greater economy of power consumption.\" \"When not taking a reading each PR2 SDI-12 only takes ~2 mA from the SDI-12 network.\" \"Fortunately the PR2 SDI-12 Profile Probes power down to ~0.4 mA when not taking a reading\" (p.16)",
+   "derived_rule": "Both continuous and switched power are supported by the vendor text.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No minimum polling interval is stated anywhere found."
+  },
+  {
+   "id": "c60",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.31 \"Maximum Recording Rate\" (image read)",
+   "quote": "Full paragraph: \"In Sequential mode a GP2 may take 12 seconds to log 4 PR2/6s that is, about 3 seconds per PR2. In Concurrent mode, 4 PR2s in the same concurrent group may take 8 seconds. Note: The GP2 logger is much faster than the SDI-12 standard baud rate, so the speed of the logger should not normally be a limiting factor. If a reading cannot complete in the time available then the previous SDI-12 reading for that sensor will be reported. So one way of discovering how fast you can take reading is to vary the relevant environmental parameter increasingly quickly and find out at what recording rate the readings fail to keep up with the rate of change.\"",
+   "derived_rule": "Context is the GP2 recording interval/scan rate (\"recording rate\"); \"time available\" is not defined and is not tied to ttt or concurrent groups in the text. A stale-value behaviour is stated for a GP2 logging scenario; whether the SENSOR itself returns a previous reading is unclear.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Ambiguous: could describe logger-side or sensor-side behaviour. Do not assume a third-party SDI-12 master (Dragino SDI-12-LB) gets stale data from the sensor."
+  },
+  {
+   "id": "c61",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "pp.17-19 cable",
+   "quote": "\"The SDI-12 standard indicates that you can have a star network of up to 10 cables where each cable is up to 60 m long (taking sequential readings).\" p.42: max cable length 60 m.",
+   "derived_rule": "Cable length 60 m.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c62",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.28-29",
+   "quote": "\"each of the sensor ring pairs on a PR2 SDI12 takes 10mA. So a Pr2/6 SDI 12 takes 60mA.\" and p.16: \"Each PR2 SDI-12 takes less than 60 mA at 12 VDC regardless of whether these are PR2/4 or PR2/6s.\"",
+   "derived_rule": "Internal inconsistency: p.28 implies PR2/4 = 40 mA, p.16 says < 60 mA for both.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": ""
+  },
+  {
+   "id": "c63",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.42 Specifications (image read)",
+   "quote": "\"Range: Accuracy specified from 0 to 0.4 m3.m-3, Full range is from 0.0 to 1.0 m3.m-3\"; \"Accuracy +-0.04 m3.m-3, 0 to 40C (after soil specific calibration); +-0.06 m3.m-3 (with generalised soil calibration in 'normal' soils)\"; Environment: \"0 to 40C for full accuracy specification, -20 to 60C full operating range. IP67 rated\"",
+   "derived_rule": "Specified accuracy range 0-0.4; full range 0.0-1.0.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "c64",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.39-40",
+   "quote": "\"Air reading ... The reading should be 75 +-20 mV from each sensor position.\" \"Water reading ... the reading should lie between 1020 and 1100mV.\" (\"Although this reading is outside the PR2's specified accuracy range\")",
+   "derived_rule": "Vendor reference mV values for air and water.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Raw/mV values, not theta."
+  },
+  {
+   "id": "c65",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "whole manual",
+   "quote": "No statement found on behaviour for out-of-range readings, negative values, clamping, rounding, sensor failure/error replies, or when no probe is in an access tube.",
+   "derived_rule": "All unknown.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Absence established by text search of the extracted manual plus the pages rendered; not by a complete visual read of every page."
+  },
+  {
+   "id": "c66",
+   "model": "PR2/4-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S1",
+   "locator": "p.23 Value Position (image read)",
+   "quote": "\"Value Position: defaults to 1, 2, 3 and 4, in each measurement row created, corresponding to the sensors at 100, 200, 300 and 400 mm in a PR2/4. The PR2/6 is similar, with a row for each depth\"",
+   "derived_rule": "PR2/4 depths 100/200/300/400 mm. PR2/6 depths are NOT given in the manual.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "PR2/6 depths unknown from the manual. p.27: \"position 1 ... at 100 mm nominal depth\"."
+  },
+  {
+   "id": "c67",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S3",
+   "locator": "product page text (HTML, access 2026-10-04)",
+   "quote": "\"The PR2/4 has sensing elements at 10/20/30/40 cm\"; \"The PR2/6 has sensing elements at 10/20/30/40/60 and 100 cm\"; also \"The PR2/4 model measures soil moisture at 4 depths down to 40 cm - the PR2/6 measures at 6 depths down to 100 cm.\"",
+   "derived_rule": "PR2/6 depths 10/20/30/40/60/100 cm per product page. Same page text is for the whole PR2 family (analogue + SDI-12).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Marketing/product page, partly shared with analogue models; PR2/6 depths are not corroborated by the SDI-12 manual."
+  },
+  {
+   "id": "c68",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S5",
+   "locator": "Soil Moisture Catalogue v5-3 (sensing depths row, PR2 page)",
+   "quote": "\"Sensing depths (nominal) PR2/6: 10, 20, 30, 40, 60, 100 cm; PR2/4: 10, 20, 30, 40 cm\"",
+   "derived_rule": "Corroborates product page.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Catalogue page is for the PR2 family; SDI-12 shares general spec."
+  },
+  {
+   "id": "c69",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S3",
+   "locator": "product page spec table vs manual p.42",
+   "quote": "Product page: \"(SDI-12) Power consumption <60 mA at 12 V DC Sleep current <2 mA at 12 V DC\"; weights \"PR2/6: weight 1.2 kg PR2/4: weight 0.8 kg\"; \"Recalibration advised every 3 years\". Manual p.42: asleep 0.4 mA; weights 0.95 kg (PR2/6) and 0.6 kg (PR2/4); manual p.39: check calibration \"at least once a year\".",
+   "derived_rule": "Product page and manual disagree on sleep current, weight, recalibration advice.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Not safety-critical for protocol work; indicates the web page may derive from a newer spec than 4.1 (unverified)."
+  },
+  {
+   "id": "c70",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S4",
+   "locator": "SDI-12 version page and catalogue",
+   "quote": "\"The PR2 SDI-12 conforms to the industry standard SDI-12 (v1.3) specification.\" Catalogue: \"SDI-12 protocol version 1.3\". Manual p.48: \"SDI-12 Specification, Version 1.3, January 26 2013\"; aI! callout \"SDI-12 standard vesion 1.3\".",
+   "derived_rule": "Claimed compliance is v1.3 (CRC required from 1.3; extended commands allowed).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "No claim of 1.4 conformance."
+  },
+  {
+   "id": "c71",
+   "model": "PR2/4-SDI-12 and PR2/6-SDI-12",
+   "firmware": "not stated",
+   "source_id": "S4",
+   "locator": "SDI-12 version page (links)",
+   "quote": "Page links the same manual file \"PR2_SDI-12-_User_Manual_version_4_1.pdf\"; product page \"Manuals\" list shows \"PR2 SDI-12 User Manual ... Filename: pr2_sdi-12-_user_manual_version_4_1\" and the analogue \"PR2 Profile Probe User Manual ver 5.0\". Searches of delta-t.co.uk for \"PR2 SDI-12 manual / firmware / FAQ\" returned only product and SDI-12 pages.",
+   "derived_rule": "No newer PR2 SDI-12 manual edition than v4.1 (May 2016) found on delta-t.co.uk; no firmware release notes or FAQ found.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Absence of evidence: site search plus page links only; PDFs 2663 (analogue manual v5.0, 48 pp) and the HH2/other documents were not read for SDI-12 content. Datasheet \"PR2_SDI-12_v.2\" is an image on the page and was not read."
+  }
+ ],
+ "transcripts": [
+  {
+   "id": "t1",
+   "source_id": "S1",
+   "locator": "p.21 sections 2-3",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "?!"
+    },
+    {
+     "dir": "reply",
+     "text": "a<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "aI!"
+    },
+    {
+     "dir": "reply",
+     "text": "a13Delta-T PR2SDI00200000000010001<CR><LF>"
+    }
+   ],
+   "notes": "Section 3 table string has 14 chars after \"PR2SDI002\"-prefix; callout/p.49 string \"a13Delta-T PR2SDI0020000000010001<CR><LF>\" has 13. Likely typo. No block boundaries (not a D reply)."
+  },
+  {
+   "id": "t2",
+   "source_id": "S1",
+   "locator": "p.22 section 4",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "aAb!"
+    },
+    {
+     "dir": "reply",
+     "text": "b<CR><LF>"
+    }
+   ],
+   "notes": "Generic a/b placeholders, no concrete addresses."
+  },
+  {
+   "id": "t3",
+   "source_id": "S1",
+   "locator": "p.49 command table",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "?!"
+    },
+    {
+     "dir": "reply",
+     "text": "a<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "a!"
+    },
+    {
+     "dir": "reply",
+     "text": "a<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "aAb!"
+    },
+    {
+     "dir": "reply",
+     "text": "b<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "aI!"
+    },
+    {
+     "dir": "reply",
+     "text": "a13Delta-T PR2SDI0020000000010001<CR><LF>"
+    }
+   ],
+   "notes": "Reference table, not a session log."
+  },
+  {
+   "id": "t4",
+   "source_id": "S1",
+   "locator": "pp.49-50 measurement table (printed replies only)",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "aM!"
+    },
+    {
+     "dir": "reply",
+     "text": "PR2/6 a0026<CR><LF>"
+    },
+    {
+     "dir": "reply",
+     "text": "PR2/4 a0024<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "aM7!"
+    },
+    {
+     "dir": "reply",
+     "text": "PR2/6 a0027<CR><LF>"
+    },
+    {
+     "dir": "reply",
+     "text": "PR2/4 a0025<CR><LF>"
+    }
+   ],
+   "notes": "The literal \"PR2/6 \"/\"PR2/4 \" prefixes are table row labels, not sensor output. Same replies printed for aC! and the CRC forms; M5/M6 have no printed reply. No D-block transcript exists in the manual."
+  },
+  {
+   "id": "t5",
+   "source_id": "S1",
+   "locator": "p.40 prose",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "aC7!"
+    },
+    {
+     "dir": "command",
+     "text": "aD0!"
+    }
+   ],
+   "notes": "Prose instruction only; no reply text printed. Statement: five (PR2/4) or seven (PR2/6) values returned, first is the auto-zero channel."
+  },
+  {
+   "id": "t6",
+   "source_id": "S1",
+   "locator": "p.51 extended command examples",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "0XWM5UT"
+    },
+    {
+     "dir": "command",
+     "text": "0XWM6UV"
+    },
+    {
+     "dir": "command",
+     "text": "0XWM5U1"
+    },
+    {
+     "dir": "command",
+     "text": "aXWM5S1X1.6"
+    },
+    {
+     "dir": "command",
+     "text": "aXWM5S2X+1.3"
+    },
+    {
+     "dir": "command",
+     "text": "aXWM5S1Y8.6"
+    },
+    {
+     "dir": "command",
+     "text": "aXWM5S2Y+7.4"
+    }
+   ],
+   "notes": "Printed WITHOUT the terminating \"!\" in the unit examples (0XWM5UT etc.); p.52 note says DeltaLINK adds the \"!\". No replies printed."
+  },
+  {
+   "id": "t7",
+   "source_id": "S1",
+   "locator": "p.52 read-back example",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "aXRM2S6!"
+    },
+    {
+     "dir": "reply",
+     "text": "B M2 U=V,S6,a0=1.2 a1=8.2"
+    }
+   ],
+   "notes": "Printed reply has no <CR><LF> and uses address B for a command written with a. The only printed reply with calibration values."
+  },
+  {
+   "id": "t8",
+   "source_id": "S2",
+   "locator": "4.4.8.4 p.17 (spec example, for contrast)",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "0M!"
+    },
+    {
+     "dir": "reply",
+     "text": "00359<CR><LF>"
+    },
+    {
+     "dir": "reply",
+     "text": "0<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "0D0!"
+    },
+    {
+     "dir": "reply",
+     "text": "0+1.11+2.22+3.33+4.44+5.55+6.66<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "0D1!"
+    },
+    {
+     "dir": "reply",
+     "text": "0+7.77+8.88+9.99<CR><LF>"
+    }
+   ],
+   "notes": "SDI-12 spec example, NOT PR2. 30 chars in D0 (6 x 5), consistent with the 35-char limit."
+  },
+  {
+   "id": "t9",
+   "source_id": "S2",
+   "locator": "4.4.12.3 p.21 (spec CRC example)",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "0MC!"
+    },
+    {
+     "dir": "reply",
+     "text": "00053<CR><LF>"
+    },
+    {
+     "dir": "reply",
+     "text": "0<CR><LF>"
+    },
+    {
+     "dir": "command",
+     "text": "0D0!"
+    },
+    {
+     "dir": "reply",
+     "text": "0+3.14+2.718+1.414Ipz<CR><LF>"
+    }
+   ],
+   "notes": "SDI-12 spec example, NOT PR2."
+  }
+ ],
+ "unknowns": [
+  {
+   "id": "u1",
+   "question": "What is the character width, sign, and decimals of each value in aD0!/aD1! replies for each unit mode (permittivity, theta, %, mV, ADC)?",
+   "why_it_matters": "Determines whether 4/6/7 values fit one 35-char D0 under M, hence whether D1 must be read, and decoder parsing. Manual prints no value example."
+  },
+  {
+   "id": "u2",
+   "question": "Does the PR2 return all 6 values in one aD0! after aM! or split across D0/D1, and where does it split?",
+   "why_it_matters": "Depends on u1 and on firmware fill policy (spec allows fewer values per block)."
+  },
+  {
+   "id": "u3",
+   "question": "What n is returned for aM5!/aM6! (blank in table) and does a never-customised M5/M6 return a0004/a0006 or a0000?",
+   "why_it_matters": "Needed to detect custom modes; the SDI-12 spec says an undefined M returns a0000."
+  },
+  {
+   "id": "u4",
+   "question": "Can aM!, aM1! (and M2-M4) be redefined by aXWM..., or only M5/M6? (n ranges printed 1-6, 2-6; p.52 paragraph implies M1/M3 follow per-position overrides)",
+   "why_it_matters": "Affects whether a converter using M1/M3 can see per-position overrides and whether an installer may have changed it."
+  },
+  {
+   "id": "u5",
+   "question": "Does aC! reply use atttnn (two-digit nn, e.g. a00206) as SDI-12 requires, or the printed a0026?",
+   "why_it_matters": "A parser expecting atttnn will mis-parse a 5-char reply. The manual prints one reply for both M and C."
+  },
+  {
+   "id": "u6",
+   "question": "Does the PR2 issue a service request after aM! (ttt=002 >= 1 s, required by SDI-12), and does ttt really stay 002 across modes?",
+   "why_it_matters": "Converter timing; only manual-stated ttt=002 is printed."
+  },
+  {
+   "id": "u7",
+   "question": "What happens on out-of-range, air, water, negative theta, sensor failure, probe out of tube (clamp, error value, previous value)?",
+   "why_it_matters": "Nothing documented; data validation rules must be conservative."
+  },
+  {
+   "id": "u8",
+   "question": "Meaning of \"If a reading cannot complete in the time available then the previous SDI-12 reading for that sensor will be reported\" (sensor-side or GP2-side; relation to ttt/min interval)?",
+   "why_it_matters": "Whether a master can receive a stale reading silently."
+  },
+  {
+   "id": "u9",
+   "question": "Is there a minimum interval between measurements or a settling time after power-up before the first command is accepted?",
+   "why_it_matters": "Switched-power strategy; only \"Full accuracy achieved within 1s from power-up\" and \"1 second warm-up\" printed."
+  },
+  {
+   "id": "u10",
+   "question": "PR2/6 sensor depths per the SDI-12 manual (only PR2/4: 100-400 mm printed); any difference between /4 and /6 model strings in aI!?",
+   "why_it_matters": "Product page/catalogue say 10/20/30/40/60/100 cm for PR2/6; aI! shows only one string \"PR2SDI\"."
+  },
+  {
+   "id": "u11",
+   "question": "Which aI! string is correct: 33 or 34 chars (13 or 14 optional chars)?",
+   "why_it_matters": "Two printed forms differ by one 0; the 34-char form violates the SDI-12 13-char limit."
+  },
+  {
+   "id": "u12",
+   "question": "Reply of aXWM...!, aXW#!, aXW$!, aXW~! and any commands reporting sensor count, serial number or firmware version (none printed); firmware version/revision history of PR2 SDI-12",
+   "why_it_matters": "Cannot verify a write succeeded from documents; no firmware is identified for the printed behaviour."
+  },
+  {
+   "id": "u13",
+   "question": "Meaning of U codes in aXRMxSy! reply beyond T and V; meaning of printed \"U=T\"/\"U=V\" for modes 0-3",
+   "why_it_matters": "Only T and V are described in the read-back example."
+  },
+  {
+   "id": "u14",
+   "question": "Whether a newer manual or firmware note exists outside delta-t.co.uk (e.g. partner sites)",
+   "why_it_matters": "Only delta-t.co.uk was searched."
+  },
+  {
+   "id": "u15",
+   "question": "Sleep current: 0.4 mA (manual) vs <2 mA (product page/catalogue); weight and calibration interval also differ",
+   "why_it_matters": "Documents disagree; no firmware or date reconciles them."
+  }
+ ]
+}

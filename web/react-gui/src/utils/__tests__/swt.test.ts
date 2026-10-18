@@ -1,16 +1,25 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue, kpaToPf, pfToKpa, summarizeSwtValues } from '../swt';
+import { classifySwtWaterStatus, formatMeasuredSwtValue, formatSwtCardValue, formatSwtValue, kpaToPf, pfToKpa, summarizeSwtValues } from '../swt';
 
 describe('classifySwtWaterStatus', () => {
   it.each([
-    [0, 'wet'], [19.999, 'wet'], [20, 'moist'], [50, 'moist'], [50.001, 'dry'], [300, 'dry'],
+    [0, 'wet'], [19.999, 'wet'], [20, 'moist'], [50, 'moist'], [50.001, 'dry'], [300, 'dry'], [500, 'dry'], [1_000_000, 'dry'],
   ] as const)('classifies %s kPa as %s', (value, status) => {
     expect(classifySwtWaterStatus(value)).toBe(status);
   });
 
-  it.each([-1, 301, null, undefined, NaN, -Infinity, Infinity, '20'])('rejects %s', value => {
+  it.each([-1, 1_000_000.1, null, undefined, NaN, -Infinity, Infinity, '20'])('rejects %s', value => {
     expect(classifySwtWaterStatus(value)).toBeNull();
+  });
+});
+
+describe('formatMeasuredSwtValue', () => {
+  it('shows a measured zero as 0.0 kPa in pF mode and leaves other values to formatSwtValue', () => {
+    expect(formatMeasuredSwtValue(0, 'pF')).toBe('0.0 kPa');
+    expect(formatMeasuredSwtValue(0, 'kPa')).toBe('0.0 kPa');
+    expect(formatMeasuredSwtValue(30, 'pF')).toBe('2.48 pF');
+    expect(formatMeasuredSwtValue(null, 'pF')).toBeNull();
   });
 });
 
@@ -19,20 +28,21 @@ describe('formatSwtCardValue', () => {
     expect(formatSwtCardValue(30, 'kPa')).toBe('30.0 kPa');
     expect(formatSwtCardValue(30, 'pF')).toBe('2.48 pF');
   });
-  // Was '0.0 kPa' (a kPa fallback in pF mode); the pF floor rule shows 0 pF instead.
-  it('shows a measured zero as the 0 pF floor in pF mode and as 0.0 kPa in kPa mode', () => {
-    expect(formatSwtCardValue(0, 'pF')).toBe('0.00 pF');
+  it('shows a measured zero as 0.0 kPa in both modes, since pF has no value at zero', () => {
+    expect(formatSwtCardValue(0, 'pF')).toBe('0.0 kPa');
     expect(formatSwtCardValue(0, 'kPa')).toBe('0.0 kPa');
+    expect(formatSwtCardValue(null, 'pF')).toBeNull();
+    expect(formatSwtCardValue(-1, 'pF')).toBeNull();
   });
   it.each([
-    [0.05, '0.00 pF', '0.1 kPa'],
+    [0.05, '-0.30 pF', '0.1 kPa'],
     [0.1, '0.00 pF', '0.1 kPa'],
     [0.11, '0.04 pF', '0.1 kPa'],
   ])('shows %s kPa as %s in pF mode and %s in kPa mode', (kpa, pf, kpaText) => {
     expect(formatSwtCardValue(kpa, 'pF')).toBe(pf);
     expect(formatSwtCardValue(kpa, 'kPa')).toBe(kpaText);
   });
-  it.each([-1, 301, null, undefined, NaN, Infinity, '30'])('keeps %s unavailable in both units', value => {
+  it.each([-1, 1_000_000.1, null, undefined, NaN, Infinity, '30'])('keeps %s unavailable in both units', value => {
     expect(formatSwtCardValue(value, 'pF')).toBeNull();
     expect(formatSwtCardValue(value, 'kPa')).toBeNull();
   });
@@ -44,7 +54,7 @@ describe('summarizeSwtValues', () => {
     expect(summarizeSwtValues([20, 50])).toEqual({ status: 'moist', swt: 35 });
     expect(summarizeSwtValues([51, 59])).toEqual({ status: 'dry', swt: 55 });
     expect(summarizeSwtValues([])).toEqual({ status: null, swt: null });
-    expect(summarizeSwtValues([301])).toEqual({ status: null, swt: null });
+    expect(summarizeSwtValues([1_000_000.1])).toEqual({ status: null, swt: null });
   });
 });
 
@@ -66,27 +76,24 @@ describe('kpaToPf golden vectors', () => {
   });
 });
 
-// pF is never shown below 0: finite tension at or below 0.1 kPa, where
-// log10(kPa * 10) is 0, negative or undefined, derives the 0 pF floor.
-// Zero and negative kPa returned null before this rule; 0.05 kPa returned -0.30.
-describe('kpaToPf floor at 0.1 kPa', () => {
+describe('kpaToPf general matric-potential conversion', () => {
   it.each([
     [0.11, Math.log10(1.1)],
     [0.1, 0],
-    [0.05, 0],
-    [0, 0],
-    [-5, 0],
+    [0.05, Math.log10(0.05) + 1],
+    [0, null],
+    [-5, Math.log10(5) + 1],
   ])('derives %s kPa as pF %s', (kpa, pf) => {
-    expect(kpaToPf(kpa)).toBeCloseTo(pf, 12);
+    if (pf === null) expect(kpaToPf(kpa)).toBeNull();
+    else expect(kpaToPf(kpa)).toBeCloseTo(pf, 12);
   });
 
-  it('never returns a negative pF', () => {
-    for (const kpa of [0.1, 0.0999, 0.05, 0.001, 0, -0.01, -300]) {
-      expect(kpaToPf(kpa)).toBe(0);
-    }
+  it('preserves signed measurement magnitude and allows negative pF', () => {
+    expect(kpaToPf(-0.05)).toBeCloseTo(-0.3010299956639812, 12);
+    expect(kpaToPf(0)).toBeNull();
   });
 
-  it('starts just above the floor without a jump', () => {
+  it('crosses zero pF continuously at 0.1 kPa', () => {
     expect(kpaToPf(0.1000001)).toBeGreaterThan(0);
     expect(kpaToPf(0.1000001)).toBeLessThan(1e-6);
   });
@@ -108,16 +115,15 @@ describe('pfToKpa', () => {
     expect(pfToKpa(400)).toBeNull();
   });
 
-  it('stays exact above the floor and maps 0 pF to the 0.1 kPa floor', () => {
-    for (const kpa of [0.11, 0.2, 1, 5]) {
+  it('round-trips finite nonzero kPa and maps 0 pF to 0.1 kPa', () => {
+    for (const kpa of [0.05, 0.11, 0.2, 1, 5]) {
       expect(pfToKpa(kpaToPf(kpa))).toBeCloseTo(kpa, 12);
     }
     expect(pfToKpa(0)).toBeCloseTo(0.1, 15);
   });
 
-  it('rejects a negative pF, which is never shown', () => {
-    expect(pfToKpa(-0.3)).toBeNull();
-    expect(pfToKpa(-1)).toBeNull();
+  it('accepts negative pF values', () => {
+    expect(pfToKpa(-1)).toBeCloseTo(0.01, 15);
   });
 });
 
@@ -132,13 +138,12 @@ describe('formatSwtValue', () => {
     expect(formatSwtValue(10, 'pF')).toBe('2.00 pF');
   });
 
-  // Was null for non-positive tension; the pF floor rule shows 0 pF at 2 decimals.
   it.each([
     [0.11, '0.04 pF'],
     [0.1, '0.00 pF'],
-    [0.05, '0.00 pF'],
-    [0, '0.00 pF'],
-    [-1, '0.00 pF'],
+    [0.05, '-0.30 pF'],
+    [0, null],
+    [-1, '1.00 pF'],
   ])('formats %s kPa as %s', (kpa, shown) => {
     expect(formatSwtValue(kpa, 'pF')).toBe(shown);
   });

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { lsn50API } from '../../services/api';
 import type { Device } from '../../types/farming';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
-import { formatSwtValue } from '../../utils/swt';
+import { formatMeasuredSwtValue } from '../../utils/swt';
 
 type ChannelNumber = 1 | 2 | 3;
 
@@ -205,9 +205,9 @@ export const DraginoChameleonSwtSection: React.FC<DraginoChameleonSwtSectionProp
     }
   };
 
-  const liveSwt1 = formatSwtValue(device.latest_data?.swt_1, swtUnit);
-  const liveSwt2 = formatSwtValue(device.latest_data?.swt_2, swtUnit);
-  const liveSwt3 = formatSwtValue(device.latest_data?.swt_3, swtUnit);
+  const liveSwt1 = formatMeasuredSwtValue(device.latest_data?.swt_1, swtUnit);
+  const liveSwt2 = formatMeasuredSwtValue(device.latest_data?.swt_2, swtUnit);
+  const liveSwt3 = formatMeasuredSwtValue(device.latest_data?.swt_3, swtUnit);
 
   const liveByChannel: Record<ChannelNumber, Array<{ label: string; value: string }>> = {
     1: [liveSwt1 ? { label: 'SWT', value: liveSwt1 } : null].filter(

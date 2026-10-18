@@ -85,14 +85,14 @@ describe('convertFrame with the bench calibration (spec section 11)', () => {
     assert.deepEqual(pick(b), { status: 'saturated', r: 529, bound: null, kpa: 0, kpaBound: null });
     assert.equal(b.offset_mv, 13.4);
   });
-  it('WM1 in water: reverse clipped -> wet with an upper bound', () => {
+  it('WM1 clipped publishes the finite estimate and retains the diagnostic bound', () => {
     const [a] = convert([276, 4095], [4093, 2]);
-    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 1325, kpa: null, kpaBound: 11.2 });
+    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 1325, kpa: 11.2, kpaBound: 11.2 });
     assert.ok(a.offset_mv >= 110);
   });
   it('WM1 swapped: forward clipped at 0 is a wet probe, not a short', () => {
     const [a] = convert([0, 3826], [4093, 2]);
-    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 1287, kpa: null, kpaBound: 11 });
+    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 1287, kpa: 11, kpaBound: 11 });
   });
   it('clipped with a bound inside the saturated band reads 0 kPa', () => {
     const [a] = convert([110, 4095], [4093, 2]);
@@ -110,7 +110,7 @@ describe('convertFrame with the bench calibration (spec section 11)', () => {
 describe('clip bound and rail boundaries (external review 2026-09-26)', () => {
   it('the tension bound covers the 8 kOhm segment drop at warm temperatures', () => {
     const [a] = convert([1411, 4095], [4093, 2], { soil: 5000 });
-    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 8502, kpa: null, kpaBound: 93.2 });
+    assert.deepEqual(pick(a), { status: 'wet_offset_clipped', r: null, bound: 8502, kpa: 93.2, kpaBound: 93.2 });
     assert.equal(c.tensionFromResistance(8502, 50).kpa, 78.2);
     assert.equal(c.tensionUpperBound(8502, 50), 93.2);
     assert.equal(c.tensionUpperBound(1325, 19.88), 11.2);
@@ -182,7 +182,7 @@ describe('flags, calibration and temperature', () => {
   });
   it('records calibration and conversion versions', () => {
     const r = c.convertFrame(c.parseProfile3(frame([800, 3291], [4093, 2])).frame, CAL);
-    assert.deepEqual([r.calibration_sync_version, r.conversion_version], [3, 'wm-lsn50-p3-v2']);
+    assert.deepEqual([r.calibration_sync_version, r.conversion_version], [3, 'wm-lsn50-p3-v3']);
   });
 });
 
@@ -193,5 +193,18 @@ describe('tensionFromResistance (node-neutral)', () => {
     assert.deepEqual(c.tensionFromResistance(10000, 20), { kpa: 56.7, status: 'ok' });
     assert.deepEqual(c.tensionFromResistance(80000, 20), { kpa: null, status: 'outside_200ss_range' });
     assert.deepEqual(c.tensionFromResistance(10000, null), { kpa: null, status: 'temperature_missing' });
+  });
+});
+
+describe('clipped estimate availability', () => {
+  it('does not invent a value without usable temperature or finite bound', () => {
+    for (const opts of [{ soil: -32768 }, { soil: 5500 }, { status: 1 }]) {
+      const [a] = convert([276, 4095], [4093, 2], opts);
+      assert.equal(a.kpa, null);
+      assert.equal(a.kpa_upper_bound, null);
+    }
+    const [outside] = convert([4000, 4095], [4093, 2]);
+    assert.equal(outside.kpa, null);
+    assert.equal(outside.kpa_upper_bound, null);
   });
 });

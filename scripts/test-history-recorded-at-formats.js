@@ -97,10 +97,13 @@ async function withBoth(fn, firstMs = FIRST_MS) {
 
 // Pinned from the builder at 5506e841e (before this change) on the pure
 // toISOString table: the change must not move a single byte there.
+// Re-pinned for the owner ruling of 2026-10-18 (full-precision soil-tension
+// kPa and pF in CSV v1, written as the cloud writes them); only swt_N and
+// swt_N_pf value cells moved.
 const PURE_ISO_EXPORT_SHA256 = {
-  raw: 'e4d2cd16b01317fd686c6aa9a9eaa63b23ef08090223082e2ce94514973d42ed',
-  hourly: '4543e19f58d8df6b090d04e8ad4d02e8d09cc60c9885b6c416da00b3dadbfbc0',
-  daily: 'bd72fec0f19bb32689586919f1c3a80f6e2e8fc79eb8ce367456f822c0d2c840',
+  raw: 'e62adb07257fb8ffc10a361cd2c9ef0421f5d0c98345c9f40282c9df363ab55d',
+  hourly: 'dbdb18d30836c487c8a0731bf0187715722268ec7f458c896e2b04383dc9e215',
+  daily: 'eddd6d04ef30dcc2a0e36144373316070aa0b61c51c03e824aa9fcff3c598e60',
 };
 
 test('the mixed table really mixes shapes at the boundaries it is meant to test', () => {

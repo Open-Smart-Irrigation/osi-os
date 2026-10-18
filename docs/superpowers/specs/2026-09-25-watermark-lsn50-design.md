@@ -1,5 +1,8 @@
 # WATERMARK 200SS soil tension on the Dragino LSN50 — design
 
+The clipped-value presentation and phase-1 scheduler exclusion in this historical design are superseded by [unified soil tension](../../operations/unified-soil-tension.md), approved on 17 October 2026. Raw diagnostics remain retained.
+
+
 Date: 2026-09-25 · Status: Phase 1 reference; §§7–8 and §13 superseded 2026-09-30 · Repos: osi-os (edge), osi-server (cloud)
 
 ## 1. Purpose

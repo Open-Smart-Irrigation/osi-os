@@ -224,7 +224,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
       )}
 
       <div className="grid grid-cols-1 gap-3">
-        {tempEnabled && (
+        {tempEnabled && !watermark && (
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">TEMPERATURE</p>
             {data?.ext_temperature_c != null ? (
@@ -310,8 +310,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('watermark.sectionTitle')}</p>
             <WatermarkProbeSection
               swtUnit={swtUnit}
-              soilTempC={watermark.soil_temp_c}
-              soilTempMeasured={watermark.soil_temp_source === 2}
+              soilTempC={data?.ext_temperature_c ?? null}
               dieTempC={watermark.die_temp_c}
               supplyMv={watermark.supply_mv}
               probes={[1, 2].map((n) => ({

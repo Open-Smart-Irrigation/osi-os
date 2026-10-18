@@ -50,6 +50,8 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
       zonePairs: pairs,
       channelXLabel: axisLabel(x, channelMeta),
       channelYLabel: axisLabel(y, channelMeta),
+      channelXUnit: channelMeta.get(x)?.unit,
+      channelYUnit: channelMeta.get(y)?.unit,
     }),
     [pairs, x, y, channelMeta],
   );

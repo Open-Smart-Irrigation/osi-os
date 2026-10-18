@@ -170,6 +170,7 @@ function osiLibSpy(scoped, requested) {
         return { ok: true, value: scopeHelper };
       }
       if (name === 'watermark-helper') return { ok: true, value: watermarkHelper };
+      if (name === 'sdi12-commissioning') return { ok: true, value: require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/tensiomark') };
       return { ok: false, error: 'not provided in this test: ' + name };
     },
   };
@@ -617,13 +618,14 @@ function unassign(native, typeId) {
 
 CASES.push(
   {
-    name: 'unassigned owner exception: only the soil-depth and the two WATERMARK calibration routes opt in',
+    name: 'unassigned owner exception: only soil-depth, SDI-12 config and WATERMARK calibration routes opt in',
     async run() {
       const optedIn = guardRouteTable()
         .filter((route) => route.allowUnassignedOwner === true)
         .map((route) => [route.method, route.suffix]);
       assert.deepEqual(optedIn, [
         ['PUT', '/soil-moisture-depths'],
+        ['PUT', '/sdi12/config'],
         ['PUT', '/watermark/calibration'],
         ['DELETE', '/watermark/calibration'],
       ]);
@@ -838,6 +840,40 @@ CASES.push(
     },
   },
 );
+
+const TENSI_LAYOUT = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/__fixtures__/tensiomark-layout.json');
+CASES.push({
+  name: 'Tensiomark local depth edits preserve identity and write layout plus depth map together',
+  async run() {
+    for (const scoped of [false, true]) {
+      const native = freshDb();
+      native.prepare('UPDATE devices SET type_id=?,sdi12_probe_profile=?,sdi12_channel_layout_json=? WHERE deveui=?')
+        .run('DRAGINO_SDI12', 'TENSIOMARK', JSON.stringify(TENSI_LAYOUT), DEVEUI);
+      const before = depthRow(native);
+      const readLayout = () => JSON.parse(native.prepare('SELECT sdi12_channel_layout_json AS layout FROM devices WHERE deveui=?').get(DEVEUI).layout);
+      for (const badDepths of [{ swt_1: 30 }, { vwc_1: null }, { vwc_1: 0 }, { swt_1: null }, { swt_1: 0 },
+        { SWT_1: 30, soil_temp_1: 30 }, { swt_1: 30, SWT_1: 30, soil_temp_1: 30 }]) {
+        const bad = await depthRequest(native, 'A', badDepths, { scoped });
+        assert.equal(bad.status, 400, JSON.stringify(bad.body));
+        assert.deepEqual(depthRow(native), before);
+      }
+      const depths = { swt_1: 30, soil_temp_1: 30, swt_2: 60, soil_temp_2: 60 };
+      const saved = await depthRequest(native, scoped ? 'B' : 'A', depths, { scoped });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      const expected = structuredClone(TENSI_LAYOUT);
+      expected.sensors[0].depth_cm = 30; expected.sensors[1].depth_cm = 60;
+      assert.deepEqual(readLayout(), expected);
+      assert.deepEqual(saved.body.sdi12_channel_layout_json, expected);
+      assert.deepEqual(saved.body.soil_moisture_probe_depths_json, depths);
+      assert.equal(depthRow(native).sync_version, before.sync_version + 1);
+      const cleared = await depthRequest(native, 'A', {}, { scoped });
+      assert.equal(cleared.status, 200);
+      assert.deepEqual(readLayout(), TENSI_LAYOUT);
+      assert.deepEqual(JSON.parse(depthRow(native).depths), {});
+      native.close();
+    }
+  },
+});
 
 // ----------------------------------------------------------------- runner --
 

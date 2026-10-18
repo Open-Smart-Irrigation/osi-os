@@ -1,0 +1,561 @@
+{
+ "package": "hydrascout",
+ "accessed": "2026-10-04",
+ "sources": [
+  {
+   "id": "S1",
+   "title": "SDI-12 and the HydraScout HSTI Probe (Technical Note, DX80DRM-H12 MultiHop SDI-12 radio)",
+   "edition": "Original Document 2 April 2015, Rev. A, doc b_4182045, 7 pp",
+   "publisher": "Banner Engineering",
+   "host_type": "third_party",
+   "url": "https://info.bannerengineering.com/cs/groups/public/documents/literature/b_4182045.pdf",
+   "sha256": "0c546777ffbac0ef02c890dd602447b38312d071b78dd4be04cefc56c729314a",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S2",
+   "title": "HydraSCOUT probe page (hsti.co/hsti-hydrascout-probe.html), Wayback 2016-01-22",
+   "edition": "capture 20160122162949",
+   "publisher": "Hydra Sensor Technologies International Ltd (HSTI)",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20160122162949/http://hsti.co/hsti-hydrascout-probe.html",
+   "sha256": "214e3e0e1be03e2c2dc46461293ae3a5d106d65076b8a93156cb9b375212b956",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S3",
+   "title": "HydraLINK probe page (hsti.co/hsti-hydralink-probe.html), Wayback 2016-04-12",
+   "edition": "capture 20160412085159",
+   "publisher": "HSTI",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20160412085159/http://hsti.co/hsti-hydralink-probe.html",
+   "sha256": "630e960d61503456dc06099fe2589a75bd4fcc97f6de8a24e9761520f032401c",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S4",
+   "title": "HydraSCOUT product page (hsti.co/products/hydrascout/), Wayback 2017-07-02",
+   "edition": "capture 20170702130709",
+   "publisher": "HSTI",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20170702130709/http://hsti.co/products/hydrascout/",
+   "sha256": "7d1fe1ac4d6a8643d4f819aa0cdd7ac0d7ba6b6edb24022dc298da034e4eaa4f",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S5",
+   "title": "HydraScout product category (Budget/Standard/HD) and product pages 1000mm HD/Budget/Standard, 200mm Standard",
+   "edition": "captures 20201124122727 (category), 20220817074756, 20220817074512, 20220528100723, 20220528095458",
+   "publisher": "HSTI webshop",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20201124122727/https://hsti.co/product-category/hydrascout/",
+   "sha256": "28501cd901a74efb44653b41bfe50d23f93954ac214c95049fe155837a45c39b (category page). Pages carry injected spam text (hacked site); product lines unaffected.",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S6",
+   "title": "HYDRASCOUT - Our Sensors (hydrascout.co), Wayback 2022-05-19",
+   "edition": "capture 20220519051036",
+   "publisher": "HSTI-France / Hydrascout",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20220519051036/https://www.hydrascout.co/our-products/?lang=en",
+   "sha256": "67a57e5725dc82f008dace2e56c0df60b267d6a760f38ded5def93626ee5eb0d",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S7",
+   "title": "Accueil - Sonde capacitive HYDRASCOUT (hydrascout.co), Wayback 2021-12-05",
+   "edition": "capture 20211205111846",
+   "publisher": "HSTI-France",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20211205111846/https://www.hydrascout.co/",
+   "sha256": "4c13c80e400395327aae4670f3e004ccdd17a2e04e4f67cc38e727e36c2fe293",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S8",
+   "title": "HydraScout page, hsti.co/hydrascout (hydrascout.co redirects/serves same page)",
+   "edition": "live fetch 2026-10-04; sitemap lastmod 2026-09-25",
+   "publisher": "HSTI-France",
+   "host_type": "manufacturer",
+   "url": "https://www.hsti.co/hydrascout",
+   "sha256": "fad8e94117164aa522b3206832166e37c24edd377365d9338f60957e9f1b24ea",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S9",
+   "title": "Help Center (hsti.co/centre-aide)",
+   "edition": "live fetch 2026-10-04",
+   "publisher": "HSTI-France",
+   "host_type": "manufacturer",
+   "url": "https://www.hsti.co/centre-aide",
+   "sha256": "93b28f044fdcafe12e69c4d452fe2978e1d1db1c549c4eb424d064959828c4f4",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S10",
+   "title": "The HydraSCOUT probe (Pragmatic marketplace, pragmatic.inosens.rs)",
+   "edition": "live fetch 2026-10-04",
+   "publisher": "Pragmatic (reseller listing; seller 'Hydra Sensor Technologies', copy of HSTI 2017 text)",
+   "host_type": "third_party",
+   "url": "https://pragmatic.inosens.rs/product-name/the-hydrascout-probe/",
+   "sha256": "80a2c11abca38f8a3d33ba9261a7b98d96fed700e3e6c2f7fb004774f5cc6b3e",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S11",
+   "title": "More SDI-12 sensors tested with the adapters (blog, 2018-04-27)",
+   "edition": "2018-04-27",
+   "publisher": "Liudres LLC (SDI-12 USB adapter vendor)",
+   "host_type": "third_party",
+   "url": "https://liudresllc.com/2018/04/27/more-sdi-12-sensors-tested-with-the-adapters/",
+   "sha256": "9a00a2ea8032bd459617b5a04e80a779f00d80e96ee91a11e5cd9011044f46c4",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S12",
+   "title": "SDI-12 and the Aquacheck Sub-Surface Soil Moisture Probe (Banner b_4182041) and SDI-12 and the Decagon GS3 (b_4182043)",
+   "edition": "Banner sister notes",
+   "publisher": "Banner Engineering",
+   "host_type": "third_party",
+   "url": "https://info.bannerengineering.com/cs/groups/public/documents/literature/b_4182041.pdf",
+   "sha256": "ea5819557f885462091ed1458bb7fef1e861703ece499ee5dcba48546b876034 (b_4182041); f84de53c8836c3c44e4c73679561e3589182863024fb5aa40501b34b197d5d30 (b_4182043)",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S13",
+   "title": "HydraConnect Datalogger HSTI - Hawk 4G+GPS (SDI-12)",
+   "edition": "live fetch 2026-10-04",
+   "publisher": "MYJ Sensores (distributor)",
+   "host_type": "third_party",
+   "url": "https://myj-sensores.com/gb/dataloggers/6807-hydraconnect-datalogger-hsti-hawk-4ggps-sdi-12.html",
+   "sha256": "9235b1e95227f926f777514696762382233438b7e54bc3a99b1353baba147d10",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "S14",
+   "title": "hsti.co sitemap.xml, robots.txt; Wayback CDX listings for hsti.co*, hydrascout.co*, hydrascout.com*",
+   "edition": "2026-10-04",
+   "publisher": "HSTI-France / Internet Archive",
+   "host_type": "manufacturer",
+   "url": "https://www.hsti.co/sitemap.xml",
+   "sha256": "07ea2bff641f614b31aa64d2c5066a3a311cea1f0ef90d2a97394db6cd368085",
+   "retrieved": "2026-10-04"
+  }
+ ],
+ "claims": [
+  {
+   "id": "C01",
+   "model": "HydraSCOUT (2016/2017 era)",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "Wayback 20160122 'INTERFACE' block",
+   "quote": "Measurements: 0 = soil moisture percentage (SMP%) / 1 = soil temperature (degrees Celsius) / 2 = raw frequency measurement (Megahertz)",
+   "derived_rule": "Command index maps: M0/M = soil moisture %, M1 = soil temperature degC, M2 = raw frequency MHz. Page does not write the letters 'aM!' - mapping to M/M1/M2 is an inference (the numbered 'Measurements' list).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Marketing spec table, not a command reference. Does not say whether the numbers are M-command indices, nor the D-block layout, nor whether output is per-sensor or interleaved. Product marked 'latest' in 2016; current firmware unknown."
+  },
+  {
+   "id": "C02",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "same, 'Data points'",
+   "quote": "Data points: One per 10cm sensor 'segment' in the probe. Probes are supplied in various lengths / number of sensors",
+   "derived_rule": "One value per sensor per measurement command.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Contradicted in spirit by product list where 1000 mm has 3/5/10 sensors (not 10 cm pitch for 3 or 5 sensors); 'segment' undefined. Order of values (shallow-first or deep-first) not stated."
+  },
+  {
+   "id": "C03",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "same, 'Bus address'",
+   "quote": "Bus address: Default = 0, can be changed using SDI-12 commands",
+   "derived_rule": "Factory address 0; changeable via standard SDI-12 aAb!.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Only claim; no transcript. Banner note says most probes ship at 0 but radio defaults to ASCII '1' (S1 p1)."
+  },
+  {
+   "id": "C04",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "same, 'Sampling time' / 'Settling time' / POWER",
+   "quote": "Sampling time: Approximately 300mS ... Settling time 250mS ... Voltage 5V - 24 VDC ... Current - idle TBA ... measurement 30mA",
+   "derived_rule": "Expect short ttt (~0-1 s); supply 5-24 VDC; 30 mA during measurement (2016). Idle current TBA in 2016; '6 mA' in 2017 (S4).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "'Sampling time' is not an SDI-12 ttt declaration. No warm-up statement beyond 'settling time 250 mS'. S4 changes sensor max 10 -> 8 and idle TBA -> 6 mA, so spec revised over time."
+  },
+  {
+   "id": "C05",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "same, 'Firmware upgrades'",
+   "quote": "Firmware upgrades: Yes, via SDI-12 interface",
+   "derived_rule": "Firmware versions may exist in the field; behaviour may differ.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "low",
+   "limitation": "No firmware version list anywhere found."
+  },
+  {
+   "id": "C06",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S4",
+   "locator": "Wayback 20170702 product page, 'It comes standard with' and 'Sensors'",
+   "quote": "5 sensors (up to 8) ... Sensors | 1 to 8 ... Length | 100mm - 1500mm ... Diameter 38mm ... Cable Length Standard 3-core 5m, but up to 25m on request. Connector Bare Wire Cable",
+   "derived_rule": "Sensor count 1..8 (2017) vs 1..10 (2016); 3-core cable (power, ground, data).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "2016 page (S2) says 'up to 10'."
+  },
+  {
+   "id": "C07",
+   "model": "HydraSCOUT Budget/Standard/HD",
+   "firmware": null,
+   "source_id": "S5",
+   "locator": "category page capture 20201124 + product pages 2022",
+   "quote": "HydraSCOUT - HD (SDI-12) 1500mm, 10 sensor, 5m cable | HydraSCOUT (SDI-12) 1500mm, 5 sensor, 5m cable | HydraSCOUT - budget (SDI-12) 1000mm, 3 sensor, 5m cable | HydraSCOUT (SDI-12) 200mm, 2 sensor, 5m cable",
+   "derived_rule": "Three families: budget = 3 sensors (600/800/1000 mm); Standard = 2..6 sensors (200..1500 mm; e.g. 800 mm in 4,5,6 sensor variants); HD = 6 (600mm), 8 (800), 10 (1000,1200,1500). Listings: HD 600=6, 800=8, 1000=10, 1200=10, 1500=10; Standard 1200=5 or 6, 1500=5, 1000=5, 800=4/5/6.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Webshop catalogue (2020-2022); not a datasheet; depths/spacing per model not given. Whether Budget/Standard/HD differ in command set unknown. The 10-sensor HD exceeds the 9-value M limit of SDI-12; how HSTI packs 10 values is unknown."
+  },
+  {
+   "id": "C08",
+   "model": "HydraSCOUT (current)",
+   "firmware": null,
+   "source_id": "S8",
+   "locator": "hsti.co/hydrascout, 'Multi-sensor design' and 'Certified accuracy'",
+   "quote": "From 2 to 8 sensors, installed at depths ranging from 20 to 150 cm. ... accuracy of +-3.0% volumetric water content (VWC) and +-0.5 C for temperature.",
+   "derived_rule": "Current marketing: moisture reported as VWC; temperature degC.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Marketing page, no protocol content. 'VWC' here may be after Odusol calibration, not the SDI-12 raw output. No salinity on the 2026 page."
+  },
+  {
+   "id": "C09",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S6",
+   "locator": "hydrascout.co 'Our Sensors' 2022",
+   "quote": "We are also developing salinity measurements at the request of certain customers",
+   "derived_rule": "Salinity is NOT a standard SDI-12 quantity in the 2016-2017 spec. 2021 home page claims 'humidite, temperature et salinite'; 2022 page says salinity 'in development'; install steps say chart per sensor of 'temperature, un index d'humidite et selon les cas de salinite' (S6).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Moisture described as 'un index d'humidite' (an index), not necessarily VWC. Conductivity semantics, unit and command unknown."
+  },
+  {
+   "id": "C10",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S9",
+   "locator": "centre-aide, 'What type of connection does it use?'",
+   "quote": "The unit is compatible with standard protocols (SDI-12, RS485) for connecting to probes.",
+   "derived_rule": "Refers to the datalogger (HydraConnect), not the probe's command set.",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "low",
+   "limitation": "No command content."
+  },
+  {
+   "id": "C11",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S2",
+   "locator": "Wayback 2016 'Specification: www.sdi-12.org'",
+   "quote": "Specification www.sdi-12.org",
+   "derived_rule": "Probe claims conformance to published SDI-12 (version not stated).",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Version (1.3/1.4) not stated; so C/R/D-block/CRC support unknown."
+  },
+  {
+   "id": "C20",
+   "model": "HydraScout (unspecified model, 3 sensors in example)",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p1 'Configuring...' and p2 'Example - Five HydraScout HSTI Probes to One Radio'",
+   "quote": "set the values in the enabling registers to M! (typically, soil moisture is the first result back from the probe and is located in the M! command position - verify this with the probe manufacturer's documentation)",
+   "derived_rule": "Banner's expectation: aM! = soil moisture. Banner itself defers to the manufacturer.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Hedged ('typically', 'verify'). Not evidence of HSTI behaviour; the sentence is shared boilerplate with the Aquacheck note (S12: 'verify this with the probe manufacturer's documentation')."
+  },
+  {
+   "id": "C21",
+   "model": "HydraScout, 3 sensors",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p4 'Example - One HydraScout Probe to One Radios'",
+   "quote": "the probe only reports back soil moisture and temperature readings using the aM! and aM! commands",
+   "derived_rule": "Intended: aM! and aM1! (see notes, typo). M! = Soil Moisture, M1! = Temperature (row labels).",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Typo: the two commands are written identically; the table rows on the same page show M! and M1!. Only M!/M1! appear; M2! (raw frequency, S2) is not mentioned. Banner's M! example is for a 3-sensor probe at address 1."
+  },
+  {
+   "id": "C22",
+   "model": "HydraScout, 3 sensors",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p4 table 'Probe Address 1 | M! | Soil Moisture | #1, 1-3 | 1 | 1.1234 | 0.02' and 'M1! | Temperature | #1, 1-3 | 1 | 1.1234 | 0.02'",
+   "quote": "M! results: 1, 1.1234, 0.02 ; M1! results: 1, 1.1234, 0.02",
+   "derived_rule": "Table shows three values per command for 3 sensors. Values are placeholders: identical for moisture and temperature, and identical to the placeholder rows in Banner's Aquacheck (b_4182041: '1 1.1234 0.02 0.1234 0 0.1234', '24.994 24.528 24.98') and Decagon GS3 (b_4182043: 'WC, EC, Temp C ... 1 1.1234 0.02') notes.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Not measurements. Units, ordering and scaling cannot be read from them. p3 uses '001.0000 001.1234 000.0200' and '24.99402 24.52802 24.97996' placeholders."
+  },
+  {
+   "id": "C23",
+   "model": "HydraScout",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p4 Figure 1 (DXM Configurator Register View, slave 12, start 11101)",
+   "quote": "11101 16835 / 11102 61540 / 11103 16794 / 11104 27755 / 11105 16843 / 11106 55961",
+   "derived_rule": "Decoding as big-endian IEEE-754 (upper word first): 24.4924, 19.3029, 25.4817. This is the only apparently real reading in the note.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Screenshot of unknown command, unknown installation, no D-block text. 3 values = 3 sensors. Cannot tell whether moisture % or temperature degC (both plausible); decode and word order are my inference. Not a transcript."
+  },
+  {
+   "id": "C24",
+   "model": "HydraScout, 3 sensors",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p2-3 'Five Probes to Three Radios'",
+   "quote": "When both soil moisture and temperature data is required from each of the five probes, you must use more than one M-H12 radio.",
+   "derived_rule": "Banner radio limitation, not probe behaviour.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Says nothing about probe."
+  },
+  {
+   "id": "C25",
+   "model": "n/a",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p1 'For each of the five probes ... results registers' and p1 'Only results registers 1 through 9 are enabled since Mx! commands only support nine results.'",
+   "quote": "Only results registers 1 through 9 are enabled since Mx! commands only support nine results.",
+   "derived_rule": "Standard SDI-12 limit for M (9 values); relevant to 10-sensor HD (a single M cannot carry 10 values).",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Same note also says 'The M-H12 can measure up to 12 soil moisture points per probe' (p2) - internally inconsistent; the radio exposes 12 result slots, up to 24 by registers."
+  },
+  {
+   "id": "C26",
+   "model": "n/a",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p6 'Supported M! Commands' / 'Supported C! Commands' tables",
+   "quote": "xM! 0 or 10; xM1! 11 ... xM9! 19; xC! 1 or 20; xC1! 21 ... xC9! 29",
+   "derived_rule": "These are radio register codes (which command the radio issues), not statements about the probe.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Do not read as probe capabilities. C commands are only claimed as a radio feature."
+  },
+  {
+   "id": "C27",
+   "model": "n/a",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p1 text; p5 'Device Address' footnotes 1,2",
+   "quote": "Most manufacturers ship their sensor/probe units with an address of 0. The DX80DR9M-H12 radios are, by default, set to communicate with SDI-12 address 1 because address 0 is reserved as a broadcast method. / The default device addresses 49 through 53 are in ASCII.",
+   "derived_rule": "Radio default address '1' (ASCII 49). The 'address 0 reserved as a broadcast' claim is Banner's and contradicts SDI-12 (0 is the default, '?' is the wildcard).",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Banner's statement, not probe's."
+  },
+  {
+   "id": "C28",
+   "model": "n/a",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p1 'Sensor Wiring'",
+   "quote": "DC+ = Brown (SP1) / DC- = Green/Yellow (GND) / Data = Blue (SDI)",
+   "derived_rule": "Probe cable colours 3-core: brown +, green/yellow GND, blue data.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "Colours stated by Banner for 'the sensor', only HydraScout-labelled in the note title. HSTI says 3-core cable (S4)."
+  },
+  {
+   "id": "C29",
+   "model": "n/a",
+   "firmware": null,
+   "source_id": "S1",
+   "locator": "p6 radio defaults table",
+   "quote": "Warmup Time 1755 (50) / Sample Low 1753 (22500) / Voltage 1756 (148)",
+   "derived_rule": "Radio defaults. Not probe warm-up.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "high",
+   "limitation": "Units not stated in note; do not treat as probe parameters."
+  },
+  {
+   "id": "C30",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S10",
+   "locator": "Pragmatic description",
+   "quote": "Measurements | 0 = soil moisture percentage (SMP%) / 1 = soil temperature (degrees Celsius) / 2 = raw frequency measurement (Megahertz) ... Sensors | 1 to 8",
+   "derived_rule": "Verbatim copy of HSTI 2017 spec (S4); not independent confirmation.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Copy; listing says 'Address: France'."
+  },
+  {
+   "id": "C31",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S11",
+   "locator": "blog item list",
+   "quote": "HSTI: HydraSCOUT multi-sensor soil moisture and temperature probe (Thanks Bertrand!)",
+   "derived_rule": "A third party reports the probe was tested with an SDI-12 USB adapter. No transcript published in the blog.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "No commands or replies shown; a one-line mention only."
+  },
+  {
+   "id": "C32",
+   "model": "HydraConnect datalogger",
+   "firmware": null,
+   "source_id": "S13",
+   "locator": "product description",
+   "quote": "HydraConnect is a datalogger that collects and transmits data from our HydraScout and HydraSolo probes. ... 15-minute intervals",
+   "derived_rule": "HSTI's own datalogger polls the probes; its SDI-12 command sequence is not published.",
+   "category": "third_party_example",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Distributor text copied from HSTI; no protocol detail."
+  },
+  {
+   "id": "C40",
+   "model": "HydraSCOUT",
+   "firmware": null,
+   "source_id": "S4",
+   "locator": "n/a",
+   "quote": "(search-engine snippets) HydraSCOUT 'SDI-12 commands M1!'",
+   "derived_rule": "A WebSearch summary asserted 'aM! and M1! are used with HydraScout'; that summary only restates the Banner PDF (S1).",
+   "category": "unverified_snippet",
+   "test": null,
+   "confidence": "low",
+   "limitation": "Not an independent source. Treated as non-evidence."
+  }
+ ],
+ "transcripts": [
+  {
+   "id": "T1",
+   "source_id": "S1",
+   "locator": "p4 table and Figure 1",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "1M!   (Banner row 'M! Soil Moisture #1, 1-3')"
+    },
+    {
+     "dir": "reply",
+     "text": "(not shown; table row: 1 / 1.1234 / 0.02 - placeholders)"
+    },
+    {
+     "dir": "command",
+     "text": "1M1!   (Banner row 'M1! Temperature #1, 1-3')"
+    },
+    {
+     "dir": "reply",
+     "text": "(not shown; table row: 1 / 1.1234 / 0.02 - placeholders)"
+    }
+   ],
+   "notes": "NOT a wire transcript. Banner never prints an SDI-12 reply string (no a<ttt><n>, no D0! line). The rows are Modbus-register presentations of radio results. Figure 1 registers 11101-11106 = 16835,61540,16794,27755,16843,55961 decode to 24.4924, 19.3029, 25.4817."
+  }
+ ],
+ "unknowns": [
+  {
+   "id": "U1",
+   "question": "What is the exact aI! response string (SDI-12 version, vendor, model, firmware, serial)?",
+   "why_it_matters": "Needed to recognise the probe and distinguish Budget/Standard/HD and firmware."
+  },
+  {
+   "id": "U2",
+   "question": "Does aM! return ttt and n, and what are they for 2..10 sensor models? What is n for 10-sensor HD (SDI-12 M is limited to 9 values)?",
+   "why_it_matters": "Defines the wait and the parse; HD may need C or more than one command."
+  },
+  {
+   "id": "U3",
+   "question": "Which commands exist (M, M1, M2, M3.., C, C1.., R, X..) and what does each return? Is M2 = raw MHz and are M and M1 really moisture/temperature?",
+   "why_it_matters": "Only a 2016-2017 marketing list exists, not a command reference."
+  },
+  {
+   "id": "U4",
+   "question": "Value order and grouping: one value per sensor shallow-to-deep or deep-to-shallow? Moisture and temperature interleaved or in separate commands? How are values split over D0..D9?",
+   "why_it_matters": "Core of the wire contract."
+  },
+  {
+   "id": "U5",
+   "question": "Units and scaling: is moisture VWC %, a relative index, or raw; temperature degC; is 'SMP%' calibrated? Any conversion needed (Odusol calibration)?",
+   "why_it_matters": "Storage and display semantics."
+  },
+  {
+   "id": "U6",
+   "question": "Salinity/conductivity: is any command available, in what unit/index, which model/firmware?",
+   "why_it_matters": "Hydrascout.co 2021 mentions salinity; 2022 says in development; 2016 spec has none."
+  },
+  {
+   "id": "U7",
+   "question": "Sensor depth/spacing per model (Budget, Standard, HD; each length) and the depth of sensor #1 from the top.",
+   "why_it_matters": "Needed to assign depths to values; 'one per 10cm segment' vs 3-sensor 1 m budget conflict."
+  },
+  {
+   "id": "U8",
+   "question": "Error / missing-sensor value (e.g. -9999, 0, NaN, no value)? Behaviour when a sensor is faulty?",
+   "why_it_matters": "Quality flags."
+  },
+  {
+   "id": "U9",
+   "question": "Supply voltage min/typ, idle current (TBA in 2016; 6 mA in 2017), measurement current (30 mA), warm-up before first M!, minimum interval between measurements.",
+   "why_it_matters": "Power budget on battery gateway."
+  },
+  {
+   "id": "U10",
+   "question": "Is CRC (aMC!) supported? Is concurrent measurement (aC!) and aV! supported? SDI-12 version 1.3 or 1.4? Extended commands (calibration, factory)?",
+   "why_it_matters": "Wire contract details."
+  },
+  {
+   "id": "U11",
+   "question": "How are calibration options exposed (soil class, texture, user coefficients) - on the probe or only in Odusol?",
+   "why_it_matters": "Whether raw or calibrated values are on the bus."
+  },
+  {
+   "id": "U12",
+   "question": "Is HydraScout based on or a rebrand of another probe? (No source states this; unknown.)",
+   "why_it_matters": "Only a stated relationship would let us reuse another protocol."
+  }
+ ]
+}

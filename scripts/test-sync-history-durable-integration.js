@@ -59,6 +59,18 @@ try {
     ) VALUES(
       101, 'A84041SENSOR0001', '2026-07-25T10:01:00.000Z', 10.5, 11.5, 1
     );
+    INSERT INTO tensiomark_observations(
+      id, device_data_id, deveui, recorded_at, received_at, raw_response,
+      payload_base64, configuration_hash, configuration_json, disposition,
+      normalized_json
+    ) VALUES(
+      151, 101, 'A84041SENSOR0001', '2026-07-25T10:01:00.000Z', '2026-07-25T10:01:01.000Z',
+      '1+18.090+1.7300\r\n4+19.125+0.164\r\n',
+      'MSsxOC4wOTArMS43MzAwDQo0KzE5LjEyNSswLjE2NA0K',
+      '7c2832cdd726a58fe885b72fe69175a52f0a130bd4f67cfb4a971e038e2bd550',
+      '{"version":1,"kind":"tensiomark"}', 'accepted',
+      '{"normalization_version":2,"native_pf":{"swt_1":"+1.7300","swt_2":"+0.164"}}'
+    );
     INSERT INTO chameleon_readings(
       id, deveui, recorded_at, payload_version, status_flags,
       data_invalid, comp_pending, f_port, f_cnt, calibration_status

@@ -1,0 +1,609 @@
+[
+  {
+    "name": "normal",
+    "description": "Two fragments assumed to belong to one acquisition; completion is transport evidence only.",
+    "input": {
+      "name": "normal",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 1000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_ascii": "+10+20"
+  },
+  {
+    "name": "mixed-cycle-gap",
+    "description": "Cycle A fragment 0 and cycle B fragment 1 with lost intervening frames; legacy emits a mixed reading.",
+    "input": {
+      "name": "mixed-cycle-gap",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 10000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 103,
+            "fPort": 2,
+            "data": "DOQCAgErNDA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "rejected"
+    ]
+  },
+  {
+    "name": "consecutive-counter-ambiguity",
+    "description": "Different simulated sensor acquisitions contribute fragments with consecutive transmitted counters; both policies complete. Counter continuity cannot prove acquisition identity.",
+    "input": {
+      "name": "consecutive-counter-ambiguity",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 10000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErNDA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_ascii": "+10+40"
+  },
+  {
+    "name": "duplicate",
+    "description": "A duplicate first fragment clears strict assembly; legacy reseeds and later completes.",
+    "input": {
+      "name": "duplicate",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 100,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 1000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "reset",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "rejected",
+      "rejected"
+    ]
+  },
+  {
+    "name": "reordered",
+    "description": "Index 1 arrives before index 0; the legacy assembler tolerates reordering.",
+    "input": {
+      "name": "reordered",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 100,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "rejected",
+      "rejected"
+    ]
+  },
+  {
+    "name": "missing-fragment",
+    "description": "One fragment never arrives; neither policy completes by the end of the recording.",
+    "input": {
+      "name": "missing-fragment",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered"
+    ],
+    "expected_candidate_actions": [
+      "buffered"
+    ]
+  },
+  {
+    "name": "session-change",
+    "description": "Synthetic epoch changes between complementary fragments; the current runtime does not receive this annotation.",
+    "input": {
+      "name": "session-change",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 1000,
+          "session_epoch": "synthetic-session-b",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 1,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "rejected"
+    ]
+  },
+  {
+    "name": "missing-session",
+    "description": "Raw ChirpStack-like event lacks an independently established session annotation.",
+    "input": {
+      "name": "missing-session",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": null,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 1000,
+          "session_epoch": null,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "rejected",
+      "rejected"
+    ]
+  },
+  {
+    "name": "restart",
+    "description": "Restart loses context. The candidate refuses the rest of this replay; no durable recovery mechanism is being claimed.",
+    "input": {
+      "name": "restart",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQCAgArMTA="
+          }
+        },
+        {
+          "type": "restart",
+          "at_ms": 500
+        },
+        {
+          "type": "up",
+          "at_ms": 1000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 101,
+            "fPort": 2,
+            "data": "DOQCAgErMjA="
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 2000,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 102,
+            "fPort": 2,
+            "data": "DOQCAgArMzA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "buffered",
+      "reset",
+      "buffered",
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "buffered",
+      "reset",
+      "rejected",
+      "rejected"
+    ]
+  },
+  {
+    "name": "unsupported-payver",
+    "description": "PAYVER is configurable, but this lab only evaluates the current 1/2 decoding convention.",
+    "input": {
+      "name": "unsupported-payver",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQFAgArMTA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "rejected"
+    ],
+    "expected_candidate_actions": [
+      "rejected"
+    ]
+  },
+  {
+    "name": "single",
+    "description": "Unsegmented PAYVER 1 completes under the assumed DATAUP 0 convention.",
+    "input": {
+      "name": "single",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQBKzEwKzIw"
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "complete"
+    ],
+    "expected_candidate_ascii": "+10+20"
+  },
+  {
+    "name": "lossy-markers",
+    "description": "The real legacy codec removes a vendor marker and its length byte; the candidate refuses lossy body decoding.",
+    "input": {
+      "name": "lossy-markers",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "up",
+          "at_ms": 0,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQB8QMrMTA="
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "complete"
+    ],
+    "expected_candidate_actions": [
+      "rejected"
+    ]
+  },
+  {
+    "name": "ack-evidence-only",
+    "description": "Gateway scheduling ACK, negative/positive device ACKs, duplicate and late ACKs do not establish application; absent middle-command evidence cannot be filled by the final ACK.",
+    "input": {
+      "name": "ack-evidence-only",
+      "evidence_kind": "synthetic",
+      "events": [
+        {
+          "type": "txack",
+          "at_ms": 0,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "queueItemId": "synthetic-final-command",
+            "fCntDown": 5,
+            "downlinkId": 42,
+            "gatewayId": "8899aabbccddeeff"
+          }
+        },
+        {
+          "type": "ack",
+          "at_ms": 100,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "queueItemId": "synthetic-middle-command",
+            "fCntDown": 5,
+            "acknowledged": false
+          }
+        },
+        {
+          "type": "ack",
+          "at_ms": 200,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "queueItemId": "synthetic-final-command",
+            "fCntDown": 5,
+            "acknowledged": true
+          }
+        },
+        {
+          "type": "ack",
+          "at_ms": 300,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "queueItemId": "synthetic-final-command",
+            "fCntDown": 5,
+            "acknowledged": true
+          }
+        },
+        {
+          "type": "up",
+          "at_ms": 400,
+          "session_epoch": "synthetic-session-a",
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "fCnt": 100,
+            "fPort": 2,
+            "data": "DOQBKzEw"
+          }
+        },
+        {
+          "type": "ack",
+          "at_ms": 500,
+          "event": {
+            "deviceInfo": {
+              "devEui": "0011223344556677"
+            },
+            "queueItemId": "synthetic-old-command",
+            "fCntDown": 5,
+            "acknowledged": true
+          }
+        }
+      ]
+    },
+    "expected_legacy_actions": [
+      "evidence_only",
+      "evidence_only",
+      "evidence_only",
+      "evidence_only",
+      "complete",
+      "evidence_only"
+    ],
+    "expected_candidate_actions": [
+      "evidence_only",
+      "evidence_only",
+      "evidence_only",
+      "evidence_only",
+      "complete",
+      "evidence_only"
+    ]
+  }
+]
