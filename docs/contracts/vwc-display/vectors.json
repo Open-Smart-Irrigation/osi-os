@@ -1,0 +1,216 @@
+{
+  "contract": "vwc-display-v1",
+  "bounds": {
+    "min_pct": 0,
+    "max_pct": 100,
+    "freshness_window_ms": 10800000,
+    "clock_skew_ms": 300000
+  },
+  "display": { "decimals": 1, "separator": " ", "unit": "%" },
+  "series_colors": { "vwc": "#0072B2", "soil_vic": "#CC79A7" },
+  "reading_state": [
+    { "input": null, "expected": "absent" },
+    { "input": 0, "expected": "value" },
+    { "input": 28.04, "expected": "value" },
+    { "input": 100, "expected": "value" },
+    { "input": -0.01, "expected": "invalid" },
+    { "input": 100.01, "expected": "invalid" },
+    { "input": "28", "expected": "invalid" },
+    { "input": true, "expected": "invalid" }
+  ],
+  "non_json_inputs": {
+    "absent": ["undefined"],
+    "invalid": ["NaN", "Infinity", "-Infinity"]
+  },
+  "format": [
+    { "input": 0, "expected": "0.0 %" },
+    { "input": 28.04, "expected": "28.0 %" },
+    { "input": 31.96, "expected": "32.0 %" },
+    { "input": 99.96, "expected": "100.0 %" },
+    { "input": 100, "expected": "100.0 %" },
+    { "input": null, "expected": null },
+    { "input": -1, "expected": null },
+    { "input": 101, "expected": null },
+    { "input": "28", "expected": null }
+  ],
+  "qualification": [
+    { "input": "SENTEK_ENVIROSCAN", "expected": "field_verified" },
+    { "input": "DELTAT_PR2_4", "expected": "provisional" },
+    { "input": "DELTAT_PR2_6", "expected": "provisional" },
+    { "input": "IMKO_PICO64", "expected": "provisional" },
+    { "input": "HYDRASCOUT", "expected": "provisional" },
+    { "input": "GENERIC_VWC", "expected": "generic" },
+    { "input": "TENSIOMARK", "expected": null },
+    { "input": "", "expected": null },
+    { "input": null, "expected": null },
+    { "input": "UNLISTED_PROFILE", "expected": "provisional" }
+  ],
+  "derivation": [
+    { "input": "TRISCAN", "expected": "sentek_default_curve" },
+    { "input": "ENVIROSCAN", "expected": "probe_reported" },
+    { "input": null, "expected": "probe_reported" }
+  ],
+  "depth": [
+    {
+      "name": "the depth map wins over the layout",
+      "device": {
+        "type_id": "DRAGINO_SDI12",
+        "soil_moisture_probe_depths_json": { "vwc_1": 15 },
+        "sdi12_channel_layout_json": { "version": 1, "address": "0", "sensors": [{ "channel": 1, "response_position": 1, "depth_cm": 10, "type": "ENVIROSCAN" }] }
+      },
+      "key": "vwc_1",
+      "expected": 15
+    },
+    {
+      "name": "the layout supplies a VWC depth the map lacks",
+      "device": {
+        "type_id": "DRAGINO_SDI12",
+        "soil_moisture_probe_depths_json": null,
+        "sdi12_channel_layout_json": { "version": 1, "address": "0", "sensors": [{ "channel": 2, "response_position": 2, "depth_cm": 20, "type": "TRISCAN" }] }
+      },
+      "key": "vwc_2",
+      "expected": 20
+    },
+    {
+      "name": "the layout supplies a VIC depth the map lacks",
+      "device": {
+        "type_id": "DRAGINO_SDI12",
+        "soil_moisture_probe_depths_json": null,
+        "sdi12_channel_layout_json": { "version": 1, "address": "0", "sensors": [{ "channel": 2, "response_position": 2, "depth_cm": 20, "type": "TRISCAN" }] }
+      },
+      "key": "soil_vic_2",
+      "expected": 20
+    },
+    {
+      "name": "a zero depth is not a depth",
+      "device": { "type_id": "DRAGINO_SDI12", "soil_moisture_probe_depths_json": { "vwc_1": 0 }, "sdi12_channel_layout_json": null },
+      "key": "vwc_1",
+      "expected": null
+    },
+    {
+      "name": "a negative depth is not a depth",
+      "device": { "type_id": "DRAGINO_SDI12", "soil_moisture_probe_depths_json": { "vwc_1": -10 }, "sdi12_channel_layout_json": null },
+      "key": "vwc_1",
+      "expected": null
+    },
+    {
+      "name": "a Tensiomark layout gives no VWC depth",
+      "device": {
+        "type_id": "DRAGINO_SDI12",
+        "soil_moisture_probe_depths_json": null,
+        "sdi12_channel_layout_json": { "kind": "tensiomark", "version": 1, "address": "0", "sensors": [{ "channel": 1, "response_position": 1, "depth_cm": 10 }] }
+      },
+      "key": "vwc_1",
+      "expected": null
+    },
+    {
+      "name": "a layout on a non-SDI-12 device gives no depth",
+      "device": {
+        "type_id": "KIWI_SENSOR",
+        "soil_moisture_probe_depths_json": null,
+        "sdi12_channel_layout_json": { "version": 1, "address": "0", "sensors": [{ "channel": 1, "response_position": 1, "depth_cm": 10, "type": "ENVIROSCAN" }] }
+      },
+      "key": "vwc_1",
+      "expected": null
+    }
+  ],
+  "zone_summary": {
+    "now": "2026-10-01T12:00:00.000Z",
+    "cases": [
+      {
+        "name": "shallowest depth leads, no cross-depth mean",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10, "vwc_2": 30 }, "latest_data": { "vwc_1": 28, "vwc_2": 35 } }
+        ],
+        "expected": { "hasSensor": true, "value": 28, "depthCm": 10, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "same depth across probes averages",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 28 } },
+          { "deveui": "vwc-b", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 30 } }
+        ],
+        "expected": { "hasSensor": true, "value": 29, "depthCm": 10, "channel": null, "contributorCount": 2, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "no depth recorded: lowest channel, named",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "latest_data": { "vwc_1": 28, "vwc_2": 32 } }
+        ],
+        "expected": { "hasSensor": true, "value": 28, "depthCm": null, "channel": 1, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "depth beats no depth",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_2": 20 }, "latest_data": { "vwc_1": 30, "vwc_2": 25 } }
+        ],
+        "expected": { "hasSensor": true, "value": 25, "depthCm": 20, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "fresh beats stale",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T08:00:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 20 } },
+          { "deveui": "vwc-b", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 30 }, "latest_data": { "vwc_1": 33 } }
+        ],
+        "expected": { "hasSensor": true, "value": 33, "depthCm": 30, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "only stale keeps value, flags stale",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T08:00:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 20 } }
+        ],
+        "expected": { "hasSensor": true, "value": 20, "depthCm": 10, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T08:00:00.000Z", "stale": true, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "zero is a reading",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 0 } }
+        ],
+        "expected": { "hasSensor": true, "value": 0, "depthCm": 10, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "out of range only is invalid",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "latest_data": { "vwc_1": 140 } }
+        ],
+        "expected": { "hasSensor": true, "value": null, "depthCm": null, "channel": null, "contributorCount": 0, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": true, "qualification": "field_verified" }
+      },
+      {
+        "name": "out of range beside valid is skipped",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10, "vwc_2": 20 }, "latest_data": { "vwc_1": 150, "vwc_2": 25 } }
+        ],
+        "expected": { "hasSensor": true, "value": 25, "depthCm": 20, "channel": null, "contributorCount": 1, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "configured, nothing reported",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "latest_data": {} }
+        ],
+        "expected": { "hasSensor": true, "value": null, "depthCm": null, "channel": null, "contributorCount": 0, "observedAt": null, "stale": true, "invalid": false, "qualification": "field_verified" }
+      },
+      {
+        "name": "provisional contributor lowers qualification",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "SENTEK_ENVIROSCAN", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 28 } },
+          { "deveui": "vwc-b", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "IMKO_PICO64", "last_seen": "2026-10-01T11:30:00.000Z", "soil_moisture_probe_depths_json": { "vwc_1": 10 }, "latest_data": { "vwc_1": 30 } }
+        ],
+        "expected": { "hasSensor": true, "value": 29, "depthCm": 10, "channel": null, "contributorCount": 2, "observedAt": "2026-10-01T11:30:00.000Z", "stale": false, "invalid": false, "qualification": "provisional" }
+      },
+      {
+        "name": "Tensiomark is not volumetric",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "DRAGINO_SDI12", "sdi12_probe_profile": "TENSIOMARK", "last_seen": "2026-10-01T11:30:00.000Z", "latest_data": { "vwc_1": 28, "swt_1": 30 } }
+        ],
+        "expected": { "hasSensor": false, "value": null, "depthCm": null, "channel": null, "contributorCount": 0, "observedAt": null, "stale": false, "invalid": false, "qualification": null }
+      },
+      {
+        "name": "no SDI-12 device",
+        "devices": [
+          { "deveui": "vwc-a", "type_id": "KIWI_SENSOR", "last_seen": "2026-10-01T11:30:00.000Z", "latest_data": { "swt_1": 30 } }
+        ],
+        "expected": { "hasSensor": false, "value": null, "depthCm": null, "channel": null, "contributorCount": 0, "observedAt": null, "stale": false, "invalid": false, "qualification": null }
+      }
+    ]
+  }
+}
