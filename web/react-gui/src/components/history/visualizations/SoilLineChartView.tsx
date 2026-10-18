@@ -11,6 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
+import { classifyHistoryChannel, displayHistorySeriesLabel, historySeriesColor, historySeriesDash, historySeriesValue } from '../../../history/sourceIdentity';
 import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface SoilLineChartViewProps {
@@ -26,10 +27,12 @@ export type RenderSeries = {
   label: string;
   unit: string;
   depthCm: number | null;
+  deviceSourceId?: string | null;
+  sourceKey?: string | null;
+  channelKey?: string;
   points: Array<{ t: string; value: number | null }>;
 };
 
-const SERIES_COLORS = ['#2563eb', '#059669', '#d97706', '#7c3aed'];
 const MAX_CONTINUOUS_GAP_MS = 90 * 60 * 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,8 +50,7 @@ function finiteNumber(value: unknown): number | null {
 }
 
 function pointValue(point: Partial<HistorySeriesPoint> | null | undefined): number | null {
-  if (!isRecord(point)) return null;
-  return finiteNumber(point.value) ?? finiteNumber(point.latest) ?? finiteNumber(point.mean) ?? finiteNumber(point.median);
+  return historySeriesValue(point);
 }
 
 function validTimestamp(value: unknown): string | null {
@@ -121,10 +123,13 @@ export function soilSeriesDisplayLabel(
 
 function displayUnit(series: unknown): string {
   const unit = normalizedText(isRecord(series) ? series.unit : null);
-  return unit && !looksLikeRawSourceToken(unit) ? unit : 'kPa';
+  if (unit && !looksLikeRawSourceToken(unit)) return unit;
+  const channelKey = normalizedText(isRecord(series) ? series.channelKey : null)?.toLowerCase();
+  return channelKey && /^(vwc)(?:_\d+)?$/.test(channelKey) ? '%' : 'kPa';
 }
 
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
+  const records = seriesList.filter(isRecord);
   const depthCounts = new Map<string, number>();
   seriesList.forEach((series) => {
     const key = depthKey(seriesDepthCm(series));
@@ -132,6 +137,7 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
   });
 
   return seriesList.map((series, index) => {
+    if (isRecord(series) && typeof series.channelKey === 'string' && series.channelKey && classifyHistoryChannel(series.channelKey) !== 'soil') return null;
     const rawPoints = isRecord(series) ? series.points : null;
     const seriesDepth = seriesDepthCm(series);
     const duplicateDepth = (depthCounts.get(depthKey(seriesDepth) ?? '') ?? 0) > 1;
@@ -143,14 +149,21 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
           return accumulator;
         }, [])
       : [];
+    const id = normalizedText(isRecord(series) ? series.id : null) ?? `series-${index}`;
+    const sourceAwareLabel = isRecord(series) && (normalizedText(series.sourceLabel) || normalizedText(series.deviceSourceId))
+      ? displayHistorySeriesLabel(series, records)
+      : soilSeriesDisplayLabel(t, series, index, duplicateDepth);
     return {
-      key: `series-${index}`,
-      label: soilSeriesDisplayLabel(t, series, index, duplicateDepth),
+      key: id,
+      label: sourceAwareLabel,
       unit: displayUnit(series),
       depthCm: seriesDepth,
+      deviceSourceId: normalizedText(isRecord(series) ? series.deviceSourceId : null),
+      sourceKey: normalizedText(isRecord(series) ? series.sourceKey : null),
+      channelKey: normalizedText(isRecord(series) ? series.channelKey : null) ?? '',
       points,
     };
-  });
+  }).filter(Boolean) as RenderSeries[];
 }
 
 function hasVisiblePoints(series: RenderSeries): boolean {
@@ -195,6 +208,21 @@ export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
   return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
+export function seriesPlotPoints(series: RenderSeries): Array<{ tMs: number } & Record<string, number | null>> {
+  return series.points
+    .map((point) => ({ tMs: Date.parse(point.t), [series.key]: point.value }))
+    .filter((point) => Number.isFinite(point.tMs));
+}
+
+function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; series: RenderSeries[] }> {
+  const groups = new Map<string, RenderSeries[]>();
+  seriesList.forEach((series) => {
+    const unit = series.unit || 'unitless';
+    groups.set(unit, [...(groups.get(unit) ?? []), series]);
+  });
+  return [...groups.entries()].map(([unit, series]) => ({ unit: unit === 'unitless' ? '' : unit, series }));
+}
+
 function formatValue(value: number | null, unit: string): string {
   if (value === null) return '-';
   const formatted = Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -213,13 +241,17 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
   const { t: translate } = useTranslation('history');
   const t = translate as HistoryTranslate;
   const hoverCapable = useHoverCapable();
-  const { visibleSeries, rows, seriesByKey } = React.useMemo(() => {
+  const { visibleSeries, rows, groups } = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
     const nextVisibleSeries = normalizeSeriesList(t, rawSeries).filter(hasVisiblePoints);
     return {
       visibleSeries: nextVisibleSeries,
       rows: buildNumericRows(nextVisibleSeries),
-      seriesByKey: new Map(nextVisibleSeries.map((series) => [series.key, series])),
+      groups: groupSeriesByUnit(nextVisibleSeries).map((group) => ({
+        ...group,
+        rows: buildNumericRows(group.series),
+        seriesByKey: new Map(group.series.map((series) => [series.key, series])),
+      })),
     };
   }, [data, t]);
   const spanMs = chartWindow
@@ -249,41 +281,60 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
       aria-label={t('history.soilLineChart.title')}
       className="flex min-h-0 flex-1 flex-col"
     >
-      <div className="relative min-h-0 min-w-0 flex-1"><div className="absolute inset-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={HISTORY_CHART_MARGIN}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis
-              {...historyTimeXAxis}
-              domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
-              tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
-            />
-            <YAxis {...historyValueYAxis('kPa', 52)} />
-            {hoverCapable && (
-              <Tooltip
-                isAnimationActive={false}
-                labelFormatter={formatTimestampMs}
-                formatter={(value, _name, item) => {
-                  const series = seriesByKey.get(String(item.dataKey));
-                  return [formatTooltipValue(value, series?.unit ?? 'kPa'), series?.label ?? t('history.soilLineChart.series.soil')];
-                }}
-              />
+      <div data-testid="history-series-legend" className="mb-3 flex flex-wrap gap-2">
+        {visibleSeries.map((series) => (
+          <span key={series.key} className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)]">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: historySeriesColor(series.key) }} />
+            {series.label}
+          </span>
+        ))}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        {groups.map((group) => (
+          <div key={group.unit || 'unitless'} className="relative min-h-0 min-w-0 flex-1">
+            {groups.length > 1 && group.unit && (
+              <h4 className="mb-1 text-xs font-semibold text-[var(--text-tertiary)]">{group.unit}</h4>
             )}
-            {visibleSeries.map((series, index) => (
-              <Line
-                key={series.key}
-                type="monotone"
-                dataKey={series.key}
-                name={series.label}
-                stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
-                strokeWidth={2}
-                dot={soilSeriesShouldShowDots(series) ? { r: 3, strokeWidth: 1 } : false}
-                isAnimationActive={false}
-                connectNulls={false}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer></div>
+            <div className="absolute inset-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={group.rows} margin={HISTORY_CHART_MARGIN}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis
+                    {...historyTimeXAxis}
+                    domain={chartWindow ? [chartWindow.fromMs, chartWindow.toMs] : ['dataMin', 'dataMax']}
+                    tickFormatter={(value) => formatTimeTick(Number(value), spanMs)}
+                  />
+                  <YAxis {...historyValueYAxis(group.unit || undefined, 52)} />
+                  {hoverCapable && (
+                    <Tooltip
+                      isAnimationActive={false}
+                      labelFormatter={formatTimestampMs}
+                      formatter={(value, _name, item) => {
+                        const series = group.seriesByKey.get(String(item.dataKey));
+                        return [formatTooltipValue(value, series?.unit ?? ''), series?.label ?? t('history.soilLineChart.series.soil')];
+                      }}
+                    />
+                  )}
+                  {group.series.map((series) => (
+                    <Line
+                      key={series.key}
+                      type="monotone"
+                      data={seriesPlotPoints(series)}
+                      dataKey={series.key}
+                      name={series.label}
+                      stroke={historySeriesColor(series.key)}
+                      strokeDasharray={historySeriesDash(series.key)}
+                      strokeWidth={2}
+                      dot={soilSeriesShouldShowDots(series) ? { r: 3, strokeWidth: 1 } : false}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );

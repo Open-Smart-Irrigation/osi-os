@@ -905,11 +905,41 @@ function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
     },
     limits: {
       maxPointsPerSeries: Number(limits?.maxPointsPerSeries ?? limits?.max_points_per_series ?? 0),
+      maxPointsTotal: Number.isFinite(Number(limits?.maxPointsTotal ?? limits?.max_points_total))
+        ? Number(limits?.maxPointsTotal ?? limits?.max_points_total)
+        : null,
       maxEvents: Number(limits?.maxEvents ?? limits?.max_events ?? 0),
       maxInterpretations: Number(limits?.maxInterpretations ?? limits?.max_interpretations ?? 0),
       truncated: asBoolean(limits?.truncated),
+      reason: limits?.reason ?? null,
+      availableSources: Array.isArray(limits?.availableSources ?? limits?.available_sources)
+        ? (limits.availableSources ?? limits.available_sources).map((source: any) => ({
+            sourceKey: String(source?.sourceKey ?? source?.source_key ?? ''),
+            label: String(source?.label ?? source?.name ?? source?.sourceLabel ?? 'Source'),
+            deviceSourceId: source?.deviceSourceId ?? source?.device_source_id ?? null,
+          })).filter((source: { sourceKey: string }) => source.sourceKey.length > 0)
+        : undefined,
     },
-    series: Array.isArray(row?.series) ? row.series : [],
+    seriesIdentityVersion: Number(row?.seriesIdentityVersion ?? row?.series_identity_version ?? 0),
+    series: Array.isArray(row?.series) ? row.series.map((series: any) => ({
+      ...series,
+      id: String(series?.id ?? ''),
+      deviceSourceId: series?.deviceSourceId ?? series?.device_source_id ?? null,
+      sourceKey: series?.sourceKey ?? series?.source_key ?? null,
+      channelKey: String(series?.channelKey ?? series?.channel_key ?? ''),
+      sourceLabel: series?.sourceLabel ?? series?.source_label ?? null,
+      label: String(series?.label ?? ''),
+      unit: series?.unit ?? null,
+      depthCm: series?.depthCm ?? series?.depth_cm ?? null,
+      metadataBasis: series?.metadataBasis ?? series?.metadata_basis,
+      points: Array.isArray(series?.points) ? series.points.map((point: any) => ({
+        ...point,
+        t: String(point?.t ?? ''),
+        value: Object.prototype.hasOwnProperty.call(point ?? {}, 'value')
+          ? (typeof point.value === 'number' && Number.isFinite(point.value) ? point.value : null)
+          : null,
+      })) : [],
+    })) : [],
     profiles: Array.isArray(row?.profiles) ? row.profiles : [],
     events: Array.isArray(row?.events) ? row.events : [],
     calendar: row?.calendar ?? null,

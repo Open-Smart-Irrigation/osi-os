@@ -119,6 +119,20 @@ describe('SoilLineChartView', () => {
     })).toBe(true);
   });
 
+  it('shows isolated observations on both sides of an explicit null gap', () => {
+    expect(soilSeriesShouldShowDots({
+      key: 'device-a:swt_1',
+      label: 'Probe A',
+      unit: 'kPa',
+      depthCm: 20,
+      points: [
+        { t: '2026-06-24T06:00:00Z', value: 5 },
+        { t: '2026-06-24T07:00:00Z', value: null },
+        { t: '2026-06-24T08:00:00Z', value: 7 },
+      ],
+    })).toBe(true);
+  });
+
   it('keeps dots hidden for continuous hourly soil series', () => {
     expect(soilSeriesShouldShowDots({
       key: 'swt_1',

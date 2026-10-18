@@ -14,6 +14,7 @@ import type {
   HistoryCardDataResponse,
   HistorySeriesPoint,
 } from '../../../history/types';
+import { displayHistorySeriesLabel, historySeriesColor, historySeriesDash, historySeriesValue } from '../../../history/sourceIdentity';
 import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface EnvironmentLineChartViewProps {
@@ -39,7 +40,6 @@ type RenderSeries = {
   points: RenderPoint[];
 };
 
-const SERIES_COLORS = ['#0284c7', '#16a34a', '#ca8a04', '#7c3aed', '#dc2626', '#0891b2'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -51,18 +51,8 @@ function normalizedText(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-function finiteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 function pointValue(point: Partial<HistorySeriesPoint> | null | undefined): number | null {
-  if (!isRecord(point)) return null;
-  return (
-    finiteNumber(point.value) ??
-    finiteNumber(point.latest) ??
-    finiteNumber(point.mean) ??
-    finiteNumber(point.median)
-  );
+  return historySeriesValue(point);
 }
 
 function validTimestamp(value: unknown): string | null {
@@ -164,6 +154,7 @@ function formatTooltipValue(value: unknown, unit: string): string {
 }
 
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
+  const records = seriesList.filter(isRecord);
   return seriesList.map((series, index) => {
     const source = sourceText(series);
     const rawPoints = isRecord(series) ? series.points : null;
@@ -176,9 +167,12 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
         }, [])
       : [];
 
+    const key = normalizedText(isRecord(series) ? series.id : null) ?? `series-${index}`;
     return {
-      key: `series-${index}`,
-      label: displaySeriesLabel(t, series, source),
+      key,
+      label: isRecord(series) && (normalizedText(series.sourceLabel) || normalizedText(series.deviceSourceId))
+        ? displayHistorySeriesLabel(series, records)
+        : displaySeriesLabel(t, series, source),
       unit: displayUnit(series, source),
       points,
     };
@@ -215,6 +209,12 @@ function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; se
     unit: unit === 'unitless' ? '' : unit,
     series,
   }));
+}
+
+function seriesPlotPoints(series: RenderSeries): Array<{ tMs: number } & Record<string, number | null>> {
+  return series.points
+    .map((point) => ({ tMs: Date.parse(point.t), [series.key]: point.value }))
+    .filter((point) => Number.isFinite(point.tMs));
 }
 
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
@@ -269,7 +269,15 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
       className="flex min-h-0 flex-1 flex-col"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        {groups.map((group, groupIndex) => {
+        <div data-testid="history-series-legend" className="flex flex-wrap gap-2">
+          {visibleSeries.map((series) => (
+            <span key={series.key} className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)]">
+              <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: historySeriesColor(series.key) }} />
+              {series.label}
+            </span>
+          ))}
+        </div>
+        {groups.map((group) => {
           return (
             <div key={group.unit || 'unitless'} className="flex min-h-0 flex-1 flex-col gap-1">
               {groups.length > 1 && (
@@ -302,15 +310,17 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
                         }}
                       />
                     )}
-                    {group.series.map((series, index) => (
+                    {group.series.map((series) => (
                       <Line
                         key={series.key}
                         type="monotone"
+                        data={seriesPlotPoints(series)}
                         dataKey={series.key}
                         name={series.label}
-                        stroke={SERIES_COLORS[(groupIndex + index) % SERIES_COLORS.length]}
+                        stroke={historySeriesColor(series.key)}
+                        strokeDasharray={historySeriesDash(series.key)}
                         strokeWidth={2}
-                        dot={false}
+                        dot={{ r: 3, strokeWidth: 1 }}
                         isAnimationActive={false}
                         connectNulls={false}
                       />

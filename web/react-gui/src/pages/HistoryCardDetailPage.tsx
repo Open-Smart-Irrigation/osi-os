@@ -204,12 +204,12 @@ function routeCardIdForCard(card: HistoryCardSummary): string {
 function sourceOptionsForCard(card: HistoryCardSummary | null): Array<{ key: string; name: string }> {
   if (!card || (card.sourceDeviceCount ?? card.sourceDevices?.length ?? 0) <= 1) return [];
   const seen = new Set<string>();
-  return (card.sourceDevices ?? []).reduce<Array<{ key: string; name: string }>>((options, device) => {
+  return (card.sourceDevices ?? []).reduce<Array<{ key: string; name: string }>>((options, device, index) => {
     const key = typeof device.sourceKey === 'string' ? device.sourceKey.trim() : '';
     const name = typeof device.name === 'string' ? device.name.trim() : '';
-    if (!key || !name || /\b[A-F0-9]{16}\b/i.test(name) || seen.has(key)) return options;
+    if (!key || seen.has(key)) return options;
     seen.add(key);
-    options.push({ key, name });
+    options.push({ key, name: name && !/\b[A-F0-9]{16}\b/i.test(name) ? name : `Source ${index + 1}` });
     return options;
   }, []);
 }

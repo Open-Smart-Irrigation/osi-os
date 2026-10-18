@@ -31,7 +31,7 @@ function getHistoryCardDataKey(options: UseHistoryCardDataOptions): string | nul
 
   const { range } = options;
   return [
-    'history-card-data',
+    'history-card-data-v2',
     scopeKey(options.scope),
     options.cardId,
     options.view,
@@ -45,29 +45,42 @@ function getHistoryCardDataKey(options: UseHistoryCardDataOptions): string | nul
   ].join('|');
 }
 
-function fetchHistoryCardData(
+function requestSignature(scope: HistoryCardDataScope, cardId: string, request: HistoryCardDataRequest): string {
+  const range = request.range.label === 'custom'
+    ? request.range
+    : { label: request.range.label, timezone: request.range.timezone };
+  return JSON.stringify([scopeKey(scope), cardId, request.view, range, request.aggregation, [...request.overlays].sort(), request.sourceKey ?? null]);
+}
+
+async function fetchHistoryCardData(
   scope: HistoryCardDataScope,
   cardId: string,
   request: HistoryCardDataRequest,
 ): Promise<HistoryCardDataResponse> {
-  if (scope.type === 'zone') {
-    return historyAPI.getZoneCardData(scope.zoneId, cardId, request);
+  const response = scope.type === 'zone'
+    ? await historyAPI.getZoneCardData(scope.zoneId, cardId, request)
+    : await historyAPI.getGatewayCardData(scope.gatewayEui, cardId, request);
+  if (response.seriesIdentityVersion !== undefined && response.seriesIdentityVersion !== 2) {
+    throw new Error('History data needs an updated gateway or server response (series identity v2).');
   }
-
-  return historyAPI.getGatewayCardData(scope.gatewayEui, cardId, request);
+  return { ...response, __historyRequestSignature: requestSignature(scope, cardId, request) } as HistoryCardDataResponse;
 }
 
 export function useHistoryCardData(options: UseHistoryCardDataOptions) {
   const swrKey = getHistoryCardDataKey(options);
+  const request: HistoryCardDataRequest = {
+    view: options.view,
+    range: options.range,
+    aggregation: options.aggregation,
+    overlays: options.overlays,
+    ...(options.sourceKey === undefined ? {} : { sourceKey: options.sourceKey }),
+  };
+  const expectedSignature = options.scope && options.cardId ? requestSignature(options.scope, options.cardId, request) : null;
   const { data, error, isLoading, mutate } = useSWR<HistoryCardDataResponse>(
     swrKey,
     () =>
       fetchHistoryCardData(options.scope as HistoryCardDataScope, options.cardId as string, {
-        view: options.view,
-        range: options.range,
-        aggregation: options.aggregation,
-        overlays: options.overlays,
-        sourceKey: options.sourceKey,
+        ...request,
       }),
     {
       keepPreviousData: true,
@@ -76,8 +89,9 @@ export function useHistoryCardData(options: UseHistoryCardDataOptions) {
     },
   );
 
+  const visibleData = data && ((data as HistoryCardDataResponse & { __historyRequestSignature?: string }).__historyRequestSignature === expectedSignature || !(data as HistoryCardDataResponse & { __historyRequestSignature?: string }).__historyRequestSignature) ? data : undefined;
   return {
-    data,
+    data: visibleData,
     error,
     isLoading,
     refresh: mutate,

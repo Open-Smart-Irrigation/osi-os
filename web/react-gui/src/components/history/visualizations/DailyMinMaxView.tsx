@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
+import { displayHistorySeriesLabel, historySeriesColor } from '../../../history/sourceIdentity';
 import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface DailyMinMaxViewProps {
@@ -39,7 +40,6 @@ type DailySeries = {
   points: DailyPoint[];
 };
 
-const SERIES_COLORS = ['#0284c7', '#16a34a', '#ca8a04', '#7c3aed'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -94,6 +94,7 @@ function displayUnit(series: unknown): string {
 }
 
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): DailySeries[] {
+  const records = seriesList.filter(isRecord);
   return seriesList.map((series, index) => {
     const source = sourceText(series);
     const rawPoints = isRecord(series) ? series.points : null;
@@ -111,9 +112,12 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
         }, [])
       : [];
 
+    const key = normalizedText(isRecord(series) ? series.id : null) ?? `daily-series-${index}`;
     return {
-      key: `daily-series-${index}`,
-      label: displaySeriesLabel(t, series, source),
+      key,
+      label: isRecord(series) && (normalizedText(series.sourceLabel) || normalizedText(series.deviceSourceId))
+        ? displayHistorySeriesLabel(series, records)
+        : displaySeriesLabel(t, series, source),
       unit: displayUnit(series),
       points,
     };
@@ -193,10 +197,10 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
   const hoverCapable = useHoverCapable();
   const visibleSeries = React.useMemo(() => {
     const rawSeries = Array.isArray(data?.series) ? data.series : [];
-    return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series, seriesIndex) => ({
+    return normalizeSeriesList(t, rawSeries).filter(hasDailyRange).map((series) => ({
       series,
       rows: expandSinglePointRows(buildNumericRows(series)),
-      color: SERIES_COLORS[seriesIndex % SERIES_COLORS.length],
+      color: historySeriesColor(series.key),
     }));
   }, [data, t]);
 
@@ -219,6 +223,14 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
       aria-label={t('history.dailyMinMax.title')}
       className="flex min-h-0 flex-1 flex-col gap-3"
     >
+      <div data-testid="history-series-legend" className="flex flex-wrap gap-2">
+        {visibleSeries.map(({ series, color }) => (
+          <span key={series.key} className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)]">
+            <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+            {series.label}
+          </span>
+        ))}
+      </div>
       {visibleSeries.map(({ series, rows, color }) => {
         const spanMs = chartWindow
           ? chartWindow.toMs - chartWindow.fromMs
@@ -249,7 +261,7 @@ const DailyMinMaxViewComponent: React.FC<DailyMinMaxViewProps> = ({ data, window
                       labelFormatter={formatTimestampMs}
                       formatter={(value, name) => [
                         formatTooltipValue(value, series.unit),
-                        String(name),
+                        `${series.label} · ${String(name)}`,
                       ]}
                     />
                   )}
