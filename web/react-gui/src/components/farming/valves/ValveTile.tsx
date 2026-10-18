@@ -149,8 +149,12 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
   // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not
   // an alarm: see deriveValveGlyphState.
+  // CMD-04 PR0 (owner decision Q02 c): a plan or scheduler-status push that a queue flush
+  // dropped is not re-sent automatically. Say plainly that the valve may not hold it; this
+  // outranks the generic not-yet-confirmed line, whose count already includes the lost slots.
   const planLine: string | null =
-    valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
+    (valve.pushState.lost ?? 0) > 0 || valve.pushState.schedulerStatusLost ? t('planLost')
+    : valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
 
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';

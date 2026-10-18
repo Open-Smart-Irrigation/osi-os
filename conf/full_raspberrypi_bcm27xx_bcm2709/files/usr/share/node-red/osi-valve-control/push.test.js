@@ -323,37 +323,218 @@ test('compileAndQueue: clock-sync timezone prefers the first enabled WEEKLY sche
   db.close();
 });
 
-test('GEN2: a flush that wipes the queue re-emits pushes an earlier compile left outstanding', async () => {
-  // Live reproduction (bench Gen2 valve, 2026-08-23): several compiles inside ~12s. An earlier
-  // compile's DAYMASK_PLAN for days 1+4 was not superseded by the later one (different day-set),
-  // but the later compile's flushQueue() wiped its downlink out of ChirpStack. The row stayed
-  // QUEUED and undelivered across two hours of uplinks -- that weekday's plan never reached the
-  // valve, and nothing would have touched the row until failStalePushes FAILED it 24h later.
+
+// ---------------------------------------------------------------------------------------------
+// CMD-04 PR0 (owner decision Q02 = (c)): no automatic configuration re-send. A compile that
+// flushes the device's ChirpStack queue sends only what it compiled itself. Rows an earlier
+// compile left QUEUED (and that this compile does not replace) are not re-emitted: they become
+// LOST -- stored as state FAILED with error 'not_resent_q02c', because the 0022 CHECK on
+// valve_schedule_pushes.state does not admit a new state value -- and are surfaced as
+// "device may not hold this plan". They are never re-sent automatically afterwards, only by an
+// explicit operator "Resend plan" (force).
+// ---------------------------------------------------------------------------------------------
+
+const workers = require('./workers');
+const { FIXTURE_EUI: EUI } = require('./test-helpers');
+const hexOf = (m) => Buffer.from(m.payload.data, 'base64').toString('hex').toUpperCase();
+const ledger = async (db) => db.all('SELECT push_id, purpose, weekday, payload_hex, state, error FROM valve_schedule_pushes WHERE device_eui=? ORDER BY rowid', [EUI]);
+
+test('Q02c GEN2 bench scenario: three compiles in quick succession re-emit nothing; earlier rows not replaced become LOST and are surfaced', async () => {
+  // The live case behind the old re-emission (bench Gen2 valve, 2026-08-23): several compiles
+  // inside ~12 s, each flushing the device queue. An earlier compile's DAYMASK_PLAN for days
+  // 1+4 was not replaced by the later compiles (different day-set), so its downlink was flushed
+  // away. The old fix re-sent it from the stored bytes; under Q02 (c) it is surfaced instead.
   const { db } = await tempDb();
-  const eui = '0016C001F1000001';
-  await store.upsertSettings(db, eui, { strega_generation: 'GEN2' });
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
+  const flushes = [];
+  const flushQueue = async (e) => { flushes.push(e); };
 
-  // Compile A: a window on days 1 and 4 only.
-  await store.insertSchedule(db, { schedule_uuid: 'a1', device_eui: eui, kind: 'WEEKLY', label: null, weekdays_mask: 0x12, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
-  await compileAndQueue({ db, deviceEui: eui, appId: 'app', force: false, now: new Date('2026-08-23T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  // Compile A: a window on days 1 and 4.
+  await store.insertSchedule(db, { schedule_uuid: 'a1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x12, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  const rA = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-23T10:00:00Z'), flushQueue, warn: () => {} });
+  const daysAB = rA.rows.find((r) => r.purpose === 'DAYMASK_PLAN' && r.payload_hex.startsWith('12'));
+  assert.ok(daysAB, 'compile A queues the days-1+4 group');
 
-  const outstanding = await store.listQueued(db, eui);
-  assert.ok(outstanding.length > 0, 'compile A should leave queued rows');
+  // Compile B: add days 0/3/6. Days 1+4 are unchanged, so B does not replace A's 1+4 row.
+  await store.insertSchedule(db, { schedule_uuid: 'b1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x49, start_time: '08:00', duration_minutes: 45, timezone: 'Europe/Zurich', enabled: 1 });
+  const rB = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-23T10:00:05Z'), flushQueue, warn: () => {} });
 
-  // Compile B: add a window on days 0/3/6. Its groups do not cover days 1+4's group, so
-  // compile A's row survives supersede -- but the flush still wipes its downlink.
-  await store.insertSchedule(db, { schedule_uuid: 'b1', device_eui: eui, kind: 'WEEKLY', label: null, weekdays_mask: 0x49, start_time: '08:00', duration_minutes: 45, timezone: 'Europe/Zurich', enabled: 1 });
-  let flushed = false;
-  const r = await compileAndQueue({ db, deviceEui: eui, appId: 'app', force: false, now: new Date('2026-08-23T10:00:10Z'), flushQueue: async () => { flushed = true; }, warn: () => {} });
+  // Compile C: add day 5.
+  await store.insertSchedule(db, { schedule_uuid: 'c1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x20, start_time: '09:00', duration_minutes: 15, timezone: 'Europe/Zurich', enabled: 1 });
+  const rC = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-23T10:00:10Z'), flushQueue, warn: () => {} });
 
-  assert.equal(flushed, true, 'compile B must have flushed the queue for this to be the real case');
-
-  // Every row the ledger still calls QUEUED must have a corresponding outgoing message,
-  // otherwise its downlink is gone from ChirpStack and it can never be delivered or acked.
-  const stillQueued = await store.listQueued(db, eui);
-  const sentHex = new Set(r.messages.map((m) => Buffer.from(m.payload.data, 'base64').toString('hex').toUpperCase()));
-  for (const row of stillQueued) {
-    assert.ok(sentHex.has(row.payload_hex.toUpperCase()), `queued row ${row.payload_hex} was flushed away without being re-sent`);
+  assert.equal(flushes.length, 3, 'every compile flushed the device queue');
+  for (const [name, r] of [['B', rB], ['C', rC]]) {
+    assert.equal(r.messages.length, r.rows.length, `compile ${name} must send only the rows it compiled itself`);
+    const freshHex = new Set(r.rows.map((row) => row.payload_hex.toUpperCase()));
+    for (const m of r.messages) assert.ok(freshHex.has(hexOf(m)), `compile ${name} re-emitted a stored payload ${hexOf(m)}`);
   }
-  assert.ok(r.requeued >= 1, 'at least one earlier-compile row should have been carried over');
+  assert.ok(!rB.messages.concat(rC.messages).some((m) => hexOf(m) === daysAB.payload_hex.toUpperCase()), "A's days-1+4 plan must not be re-sent");
+
+  const rows = await ledger(db);
+  const aRow = rows.find((r) => r.push_id === daysAB.push_id);
+  assert.equal(aRow.state, 'FAILED');
+  assert.equal(aRow.error, 'not_resent_q02c', "A's days-1+4 row is LOST, not left QUEUED and not superseded");
+  assert.equal(rows.filter((r) => r.state === 'QUEUED' && !rC.rows.some((f) => f.push_id === r.push_id)).length, 0,
+    'after the last compile, only its own rows are still QUEUED');
+
+  // Surfaced: summary, per-slot states, and the synced runtime snapshot.
+  const summary = await store.pushSummary(db, EUI, new Date('2026-08-23T10:00:10Z'));
+  assert.ok(summary.lost >= 2, 'days 1 and 4 at least are LOST slots');
+  assert.ok(summary.failed >= summary.lost, 'LOST slots are a subset of failed (backward compatible count)');
+  const states = await store.weekdayPushStates(db, EUI);
+  assert.equal(states.find((r) => r.payload_hex === daysAB.payload_hex).state, 'LOST');
+  db.close();
+});
+
+test('Q02c GEN1: a compile after a flush with 3 carried rows sends 0 extra downlinks; the 3 rows become LOST and are surfaced', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  await store.insertSchedule(db, { schedule_uuid: 'm1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  // The valve confirmed everything except weekdays 3 and 5.
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at='2026-08-19T10:05:00.000Z' WHERE device_eui=? AND state='QUEUED' AND NOT (purpose='WEEKDAY_PLAN' AND weekday IN (3,5))", [EUI]);
+  // A pause queued without a flush (third carried row).
+  await queuePushes({ db, deviceEui: EUI, appId: 'app', pushes: [buildStatusPush('0')], flushQueue: null, warn: () => {} });
+  const carried = (await ledger(db)).filter((r) => r.state === 'QUEUED');
+  assert.equal(carried.length, 3);
+
+  // Unrelated edit: Tuesday (weekday 2) gets a window. The compile flushes the queue.
+  await store.insertSchedule(db, { schedule_uuid: 't1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x04, start_time: '07:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const warnings = [];
+  const r = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:10:00Z'), flushQueue: async () => {}, warn: (m) => warnings.push(m) });
+
+  assert.deepEqual(r.rows.map((row) => [row.purpose, row.weekday]), [['WEEKDAY_PLAN', 2]]);
+  assert.equal(r.messages.length, 1, 'exactly the one compiled downlink, no re-emission');
+  assert.equal(r.lost, 3);
+  assert.ok(warnings.some((w) => /not re-sent/.test(w)), 'the loss is logged');
+
+  const after = await ledger(db);
+  for (const c of carried) {
+    const row = after.find((x) => x.push_id === c.push_id);
+    assert.equal(row.state, 'FAILED', `${c.purpose}/${c.weekday} must leave QUEUED`);
+    assert.equal(row.error, 'not_resent_q02c');
+  }
+
+  const summary = await store.pushSummary(db, EUI, new Date('2026-08-19T10:10:00Z'));
+  assert.equal(summary.lost, 2, 'weekdays 3 and 5 are LOST');
+  assert.equal(summary.failed, 2);
+  assert.equal(summary.queued, 1);
+  assert.equal(summary.scheduler_status_lost, true, 'the lost pause is surfaced too');
+  const states = await store.weekdayPushStates(db, EUI);
+  assert.equal(states.find((s) => s.weekday === 3).state, 'LOST');
+  assert.equal(states.find((s) => s.weekday === 5).state, 'LOST');
+
+  // The synced runtime keeps the old state enum (an old cloud renders FAILED) and adds the flag.
+  const { buildRuntimePayload } = require('./runtime');
+  const payload = await buildRuntimePayload(db, EUI, new Date('2026-08-19T10:10:00Z'));
+  assert.equal(payload.push_state.lost, 2);
+  assert.equal(payload.push_state.failed, 2);
+  assert.equal(payload.push_state.scheduler_status_lost, true);
+  const wd3 = payload.push_state.weekday_states.find((w) => w.weekday === 3);
+  assert.deepEqual(wd3, { weekday: 3, state: 'FAILED', acked_at: null, lost: true });
+  const events = await db.all("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED' ORDER BY rowid DESC LIMIT 1");
+  assert.equal(JSON.parse(events[0].payload_json).push_state.lost, 2, 'the compile emitted a runtime change carrying the loss');
+  db.close();
+});
+
+test('Q02c: an unrelated later edit never re-sends a LOST or 24h-FAILED plan; an explicit Resend (force) still does', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'm1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  // Monday (1) never confirmed; the 24 h sweep fails it. Every other row confirmed.
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE device_eui=? AND NOT (purpose='WEEKDAY_PLAN' AND weekday=1)", [EUI]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-08-17 10:00:00' WHERE device_eui=? AND weekday=1", [EUI]);
+  await store.failStalePushes(db, '2026-08-18T10:00:00.000Z');
+  assert.equal((await db.get('SELECT state FROM valve_schedule_pushes WHERE weekday=1')).state, 'FAILED');
+
+  // Unrelated edit (Wednesday). Monday's plan must not ride along.
+  await store.insertSchedule(db, { schedule_uuid: 'w1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x08, start_time: '07:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const r1 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T11:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.deepEqual(r1.rows.map((row) => row.weekday), [3], 'only the edited weekday is sent');
+
+  // Thursday's row is still QUEUED when Friday is edited: it becomes LOST ...
+  await store.insertSchedule(db, { schedule_uuid: 'f1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x20, start_time: '07:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const r2 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T11:01:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.deepEqual(r2.rows.map((row) => row.weekday), [5]);
+  assert.equal(r2.lost, 1);
+  // ... and the next unrelated edit does not re-send it either.
+  await store.insertSchedule(db, { schedule_uuid: 's1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x40, start_time: '07:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const r3 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T11:02:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.deepEqual(r3.rows.map((row) => row.weekday), [6], 'the LOST Wednesday plan is not re-sent by a Saturday edit');
+
+  // Explicit operator Resend stays as today: every weekday goes out again, and the LOST
+  // surfacing clears because the newest row per slot is now the resent one.
+  const r4 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: true, now: new Date('2026-08-19T11:03:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.equal(r4.rows.filter((row) => row.purpose === 'WEEKDAY_PLAN').length, 7);
+  const summary = await store.pushSummary(db, EUI, new Date('2026-08-19T11:03:00Z'));
+  assert.equal(summary.lost, 0);
+  assert.equal(summary.queued, 7);
+  db.close();
+});
+
+test('Q02c: CLOCK_SYNC is never replayed from stored bytes; a lost clock sync is recomputed fresh by the next clock tick', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'm1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '06:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  const r1 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  const storedClock = r1.rows.find((row) => row.purpose === 'CLOCK_SYNC');
+  assert.ok(storedClock);
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE device_eui=? AND purpose='WEEKDAY_PLAN'", [EUI]);
+
+  // Two hours later an edit flushes the queue while the clock sync is still unconfirmed.
+  await store.insertSchedule(db, { schedule_uuid: 't1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x04, start_time: '07:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
+  const r2 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T12:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  assert.ok(!r2.messages.some((m) => hexOf(m) === storedClock.payload_hex.toUpperCase()), 'the stored wall-clock bytes are not replayed');
+  const clockRow = await db.get('SELECT state, error FROM valve_schedule_pushes WHERE push_id=?', [storedClock.push_id]);
+  assert.deepEqual({ ...clockRow }, { state: 'FAILED', error: 'not_resent_q02c' });
+  const settings = await store.getSettings(db, EUI);
+  assert.equal(settings.last_clock_sync_queued_at, null, 'the lost clock sync makes the valve due for a fresh one');
+
+  // The next clock tick computes the payload from its own current time.
+  const tickNow = new Date('2026-08-19T12:10:00Z');
+  const tick = await workers.runClockTick({ db, now: tickNow, appId: 'app', warn: () => {} });
+  assert.equal(tick.messages.length, 1);
+  assert.equal(hexOf(tick.messages[0]), buildClockPush('GEN1', tickNow, 'Europe/Zurich').payloadHex);
+  assert.notEqual(hexOf(tick.messages[0]), storedClock.payload_hex.toUpperCase());
+  db.close();
+});
+
+test('Q02c: without a flush (an actuation awaiting observation) earlier rows stay QUEUED and nothing is marked LOST', async () => {
+  const { db } = await tempDb();
+  await store.insertSchedule(db, { schedule_uuid: 'm1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x02, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES ('e1', ?, '2026-08-19T10:01:00Z', 600, '2026-08-19T10:11:00Z', 'unknown', 'PENDING_OBSERVATION', '2026-08-19T10:01:00Z')",
+    [EUI]
+  );
+  let flushed = false;
+  await store.insertSchedule(db, { schedule_uuid: 't1', device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 0x04, start_time: '07:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const r = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', force: false, now: new Date('2026-08-19T10:02:00Z'), flushQueue: async () => { flushed = true; }, warn: () => {} });
+  assert.equal(flushed, false);
+  assert.equal(r.lost, 0);
+  const lost = await db.all("SELECT 1 FROM valve_schedule_pushes WHERE error='not_resent_q02c'");
+  assert.equal(lost.length, 0);
+  db.close();
+});
+
+test('classifyCarried: a DAYMASK_PLAN row is replaced only when the batch covers every one of its days', () => {
+  const { classifyCarried } = require('./push');
+  const queued = [
+    { push_id: 'full', purpose: 'DAYMASK_PLAN', weekday: null, payload_hex: '0699151930' }, // days 1+2
+    { push_id: 'partial', purpose: 'DAYMASK_PLAN', weekday: null, payload_hex: '1899151930' }, // days 3+4
+    { push_id: 'all', purpose: 'DAYMASK_PLAN', weekday: null, payload_hex: '8099151930' }, // every day
+    { push_id: 'wd', purpose: 'WEEKDAY_PLAN', weekday: 2, payload_hex: 'FF' },
+    { push_id: 'status', purpose: 'SCHEDULER_STATUS', weekday: null, payload_hex: '30' },
+    { push_id: 'clock', purpose: 'CLOCK_SYNC', weekday: null, payload_hex: '01' },
+  ];
+  const pushes = [
+    { purpose: 'DAYMASK_PLAN', daymask: 0x0E, weekday: null }, // days 1-3
+    { purpose: 'CLOCK_SYNC', weekday: null },
+  ];
+  // The DAYMASK_PLAN push implies supersedeWeekday (the GEN1 row belongs to the abandoned generation).
+  const lost = classifyCarried(queued, pushes, { supersedeWeekday: true, supersedeDaymask: false });
+  assert.deepEqual(lost.map((r) => r.push_id), ['partial', 'all', 'status']);
+  // A status-only batch replaces nothing but the older status push.
+  const lost2 = classifyCarried(queued, [{ purpose: 'SCHEDULER_STATUS', weekday: null }], {});
+  assert.deepEqual(lost2.map((r) => r.push_id), ['full', 'partial', 'all', 'wd', 'clock']);
 });

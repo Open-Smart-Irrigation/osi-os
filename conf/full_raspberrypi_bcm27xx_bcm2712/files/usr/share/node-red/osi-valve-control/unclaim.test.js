@@ -43,8 +43,18 @@ async function queuedPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' ORDER BY purpose, fport, weekday, payload_hex");
 }
 
-// The seed's one-off CLOCK_SYNC stays QUEUED across a compile (nothing supersedes it), so
-// the plan-shaped assertions look only at the rows that carry the on-valve schedule.
+// Plan rows that are QUEUED or that a flush dropped unsent (LOST: FAILED + 'not_resent_q02c'),
+// without the state column. SUPERSEDED rows are excluded: a later compile replaced them.
+// CLOCK_SYNC is left out on purpose: when a flush drops the seed's clock sync, the next compile
+// queues a freshly computed one, so the two-delete path has one more clock row than the
+// single-compile unclaim path.
+async function intendedPushes(db) {
+  return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS') AND (state='QUEUED' OR (state='FAILED' AND error='not_resent_q02c')) ORDER BY purpose, fport, weekday, payload_hex");
+}
+
+// The seed's one-off CLOCK_SYNC is not replaced by a later compile (since CMD-04 PR0 a flushing
+// compile marks it LOST), so the plan-shaped assertions look only at the rows that carry the
+// on-valve schedule.
 async function queuedPlanPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') ORDER BY fport, weekday, payload_hex");
 }
@@ -104,8 +114,16 @@ test('unclaiming a valve queues exactly the downlinks the explicit schedule dele
   await unclaim(viaUnclaim.db);
   await clearValveOnUnclaim({ db: viaUnclaim.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
 
-  assert.deepEqual(await queuedPushes(viaUnclaim.db), await queuedPushes(viaScheduleDelete.db),
-    'the outstanding downlinks after an unclaim must equal the ones the explicit delete leaves');
+  // CMD-04 PR0 (Q02 c): each schedule delete compiles and flushes on its own, and a flush no
+  // longer re-sends what an earlier compile left queued. After the two deletes, the first
+  // delete's clearing plans for weekdays 2-6 are LOST (surfaced, not re-sent) while the unclaim's
+  // single compile still has them queued. Parity is therefore on what each path intends the
+  // valve to hold -- the outstanding (QUEUED) plus the LOST rows -- not on transport state.
+  assert.deepEqual(await intendedPushes(viaUnclaim.db), await intendedPushes(viaScheduleDelete.db),
+    'the downlinks an unclaim intends must equal the ones the explicit delete intends');
+  const lostAfterDeletes = await viaScheduleDelete.db.all("SELECT weekday FROM valve_schedule_pushes WHERE purpose='WEEKDAY_PLAN' AND state='FAILED' AND error='not_resent_q02c' ORDER BY weekday");
+  assert.deepEqual(lostAfterDeletes.map((r) => r.weekday), [2, 3, 4, 5, 6],
+    'two quick deletes: the first delete\'s clearing plans the second flush dropped are LOST, not re-sent');
   viaUnclaim.db.close();
   viaScheduleDelete.db.close();
 });

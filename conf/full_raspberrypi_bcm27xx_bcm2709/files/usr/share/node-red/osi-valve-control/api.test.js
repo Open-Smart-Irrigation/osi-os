@@ -245,3 +245,23 @@ test('F144: DELETE /api/valves/<B>/schedules/<A-owned uuid> -> 404 and A\'s row 
   const row = await db.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
   assert.equal(row.deleted_at, null);
 });
+
+const { FIXTURE_EUI } = require('./test-helpers');
+
+test('CMD-04 PR0: a second schedule edit that flushes the queue sends only its own pushes; GET /api/valves surfaces the LOST rows', async () => {
+  const { path } = await tempDb();
+  const first = await call(path, req('POST', '/api/valves/' + FIXTURE_EUI + '/schedules', { kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30 }));
+  assert.equal(first.statusCode, 201);
+  const second = await call(path, req('POST', '/api/valves/' + FIXTURE_EUI + '/schedules', { kind: 'WEEKLY', weekdays_mask: 4, start_time: '07:00', duration_minutes: 30 }));
+  assert.equal(second.statusCode, 201);
+  assert.equal(second.payload.pushes_queued, 1, 'only Tuesday changed');
+  assert.equal(second.valvePushMessages.length, 1, 'no re-emission of the first edit\'s still-queued rows');
+  const list = await call(path, req('GET', '/api/valves'));
+  const ps = list.payload.valves[0].push_state;
+  assert.equal(ps.lost, 6, 'the six weekdays the second flush dropped are LOST');
+  assert.equal(ps.failed, 6);
+  assert.equal(ps.queued, 1);
+  assert.equal(ps.scheduler_status_lost, false);
+  const sched = await call(path, req('GET', '/api/valves/' + FIXTURE_EUI + '/schedules'));
+  assert.equal(sched.payload.push_state.filter((r) => r.state === 'LOST').length, 6);
+});

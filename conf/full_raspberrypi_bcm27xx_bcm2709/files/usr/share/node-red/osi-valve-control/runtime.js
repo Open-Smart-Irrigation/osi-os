@@ -91,6 +91,12 @@ async function buildRuntimePayload(db, deviceEui, now) {
     queued: Number(pushes.queued || 0),
     acked: Number(pushes.acked || 0),
     failed: Number(pushes.failed || 0),
+    // CMD-04 PR0 (Q02 c), additive: slots a queue flush dropped unsent (a subset of `failed`,
+    // so an older cloud that ignores this key still shows them as failed), and whether the
+    // newest scheduler-status push was dropped the same way. The cloud stores push_state as an
+    // opaque JSONB passthrough, so unknown keys are tolerated.
+    lost: Number(pushes.lost || 0),
+    scheduler_status_lost: !!pushes.scheduler_status_lost,
     last_plan_acked_at: pushes.last_plan_acked_at || null,
   };
   // GEN2 has no meaningful per-weekday row (DAYMASK_PLAN rows carry weekday=null); the schedule
@@ -112,7 +118,12 @@ async function buildRuntimePayload(db, deviceEui, now) {
     }
     pushState.weekday_states = [...latestByWeekday.values()]
       .sort((a, b) => a.weekday - b.weekday)
-      .map((r) => ({ weekday: r.weekday, state: r.state, acked_at: r.acked_at || null }));
+      // CMD-04 PR0: weekdayPushStates reports a LOST row as state 'LOST'; the contract enum
+      // (and an older cloud's badge code) knows only QUEUED/ACKED/FAILED, so it ships as FAILED
+      // plus `lost: true`.
+      .map((r) => (r.state === 'LOST'
+        ? { weekday: r.weekday, state: 'FAILED', acked_at: r.acked_at || null, lost: true }
+        : { weekday: r.weekday, state: r.state, acked_at: r.acked_at || null }));
   }
   return {
     contract_version: 1,

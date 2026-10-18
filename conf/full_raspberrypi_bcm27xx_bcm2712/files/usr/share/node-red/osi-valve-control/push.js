@@ -87,7 +87,7 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
   // push queued outside a compile) leaves these exactly as purpose-derived, unchanged.
   const supersedeWeekday = purposes.has('DAYMASK_PLAN') || generation === 'GEN2';
   const supersedeDaymask = purposes.has('WEEKDAY_PLAN') || (generation != null && generation !== 'GEN2');
-  if (!pushes.length && !supersedeWeekday && !supersedeDaymask) return { rows: [], messages: [], flushed: false };
+  if (!pushes.length && !supersedeWeekday && !supersedeDaymask) return { rows: [], messages: [], flushed: false, lost: 0 };
   let flushed = false;
   if (pushes.length) {
     const pending = await store.hasPendingObservation(db, deviceEui);
@@ -96,11 +96,36 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
     }
   }
   const rows = pushes.map((p) => toRow(deviceEui, p));
-  // ValveRuntime.push_state (queued/acked/failed/weekday_states) only reflects WEEKDAY_PLAN/
-  // DAYMASK_PLAN rows -- a queuePushes call that only carries a SCHEDULER_STATUS or CLOCK_SYNC
-  // push (no plan purpose, no cross-generation supersede) leaves that resource unchanged.
-  const affectsPushState = supersedeWeekday || supersedeDaymask || purposes.has('WEEKDAY_PLAN') || purposes.has('DAYMASK_PLAN');
+  // CMD-04 PR0 (owner decision Q02 = (c): no automatic configuration re-send; a lost plan is
+  // surfaced, never silently expired). The flush above removed every downlink ChirpStack still
+  // held for this device. Rows an earlier compile left QUEUED that this batch does not replace
+  // lost their downlink with it (live case: three compiles inside 12 s on a bench Gen2 valve
+  // left a DAYMASK_PLAN for days 1+4 QUEUED and undelivered). This code used to re-emit them
+  // from their stored bytes, which also replayed stale CLOCK_SYNC wall-clock payloads and
+  // re-sent plans the valve may already have applied. They are now marked LOST instead
+  // (classifyCarried) and surfaced through push_state; only an explicit operator "Resend plan"
+  // sends them again. A lost CLOCK_SYNC is not replayed either: last_clock_sync_queued_at is
+  // cleared so the next clock tick computes a fresh one from the time at that tick.
+  let lostRows = [];
+  if (flushed) {
+    try {
+      lostRows = classifyCarried(await store.listQueued(db, deviceEui), pushes, { supersedeWeekday, supersedeDaymask });
+    } catch (e) {
+      warn && warn('[valve-control] could not list outstanding pushes after a flush for ' + deviceEui + ': ' + (e && e.message ? e.message : e));
+    }
+  }
+  const lostPlan = lostRows.some((r) => r.purpose === 'WEEKDAY_PLAN' || r.purpose === 'DAYMASK_PLAN');
+  const lostClock = lostRows.some((r) => r.purpose === 'CLOCK_SYNC');
+  // ValveRuntime.push_state (queued/acked/failed/lost/weekday_states) only reflects WEEKDAY_PLAN/
+  // DAYMASK_PLAN rows plus the newest SCHEDULER_STATUS row's loss flag -- a queuePushes call that
+  // only carries a SCHEDULER_STATUS or CLOCK_SYNC push (no plan purpose, no cross-generation
+  // supersede, nothing lost) leaves that resource unchanged.
+  const affectsPushState = supersedeWeekday || supersedeDaymask || purposes.has('WEEKDAY_PLAN') || purposes.has('DAYMASK_PLAN') || lostRows.length > 0;
   await db.transaction(async (tx) => {
+    // Before the supersede below: supersedeQueuedGen2 supersedes on any mask overlap, which
+    // would hide the days of a partly-replaced DAYMASK_PLAN row that this batch does not cover.
+    if (lostRows.length) await store.markPushesLost(tx, lostRows.map((r) => r.push_id), store.LOST_NOT_RESENT);
+    if (lostClock) await store.upsertSettings(tx, deviceEui, { last_clock_sync_queued_at: null });
     for (const p of pushes) await store.supersedeQueued(tx, deviceEui, p.purpose, p.weekday == null ? (p.daymask == null ? null : p.daymask) : p.weekday);
     if (supersedeWeekday) {
       for (let d = 0; d < 7; d += 1) await store.supersedeQueued(tx, deviceEui, 'WEEKDAY_PLAN', d);
@@ -115,24 +140,40 @@ async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueu
       catch (e) { warn && warn('[valve-control] queuePushes: runtime emit failed: ' + (e && e.message ? e.message : e)); }
     }
   });
-  // The flush above wiped ChirpStack's queue for this device. Rows left QUEUED by an EARLIER
-  // compile that this one does not supersede (a different day-set) lost their downlink with it,
-  // while their ledger row stays QUEUED -- so that weekday's plan silently never reaches the
-  // valve, and the row sits untouched until failStalePushes marks it FAILED 24h later. Observed
-  // live on a bench Gen2 valve: three compiles inside 12s left a DAYMASK_PLAN for days 1+4
-  // QUEUED and undelivered across two hours of uplinks. Re-emit whatever the ledger still
-  // considers outstanding, oldest first, so the queue matches the ledger again.
-  let carried = [];
-  if (flushed) {
-    const fresh = new Set(rows.map((r) => r.push_id));
-    try {
-      carried = (await store.listQueued(db, deviceEui)).filter((r) => !fresh.has(r.push_id));
-    } catch (e) {
-      warn && warn('[valve-control] could not re-queue outstanding pushes for ' + deviceEui + ': ' + (e && e.message ? e.message : e));
-    }
+  if (lostRows.length && warn) {
+    warn('[valve-control] ' + deviceEui + ': ' + lostRows.length + ' queued push(es) dropped by the queue flush and not re-sent (Q02c): '
+      + lostRows.map((r) => r.purpose + (r.weekday != null ? ':' + r.weekday : '')).join(', ')
+      + (lostPlan ? '; device may not hold this plan' : ''));
   }
-  const messages = carried.concat(rows).map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
-  return { rows, messages, flushed, requeued: carried.length };
+  const messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
+  return { rows, messages, flushed, lost: lostRows.length };
+}
+
+// Which outstanding (QUEUED) rows a flush dropped without this batch replacing them. A row is
+// replaced when the batch carries the same thing again: the same GEN1 weekday, a set of
+// DAYMASK_PLAN pushes whose masks together cover every day of the old row's mask, or the same
+// SCHEDULER_STATUS/CLOCK_SYNC purpose; or when it belongs to the other generation's plan, which
+// a generation switch abandons anyway (the supersedeWeekday/supersedeDaymask flags). The rest
+// are LOST. Pure: no I/O.
+function classifyCarried(queuedRows, pushes, flags) {
+  const f = flags || {};
+  const weekdays = new Set();
+  const purposes = new Set();
+  let maskUnion = 0;
+  for (const p of pushes) {
+    purposes.add(p.purpose);
+    if (p.purpose === 'WEEKDAY_PLAN') weekdays.add(Number(p.weekday));
+    if (p.purpose === 'DAYMASK_PLAN') maskUnion |= (p.daymask === 0x80 ? 0x7F : Number(p.daymask));
+  }
+  return (queuedRows || []).filter((r) => {
+    if (r.purpose === 'WEEKDAY_PLAN') return !(f.supersedeWeekday || weekdays.has(Number(r.weekday)));
+    if (r.purpose === 'DAYMASK_PLAN') {
+      if (f.supersedeDaymask) return false;
+      const mask = store.daymaskOf(r.payload_hex);
+      return (mask & maskUnion) !== mask;
+    }
+    return !purposes.has(r.purpose);
+  });
 }
 
 async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, warn, timeZoneFallback }) {
@@ -161,4 +202,4 @@ async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, w
   return Object.assign({ compiled }, queued);
 }
 
-module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, queuePushes, compileAndQueue };
+module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, queuePushes, compileAndQueue, classifyCarried };

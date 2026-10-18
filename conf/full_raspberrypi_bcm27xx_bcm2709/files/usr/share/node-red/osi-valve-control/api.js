@@ -138,7 +138,7 @@ function shapeValve(row, schedules, now, tzFallback, pushes) {
     recent_stale_state: row.recent_stale_state || null,
     next_run: P.nextRun(schedules, now, row.zone_timezone || tzFallback),
     schedule_count: schedules.length,
-    push_state: { queued: Number(pushes.queued || 0), acked: Number(pushes.acked || 0), failed: Number(pushes.failed || 0), last_plan_queued_at: pushes.last_plan_queued_at || null, last_plan_acked_at: pushes.last_plan_acked_at || null },
+    push_state: { queued: Number(pushes.queued || 0), acked: Number(pushes.acked || 0), failed: Number(pushes.failed || 0), lost: Number(pushes.lost || 0), scheduler_status_lost: !!pushes.scheduler_status_lost, last_plan_queued_at: pushes.last_plan_queued_at || null, last_plan_acked_at: pushes.last_plan_acked_at || null },
     last_clock_sync_acked_at: row.last_clock_sync_acked_at || null,
   };
 }

@@ -1642,6 +1642,9 @@ function normaliseValvePushState(row: any): ValveSummary['pushState'] {
     queued: Number(row?.queued ?? 0),
     acked: Number(row?.acked ?? 0),
     failed: Number(row?.failed ?? 0),
+    // CMD-04 PR0: absent on gateways that predate the LOST state.
+    lost: Number(row?.lost ?? 0),
+    schedulerStatusLost: row?.scheduler_status_lost === true,
     lastPlanQueuedAt: row?.last_plan_queued_at ?? null,
     lastPlanAckedAt: row?.last_plan_acked_at ?? null,
   };

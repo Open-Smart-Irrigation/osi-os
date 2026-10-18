@@ -612,3 +612,29 @@ test('F144: a schedule write with no EUI scope throws instead of falling back to
   assert.equal(row.deleted_at, null);
   db.close();
 });
+
+test('CMD-04 PR0: a LOST slot stays in pushSummary past the 30-day window and reads as LOST in weekdayPushStates', async () => {
+  const { db } = await tempDb();
+  const eui = require('./test-helpers').FIXTURE_EUI;
+  await store.insertPushes(db, [
+    { push_id: 'old-lost', device_eui: eui, purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload_hex: 'FF', plan_hash: 'h1' },
+    { push_id: 'old-acked', device_eui: eui, purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: 'FF', plan_hash: 'h2' },
+    { push_id: 'status', device_eui: eui, purpose: 'SCHEDULER_STATUS', weekday: null, fport: 21, payload_hex: '30', plan_hash: null },
+  ]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-06-01 10:00:00'");
+  await store.markPushesLost(db, ['old-lost', 'status'], store.LOST_NOT_RESENT);
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at='2026-06-01T10:05:00.000Z' WHERE push_id='old-acked'");
+  const summary = await store.pushSummary(db, eui, new Date('2026-09-01T00:00:00Z'));
+  assert.equal(summary.lost, 1, 'a lost plan is never silently expired');
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.acked, 0, 'the 30-day window still bounds the other counts');
+  assert.equal(summary.scheduler_status_lost, true);
+  const states = await store.weekdayPushStates(db, eui);
+  assert.equal(states.find((r) => r.weekday === 1).state, 'LOST');
+  assert.equal(states.find((r) => r.weekday === 1).error, 'not_resent_q02c');
+  assert.equal(states.find((r) => r.weekday === 2).state, 'ACKED');
+  // markPushesLost never overrides an ACK that raced the flush.
+  await store.markPushesLost(db, ['old-acked'], store.LOST_NOT_RESENT);
+  assert.equal((await db.get("SELECT state FROM valve_schedule_pushes WHERE push_id='old-acked'")).state, 'ACKED');
+  db.close();
+});

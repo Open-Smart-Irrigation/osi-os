@@ -84,6 +84,24 @@ describe('normaliseValveSummary defensive actuation handling', () => {
     axiosMocks.get.mockReset();
   });
 
+  it('maps push_state lost / scheduler_status_lost, defaulting both when an older gateway omits them (CMD-04 PR0)', async () => {
+    axiosMocks.get.mockResolvedValue({
+      data: {
+        valves: [
+          { device_eui: 'valve-with-loss', name: 'V1', push_state: { queued: 1, acked: 0, failed: 6, lost: 6, scheduler_status_lost: true } },
+          { device_eui: 'valve-older-gateway', name: 'V2', push_state: { queued: 0, acked: 7, failed: 0 } },
+        ],
+      },
+    });
+    const { valvesAPI } = await import('../../../../services/api');
+
+    const [withLoss, older] = await valvesAPI.list();
+    expect(withLoss.pushState.lost).toBe(6);
+    expect(withLoss.pushState.schedulerStatusLost).toBe(true);
+    expect(older.pushState.lost).toBe(0);
+    expect(older.pushState.schedulerStatusLost).toBe(false);
+  });
+
   it('drops an active_actuation missing expected_close_at to null (would otherwise NaN in valveState)', async () => {
     axiosMocks.get.mockResolvedValue({
       data: {

@@ -22,7 +22,7 @@ test('buildRuntimePayload: a valve with no expectation history has a null active
   assert.equal(payload.device_eui, EUI);
   assert.equal(payload.active_actuation, null);
   assert.equal(payload.recent_stale_state, null);
-  assert.deepEqual(payload.push_state, { queued: 0, acked: 0, failed: 0, last_plan_acked_at: null, weekday_states: [] });
+  assert.deepEqual(payload.push_state, { queued: 0, acked: 0, failed: 0, lost: 0, scheduler_status_lost: false, last_plan_acked_at: null, weekday_states: [] });
   assert.match(payload.as_of, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 });
 

@@ -955,6 +955,14 @@ export interface ValvePushState {
   queued: number;
   acked: number;
   failed: number;
+  /**
+   * CMD-04 PR0 (owner decision Q02 c): plan slots a device-queue flush dropped without
+   * re-sending them (a subset of `failed`). The valve may not hold this plan. The service
+   * normaliser always sets it; optional only so fixtures from older gateways stay valid.
+   */
+  lost?: number;
+  /** The newest scheduler-status push (pause / skip today / resume) was dropped the same way. */
+  schedulerStatusLost?: boolean;
   lastPlanQueuedAt: string | null;
   lastPlanAckedAt: string | null;
 }
@@ -1023,7 +1031,8 @@ export interface ValvePlanError {
 export interface ValveWeekdayPush {
   purpose: string;
   weekday: number | null;
-  state: 'QUEUED' | 'ACKED' | 'FAILED';
+  /** 'LOST' (CMD-04 PR0): a queue flush dropped this push and it was not re-sent. */
+  state: 'QUEUED' | 'ACKED' | 'FAILED' | 'LOST';
   queuedAt: string;
   ackedAt: string | null;
   error: string | null;

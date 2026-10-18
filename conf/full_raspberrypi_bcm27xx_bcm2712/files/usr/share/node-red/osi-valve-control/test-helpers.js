@@ -51,6 +51,10 @@ function trackedTempDirs() {
   return [...tempDirs];
 }
 
+// The synthetic EUI of the one valve every tempDb() fixture seeds. New tests reference this
+// constant instead of repeating the literal.
+const FIXTURE_EUI = '0016C001F1000001';
+
 async function tempDb() {
   const src = path.resolve(__dirname, '../../db/farming.db');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-'));
@@ -61,7 +65,7 @@ async function tempDb() {
   const raw = new DatabaseSync(dbPath);
   const db = facade(raw);
   await db.run("INSERT INTO users(id, username, password_hash, created_at) VALUES (1,'t','x',datetime('now'))");
-  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000001','Valve A','STREGA_VALVE',1,datetime('now'),datetime('now'))");
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve A','STREGA_VALVE',1,datetime('now'),datetime('now'))", [FIXTURE_EUI]);
   const cleanup = () => {
     try { raw.close(); } catch (_) { /* already closed by the test */ }
     removeTempDir(dir);
@@ -82,4 +86,4 @@ async function linkCloud(db, opts) {
   );
 }
 
-module.exports = { tempDb, facade, linkCloud, trackedTempDirs };
+module.exports = { tempDb, facade, linkCloud, trackedTempDirs, FIXTURE_EUI };
