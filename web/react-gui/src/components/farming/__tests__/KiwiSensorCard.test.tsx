@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
-const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+const DAYS_OLD = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   window.localStorage.clear();
@@ -70,7 +70,7 @@ describe('KiwiSensorCard SWT unit preference', () => {
     expect(screen.getByText('2.48 pF')).toBeInTheDocument();
     expect(screen.queryByText('30.0 kPa')).not.toBeInTheDocument();
   });
-  it('shows independently classified KIWI channels and withholds stale status', () => {
+  it('shows independently classified KIWI channels and keeps the status on an old reading', () => {
     const { rerender } = render(<KiwiSensorCard removeContext="farm" device={{
       ...kiwiDevice,
       last_seen: FRESH,
@@ -81,10 +81,10 @@ describe('KiwiSensorCard SWT unit preference', () => {
 
     rerender(<KiwiSensorCard removeContext="farm" device={{
       ...kiwiDevice,
-      last_seen: STALE,
+      last_seen: DAYS_OLD,
       latest_data: { swt_1: 10 },
     }} />);
-    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
   // Before the pF floor rule a zero fell back to '0.0 kPa' in pF mode.

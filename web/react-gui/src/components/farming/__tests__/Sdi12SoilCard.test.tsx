@@ -18,7 +18,7 @@ vi.mock('react-i18next', () => ({
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
-const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+const DAYS_OLD = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   window.localStorage.clear();
@@ -184,13 +184,13 @@ describe('Sdi12SoilCard', () => {
     expect(screen.getAllByText(/Soil temperature/)).toHaveLength(1);
   });
 
-  it('withholds stale and out-of-range SDI-12 status without hiding the row', () => {
+  it('keeps the status on an old reading and withholds it for an out-of-range one', () => {
     const { rerender } = render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'TENSIOMARK',
-      last_seen: STALE,
+      last_seen: DAYS_OLD,
       latest: { swt_1: 30.2 },
     })} />);
-    expect(screen.queryByText('Moist')).not.toBeInTheDocument();
+    expect(screen.getByText('Moist')).toBeInTheDocument();
 
     rerender(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'TENSIOMARK',

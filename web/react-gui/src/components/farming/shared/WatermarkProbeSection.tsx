@@ -16,7 +16,6 @@ export interface WatermarkProbeView {
 
 interface WatermarkProbeSectionProps {
   probes: WatermarkProbeView[];
-  isCurrent: boolean;
   swtUnit: SwtUnit;
   soilTempC: number | null;
   soilTempMeasured: boolean;
@@ -40,7 +39,7 @@ function clippedWaterStatus(bound: number | null) {
 }
 
 export function WatermarkProbeSection({
-  probes, isCurrent, swtUnit, soilTempC, soilTempMeasured, dieTempC, supplyMv, onOpenHistory,
+  probes, swtUnit, soilTempC, soilTempMeasured, dieTempC, supplyMv, onOpenHistory,
 }: WatermarkProbeSectionProps) {
   const { t } = useTranslation('devices');
   const historyTitle = onOpenHistory ? t('common.viewHistory', { defaultValue: 'View history' }) : undefined;
@@ -60,7 +59,7 @@ export function WatermarkProbeSection({
           : clipped && bound !== null
             ? t('watermark.wetUpTo', { value: formatSwtCardValue(bound, swtUnit) })
             : null;
-        const waterStatus = !isCurrent ? null : kpa !== null ? classifySwtWaterStatus(kpa) : clipped ? clippedWaterStatus(bound) : null;
+        const waterStatus = kpa !== null ? classifySwtWaterStatus(kpa) : clipped ? clippedWaterStatus(bound) : null;
         // A clipped reading with no upper bound (the bound resistance is itself
         // beyond range) has no value to promise "at most" against; use the
         // distinct unbounded status text instead of the misleading default.
