@@ -499,12 +499,12 @@ function buildSeriesFromAggregate(card, aggregate, sourceDevices, opts) {
 function buildSoilProfiles(latestRows, sourceDevices, series) {
   const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
   const rows = Array.isArray(latestRows) ? latestRows : [];
-  const channels = filterSoilChannelsForSources(CARD_CONFIG.soil.channels, devices);
   const result = [];
   for (const device of devices) {
     const eui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
     if (!eui) continue;
     const sourceId = historyHelper.deviceSourceId(device);
+    const channels = filterSoilChannelsForSources(CARD_CONFIG.soil.channels, [device]);
     const row = rows
       .filter((candidate) => normalizeDeveui(candidate && (candidate.deveui || candidate.device_eui || candidate.deviceEui)) === eui)
       .sort((left, right) => Date.parse(right && right.recorded_at || 0) - Date.parse(left && left.recorded_at || 0))[0] || null;
@@ -517,8 +517,6 @@ function buildSoilProfiles(latestRows, sourceDevices, series) {
       const resolved = value === null ? fallbackValue : value;
       if (resolved === null) continue;
       result.push({
-        // Profiles retain physical source metadata; the channel id remains the
-        // profile view's compatibility key until its consumer adopts series ids.
         id: channel.id,
         deviceSourceId: sourceId,
         sourceKey: displaySafeSourceKey('soil', device),

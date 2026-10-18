@@ -740,6 +740,50 @@ for (const profile of PROFILES) {
     });
   });
 
+  test(`${profile}: mixed completed rollup and recovery overflow clears retained buckets`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const device = { deveui: source, type_id: 'KIWI_SENSOR' };
+    const logicalSourceKey = `soil-src-${require('node:crypto').createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
+    const rollup = {
+      zone_id: 1, card_type: 'soil', logical_source_key: logicalSourceKey, channel_id: 'swt_1',
+      bucket_level: 'daily', bucket_start: '2026-10-01T00:00:00.000Z',
+      bucket_end: '2026-10-02T00:00:00.000Z', min_value: 5, max_value: 5,
+      mean_value: 5, median_value: 5, latest_value: 5, coverage_pct: 100,
+      coverage_confidence: 'configured', sample_count: 1, unit: 'kPa',
+    };
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [rollup];
+        return Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          deveui: source,
+          recorded_at: new Date(Date.parse('2026-10-02T00:00:00Z') + index * 1000).toISOString(),
+          swt_1: 1,
+        }));
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [device],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-04T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+    assert.equal(aggregate.sourceAggregates.length, 1);
+    assert.deepEqual(aggregate.sourceAggregates[0].buckets, []);
+    assert.deepEqual(aggregate.sourceAggregates[0].series.swt_1.points, []);
+  });
+
   test(`${profile}: shared recovery budget covers all source-channel pairs`, async () => {
     const helper = loadHelper(profile);
     const sourceKeys = ['A8404100000000A1', 'A8404100000000B1'];

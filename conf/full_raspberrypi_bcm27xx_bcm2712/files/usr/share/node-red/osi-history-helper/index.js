@@ -2257,10 +2257,13 @@ async function aggregateDeviceData(db, query = {}) {
       }
     }
     if (rollupRows.length || recoveredSources.length || live) {
-      const sourceAggregates = mergeSourceAggregates(
-        [...completedSources, ...recoveredSources],
-        live && live.sourceAggregates
-      );
+      const rawBudgetRejected = recoveredResult.rawScanOverflow || liveOverflow;
+      const sourceAggregates = rawBudgetRejected
+        ? unavailableSourceAggregates(rollupDevices, channels, cardType)
+        : mergeSourceAggregates(
+          [...completedSources, ...recoveredSources],
+          live && live.sourceAggregates
+        );
       const buckets = sourceAggregates.flatMap((source) => source.buckets || []);
       const coverageValues = buckets.map((bucket) => toFiniteNumber(bucket.coveragePct)).filter((value) => value !== null);
       const coverageConfidence = buckets.some((bucket) => bucket.coverageConfidence === 'unknown')
@@ -2277,7 +2280,7 @@ async function aggregateDeviceData(db, query = {}) {
         coverageConfidence,
         coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
         buckets,
-        ...(recoveredResult.rawScanOverflow || liveOverflow ? {
+        ...(rawBudgetRejected ? {
           availability: {
             available: false,
             reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],

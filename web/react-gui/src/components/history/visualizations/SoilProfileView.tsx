@@ -16,6 +16,7 @@ interface RenderableProfilePoint {
   sourceLabel: string | null;
   deviceSourceId: string | null;
   sourceKey: string | null;
+  channelKey: string | null;
   depthCm: number | null;
   value: number | null;
   unit: string | null;
@@ -40,12 +41,15 @@ function normalizeProfilePoint(
 ): RenderableProfilePoint {
   const id = normalizeText(point?.id);
   const label = normalizeText(point?.label);
+  const deviceSourceId = normalizeText(point?.deviceSourceId);
+  const channelKey = normalizeText(point?.channelKey);
   return {
-    renderKey: id ?? `profile-${index}`,
+    renderKey: deviceSourceId && channelKey ? `${deviceSourceId}:${channelKey}` : (id ?? `profile-${index}`),
     label,
     sourceLabel: normalizeText(point?.sourceLabel),
-    deviceSourceId: normalizeText(point?.deviceSourceId),
+    deviceSourceId,
     sourceKey: normalizeText(point?.sourceKey),
+    channelKey,
     depthCm: normalizeFiniteNumber(point?.depthCm),
     value: normalizeFiniteNumber(point?.value),
     unit: normalizeText(point?.unit),

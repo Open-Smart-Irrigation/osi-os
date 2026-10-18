@@ -223,6 +223,32 @@ describe('HistoryCardFrame soil profile', () => {
     expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
   });
 
+  it('keeps two eligible devices distinct when they share a channel', () => {
+    useHistoryCardDataMock.mockReturnValue({
+      data: data({
+        profiles: [
+          {
+            id: 'swt_1', channelKey: 'swt_1', deviceSourceId: 'device-a', sourceKey: 'soil-src-a',
+            sourceLabel: 'Probe A', label: 'Soil 1', depthCm: 20, value: 10, unit: 'kPa', status: 'optimal',
+          },
+          {
+            id: 'swt_1', channelKey: 'swt_1', deviceSourceId: 'device-b', sourceKey: 'soil-src-b',
+            sourceLabel: 'Probe B', label: 'Soil 1', depthCm: 40, value: 20, unit: 'kPa', status: 'optimal',
+          },
+        ],
+      }),
+      error: undefined,
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+
+    render(<HistoryCardFrame card={card} scope={{ type: 'zone', zoneId: 1 }} />);
+
+    expect(screen.getByText(/Probe A/)).toBeInTheDocument();
+    expect(screen.getByText(/Probe B/)).toBeInTheDocument();
+    expect(screen.getAllByText(/kPa/)).toHaveLength(2);
+  });
+
   it('renders card-data loading and error states before the soil profile view', () => {
     useHistoryCardDataMock.mockReturnValue({
       data: undefined,
