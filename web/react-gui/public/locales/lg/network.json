@@ -47,7 +47,9 @@
       "legendWeak": "Weak",
       "noPosition": "No gateway position is recorded, so the walk is drawn without a reference marker.",
       "noPoints": "No observation in this window carries a position.",
-      "captureOff": "Radio capture is switched off on this gateway, so no coverage points are being recorded."
+      "captureOff": "Radio capture is switched off on this gateway, so no coverage points are being recorded.",
+      "noGpsFix": "No GPS fix",
+      "noGpsFixHint": "The field tester has no GPS fix yet, so its uplinks are not drawn. Take it outdoors with a clear view of the sky and wait until it shows satellites. Points appear once fixes arrive."
     }
   }
 }

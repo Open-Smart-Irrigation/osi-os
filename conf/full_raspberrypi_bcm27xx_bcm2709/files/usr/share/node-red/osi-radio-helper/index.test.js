@@ -1,6 +1,51 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+// node:sqlite-backed stand-in for the native `sqlite3` addon (#392): lets this
+// test run where the addon is not built. Scoped via Module._load to
+// osi-db-helper's own require('sqlite3') only.
+const Module = require('node:module');
+const { DatabaseSync } = require('node:sqlite');
+function sqlite3Adapter() {
+  class Database {
+    constructor(filename, mode, callback) {
+      if (typeof mode === 'function') { callback = mode; mode = undefined; }
+      this.native = new DatabaseSync(filename, { readOnly: mode === 1 });
+      queueMicrotask(() => callback && callback.call(this, null));
+    }
+    all(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { callback.call(this, null, this.native.prepare(sql).all(...(params || []))); } catch (error) { callback.call(this, error); }
+    }
+    get(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { callback.call(this, null, this.native.prepare(sql).get(...(params || []))); } catch (error) { callback.call(this, error); }
+    }
+    run(sql, params, callback) {
+      if (typeof params === 'function') { callback = params; params = []; }
+      callback = callback || (() => {});
+      try { const result = this.native.prepare(sql).run(...(params || [])); callback.call({ changes: Number(result.changes) }, null); } catch (error) { callback.call(this, error); }
+    }
+    exec(sql, callback) {
+      callback = callback || (() => {});
+      try { this.native.exec(sql); callback.call(this, null); } catch (error) { callback.call(this, error); }
+    }
+    close(callback) {
+      callback = callback || (() => {});
+      try { this.native.close(); callback.call(this, null); } catch (error) { callback.call(this, error); }
+    }
+  }
+  return { Database, OPEN_READONLY: 1, OPEN_READWRITE: 2, OPEN_CREATE: 4 };
+}
+const RADIO_HELPER_DIR = __dirname;
+const DB_HELPER_PATH = require.resolve('osi-db-helper', { paths: [RADIO_HELPER_DIR] });
+const originalLoad = Module._load;
+Module._load = function patchedLoad(request, parent, isMain) {
+  if (request === 'sqlite3' && parent && parent.filename === DB_HELPER_PATH) return sqlite3Adapter();
+  return originalLoad.call(this, request, parent, isMain);
+};
 const { normalizeUplink, fromChirpStack } = require('./index');
 const uuid = '00000000-0000-4000-8000-000000000000';
 test('normalizes and bounds receiver metadata', () => {
@@ -36,24 +81,20 @@ test('preserves GPS and confirmed location provenance while dropping unknown fie
 test('decodes the tester position from a gateway-realistic environment', () => {
   const frame = {
     time: '2026-09-22T15:36:28.199Z',
-    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+    deviceInfo: { devEui: 'a840410000000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
       deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
     fPort: 1, fCnt: 4, data: 'INlJhJz1BdwMCA==',
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
     txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
   };
-  // The gateway exports CHIRPSTACK_PROFILE_RAK10701, never CHIRPSTACK_PROFILE_FIELD_TESTER.
-  const byId = fromChirpStack(frame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
-  assert.equal(byId.metadata.reported_position.latitude, 46.4999993);
-  assert.equal(byId.metadata.reported_position.longitude, 6.4999982);
+  // Identity is the OSI device type decided by the caller, never the ChirpStack profile.
+  const typed = fromChirpStack(frame, { gatewayPositions: {}, isFieldTester: true });
+  assert.equal(typed.metadata.reported_position.latitude, 46.4999993);
+  assert.equal(typed.metadata.reported_position.longitude, 6.4999982);
+  assert.equal(typed.metadata.reported_position.satellites, 8);
 
-  // Name fallback must match the provisioned name, which is not equal to 'Field Tester'.
-  const byName = fromChirpStack(frame, { gatewayPositions: {}, testerProfileNamePattern: 'field tester' });
-  assert.equal(byName.metadata.reported_position.satellites, 8);
-
-  // A non-tester profile must still decode nothing.
-  const other = fromChirpStack({ ...frame, deviceInfo: { ...frame.deviceInfo, deviceProfileId: 'other', deviceProfileName: 'OSI KIWI Sensor' } },
-    { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  // A device that is not typed as a tester decodes nothing, even on the tester profile.
+  const other = fromChirpStack(frame, { gatewayPositions: {}, isFieldTester: false });
   assert.equal(other.metadata.reported_position, null);
 });
 
@@ -64,13 +105,13 @@ test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position,
   // decodeTesterGps for RAK's own has_gps = (hdop <= 2) && (sats >= 5) gate.
   const zeroFrame = {
     time: '2026-09-22T15:36:28.199Z',
-    deviceInfo: { devEui: 'ac1f09fffe000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
+    deviceInfo: { devEui: 'a840410000000001', deviceProfileId: '9b7c33dd-9d24-47a3-b13e-8b050e0ee6de',
       deviceProfileName: 'OSI RAK Field Tester', applicationId: 'app-field-tester' },
     fPort: 1, fCnt: 1, data: Buffer.alloc(10).toString('base64'),
     rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }],
     txInfo: { frequency: 868100000, modulation: { lora: { spreadingFactor: 12, bandwidth: 125000, codeRate: 'CR_4_5' } } }
   };
-  const row = fromChirpStack(zeroFrame, { gatewayPositions: {}, testerProfileIds: ['9b7c33dd-9d24-47a3-b13e-8b050e0ee6de'] });
+  const row = fromChirpStack(zeroFrame, { gatewayPositions: {}, isFieldTester: true });
   assert.equal(row.metadata.reported_position, null);
   // RSSI and receivers must still be captured -- only the position is dropped,
   // exactly as for any non-tester uplink.
@@ -80,7 +121,7 @@ test('a genuine all-zero ten-byte frame (no GPS fix yet) decodes to no position,
 });
 
 test('a static gateway position is not subject to the gpsd freshness window', () => {
-  const frame = { time: '2026-09-22T15:36:28.199Z', deviceInfo: { devEui: 'ac1f09fffe000001' }, fPort: 1,
+  const frame = { time: '2026-09-22T15:36:28.199Z', deviceInfo: { devEui: 'a840410000000001' }, fPort: 1,
     data: 'INlJhJz1BdwMCA==', rxInfo: [{ gatewayId: '0016C001F1000002', rssi: -93, snr: 7.75 }], txInfo: {} };
   const positions = { '0016C001F1000002': { latitude: 46.5, longitude: 6.5, altitude_m: null,
     source: 'static', last_good_fix_at: '2026-01-01T00:00:00.000Z' } };

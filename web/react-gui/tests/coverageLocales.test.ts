@@ -39,6 +39,7 @@ function readCoverage(locale: string): Record<string, string> {
 const KEYS = [
   'title', 'window', 'windowLastHour', 'windowHours', 'windowDays', 'export',
   'gateway', 'legendStrong', 'legendWeak', 'noPosition', 'noPoints', 'captureOff',
+  'noGpsFix', 'noGpsFixHint',
 ];
 
 /**
