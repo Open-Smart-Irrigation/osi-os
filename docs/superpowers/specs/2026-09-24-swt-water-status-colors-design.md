@@ -21,7 +21,7 @@ Success means:
 - every current SWT channel shown on the three named device-card families has its own blue Wet, green Moist, or red Dry indicator;
 - the Water card's current tension value uses the same classifier;
 - pF display mode changes only the formatted number, never the classification;
-- missing, invalid, faulted, or stale telemetry receives no water-status color;
+- missing, invalid, or faulted telemetry receives no water-status color (stale telemetry: see the 2026-10-18 ruling under Freshness and validity);
 - status remains understandable without color and does not weaken the existing history-button affordance; and
 - SDI-12 Tensiomark contributes tension, rather than being misclassified as volumetric water content, in the Water card.
 
@@ -71,7 +71,7 @@ dry    for 50 < value <= 300
 null   otherwise
 ```
 
-Classification happens before rounding and before `kpaToPf()`. Thus `19.999` is Wet, `20` is Moist, `50` is Moist, and `50.001` is Dry. A numeric string is invalid. Zero is valid Wet even though its pF representation is undefined; when pF mode cannot format zero, the card displays `0.0 kPa` rather than an em dash so a real reading is not hidden.
+Classification happens before rounding and before `kpaToPf()`. Thus `19.999` is Wet, `20` is Moist, `50` is Moist, and `50.001` is Dry. A numeric string is invalid. Zero is valid Wet. pF mode shows a floor of `0.00 pF` for any finite tension at or below `PF_FLOOR_KPA` (0.1 kPa), so a saturated probe at 0 kPa is shown, not hidden (this replaced the original "pF undefined at zero, fall back to `0.0 kPa`" rule).
 
 `summarizeSwtValues()` must delegate to this classifier if it remains exported. It returns a language-neutral status code, with user-visible labels resolved from the existing locale resources. It may not retain a competing 60 kPa boundary or hardcoded English labels.
 
@@ -100,19 +100,19 @@ The locale files nest these labels at `history.soil.state.wet`, `.moist`, and `.
 
 ## Freshness and validity
 
-Superseded 2026-10-18 (owner ruling): the pill shows on the latest stored reading; the card's last-seen line carries the age. Value selection in the zone summary still prefers current contributors.
+Superseded 2026-10-18 (owner ruling, #500): the pill shows on the latest stored reading; the card's last-seen line carries the age. This applies to the device cards and to the Water card: a stale "Soil now" shows the latest stored value and its pill, and the "No reading since …" line carries the age (the separate "Last valid … · time" line is gone). An invalid or faulted reading still shows no value and no pill, and a stale value never gets the trigger-relative line. Value selection in the zone summary still prefers current contributors. Where the text below says "stale … no indicator" or requires a current `last_seen` for the pill, read it as history.
 
 The three-hour `SENSOR_FRESHNESS_WINDOW_MS` remains the age limit for current telemetry. Add a small exported predicate beside that constant so device cards and the zone summary use the same timestamp rule. A reading is current only when `nowMs` is finite, `last_seen` parses to a finite timestamp, and `-5 minutes <= nowMs - observedMs <= 3 hours`. Both endpoints are inclusive. This admits at most five minutes of device clock skew; a timestamp five minutes and one millisecond in the future is not current. Missing, unparseable, and far-future timestamps cannot establish freshness.
 
 A device-card indicator renders only when:
 
 - its raw canonical kPa classifies successfully;
-- the device's `last_seen` is current; and
+- (until 2026-10-18 only) the device's `last_seen` is current; and
 - the device-specific sample is not faulted.
 
 For LSN50 Chameleon channels, `chameleon_i2c_missing`, `chameleon_timeout`, and the matching `chameleon_chN_open` flag suppress status. The existing “No valid Chameleon sample” treatment remains for global I2C and timeout faults. A missing channel value continues to render as unavailable.
 
-`summarizeZoneSoil()` must build a current tension value from current, valid contributors only. If at least one eligible current contributor exists, stale or faulted devices do not enter its mean. If none is current but valid historical snapshots exist, the function retains the last-valid value and timestamp for the existing stale display, which receives no indicator. If reported values exist but all are invalid or faulted, the result remains invalid.
+`summarizeZoneSoil()` must build a current tension value from current, valid contributors only. If at least one eligible current contributor exists, stale or faulted devices do not enter its mean. If none is current but valid historical snapshots exist, the function retains the last-valid value and timestamp for the stale display, which (since the 2026-10-18 ruling) carries the indicator. If reported values exist but all are invalid or faulted, the result remains invalid.
 
 Historical contributors must have parseable observation timestamps older than the three-hour window. Missing, invalid, and future-dated timestamps do not supply a last-valid value or affect its mean. This rule applies per channel. An `SWT_AVG` schedule averages eligible current channels; it does not create a new device-card average. The selected channel and depth behavior stays unchanged.
 
@@ -124,7 +124,7 @@ An otherwise valid measurement with an untrusted timestamp leaves both the value
 
 Each visible SWT tile gets one indicator beside its formatted value. `swt_1` and `swt_2` classify independently. Legacy `swt_wm1` and `swt_wm2` remain compatibility inputs through `canonicalSwtChannels()`.
 
-The numeric value remains the existing history button. The status pill sits beside the button rather than inside a second interactive element. A stale KIWI continues to show its last value and footer timestamp but receives no current-status pill.
+The numeric value remains the existing history button. The status pill sits beside the button rather than inside a second interactive element. A stale KIWI continues to show its last value and footer timestamp; since the 2026-10-18 ruling it keeps the pill of that value.
 
 An unavailable SWT value uses the existing translated unavailable label inside the history button. History remains accessible for a displayed channel even when its latest measurement is missing or outside the valid range. Other KIWI measurement controls keep their existing behavior.
 
@@ -146,7 +146,7 @@ The live SWT values inside `DraginoChameleonSwtSection` are settings-modal diagn
 
 “Soil now” continues to show one selected quantity. Tension takes precedence over volumetric data when both exist. A Tensiomark-only zone now follows the tension path.
 
-For a current valid tension value, render the shared indicator beside the number. For VWC, retain the neutral “Volumetric water content” text and show no VIA color. Stale, missing, and invalid states keep their existing warning and last-valid copy without a status indicator.
+For a valid tension value, render the shared indicator beside the number. For VWC, retain the neutral “Volumetric water content” text and show no VIA color. Missing and invalid states keep their existing warning copy without a value or status indicator. A stale value (2026-10-18 ruling) keeps its number and indicator; the warning line "No reading since …" carries its age and the trigger-relative line is withheld.
 
 Trigger proximity remains a separate neutral line:
 
@@ -184,7 +184,7 @@ Zone-summary tests cover:
 - global LSN50 Chameleon faults;
 - per-channel open flags;
 - requested-channel fallback without a false trigger comparison; and
-- a fully stale set retaining last-valid copy without a status indicator.
+- a fully stale set retaining the last-valid value (with its indicator since the 2026-10-18 ruling).
 
 Component tests cover one Wet, Moist, and Dry channel across the device-card families, a mixed-depth LSN50, missing and stale values, preserved history buttons, a real non-English label, and the Water card showing both fixed VIA status and schedule-relative copy.
 

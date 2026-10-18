@@ -183,9 +183,9 @@ function formatDisplayMode(t: Translate, mode: string | null | undefined): strin
 
 /**
  * Which soil channel the zone's scheduler compares. `threshold_kpa` carries an
- * encoded 1-4 stress level when the metric is DENDRO, and VWC has no edge
- * telemetry column at all, so neither is a tension the soil reading can be
- * judged against.
+ * encoded 1-4 stress level when the metric is DENDRO, and a VWC trigger compares
+ * volumetric percent (SDI-12 `vwc_N`), so neither is a tension the soil
+ * reading can be judged against.
  */
 function triggerChannelOf(metric: string | null | undefined): SoilChannelSelection | null {
   switch (metric) {
@@ -403,13 +403,10 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           })
         : t('zone.water.soil.noReadingYet', { defaultValue: 'No reading yet' })
       : null;
-  const soilLastValid = soilStatusLine !== null && soilValue !== null && soilNow.observedAt
-    ? t('zone.water.soil.lastValid', {
-        value: soilValue,
-        time: dateFormat.dateTime(soilNow.observedAt) ?? soilNow.observedAt,
-        defaultValue: 'Last valid {{value}} · {{time}}',
-      })
-    : null;
+  // Owner ruling 2026-10-18 (#500): the latest stored reading keeps its value
+  // and water-status pill when it is older than three hours; the "No reading
+  // since" line carries its age. An invalid reading shows no value and no pill.
+  const soilShowsValue = !soilNow.invalid && soilValue !== null;
 
   useEffect(() => {
     let cancelled = false;
@@ -740,18 +737,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <p className="text-lg font-semibold text-[var(--text)]">
-                    {soilStatusLine === null ? soilValue ?? '—' : '—'}
+                    {soilShowsValue ? soilValue : '—'}
                   </p>
-                  {soilStatusLine === null && <SwtStatusIndicator status={soilWaterStatus} />}
+                  {soilShowsValue && <SwtStatusIndicator status={soilWaterStatus} />}
                 </div>
                 {soilDescriptor && soilStatusLine === null && (
                   <p className="text-sm text-[var(--text-secondary)]">{soilDescriptor}</p>
                 )}
                 {soilStatusLine && (
                   <p className="text-sm font-semibold text-[var(--warn-text)]">{soilStatusLine}</p>
-                )}
-                {soilLastValid && (
-                  <p className="text-xs text-[var(--text-secondary)]">{soilLastValid}</p>
                 )}
               </div>
             )}
