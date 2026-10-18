@@ -1,0 +1,35 @@
+name: History uPlot Core
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  # web/history-uplot-core is the shared mobile history chart engine. The
+  # edge GUI installs it as a packed copy (web/react-gui/.npmrc
+  # install-links=true), and osi-server vendors it byte for byte, so its own
+  # tests run here rather than only through the GUI suite.
+  history-uplot-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: web/history-uplot-core
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: web/history-uplot-core
+      - name: Unit tests
+        run: npm test
+        working-directory: web/history-uplot-core
+      # Red/green self-test of the cloud vendor parity verifier against a
+      # temporary fixture copy; needs no osi-server checkout.
+      - name: Vendor verifier self-test
+        run: bash scripts/test-verify-history-uplot-vendor.sh

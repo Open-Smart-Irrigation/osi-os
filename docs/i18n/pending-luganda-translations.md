@@ -232,6 +232,19 @@ Tracked in code at `web/react-gui/tests/lorainViewLocales.test.ts`
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
 
+## `history.json` — mobile uPlot history
+
+| Keys | Reason |
+|---|---|
+| `mobileUplot.ranges.*` (4), `mobileUplot.back`, `forward`, `latest`, `sensors`, `unitNotReported`, `loading`, `updating`, `noData`, `allHidden`, `unavailable`, `pinnedReading`, `close`, `aggregation`, `points`, `loadedRange`, `truncated`, `showDay`, `retry`, `failure`, `coverage`, `freshness`, `notLoaded`, `mobileUplot.seriesLegend.*` (6) (32 keys in `history.json`) | Added with the default-off mobile soil history preview and its compact series legend. The `lg` values first shipped on the preview branch were written by implementation agents, not by a human translator, so they were replaced with the English source text. de-CH/es/fr/it/pt carry translations. |
+
+Tracked in code at
+`web/react-gui/src/history/__tests__/historyLocaleValues.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en` and that every `mobileUplot.*` key is listed. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change.
+
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

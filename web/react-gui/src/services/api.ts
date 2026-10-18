@@ -1862,7 +1862,10 @@ export const historyAPI = {
     request: HistoryCardDataRequest,
   ): Promise<HistoryCardDataResponse> => {
     const params = buildHistoryCardDataParams(request);
-    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/data`, { params });
+    const response = await api.get(`/api/history/zones/${zoneId}/cards/${encodeURIComponent(cardId)}/data`, {
+      params,
+      signal: request.signal,
+    });
     return normaliseHistoryCardDataResponse(response.data);
   },
 
@@ -1884,7 +1887,7 @@ export const historyAPI = {
     const params = buildHistoryCardDataParams(request);
     const response = await api.get(
       `/api/history/gateways/${encodeURIComponent(gatewayEui)}/cards/${encodeURIComponent(cardId)}/data`,
-      { params },
+      { params, signal: request.signal },
     );
     return normaliseHistoryCardDataResponse(response.data);
   },

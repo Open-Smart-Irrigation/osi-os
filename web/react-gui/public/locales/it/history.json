@@ -573,5 +573,15 @@
       "button": "Sorgenti",
       "menuLabel": "Sorgenti della scheda"
     }
+  },
+  "mobileUplot": {
+    "ranges": {"day": "24 ore", "week": "7 giorni", "month": "30 giorni", "ninetyDays": "90 giorni"},
+    "back": "Indietro", "forward": "Avanti", "latest": "Ultimo", "sensors": "Sensori",
+    "unitNotReported": "Unità non indicata", "loading": "Caricamento storico…", "updating": "Aggiornamento storico…",
+    "noData": "Nessun dato in questo intervallo.", "allHidden": "Tutte le serie sono nascoste.", "unavailable": "Nessun valore a questo punto",
+    "pinnedReading": "Valore fissato", "close": "Chiudi", "aggregation": "Aggregazione", "points": "Punti",
+    "loadedRange": "Intervallo caricato", "truncated": "Alcuni dati non sono disponibili a questo livello di dettaglio.", "showDay": "Mostra 24 ore",
+    "retry": "Riprova", "failure": "Storico non disponibile", "coverage": "Copertura", "freshness": "Aggiornamento", "notLoaded": "Non caricato",
+    "seriesLegend": {"legend": "Legenda", "showAll": "Mostra tutto", "plottedSeries": "Serie visualizzate", "seriesCount": "Serie: {{count}}", "focusAnnouncement": "In evidenza: {{label}}", "allSeriesAnnouncement": "Tutte le serie sono visualizzate"}
   }
 }

@@ -136,22 +136,22 @@ export const HistoryDetailHeader: React.FC<HistoryDetailHeaderProps> = ({
                   {t('history.settings.advancedView')}
                 </button>
               )}
-              <button
+              {onResetRange && <button
                 type="button"
                 role="menuitem"
                 className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
                 onClick={onResetRange}
               >
                 {t('history.settings.resetRange')}
-              </button>
-              <button
+              </button>}
+              {onRefresh && <button
                 type="button"
                 role="menuitem"
                 className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-[var(--text)] hover:bg-[var(--secondary-bg)]"
                 onClick={onRefresh}
               >
                 {t('history.settings.refresh')}
-              </button>
+              </button>}
             </div>
             </>
           )}
