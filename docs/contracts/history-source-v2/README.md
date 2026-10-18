@@ -68,8 +68,8 @@ checkout to verify that parity; the default cloud root is the sibling
 override:
 
 ```text
-HISTORY_SOURCE_CLOUD_ROOT=/home/phil/Repos/osi-server/.worktrees/source-preserving-history \
-  node scripts/verify-history-source-v2-fixtures.js
+export HISTORY_SOURCE_CLOUD_ROOT=/path/to/osi-server-worktree
+node scripts/verify-history-source-v2-fixtures.js
 ```
 
 No private field CSV or customer identity belongs in either copy.
