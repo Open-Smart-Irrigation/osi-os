@@ -1,0 +1,61 @@
+{
+  "id": "alarm-only",
+  "truthRows": [
+    "T8"
+  ],
+  "description": "A heavy-rain alarm frame: status 1, type 3, 90 seconds between the last two tips. It carries no rain block and no amount.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000019",
+      "devAddr": "01000001",
+      "fCnt": 80,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000020",
+      "devAddr": "01000001",
+      "fCnt": 81,
+      "time": "2026-10-08T10:07:30.000Z",
+      "fPort": 2,
+      "bytesHex": "0b0103005a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": false,
+        "tips": null,
+        "amount_mm": null,
+        "frame_kind": "alarm",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "alarm_event",
+        "alarm_value": 90
+      }
+    ],
+    "spans": []
+  }
+}

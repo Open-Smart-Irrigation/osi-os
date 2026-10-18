@@ -11,6 +11,9 @@ const { DatabaseSync } = require('node:sqlite');
 const journal = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal'
 );
+const scopeHelper = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
+);
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
@@ -25,6 +28,8 @@ const PLOT_UUID = '33333333-3333-4333-8333-333333333333';
 const SECOND_PLOT_UUID = '66666666-6666-4666-8666-666666666666';
 const VOCAB_UUID = '77777777-7777-4777-8777-777777777777';
 const GROUP_UUID = '88888888-8888-4888-8888-888888888888';
+const BATCH_ENTRY_UUID = 'aaaaaaaa-1111-4111-8111-111111111111';
+const SECOND_BATCH_ENTRY_UUID = 'aaaaaaaa-2222-4222-8222-222222222222';
 const ZONE_UUID = '44444444-4444-4444-8444-444444444444';
 const SEASON_UUID = '55555555-5555-4555-8555-555555555555';
 const GATEWAY_EUI = '0016C001F11715E2';
@@ -821,6 +826,402 @@ test('UPSERT_JOURNAL_ENTRY applies through lifecycle and atomically records nume
     assert.equal(ack.commandId, 101);
     assert.equal(typeof ack.commandId, 'number');
     assert.equal(await db.get('SELECT COUNT(*) AS n FROM sync_outbox').then((row) => row.n), 1);
+  } finally {
+    db.close();
+  }
+});
+
+function batchCommandEnvelope(overrides, options) {
+  options = options || {};
+  const batchUuid = options.batchUuid || '99999999-9999-4999-8999-999999999999';
+  const source = entryAggregate({ batch_uuid: batchUuid });
+  const shared = {
+    activity_code: source.activity_code,
+    template_code: source.template_code,
+    template_version: source.template_version,
+    layout_code: source.layout_code,
+    layout_version: source.layout_version,
+    catalog_version: source.catalog_version,
+    occurred_start: source.occurred_start,
+    occurred_end: source.occurred_end,
+    occurred_timezone: source.occurred_timezone,
+    occurred_utc_offset_minutes: source.occurred_utc_offset_minutes,
+    device_eui: source.device_eui,
+    season_crop: source.season_crop,
+    season_variety: source.season_variety,
+    campaign_uuid: source.campaign_uuid,
+    protocol_code: source.protocol_code,
+    protocol_version: source.protocol_version,
+    observation_unit_code: source.observation_unit_code,
+    pass_uuid: source.pass_uuid,
+    note: source.note,
+    values: source.values,
+  };
+  const members = options.members || [{
+    entry_uuid: BATCH_ENTRY_UUID, base_sync_version: 0, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null,
+  }];
+  const payload = {
+    command_id: LOGICAL_COMMAND_UUID,
+    command_type: 'UPSERT_JOURNAL_ENTRY_BATCH',
+    contract_version: 1,
+    owner_user_uuid: OWNER_UUID,
+    author_principal_uuid: ACTOR_UUID,
+    author_label: 'Cloud researcher',
+    batch_uuid: batchUuid,
+    base_sync_version: 0,
+    effect_key: 'journal_entry_batch:' + batchUuid + ':0',
+    shared,
+    members,
+  };
+  payload.submitted_intent_hash = journal.submittedIntentHash(payload.command_type, payload);
+  return Object.assign({ commandId: 811, commandType: payload.command_type, payload }, overrides || {});
+}
+
+async function journalRowCounts(db) {
+  const count = async (table) => (await db.get('SELECT COUNT(*) AS n FROM ' + table)).n;
+  return {
+    entries: await count('journal_entries'),
+    values: await count('journal_entry_values'),
+    outbox: await count('sync_outbox'),
+    applied: await count('applied_commands'),
+    acks: await count('command_ack_outbox'),
+  };
+}
+
+function addSecondPlot(db, ownerUuid) {
+  const now = '2026-07-12T00:00:00.000Z';
+  db.native.prepare(
+    'INSERT INTO journal_plots(' +
+      'plot_uuid,plot_code,name,zone_uuid,gateway_device_eui,owner_user_uuid' +
+      ') VALUES (?,?,?,?,?,?)'
+  ).run(SECOND_PLOT_UUID, 'south-field', 'South field', ZONE_UUID, GATEWAY_EUI, ownerUuid);
+  db.native.prepare(
+    'INSERT INTO journal_plot_settings(' +
+      'plot_uuid,layout_code,updated_at,updated_by_principal_uuid' +
+      ') VALUES (?,?,?,?)'
+  ).run(SECOND_PLOT_UUID, 'open_field', now, ACTOR_UUID);
+}
+
+function twoMembers() {
+  return [
+    { entry_uuid: BATCH_ENTRY_UUID, base_sync_version: 0, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null },
+    { entry_uuid: SECOND_BATCH_ENTRY_UUID, base_sync_version: 0, plot_uuid: SECOND_PLOT_UUID, cycle_uuid: null, cycle_action: null },
+  ];
+}
+
+test('UPSERT_JOURNAL_ENTRY_BATCH commits its members, ledger and one receipt atomically', async () => {
+  const db = fixtureDb('batch-applied');
+  try {
+    addSecondPlot(db, OWNER_UUID);
+    const envelope = batchCommandEnvelope({}, { members: twoMembers() });
+    const result = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.handled, true);
+    assert.equal(result.ack.commandId, 811);
+    assert.equal(result.ack.result, 'APPLIED');
+    assert.equal(result.ack.batchUuid, '99999999-9999-4999-8999-999999999999');
+    assert.equal(result.ack.effectKey, 'journal_entry_batch:99999999-9999-4999-8999-999999999999:0');
+    assert.deepEqual(result.ack.members.map((member) => member.plotUuid), [PLOT_UUID, SECOND_PLOT_UUID]);
+    for (const member of result.ack.members) {
+      assert.equal(member.syncVersion, 1);
+      assert.match(member.payloadHash, /^[0-9a-f]{64}$/);
+      const entry = await db.get('SELECT * FROM journal_entries WHERE entry_uuid=?', [member.entryUuid]);
+      assert.equal(entry.batch_uuid, '99999999-9999-4999-8999-999999999999');
+      assert.equal(entry.owner_user_uuid, OWNER_UUID);
+      assert.equal(entry.origin, 'cloud-ui');
+    }
+    assert.deepEqual(await journalRowCounts(db), { entries: 2, values: 2, outbox: 2, applied: 1, acks: 1 });
+    const applied = await db.get('SELECT * FROM applied_commands WHERE command_id=?', ['811']);
+    assert.equal(applied.command_type, 'UPSERT_JOURNAL_ENTRY_BATCH');
+    assert.deepEqual(JSON.parse(applied.result_detail), result.ack);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH exact replay returns the stored receipt without new writes', async () => {
+  const db = fixtureDb('batch-replay');
+  try {
+    const envelope = batchCommandEnvelope({ commandId: 812 });
+    const first = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    const before = await journalRowCounts(db);
+    const replay = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.deepEqual(replay.ack, first.ack);
+    const after = await journalRowCounts(db);
+    assert.equal(after.entries, before.entries);
+    assert.equal(after.values, before.values);
+    assert.equal(after.outbox, before.outbox);
+    assert.equal(after.applied, before.applied);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH rejects a changed intent at its same effect key without writes', async () => {
+  const db = fixtureDb('batch-intent-conflict');
+  try {
+    await journal.applyJournalCommand(db, batchCommandEnvelope({ commandId: 813 }), { gateway_device_eui: GATEWAY_EUI });
+    const changed = batchCommandEnvelope({ commandId: 814 });
+    changed.payload.shared.note = 'Changed after first submit';
+    changed.payload.submitted_intent_hash = journal.submittedIntentHash(changed.commandType, changed.payload);
+    const result = await journal.applyJournalCommand(db, changed, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'idempotency_conflict');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 1);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses a submitted intent hash that does not match its payload', async () => {
+  const db = fixtureDb('batch-intent-hash');
+  try {
+    const envelope = batchCommandEnvelope({ commandId: 816 });
+    envelope.payload.submitted_intent_hash = 'f'.repeat(64);
+    const result = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'invalid_intent_hash');
+    const counts = await journalRowCounts(db);
+    assert.equal(counts.entries, 0);
+    assert.equal(counts.outbox, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses unordered, rebased, repeated or out-of-contract members without writes', async () => {
+  const db = fixtureDb('batch-malformed');
+  try {
+    addSecondPlot(db, OWNER_UUID);
+    const unordered = batchCommandEnvelope({ commandId: 817 }, { members: twoMembers().reverse() });
+    const result = await journal.applyJournalCommand(db, unordered, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'malformed_command');
+    const rebased = batchCommandEnvelope({ commandId: 818 }, {
+      members: [{ entry_uuid: BATCH_ENTRY_UUID, base_sync_version: 3, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null }],
+    });
+    const second = await journal.applyJournalCommand(db, rebased, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(second.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(second.ack.reason, 'malformed_command');
+    const samePlot = batchCommandEnvelope({ commandId: 820 }, {
+      members: [
+        { entry_uuid: BATCH_ENTRY_UUID, base_sync_version: 0, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null },
+        { entry_uuid: SECOND_BATCH_ENTRY_UUID, base_sync_version: 0, plot_uuid: PLOT_UUID, cycle_uuid: null, cycle_action: null },
+      ],
+    });
+    const third = await journal.applyJournalCommand(db, samePlot, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(third.ack.reason, 'malformed_command');
+    const smuggled = batchCommandEnvelope({ commandId: 821 });
+    smuggled.payload.shared.status = 'draft';
+    smuggled.payload.shared.owner_user_uuid = SECOND_OWNER_UUID;
+    smuggled.payload.submitted_intent_hash = journal.submittedIntentHash(smuggled.commandType, smuggled.payload);
+    const fourth = await journal.applyJournalCommand(db, smuggled, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(fourth.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(fourth.ack.reason, 'malformed_command');
+    assert.equal((await journalRowCounts(db)).entries, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH never writes a member on a plot the named owner does not own', async () => {
+  const db = fixtureDb('batch-foreign-plot');
+  try {
+    db.native.prepare(
+      'INSERT INTO users(id,username,password_hash,created_at,user_uuid) VALUES (?,?,?,?,?)'
+    ).run(2, 'journal-foreign', 'unused', '2026-07-12T00:00:00.000Z', SECOND_OWNER_UUID);
+    addSecondPlot(db, SECOND_OWNER_UUID);
+    const envelope = batchCommandEnvelope({ commandId: 819 }, { members: twoMembers() });
+    const result = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    const counts = await journalRowCounts(db);
+    assert.equal(counts.entries, 0);
+    assert.equal(counts.values, 0);
+    assert.equal(counts.outbox, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses a member entry UUID another batch already wrote', async () => {
+  const db = fixtureDb('batch-reused-entry');
+  try {
+    await journal.applyJournalCommand(db, batchCommandEnvelope({ commandId: 830 }), { gateway_device_eui: GATEWAY_EUI });
+    const before = await journalRowCounts(db);
+    const reused = batchCommandEnvelope({ commandId: 831 }, { batchUuid: '98989898-9898-4898-8898-989898989898' });
+    const result = await journal.applyJournalCommand(db, reused, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'idempotency_conflict');
+    const after = await journalRowCounts(db);
+    assert.equal(after.entries, before.entries);
+    assert.equal(after.outbox, before.outbox);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses a pass UUID, which would drop member crop-cycle choices', async () => {
+  const db = fixtureDb('batch-pass-uuid');
+  try {
+    addSecondPlot(db, OWNER_UUID);
+    const members = twoMembers();
+    members[1].cycle_action = 'new';
+    const envelope = batchCommandEnvelope({ commandId: 832 }, { members });
+    envelope.payload.shared.pass_uuid = '97979797-9797-4797-8797-979797979797';
+    envelope.payload.submitted_intent_hash = journal.submittedIntentHash(envelope.commandType, envelope.payload);
+    const result = await journal.applyJournalCommand(db, envelope, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'malformed_command');
+    assert.equal((await journalRowCounts(db)).entries, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH refuses an effect key that does not name its batch', async () => {
+  const db = fixtureDb('batch-effect-key');
+  try {
+    const wrong = batchCommandEnvelope({ commandId: 833 });
+    wrong.payload.effect_key = 'journal_entry_batch:98989898-9898-4898-8898-989898989898:0';
+    const result = await journal.applyJournalCommand(db, wrong, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(result.ack.reason, 'invalid_effect_key');
+    const missing = batchCommandEnvelope({ commandId: 834 });
+    delete missing.payload.effect_key;
+    const second = await journal.applyJournalCommand(db, missing, { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(second.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(second.ack.reason, 'invalid_effect_key');
+    assert.equal((await journalRowCounts(db)).entries, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('UPSERT_JOURNAL_ENTRY_BATCH rolls back members and ledger when ACK persistence faults', async () => {
+  const db = fixtureDb('batch-ack-fault');
+  try {
+    const run = db.run.bind(db);
+    db.run = function(sql, params) {
+      if (/INSERT INTO command_ack_outbox/.test(sql)) {
+        const error = new Error('injected ACK outbox fault');
+        error.code = 'SQLITE_IOERR';
+        return Promise.reject(error);
+      }
+      return run(sql, params);
+    };
+    await journal.applyJournalCommand(db, batchCommandEnvelope({ commandId: 815 }), {
+      gateway_device_eui: GATEWAY_EUI,
+    }).catch(() => null);
+    const counts = await journalRowCounts(db);
+    assert.equal(counts.entries, 0);
+    assert.equal(counts.values, 0);
+    assert.equal(counts.outbox, 0);
+    assert.equal((await db.get("SELECT COUNT(*) AS n FROM applied_commands WHERE result='APPLIED'")).n, 0);
+  } finally {
+    db.close();
+  }
+});
+
+function withScopedAccess(t) {
+  const previous = process.env.OSI_SCOPED_ACCESS;
+  process.env.OSI_SCOPED_ACCESS = '1';
+  scopeHelper._resetForTests();
+  t.after(() => {
+    if (previous === undefined) delete process.env.OSI_SCOPED_ACCESS;
+    else process.env.OSI_SCOPED_ACCESS = previous;
+    scopeHelper._resetForTests();
+  });
+}
+
+function addLocalAuthor(db, role) {
+  db.native.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,user_uuid,role) VALUES (?,?,?,?,?,?)'
+  ).run(3, 'cloud-researcher', 'unused', '2026-07-12T00:00:00.000Z', ACTOR_UUID, role);
+}
+
+function farmWideCommand(commandId, entryUuid) {
+  const entry = entryAggregate({
+    entry_uuid: entryUuid,
+    plot_uuid: null,
+    zone_uuid: null,
+    season_uuid: null,
+    season_crop: null,
+    season_variety: null,
+  });
+  return commandEnvelope({
+    commandId,
+    payload: Object.assign({}, commandEnvelope().payload, {
+      effect_key: 'journal_entry:' + entryUuid + ':0',
+      entry,
+    }),
+  });
+}
+
+test('scoped mode: a cloud farm-wide entry from an author who is neither farm owner nor admin is refused', async (t) => {
+  withScopedAccess(t);
+  const db = fixtureDb('scoped-farm-wide-command');
+  try {
+    addLocalAuthor(db, 'researcher');
+    const farmWideUuid = 'aaaaaaaa-3333-4333-8333-333333333333';
+    const refusedUuid = 'aaaaaaaa-5555-4555-8555-555555555555';
+    const refused = await journal.applyJournalCommand(db, farmWideCommand(901, refusedUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(refused.ack.result, 'REJECTED_PERMANENT');
+    assert.equal(refused.ack.reason, 'scope_denied');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM journal_entries')).n, 0);
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM sync_outbox')).n, 0);
+
+    // A plot entry by the same author is unaffected.
+    const plotEntry = await journal.applyJournalCommand(db, commandEnvelope({ commandId: 902 }), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(plotEntry.ack.result, 'APPLIED', JSON.stringify(plotEntry.ack));
+
+    // Once the author is the linked farm owner, a farm-wide entry applies.
+    db.native.prepare(
+      "UPDATE users SET server_url='https://cloud.example.test', server_linked_at='2026-07-13T00:00:00.000Z' " +
+        'WHERE user_uuid=?'
+    ).run(ACTOR_UUID);
+    const applied = await journal.applyJournalCommand(db, farmWideCommand(903, farmWideUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    });
+    assert.equal(applied.ack.result, 'APPLIED', JSON.stringify(applied.ack));
+    const adminVoidUuid = 'aaaaaaaa-6666-4666-8666-666666666666';
+    assert.equal((await journal.applyJournalCommand(db, farmWideCommand(907, adminVoidUuid), {
+      gateway_device_eui: GATEWAY_EUI,
+    })).ack.result, 'APPLIED');
+
+    // Its void needs the owner or an admin too.
+    db.native.prepare('UPDATE users SET server_url=NULL WHERE user_uuid=?').run(ACTOR_UUID);
+    const voidRefused = await journal.applyJournalCommand(db,
+      pendingCommand(904, 'VOID_JOURNAL_ENTRY', 'journal_entry:' + farmWideUuid + ':1', {
+        entry_uuid: farmWideUuid,
+        base_sync_version: 1,
+        reason: 'Recorded twice',
+      }), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(voidRefused.ack.reason, 'scope_denied');
+    assert.equal((await db.get('SELECT status FROM journal_entries WHERE entry_uuid=?', [farmWideUuid])).status,
+      'final');
+    db.native.prepare("UPDATE users SET role='admin' WHERE user_uuid=?").run(ACTOR_UUID);
+    const voided = await journal.applyJournalCommand(db,
+      pendingCommand(905, 'VOID_JOURNAL_ENTRY', 'journal_entry:' + adminVoidUuid + ':1', {
+        entry_uuid: adminVoidUuid,
+        base_sync_version: 1,
+        reason: 'Recorded twice',
+      }), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(voided.ack.result, 'APPLIED', JSON.stringify(voided.ack));
+  } finally {
+    db.close();
+  }
+});
+
+test('flag off: a cloud farm-wide entry applies as before', async () => {
+  const db = fixtureDb('flag-off-farm-wide-command');
+  try {
+    const applied = await journal.applyJournalCommand(db,
+      farmWideCommand(906, 'aaaaaaaa-4444-4444-8444-444444444444'), { gateway_device_eui: GATEWAY_EUI });
+    assert.equal(applied.ack.result, 'APPLIED');
   } finally {
     db.close();
   }

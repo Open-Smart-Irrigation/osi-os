@@ -1,5 +1,12 @@
-import axios from 'axios';
-import { notifyAuthExpired } from './authEvents';
+import axios, { type GenericAbortSignal, type InternalAxiosRequestConfig } from 'axios';
+import {
+  StaleSessionRequestError,
+  currentSessionSignal,
+  expireAuthSession,
+  getAuthSession,
+  isCurrentAuthSession,
+  type AuthSessionSnapshot,
+} from './authSession';
 import type {
   AnalysisCatalogResponse,
   AnalysisSeriesRequest,
@@ -35,7 +42,8 @@ import type {
   HistoryWorkspaceRecord,
 } from '../history/types';
 import { migrateHistoryWorkspace } from '../history/workspaceModel';
-import type { RainDay } from '../utils/rain';
+import { parseRainHistory, type RainHistory } from '../utils/rain';
+import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
 import type {
   Device,
   LoginRequest,
@@ -158,47 +166,109 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to attach Authorization token
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /**
+     * The session a request belongs to (#378). Set it on work that is queued
+     * or sent later (services/authSession.ts SessionBoundRequest); the request
+     * interceptor records the current session on every other request.
+     */
+    authSession?: AuthSessionSnapshot;
+    /**
+     * A credential request (login, register): it is sent without the
+     * session's token, and its 401 is a credential error, not the end of a
+     * session, so a wrong password neither signs out the current session nor
+     * remounts the login page.
+     */
+    skipAuthExpiry?: boolean;
+  }
+}
+
+const rejectStaleSessionRequest = (): Promise<never> =>
+  Promise.reject(new StaleSessionRequestError());
+
+function abortWithSession(own: GenericAbortSignal | undefined, session: AbortSignal): GenericAbortSignal {
+  if (!own) return session;
+  if (typeof AbortSignal.any === 'function' && own instanceof AbortSignal) {
+    return AbortSignal.any([own, session]);
+  }
+  // Fallback without AbortSignal.any: the first abort removes both listeners.
+  const either = new AbortController();
+  if (own.aborted || session.aborted) {
+    either.abort();
+    return either.signal;
+  }
+  const abort = () => {
+    own.removeEventListener?.('abort', abort);
+    session.removeEventListener('abort', abort);
+    either.abort();
+  };
+  own.addEventListener?.('abort', abort);
+  session.addEventListener('abort', abort);
+  return either.signal;
+}
+
+// Binds each request to its session at creation. Synchronous so the session
+// is read when the caller creates the request, not a microtask later; a
+// synchronous interceptor that throws would still dispatch, so a stale
+// request is refused by replacing its adapter instead. Every request also
+// carries the epoch's abort signal: ending the session cancels it.
 api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      if (!config.headers) {
-        config.headers = {} as any;
-      }
-      config.headers['Authorization'] = `Bearer ${token}`;
+  (config: InternalAxiosRequestConfig) => {
+    const captured = config.authSession;
+    if (captured && !isCurrentAuthSession(captured)) {
+      config.adapter = rejectStaleSessionRequest;
+      return config;
+    }
+    if (config.skipAuthExpiry) {
+      // A credential request (login, register) belongs to no session: it
+      // carries no session's token, and a session ending while it is in
+      // flight does not cancel it (the login operation fence decides
+      // whether its result may commit).
+      config.authSession = undefined;
+      return config;
+    }
+    config.signal = abortWithSession(config.signal, currentSessionSignal());
+    const session = captured ?? getAuthSession();
+    const bearer = session.token ? `Bearer ${session.token}` : null;
+    const explicit = config.headers.get('Authorization');
+    if (explicit) {
+      // Never replace an Authorization the caller set. Only a header that is
+      // this session's own token lets a 401 end the session.
+      config.authSession = explicit === bearer ? session : undefined;
+    } else {
+      config.authSession = session;
+      if (bearer) config.headers.set('Authorization', bearer);
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  undefined,
+  { synchronous: true },
 );
 
-// Response interceptor to handle auth errors
+// A 401 ends the session only when it answers a request sent with the
+// current session's token, and never for the credential endpoints.
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('username');
-      notifyAuthExpired();
+    if (error?.response?.status === 401 && !error.config?.skipAuthExpiry) {
+      expireAuthSession(error.config?.authSession);
     }
     return Promise.reject(error);
-  }
+  },
 );
+
+const CREDENTIAL_REQUEST = { skipAuthExpiry: true } as const;
 
 // Auth API
 export const authAPI = {
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
-    const response = await api.post<LoginResponse>('/auth/login', credentials);
+    const response = await api.post<LoginResponse>('/auth/login', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 
   register: async (credentials: RegisterRequest): Promise<RegisterResponse> => {
-    const response = await api.post<RegisterResponse>('/auth/register', credentials);
+    const response = await api.post<RegisterResponse>('/auth/register', credentials, CREDENTIAL_REQUEST);
     return response.data;
   },
 };
@@ -655,6 +725,21 @@ export const irrigationZonesAPI = {
   disableAllSchedules: async (): Promise<{ disabledSchedules: number }> => {
     const response = await api.post<{ disabledSchedules?: number }>('/api/irrigation-zones/schedules/disable-all');
     return { disabledSchedules: Number(response.data?.disabledSchedules ?? 0) };
+  },
+};
+
+// A zone's rain gauge: which of the gauges reporting for the zone measures its
+// rain. PUT { deveui } chooses one of the candidates; null clears the choice.
+// The gateway re-projects the zone's last 30 days on a change.
+export const zoneRainSourceAPI = {
+  get: async (zoneId: number): Promise<ZoneRainSource> => {
+    const response = await api.get<unknown>(`/api/irrigation-zones/${zoneId}/rain-source`);
+    return normaliseZoneRainSource(response.data);
+  },
+
+  set: async (zoneId: number, deveui: string | null): Promise<ZoneRainSource> => {
+    const response = await api.put<unknown>(`/api/irrigation-zones/${zoneId}/rain-source`, { deveui });
+    return normaliseZoneRainSource(response.data);
   },
 };
 
@@ -1169,7 +1254,8 @@ function normaliseZoneRecommendation(row: any): ZoneRecommendation {
     zone_id: row.zone_id,
     date: row.date,
     zone_stress_summary: row.zone_stress_summary ?? 'none',
-    rainfall_mm: row.rainfall_mm ?? 0,
+    // Unknown rain stays null (rain-resolution policy), never 0.
+    rainfall_mm: row.rainfall_mm ?? null,
     water_delivered_liters: row.water_delivered_liters ?? 0,
     irrigation_action: row.irrigation_action ?? 'maintain',
     action_reasoning: row.action_reasoning ?? '',
@@ -1232,23 +1318,11 @@ export const sensorAPI = {
     );
     return response.data;
   },
-  // Daily rainfall totals bucketed by local calendar day on the edge.
-  // tzOffsetMin: minutes east of UTC (use localTzOffsetMinutes()).
-  getDailyRainHistory: async (deveui: string, days: number, tzOffsetMin: number): Promise<RainDay[]> => {
-    const response = await api.get<unknown>(
-      `/api/devices/${deveui}/rain-history`,
-      { params: { days, tz_offset_min: tzOffsetMin } }
-    );
-    const rows = Array.isArray(response.data) ? response.data : [];
-    return rows.flatMap((row): RainDay[] => {
-      if (typeof row !== 'object' || row === null) return [];
-      const record = row as Record<string, unknown>;
-      const day = String(record.day ?? '');
-      const totalMm = Number(record.total_mm);
-      const samples = Number(record.samples);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(totalMm)) return [];
-      return [{ day, total_mm: totalMm, samples: Number.isFinite(samples) ? samples : 0 }];
-    });
+  // Daily rainfall totals over the farm's own days: the gateway buckets them
+  // in the device's zone timezone. No browser offset is sent.
+  getDailyRainHistory: async (deveui: string, days: number): Promise<RainHistory> => {
+    const response = await api.get<unknown>(`/api/devices/${deveui}/rain-history`, { params: { days } });
+    return parseRainHistory(response.data);
   },
 };
 
@@ -1741,6 +1815,10 @@ export const analysisAPI = {
     const response = await api.post<unknown>('/api/analysis/views', toEdgeAnalysisViewPayload(request));
     return adaptEdgeSavedViewResponse(response.data);
   },
+
+  deleteView: async (id: number): Promise<void> => {
+    await api.delete(`/api/analysis/views/${id}`);
+  },
 };
 
 export const historyAPI = {
@@ -1857,7 +1935,80 @@ export const historyAPI = {
   },
 };
 
-export type ZoneExportGranularity = 'raw' | 'hourly' | 'daily';
+export type HistoryExportGranularity = 'raw' | 'hourly' | 'daily';
+export type ZoneExportGranularity = HistoryExportGranularity;
+
+async function downloadHistoryCsv(
+  endpoint: string,
+  params: Record<string, string>,
+  filename: string,
+): Promise<void> {
+  const response = await api.get(endpoint, { params, responseType: 'blob' });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+// A refused or failed CSV export: the HTTP status (null without an answer)
+// and the gateway's suggestion, read from the JSON error body that arrives as
+// a Blob because the request asks for one.
+export class HistoryExportError extends Error {
+  readonly status: number | null;
+  readonly suggestion: string | null;
+
+  constructor(message: string, status: number | null, suggestion: string | null) {
+    super(message);
+    this.name = 'HistoryExportError';
+    this.status = status;
+    this.suggestion = suggestion;
+  }
+}
+
+async function toHistoryExportError(error: unknown): Promise<HistoryExportError> {
+  const response = (error as { response?: { status?: unknown; data?: unknown } } | null)?.response;
+  const status = typeof response?.status === 'number' ? response.status : null;
+  let message = error instanceof Error ? error.message : 'export failed';
+  let suggestion: string | null = null;
+  const data = response?.data;
+  try {
+    const text = data instanceof Blob ? await data.text() : typeof data === 'string' ? data : null;
+    const body = text ? JSON.parse(text) as { error?: unknown; suggestion?: unknown } : null;
+    if (body && typeof body.error === 'string') message = body.error;
+    if (body && typeof body.suggestion === 'string') suggestion = body.suggestion;
+  } catch {
+    // A body that is not JSON keeps the status alone.
+  }
+  return new HistoryExportError(message, status, suggestion);
+}
+
+export const historyExportAPI = {
+  downloadAllZones: async (opts: {
+    from: string;
+    to: string;
+    granularity: HistoryExportGranularity;
+  }): Promise<void> => {
+    try {
+      await downloadHistoryCsv(
+        '/api/history/export.csv',
+        {
+          scope: 'allZones',
+          from: opts.from,
+          to: opts.to,
+          granularity: opts.granularity,
+        },
+        `all-zones-${opts.from}_${opts.to}-${opts.granularity}.csv`,
+      );
+    } catch (error) {
+      throw await toHistoryExportError(error);
+    }
+  },
+};
 
 export const zoneExportAPI = {
   download: async (
@@ -1870,19 +2021,11 @@ export const zoneExportAPI = {
       granularity: opts.granularity,
     };
     if (opts.channels?.length) params.channels = opts.channels.join(',');
-    const response = await api.get(`/api/history/zones/${zoneId}/export.csv`, {
+    await downloadHistoryCsv(
+      `/api/history/zones/${zoneId}/export.csv`,
       params,
-      responseType: 'blob',
-    });
-    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `zone-${zoneId}-${opts.from}_${opts.to}-${opts.granularity}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+      `zone-${zoneId}-${opts.from}_${opts.to}-${opts.granularity}.csv`,
+    );
   },
 };
 

@@ -102,12 +102,12 @@ function sha256Hex(input: string): string {
 }
 
 export function analysisSeriesIdFromParts(
-  zoneId: number,
+  zoneId: number | null | string,
   cardType: string,
   sourceKey: string,
   channelKey: string,
 ): string {
-  return sha256Hex(`${zoneId}|${cardType}|${sourceKey}|${channelKey}`).slice(0, 16);
+  return sha256Hex(`${zoneId === null ? 'unassigned' : zoneId}|${cardType}|${sourceKey}|${channelKey}`).slice(0, 16);
 }
 
 function legacySeriesIdMap(catalogEntries: AnalysisCatalogEntry[]): Map<string, string> {
@@ -116,7 +116,7 @@ function legacySeriesIdMap(catalogEntries: AnalysisCatalogEntry[]): Map<string, 
   for (const entry of catalogEntries) {
     for (const legacyChannel of legacyAliasesFor(entry.channelKey)) {
       legacyIds.set(
-        analysisSeriesIdFromParts(entry.zoneId, entry.cardType, entry.sourceKey, legacyChannel),
+        analysisSeriesIdFromParts(entry.zoneId === null ? 'unassigned' : entry.zoneId, entry.cardType, entry.sourceKey, legacyChannel),
         entry.seriesId,
       );
     }

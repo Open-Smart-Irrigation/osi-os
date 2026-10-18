@@ -1,0 +1,92 @@
+{
+  "navLabel": "Obuyambi n'okusaba",
+  "title": "Obuyambi n'okusaba",
+  "backToDashboard": "Ddayo ku Dashboard",
+  "empty": "Tewali kusaba okuliwo.",
+  "form": {
+    "stepRequest": "1. Ebigambo by'okusaba",
+    "stepArea": "2. Ekitundu n'obukulu",
+    "stepDiagnostics": "3. Okukebera n'okukkiriza",
+    "summary": "Omutwe omumpi",
+    "description": "Kiki ekirina okulongoosebwa?",
+    "contactEmail": "Email ey'okukutuukako (si ya buwaze)",
+    "expected": "Ekisuubirwa",
+    "actual": "Ekiriwo",
+    "steps": "Emitendera",
+    "requestType": "Ekika ky'okusaba",
+    "area": "Ekitundu",
+    "severity": "Obukulu",
+    "diagnostics": "Ebikwata ku kukebera",
+    "includeDiagnostics": "Teekako ebikwata ku kyuma ebitali bya kyama.",
+    "consentPublic": "Nzikiriza okusaba kuno kugabanyizibwe mu lujjudde awatali bikwata ku faamu eby'ekyama.",
+    "submit": "Tereka okusaba",
+    "submitting": "Kutereka..."
+  },
+  "types": {
+    "bug": "Ekizibu",
+    "improvement": "Okulongoosa",
+    "feedback": "Ebirowoozo"
+  },
+  "areas": {
+    "dashboard": "Dashboard",
+    "history": "Ebyafaayo",
+    "analysis": "Okwekenneenya",
+    "copy": "Ebigambo n'ennyiriri",
+    "watering": "Okufukirira",
+    "sync": "Okusinkroniza",
+    "devices": "Ebyuma",
+    "system": "Enkola",
+    "other": "Ekirala"
+  },
+  "severity": {
+    "cant_work": "Omulimu tegusoboka",
+    "workaround": "Waliwo engeri endala",
+    "annoying": "Kinyiza",
+    "idea": "Ekirowoozo"
+  },
+  "diagnostics": {
+    "loading": "Ebikwata ku kukebera bitikkibwa...",
+    "unavailable": "Ebikwata ku kukebera tebiriwo kati."
+  },
+  "banners": {
+    "retryable": "Tekisobodde kusindikibwa kati. Osobola okugezaako nate."
+  },
+  "status": {
+    "QUEUED": "Kiterekeddwa, kirindiridde yintaneeti",
+    "SUBMITTED": "Kisindikiddwa",
+    "SYNCED": "Kisinkroniziddwa",
+    "FAILED_RETRYABLE": "Kyetaaga okugezaako nate",
+    "FAILED_PERMANENT": "Tekisobodde kusindikibwa",
+    "AWAITING_PUBLISH": "Kirindiridde kufulumizibwa",
+    "PUBLISHING": "Kifulumizibwa",
+    "PUBLISH_BLOCKED_CONFIG": "Okufulumya kuzibiddwa",
+    "PUBLISH_BLOCKED_SECRET": "Okufulumya kuzibiddwa",
+    "TRIAGED": "Kyekebejjebwa",
+    "BEING_REVIEWED": "Kyekebejjebwa",
+    "NEEDS_INFO": "Kyetaaga ebisingawo",
+    "ISSUE_ONLY": "Kiterekeddwa nga issue",
+    "ISSUE_OPEN": "Issue egguddwawo",
+    "NOT_PLANNED": "Tekitegekeddwa",
+    "RATE_LIMITED": "Ekkomo ly'omuwendo lituukiddwaako",
+    "RELEASED": "Kifulumiziddwa",
+    "REJECTED": "Kigaanyiiddwa",
+    "DUPLICATE": "Kiddiddwamu",
+    "DUPLICATE_OF": "Kiddiddwamu",
+    "AWAITING_APPROVAL": "Kirindiridde kukkirizibwa",
+    "AGENT_RUNNING": "Kikolebwa",
+    "VERIFYING": "Kikakasibwa",
+    "PR_OPEN": "Kikolebwa",
+    "IN_REVIEW": "Kyekebejjebwa",
+    "MERGED": "Kigattiddwa",
+    "CLOSED": "Kiggaddwa",
+    "AGENT_FAILED": "Kyetaaga okwekebejjebwa",
+    "UNKNOWN": "Okukyusa embeera kufuniddwa"
+  },
+  "myRequests": {
+    "title": "Okusaba kwange",
+    "loadError": "Okusaba tekusobodde kutikkibwa.",
+    "loading": "Okusaba kutikkibwa...",
+    "area": "Ekitundu",
+    "submitted": "Kisindikiddwa"
+  }
+}

@@ -19,8 +19,18 @@ describe('formatSwtCardValue', () => {
     expect(formatSwtCardValue(30, 'kPa')).toBe('30.0 kPa');
     expect(formatSwtCardValue(30, 'pF')).toBe('2.48 pF');
   });
-  it('keeps a measured zero visible without inventing zero pF', () => {
-    expect(formatSwtCardValue(0, 'pF')).toBe('0.0 kPa');
+  // Was '0.0 kPa' (a kPa fallback in pF mode); the pF floor rule shows 0 pF instead.
+  it('shows a measured zero as the 0 pF floor in pF mode and as 0.0 kPa in kPa mode', () => {
+    expect(formatSwtCardValue(0, 'pF')).toBe('0.00 pF');
+    expect(formatSwtCardValue(0, 'kPa')).toBe('0.0 kPa');
+  });
+  it.each([
+    [0.05, '0.00 pF', '0.1 kPa'],
+    [0.1, '0.00 pF', '0.1 kPa'],
+    [0.11, '0.04 pF', '0.1 kPa'],
+  ])('shows %s kPa as %s in pF mode and %s in kPa mode', (kpa, pf, kpaText) => {
+    expect(formatSwtCardValue(kpa, 'pF')).toBe(pf);
+    expect(formatSwtCardValue(kpa, 'kPa')).toBe(kpaText);
   });
   it.each([-1, 301, null, undefined, NaN, Infinity, '30'])('keeps %s unavailable in both units', value => {
     expect(formatSwtCardValue(value, 'pF')).toBeNull();
@@ -46,14 +56,39 @@ describe('kpaToPf golden vectors', () => {
     expect(kpaToPf(300)).toBeCloseTo(3.4771212547196626, 12);
   });
 
-  it('returns null for missing, zero, negative, and non-finite input', () => {
+  it('returns null for missing and non-finite input', () => {
     expect(kpaToPf(null)).toBeNull();
     expect(kpaToPf(undefined)).toBeNull();
-    expect(kpaToPf(0)).toBeNull();
-    expect(kpaToPf(-5)).toBeNull();
     expect(kpaToPf(Number.NaN)).toBeNull();
     expect(kpaToPf(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(kpaToPf(Number.NEGATIVE_INFINITY)).toBeNull();
     expect(kpaToPf('30' as unknown)).toBeNull();
+  });
+});
+
+// pF is never shown below 0: finite tension at or below 0.1 kPa, where
+// log10(kPa * 10) is 0, negative or undefined, derives the 0 pF floor.
+// Zero and negative kPa returned null before this rule; 0.05 kPa returned -0.30.
+describe('kpaToPf floor at 0.1 kPa', () => {
+  it.each([
+    [0.11, Math.log10(1.1)],
+    [0.1, 0],
+    [0.05, 0],
+    [0, 0],
+    [-5, 0],
+  ])('derives %s kPa as pF %s', (kpa, pf) => {
+    expect(kpaToPf(kpa)).toBeCloseTo(pf, 12);
+  });
+
+  it('never returns a negative pF', () => {
+    for (const kpa of [0.1, 0.0999, 0.05, 0.001, 0, -0.01, -300]) {
+      expect(kpaToPf(kpa)).toBe(0);
+    }
+  });
+
+  it('starts just above the floor without a jump', () => {
+    expect(kpaToPf(0.1000001)).toBeGreaterThan(0);
+    expect(kpaToPf(0.1000001)).toBeLessThan(1e-6);
   });
 });
 
@@ -72,6 +107,18 @@ describe('pfToKpa', () => {
   it('returns null when conversion overflows finite kPa', () => {
     expect(pfToKpa(400)).toBeNull();
   });
+
+  it('stays exact above the floor and maps 0 pF to the 0.1 kPa floor', () => {
+    for (const kpa of [0.11, 0.2, 1, 5]) {
+      expect(pfToKpa(kpaToPf(kpa))).toBeCloseTo(kpa, 12);
+    }
+    expect(pfToKpa(0)).toBeCloseTo(0.1, 15);
+  });
+
+  it('rejects a negative pF, which is never shown', () => {
+    expect(pfToKpa(-0.3)).toBeNull();
+    expect(pfToKpa(-1)).toBeNull();
+  });
 });
 
 describe('formatSwtValue', () => {
@@ -85,13 +132,21 @@ describe('formatSwtValue', () => {
     expect(formatSwtValue(10, 'pF')).toBe('2.00 pF');
   });
 
-  it('returns null for non-positive tension under pF so callers can render a localized placeholder', () => {
-    expect(formatSwtValue(0, 'pF')).toBeNull();
-    expect(formatSwtValue(-1, 'pF')).toBeNull();
+  // Was null for non-positive tension; the pF floor rule shows 0 pF at 2 decimals.
+  it.each([
+    [0.11, '0.04 pF'],
+    [0.1, '0.00 pF'],
+    [0.05, '0.00 pF'],
+    [0, '0.00 pF'],
+    [-1, '0.00 pF'],
+  ])('formats %s kPa as %s', (kpa, shown) => {
+    expect(formatSwtValue(kpa, 'pF')).toBe(shown);
   });
 
-  it('keeps showing raw kPa for non-positive tension under kPa', () => {
+  it('keeps showing raw kPa for low and non-positive tension under kPa', () => {
     expect(formatSwtValue(0, 'kPa')).toBe('0.0 kPa');
+    expect(formatSwtValue(0.05, 'kPa')).toBe('0.1 kPa');
+    expect(formatSwtValue(-1, 'kPa')).toBe('-1.0 kPa');
   });
 
   it('returns null for missing values in both units', () => {

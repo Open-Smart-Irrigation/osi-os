@@ -62,8 +62,33 @@ test('compileAndQueue: first save pushes 7 weekdays + clock, second identical sa
   await store.insertSchedule(db, { schedule_uuid: 'u2', device_eui: '0016C001F1000001', kind: 'WEEKLY', label: null, weekdays_mask: 2, start_time: '07:00', duration_minutes: 30, timezone: 'Europe/Zurich', enabled: 1 });
   const r3 = await compileAndQueue({ db, deviceEui: '0016C001F1000001', appId: 'app', force: false, now: new Date(), flushQueue: async () => {}, warn: () => {} });
   assert.deepEqual(r3.rows.map((r) => r.weekday), [1]);
-  const superseded = await db.all("SELECT state FROM valve_schedule_pushes WHERE weekday=1 ORDER BY queued_at");
+  const superseded = await db.all("SELECT state FROM valve_schedule_pushes WHERE weekday=1 ORDER BY rowid");
   assert.deepEqual(superseded.map((s) => s.state), ['SUPERSEDED', 'QUEUED']);
+  db.close();
+});
+
+test('compileAndQueue: after the gateway clock steps back, reverting a weekday to its earlier plan still pushes it', async () => {
+  // The valve has no read-back of its scheduler, so the gateway's ledger is the only record of
+  // what the valve holds. Plan A (Monday 06:00) is pushed while the clock runs 5 minutes fast;
+  // the clock is corrected and plan B (Monday 07:00) is pushed and acked. The valve now runs B.
+  // Reverting to A must queue a Monday push; deciding "already pushed" from the row with the
+  // later timestamp (A) would leave the valve opening at 07:00 while the gateway shows 06:00.
+  const { db } = await tempDb();
+  const eui = '0016C001F1000001';
+  const run = () => compileAndQueue({ db, deviceEui: eui, appId: 'app', force: false, now: new Date('2026-09-17T14:00:00Z'), flushQueue: async () => {}, warn: () => {} });
+  await store.insertSchedule(db, { schedule_uuid: 'u1', device_eui: eui, kind: 'WEEKLY', label: null, weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 1 });
+  const a = await run();
+  assert.equal(a.rows.filter((r) => r.purpose === 'WEEKDAY_PLAN').length, 7);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-09-17 14:05:00', state='ACKED', acked_at='2026-09-17T14:05:30.000Z'");
+
+  await store.updateSchedule(db, 'u1', { start_time: '07:00' }, eui);
+  const b = await run();
+  assert.deepEqual(b.rows.map((r) => r.weekday), [1]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-09-17 14:00:00', state='ACKED', acked_at='2026-09-17T14:00:30.000Z' WHERE push_id=?", [b.rows[0].push_id]);
+
+  await store.updateSchedule(db, 'u1', { start_time: '06:00' }, eui);
+  const reverted = await run();
+  assert.deepEqual(reverted.rows.map((r) => r.weekday), [1], 'Monday must be pushed again: the valve holds plan B, not A');
   db.close();
 });
 

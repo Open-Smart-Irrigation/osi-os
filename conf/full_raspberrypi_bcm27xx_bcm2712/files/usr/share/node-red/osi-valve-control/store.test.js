@@ -362,7 +362,7 @@ test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read
   assert.match(warnings[0], /gateway_timezone read failed:.*SQLITE_BUSY/);
 });
 
-// F135. Silvan harness run 5, case V2 check #18: GET /api/valves reported
+// F135. Customer test gateway harness run 5, case V2 check #18: GET /api/valves reported
 // {"queued":0,"acked":7} while the ledger held three QUEUED plan pushes, so the one
 // question the check exists to answer -- "did this valve ever answer?" -- came back
 // wrong. The ledger was never wrong; the newest-per-slot collapse was. queued_at is
@@ -372,15 +372,25 @@ test('getGatewaySetting (FW-T5 review R1, m6): swallows a non-table-missing read
 // at 14:00:13.657 and a dropped-ACK recompile at 14:00:13.98 shared queued_at
 // '2026-09-17 14:00:13', and the older ACKED rows won all three slots. It passed in
 // runs 2-4 and failed twice in run 5 on byte-identical code, which is the signature
-// of an ordering tie rather than a regression. store.js:286 (listQueued) already
-// carries the rowid tiebreaker this needs.
+// of an ordering tie rather than a regression.
+//
+// The tie is written as fixed values, not taken from the wall clock. An earlier version
+// copied one h2 row's datetime('now') onto the h3 rows; when the three h2 inserts
+// straddled a second boundary (n0 at :09, n1 and n2 at :10), the h3 rows got :09 and the
+// "tie" became an h3 row one second OLDER than the h2 row it was meant to tie with, so
+// the slot correctly went to h2 and the test failed (once in CI). Fixed timestamps make
+// the fixture describe one situation on every run.
+const F135_EARLIER = '2026-09-17 13:59:13';
+const F135_TIE = '2026-09-17 14:00:13';
+const F135_NOW = new Date('2026-09-17T14:00:14Z');
+
 async function seedSameSecondRecompile(db, store) {
   const plan = [];
   for (let d = 0; d < 7; d += 1) {
     plan.push({ push_id: 'p' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '00', plan_hash: 'h1' });
   }
   await store.insertPushes(db, plan);
-  await db.run("UPDATE valve_schedule_pushes SET queued_at = datetime(queued_at, '-1 minute'), state='ACKED', acked_at=datetime('now') WHERE plan_hash='h1'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ?, state='ACKED', acked_at=? WHERE plan_hash='h1'", [F135_EARLIER, F135_EARLIER]);
 
   // Recompile one: answered, so these rows end ACKED.
   const nacked = [];
@@ -388,7 +398,7 @@ async function seedSameSecondRecompile(db, store) {
     nacked.push({ push_id: 'n' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '01', plan_hash: 'h2' });
   }
   await store.insertPushes(db, nacked);
-  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=datetime('now') WHERE plan_hash='h2'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ?, state='ACKED', acked_at=? WHERE plan_hash='h2'", [F135_TIE, F135_TIE]);
 
   // Recompile two, same wall-clock second, never answered: these are the rows an
   // operator must see as outstanding.
@@ -397,14 +407,14 @@ async function seedSameSecondRecompile(db, store) {
     dropped.push({ push_id: 'q' + d, device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: d, fport: 30 + d, payload_hex: '02', plan_hash: 'h3' });
   }
   await store.insertPushes(db, dropped);
-  await db.run("UPDATE valve_schedule_pushes SET queued_at = (SELECT queued_at FROM valve_schedule_pushes WHERE plan_hash='h2' LIMIT 1) WHERE plan_hash='h3'");
+  await db.run("UPDATE valve_schedule_pushes SET queued_at = ? WHERE plan_hash='h3'", [F135_TIE]);
 }
 
 test('pushSummary (F135): when two recompiles share a queued_at second, the later one owns the slot', async () => {
   const { db } = await tempDb();
   await seedSameSecondRecompile(db, store);
 
-  const summary = await store.pushSummary(db, '0016C001F1000001');
+  const summary = await store.pushSummary(db, '0016C001F1000001', F135_NOW);
   assert.equal(summary.queued, 3, 'the three unanswered slots must be reported as queued');
   assert.equal(summary.acked, 4, 'only the four untouched weekdays are still acked');
   db.close();
@@ -426,6 +436,129 @@ test('weekdayPushStates (F135): the same tie must not hand a slot to the older r
   assert.equal(firstByWeekday.get(2), 'QUEUED');
   assert.equal(firstByWeekday.get(6), 'ACKED');
   db.close();
+});
+
+// A gateway clock that steps backwards (a clock set ahead and then corrected by NTP, a
+// restore from a wrong RTC; runHousekeeping already detects such jumps) stamps a LATER push
+// with an EARLIER queued_at, because queued_at is only ever the wall clock at insert time.
+// The ledger's insertion order is what the valve saw last (ChirpStack delivers FIFO), so
+// "newest per slot" must follow insertion order, not the clock. Each case below inserts
+// 'ahead' first under a clock 5 minutes fast, then 'behind' after the clock was corrected,
+// and acks 'ahead' late, after 'behind' exists, to show a state change on the older row
+// does not move it either.
+const STEP_EUI = '0016C001F1000001';
+const STEP_AHEAD = '2026-09-17 14:05:00';
+const STEP_BEHIND = '2026-09-17 14:00:00';
+
+async function seedClockStepBack(db, purpose, { aheadPayload, behindPayload, aheadState = 'ACKED' } = {}) {
+  const weekday = purpose === 'WEEKDAY_PLAN' ? 1 : null;
+  const fport = purpose === 'WEEKDAY_PLAN' ? 15 : 25;
+  await store.insertPushes(db, [{ push_id: 'ahead', device_eui: STEP_EUI, purpose, weekday, fport, payload_hex: aheadPayload || '00', plan_hash: 'h-ahead' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id='ahead'", [STEP_AHEAD]);
+  await store.insertPushes(db, [{ push_id: 'behind', device_eui: STEP_EUI, purpose, weekday, fport, payload_hex: behindPayload || '01', plan_hash: 'h-behind' }]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id='behind'", [STEP_BEHIND]);
+  if (aheadState === 'ACKED') {
+    await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at=? WHERE push_id='ahead'", ['2026-09-17T14:01:00.000Z']);
+  }
+}
+
+test('clock step back: weekdayPushStates hands the slot to the later insert, not the later timestamp', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const rows = await store.weekdayPushStates(db, STEP_EUI);
+  assert.equal(rows[0].queued_at, STEP_BEHIND, 'the push queued after the clock was corrected is the newest');
+  assert.equal(rows[0].state, 'QUEUED');
+  db.close();
+});
+
+test('clock step back: pushSummary counts the later insert for the slot', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const summary = await store.pushSummary(db, STEP_EUI, new Date('2026-09-17T14:01:00Z'));
+  assert.equal(summary.queued, 1, 'the plan the valve has not confirmed yet is outstanding');
+  assert.equal(summary.acked, 0, 'the earlier plan the valve confirmed is no longer what it should hold');
+  db.close();
+});
+
+test('clock step back: lastPushHashes reports the later insert, so a revert to the earlier plan is pushed again (GEN1)', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'WEEKDAY_PLAN');
+  const hashes = await store.lastPushHashes(db, STEP_EUI);
+  assert.equal(hashes['WEEKDAY_PLAN:1'], 'h-behind');
+  db.close();
+});
+
+test('clock step back: lastPushHashes reports the later insert per weekday (GEN2 daymask)', async () => {
+  const { db } = await tempDb();
+  // Both rows cover Monday (bit 1); 'ahead' also covers Tuesday (bit 2), which nothing newer touches.
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0699151930', behindPayload: '0299151930' });
+  const hashes = await store.lastPushHashes(db, STEP_EUI);
+  assert.equal(hashes['GEN2DAY:1'], 'h-behind');
+  assert.equal(hashes['GEN2DAY:2'], 'h-ahead');
+  db.close();
+});
+
+test('clock step back: ackPush settles the later QUEUED insert when two are outstanding for the same purpose and port', async () => {
+  const { db } = await tempDb();
+  // GEN2 rows with disjoint masks are not superseded by each other, so both stay QUEUED.
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
+  assert.equal(await store.ackPush(db, STEP_EUI, 'DAYMASK_PLAN', 25, null, 0, '2026-09-17T14:02:00.000Z'), 1);
+  const byId = Object.fromEntries((await db.all('SELECT push_id, state FROM valve_schedule_pushes')).map((r) => [r.push_id, r.state]));
+  assert.equal(byId.behind, 'ACKED');
+  assert.equal(byId.ahead, 'QUEUED');
+  db.close();
+});
+
+test('clock step back: listQueued re-emits outstanding pushes in insertion order', async () => {
+  const { db } = await tempDb();
+  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
+  const queued = await store.listQueued(db, STEP_EUI);
+  assert.deepEqual(queued.map((r) => r.push_id), ['ahead', 'behind']);
+  db.close();
+});
+
+// Guards for the invariant the reads above rely on: rowid order is insertion order. Each of
+// these changes would silently break it: a WITHOUT ROWID or INTEGER PRIMARY KEY table (no
+// rowid, or a caller-chosen one), REPLACE/DELETE on the ledger, or a migration that rebuilds
+// the table and copies rows without their rowid (the copy renumbers them in scan order).
+test('push ledger invariant: the table keeps an implicit rowid that grows with every insert', async () => {
+  const { db } = await tempDb();
+  const ddl = (await db.get("SELECT sql FROM sqlite_master WHERE type='table' AND name='valve_schedule_pushes'")).sql;
+  assert.doesNotMatch(ddl, /WITHOUT\s+ROWID/i);
+  const intPk = (await db.all('PRAGMA table_info(valve_schedule_pushes)')).filter((c) => c.pk > 0 && /^INTEGER$/i.test(c.type));
+  assert.deepEqual(intPk, [], 'an INTEGER PRIMARY KEY column would alias rowid to a caller-written value');
+  const row = (id) => ({ push_id: id, device_eui: STEP_EUI, purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null });
+  await store.insertPushes(db, [row('i1'), row('i2'), row('i3')]);
+  await db.run("DELETE FROM valve_schedule_pushes WHERE push_id='i3'"); // the newest row gone: its rowid may be reused
+  await store.insertPushes(db, [row('i4')]);
+  const ids = (await db.all('SELECT push_id FROM valve_schedule_pushes ORDER BY rowid')).map((r) => r.push_id);
+  assert.deepEqual(ids, ['i1', 'i2', 'i4'], 'a new insert sorts after every existing row');
+  db.close();
+});
+
+test('push ledger invariant: no product code replaces or deletes ledger rows, and no migration copies the table without its rowid', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const f of fs.readdirSync(__dirname).filter((n) => n.endsWith('.js') && !n.endsWith('.test.js'))) {
+    const src = fs.readFileSync(path.join(__dirname, f), 'utf8');
+    assert.doesNotMatch(src, /(REPLACE\s+INTO|DELETE\s+FROM)\s+valve_schedule_pushes\b/i, f + ' must keep the push ledger append-only');
+  }
+  let root = __dirname;
+  while (!fs.existsSync(path.join(root, 'database/migrations/ordered'))) {
+    const up = path.dirname(root);
+    assert.notEqual(up, root, 'database/migrations/ordered not found above ' + __dirname);
+    root = up;
+  }
+  const dir = path.join(root, 'database/migrations/ordered');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.sql'))) {
+    for (const stmt of fs.readFileSync(path.join(dir, f), 'utf8').split(';')) {
+      if (!/valve_schedule_pushes/i.test(stmt)) continue;
+      assert.doesNotMatch(stmt, /(REPLACE\s+INTO|DELETE\s+FROM)\s+valve_schedule_pushes\b/i, f);
+      if (/INSERT\s+(OR\s+\w+\s+)?INTO[\s\S]*\bSELECT\b/i.test(stmt)) {
+        assert.match(stmt, /\browid\b/i, f + ': a rebuild of valve_schedule_pushes must copy rowid (INSERT INTO new(rowid, ...) SELECT rowid, ...)');
+      }
+    }
+  }
 });
 
 // --- F144: updateSchedule/softDeleteSchedule are scoped to the owning valve ---

@@ -921,6 +921,10 @@ const schemaContract = {
     'workspace_uuid', 'plot_uuid', 'snapshot_uuid', 'gateway_device_eui',
     'projection_version', 'payload_json', 'recorded_at',
   ],
+  journal_v2_plot_group_snapshots: [
+    'workspace_uuid', 'group_uuid', 'snapshot_uuid', 'gateway_device_eui',
+    'projection_version', 'payload_json', 'recorded_at',
+  ],
   journal_v2_crop_cycles: [
     'workspace_uuid', 'cycle_uuid', 'sync_version', 'payload_json', 'recorded_at',
   ],
@@ -1012,6 +1016,11 @@ const schemaContract = {
     'rain_source',
     'computed_at',
     'sync_version',
+    'rain_coverage',
+    'rain_selected_deveui',
+    'rain_policy_version',
+    'rain_quality_reasons',
+    'rain_received_mm',
   ],
   weather_locations: [
     'location_key',
@@ -1171,6 +1180,51 @@ const schemaContract = {
     'id',
     'enabled',
   ],
+  rain_observations: [
+    'id',
+    'device_data_id',
+    'deveui',
+    'instrument_type',
+    'event_id',
+    'dev_addr',
+    'f_cnt',
+    'payload_digest',
+    'received_at',
+    'measured_start',
+    'measured_end',
+    'interval_basis',
+    'frame_kind',
+    'tips',
+    'amount_mm',
+    'status',
+    'quality_reasons',
+    'config_json',
+    'zone_id',
+    'zone_uuid',
+    'timezone',
+    'source_policy_version',
+    'created_at',
+  ],
+  rain_instrument_days: [
+    'deveui',
+    'date',
+    'timezone',
+    'amount_mm',
+    'received_mm',
+    'coverage',
+    'reasons',
+    'accepted_count',
+    'observed_cutoff',
+    'policy_version',
+    'computed_at',
+  ],
+  zone_rain_source: [
+    'zone_id',
+    'selected_deveui',
+    'selected_at',
+    'selected_by_uuid',
+    'updated_at',
+  ],
 };
 
 const requiredIndexes = {
@@ -1271,6 +1325,12 @@ const requiredIndexes = {
   user_plot_assignments: [
     'uq_user_plot_active',
     'idx_user_plot_by_plot',
+  ],
+  rain_observations: [
+    'ux_rain_observations_event',
+    'idx_rain_observations_deveui_received',
+    'idx_rain_observations_zone_received',
+    'idx_rain_observations_device_data',
   ],
 };
 
@@ -1429,6 +1489,20 @@ const requiredIndexSqlFragments = {
     'on user_plot_assignments(plot_uuid)',
     'where deleted_at is null',
   ],
+  ux_rain_observations_event: [
+    'unique index',
+    'on rain_observations(deveui, event_id)',
+    'where event_id is not null',
+  ],
+  idx_rain_observations_deveui_received: [
+    'on rain_observations(deveui, received_at)',
+  ],
+  idx_rain_observations_zone_received: [
+    'on rain_observations(zone_id, received_at)',
+  ],
+  idx_rain_observations_device_data: [
+    'on rain_observations(device_data_id)',
+  ],
 };
 
 const requiredTriggerSqlFragments = {
@@ -1530,13 +1604,31 @@ const requiredTriggerSqlFragments = {
     "'zone-id:' || new.zone_id) || '|' ||",
   ],
   trg_dp_zone_env_outbox_ai: [
-    "'sync_version', new.sync_version ), new.sync_version,",
+    // 0073 writes the canonical one-line body of scripts/sync-trigger-source.json
+    // (the body sync-init-fn recreates at boot): sync_version stays the last payload
+    // key and the outbox row's version.
+    "'sync_version', new.sync_version), new.sync_version,",
     "'zone-id:' || new.zone_id) || '|' ||",
+    // 0073: the five zone-day rain quality keys, null on a row without a policy version.
+    "'rain_coverage', case when new.rain_policy_version is not null then new.rain_coverage end",
+    "'rain_selected_deveui', case when new.rain_policy_version is not null then new.rain_selected_deveui end",
+    "'rain_policy_version', new.rain_policy_version",
+    "'rain_quality_reasons', json(case when new.rain_policy_version is not null and json_valid(new.rain_quality_reasons) and json_type(new.rain_quality_reasons) = 'array' then new.rain_quality_reasons end)",
+    "'rain_received_mm', case when new.rain_policy_version is not null then new.rain_received_mm end",
   ],
   trg_dp_zone_env_outbox_au: [
     'coalesce(new.sync_version,0) <> coalesce(old.sync_version,0)',
-    "'sync_version', new.sync_version ), new.sync_version,",
+    // 0073 writes the canonical one-line body of scripts/sync-trigger-source.json
+    // (the body sync-init-fn recreates at boot): sync_version stays the last payload
+    // key and the outbox row's version.
+    "'sync_version', new.sync_version), new.sync_version,",
     "'zone-id:' || new.zone_id) || '|' ||",
+    // 0073: the five zone-day rain quality keys, null on a row without a policy version.
+    "'rain_coverage', case when new.rain_policy_version is not null then new.rain_coverage end",
+    "'rain_selected_deveui', case when new.rain_policy_version is not null then new.rain_selected_deveui end",
+    "'rain_policy_version', new.rain_policy_version",
+    "'rain_quality_reasons', json(case when new.rain_policy_version is not null and json_valid(new.rain_quality_reasons) and json_type(new.rain_quality_reasons) = 'array' then new.rain_quality_reasons end)",
+    "'rain_received_mm', case when new.rain_policy_version is not null then new.rain_received_mm end",
   ],
   trg_sync_device_data_dirty_au: [
     "select gateway_device_eui from devices where deveui = new.deveui",

@@ -17,10 +17,12 @@ const REQUIRED_HEALTH_KEYS = [
   'errors_last_at',
   'errors_total',
   'clock_source',
+  'command_ack_dead_lettered',
   'health_state',
   'rtc_present',
   'schema_sig',
   'sync_dirty_pending',
+  'sync_dirty_rejected',
   'sync_linked',
   'sync_oldest_age_s',
   'sync_pending',
@@ -294,12 +296,14 @@ function assertHealthPayload(profile, buildNode) {
     sync_rejected: 1,
     sync_rejected_recent: 0,
     sync_dirty_pending: 2,
+    sync_dirty_rejected: 4,
     disk_free_pct: 87,
     errors_total: 3,
     errors_last_at: 1720000000000,
     health_state: 'healthy',
     rtc_present: true,
     clock_source: 'rtc',
+    command_ack_dead_lettered: 1,
     ignored_extra_key: 'must not leak',
   };
 
@@ -327,12 +331,14 @@ function assertHealthPayload(profile, buildNode) {
       sync_rejected: null,
       sync_rejected_recent: null,
       sync_dirty_pending: null,
+      sync_dirty_rejected: null,
       disk_free_pct: 0,
       errors_total: null,
       errors_last_at: null,
       health_state: null,
       rtc_present: null,
       clock_source: null,
+      command_ack_dead_lettered: null,
     });
 
     const stringResult = runBuildHeartbeat(profile, buildNode, 'malformed-health');
@@ -361,9 +367,11 @@ function assertHealthPayload(profile, buildNode) {
       sync_oldest_age_s: { invalid: true },
       sync_rejected: ['invalid'],
       sync_dirty_pending: NaN,
+      sync_dirty_rejected: -Infinity,
       disk_free_pct: Infinity,
       errors_total: { invalid: true },
       errors_last_at: Symbol('invalid-errors-last-at'),
+      command_ack_dead_lettered: NaN,
     });
     assertAllNullHealth(profile, 'fresh invalid values', invalidValuesResult.payload && invalidValuesResult.payload.health);
 

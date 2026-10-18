@@ -30,12 +30,14 @@ const PUBLIC_HEALTH_KEYS = [
   'sync_rejected',
   'sync_rejected_recent',
   'sync_dirty_pending',
+  'sync_dirty_rejected',
   'disk_free_pct',
   'crash_count',
   'crash_looping',
   'health_state',
   'rtc_present',
-  'clock_source'
+  'clock_source',
+  'command_ack_dead_lettered'
 ];
 
 const ALL_NULL_HEALTH = Object.fromEntries(PUBLIC_HEALTH_KEYS.map((key) => [key, null]));
@@ -142,12 +144,14 @@ function modernSchema(db) {
 }
 
 function assertSyncFieldsNull(health) {
+  assert.strictEqual(health.command_ack_dead_lettered, null);
   assert.strictEqual(health.sync_linked, null);
   assert.strictEqual(health.sync_pending, null);
   assert.strictEqual(health.sync_oldest_age_s, null);
   assert.strictEqual(health.sync_rejected, null);
   assert.strictEqual(health.sync_rejected_recent, null);
   assert.strictEqual(health.sync_dirty_pending, null);
+  assert.strictEqual(health.sync_dirty_rejected, null);
 }
 
 test('modern schema reports schema, sync, and disk health', async () => {
@@ -169,6 +173,7 @@ test('modern schema reports schema, sync, and disk health', async () => {
     assert.strictEqual(health.sync_rejected, 0);
     assert.strictEqual(health.sync_rejected_recent, 0);
     assert.strictEqual(health.sync_dirty_pending, 0);
+    assert.strictEqual(health.sync_dirty_rejected, 0);
     assertDiskFreePct(health.disk_free_pct);
   } finally {
     db.close();
@@ -257,6 +262,31 @@ test('sync backlog counters count pending, rejected, and dirty pending rows inde
     assert.strictEqual(health.sync_rejected_recent, 0, 'the fixture rejection is long past the 24h window');
     assert.strictEqual(health.sync_dirty_pending, 1);
     assert(Number.isInteger(health.sync_oldest_age_s));
+  } finally {
+    db.close();
+  }
+});
+
+test('rejected history keys are counted apart from pending ones and do not drive health_state', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    await db.exec(`
+      INSERT INTO sync_history_dirty_keys(peer_node, table_name, row_key, changed_at, status)
+      VALUES
+        ('cloud', 'device_data', 'pending-key', '2026-07-05T00:04:00Z', 'pending'),
+        ('cloud', 'device_data', 'rejected-key-1', '2026-07-05T00:05:00Z', 'rejected'),
+        ('cloud', 'dendrometer_daily', 'rejected-key-2', '2026-07-05T00:06:00Z', 'rejected'),
+        ('cloud', 'device_data', 'dropped-key', '2026-07-05T00:07:00Z', 'dropped'),
+        ('cloud', 'device_data', 'done-key', '2026-07-05T00:08:00Z', 'done');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.sync_dirty_pending, 1, 'only pending keys count as the dirty backlog');
+    assert.strictEqual(health.sync_dirty_rejected, 2, 'a key the cloud condemned stays visible after it leaves pending');
+    assert.strictEqual(health.health_state, 'healthy', 'rejected history keys are a diagnostic count, not a health_state input');
   } finally {
     db.close();
   }
@@ -563,4 +593,84 @@ test('gatherEdgeHealth includes rtc_present in its output shape', async () => {
   const db = makeFacadeShim();
   const health = await gatherEdgeHealth(db, { timeoutMs: 2000, diskPath: os.tmpdir() });
   assert.ok(Object.prototype.hasOwnProperty.call(health, 'rtc_present'));
+});
+
+// rejected_at is written as new Date().toISOString() ("YYYY-MM-DDTHH:MM:SS.sssZ").
+// Compared as text against SQLite's datetime() ("YYYY-MM-DD HH:MM:SS"), every
+// row on the cutoff's calendar date sorts after the cutoff ('T' > ' '), so the
+// 24-hour window stretched to up to 48 hours. The stale row below sits on that
+// date: 30 hours old when the UTC clock is past 06:00, otherwise the first
+// second of the cutoff date (older than 24 hours either way).
+function staleRejectionOnCutoffDate(nowMs) {
+  const cutoff = new Date(nowMs - 24 * 3600 * 1000);
+  const cutoffDayStart = Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth(), cutoff.getUTCDate());
+  return new Date(Math.max(nowMs - 30 * 3600 * 1000, cutoffDayStart));
+}
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  test(`sync_rejected_recent does not count a rejection older than 24 hours on the cutoff date (${profile})`, async (t) => {
+    const nowMs = Date.now();
+    const rejectedAt = staleRejectionOnCutoffDate(nowMs);
+    if (nowMs - rejectedAt.getTime() < 24 * 3600 * 1000 + 60 * 1000) {
+      t.skip('within a minute of UTC midnight there is no row older than 24 hours on the cutoff date');
+      return;
+    }
+    const modulePath = require.resolve(
+      `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red/osi-health-helper`
+    );
+    delete require.cache[modulePath];
+    const helper = require(modulePath);
+    const db = makeFacadeShim();
+    try {
+      await modernSchema(db);
+      await db.exec(`
+        INSERT INTO sync_outbox(event_uuid, occurred_at, delivered_at, rejected_at)
+        VALUES ('stale-same-date', '2026-07-05T00:00:00Z', NULL, '${rejectedAt.toISOString()}'),
+               ('recent', '2026-07-05T00:00:00Z', NULL, '${new Date(nowMs - 3600 * 1000).toISOString()}');
+      `);
+
+      const health = await helper.gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+      assert.strictEqual(health.sync_rejected, 2);
+      assert.strictEqual(health.sync_rejected_recent, 1,
+        `a rejection at ${rejectedAt.toISOString()} is outside the 24-hour window`);
+    } finally {
+      db.close();
+    }
+  });
+}
+
+test('dead-lettered command ACKs are counted and do not drive health_state', async () => {
+  const db = makeFacadeShim();
+  try {
+    await modernSchema(db);
+    await db.exec(`
+      CREATE TABLE command_ack_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+      );
+      INSERT INTO command_ack_outbox(command_id, payload_json, created_at, delivered_at, retry_count, last_error)
+      VALUES
+        ('1', '{}', '2026-07-05T00:00:00Z', '2026-07-05T00:00:30Z', 0, NULL),
+        ('2', '{}', '2026-07-05T00:01:00Z', '2026-07-05T00:11:00Z', 20, 'dead_letter: retry_cap_exceeded - LEASE_MISMATCH'),
+        ('3', '{}', '2026-07-05T00:02:00Z', '2026-07-05T00:02:30Z', 0, 'dead_letter: http 400 {}'),
+        ('4', '{}', '2026-07-05T00:03:00Z', NULL, 3, 'conflicting_local_acks: queued rows for this commandId disagree'),
+        ('5', '{}', '2026-07-05T00:04:00Z', NULL, 0, 'transport: {"statusCode":0}');
+    `);
+
+    const health = await gatherEdgeHealth(db, { timeoutMs: 1000, diskPath: os.tmpdir() });
+
+    assertPublicHealthShape(health);
+    assert.strictEqual(health.command_ack_dead_lettered, 2,
+      'only delivered rows marked dead_letter count: the cloud never accepted these ACKs');
+    assert.strictEqual(health.health_state, 'healthy',
+      'dead-lettered ACKs are a diagnostic count, not a health_state input');
+  } finally {
+    db.close();
+  }
 });

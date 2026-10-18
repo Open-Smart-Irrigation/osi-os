@@ -43,6 +43,11 @@ describe('analysisSeriesIdFromParts', () => {
     expect(analysisSeriesIdFromParts(7, 'environment', 'microclimate', 'ambient_temperature')).toBe(AMBIENT_TEMPERATURE_SERIES_ID);
     expect(analysisSeriesIdFromParts(12, 'soil', 'root-zone', 'swt_wm1')).toBe(SWT_WM1_LEGACY_SERIES_ID);
   });
+
+  it('uses the stable unassigned component for null-zone series ids', () => {
+    expect(analysisSeriesIdFromParts(null, 'environment', 'lorain', 'rain_mm_delta'))
+      .toBe(analysisSeriesIdFromParts('unassigned', 'environment', 'lorain', 'rain_mm_delta'));
+  });
 });
 
 describe('migrateWorkspaceSeriesIds', () => {

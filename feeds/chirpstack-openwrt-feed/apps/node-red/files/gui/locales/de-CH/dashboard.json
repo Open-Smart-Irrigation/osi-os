@@ -8,6 +8,12 @@
     "activity": "Aktivität erfassen"
   },
   "data": "Daten",
+  "network": "Netzwerk",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Benutzer",
+    "grants": "Berechtigungen"
+  },
   "account": "Konto",
   "accountMenu": {
     "osiServer": "OSI Server"

@@ -12,7 +12,8 @@ vi.mock('../EChart', () => ({
   },
 }));
 vi.mock('../CorrelationPanel', () => ({ CorrelationPanel: () => <div data-testid="correlation-panel" /> }));
-vi.mock('../../../analysis/echartsOptions', () => ({
+vi.mock('../../../analysis/echartsOptions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../analysis/echartsOptions')>()),
   buildTimeSeriesOption: vi.fn(() => ({ grid: [] })),
   buildSmallMultiplesOption: vi.fn(() => ({ grid: [] })),
 }));
@@ -120,5 +121,7 @@ describe('AnalysisChartPanel', () => {
     const agronomy: AnalysisSeries = { ...rain, resolved: { ...rain.resolved, sourceKey: 'agronomy-src-zone' } };
     expect(formatPartial?.({ ...partial, count: 6, expected: 7 }, agronomy)).toBe('analysis.tooltip.partialDays');
     expect(formatPartial?.({ ...partial, quality: null }, rain)).toBe('');
+    const amount: AnalysisSeries = { ...rain, resolved: { ...rain.resolved, channelKey: 'rain_mm_delta' } };
+    expect(formatPartial?.({ ...partial, count: 2, expected: null, quality: null }, amount)).toBe('analysis.tooltip.reportsReceived');
   });
 });

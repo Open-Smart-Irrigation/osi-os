@@ -7,6 +7,8 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+# deploy-bundle.sh is a bash script (pipefail, BASH_SOURCE): run it with bash,
+# not sh, which is dash on Debian and Ubuntu.
 builder="$script_dir/deploy-bundle.sh"
 
 work=$(mktemp -d)
@@ -17,7 +19,7 @@ gui_tar="$work/react_gui.tar.gz"
 
 echo "fail without a react_gui.tar.gz..."
 if REPO_ROOT="$repo_root" OUT_DIR="$out_dir" REACT_GUI_TARBALL="$work/does-not-exist.tar.gz" \
-    sh "$builder" >"$work/no-gui.log" 2>&1; then
+    bash "$builder" >"$work/no-gui.log" 2>&1; then
   echo "expected deploy-bundle.sh to fail when react_gui.tar.gz is absent" >&2
   cat "$work/no-gui.log" >&2
   exit 1
@@ -40,7 +42,7 @@ grep -qi 'react_gui.tar.gz' "$work/no-gui.log" || {
 echo "build a real bundle..."
 printf 'stub gui bundle\n' | gzip > "$gui_tar"
 REPO_ROOT="$repo_root" OUT_DIR="$out_dir" REACT_GUI_TARBALL="$gui_tar" BUNDLE_TS="20260911T000000Z" \
-  sh "$builder" >"$work/build.log" 2>&1 || {
+  bash "$builder" >"$work/build.log" 2>&1 || {
   echo "expected deploy-bundle.sh to succeed with a react_gui.tar.gz present" >&2
   cat "$work/build.log" >&2
   exit 1

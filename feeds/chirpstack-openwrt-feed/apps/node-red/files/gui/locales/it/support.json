@@ -1,0 +1,92 @@
+{
+  "navLabel": "Supporto e richieste",
+  "title": "Supporto e richieste",
+  "backToDashboard": "Torna alla dashboard",
+  "empty": "Nessuna richiesta ancora.",
+  "form": {
+    "stepRequest": "1. Testo della richiesta",
+    "stepArea": "2. Area e gravità",
+    "stepDiagnostics": "3. Diagnostica e consenso",
+    "summary": "Titolo breve",
+    "description": "Che cosa dovrebbe essere migliorato?",
+    "contactEmail": "Email di contatto (opzionale)",
+    "expected": "Previsto",
+    "actual": "Attuale",
+    "steps": "Passaggi",
+    "requestType": "Tipo di richiesta",
+    "area": "Area",
+    "severity": "Gravità",
+    "diagnostics": "Anteprima diagnostica",
+    "includeDiagnostics": "Includi diagnostica sicura con questa richiesta.",
+    "consentPublic": "Accetto che questa richiesta possa essere condivisa pubblicamente senza dettagli privati dell'azienda agricola.",
+    "submit": "Salva richiesta",
+    "submitting": "Salvataggio..."
+  },
+  "types": {
+    "bug": "Bug",
+    "improvement": "Miglioramento",
+    "feedback": "Feedback"
+  },
+  "areas": {
+    "dashboard": "Dashboard",
+    "history": "Cronologia",
+    "analysis": "Analisi",
+    "copy": "Testi ed etichette",
+    "watering": "Irrigazione",
+    "sync": "Sincronizzazione",
+    "devices": "Dispositivi",
+    "system": "Sistema",
+    "other": "Altro"
+  },
+  "severity": {
+    "cant_work": "Non si può lavorare",
+    "workaround": "Soluzione temporanea disponibile",
+    "annoying": "Fastidioso",
+    "idea": "Idea"
+  },
+  "diagnostics": {
+    "loading": "Caricamento diagnostica...",
+    "unavailable": "La diagnostica non è disponibile al momento."
+  },
+  "banners": {
+    "retryable": "Impossibile inviare ora. La richiesta può essere ritentata."
+  },
+  "status": {
+    "QUEUED": "Salvata, in attesa di internet",
+    "SUBMITTED": "Inviata",
+    "SYNCED": "Sincronizzata",
+    "FAILED_RETRYABLE": "Serve un nuovo tentativo",
+    "FAILED_PERMANENT": "Impossibile inviare",
+    "AWAITING_PUBLISH": "In attesa di pubblicazione",
+    "PUBLISHING": "Pubblicazione in corso",
+    "PUBLISH_BLOCKED_CONFIG": "Pubblicazione bloccata",
+    "PUBLISH_BLOCKED_SECRET": "Pubblicazione bloccata",
+    "TRIAGED": "In revisione",
+    "BEING_REVIEWED": "In revisione",
+    "NEEDS_INFO": "Servono più informazioni",
+    "ISSUE_ONLY": "Salvata come issue",
+    "ISSUE_OPEN": "Issue aperta",
+    "NOT_PLANNED": "Non pianificata",
+    "RATE_LIMITED": "Limite di frequenza raggiunto",
+    "RELEASED": "Rilasciata",
+    "REJECTED": "Rifiutata",
+    "DUPLICATE": "Duplicata",
+    "DUPLICATE_OF": "Duplicata",
+    "AWAITING_APPROVAL": "In attesa di approvazione",
+    "AGENT_RUNNING": "In corso",
+    "VERIFYING": "Verifica in corso",
+    "PR_OPEN": "In corso",
+    "IN_REVIEW": "In revisione",
+    "MERGED": "Unita",
+    "CLOSED": "Chiusa",
+    "AGENT_FAILED": "Richiede revisione",
+    "UNKNOWN": "Aggiornamento di stato ricevuto"
+  },
+  "myRequests": {
+    "title": "Le mie richieste",
+    "loadError": "Impossibile caricare le richieste.",
+    "loading": "Caricamento richieste...",
+    "area": "Area",
+    "submitted": "Inviata"
+  }
+}

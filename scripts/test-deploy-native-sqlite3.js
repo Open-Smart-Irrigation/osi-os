@@ -295,7 +295,10 @@ function shellHarness(gw, body, opts = {}) {
     `NATIVE_ARCH=${JSON.stringify(opts.arch || 'armv7l')}`,
     `MUSL_LOADER_GLOB=${JSON.stringify(opts.muslGlob || path.join(gw.root, 'fake-libc', 'ld-musl-*.so.1'))}`,
   ];
-  if (opts.lockFixture) {
+  if (opts.fetchFails) {
+    // A 404 through the tunnel: curl -f writes nothing and exits 22.
+    preamble.push('fetch() { mkdir -p "$(dirname "$2")"; return 22; }');
+  } else if (opts.lockFixture) {
     // deploy.sh curls the shipped lockfile through the SSH tunnel; here the
     // preflight gets a fixture straight off disk.
     preamble.push(`fetch() { mkdir -p "$(dirname "$2")"; cp ${JSON.stringify(opts.lockFixture)} "$2"; }`);
@@ -604,6 +607,30 @@ test('run_native_sqlite3_preflight passes when the installed version matches the
   });
   assert.equal(r.status, 0, `preflight should pass: ${r.stdout}${r.stderr}`);
   assert.match(r.stdout, /matches the shipped lockfile/);
+});
+
+// deploy.sh calls the preflight as "run_native_sqlite3_preflight || exit 1",
+// where set -e does not apply inside it; the condition below is the same.
+const PREFLIGHT_IN_CONDITION = 'if run_native_sqlite3_preflight; then echo "PREFLIGHT-RC=0"; else echo "PREFLIGHT-RC=$?"; fi';
+
+test('run_native_sqlite3_preflight stops when the shipped lockfile cannot be fetched', () => {
+  const gw = makeGateway('firmware-symlink');
+  const r = shellHarness(gw, PREFLIGHT_IN_CONDITION, { fetchFails: true, arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT-RC=[1-9]/, `${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /ERROR: could not fetch the shipped package-lock\.json/);
+  assert.doesNotMatch(r.stdout, /skipping the preflight/);
+});
+
+test('run_native_sqlite3_preflight stops on a lockfile that is not valid JSON', () => {
+  const gw = makeGateway('firmware-symlink');
+  const lock = path.join(gw.root, 'lock-truncated.json');
+  fs.writeFileSync(lock, '{"lockfileVersion": 3, "packages": {"node_modules/sqlite3": {"vers');
+  const r = shellHarness(gw, PREFLIGHT_IN_CONDITION, { lockFixture: lock, arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT-RC=[1-9]/, `${r.stdout}${r.stderr}`);
+  assert.match(r.stderr, /ERROR: the shipped package-lock\.json is not valid JSON/);
+  assert.doesNotMatch(r.stdout, /skipping the preflight/);
 });
 
 test('run_native_sqlite3_preflight only warns about a version mismatch on aarch64', () => {

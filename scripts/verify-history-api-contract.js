@@ -17,6 +17,7 @@ const DEFAULT_FLOW_PATH = path.resolve(
 const REQUIRED_ENDPOINTS = [
   ['GET', '/api/history/zones/:zoneId/cards'],
   ['GET', '/api/history/zones/:zoneId/export.csv'],
+  ['GET', '/api/history/export.csv'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/data'],
   ['GET', '/api/history/zones/:zoneId/cards/:cardId/advanced'],
   ['GET', '/api/history/gateways/:gatewayEui/cards'],
@@ -35,7 +36,8 @@ const REQUIRED_ENDPOINTS = [
   ['GET', '/api/analysis/channels'],
   ['POST', '/api/analysis/series'],
   ['GET', '/api/analysis/views'],
-  ['POST', '/api/analysis/views']
+  ['POST', '/api/analysis/views'],
+  ['DELETE', '/api/analysis/views/:id']
 ].map(([method, url]) => ({ method, url }));
 
 const REQUIRED_ENDPOINT_KEYS = new Set(REQUIRED_ENDPOINTS.map(endpointKey));
@@ -121,6 +123,13 @@ function findHistoryRouter(flows) {
   return flows.find((node) =>
     node.type === 'function' &&
     String(node.name || '').trim() === 'History API Router'
+  ) || null;
+}
+
+function findPortableHistoryNode(flows) {
+  return flows.find((node) =>
+    node.type === 'function' &&
+    String(node.name || '').trim() === 'Portable History API'
   ) || null;
 }
 
@@ -264,6 +273,8 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   assertContains(failures, source, 'verifyBearer(msg.req && msg.req.headers && msg.req.headers.authorization)', 'analysis bearer auth gate');
   assertContains(failures, source, "osiLib.require('scope')", 'analysis reads load the shared scope module');
   assertContains(failures, source, 'assertEnabledAccount(db, ownerUuid, { scopedMode: true })', 'analysis reads gate on an enabled account (P1)');
+  assertContains(failures, source, "let unassignedAccess = 'owner'", 'analysis flag-off owner unassigned policy');
+  assertContains(failures, source, "unassignedAccess = 'account'", 'analysis scoped account unassigned policy');
   assertContains(failures, source, 'null is the legacy owner-only path in osi-history-helper', 'analysis null sentinel stays legacy owner-only');
   assertContains(failures, source, 'SELECT zone_uuid FROM irrigation_zones WHERE deleted_at IS NULL AND zone_uuid IS NOT NULL ORDER BY id ASC', 'scoped analysis reads load an explicit account-wide zone array');
   assertContains(failures, source, 'scopeZoneUuids = accountZoneRows', 'scoped analysis reads pass the explicit zone array');
@@ -271,14 +282,48 @@ function verifyAnalysisRouterImplementation(flows, failures) {
   // Wave 3 scoped-access port (AgroLink d49e1cd28): buildAnalysisCatalog also
   // threads zoneUuids through when OSI_SCOPED_ACCESS=1 (osi-scope-helper's
   // listScopeZoneUuids); the literal call site gained a trailing property.
-  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids })', 'analysis /channels scopes catalog to authenticated user and owned-plus-granted zones');
+  assertContains(failures, source, 'buildAnalysisCatalog(db, { deviceEui: deviceEui, userId: auth.userId, zoneUuids: scopeZoneUuids, unassignedAccess: unassignedAccess })', 'analysis /channels scopes catalog and unassigned devices from authenticated server policy');
+  assertContains(failures, source, 'channels: catalog.channels, sources: catalog.sources', 'analysis /channels explicitly projects public sources');
   assertContains(failures, source, 'osiHistory.resolveAnalysisSeries', 'analysis /series calls resolveAnalysisSeries');
   assertContains(failures, source, 'zoneUuids: scopeZoneUuids', 'analysis /series scopes resolver to owned-plus-granted zones');
+  assertContains(failures, source, 'unassignedAccess: unassignedAccess', 'analysis /series uses server-derived unassigned policy');
   assertContains(failures, source, 'osiHistory.listAnalysisViews', 'analysis /views calls listAnalysisViews');
   assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids', 'analysis /views filters saved selectors to owned-plus-granted zones');
+  assertContains(failures, source, 'deviceEui: deviceEui, zoneUuids: scopeZoneUuids, unassignedAccess: unassignedAccess', 'analysis /views uses server-derived unassigned policy');
   assertContains(failures, source, 'osiHistory.saveAnalysisView', 'analysis /views POST calls saveAnalysisView');
   assertContains(failures, source, 'payload.suggestion = error.suggestion', 'structured analysis suggestions');
   assertNotContains(failures, source, 'sync_outbox', 'edge sync outbox mutation from local-only analysis views');
+}
+
+// GET /api/history/export.csv and DELETE /api/analysis/views/:id: a thin node
+// over osi-history-router's handlePortableHistoryRequest.
+function verifyPortableHistoryImplementation(flows, failures, moduleSource) {
+  const node = findPortableHistoryNode(flows);
+  if (!node) {
+    failures.push('missing Portable History API function node');
+    return;
+  }
+  const source = String(node.func || '');
+  const libs = Array.isArray(node.libs) ? node.libs : [];
+  if (!libs.some((lib) => lib && lib.var === 'osiLib' && lib.module === 'osi-lib')) {
+    failures.push("Portable History API must declare libs binding { var: 'osiLib', module: 'osi-lib' }");
+  }
+  assertContains(failures, source, "osiLib.require('history-router')", 'portable history loads the history router module through osi-lib');
+  assertContains(failures, source, 'if (scopedOn) {', 'portable history loads the scope helper only with scoped access on');
+  assertContains(failures, source, 'handlePortableHistoryRequest(', 'portable history delegates to handlePortableHistoryRequest');
+  assertContains(failures, source, 'db.close(', 'portable history closes its database handle');
+  const responses = (node.wires || []).flat().map((id) => flows.find((candidate) => candidate.id === id));
+  if (!responses.length || responses.some((target) => !target || target.type !== 'http response' ||
+      (target.headers && Object.keys(target.headers).length))) {
+    failures.push('Portable History API must answer through an http response node without fixed headers (CSV needs its own Content-Type)');
+  }
+  assertContains(failures, moduleSource, 'async function handlePortableHistoryRequest', 'portable history handler');
+  assertContains(failures, moduleSource, 'await scope.assertEnabledAccount(db, user.user_uuid, { scopedMode: true })', 'portable history refuses a disabled account through the scope helper');
+  assertContains(failures, moduleSource, "'SELECT id FROM irrigation_zones WHERE user_id = ? AND deleted_at IS NULL ORDER BY id ASC'", 'flag-off all-zones export stays owner-only');
+  assertContains(failures, moduleSource, 'history.buildAllZonesExportCsv(db,', 'helper-owned all-zones CSV export');
+  assertContains(failures, moduleSource, "query.scope !== 'allZones'", 'all-zones export scope validation');
+  assertContains(failures, moduleSource, 'history.deleteAnalysisView(db, { userId: auth.userId }, viewId)', 'saved view delete filtered by owner');
+  assertNotContains(failures, moduleSource, 'sync_outbox', 'edge sync outbox mutation from local-only portable history');
 }
 
 function readFlows(flowPath) {
@@ -352,6 +397,7 @@ function verify(options) {
   if (!allowPendingMissing) {
     verifyHistoryRouterImplementation(flows, failures, moduleSource);
     verifyAnalysisRouterImplementation(flows, failures);
+    verifyPortableHistoryImplementation(flows, failures, moduleSource);
   }
 
   if (failures.length) {

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAnalysisCatalog } from '../analysis/useAnalysisCatalog';
 import { useAnalysisSeries } from '../analysis/useAnalysisSeries';
 import { useAnalysisViews } from '../analysis/useAnalysisViews';
-import { axisQuantityLabel, channelMetaFromCatalog } from '../analysis/channelLabels';
+import { axisQuantityLabel, channelMetaFromCatalog, presentRainfallName } from '../analysis/channelLabels';
 import { applyLabelOverrides } from '../analysis/labelOverrides';
 import { loadWorkspace, migrateWorkspaceSeriesIds, saveWorkspace } from '../analysis/analysisWorkspaceStorage';
 import {
@@ -24,6 +24,7 @@ import {
 } from '../analysis/workspaceModel';
 import type { AnalysisRange, AnalysisSeriesRequest } from '../analysis/types';
 import { canonicalize } from '../channels/registry';
+import { exportGranularity, exportRangeFor } from '../analysis/exportRange';
 import { AnalysisSeriesTray } from '../components/analysis/AnalysisSeriesTray';
 import { AnalysisControls } from '../components/analysis/AnalysisControls';
 import { AnalysisChartPanel } from '../components/analysis/AnalysisChartPanel';
@@ -36,6 +37,7 @@ import { AppHeader } from '../components/AppHeader';
 import { HelpTip } from '../components/farming/shared/HelpTip';
 import { useAuth } from '../contexts/AuthContext';
 import { useScope } from '../contexts/ScopeContext';
+import { useGatewayModules } from '../hooks/useGatewayModules';
 
 function toRequest(ws: AnalysisWorkspaceState): AnalysisSeriesRequest | null {
   if (ws.selectors.length === 0) return null;
@@ -46,11 +48,12 @@ export function CrossZoneAnalysisPage() {
   const { t } = useTranslation();
   const { username, logout } = useAuth();
   const { isAdmin, loading: scopeLoading } = useScope();
+  const gatewayModules = useGatewayModules();
   const [workspace, setWorkspace] = useState<AnalysisWorkspaceState>(() => loadWorkspace() ?? createDefaultWorkspace());
   const [viewSaveError, setViewSaveError] = useState<unknown>(null);
   const chartRef = useRef<EChartHandle>(null);
   const { catalog, isLoading: catalogLoading, error: catalogError } = useAnalysisCatalog();
-  const { views, saveView, error: viewsError } = useAnalysisViews();
+  const { views, saveView, deleteView, error: viewsError } = useAnalysisViews();
 
   const activeWorkspace = useMemo(
     () => (catalog ? migrateWorkspaceSeriesIds(workspace, catalog.channels) : workspace),
@@ -75,13 +78,36 @@ export function CrossZoneAnalysisPage() {
     () => new Map((catalog?.channels ?? []).map((c) => [c.seriesId, c])),
     [catalog],
   );
+  // Legacy estimates are not offered as presets; the tray lists them on request.
+  const offeredChannels = useMemo(() => (catalog?.channels ?? []).filter((c) => !c.legacy), [catalog]);
   const zoneNameById = useMemo(
-    () => new Map((catalog?.channels ?? []).map((c) => [c.zoneId, c.zoneName])),
+    () => new Map(
+      (catalog?.channels ?? [])
+        .filter((c): c is typeof c & { zoneId: number; zoneName: string } => c.zoneId !== null && c.zoneName !== null)
+        .map((c) => [c.zoneId, c.zoneName]),
+    ),
     [catalog],
   );
+  const appliedAggregation = data?.aggregation.applied;
+  // A rain amount is named for the applied aggregation ("this interval" raw,
+  // "amount" summed) and a legacy estimate says so; a user's rename still wins.
+  const presentedSeries = useMemo(
+    () => (data?.series ?? []).map((item) => {
+      const entry = catalogById.get(item.seriesId);
+      if (!entry) return item;
+      const name = presentRainfallName(entry, appliedAggregation);
+      const label = entry.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
+      return label === item.label ? item : { ...item, label };
+    }),
+    [appliedAggregation, catalogById, data, t],
+  );
   const displayedSeries = useMemo(
-    () => applyLabelOverrides(data?.series ?? [], activeWorkspace.labelOverrides),
-    [activeWorkspace.labelOverrides, data],
+    () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
+    [activeWorkspace.labelOverrides, presentedSeries],
+  );
+  const resolvedExportRange = useMemo(
+    () => exportRangeFor(data?.range),
+    [data?.range],
   );
   const updateWorkspace = (mutate: (workspace: AnalysisWorkspaceState) => AnalysisWorkspaceState) => {
     setWorkspace((currentWorkspace) => mutate(catalog ? migrateWorkspaceSeriesIds(currentWorkspace, catalog.channels) : currentWorkspace));
@@ -111,7 +137,7 @@ export function CrossZoneAnalysisPage() {
         : setLabelOverride(currentWorkspace, seriesId, label)
     ));
   const resolveAxisLabel = (channelKey: string, unit: string | null) =>
-    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit);
+    activeWorkspace.axisLabelOverrides[canonicalize(channelKey)] ?? axisQuantityLabel(channelKey, unit, appliedAggregation);
   const renameAxis = (channelKey: string, label: string | null) =>
     updateWorkspace((currentWorkspace) => (
       label === null
@@ -124,6 +150,8 @@ export function CrossZoneAnalysisPage() {
       .filter((channel) => (
         channel.sourceKind === 'device'
         && channel.availability === 'available'
+        && channel.zoneId !== null
+        && !channel.legacy
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -169,6 +197,8 @@ export function CrossZoneAnalysisPage() {
         <aside className="analysis-sidebar overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm lg:w-[320px] lg:shrink-0">
           <AnalysisSeriesTray
             channels={catalog?.channels ?? []}
+            sources={catalog?.sources}
+            gatewayModules={gatewayModules}
             selectedIds={selectedIds}
             onAdd={(id) => updateWorkspace((currentWorkspace) => addSeries(currentWorkspace, id))}
             onRemove={(id) => updateWorkspace((currentWorkspace) => removeSeries(currentWorkspace, id))}
@@ -181,6 +211,12 @@ export function CrossZoneAnalysisPage() {
                 void saveCurrentView(name);
               }}
               onLoad={loadView}
+              onDelete={(id) => {
+                const name = views.find((view) => view.id === id)?.name ?? '';
+                if (!window.confirm(t('analysis.views.confirmDelete', { name }))) return;
+                setViewSaveError(null);
+                void deleteView(id).catch(setViewSaveError);
+              }}
             />
           </div>
         </aside>
@@ -218,7 +254,7 @@ export function CrossZoneAnalysisPage() {
               ) : null}
               {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
                 <MetricAcrossZonesPicker
-                  channels={catalog?.channels ?? []}
+                  channels={offeredChannels}
                   onApply={applyMetricPreset}
                 />
               ) : null}
@@ -228,6 +264,10 @@ export function CrossZoneAnalysisPage() {
               catalogById={catalogById}
               chartRef={chartRef}
               username={username}
+              exportRange={resolvedExportRange}
+              exportGranularity={exportGranularity(data?.aggregation.applied)}
+              aggregation={appliedAggregation}
+              rangeEnd={data?.range?.to}
             />
           </div>
           {seriesLoading && <p className="mt-4 text-sm text-[var(--text-tertiary)]">{t('analysis.series.loading')}</p>}

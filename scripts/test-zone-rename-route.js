@@ -218,6 +218,24 @@ test('scoped: a zone the actor has no access to is refused without a write', asy
   }
 });
 
+test('scoped: a researcher with no grant on the zone is refused without a write', async () => {
+  const db = seedScopedDb();
+  try {
+    // res1 can mutate and owns zone 1, but neither owns zone 2 nor (once its
+    // grant g-3 is revoked) holds a grant on it: only the zone check refuses
+    // here, the role checks pass.
+    db.exec("UPDATE user_zone_assignments SET deleted_at='2026-09-20T00:00:00Z' WHERE assignment_uuid='g-3'");
+    const { stage, result } = await callRoute(db, FLAG_ON, { zoneId: 2, name: 'Not mine', authorization: token(OWNER) });
+    assert.equal(stage, 'guard');
+    assert.ok(result.statusCode === 403 || result.statusCode === 404, String(result.statusCode));
+    const row = db.prepare('SELECT name, sync_version FROM irrigation_zones WHERE id=2').get();
+    assert.equal(row.name, 'Z Two');
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sync_outbox WHERE aggregate_type='ZONE'").get().n, 0);
+  } finally {
+    db.close();
+  }
+});
+
 test('a deleted zone answers 404', async () => {
   const db = seedScopedDb();
   try {

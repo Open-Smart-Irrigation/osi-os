@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "Após a vinculação, deve usar as suas credenciais do OSI Server para iniciar sessão. O OSI OS armazena um verificador offline específico do gateway para o início de sessão vinculado.",
+    "message": "Após a vinculação, deve usar as suas credenciais do OSI Server para iniciar sessão. O OSI OS guarda um verificador offline específico desta gateway para o início de sessão vinculado.",
     "proceed": "Prosseguir"
   },
   "success": {
@@ -40,30 +40,47 @@
     "networkError": "Não foi possível alcançar o OSI Server. Verifique o URL e a sua ligação à Internet.",
     "authFailed": "Credenciais OSI Server inválidas.",
     "generic": "Ocorreu um erro. Por favor, tente novamente.",
-    "forceSyncFailed": "A sincronização manual falhou. Por favor, tente novamente."
+    "forceSyncFailed": "A sincronização manual falhou. Tente novamente."
   },
   "sync": {
     "title": "Sincronização manual",
-    "description": "Executa uma sincronização de recuperação imediata com o OSI Server.",
+    "description": "Execute uma sincronização de recuperação imediata com o OSI Server.",
     "button": "Forçar sincronização agora",
     "running": "A sincronizar...",
     "successTitle": "Sincronização manual concluída",
     "partialTitle": "Sincronização manual concluída com problemas",
-    "refreshed": "Token de sincronização atualizado antes da sincronização.",
+    "refreshed": "Token de sincronização renovado antes da sincronização.",
     "usedCurrentToken": "A usar o token de sincronização atual.",
     "bootstrap": "Bootstrap aplicado: {{applied}}, ignorado: {{skipped}}",
-    "outbox": "Outbox entregue: {{delivered}} ({{before}} -> {{after}} pendentes)",
-    "pending": "Comandos pendentes obtidos: {{fetched}}, colocados na fila para aplicação local: {{queued}}",
-    "pendingAfterResponse": "A aplicação local continua após o retorno desta resposta.",
+    "outbox": "{{delivered}} atualizaç(ões) enviada(s) para a OSI Server ({{after}} pendentes)",
+    "outboxCounts": {
+      "title": "Resultado da caixa de saída",
+      "selected": "Selecionadas: {{count}}",
+      "applied": "Aplicadas: {{count}}",
+      "duplicate": "Duplicadas: {{count}}",
+      "retryable": "Repetíveis: {{count}}",
+      "rejected": "Rejeitadas: {{count}}",
+      "protocolErrors": "Erros de protocolo: {{count}}",
+      "pendingAfter": "Pendentes após a sincronização: {{count}}",
+      "rejectedCode": "Rejeitadas por {{code}}: {{count}}"
+    },
+    "pending": "Comandos pendentes obtidos: {{fetched}}, em fila para aplicação local: {{queued}}",
+    "pendingAfterResponse": "A aplicação local continua após esta resposta retornar.",
     "lastError": "Último erro de {{source}}: {{message}}"
+  },
+  "rejected": {
+    "title": "Rejeitado pelo OSI Server",
+    "count": "{{total}} atualização(ões) foram rejeitadas definitivamente e não serão repetidas ({{last24h}} nas últimas 24 horas).",
+    "lastReason": "Mais recente: {{op}} rejeitado por {{reason}} em {{date}}"
   },
   "reauth": {
     "title": "Token de sincronização expirado",
-    "description": "Autentique-se novamente no OSI Server para gerar um novo token de sincronização para este gateway.",
+    "description": "Autentique-se novamente no OSI Server para gerar um novo token de sincronização para esta gateway.",
     "button": "Autenticar novamente",
     "username": "Nome de utilizador do servidor",
     "password": "Palavra-passe do OSI Server",
     "submit": "Atualizar ligação",
-    "running": "A atualizar..."
+    "running": "A atualizar...",
+    "detected": "A ligação à nuvem precisa de nova autenticação. A última tentativa de sincronização foi recusada com HTTP {{statusCode}}."
   }
 }

@@ -214,39 +214,48 @@ dev workstation unless noted.
    complete" and exit 0. Same failure class as `git push | tail -1` hiding a failed
    push behind `tail`'s exit code (engineering playbook §1). Download-then-run makes
    `curl`'s failure set `$rc`, so a 404'd deploy fails loudly over the SSH exit code.
-   `deploy.sh`'s own header comment still shows the shorter piped form as a
-   convenience one-liner — prefer the hardened form above for anything you need to
-   trust.
+   `deploy.sh`'s own header comment shows the same download-then-run form.
 
 5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
    restarts Node-RED itself, up to twice: once around the schema-migration step
    **only when a live `/data/db/farming.db` exists** (`run_schema_migration`
-   stops it before migrating and starts it again after; on a fresh Pi the
-   migration step SKIPs, so this restart does not happen), and once after the
-   payload flip (`/etc/init.d/node-red restart` right after `flipTo`, always).
+   stops it, migrates, then activates the staged flows+GUI pair
+   (`--- Activate paired flows+GUI payload before Node-RED restart ---`,
+   `OK: activated flows+GUI payloads/<stamp>`) before it starts Node-RED again,
+   so a restart never runs old flows on a migrated schema; on a fresh Pi the
+   migration step SKIPs, so this restart does not happen), and once in the
+   health block (`--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---`):
+   it flips the pair if the migration step has not already, and restarts
+   Node-RED unless it already did. The flip always switches flows.json and the
+   GUI directory together.
    There is nothing left for you to restart on a normal deploy.
 
    On a passing post-flip self-check the script prints, in order:
    ```text
-   OK: local health self-check PASSED (Node-RED alive, /gui reachable)
+   OK: boot node confirmed 'sync-init: schema init complete' after <n>s
+   OK: local health self-check PASSED (Node-RED service running, /gui reachable after <n>s)
    OK: committing payload <stamp>
    ```
    and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
 
    On a failing self-check it instead prints:
    ```text
-   ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload
-   ROLLED BACK: flows.json -> payloads/<prev>; Node-RED restarted on last-known-good payload
+   ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI
+   ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair
    NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup.
    NOTE: run deploy-canary-gate.js from your operator machine for the full cloud verdict.
    ```
-   and exits 1. The flows payload rolls back automatically; a schema migration
+   and exits 1. The flows+GUI pair rolls back automatically; a schema migration
    that already committed earlier in this same deploy does **not** roll back
    with it (DD10) — restoring it is an operator decision, from the backup
    `migrate-cli.js` took under `/data/backups/migrate` (or `$MIGRATE_BACKUP_DIR`
-   if set), not something the script undoes for you. If there is no previous
-   payload to roll back to (e.g. the very first deploy), it instead prints an
-   `ERROR`, leaves the new payload live, and exits 1 — treat that as a stop.
+   if set), not something the script undoes for you. Before it restarts on the
+   previous pair it proves Node-RED is stopped and the retained payload fits the
+   database, and a refusal at any of those points prints an `ERROR` and leaves
+   Node-RED stopped (exit 1). If there is no previous payload to roll back to
+   (e.g. the very first deploy), it prints
+   `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
+   and exits 1 — treat that as a stop, with the service down.
 
    Restarting Node-RED by hand right after a green deploy doesn't make it any
    safer — it only obscures which restart (migration, flip, or yours) produced
@@ -278,10 +287,38 @@ dev workstation unless noted.
    `CHIRPSTACK_APP_SENSORS=` line in `/srv/node-red/.chirpstack.env`), and only
    re-runs `chirpstack-bootstrap.js` when that stamp is invalid or ChirpStack's
    gRPC port isn't answering yet. No manual bootstrap step is needed after a normal
-   restart on an already-provisioned gateway. Manual re-provision, if ever needed:
+   restart on an already-provisioned gateway. Never run `chirpstack-bootstrap.js`
+   directly: it writes no stamp, so the service runs it again at the next boot,
+   mints a second API key and rewrites `.chirpstack.env`. Provision a gateway
+   that is not provisioned yet with `/etc/init.d/osi-bootstrap start`. Manual
+   re-provision, if ever needed (reuses the existing API key; the env file keeps
+   only the `CHIRPSTACK_*` keys):
    ```bash
-   node /usr/share/node-red/chirpstack-bootstrap.js
+   rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
    ```
+
+   **One exception: the Kiwi/Clover profile repair.** `deploy.sh` runs it
+   itself; rerun it by hand only when the deploy printed its WARN, and only as
+   this exact command:
+   ```bash
+   node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles
+   ```
+   Add `--repoint-clover-device=<DevEUI>` (repeatable) to move a Clover
+   registered before the repair off the field-tester profile.
+   - Only the `/srv/node-red/` copy, which this deploy installed. Never
+     `/usr/share/node-red/chirpstack-bootstrap.js`: an image built before the
+     repair existed ignores the flag and runs a full provisioning pass (second
+     API key, env file rewritten without operator lines, the Clover alias back).
+   - Only with `--repair-soil-profiles` (or `--repoint-clover-device`). With
+     either flag the script never runs the full pass: it fails instead.
+   - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
+     none (a codec already there is left alone), a new `OSI CLOVER Sensor`
+     profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
+     UCI key, the `CHIRPSTACK_PROFILE_CLOVER` env line, and the profile of each
+     DevEUI you name. It reuses the existing API key and writes nothing once
+     all is correct. Node-RED needs a restart to pick up a new Clover id; after
+     a standalone run, request it with
+     `/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60`.
 
 ### What `deploy.sh` actually does end-to-end
 
@@ -295,8 +332,13 @@ Reading straight through the script, in order:
    and the diagnose script into a temp dir, fails loudly if any fetched artifact is
    empty, then runs `verify-communication-contract.js` against them before touching
    anything live.
-3. Deploys `settings.js`, the Node-RED init script, and the gateway identity
-   helper (the latter two `chmod 755`), removes a legacy GPS sidecar service if
+3. Reads the release version from `96_osi_server_config` and records the current
+   `osi-server.cloud.firmware_version`. Deploys `settings.js`, the Node-RED init
+   script, and the gateway identity helper (the latter two `chmod 755`), installs
+   `osi-bootstrap` and enables it when it is not enabled (this also re-enables a
+   service an operator disabled, and is not undone on rollback; when this deploy
+   enables it on a gateway whose env file is already provisioned, it writes
+   `/etc/osi-bootstrap.done`), removes a legacy GPS sidecar service if
    present, then fetches the deploy-payload-swap helper
    (`scripts/deploy-payload-swap.js`) and hard-aborts if `/srv/node-red/payloads`
    is on a different filesystem than `/srv/node-red` — the symlink flip in step
@@ -322,9 +364,13 @@ Reading straight through the script, in order:
    schema, not seed-plus-migrations). Otherwise it ensures the `sqlite3` CLI is
    present (attempting `opkg install sqlite3-cli` if missing); fetches
    `database/migrations/ordered/CHECKSUMS.json`, every ordered migration file
-   it names, the Stage 0 helper scripts (`repair-sync-outbox-v2.js`,
-   `baseline-existing-db.js`, `migrate-cli.js`, `semantic-schema-compare.js`),
-   and the `lib/osi-migrate` runner modules; stops Node-RED and waits up to 30s
+   it names, the helper scripts (`baseline-existing-db.js`,
+   `repair-sync-outbox-v2.js`, `migrate-cli.js`, `semantic-schema-compare.js`,
+   `restamp-fingerprints.js`, `verify-head-cli.js`,
+   `verify-runtime-schema-parity.js`) and the `lib/osi-migrate` runner
+   modules, then refuses, before Node-RED is touched, unless every migration
+   matches its `CHECKSUMS.json` SHA-256, no unnamed `.sql` sits beside them,
+   and every runner file is non-empty and parses; stops Node-RED and waits up to 30s
    for the process to exit, refusing to proceed if it doesn't; WAL-checkpoints
    the DB and runs `PRAGMA integrity_check`; if the `schema_migrations` ledger
    has zero rows, runs the sync-outbox v2 repair then `baseline-existing-db.js`
@@ -337,23 +383,35 @@ Reading straight through the script, in order:
    territory; this section only covers what `deploy.sh` does mechanically to
    fetch and invoke them.
 9. Fixes mosquitto file ownership/permissions if mosquitto is installed.
-10. Flips the payload live (`flipTo(<new stamp>)`), restarts Node-RED, waits 5s,
-    then probes `http://127.0.0.1:1880/gui` with `wget --spider` (5.3 / DD10).
+10. Flips the payload live (`flipTo(<new stamp>)`: flows.json and the GUI
+    directory together; skipped when the migration step already activated it),
+    writes the new `firmware_version` to UCI (every switch back to the previous
+    payload puts the old value back first), restarts Node-RED unless the
+    migration step did, then probes `http://127.0.0.1:1880/gui` with
+    `wget --spider` and requires the boot node's
+    `sync-init: schema init complete` line from this restart (5.3 / DD10).
     On pass: prints `OK: local health self-check PASSED …` then
     `OK: committing payload <stamp>` and prunes old payload directories to
     `PAYLOAD_KEEP_N` (default 5). On fail: prints
-    `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows
-    payload`, flips back to the previous stamp, restarts Node-RED on
-    last-known-good, prints `ROLLED BACK: flows.json -> payloads/<prev>`, notes
-    that a committed DB migration is **not** auto-undone (DD10 — see step 8)
-    and that `deploy-canary-gate.js` gives the full cloud verdict, then exits
-    1. If there is no previous payload to roll back to, it prints an `ERROR`,
-    leaves the new payload live, and exits 1.
-11. Deploys the React GUI: fetches `react_gui.tar.gz`, wipes
-    `/usr/lib/node-red/gui/` (including dotfiles), extracts the new bundle in
-    place. This runs **after** the flip and self-check, so the `/gui` probe in
-    step 10 tests Node-RED route liveness against the *old* GUI bundle — a
-    passing self-check says nothing about the new GUI actually working.
+    `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
+    flips back to the previous stamp (flows and GUI together), restarts
+    Node-RED on the last-known-good pair, prints
+    `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
+    notes that a committed DB migration is **not** auto-undone (DD10 — see
+    step 8) and that `deploy-canary-gate.js` gives the full cloud verdict, then
+    exits 1. If there is no previous payload to roll back to, it removes the
+    first-deploy payload, leaves Node-RED stopped, prints an `ERROR`, and
+    exits 1.
+11. The React GUI is not a separate step after the flip. Earlier,
+    `--- flows.json + React GUI (staged payload; activation deferred to migration) ---`
+    fetches `react_gui.tar.gz`, extracts it into a staging directory and stages
+    it with flows.json as one payload (`OK: staged paired payloads/<stamp> …`),
+    and captures the existing flows+GUI pair as the rollback target
+    (`OK: captured existing flows+GUI pair as payloads/<prev>`). Nothing under
+    `/usr/lib/node-red/gui/` is wiped in place: the flip in step 10 swaps the
+    whole pair, so the `/gui` probe exercises the new GUI bundle together with
+    the new flows. It still proves only that Node-RED served the route, not that
+    the SPA works in a browser.
 12. Prints the final summary: `=== Deploy complete. ===`, the payload path
     annotated "(flipped + local health self-checked)", a rollback note
     (automatic for payload failure; committed DB migration restore is the 1.B1
@@ -367,10 +425,44 @@ sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and n
 installable via `opkg`; Node-RED failing to stop within 30s before a migration;
 a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
 is restarted before the script exits — except `migrate-cli.js` exit code 3, a
-backup-restore integrity failure, which leaves Node-RED stopped); and a failed
-post-flip self-check, which either auto-rolls back and exits 1, or — when there is
-no previous payload — exits 1 with an `ERROR` and leaves the new payload live. All
-of these are hard aborts (`exit 1`), not partial continues.
+backup-restore integrity failure, which leaves Node-RED stopped); a failed
+download or verification of the migration runner, an uncreatable migration
+backup directory, or an unreadable database size (refused before Node-RED is
+stopped); a failed ledger-reconciliation download or probe (the previous
+payload is restarted); a failed command-ledger staging run (before anything is
+stopped); a failed command-ledger activation after the migration (see below);
+and a failed post-flip self-check, which either auto-rolls back the flows+GUI
+pair and exits 1, or — when there is no previous payload — removes the
+first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
+
+**Failed command-ledger activation.** At staging, before anything is stopped,
+`deploy.sh` copies the live `osi-command-ledger/{package.json,index.js}` and
+`osi-watermark-binding/canonicalization.js` to
+`/srv/node-red/.osi-command-ledger-previous.<stamp>`. The file `absent` in that
+directory lists the files that did not exist. If the copy fails, the deploy stops
+there. A successful deploy removes the copy; a failed one keeps it.
+
+If the activation fails, the script lists each live file as previous,
+candidate, absent or unknown, then decides:
+- no ledger file is in place, as before the deploy (a gateway that never had
+  one): the deploy's usual failure path runs, which restarts the previous
+  payload when the database allows it;
+- the live pair loads in a fresh process: the same failure path runs;
+- it does not load: the kept state is restored. Absent files are restored too:
+  candidate files that did not exist before are moved to `<copy>/failed`. If
+  the result has no ledger files, or loads, the same failure path runs;
+- otherwise: Node-RED and identityd are held **stopped**, as in the script's
+  other holds. Nothing is disabled, so a reboot or a manual start runs the
+  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
+  records the reason, the time and the copy.
+
+Every later deploy reads the marker before its first fetch:
+- if the live pair loads, it clears the marker and says so;
+- if not, it prints a `WARNING` and carries on; an activation whose pair
+  loads clears the marker.
+
+Way out: re-run the deploy. If it fails again, the load error printed by the
+installer or the probe names the cause.
 
 ### Private branch deployments
 
@@ -589,9 +681,9 @@ in runbooks, docs, or scripts.
   `/data/db/farming.db` doesn't exist yet — a brand-new Pi ends up at exactly
   the bundled seed schema, not seed-plus-migrations.
 - Trusting `=== Deploy complete. ===` without reading the self-check verdict
-  printed above it. A failed post-flip probe auto-rolls the flows payload back
+  printed above it. A failed post-flip probe auto-rolls the flows+GUI pair back
   while any committed DB migration stays applied — the
-  `ROLLED BACK: flows.json -> payloads/<prev>` line (or its absence) tells you
+  `ROLLED BACK: flows+GUI -> payloads/<prev>` line (or its absence) tells you
   which payload is actually live, not the closing banner.
 - Restarting Node-RED by hand right after a deploy "just to be sure."
   `deploy.sh` already restarted it — once around the schema migration, once

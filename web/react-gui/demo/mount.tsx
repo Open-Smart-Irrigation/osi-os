@@ -1,8 +1,11 @@
 import React, {Suspense} from 'react';
 import ReactDOM from 'react-dom/client';
+import {SWRConfig} from 'swr';
 import App from '../src/App';
 import '../src/index.css';
 import './app.css';
 import {applyThemePreference} from '../src/utils/displayPreferences';
+import {demoRevalidation} from './revalidation';
 applyThemePreference('light');
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><Suspense fallback="Loading OSI OS…"><App /></Suspense></React.StrictMode>);
+const DEMO_SWR_CONFIG = {use: [demoRevalidation]};
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><Suspense fallback="Loading OSI OS…"><SWRConfig value={DEMO_SWR_CONFIG}><App /></SWRConfig></Suspense></React.StrictMode>);

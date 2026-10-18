@@ -152,7 +152,40 @@ test('isSoilSource', function() {
 test('isEnvironmentSource', function() {
   assert.strictEqual(HR.isEnvironmentSource({ type_id: 'SENSECAP_S2120' }), true);
   assert.strictEqual(HR.isEnvironmentSource({ type_id: 'KIWI_SENSOR' }), true);
+  assert.strictEqual(HR.isEnvironmentSource({ type_id: 'AQUASCOPE_LORAIN' }), true);
   assert.strictEqual(HR.isEnvironmentSource({ type_id: 'STREGA_VALVE' }), false);
+});
+
+test('isEnvironmentSource keeps the router type predicate free of measurement fallback', function() {
+  const cases = [
+    [{ type_id: 'KIWI_SENSOR', ambient_temperature: 0 }, true],
+    [{ type_id: 'TEKTELIC_CLOVER', ambient_temperature: 0 }, true],
+    [{ type_id: 'SENSECAP_S2120', ambient_temperature: 0 }, true],
+    [{ type_id: 'AQUASCOPE_LORAIN', rain_mm_today: 0 }, true],
+    [{ type_id: 'DRAGINO_LSN50', temp_enabled: 1 }, true],
+    [{ type_id: 'DRAGINO_LSN50', temp_enabled: 0, ambient_temperature: 0 }, false],
+    [{ type_id: 'UNKNOWN_DEVICE', ambient_temperature: 0 }, false],
+    [{ type_id: 'UNKNOWN_DEVICE', ambient_temperature: null }, false],
+    [{ type_id: 'STREGA_VALVE', rain_mm_today: 0 }, false],
+  ];
+  for (const [device, expected] of cases) {
+    assert.strictEqual(HR.isEnvironmentSource(device), expected, JSON.stringify(device));
+  }
+});
+
+test('buildSeriesFromAggregate exposes LoRain environment card data', function() {
+  const result = HR.buildSeriesFromAggregate(
+    { cardType: 'environment' },
+    {
+      aggregation: 'raw',
+      series: {
+        rain_mm_per_hour: { points: [{ recordedAt: '2026-10-01T10:00:00.000Z', value: 6 }] },
+      },
+    },
+    [{ type_id: 'AQUASCOPE_LORAIN' }]
+  );
+  assert.deepEqual(result.map((series) => series.id), ['rain_mm_per_hour']);
+  assert.equal(result[0].points[0].value, 6);
 });
 
 test('isIrrigationSource', function() {

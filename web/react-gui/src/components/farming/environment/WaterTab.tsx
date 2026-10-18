@@ -90,6 +90,33 @@ const REASON_LABELS: Record<string, string> = {
 type Translate = TFunction<'devices'>;
 type LegendEntry = NonNullable<LegendProps['payload']>[number];
 
+/** Coverage wording for the selected rain amount; received-only stays separate. */
+export function rainCoverageNote(
+  t: Translate,
+  coverage: string | null | undefined,
+  source?: string | null,
+): string | null {
+  switch (coverage) {
+    case 'complete_so_far':
+      return t('environment.water.rainSoFar', { defaultValue: 'so far' });
+    case 'partial':
+      if (source === 'meteoswiss_station' || source === 'weather_service') {
+        return t('environment.water.rainCoverage.providerPartial', {
+          defaultValue: 'Provider amount — partial coverage',
+        });
+      }
+      return t('environment.water.rainCoverage.receivedOnlyLabel', {
+        defaultValue: 'received only (incomplete day)',
+      });
+    case 'unknown':
+      return t('environment.water.rainCoverage.receivedOnlyLabel', {
+        defaultValue: 'received only (incomplete day)',
+      });
+    default:
+      return null;
+  }
+}
+
 const RAIN_COLOR = '#38bdf8';
 const MEASURED_COLOR = '#14b8a6';
 const ESTIMATED_COLOR = '#22c55e';
@@ -264,6 +291,12 @@ export const WaterDayTooltip: React.FC<WaterDayTooltipProps> = ({ row, label, wa
       {showRain && (
         <p className="font-semibold text-sky-700">
           {t('environment.water.tooltipRain', { defaultValue: 'Rain' })}: {formatValue(row.rainMm, 'mm', 1)}
+          {/* MeteoSwiss' daily file covers 0-24 UTC, which differs from the farm's local day. */}
+          {row.rainMm != null && row.rainPeriod === 'utc_day' && (
+            <span className="ml-1 text-xs font-normal text-[var(--text-secondary)]" data-testid="water-day-rain-period">
+              ({t('environment.water.utcDay', { defaultValue: 'UTC day' })})
+            </span>
+          )}
         </p>
       )}
       {showMeasured && (
@@ -369,7 +402,8 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const estimatedNetMm = water.estimatedIrrigationNetMm ?? null;
   // A linked gateway can carry rain for a zone without a gauge: measured at the
   // nearest MeteoSwiss station, or the weather service's rain for the hours of
-  // today that have passed. The zone's own gauge always wins the label.
+  // today that have passed. A certified measurement names its actual source,
+  // even when the zone also has a configured gauge.
   const rainStationLabel = water.rainStation
     ? {
         station: water.rainStation.name ?? water.rainStation.id,
@@ -378,14 +412,17 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
           : '—',
       }
     : null;
-  const rainSourceHelp = hasRainGauge
-    ? null
-    : water.rainSource === 'meteoswiss_station' && rainStationLabel
+  const rainSourceHelp = water.rainSource === 'meteoswiss_station' && rainStationLabel
       ? t('zone.water.rainFromStation', { ...rainStationLabel, defaultValue: 'Measured at MeteoSwiss {{station}} ({{distance}} km away)' })
       : water.rainSource === 'weather_service'
         ? t('zone.water.rainFromWeather', { defaultValue: 'From weather data (not measured)' })
         : null;
-  const showRainTile = hasRainGauge || (rainSourceHelp != null && water.rainTodayMm != null);
+  const rainCoverageDetail = water.rainTodayMm != null
+    ? rainCoverageNote(t, water.rainTodayCoverage, water.rainSource)
+    : null;
+  const showRainTile = hasRainGauge
+    || water.rainTodayReceivedMm != null
+    || (rainSourceHelp != null && water.rainTodayMm != null);
   const todayDate = water.todayDate ?? null;
   const chartData = buildWaterChartRows(water);
   // One decision for the bars, the axis and the legend (see waterChartSeries).
@@ -437,6 +474,12 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
       key: 'rain',
       label: t('environment.water.rainToday', { defaultValue: 'Rain today' }),
       value: formatValue(water.rainTodayMm, 'mm', 1),
+      // A received lower bound stays visible alongside a provider-resolved amount.
+      detail: [
+        rainCoverageDetail,
+        water.rainTodayReceivedMm != null
+          ? t('environment.water.rainReceivedOnly', { value: formatValue(water.rainTodayReceivedMm, 'mm', 1), defaultValue: '{{value}} received only (incomplete day)' }) : null,
+      ].filter(Boolean).join(' · ') || null,
       help: rainSourceHelp
         ? { label: t('environment.water.rainSourceHelpLabel', { defaultValue: 'Where this rain value comes from' }), text: rainSourceHelp }
         : null,

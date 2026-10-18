@@ -1,0 +1,68 @@
+{
+  "id": "multi-block",
+  "truthRows": [
+    "T16"
+  ],
+  "description": "The 10:15 send failed before transmission and consumed no fCnt; its blocks stayed in the buffer, so the 10:30 frame carries two rain blocks (3 and 1 tips). The probable amount is the sum; the current codec reports only the last block.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000048",
+      "devAddr": "01000001",
+      "fCnt": 160,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000049",
+      "devAddr": "01000001",
+      "fCnt": 161,
+      "time": "2026-10-08T10:30:02.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100031221000a06030005060100b8068100011221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 4,
+        "amount_mm": 2,
+        "codec_tips": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "multi_block"
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "unknown",
+        "reason": "multi_block"
+      }
+    ]
+  }
+}

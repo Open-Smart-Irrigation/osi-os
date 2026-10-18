@@ -368,6 +368,41 @@
       "required": ["plot"],
       "properties": { "plot": { "$ref": "#/definitions/plotSnapshot" } }
     },
+    "plotGroupSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "group_uuid", "owner_user_uuid", "label", "gateway_device_eui", "created_by_principal_uuid", "created_at", "resolved_at", "resolved_by_principal_uuid", "sync_version", "deleted_at", "members"],
+      "properties": {
+        "contract_version": { "const": 2 },
+        "group_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "owner_user_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "label": { "type": "string", "minLength": 1 },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "created_by_principal_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "created_at": { "$ref": "#/definitions/canonicalTimestamp" },
+        "resolved_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "resolved_by_principal_uuid": { "$ref": "#/definitions/nullableCanonicalUuid" },
+        "sync_version": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "deleted_at": { "$ref": "#/definitions/nullableCanonicalTimestamp" },
+        "members": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/definitions/canonicalUuid" } }
+      }
+    },
+    "plotGroupResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_device_eui", "group_uuid", "projection_version"],
+      "properties": {
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "group_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
+    "plotGroupCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plot_group"],
+      "properties": { "plot_group": { "$ref": "#/definitions/plotGroupSnapshot" } }
+    },
     "cutoverResource": {
       "type": "object",
       "additionalProperties": false,
@@ -481,6 +516,21 @@
         "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
       }
     },
+    "plotGroupSnapshotMutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutation_uuid", "workspace_uuid", "operation", "resource", "candidate", "payload_sha256", "origin", "recorded_at"],
+      "properties": {
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "operation": { "const": "PLOT_GROUP_SNAPSHOT" },
+        "resource": { "$ref": "#/definitions/plotGroupResource" },
+        "candidate": { "$ref": "#/definitions/plotGroupCandidate" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "origin": { "const": "edge-worker" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
     "cutoverBarrierReceiptMutation": {
       "type": "object",
       "additionalProperties": false,
@@ -504,6 +554,7 @@
         { "$ref": "#/definitions/productUpsertMutation" },
         { "$ref": "#/definitions/customVocabUpsertMutation" },
         { "$ref": "#/definitions/plotSnapshotMutation" },
+        { "$ref": "#/definitions/plotGroupSnapshotMutation" },
         { "$ref": "#/definitions/cutoverBarrierReceiptMutation" }
       ]
     },
@@ -546,6 +597,17 @@
         "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
         "projection_version": { "$ref": "#/definitions/positiveVersion" },
         "plot": { "$ref": "#/definitions/plotSnapshot" }
+      }
+    },
+    "plotGroupSnapshotPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_uuid", "gateway_device_eui", "projection_version", "plot_group"],
+      "properties": {
+        "snapshot_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "gateway_device_eui": { "$ref": "#/definitions/gatewayEui" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" },
+        "plot_group": { "$ref": "#/definitions/plotGroupSnapshot" }
       }
     },
     "productReferencePayload": {
@@ -702,6 +764,19 @@
         "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
       }
     },
+    "plotGroupSnapshotReplication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "workspace_uuid", "kind", "payload", "payload_sha256", "recorded_at"],
+      "properties": {
+        "sequence": { "$ref": "#/definitions/sequence" },
+        "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "kind": { "const": "PLOT_GROUP_SNAPSHOT" },
+        "payload": { "$ref": "#/definitions/plotGroupSnapshotPayload" },
+        "payload_sha256": { "$ref": "#/definitions/sha256" },
+        "recorded_at": { "$ref": "#/definitions/canonicalTimestamp" }
+      }
+    },
     "referenceDataReplication": {
       "type": "object",
       "additionalProperties": false,
@@ -759,6 +834,7 @@
         { "$ref": "#/definitions/entryHeadReplication" },
         { "$ref": "#/definitions/entryConflictReplication" },
         { "$ref": "#/definitions/plotSnapshotReplication" },
+        { "$ref": "#/definitions/plotGroupSnapshotReplication" },
         { "$ref": "#/definitions/referenceDataReplication" },
         { "$ref": "#/definitions/cropCycleProjectionReplication" },
         { "$ref": "#/definitions/attachmentDescriptorReplication" },
@@ -813,6 +889,17 @@
         "projection_version": { "$ref": "#/definitions/positiveVersion" }
       }
     },
+    "plotGroupSnapshotResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "mutation_uuid", "outcome", "projection_version"],
+      "properties": {
+        "kind": { "const": "PLOT_GROUP_SNAPSHOT_RESULT" },
+        "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+        "outcome": { "$ref": "#/definitions/mutationOutcome" },
+        "projection_version": { "$ref": "#/definitions/positiveVersion" }
+      }
+    },
     "cutoverBarrierReceiptResult": {
       "type": "object",
       "additionalProperties": false,
@@ -829,6 +916,7 @@
         { "$ref": "#/definitions/entryMutationResult" },
         { "$ref": "#/definitions/referenceMutationResult" },
         { "$ref": "#/definitions/plotSnapshotResult" },
+        { "$ref": "#/definitions/plotGroupSnapshotResult" },
         { "$ref": "#/definitions/cutoverBarrierReceiptResult" }
       ]
     }

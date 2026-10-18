@@ -190,6 +190,48 @@ Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
 
+## `common.json` — all-zones export messages and saved-view delete
+
+| Keys | Reason |
+|---|---|
+| `analysis.export.allZonesCsvBusy`, `analysis.export.errors.tooLarge`, `busy`, `invalidRange`, `failed`; `analysis.views.confirmDelete` (6 keys in `common.json`) | Added with the analysis page's all-zones CSV export (its busy label and the messages for a refused or failed export) and the confirmation before a saved view is deleted. No human Luganda pass yet, so `lg` ships the English source text. de-CH/es/fr/it/pt were translated in the same change. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts`
+(`PENDING_HUMAN_LUGANDA` in the all-zones export test), which asserts each
+key's `lg` value is still byte-identical to `en`. A human Luganda pass must
+drop the key from that set and from the table above in the same change.
+
+## `common.json` — data source tray messages
+
+| Keys | Reason |
+|---|---|
+| `analysis.tray.unassigned`, `emptySource`, `otherSupported`, `otherSupportedHelp`, `valveEvents`, `unsupportedType`, `openNetwork`, `networkDisabled`, `networkLoading` (9 keys in `common.json`) | Added by the data-device discovery view (Task 4, 2026-10-07). de-CH/es/fr/it/pt carry translations. No human Luganda pass has reviewed these source messages, so `lg` keeps the English source text. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the data
+source test's `PENDING_HUMAN_LUGANDA` set. A human Luganda pass
+must drop each key from that set and from this table in the same change.
+
+## `common.json` — correlation suppression reasons for device sources
+
+| Keys | Reason |
+|---|---|
+| `analysis.correlation.ambiguous`, `analysis.correlation.missingSource` (2 keys in `common.json`) | Added by the data-device discovery view (2026-10-07). de-CH/es/fr/it/pt carry translations. No human Luganda pass has reviewed them, so `lg` keeps the English source text. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the
+correlation test's `PENDING_HUMAN_LUGANDA` set. A human Luganda pass must drop
+each key from that set and from this table in the same change.
+
+## `devices.json` and `common.json` — rain amounts on the LoRain card and in Data view
+
+| Keys | Reason |
+|---|---|
+| `loRain.intervalRainfall`, `loRain.lastReport`, `loRain.tips_one`, `loRain.tips_other`, `loRain.tipsUnavailable` (5 keys in `devices.json`); `analysis.tray.showLegacy`, `analysis.legacyEstimate`, `analysis.tooltip.reportsReceived_one`, `analysis.tooltip.reportsReceived_other`, `analysis.export.qualityColumns` (5 keys in `common.json`) | Added when the LoRain card and the Data view started to present rain as amounts (the elapsed-time rate became a legacy estimate, offered on request) and the Data view CSV gained an opt-in version 2 with quality columns. de-CH/es/fr/it/pt carry translations. No human Luganda pass yet, so `lg` ships the English source text. |
+
+Tracked in code at `web/react-gui/tests/lorainViewLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
+
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

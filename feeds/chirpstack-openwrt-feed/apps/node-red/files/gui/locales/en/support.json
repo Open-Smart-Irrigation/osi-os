@@ -1,0 +1,92 @@
+{
+  "navLabel": "Support & Requests",
+  "title": "Support & Requests",
+  "backToDashboard": "Back to dashboard",
+  "empty": "No requests yet.",
+  "form": {
+    "stepRequest": "1. Request text",
+    "stepArea": "2. Area and severity",
+    "stepDiagnostics": "3. Diagnostics and consent",
+    "summary": "Short title",
+    "description": "What should be improved?",
+    "contactEmail": "Contact email (optional)",
+    "expected": "Expected",
+    "actual": "Actual",
+    "steps": "Steps",
+    "requestType": "Request type",
+    "area": "Area",
+    "severity": "Severity",
+    "diagnostics": "Diagnostics preview",
+    "includeDiagnostics": "Include safe diagnostics with this request.",
+    "consentPublic": "I agree this request may be shared publicly without private farm details.",
+    "submit": "Save request",
+    "submitting": "Saving..."
+  },
+  "types": {
+    "bug": "Bug",
+    "improvement": "Improvement",
+    "feedback": "Feedback"
+  },
+  "areas": {
+    "dashboard": "Dashboard",
+    "history": "History",
+    "analysis": "Analysis",
+    "copy": "Text and labels",
+    "watering": "Watering",
+    "sync": "Sync",
+    "devices": "Devices",
+    "system": "System",
+    "other": "Other"
+  },
+  "severity": {
+    "cant_work": "Cannot work",
+    "workaround": "Workaround available",
+    "annoying": "Annoying",
+    "idea": "Idea"
+  },
+  "diagnostics": {
+    "loading": "Loading diagnostics...",
+    "unavailable": "Diagnostics are unavailable right now."
+  },
+  "banners": {
+    "retryable": "Could not send right now. The request can be retried."
+  },
+  "status": {
+    "QUEUED": "Saved, waiting for internet",
+    "SUBMITTED": "Submitted",
+    "SYNCED": "Synced",
+    "FAILED_RETRYABLE": "Retry needed",
+    "FAILED_PERMANENT": "Could not send",
+    "AWAITING_PUBLISH": "Waiting to publish",
+    "PUBLISHING": "Publishing",
+    "PUBLISH_BLOCKED_CONFIG": "Publishing blocked",
+    "PUBLISH_BLOCKED_SECRET": "Publishing blocked",
+    "TRIAGED": "Being reviewed",
+    "BEING_REVIEWED": "Being reviewed",
+    "NEEDS_INFO": "Needs more information",
+    "ISSUE_ONLY": "Saved as issue",
+    "ISSUE_OPEN": "Issue open",
+    "NOT_PLANNED": "Not planned",
+    "RATE_LIMITED": "Rate limited",
+    "RELEASED": "Released",
+    "REJECTED": "Rejected",
+    "DUPLICATE": "Duplicate",
+    "DUPLICATE_OF": "Duplicate",
+    "AWAITING_APPROVAL": "Awaiting approval",
+    "AGENT_RUNNING": "In progress",
+    "VERIFYING": "Verifying",
+    "PR_OPEN": "In progress",
+    "IN_REVIEW": "In review",
+    "MERGED": "Merged",
+    "CLOSED": "Closed",
+    "AGENT_FAILED": "Needs review",
+    "UNKNOWN": "Status update received"
+  },
+  "myRequests": {
+    "title": "My Requests",
+    "loadError": "Requests could not be loaded.",
+    "loading": "Loading requests...",
+    "area": "Area",
+    "submitted": "Submitted"
+  }
+}

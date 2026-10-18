@@ -7,11 +7,11 @@ import { DraginoSettingsModal } from './DraginoSettingsModal';
 import { SensorMonitor } from './SensorMonitor';
 import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
+import { RainTodayLine } from './shared/RainTodayTile';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
-import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { WatermarkProbeSection } from './shared/WatermarkProbeSection';
 
@@ -138,7 +138,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError || dendroSaturated);
   const chameleonEnabled = device.chameleon_enabled === 1;
   const chameleonDataInvalid = data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1;
-  const chameleonIsCurrent = isSensorObservationFresh(device.last_seen);
   const chameleonChannels = [
     { field: 'swt_1', label: 'SWT1', value: data?.swt_1, depth: device.chameleon_swt1_depth_cm, color: '#0f766e', open: data?.chameleon_ch1_open === 1 },
     { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb', open: data?.chameleon_ch2_open === 1 },
@@ -294,7 +293,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                         {formatSwtCardValue(channel.value, swtUnit) ?? '—'}
                       </span>
                       <SwtStatusIndicator
-                        status={chameleonIsCurrent && !chameleonDataInvalid && !channel.open
+                        status={!chameleonDataInvalid && !channel.open
                           ? classifySwtWaterStatus(channel.value)
                           : null}
                       />
@@ -310,7 +309,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('watermark.sectionTitle')}</p>
             <WatermarkProbeSection
-              isCurrent={isSensorObservationFresh(watermark.recorded_at)}
               swtUnit={swtUnit}
               soilTempC={watermark.soil_temp_c}
               soilTempMeasured={watermark.soil_temp_source === 2}
@@ -322,7 +320,9 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 depthLabel: formatDepthLabel(watermarkDepths[`swt_${n}`]),
                 channel: watermark.channels[n - 1] ?? null,
               }))}
-              onOpenHistory={(field) => setSensorMonitor({
+              onOpenHistory={(field) => setSensorMonitor(field === 'ext_temperature_c' ? {
+                field, label: t('environment.soil.temperature'), unit: '°C', color: '#f97316', decimals: 1,
+              } : {
                 field, initialField: field, label: t('watermark.probe', { n: field === 'swt_1' ? 1 : 2 }),
                 unit: 'kPa', color: field === 'swt_1' ? '#0f766e' : '#2563eb', decimals: 1,
                 seriesOptions: [1, 2].map((n) => ({ field: `swt_${n}`, label: t('watermark.probe', { n }), unit: 'kPa', color: n === 1 ? '#0f766e' : '#2563eb', decimals: 1 })),
@@ -334,12 +334,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
         {rainEnabled && (
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Rain Gauge</p>
-            <p className="mb-2 text-xs text-[var(--text-secondary)]">
-              Today:{' '}
-              <span className="font-semibold text-[var(--text)]">
-                {data?.rain_mm_today != null ? `${data.rain_mm_today.toFixed(1)} mm` : '—'}
-              </span>
-            </p>
+            <RainTodayLine data={data} />
             <button
               onClick={() => setSensorMonitor({
                 field: 'rain_mm_delta',

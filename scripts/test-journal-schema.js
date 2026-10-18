@@ -975,6 +975,7 @@ try {
       ['full_record', 8],
       ['full_record', 9],
       ['full_record', 10],
+      ['full_record', 11],
       ['research_observation', 1],
     ],
     'seed must contain the three template codes, with farmer_quick published at v1/v2 (frozen, historical), ' +
@@ -992,6 +993,9 @@ try {
   const templateDefinitions = new Map(
     templates.map((template) => [template.code, JSON.parse(template.definition_json)])
   );
+  templateDefinitions.set('full_record', JSON.parse(templates.find(
+    (template) => template.code === 'full_record' && template.version === 10
+  ).definition_json));
   const researchIdentity = templateDefinitions
     .get('research_observation')
     .sections.find((section) => section.code === 'identity');
@@ -1377,14 +1381,18 @@ try {
     layouts.map(({ code, version }) => [code, version]),
     [
       ['agroscope_open_field', 1],
+      ['farm_wide', 1],
       ['greenhouse', 1],
       ['greenhouse', 3],
+      ['greenhouse', 11],
       ['lysimeter', 1],
       ['lysimeter', 3],
+      ['lysimeter', 11],
       ['open_field', 1],
       ['open_field', 3],
       ['open_field', 8],
       ['open_field', 9],
+      ['open_field', 11],
     ],
     'seed must contain the four generic layout codes, with open_field/greenhouse/lysimeter ' +
       'published at v1 (frozen, historical) and v3 (Slice BC static/reading split); open_field ' +
@@ -1518,7 +1526,7 @@ try {
     'SELECT id, catalog_version, catalog_hash FROM journal_catalog_state WHERE id = 1;'
   );
   assert.equal(catalogState.length, 1, 'catalog state row id=1 must exist');
-  assert.equal(catalogState[0].catalog_version, 10, 'seed-built catalog version must be the current version (10, since the operation-level field/requirement/product scoping plan: full_record@10)');
+  assert.equal(catalogState[0].catalog_version, 11, 'seed-built catalog version must be the current version (11, balanced final requirements)');
   assert.match(catalogState[0].catalog_hash, /^[0-9a-f]{64}$/, 'catalog hash must be SHA-256');
 
   const seedText = fs.readFileSync(seedPath, 'utf8');

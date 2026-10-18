@@ -51,10 +51,20 @@
       "title": "Reihen",
       "search": "Nach Zonen oder Geräten suchen",
       "unknownSite": "Unbekannter Standort",
+      "unassigned": "Nicht zugewiesene Geräte",
+      "emptySource": "Für dieses Gerät sind keine Diagrammkanäle verfügbar.",
+      "otherSupported": "Weitere unterstützte Kanäle",
+      "otherSupportedHelp": "Historische Messwerte sind möglicherweise vorhanden; die Verfügbarkeit wurde nicht geprüft.",
+      "valveEvents": "Ventilereignisse und Ventilsteuerung sind in der Datenansicht nicht verfügbar.",
+      "unsupportedType": "Messwerte dieses Gerätetyps werden in der Datenansicht nicht unterstützt.",
+      "openNetwork": "Netzwerkansicht öffnen",
+      "networkDisabled": "Netzwerkansicht ist auf diesem Gateway deaktiviert.",
+      "networkLoading": "Verfügbarkeit der Netzwerkansicht wird noch geladen.",
       "reason": {
         "unsupported": "Nicht unterstützt",
         "available_no_recent_data": "Keine aktuellen Daten verfügbar"
-      }
+      },
+      "showLegacy": "Schätzungen nach alter Methode anzeigen"
     },
     "range": {
       "label": "Analysezeitraum",
@@ -80,7 +90,16 @@
     },
     "export": {
       "csv": "CSV exportieren",
-      "png": "PNG exportieren"
+      "png": "PNG exportieren",
+      "allZonesCsv": "CSV für alle Zonen exportieren",
+      "allZonesCsvBusy": "Wird exportiert…",
+      "qualityColumns": "Qualitätsspalten einschliessen",
+      "errors": {
+        "tooLarge": "Dieser Export ist zu gross. Wählen Sie einen kürzeren Zeitraum oder eine gröbere Aggregation.",
+        "busy": "Ein anderer Export läuft. Versuchen Sie es gleich noch einmal.",
+        "invalidRange": "Dieser Zeitraum kann nicht exportiert werden. Prüfen Sie Start- und Enddatum.",
+        "failed": "Der Export ist fehlgeschlagen. Versuchen Sie es erneut."
+      }
     },
     "legend": {
       "label": "Diagrammlegende",
@@ -91,7 +110,8 @@
       "save": "Ansicht speichern",
       "namePlaceholder": "Diese Ansicht benennen",
       "delete": "Ansicht löschen",
-      "empty": "Noch keine gespeicherten Ansichten."
+      "empty": "Noch keine gespeicherten Ansichten.",
+      "confirmDelete": "Gespeicherte Ansicht «{{name}}» löschen?"
     },
     "droppedNotice": "{{count}} Serien konnten nicht geladen werden",
     "correlation": {
@@ -103,12 +123,17 @@
       "zone": "Zone",
       "droppedPairs": "Verworfen",
       "insufficient": "unzureichend (n={{n}})",
+      "ambiguous": "Unterdrückt: Mehr als ein passender Kanal wurde gefunden.",
+      "missingSource": "Unterdrückt: Die Gerätequellen-Identität fehlt.",
       "exploratory": "Nur explorativ — Pearson-r über ausgerichtete Buckets; kein Signifikanztest."
     },
     "tooltip": {
       "partialHours": " ({{count}} von {{expected}} h)",
-      "partialDays": " ({{count}} von {{expected}} Tagen)"
-    }
+      "partialDays": " ({{count}} von {{expected}} Tagen)",
+      "reportsReceived_one": " · {{count}} Meldung empfangen",
+      "reportsReceived_other": " · {{count}} Meldungen empfangen"
+    },
+    "legacyEstimate": "Schätzung, alte Methode"
   },
   "restart": {
     "gateway_identity_change": "Gateway-Identität aktualisiert. Die Dienste starten in {{count}} s neu.",

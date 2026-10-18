@@ -46,7 +46,7 @@ function hourlyAggregate(rows) {
     pressure_hpa: round(mean(values(rows, 'barometric_pressure_hpa')), 1),
     light_lux: round(lux, 0),
     global_radiation_wm2: lux == null ? null : round(lux / LUX_PER_WM2, 2),
-    rain_mm: rain.length ? round(rain.reduce((a, b) => a + b, 0), 2) : null,
+    rain_mm: rain.length ? round(rain.reduce((a, b) => a + b, 0), 3) : null,
     sample_count: rows.length,
   };
 }

@@ -258,6 +258,10 @@ function DetailPanelForEntry({
   );
   const aggregate = entries.find((candidate) => candidate.entry_uuid === entryUuid) ?? null;
   const modelResult = useMemo(() => buildCatalogModel(catalog), [catalog]);
+  // A farm-wide final (no plot, no zone) is changed only by the farm owner or
+  // an admin on a scoped gateway; the gateway says whether this account may.
+  const farmWideLocked = catalog.capture_permissions?.farm_wide === false &&
+    aggregate != null && aggregate.plot_uuid == null && aggregate.zone_uuid == null;
   const model = modelResult.ok ? modelResult.model : null;
   const [mode, setMode] = useState<PanelMode>('view');
 
@@ -429,7 +433,7 @@ function DetailPanelForEntry({
         )}
       </div>
 
-      {canWrite && aggregate.status === 'final' && mode === 'view' && (
+      {canWrite && aggregate.status === 'final' && mode === 'view' && !farmWideLocked && (
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
             <button

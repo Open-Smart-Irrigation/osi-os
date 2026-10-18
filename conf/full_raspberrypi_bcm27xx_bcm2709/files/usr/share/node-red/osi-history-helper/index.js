@@ -2,9 +2,12 @@
 
 const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
+const { deviceSourceId, describeDeviceSource } = require('./device-sources');
 // The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
-// as in the repo; osi-weather-provider requires nothing back, so there is no cycle.
+// as in the repo; osi-weather-provider and osi-rain require nothing back, so
+// there is no cycle.
 const { zoneLocations } = require('../osi-weather-provider');
+const rainRules = require('../osi-rain');
 
 const DEFAULT_SOURCE_KEYS = {
   soil: 'root-zone',
@@ -255,10 +258,17 @@ function roundTo(value, decimals = 3) {
   return Math.round(number * factor) / factor;
 }
 
-// pF = log10(tension in hPa); 1 kPa = 10 hPa. Non-positive tension has no pF.
+// Tension at or below which pF takes its floor of 0 (log10(0.1 * 10) = 0).
+const PF_FLOOR_KPA = 0.1;
+
+// pF = log10(tension in hPa); 1 kPa = 10 hPa. pF is never written below 0:
+// a finite tension at or below 0.1 kPa (where the formula gives 0, a negative
+// or no value, e.g. a saturated probe at 0 kPa) derives the 0 pF floor.
+// A missing or non-finite reading stays null and gets no pF row.
 function kpaToPf(kpa) {
   const value = toFiniteNumber(kpa);
-  if (value === null || value <= 0) return null;
+  if (value === null) return null;
+  if (value <= PF_FLOOR_KPA) return 0;
   return Math.log10(value * 10);
 }
 
@@ -281,6 +291,87 @@ function pfExportRow(kpaRow, channel) {
 function parseTime(value) {
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
+}
+
+// device_data.recorded_at is TEXT, and gateways hold more than one shape in
+// it: toISOString ('2026-08-17T17:47:12.123Z'), the uplink's RFC 3339 time
+// ('2026-08-17T17:47:12.123456789+00:00', also without a fraction) and
+// SQLite's 'YYYY-MM-DD HH:MM:SS'. Text order is not time order across those
+// shapes: a row in the same millisecond as a bound, or any space-separated
+// row of the bound's date, falls on the wrong side of a plain
+// `recorded_at >= ?` (with month windows, out of both windows). So a row's
+// instant is read here, the same way for every shape: a zone-less value is
+// UTC (as SQLite and the cloud read it), digits below the millisecond are
+// dropped (as Date.parse and the sync hash do).
+const ZONELESS_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+
+function parseRecordedAtMs(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  const zoneless = ZONELESS_TIMESTAMP.exec(text);
+  const ms = Date.parse(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// The ISO UTC form of a stored recorded_at, for output (CSV, raw series).
+// Unchanged for a toISOString value; an unreadable value is passed through.
+function canonicalRecordedAt(value) {
+  const ms = parseRecordedAtMs(value);
+  return ms === null ? value : new Date(ms).toISOString();
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SQLITE_UTC_MS_FORMAT = '%Y-%m-%dT%H:%M:%fZ';
+
+function isoDate(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+// A WHERE fragment selecting the rows of `column` whose instant may lie in
+// [start, end) (or [start, end] with endInclusive). It is a superset by at
+// most a millisecond at each end (SQLite rounds the sub-millisecond digits
+// that parseRecordedAtMs drops), so callers that need the exact range filter
+// the rows with recordedAtRangeFilter. The first pair of bounds is plain text on
+// whole dates, wide enough for any shape and offset (a stored date can be a
+// day off the UTC date), so the (deveui, recorded_at) index still bounds the
+// scan; strftime then reads each candidate's instant. With `exact`, the
+// SQLite instant is the final filter (for SQL-side aggregates).
+function recordedAtRangeSql(column, start, end, options = {}) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  const upper = options.endInclusive ? '<=' : '<';
+  if (startMs === null || endMs === null) {
+    return { sql: `${column} >= ? AND ${column} ${upper} ?`, params: [start, end] };
+  }
+  const instant = `strftime('${SQLITE_UTC_MS_FORMAT}', ${column})`;
+  const marginMs = options.exact ? 0 : 1;
+  return {
+    sql: `${column} >= ? AND ${column} < ? AND ${instant} >= ? AND ${instant} ${options.exact ? upper : '<='} ?`,
+    params: [
+      isoDate(startMs - DAY_MS),
+      isoDate(endMs + 2 * DAY_MS),
+      new Date(startMs - marginMs).toISOString(),
+      new Date(endMs + marginMs).toISOString(),
+    ],
+  };
+}
+
+// The exact [start, end) filter on a row's instant, for rows selected with
+// recordedAtRangeSql.
+function recordedAtRangeFilter(start, end) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  return (row) => {
+    const ms = parseRecordedAtMs(row.recorded_at);
+    return ms !== null && (startMs === null || ms >= startMs) && (endMs === null || ms < endMs);
+  };
+}
+
+function sortByRecordedAt(rows) {
+  return rows
+    .map((row, index) => ({ row, index, ms: parseRecordedAtMs(row.recorded_at) }))
+    .sort((left, right) => (left.ms - right.ms) || (left.index - right.index))
+    .map((entry) => entry.row);
 }
 
 function normalizeDeveui(value) {
@@ -481,11 +572,19 @@ async function annotateWatermarkEvidence(db, devices) {
   });
 }
 
-function isEnvironmentSource(device) {
-  const type = String(device && device.type_id || '').toUpperCase();
-  return ['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'SENSECAP_S2120'].includes(type)
+const ENVIRONMENT_SOURCE_TYPES = new Set([
+  'KIWI_SENSOR',
+  'TEKTELIC_CLOVER',
+  'SENSECAP_S2120',
+  'AQUASCOPE_LORAIN',
+]);
+
+function isEnvironmentSource(device, options = {}) {
+  const type = deviceTypeId(device);
+  return ENVIRONMENT_SOURCE_TYPES.has(type)
     || (type === 'DRAGINO_LSN50' && Number(device && device.temp_enabled || 0) === 1)
-    || hasNumber(device, ['ambient_temperature', 'relative_humidity', 'ext_temperature_c', 'light_lux', 'rain_mm_today']);
+    || (options.allowMeasurementFallback !== false
+      && hasNumber(device, ['ambient_temperature', 'relative_humidity', 'ext_temperature_c', 'light_lux', 'rain_mm_today']));
 }
 
 function isIrrigationSource(device) {
@@ -562,11 +661,12 @@ function channelsForCard(card, sourceDevices) {
       { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h', label: 'Rain rate' },
       { id: 'rain_mm_per_10min', field: 'rain_mm_per_10min', unit: 'mm/10min', label: 'Rain (10 min)' },
       { id: 'rain_mm_today', field: 'rain_mm_today', unit: 'mm', label: 'Rain today' },
-      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rain delta' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm', label: 'Rainfall amount' },
       { id: 'wind_speed_mps', field: 'wind_speed_mps', unit: 'm/s', label: 'Wind speed' },
       { id: 'wind_gust_mps', field: 'wind_gust_mps', unit: 'm/s', label: 'Wind gust' },
       { id: 'barometric_pressure_hpa', field: 'barometric_pressure_hpa', unit: 'hPa', label: 'Pressure' },
       { id: 'uv_index', field: 'uv_index', unit: null, label: 'UV index' },
+      { id: 'rain_tips_delta', field: 'rain_tips_delta', unit: 'count', label: 'Rain tips delta' },
     ];
   }
   if (cardType === 'dendro') {
@@ -1226,7 +1326,7 @@ function aggregateRows(rows, options = {}) {
   if (channels.length === 0) throw new Error('aggregateRows requires at least one channel');
 
   const sortedRows = filterSoilRowsForSources(rows, options.sourceDevices)
-    .map((row) => ({ row, recordedAtMs: parseTime(row.recorded_at || row.recordedAt) }))
+    .map((row) => ({ row, recordedAtMs: parseRecordedAtMs(row.recorded_at || row.recordedAt) }))
     .filter((entry) => entry.recordedAtMs !== null)
     .filter((entry) => (startMs === null || entry.recordedAtMs >= startMs) && (endMs === null || entry.recordedAtMs < endMs))
     .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
@@ -1397,8 +1497,9 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const end = new Date(todayStartMs).toISOString();
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-  const rows = await dbAll(db, sql, deveuis.concat([start, end]));
+  const range = recordedAtRangeSql('recorded_at', start, end);
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+  const rows = await dbAll(db, sql, deveuis.concat(range.params));
   const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices });
   const out = [];
   for (const bucket of result.buckets || []) {
@@ -1639,8 +1740,9 @@ async function aggregateDeviceData(db, query = {}) {
     if (hasTrailingWindow && deveuis.length > 0) {
       const livePlaceholders = deveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-      const rows = await dbAll(db, sql, deveuis.concat([splitIso, end]));
+      const range = recordedAtRangeSql('recorded_at', splitIso, end);
+      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+      const rows = await dbAll(db, sql, deveuis.concat(range.params));
       live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: query.sourceDevices });
     }
     if (rollupRows.length || live) {
@@ -1663,8 +1765,9 @@ async function aggregateDeviceData(db, query = {}) {
   if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at BETWEEN ? AND ? ORDER BY deveui ASC, recorded_at ASC`;
-  const params = deveuis.concat([start, end]);
+  const range = recordedAtRangeSql('recorded_at', start, end, { endInclusive: true });
+  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC`;
+  const params = deveuis.concat(range.params);
   const rows = await dbAll(db, sql, params);
   const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices: query.sourceDevices });
   if (shouldUseRollups) result.source = 'device_data_fallback';
@@ -1760,6 +1863,7 @@ async function rawLegacySensorHistory(db, options = {}) {
   if (!start || !end) throw new Error('rawLegacySensorHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
   const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
+  const range = recordedAtRangeSql('dd.recorded_at', start, end);
   const rows = await dbAll(db, `
     SELECT dd.recorded_at, ${expression} AS value
     FROM device_data dd
@@ -1767,12 +1871,12 @@ async function rawLegacySensorHistory(db, options = {}) {
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
       AND ${expression} IS NOT NULL
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
+      AND ${range.sql}
     ORDER BY dd.recorded_at ASC
     LIMIT ?
-  `, [normalizedDeveui].concat(ownerFilter.params, [start, end, limit]));
-  return rows.map((row) => ({ t: row.recorded_at, value: toFiniteNumber(row.value) }));
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit]));
+  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
+    .map((row) => ({ t: canonicalRecordedAt(row.recorded_at), value: toFiniteNumber(row.value) }));
 }
 
 function legacyAggregationForHours(hours) {
@@ -1827,6 +1931,7 @@ async function rawLegacyDendroHistory(db, options = {}) {
   const end = options.end;
   if (!start || !end) throw new Error('rawLegacyDendroHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
+  const range = recordedAtRangeSql('dd.recorded_at', start, end);
   const rows = await dbAll(db, `
     SELECT
       dd.recorded_at,
@@ -1845,13 +1950,13 @@ async function rawLegacyDendroHistory(db, options = {}) {
     JOIN devices dv ON dv.deveui = dd.deveui
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
+      AND ${range.sql}
       AND (dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)
     ORDER BY dd.recorded_at ASC
     LIMIT 30000
-  `, [normalizedDeveui].concat(ownerFilter.params, [start, end]));
-  return rows.map(dendroHistoryRow);
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params));
+  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
+    .map((row) => dendroHistoryRow({ ...row, recorded_at: canonicalRecordedAt(row.recorded_at) }));
 }
 
 function mergeDendroAggregateField(byTime, field, points) {
@@ -1886,6 +1991,8 @@ async function aggregateLegacyDendroHistory(db, options = {}) {
     .sort((left, right) => String(left.t).localeCompare(String(right.t)));
 }
 
+const LEGACY_INTERVAL_FIELDS = new Set(['rain_mm_delta', 'rain_tips_delta', 'flow_liters_delta', 'flow_pulses_delta']);
+
 async function legacySensorHistory(db, options = {}) {
   const hoursRaw = toFiniteNumber(options.hours);
   const hours = hoursRaw !== null && hoursRaw > 0 ? hoursRaw : 24;
@@ -1906,6 +2013,9 @@ async function legacySensorHistory(db, options = {}) {
     throw error;
   }
   if (hours <= 24) return rawLegacySensorHistory(db, scopedOptions);
+  // Rollups keep no bucket sum, and their latest value is one uplink's
+  // interval, so interval channels stay on raw rows at every range.
+  if (LEGACY_INTERVAL_FIELDS.has(canonicalHistoryField(field))) return rawLegacySensorHistory(db, scopedOptions);
 
   const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
   if (!key) return rawLegacySensorHistory(db, scopedOptions);
@@ -1925,57 +2035,208 @@ async function legacySensorHistory(db, options = {}) {
   return flattenLegacyAggregate(result, key.channelId);
 }
 
-const RAIN_HISTORY_MAX_DAYS = 366;
-const RAIN_HISTORY_MAX_TZ_OFFSET_MIN = 840;
-const RAIN_DAY_MS = 24 * 60 * 60 * 1000;
+// A device's farm timezone: its zone's, else the lowest-id live zone it is a
+// weather station for, else UTC. Never the gateway host's or the viewer's.
+// `basis` says where the answer came from: 'zone', 'weather_station_zone',
+// 'unassigned_default' (no zone, or a device the caller does not own, which
+// answers like an unassigned one), 'abbreviation' (a valid zone value that is
+// not a region name, e.g. CET: kept as stored, flagged so the zone settings
+// can prompt for a region) or 'invalid' (not a timezone; answered in UTC).
+const UNASSIGNED_TIMEZONE = Object.freeze({ timezone: 'UTC', basis: 'unassigned_default' });
 
-// Daily rainfall totals for one device, bucketed by *local* calendar day.
-// tzOffsetMin = minutes to ADD to UTC to get local wall time (JS convention:
-// -new Date().getTimezoneOffset()). Uses SUM over rain_mm_delta because the
-// stored rollups (history_channel_rollups) keep no sum column and their
-// latest-per-bucket reduction under-reports interval deltas.
-async function legacyRainDailyHistory(db, options = {}) {
-  const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
-  if (!normalizedDeveui) return [];
+// Classification is osi-rain's resolveTimezone (one resolver for rain on the
+// gateway); here an empty value means "not set at this level" (null) and a
+// region name carries no basis of its own, so the caller names the level.
+function classifyTimezone(raw) {
+  const resolved = rainRules.resolveTimezone(raw);
+  if (resolved.basis === 'unassigned_default') return null;
+  return { timezone: resolved.timezone, basis: resolved.basis === 'zone' ? null : resolved.basis };
+}
+
+async function resolveDeviceTimezones(db, deveuis, options = {}) {
+  const list = Array.from(new Set((deveuis || []).map(normalizeDeveui).filter(Boolean)));
+  const out = new Map();
+  for (const eui of list) out.set(eui, { ...UNASSIGNED_TIMEZONE });
+  if (!list.length) return out;
+  const ownerFilter = optionalUserFilter(options, 'd');
+  const placeholders = list.map(() => '?').join(',');
+  const rows = await dbAll(db, `
+    SELECT d.deveui,
+           iz.timezone AS zone_tz,
+           (SELECT iz2.timezone
+              FROM weather_station_zones w
+              JOIN irrigation_zones iz2 ON iz2.id = w.zone_id AND iz2.deleted_at IS NULL
+             WHERE w.deveui = d.deveui
+             ORDER BY w.zone_id
+             LIMIT 1) AS station_tz
+      FROM devices d
+      LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id AND iz.deleted_at IS NULL
+     WHERE d.deveui IN (${placeholders}) AND d.deleted_at IS NULL${ownerFilter.sql}
+  `, list.concat(ownerFilter.params));
+  for (const row of rows) {
+    const eui = normalizeDeveui(row.deveui);
+    if (!eui) continue;
+    const fromZone = classifyTimezone(row.zone_tz);
+    const fromStation = classifyTimezone(row.station_tz);
+    const pick = fromZone ? { timezone: fromZone.timezone, basis: fromZone.basis || 'zone' }
+      : fromStation ? { timezone: fromStation.timezone, basis: fromStation.basis || 'weather_station_zone' }
+        : { ...UNASSIGNED_TIMEZONE };
+    out.set(eui, pick);
+  }
+  return out;
+}
+
+async function resolveDeviceTimezone(db, deveui, options = {}) {
+  const eui = normalizeDeveui(deveui);
+  if (!eui) return { ...UNASSIGNED_TIMEZONE };
+  const map = await resolveDeviceTimezones(db, [eui], options);
+  return map.get(eui) || { ...UNASSIGNED_TIMEZONE };
+}
+
+const RAIN_HISTORY_MAX_DAYS = 366;
+// Every current UTC offset is a whole number of quarter hours, so rows summed
+// per UTC quarter hour in SQL fall into one farm day each.
+const RAIN_SLOT_SECONDS = 15 * 60;
+
+// Daily rainfall totals for one device over the farm's own calendar days:
+// the device's zone timezone (resolveDeviceTimezone), midnight to midnight
+// per date, so 23- and 25-hour DST days are exact. Never the gateway host's
+// zone or the viewer's offset. Every day of the window is listed; a day
+// without rows has total_mm null and samples 0 (no data, not a dry day); the
+// last day ends at the request time (so_far). Sums rain_mm_delta because the
+// stored rollups keep no sum column. quality is the coverage of the device's
+// instrument day in this timezone (rain_instrument_days, migration 0072:
+// complete, complete_so_far, partial, unknown) with its reasons; a day without
+// one stays 'received_only' with no reasons (no interval provenance, so a
+// total is what arrived, not a certified day amount). total_mm stays the
+// received sum either way. A device the caller does not own answers in UTC
+// with no data.
+async function rainDailyHistory(db, options = {}) {
+  const deveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   const daysRaw = toFiniteNumber(options.days);
   const days = Math.max(1, Math.min(RAIN_HISTORY_MAX_DAYS, Math.round(daysRaw === null ? 7 : daysRaw)));
-  const offsetRaw = toFiniteNumber(options.tzOffsetMin ?? options.tz_offset_min);
-  const tzOffsetMin = Math.max(
-    -RAIN_HISTORY_MAX_TZ_OFFSET_MIN,
-    Math.min(RAIN_HISTORY_MAX_TZ_OFFSET_MIN, Math.round(offsetRaw === null ? 0 : offsetRaw))
-  );
-  const nowMs = options.nowMs ?? Date.now();
-  const offsetMs = tzOffsetMin * 60 * 1000;
-  // Start of the local day (days - 1) days back, converted back to UTC.
-  const localTodayStartMs = Math.floor((nowMs + offsetMs) / RAIN_DAY_MS) * RAIN_DAY_MS - offsetMs;
-  const start = new Date(localTodayStartMs - (days - 1) * RAIN_DAY_MS).toISOString();
-  const end = new Date(nowMs).toISOString();
-  const ownerFilter = optionalUserFilter(options, 'dv');
-  const rows = await dbAll(db, `
-    SELECT
-      date(dd.recorded_at, ?) AS day,
-      SUM(dd.rain_mm_delta) AS total_mm,
-      COUNT(*) AS samples
-    FROM device_data dd
-    JOIN devices dv ON dv.deveui = dd.deveui
-    WHERE dd.deveui = ?
-      ${ownerFilter.sql}
-      AND dd.rain_mm_delta IS NOT NULL
-      AND dd.recorded_at >= ?
-      AND dd.recorded_at < ?
-    GROUP BY day
-    ORDER BY day ASC
-  `, [`${tzOffsetMin} minutes`, normalizedDeveui].concat(ownerFilter.params, [start, end]));
-  return rows.map((row) => ({
-    day: String(row.day),
-    total_mm: roundTo(row.total_mm, 3) ?? 0,
-    samples: Number(row.samples || 0) || 0,
-  }));
+  const nowRaw = toFiniteNumber(options.nowMs);
+  const nowMs = nowRaw === null ? Date.now() : nowRaw;
+  const { timezone, basis } = deveui
+    ? await resolveDeviceTimezone(db, deveui, options)
+    : UNASSIGNED_TIMEZONE;
+  const todayKey = localDateKey(nowMs, timezone);
+  const firstKey = addUtcDays(todayKey, -(days - 1));
+  const periodStart = zoneDateStartIso(firstKey, timezone);
+  const periodEnd = new Date(nowMs).toISOString();
+  const buckets = new Map();
+  for (let key = firstKey; key && key <= todayKey; key = addUtcDays(key, 1)) {
+    const soFar = key === todayKey;
+    buckets.set(key, {
+      day: key,
+      period_start: zoneDateStartIso(key, timezone),
+      period_end: soFar ? periodEnd : zoneDateStartIso(addUtcDays(key, 1), timezone),
+      total_mm: null,
+      samples: 0,
+      quality: 'received_only',
+      reasons: [],
+      so_far: soFar,
+    });
+  }
+  if (deveui && await ownsDevice(db, deveui, options)) {
+    for (const day of await instrumentDays(db, deveui, timezone, firstKey, todayKey)) {
+      const bucket = buckets.get(day.date);
+      if (!bucket) continue;
+      bucket.quality = day.coverage;
+      bucket.reasons = day.reasons;
+    }
+  }
+  if (deveui) {
+    const ownerFilter = optionalUserFilter(options, 'dv');
+    const range = recordedAtRangeSql('dd.recorded_at', periodStart, periodEnd, { exact: true });
+    const rows = await dbAll(db, `
+      SELECT
+        CAST(strftime('%s', dd.recorded_at) AS INTEGER) / ${RAIN_SLOT_SECONDS} AS slot,
+        SUM(dd.rain_mm_delta) AS total_mm,
+        COUNT(*) AS samples
+      FROM device_data dd
+      JOIN devices dv ON dv.deveui = dd.deveui
+      WHERE dd.deveui = ?
+        ${ownerFilter.sql}
+        AND dd.rain_mm_delta IS NOT NULL
+        AND ${range.sql}
+      GROUP BY slot
+    `, [deveui].concat(ownerFilter.params, range.params));
+    for (const row of rows) {
+      const slot = toFiniteNumber(row.slot);
+      const mm = toFiniteNumber(row.total_mm);
+      const samples = Number(row.samples || 0) || 0;
+      if (slot === null || mm === null || samples <= 0) continue;
+      const bucket = buckets.get(localDateKey(slot * RAIN_SLOT_SECONDS * 1000, timezone));
+      if (!bucket) continue;
+      bucket.total_mm = (bucket.total_mm || 0) + mm;
+      bucket.samples += samples;
+    }
+  }
+  for (const bucket of buckets.values()) {
+    if (bucket.total_mm !== null) bucket.total_mm = roundTo(bucket.total_mm, 3);
+  }
+  return {
+    version: 2,
+    deveui,
+    timezone,
+    timezone_basis: basis,
+    period_start: periodStart,
+    period_end: periodEnd,
+    days: Array.from(buckets.values()),
+  };
+}
+
+const INSTRUMENT_COVERAGE = new Set(['complete', 'complete_so_far', 'partial', 'unknown']);
+
+// The device's instrument days (coverage, reasons) in one timezone between two
+// farm dates. A database without the table (before migration 0072) has none.
+async function instrumentDays(db, deveui, timezone, firstKey, lastKey) {
+  let rows;
+  try {
+    rows = await dbAll(db, `
+      SELECT date, coverage, reasons FROM rain_instrument_days
+       WHERE deveui = ? AND timezone = ? AND date >= ? AND date <= ?
+    `, [deveui, timezone, firstKey, lastKey]);
+  } catch (error) {
+    if (/no such table/i.test(String(error && error.message))) return [];
+    throw error;
+  }
+  return rows.map((row) => {
+    let reasons = [];
+    try {
+      const parsed = JSON.parse(row.reasons || '[]');
+      if (Array.isArray(parsed)) reasons = parsed.map(String);
+    } catch (_badReasons) {
+      reasons = ['quality_reasons_unreadable'];
+    }
+    return { date: row.date, coverage: INSTRUMENT_COVERAGE.has(row.coverage) ? row.coverage : 'unknown', reasons };
+  });
+}
+
+async function ownsDevice(db, deveui, options) {
+  const ownerFilter = optionalUserFilter(options, 'd');
+  const rows = await dbAll(db, `SELECT 1 AS ok FROM devices d WHERE d.deveui = ? AND d.deleted_at IS NULL${ownerFilter.sql} LIMIT 1`,
+    [deveui].concat(ownerFilter.params));
+  return rows.length > 0;
+}
+
+// Deprecated: the pre-v2 array of { day, total_mm, samples } for days with
+// samples, now taken from rainDailyHistory (farm timezone). tzOffsetMin is
+// ignored. Kept for any caller still on the old shape.
+async function legacyRainDailyHistory(db, options = {}) {
+  if (!normalizeDeveui(options.deveui || options.deviceEui || options.device_eui)) return [];
+  const history = await rainDailyHistory(db, options);
+  return history.days
+    .filter((day) => day.samples > 0)
+    .map((day) => ({ day: day.day, total_mm: day.total_mm, samples: day.samples }));
 }
 
 function csvCell(value) {
   if (value === null || value === undefined) return '';
-  const stringValue = typeof value !== 'number' && /^[=+\-@]/.test(String(value)) ? `'${String(value)}` : String(value);
+  // A text cell a spreadsheet would run as a formula (=, +, -, @, tab, CR)
+  // gets a leading apostrophe; numbers stay numbers.
+  const stringValue = typeof value !== 'number' && /^[=+\-@\t\r]/.test(String(value)) ? `'${String(value)}` : String(value);
   return /[",\n\r]/.test(stringValue) ? '"' + stringValue.replace(/"/g, '""') + '"' : stringValue;
 }
 
@@ -2020,14 +2281,21 @@ function exportSpanDays(from, to) {
   return Math.floor((endMs - startMs) / (24 * 60 * 60 * 1000)) + 1;
 }
 
+// Longest daily export: ten years. Daily aggregation builds a bucket for every
+// day of the range per source, so an unbounded range (from=1900-01-01) could
+// exhaust the gateway's heap before any row budget sees a row.
+const DAILY_EXPORT_MAX_DAYS = 3660;
+
 function assertExportRangeAllowed(scope) {
   const days = exportSpanDays(scope.from, scope.to);
-  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : null);
-  if (maxDays !== null && days > maxDays) {
+  const maxDays = scope.granularity === 'raw' ? 92 : (scope.granularity === 'hourly' ? 730 : DAILY_EXPORT_MAX_DAYS);
+  if (days > maxDays) {
     const error = new Error('range too large for this granularity');
     error.code = 'RANGE_TOO_LARGE';
     error.statusCode = 413;
-    error.suggestion = 'choose a coarser granularity';
+    error.suggestion = scope.granularity === 'raw' || scope.granularity === 'hourly'
+      ? 'choose a coarser granularity'
+      : `choose a shorter range (at most ${DAILY_EXPORT_MAX_DAYS} days)`;
     throw error;
   }
 }
@@ -2103,7 +2371,7 @@ async function resolveZoneExportScope(db, options = {}) {
     throw error;
   }
   const today = localDateKey(options.nowMs ?? Date.now(), timezone);
-  if ((today && from > today) || (today && to > today)) {
+  if (!options.allowFutureDays && ((today && from > today) || (today && to > today))) {
     const error = new Error('date range cannot include future days');
     error.statusCode = 400;
     throw error;
@@ -2119,6 +2387,15 @@ async function resolveZoneExportScope(db, options = {}) {
 
 function seriesLabel(sourceName, channel) {
   return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
+}
+
+// A raw rain row is what one report collected; a bucket is a summed amount
+// (channel label "Rainfall amount"). The GUI's rainfallLabel() uses the same words.
+const RAW_SERIES_LABELS = Object.freeze({ rain_mm_delta: 'Rainfall this interval' });
+
+function rawSeriesLabel(sourceName, channel) {
+  const rawLabel = channel && RAW_SERIES_LABELS[channel.id];
+  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel);
 }
 
 function sourceKeyForCsv(card, device) {
@@ -2153,9 +2430,13 @@ function exportChannelsForCard(card, scope) {
 
 function exportChannelsForDevice(card, device, scope) {
   const channels = channelsForCard(card, [device]);
+  const type = deviceTypeId(device);
+  const deviceChannels = type === 'AQUASCOPE_LORAIN'
+    ? channels
+    : channels.filter((channel) => channel.id !== 'rain_tips_delta');
   return scope && scope.requestedChannelKeys
-    ? channels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
-    : channels;
+    ? deviceChannels.filter((channel) => scope.requestedChannelKeys.has(channel.id))
+    : deviceChannels;
 }
 
 async function rawZoneExportRows(db, scope) {
@@ -2173,8 +2454,11 @@ async function rawZoneExportRows(db, scope) {
 
     const selectedFields = Array.from(new Set(cardChannels.flatMap(channelFieldNames)));
     const placeholders = deveuis.map(() => '?').join(',');
-    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND recorded_at >= ? AND recorded_at < ? ORDER BY recorded_at ASC`;
-    const dataRows = await dbAll(db, sql, deveuis.concat([scope.start, scope.end]));
+    const range = recordedAtRangeSql('recorded_at', scope.start, scope.end);
+    const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
+    // The rows are sorted by their ISO UTC timestamp at the end.
+    const dataRows = (await dbAll(db, sql, deveuis.concat(range.params)))
+      .filter(recordedAtRangeFilter(scope.start, scope.end));
     const arrayIdByDeveui = await resolveDeviceArrayIds(db, deveuis, scope.start, scope.end);
     const rowsByDeveui = {};
     for (const row of dataRows) {
@@ -2192,14 +2476,15 @@ async function rawZoneExportRows(db, scope) {
       const sourceName = displayDeviceName(device, index);
       const arrayId = arrayIdByDeveui[deveui] || null;
       for (const row of sourceRows) {
+        const timestamp = canonicalRecordedAt(row.recorded_at);
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
           const csvRow = {
-            timestamp: row.recorded_at,
+            timestamp,
             site: scope.site,
             zone: zoneName,
-            series_label: seriesLabel(sourceName, channel),
+            series_label: rawSeriesLabel(sourceName, channel),
             card_type: card.cardType,
             source_key: sourceKeyForCsv(card, device),
             channel_key: channel.id,
@@ -2214,6 +2499,7 @@ async function rawZoneExportRows(db, scope) {
             if (pfRow) rows.push(pfRow);
           }
         }
+        assertExportRowBudget(rows, scope);
       }
     });
   }
@@ -2222,6 +2508,27 @@ async function rawZoneExportRows(db, scope) {
     || String(left.source_key).localeCompare(String(right.source_key))
     || String(left.channel_key).localeCompare(String(right.channel_key)));
   return rows;
+}
+
+// Local calendar months of an export range, as [start, end) instants. Hourly
+// and daily buckets never cross a local midnight, so aggregating one month at
+// a time gives the same buckets as one pass over the whole range, while only
+// one month of raw rows per source is in memory (a raw row costs about 2.4 KB
+// of heap once wrapped and sorted; ten years of 15-minute data would not fit).
+function exportMonthWindows(scope) {
+  const windows = [];
+  const lastDay = addIsoDays(scope.to, 1);
+  let day = scope.from;
+  let startIso = scope.start;
+  while (day < lastDay) {
+    const nextMonth = new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)), 1)).toISOString().slice(0, 10);
+    const endDay = nextMonth < lastDay ? nextMonth : lastDay;
+    const endIso = endDay === lastDay ? scope.end : zoneDateStartIso(endDay, scope.timezone);
+    windows.push({ start: startIso, end: endIso });
+    day = endDay;
+    startIso = endIso;
+  }
+  return windows;
 }
 
 async function aggregateZoneExportRows(db, scope) {
@@ -2245,23 +2552,27 @@ async function aggregateZoneExportRows(db, scope) {
       index += 1;
       const deveui = normalizeDeveui(device.deveui || device.device_eui);
       if (!deveui) continue;
-      const aggregate = await aggregateDeviceData(db, {
-        zoneId: scope.zone.id,
-        cardType: card.cardType,
-        logicalSourceKey: card.logicalSourceKey,
-        device_euis: [deveui],
-        sourceFilterActive: true,
-        start: scope.start,
-        end: scope.end,
-        aggregation: scope.granularity,
-        channels,
-        timezone: scope.timezone,
-        nowMs: scope.nowMs,
-      });
-      rows.push(...csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
-        site: scope.site,
-        zone: zoneName,
-      }));
+      for (const window of exportMonthWindows(scope)) {
+        const aggregate = await aggregateDeviceData(db, {
+          zoneId: scope.zone.id,
+          cardType: card.cardType,
+          logicalSourceKey: card.logicalSourceKey,
+          device_euis: [deveui],
+          sourceFilterActive: true,
+          start: window.start,
+          end: window.end,
+          aggregation: scope.granularity,
+          channels,
+          timezone: scope.timezone,
+          nowMs: scope.nowMs,
+          useRollups: deviceTypeId(device) === 'AQUASCOPE_LORAIN' ? false : undefined,
+        });
+        for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
+          site: scope.site,
+          zone: zoneName,
+        })) rows.push(csvRow);
+        assertExportRowBudget(rows, scope);
+      }
     }
   }
   rows.sort((left, right) => String(left.timestamp).localeCompare(String(right.timestamp))
@@ -2278,6 +2589,91 @@ async function buildZoneExportCsv(db, options = {}) {
     return { columns: RAW_CSV_COLUMNS, rows: await rawZoneExportRows(db, scope) };
   }
   return { columns: AGG_CSV_COLUMNS, rows: await aggregateZoneExportRows(db, scope) };
+}
+
+// Upper bound on the rows of one all-zones CSV answer. Node-RED's http response
+// sends a whole string, so the answer is built in memory: at most this many
+// lines of text (about 130 bytes each, so about 26 MB) plus the CSV row
+// objects of the one zone being built, which the same budget caps. Past it the
+// export stops and answers 413 instead of growing without limit on the
+// gateway. The budget counts output rows only: the database rows one card
+// (raw) or one source (hourly, daily) fetches for the range are bounded by the
+// range limits of assertExportRangeAllowed, not by this budget.
+const ALL_ZONES_EXPORT_MAX_ROWS = 200000;
+
+function exportTooLarge(maxRows) {
+  const error = new Error(`export exceeds ${maxRows} rows`);
+  error.code = 'EXPORT_TOO_LARGE';
+  error.statusCode = 413;
+  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
+  return error;
+}
+
+function assertExportRowBudget(rows, scope) {
+  if (scope && Number.isFinite(scope.rowBudget) && rows.length > scope.rowBudget) {
+    throw exportTooLarge(scope.maxRows);
+  }
+}
+
+// One tidy CSV over several zones (the caller passes the zones it may read).
+// Each zone keeps its own local-day boundaries and its own per-source channels,
+// as in the per-zone export; rows are grouped by zone (zone id order) and
+// sorted within a zone as the per-zone export sorts them. Zones are built one
+// at a time and turned into text at once, so only one zone's CSV row objects
+// are alive at any moment (see ALL_ZONES_EXPORT_MAX_ROWS for what bounds the
+// database fetch).
+async function buildAllZonesExportCsv(db, options = {}) {
+  const maxRows = Number.isSafeInteger(options.maxRows) && options.maxRows > 0
+    ? options.maxRows
+    : ALL_ZONES_EXPORT_MAX_ROWS;
+  const granularity = normalizeExportGranularity(options.granularity || 'daily');
+  const from = normalizeExportDate(options.from, 'from');
+  const to = normalizeExportDate(options.to || options.from, 'to');
+  if (from > to) {
+    const error = new Error('from must be before or equal to to');
+    error.statusCode = 400;
+    throw error;
+  }
+  assertExportRangeAllowed({ from, to, granularity });
+  normalizeExportChannels(options.channels);
+  const zoneIds = Array.from(new Set((Array.isArray(options.zoneIds) ? options.zoneIds : [])
+    .map(Number)
+    .filter((zoneId) => Number.isSafeInteger(zoneId) && zoneId > 0)))
+    .sort((left, right) => left - right);
+  const nowMs = options.nowMs ?? Date.now();
+  const zones = zoneIds.length
+    ? await dbAll(db, `SELECT id, timezone FROM irrigation_zones WHERE deleted_at IS NULL AND id IN (${zoneIds.map(() => '?').join(',')}) ORDER BY id ASC`, zoneIds)
+    : [];
+  // A day is in the future only when it is in the future for every zone; a
+  // zone still on the day before simply has no rows for it yet.
+  const latestToday = zones.reduce((latest, zone) => {
+    const key = localDateKey(nowMs, normalizeTimezone(zone.timezone));
+    return key && (!latest || key > latest) ? key : latest;
+  }, null) || localDateKey(nowMs, 'UTC');
+  if (latestToday && (from > latestToday || to > latestToday)) {
+    const error = new Error('date range cannot include future days');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const chunks = [RAW_CSV_COLUMNS.join(',') + '\n'];
+  let rowCount = 0;
+  for (const zone of zones) {
+    const scope = await resolveZoneExportScope(db, {
+      ...options, zoneId: zone.id, from, to, granularity, nowMs, allowFutureDays: true,
+    });
+    scope.maxRows = maxRows;
+    scope.rowBudget = maxRows - rowCount;
+    const rows = granularity === 'raw'
+      ? await rawZoneExportRows(db, scope)
+      : await aggregateZoneExportRows(db, scope);
+    assertExportRowBudget(rows, scope);
+    if (rows.length) {
+      chunks.push(rows.map((row) => RAW_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')).join('\n') + '\n');
+    }
+    rowCount += rows.length;
+  }
+  return { columns: RAW_CSV_COLUMNS, csv: chunks.join(''), rowCount, zoneCount: zones.length };
 }
 
 async function writeZoneCsv(options = {}) {
@@ -2470,6 +2866,13 @@ async function resolveDeviceArrayIds(db, deveuis, start, end) {
 
 function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayId, context = {}) {
   const rows = [];
+  const isLoRain = deviceTypeId(device) === 'AQUASCOPE_LORAIN';
+  const valueForChannel = (stats, channel) => {
+    if (!isLoRain) return stats.mean;
+    if (channel.id === 'rain_mm_delta' || channel.id === 'rain_tips_delta') return stats.sum;
+    if (channel.id === 'rain_mm_today') return stats.latest;
+    return stats.mean;
+  };
   for (const bucket of aggregate.buckets || []) {
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
@@ -2485,7 +2888,7 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
         depth_cm: soilDepthCm(device, channel.id),
         array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
-        value: stats.mean,
+        value: valueForChannel(stats, channel),
       };
       rows.push(csvRow);
       if (isSwtKpaChannel(channel)) {
@@ -2600,35 +3003,42 @@ function normalizeTimezone(value) {
   return zoneFormatterEntry(value).timezone;
 }
 
+// First instant of the zone-local calendar date that contains `nowMs`. Local
+// midnight may not exist (DST starting at 00:00) or occur twice, so this finds
+// the earliest instant whose local date is that date instead of solving for a
+// wall-clock 00:00.
 function startOfLocalDayMs(nowMs, timezone) {
   const instantMs = typeof nowMs === 'number' ? nowMs : parseTime(nowMs);
   if (instantMs === null) throw new Error('startOfLocalDayMs requires a valid instant');
+  const { dateFormat } = zoneFormatterEntry(timezone);
+  const dayNumberAt = (ms) => {
+    const parts = partsOf(dateFormat, ms);
+    return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+  };
+  const targetDay = dayNumberAt(instantMs);
+  // Fast path: derive the offset at the naive midnight, then confirm the
+  // candidate is the first instant of the date. Bisect only if that fails.
   const { dateTimeFormat } = zoneFormatterEntry(timezone);
-  const parts = partsOf(dateTimeFormat, instantMs);
-  const targetWallClockMs = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    0,
-    0,
-    0
-  );
-  let candidateMs = targetWallClockMs;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const candidateParts = partsOf(dateTimeFormat, candidateMs);
-    const candidateWallClockMs = Date.UTC(
-      Number(candidateParts.year),
-      Number(candidateParts.month) - 1,
-      Number(candidateParts.day),
-      Number(candidateParts.hour) % 24,
-      Number(candidateParts.minute),
-      Number(candidateParts.second)
-    );
-    const deltaMs = candidateWallClockMs - targetWallClockMs;
-    if (deltaMs === 0) return candidateMs;
-    candidateMs -= deltaMs;
+  const offsetAt = (ms) => {
+    const q = partsOf(dateTimeFormat, ms);
+    return Date.UTC(Number(q.year), Number(q.month) - 1, Number(q.day), Number(q.hour) % 24, Number(q.minute), Number(q.second)) - Math.floor(ms / 1000) * 1000;
+  };
+  const guess = targetDay - offsetAt(targetDay);
+  const candidate = targetDay - offsetAt(guess);
+  if (dayNumberAt(candidate) === targetDay && dayNumberAt(candidate - 1000) < targetDay) return candidate;
+  // Local offsets lie within -12h..+14h, so 15h before the date's UTC midnight
+  // is always on an earlier local date. Dates can step back briefly at a
+  // fall-back transition at 00:00, but instants before the first instant of
+  // the date stay on earlier dates, so bisection on "date >= target" still
+  // lands on the first instant of the date.
+  let lowSec = Math.floor((targetDay - 15 * 3600000) / 1000);
+  let highSec = Math.floor(instantMs / 1000);
+  while (highSec - lowSec > 1) {
+    const midSec = lowSec + Math.floor((highSec - lowSec) / 2);
+    if (dayNumberAt(midSec * 1000) >= targetDay) highSec = midSec;
+    else lowSec = midSec;
   }
-  return candidateMs;
+  return highSec * 1000;
 }
 
 function localDateKey(value, timezone) {
@@ -2960,22 +3370,31 @@ const analysis = createAnalysis({
   localDateKey,
   normalizeDeveui,
   normalizeTimezone,
+  parseRecordedAtMs,
+  recordedAtRangeSql,
   resolveAggregation,
   soilDepthCm,
   sourceDevicesForCard,
   sourceKeyForCsv,
+  deviceSourceId,
+  describeDeviceSource,
+  filterSoilRowsForSources,
   zoneDateStartIso,
   zoneLocations,
 });
 
 module.exports = {
   normalizeDeveui,
+  parseRecordedAtMs,
   ANALYSIS_VIEWS_SCHEMA: analysis.ANALYSIS_VIEWS_SCHEMA,
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
+  deviceSourceId,
+  describeDeviceSource,
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
   saveAnalysisView: analysis.saveAnalysisView,
+  deleteAnalysisView: analysis.deleteAnalysisView,
   deriveCardId,
   deriveCardsForZone,
   deriveGatewayCard,
@@ -2990,6 +3409,9 @@ module.exports = {
   deriveExpectedCadenceSeconds,
   legacySensorHistory,
   legacyRainDailyHistory,
+  rainDailyHistory,
+  resolveDeviceTimezones,
+  resolveDeviceTimezone,
   resolveDeviceFieldRollupKey,
   runRollupJob,
   upsertRollups,
@@ -2997,6 +3419,8 @@ module.exports = {
   rollupRowsToResult,
   startOfLocalDayMs,
   buildZoneExportCsv,
+  buildAllZonesExportCsv,
+  ALL_ZONES_EXPORT_MAX_ROWS,
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,
   toCsv,
@@ -3007,6 +3431,7 @@ module.exports = {
   filterSoilChannelsForSources,
   filterSoilRowsForSources,
   isSoilSource,
+  isEnvironmentSource,
   isWatermarkNode,
   annotateWatermarkEvidence,
   isLsn50Swt3Eligible,

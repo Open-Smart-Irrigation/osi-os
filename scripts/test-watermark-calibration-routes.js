@@ -59,6 +59,10 @@ const USERS = Object.freeze({
   B: { id: 2, username: 'res_b' },
   V: { id: 3, username: 'view_v' },
   R: { id: 4, username: 'res_r' },
+  // Added by withAdmins(): an enabled admin and a disabled admin, neither of
+  // them the device's owner, neither with a zone.
+  D: { id: 5, username: 'admin_d' },
+  X: { id: 6, username: 'admin_x' },
 });
 const VALUES = Object.freeze({
   pullup_1_ohm: 47000, pulldown_1_ohm: 47000, series_fwd_1_ohm: 120, series_rev_1_ohm: 110,
@@ -236,6 +240,13 @@ const QUERY_WRITE = Object.freeze(Object.fromEntries(
 ));
 
 const VIA_GUARD = ['scoped-device-config-guard', 'watermark-cal-fn', 'device-response'];
+
+// The guard's route table, a static JSON array literal in its source.
+function guardRouteTable() {
+  const source = BY_ID.get('scoped-device-config-guard').func.match(/const routeTable = (\[[^\n]+\]);/);
+  assert.ok(source, 'the guard route table is not a static JSON array');
+  return JSON.parse(source[1]);
+}
 const DIRECT = ['watermark-cal-fn', 'device-response'];
 
 // ------------------------------------------------------------------ cases --
@@ -265,7 +276,12 @@ const CASES = [
       assert.deepEqual(guard.wires[25], ['watermark-cal-fn']);
       assert.deepEqual(guard.wires[26], ['watermark-cal-fn']);
       assert.deepEqual(guard.wires[27], ['device-response']);
-      assert.ok(guard.func.includes('{"method":"PUT","suffix":"/watermark/calibration","index":25},{"method":"DELETE","suffix":"/watermark/calibration","index":26}]'));
+      const routes = guardRouteTable();
+      assert.equal(routes.length, 27);
+      assert.deepEqual(routes.slice(25).map((route) => [route.method, route.suffix, route.index]), [
+        ['PUT', '/watermark/calibration', 25],
+        ['DELETE', '/watermark/calibration', 26],
+      ]);
     },
   },
   {
@@ -574,6 +590,254 @@ CASES.push(
   },
 );
 
+
+// ------------------------------------- unassigned soil sensor, scoped mode --
+// A soil sensor taken out of its zone (irrigation_zone_id NULL) is in nobody's
+// zone scope. With the flag off its owner (devices.user_id) can still set its
+// soil depths and WATERMARK calibration through the handlers' owner filter;
+// scoped, the guard lets the owner (when the owner may write) and any enabled
+// admin through on exactly those three routes, as the cloud command path does.
+// Everyone else, and every other route, still gets 404; a disabled account 403.
+
+// Adds admin D (enabled) and admin X (disabled). Neither owns the device or
+// has a zone, so only the unassigned-sensor rule can let them through.
+function withAdmins(native) {
+  native.exec(`
+    INSERT INTO users (id, username, password_hash, created_at, user_uuid, role, disabled_at, sync_version) VALUES
+      (5, 'admin_d', 'h', '2026-01-01', 'u-d', 'admin', NULL, 1),
+      (6, 'admin_x', 'h', '2026-01-01', 'u-x', 'admin', '2026-01-02', 1);
+  `);
+  return native;
+}
+
+function unassign(native, typeId) {
+  if (typeId) native.prepare('UPDATE devices SET type_id = ? WHERE deveui = ?').run(typeId, DEVEUI);
+  native.prepare('UPDATE devices SET irrigation_zone_id = NULL WHERE deveui = ?').run(DEVEUI);
+}
+
+CASES.push(
+  {
+    name: 'unassigned owner exception: only the soil-depth and the two WATERMARK calibration routes opt in',
+    async run() {
+      const optedIn = guardRouteTable()
+        .filter((route) => route.allowUnassignedOwner === true)
+        .map((route) => [route.method, route.suffix]);
+      assert.deepEqual(optedIn, [
+        ['PUT', '/soil-moisture-depths'],
+        ['PUT', '/watermark/calibration'],
+        ['DELETE', '/watermark/calibration'],
+      ]);
+      // The guard reads the route flag with a strict === true and adds no other
+      // option, so the admin extension lives in the scope helper alone.
+      const guardSource = BY_ID.get('scoped-device-config-guard').func;
+      assert.ok(guardSource.includes('allowUnassignedOwner: route.allowUnassignedOwner === true'));
+      for (const route of guardRouteTable()) {
+        assert.ok(route.allowUnassignedOwner === undefined || route.allowUnassignedOwner === true,
+          route.suffix + ': the flag is either absent or true');
+      }
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: owner A previews, saves and deletes the calibration; B, R and V get 404 and nothing changes',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      for (const who of ['B', 'R', 'V']) {
+        const denied = await runChain(native, 'PUT', who, { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+        assert.equal(denied.status, who === 'V' ? 403 : 404, who + ': ' + JSON.stringify(denied.body));
+        assert.deepEqual(denied.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      }
+      assert.equal(calibrationRow(native), null);
+
+      const preview = await runChain(native, 'PUT', 'A', { scoped: true, body: { ...VALUES, dry_run: true } });
+      assert.deepEqual(preview.trail.slice(1), VIA_GUARD);
+      assert.equal(preview.status, 200, JSON.stringify(preview.body));
+      assert.equal(preview.body.dry_run, true);
+      assert.equal(calibrationRow(native), null, 'the preview stored a calibration');
+
+      const saved = await runChain(native, 'PUT', 'A', { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.sync_version, 1);
+
+      const foreignDelete = await runChain(native, 'DELETE', 'B', { scoped: true, query: { expected_sync_version: '1' } });
+      assert.equal(foreignDelete.status, 404, JSON.stringify(foreignDelete.body));
+      assert.equal(calibrationRow(native).sync_version, 1);
+
+      const deleted = await runChain(native, 'DELETE', 'A', { scoped: true, query: { expected_sync_version: '1' } });
+      assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+      assert.equal(deleted.body.sync_version, 2);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: owner A saves soil depths; B gets 404 and the row is unchanged',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const before = depthRow(native);
+      const b = await depthRequest(native, 'B', { swt_1: 20 }, { scoped: true });
+      assert.equal(b.status, 404, JSON.stringify(b.body));
+      assert.deepEqual(depthRow(native), before);
+      const a = await depthRequest(native, 'A', { swt_1: 20, swt_2: 40 }, { scoped: true });
+      assert.deepEqual(a.trail.slice(1), DEPTH_VIA_GUARD);
+      assert.equal(a.status, 200, JSON.stringify(a.body));
+      assert.deepEqual(JSON.parse(depthRow(native).depths), { swt_1: 20, swt_2: 40 });
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: a route that does not opt in still answers 404 to the owner',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const path = '/api/devices/' + DEVEUI + '/lsn50/interval';
+      const r = await runChain(native, 'PUT', 'A', {
+        scoped: true, httpIn: 'put-lsn50-interval-http', path, body: { minutes: 10 },
+      });
+      assert.equal(r.status, 404, JSON.stringify(r.body));
+      assert.deepEqual(r.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned valve: the owner exception does not apply; 404 and the row is unchanged',
+    async run() {
+      const native = freshDb();
+      unassign(native, 'STREGA_VALVE');
+      const before = depthRow(native);
+      const a = await depthRequest(native, 'A', { swt_1: 20 }, { scoped: true });
+      assert.equal(a.status, 404, JSON.stringify(a.body));
+      assert.deepEqual(depthRow(native), before);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: enabled admin D (not the owner) previews, saves and deletes the calibration and saves soil depths',
+    async run() {
+      const native = withAdmins(freshDb());
+      unassign(native);
+      const preview = await runChain(native, 'PUT', 'D', { scoped: true, body: { ...VALUES, dry_run: true } });
+      assert.deepEqual(preview.trail.slice(1), VIA_GUARD);
+      assert.equal(preview.status, 200, JSON.stringify(preview.body));
+      assert.equal(calibrationRow(native), null, 'the preview stored a calibration');
+
+      const saved = await runChain(native, 'PUT', 'D', { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+      assert.deepEqual(saved.trail.slice(1), VIA_GUARD);
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      assert.equal(saved.body.sync_version, 1);
+      assert.equal(calibrationRow(native).pullup_1_ohm, VALUES.pullup_1_ohm);
+
+      const deleted = await runChain(native, 'DELETE', 'D', { scoped: true, query: { expected_sync_version: '1' } });
+      assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+      assert.equal(deleted.body.sync_version, 2);
+
+      const depths = await depthRequest(native, 'D', { swt_1: 15, swt_2: 45 }, { scoped: true });
+      assert.deepEqual(depths.trail.slice(1), DEPTH_VIA_GUARD);
+      assert.equal(depths.status, 200, JSON.stringify(depths.body));
+      assert.deepEqual(JSON.parse(depthRow(native).depths), { swt_1: 15, swt_2: 45 });
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor without an owner: enabled admin D saves soil depths; owner-less is no exception for researcher A',
+    async run() {
+      const native = withAdmins(freshDb());
+      unassign(native);
+      native.prepare('UPDATE devices SET user_id = NULL WHERE deveui = ?').run(DEVEUI);
+      const before = depthRow(native);
+      const a = await depthRequest(native, 'A', { swt_1: 20 }, { scoped: true });
+      assert.equal(a.status, 404, JSON.stringify(a.body));
+      assert.deepEqual(depthRow(native), before);
+      const d = await depthRequest(native, 'D', { swt_1: 20 }, { scoped: true });
+      assert.equal(d.status, 200, JSON.stringify(d.body));
+      assert.deepEqual(JSON.parse(depthRow(native).depths), { swt_1: 20 });
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned sensor: disabled admin X gets 403 from the guard on all three routes; nothing changes',
+    async run() {
+      const native = withAdmins(freshDb());
+      unassign(native);
+      const before = depthRow(native);
+      const put = await runChain(native, 'PUT', 'X', { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+      const del = await runChain(native, 'DELETE', 'X', { scoped: true, query: { expected_sync_version: '0' } });
+      const depths = await depthRequest(native, 'X', { swt_1: 20 }, { scoped: true });
+      for (const r of [put, del, depths]) {
+        assert.equal(r.status, 403, JSON.stringify(r.body));
+        assert.deepEqual(r.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      }
+      assert.equal(calibrationRow(native), null);
+      assert.deepEqual(depthRow(native), before);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, sensor in a zone: enabled admin D with no grant for the zone still gets 404 (the zone rule applies); nothing changes',
+    async run() {
+      const native = withAdmins(freshDb());
+      const before = depthRow(native);
+      const put = await runChain(native, 'PUT', 'D', { scoped: true, body: { ...VALUES, expected_sync_version: 0 } });
+      const depths = await depthRequest(native, 'D', { swt_1: 20 }, { scoped: true });
+      for (const r of [put, depths]) {
+        assert.equal(r.status, 404, JSON.stringify(r.body));
+        assert.deepEqual(r.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      }
+      assert.equal(calibrationRow(native), null);
+      assert.deepEqual(depthRow(native), before);
+      native.close();
+    },
+  },
+  {
+    name: 'scoped, unassigned: enabled admin D gets 404 on a valve and on a route that does not opt in',
+    async run() {
+      const native = withAdmins(freshDb());
+      unassign(native);
+      const interval = await runChain(native, 'PUT', 'D', {
+        scoped: true, httpIn: 'put-lsn50-interval-http', path: '/api/devices/' + DEVEUI + '/lsn50/interval', body: { minutes: 10 },
+      });
+      assert.equal(interval.status, 404, JSON.stringify(interval.body));
+      assert.deepEqual(interval.trail.slice(1), ['scoped-device-config-guard', 'device-response']);
+      native.prepare('UPDATE devices SET type_id = ? WHERE deveui = ?').run('STREGA_VALVE', DEVEUI);
+      const before = depthRow(native);
+      const valve = await depthRequest(native, 'D', { swt_1: 20 }, { scoped: true });
+      assert.equal(valve.status, 404, JSON.stringify(valve.body));
+      assert.deepEqual(depthRow(native), before);
+      native.close();
+    },
+  },
+  {
+    name: 'flag off, unassigned sensor: admin D (not the owner) still gets 404 from the handlers\' owner filter; the scope helper is never loaded',
+    async run() {
+      const native = withAdmins(freshDb());
+      unassign(native);
+      const before = depthRow(native);
+      const depths = await depthRequest(native, 'D', { swt_1: 20 });
+      assert.equal(depths.status, 404, JSON.stringify(depths.body));
+      const put = await runChain(native, 'PUT', 'D', { body: { ...VALUES, expected_sync_version: 0 } });
+      assert.equal(put.status, 404, JSON.stringify(put.body));
+      assert.deepEqual(depthRow(native), before);
+      assert.equal(calibrationRow(native), null);
+      for (const r of [depths, put]) assert.ok(!r.requested.includes('scope'), 'flag off reached osiLib.require(scope)');
+      native.close();
+    },
+  },
+  {
+    name: 'flag off, unassigned sensor: unchanged; owner A saves depths and calibration, B gets 404, the scope helper is never loaded',
+    async run() {
+      const native = freshDb();
+      unassign(native);
+      const b = await depthRequest(native, 'B', { swt_1: 20 });
+      assert.equal(b.status, 404, JSON.stringify(b.body));
+      const a = await depthRequest(native, 'A', { swt_1: 20 });
+      assert.equal(a.status, 200, JSON.stringify(a.body));
+      const saved = await runChain(native, 'PUT', 'A', { body: { ...VALUES, expected_sync_version: 0 } });
+      assert.equal(saved.status, 200, JSON.stringify(saved.body));
+      for (const r of [a, b, saved]) assert.ok(!r.requested.includes('scope'), 'flag off reached osiLib.require(scope)');
+      native.close();
+    },
+  },
+);
 
 // ----------------------------------------------------------------- runner --
 

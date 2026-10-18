@@ -106,15 +106,15 @@ test('buildRuntimePayload: GEN1 weekday_states mirrors the raw WEEKDAY_PLAN push
   assert.equal(payload.push_state.acked, 1);
 });
 
-test('buildRuntimePayload: GEN1 weekday_states collapses to ONE entry per weekday -- an ACKED row is never superseded by a later re-edit (supersedeQueued only touches state=QUEUED rows), so the raw ledger can carry several surviving rows for the same weekday; the newest by queued_at must win, not all of them', async () => {
+test('buildRuntimePayload: GEN1 weekday_states collapses to ONE entry per weekday -- an ACKED row is never superseded by a later re-edit (supersedeQueued only touches state=QUEUED rows), so the raw ledger can carry several surviving rows for the same weekday; the newest (last inserted) must win, not all of them', async () => {
   const { db } = await tempDb();
   const insertRow = (id, weekday, state, queuedAt, ackedAt) => db.run(
     'INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, queued_at, acked_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
     [id, EUI, 'WEEKDAY_PLAN', weekday, 14 + weekday, 'FF'.repeat(24), 'h-' + id, state, queuedAt, ackedAt]
   );
-  // Monday (weekday 1): three ledger generations, deliberately inserted OUT of queued_at order
-  // so a naive "last inserted" or "first inserted" read would get this wrong -- only sorting by
-  // queued_at itself picks the true newest.
+  // Monday (weekday 1): three ledger generations. The newest is the LAST INSERTED (store.js
+  // orders the ledger by rowid; queued_at is the wall clock and can step backwards), so a
+  // "first inserted" read (p-mid) or a "latest queued_at but not last" read would both be wrong.
   await insertRow('p-mid', 1, 'QUEUED', '2026-08-22T09:00:00', null);
   await insertRow('p-old', 1, 'ACKED', '2026-08-20T09:00:00', '2026-08-20T09:05:00.000Z');
   await insertRow('p-new', 1, 'ACKED', '2026-08-24T09:00:00', '2026-08-24T09:05:00.000Z');

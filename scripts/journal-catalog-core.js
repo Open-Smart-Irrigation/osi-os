@@ -2018,6 +2018,27 @@ const templates = [
     },
   },
   {
+    code: 'full_record',
+    version: 11,
+    label: 'Full record',
+    definition: {
+      sections: [
+        { code: 'identity', fields: ['activity_code', 'plot_uuid', 'occurred_start', 'occurred_end'] },
+        { code: 'operation', fields: [
+          'attr.crop', 'attr.product_uuid', 'attr.product', 'attr.treated_area',
+          'attr.harvest_yield_area', 'attr.amount_mass_area_product',
+          'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+          'attr.amount_count_area', 'attr.amount_biological_count_area',
+          'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+          'attr.observation_text', 'attr.growth_stage_bbch', 'attr.target',
+          'attr.agroscope.operation', 'attr.agroscope.device', 'attr.equipment',
+        ] },
+        { code: 'notes', fields: ['note'] },
+      ],
+      final_requirement_matrix_version: 11,
+    },
+  },
+  {
     code: 'research_observation',
     version: 1,
     label: 'Research',
@@ -2192,6 +2213,39 @@ const layouts = [
       reading_fields: ['attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume', 'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method'],
       option_dependencies: [],
     },
+  },
+  {
+    code: 'open_field', version: 11, label: 'Open field',
+    derive_agroscope_dependencies: true,
+    definition: { activity_codes: CORE_ACTIVITY_CODES, supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      static_context_fields: ['attr.block_bed_row', 'attr.cover_type', 'attr.denominator'],
+      reading_fields: [], denominator_contract: ['area', 'plant', 'row'],
+      availability_mode: 'all_compatible', option_dependencies: [] },
+  },
+  {
+    code: 'greenhouse', version: 11, label: 'Greenhouse',
+    derive_agroscope_dependencies: true,
+    definition: { activity_codes: CORE_ACTIVITY_CODES, supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
+      static_context_fields: ['attr.structure_compartment', 'attr.root_zone_system', 'attr.plant_area'],
+      reading_fields: ['attr.wetted_area', 'attr.drainage_volume', 'attr.recirculation'],
+      availability_mode: 'all_compatible', option_dependencies: [] },
+  },
+  {
+    code: 'lysimeter', version: 11, label: 'Lysimeter',
+    derive_agroscope_dependencies: true,
+    definition: { activity_codes: CORE_ACTIVITY_CODES, supported_templates: ALL_TEMPLATES,
+      minimum_fields: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
+      static_context_fields: ['attr.experimental_unit', 'attr.replicate', 'attr.treatment', 'attr.surface_area'],
+      reading_fields: ['attr.interval_minutes', 'attr.water_input', 'attr.rain_input', 'attr.drainage_volume', 'attr.mass_start', 'attr.mass_end', 'attr.tare_mass', 'attr.mass_method'],
+      availability_mode: 'all_compatible', option_dependencies: [] },
+  },
+  {
+    code: 'farm_wide', version: 1, since_version: 11, label: 'Farm-wide',
+    definition: { activity_codes: ['equipment_maintenance', 'general_observation'],
+      supported_templates: ALL_TEMPLATES, minimum_fields: [], static_context_fields: [],
+      reading_fields: [], availability_mode: 'all_compatible', option_dependencies: [] },
   },
 ];
 

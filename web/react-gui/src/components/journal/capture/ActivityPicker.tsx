@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { JournalVocabRow } from '../../../types/journal';
@@ -102,9 +102,11 @@ export function ActivityPicker({
   const { t } = useTranslation('journal');
   const [query, setQuery] = useState('');
   const [browse, setBrowse] = useState<BrowseState | null>(null);
+  const [rovingLeafKey, setRovingLeafKey] = useState('');
   const browseHeadingRef = useRef<HTMLHeadingElement>(null);
   const pickerHeadingRef = useRef<HTMLHeadingElement>(null);
   const focusPickerAfterBrowseRef = useRef(false);
+  const leafButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowsByCode = new Map(catalogRows.map((row) => [row.code, row]));
 
   const supportedFallback: ActivityLeafSelection[] = [];
@@ -182,18 +184,49 @@ export function ActivityPicker({
   const searchResults = normalizedQuery
     ? supportedFallback.filter((candidate) => leafSearchText(candidate).includes(normalizedQuery))
     : [];
+  const rovingLeaves = normalizedQuery
+    ? searchResults
+    : browse ? [] : rankedSections.flatMap((section) => section.leaves);
+  const rovingKeys = rovingLeaves.map(leafKey);
+  const rovingSignature = rovingKeys.join('\u0000');
+
+  useEffect(() => {
+    setRovingLeafKey((current) => rovingKeys.includes(current) ? current : (rovingKeys[0] ?? ''));
+  }, [rovingSignature]);
+
+  const moveRovingLeaf = (event: KeyboardEvent<HTMLButtonElement>, leaf: ActivityLeafSelection) => {
+    const key = event.key;
+    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(key)) return;
+    const currentIndex = rovingKeys.indexOf(leafKey(leaf));
+    if (currentIndex < 0 || rovingKeys.length === 0) return;
+    event.preventDefault();
+    const nextIndex = key === 'Home' ? 0
+      : key === 'End' ? rovingKeys.length - 1
+        : (currentIndex + (key === 'ArrowRight' || key === 'ArrowDown' ? 1 : -1) + rovingKeys.length) % rovingKeys.length;
+    const nextKey = rovingKeys[nextIndex];
+    setRovingLeafKey(nextKey);
+    leafButtonRefs.current.get(nextKey)?.focus();
+  };
 
   const activityIcon = (leaf: ActivityLeafSelection): string => {
     const iconKey = rowsByCode.get(leaf.activity_code)?.icon_key ?? '';
     return ACTIVITY_ICONS[iconKey] ?? '○';
   };
 
-  const leafButton = (leaf: ActivityLeafSelection) => (
+  const leafButton = (leaf: ActivityLeafSelection) => {
+    const key = leafKey(leaf);
+    return (
     <button
-      key={leafKey(leaf)}
+      key={key}
       type="button"
+      ref={(element) => {
+        if (element) leafButtonRefs.current.set(key, element);
+        else leafButtonRefs.current.delete(key);
+      }}
+      tabIndex={rovingLeafKey === key ? 0 : -1}
       aria-label={leafFullLabel(leaf)}
       onClick={() => onPick(leaf)}
+      onKeyDown={(event) => moveRovingLeaf(event, leaf)}
       className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-left text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2"
     >
       <span
@@ -204,7 +237,8 @@ export function ActivityPicker({
       </span>
       <span className="min-w-0 leading-tight">{leafDisplayLabel(leaf)}</span>
     </button>
-  );
+    );
+  };
 
   const openActivity = (activityCode: string) => {
     const candidates = supportedFallback.filter((leaf) => leaf.activity_code === activityCode);

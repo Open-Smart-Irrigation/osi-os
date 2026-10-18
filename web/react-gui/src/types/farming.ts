@@ -33,6 +33,8 @@ export interface SentekChannelLayout {
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
+/** How the gateway chose the timezone of `latest_data.rain_day` (see osi-history-helper resolveDeviceTimezone). */
+export type RainDayTimezoneBasis = 'zone' | 'weather_station_zone' | 'unassigned_default' | 'abbreviation' | 'invalid';
 
 export type WatermarkChannelStatus =
   | 'ok' | 'saturated' | 'wet_offset_clipped' | 'short' | 'short_suspected' | 'open'
@@ -176,6 +178,11 @@ export interface Device {
     rain_mm_per_hour?: number | null;
     rain_mm_per_10min?: number | null;
     rain_mm_today?: number | null;
+    // Farm-local day (YYYY-MM-DD) of the latest rain value, set by GET /api/devices for rain
+    // gauges; the "today" tiles show rain_mm_today as today only when this is the farm's date.
+    rain_day?: string | null;
+    rain_day_timezone?: string | null;
+    rain_day_timezone_basis?: RainDayTimezoneBasis | null;
     rain_delta_status?: string | null;
     flow_count_cumulative?: number | null;
     flow_pulses_delta?: number | null;
@@ -513,7 +520,8 @@ export interface ZoneRecommendation {
   zone_id: number;
   date: string;
   zone_stress_summary: StressLevel;
-  rainfall_mm: number;
+  /** The day's rain under the rain-resolution policy; null when unknown, never 0. */
+  rainfall_mm: number | null;
   water_delivered_liters: number;
   irrigation_action: IrrigationAction;
   action_reasoning: string;
@@ -576,6 +584,21 @@ export interface WaterEnvironment {
   areaM2: number | null;
   irrigationEfficiencyPct: number | null;
   rainTodayMm: number | null;
+  /**
+   * 'unknown' when no rain gauge observed today (rainTodayMm is then null, never 0);
+   * a measured zero is 'observed'. Sent by the gateway; absent in a cloud bundle.
+   */
+  rainTodayStatus?: 'observed' | 'unknown';
+  /**
+   * Rain-resolution policy coverage of rainTodayMm: gauge 'complete_so_far', provider
+   * 'complete'/'partial', 'unknown', or 'legacy_unvalidated' for a pre-policy row
+   * (audit only, never shown as a warning).
+   */
+  rainTodayCoverage?: string | null;
+  /** What the gauge received today when the day is not certified: a lower bound, never balanced. */
+  rainTodayReceivedMm?: number | null;
+  /** Rain-resolution policy reason codes for today's rain (open vocabulary). */
+  rainTodayReasons?: string[];
   irrigationTodayLiters: number | null;
   irrigationTodayNetMm: number | null;
   irrigationTodayMeasuredLiters?: number | null;
@@ -591,8 +614,8 @@ export interface WaterEnvironment {
   /** The zone's local calendar day (YYYY-MM-DD); the row with this date is today's. */
   todayDate?: string | null;
   /**
-   * Where today's rain comes from. Sent by the cloud bundle on a linked
-   * gateway; absent on an unlinked gateway or an older cloud.
+   * Where today's rain comes from. The gateway may resolve elapsed provider
+   * rain as weather_service; linked cloud bundles may also name a station.
    */
   rainSource?: 'gauge' | 'meteoswiss_station' | 'weather_service' | null;
   rainStation?: RainStation | null;
@@ -622,6 +645,12 @@ export interface WaterAction {
 export interface WaterDay {
   date: string;
   rainMm: number | null;
+  /** The period covered by a station's daily rain value; gauges and local-day values may omit it. */
+  rainPeriod?: 'local_day' | 'utc_day' | null;
+  /** Rain-resolution policy coverage of a policy-1 gateway day; absent on a legacy day. */
+  rainCoverage?: string | null;
+  /** What the gauge received on an uncertified policy-1 day (rainMm is then null). */
+  rainReceivedMm?: number | null;
   irrigationLiters: number | null;
   irrigationNetMm: number | null;
   measuredIrrigationLiters?: number | null;
@@ -749,8 +778,11 @@ export interface ForecastEnvironment {
 }
 
 export interface RainFocus {
-  totalNext24hMm: number;
-  totalNext72hMm: number;
+  /** null when no forecast hour in the horizon carries a rain value (unknown, not 0 mm). */
+  totalNext24hMm: number | null;
+  totalNext72hMm: number | null;
+  /** Forecast hours behind totalNext24hMm; absent from an older gateway or the cloud. */
+  next24hCoverage?: { coveredHours: number; expectedHours: number };
   maxHourlyRainMm: number;
   maxHourlyRainAt: string | null;
   nextRainEta: string | null;

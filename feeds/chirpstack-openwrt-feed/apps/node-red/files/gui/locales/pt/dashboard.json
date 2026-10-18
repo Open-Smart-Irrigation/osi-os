@@ -8,6 +8,12 @@
     "activity": "Registar atividade"
   },
   "data": "Dados",
+  "network": "Rede",
+  "admin": "Admin",
+  "adminMenu": {
+    "users": "Utilizadores",
+    "grants": "Permissões"
+  },
   "account": "Conta",
   "accountMenu": {
     "osiServer": "OSI Server"

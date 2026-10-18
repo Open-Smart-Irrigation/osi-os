@@ -21,7 +21,8 @@ export const Login: React.FC = () => {
 
     try {
       await login({ username, password });
-      navigate('/dashboard');
+      // Replace: Back must not return to the sign-in form of a finished login.
+      navigate('/dashboard', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.message || t('login.failed'));
     } finally {
@@ -35,7 +36,7 @@ export const Login: React.FC = () => {
         <div className="text-center mb-5">
           <img src={osiLogo} alt="OSI OS Logo" className="mx-auto mb-4 h-14 w-14" />
           <h1 className="text-3xl font-bold text-[var(--text)] mb-2 high-contrast-text">
-            OSI OS v0.7.0 (Alpha)
+            OSI OS v0.8.1 (Alpha)
           </h1>
           <p className="text-[var(--text-secondary)] text-base">{t('login.subtitle')}</p>
         </div>

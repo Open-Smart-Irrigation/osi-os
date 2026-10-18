@@ -84,8 +84,8 @@ key with a default, then commits.
 | `device_eui_last_verified_at` | ISO-8601 UTC timestamp of last resolution | resolved at boot | Same as above |
 | `link_gateway_device_eui` | Server-linked override EUI; normally written by account-link finalize after a successful link, but an operator can preset it to bypass the provisional-identity block on concentrator-less gateways — see the override note in section 2 | empty | Written by flows.json account-link finalize node; read by `gateway_identity_read_linked` (highest-priority persisted source, see section 2) |
 | `device_type` | Reported device type string | `GATEWAY` | `node-red.init` exports as `DEVICE_TYPE` |
-| `firmware_version` | Reported firmware version string | `0.7.0` (2026-07-14; bump on release) | `node-red.init` exports as `FIRMWARE_VERSION` |
-| `server_host` | Cloud host set during account-link (used to persist/restore MQTT/server host across link/unlink), separate from the hardcoded telemetry broker URL (section 9) | empty | flows.json account-link nodes write it; `node-red.init` exports as `OSI_SERVER_HOST` |
+| `firmware_version` | Reported firmware version string | `0.8.1` (2026-10-10; bump on release) | `node-red.init` exports as `FIRMWARE_VERSION` |
+| `server_host` | Cloud host set during account-link (host of the cloud's MQTT broker URL, else of the server URL); the MQTT broker URL falls back to `wss://<server_host>/mqtt` when `mqtt_broker_url` is empty (section 9) | empty | flows.json account-link nodes write it; `node-red.init` exports as `OSI_SERVER_HOST` and derives `OSI_CLOUD_BROKER_URL` from it |
 | `mqtt_password` | **Secret.** Cloud MQTT password used to build `/srv/node-red/flows_cred.json` | empty | Written by flows.json account-link finalize node; read by `node-red.init`. **Never print, log, or commit this value.** |
 | `allow_private_target` | Dev/test escape hatch allowing `http://` or private/loopback hosts for account-link `serverUrl` | `0` | flows.json `allowPrivateTargets()` reads via UCI directly (`uci -q get osi-server.cloud.allow_private_target`), also via `ALLOW_PRIVATE_SERVER_URLS`/`ALLOW_INSECURE_SERVER_URL` env fallback |
 | `journal_photo_cache_bytes` | Maximum retained Journal V2 photo-cache bytes | `4294967296` | `node-red.init` validates a positive safe integer and exports `JOURNAL_PHOTO_CACHE_BYTES`; the Journal V2 worker enforces it |
@@ -270,9 +270,10 @@ mirrored under both hardware profiles'
 and creates-or-reuses:
 
 - 3 ChirpStack applications: **OSI Sensors**, **OSI Actuators**, **OSI Field Tester**
-- 8 device profiles: **KIWI Sensor**, **STREGA Valve**, **STREGA Valve Gen2**,
-  **Dragino LSN50**, **RAK Field Tester**, **SenseCAP S2120**,
-  **Aqua-Scope LoRain**, **OSI Milesight UC512**
+- 10 device profiles: **KIWI Sensor**, **CLOVER Sensor**, **STREGA Valve**,
+  **STREGA Valve Gen2**, **Dragino LSN50**, **RAK Field Tester**,
+  **SenseCAP S2120**, **Aqua-Scope LoRain**, **OSI Milesight UC512**,
+  **SDI-12 Soil Node**
 - 1 API key (`osi-nodered`)
 
 Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
@@ -286,11 +287,11 @@ Verified full set of env vars it writes (`writeEnvFile` / `envVars` object in
 | `CHIRPSTACK_APP_SENSORS` | OSI Sensors app UUID | `chirpstack_app_sensors` |
 | `CHIRPSTACK_APP_ACTUATORS` | OSI Actuators app UUID | `chirpstack_app_actuators` |
 | `CHIRPSTACK_APP_FIELD_TESTER` | OSI Field Tester app UUID | `chirpstack_app_field_tester` |
-| `CHIRPSTACK_PROFILE_KIWI` | KIWI Sensor profile UUID | `chirpstack_profile_kiwi` |
+| `CHIRPSTACK_PROFILE_KIWI` | KIWI Sensor profile UUID (Tektelic agriculture codec, attached only when the profile has none) | `chirpstack_profile_kiwi` |
 | `CHIRPSTACK_PROFILE_STREGA` | STREGA Valve profile UUID (Gen1) | `chirpstack_profile_strega` |
 | `CHIRPSTACK_PROFILE_STREGA_GEN2` | STREGA Valve Gen2 profile UUID | `chirpstack_profile_strega_gen2` |
 | `CHIRPSTACK_PROFILE_LSN50` | Dragino LSN50 profile UUID | `chirpstack_profile_lsn50` |
-| `CHIRPSTACK_PROFILE_CLOVER` | **Alias** — intentionally set to the same UUID as `CHIRPSTACK_PROFILE_RAK10701` (compatibility alias for the RAK10701 field tester profile, not a separate profile) | `chirpstack_profile_clover` |
+| `CHIRPSTACK_PROFILE_CLOVER` | CLOVER Sensor profile UUID (`OSI CLOVER Sensor`, Tektelic agriculture codec `codecs/tektelic_agriculture_decoder.js`). Bootstraps before this profile existed wrote the RAK10701 field-tester UUID here; see the repair note below | `chirpstack_profile_clover` |
 | `CHIRPSTACK_PROFILE_RAK10701` | RAK Field Tester profile UUID | `chirpstack_profile_rak10701` |
 | `CHIRPSTACK_PROFILE_S2120` | SenseCAP S2120 profile UUID | `chirpstack_profile_s2120` |
 | `CHIRPSTACK_PROFILE_LORAIN` | Aqua-Scope LoRain profile UUID | `chirpstack_profile_lorain` — mapped to UCI by `chirpstack-bootstrap.js`, but **not exported by `node-red.init`** (runtime sees it via the env-file path only; see section 1 note) |
@@ -322,6 +323,23 @@ etc. to discriminate device type on uplink. The actual MQTT topic
 subscription rule and the `deviceProfileName`-fallback discrimination pattern
 inside flows.json are mechanics of `osi-flows-json-editing` — not duplicated
 here.
+
+**Kiwi and Clover profiles on existing gateways:** earlier bootstraps created
+the Kiwi profile without a codec and aliased `CHIRPSTACK_PROFILE_CLOVER` to the
+codec-less RAK10701 field-tester profile, so Kiwi and Clover uplinks never
+decoded there (they are decoded only by the profile codec). `deploy.sh` runs
+`node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles` on every
+provisioned gateway: it reuses the existing API key and never provisions; it
+attaches the Tektelic codec to the Kiwi and Clover profiles that have none (a
+codec already there, also one attached by hand, is left alone), gets or
+creates the `OSI CLOVER Sensor` profile when CLOVER is unset or aliased, and
+rewrites only the `chirpstack_profile_clover` UCI key and the
+`CHIRPSTACK_PROFILE_CLOVER` env line. Once everything is correct it makes no
+write; a failure only warns. A Clover registered before the repair stays on
+the field-tester profile until it is re-registered (the registration paths
+repoint an existing device's profile) or moved with
+`--repoint-clover-device=<DevEUI>`, which refuses a device on any other
+profile.
 
 **`CHIRPSTACK_PROFILE_STREGA_GEN2` on existing gateways:** a fresh
 `chirpstack-bootstrap.js` run writes it like any other profile var, but a
@@ -571,14 +589,15 @@ grep -n "SystemFeatureFlags\|defaultHistoryFeatureFlags" web/react-gui/src/servi
 
 | Fact | Value | Where set / verified |
 |---|---|---|
-| `firmware_version` default | `0.7.0` (as of 2026-07-14 — bump on release, re-check before quoting) | `96_osi_server_config`, also the inline fallback default in `node-red.init` (`fw_version=$(uci -q get ... || echo "0.7.0")`) |
-| MQTT telemetry broker URL | `wss://server.opensmartirrigation.org/mqtt`, port `443` | **Hardcoded** in the flows.json `mqtt-broker` node named "OSI Cloud Broker" (`broker` field literal) — this is a compile-time constant, not read from `server_host`/UCI/env at all. Its `credentials.user`/`credentials.password` fields use Node-RED's `${DEVICE_EUI}` / `${DEVICE_MQTT_PASSWORD}` template-expansion syntax, resolved from the process env `node-red.init` sets. |
-| `osi-server.cloud.server_host` | separate concern from the broker URL above — it is the cloud host recorded/restored during account-link (`OSI_SERVER_HOST` env var), used for REST sync target bookkeeping, not for the MQTT connection itself | flows.json account-link finalize/rollback/restore nodes |
+| `firmware_version` default | `0.8.1` (as of 2026-10-10 — bump on release, re-check before quoting) | `96_osi_server_config`, also the inline fallback default in `node-red.init` (`fw_version=$(uci -q get ... || echo "0.8.1")`) |
+| MQTT telemetry broker URL | `${OSI_CLOUD_BROKER_URL}` in the flows.json `mqtt-broker` node "OSI Cloud Broker" (`broker` field; Node-RED 3.1 substitutes a whole-string `${VAR}` at start). `node-red.init` `resolve_cloud_broker_url()` sets it from `osi-server.cloud.mqtt_broker_url`, else `wss://<server_host>/mqtt`, else the default `wss://server.opensmartirrigation.org/mqtt`; port field `443`. Logged at start as `cloud MQTT broker <url> source=<mqtt_broker_url\|server_host\|default>`. A change needs a Node-RED restart. Its `credentials.user`/`credentials.password` fields use `${DEVICE_EUI}` / `${DEVICE_MQTT_PASSWORD}`, resolved from the process env `node-red.init` sets. | `node-red.init`, `scripts/test-node-red-init-cloud-broker.sh`, `scripts/verify-communication-contract.js` |
+| `osi-server.cloud.server_host` | the cloud host recorded/restored during account-link (`OSI_SERVER_HOST` env var); second source of the broker URL above when `mqtt_broker_url` is empty | flows.json account-link finalize/rollback/restore nodes |
 | MQTT client ID | `device_${DEVICE_EUI}` template in the broker node config, but also force-rewritten literally into `/srv/node-red/flows.json` on every Node-RED start by an inline Node snippet in `node-red.init` (because Node-RED does not expand `${VAR}` in `clientid ` reliably across versions in this deployment's testing) | `node-red.init`, `start_service()` |
 
 **Re-verify:**
 ```
-grep -n '"broker": "wss://' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
+grep -n '"broker": "${OSI_CLOUD_BROKER_URL}"' conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json
+grep -n 'resolve_cloud_broker_url\|OSI_DEFAULT_CLOUD_BROKER_URL=' feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init
 grep -n "fw_version=" feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init
 grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config
 ```
@@ -587,8 +606,9 @@ grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-d
 
 ## Common mistakes
 
-- Assuming `OSI_SERVER_HOST` / `server_host` controls the MQTT telemetry
-  broker. It does not — that URL is hardcoded in flows.json (section 9).
+- Assuming the MQTT telemetry broker is fixed. It follows
+  `mqtt_broker_url`, then `server_host`, then the default (section 9), and
+  only after a Node-RED restart.
 - Assuming `.chirpstack.env` is dead weight that's safe to delete blindly.
   It's still the fallback path for every `CHIRPSTACK_*` key that isn't yet in
   UCI (fresh bootstrap before first successful UCI write, or the
@@ -604,10 +624,10 @@ grep -n "firmware_version" conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-d
   under `feeds/chirpstack-openwrt-feed/apps/node-red/files/` and are shared
   (not profile-specific), unlike flows.json which is genuinely duplicated
   per hardware profile.
-- Treating `CHIRPSTACK_PROFILE_CLOVER` as a distinct profile from
-  `CHIRPSTACK_PROFILE_RAK10701`. They are intentionally the same UUID
-  (compatibility alias) — do not "fix" this by giving CLOVER its own profile
-  without understanding why the alias exists.
+- Pointing `CHIRPSTACK_PROFILE_CLOVER` at the RAK10701 field-tester profile.
+  That profile has no codec, so every Clover uplink arrives without a decoded
+  `object` and Process Data drops it. Older gateways carry this alias until
+  `--repair-soil-profiles` runs (deploy.sh does it).
 - Assuming deploy.sh enforces ChirpStack profile completeness. It doesn't;
   that's a manual operator check (`diagnose-pi-communication.sh`).
 - Assuming deploy.sh never restarts services. Since the payload-flip redesign

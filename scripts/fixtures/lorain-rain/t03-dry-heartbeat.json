@@ -1,0 +1,68 @@
+{
+  "id": "dry-heartbeat",
+  "truthRows": [
+    "T3",
+    "T13"
+  ],
+  "description": "A rain report, then silence, then a zero heartbeat 11 wakes later (the wake counter was not reset by the wet report). The silence is dry because fCnt is continuous.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000006",
+      "devAddr": "01000001",
+      "fCnt": 30,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000007",
+      "devAddr": "01000001",
+      "fCnt": 31,
+      "time": "2026-10-08T12:45:11.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

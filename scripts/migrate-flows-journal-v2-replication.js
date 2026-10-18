@@ -22,6 +22,15 @@ const SCHEMA_FINGERPRINT = crypto.createHash('sha256').update(fs.readFileSync(pa
 // migration only ever rewrites a worker whose func hashes to exactly this, so a
 // gateway or branch carrying any other drift is refused rather than clobbered.
 const PRIOR_WORKER_SHA256 = '3073defc99cc70a06d7f14c75dd54a7dd29b5795a62863824abe14df744fa2a9';
+// The schema fingerprint is embedded in the generated worker source, so a
+// journal-v2.schema.json change produces a new worker. Only exact, reviewed
+// predecessors are upgradeable; any other worker edit still fails closed.
+// 968796c0...: the worker carrying the fingerprint of the schema before
+// PLOT_GROUP_SNAPSHOT (a2a455a7...).
+const COMPATIBLE_PRIOR_WORKER_SHA256S = new Set([
+  PRIOR_WORKER_SHA256,
+  '968796c0293777bce62294cf77b0ac97296e84d910de82b40d50a16ecff9b7fc',
+]);
 
 function serialize(flows) {
   return Buffer.from(JSON.stringify(flows, null, 2) + '\n', 'utf8');
@@ -234,8 +243,9 @@ function migrate(buffer) {
       if (JSON.stringify(node) === JSON.stringify(expected)) continue;
       const upgraded = Object.assign({}, node, { func: expected.func });
       const priorWorker = node.id === 'journal-v2-replication-worker' &&
-        crypto.createHash('sha256').update(String(node.func || '')).digest('hex') ===
-          PRIOR_WORKER_SHA256 &&
+        COMPATIBLE_PRIOR_WORKER_SHA256S.has(
+          crypto.createHash('sha256').update(String(node.func || '')).digest('hex')
+        ) &&
         JSON.stringify(upgraded) === JSON.stringify(expected);
       if (!priorWorker) {
         throw new Error('Refusing non-exact Journal V2 replication node collision: ' + node.id);

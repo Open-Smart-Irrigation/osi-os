@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { assertDeviceHealthChannels } = require('./device-health-channel-contract');
 
 const repoRoot = path.resolve(__dirname, '..');
 const manifestPath = path.join(repoRoot, 'web', 'react-gui', 'src', 'channels', 'channels.json');
@@ -311,6 +312,12 @@ try {
       expectedAnalysisChannels(manifest.entries),
       `${analysisLabel} CHANNELS`
     );
+    const deviceHealthCount = assertDeviceHealthChannels(
+      extractConstantArray(analysisSource, 'DEVICE_HEALTH_CHANNELS'),
+      manifest.entries,
+      analysisLabel
+    );
+    console.log(`OK ${analysisLabel} DEVICE_HEALTH_CHANNELS exactly matches active analysis metadata (${deviceHealthCount} channels)`);
   }
 
   const expectedEdge = manifest.entries

@@ -279,3 +279,44 @@ test('--prune-only prunes the .premigrate- pile and does NOT back up or apply pe
     else process.env.MIGRATE_BACKUP_KEEP = prevKeep;
   }
 });
+
+// The exact deploy.sh self-heal step (`node migrate-cli.js "$DB_PATH"
+// --backup-dir "$backup_dir" --prune-only`), run through `sh` with the default
+// keep of 3, against a backup directory where the newest backup was once
+// opened in place and left `-shm`/`-wal` side files behind.
+test('deploy prune step: side files do not count as backups (default keep 3)', () => {
+  const { spawnSync } = require('node:child_process');
+  const dir = scratch();
+  const db = path.join(dir, 'farming.db');
+  fs.writeFileSync(db, 'live');
+  const backupDir = path.join(dir, 'migrate');
+  fs.mkdirSync(backupDir);
+  const pm = 'farming.db.premigrate-';
+  const backups = ['2026-01-05T10-50-05-720Z', '2026-01-09T22-48-02-472Z', '2026-01-17T20-54-56-162Z']
+    .map((s) => pm + s);
+  const names = [...backups, `${backups[2]}-shm`, `${backups[2]}-wal`];
+  for (const n of names) fs.writeFileSync(path.join(backupDir, n), 'b');
+  const env = { ...process.env };
+  delete env.MIGRATE_BACKUP_KEEP;
+  const cli = path.join(__dirname, 'migrate-cli.js');
+  const run = () => spawnSync('sh', ['-c', 'node "$1" "$2" --backup-dir "$3" --prune-only', 'sh', cli, db, backupDir], {
+    env, encoding: 'utf8',
+  });
+
+  let r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(fs.readdirSync(backupDir).sort(), names.slice().sort(), 'three backups at keep 3: nothing removed');
+  assert.doesNotMatch(r.stderr, /pruned/);
+
+  // A fourth backup arrives: only the oldest backup goes, the newest one and its side files stay.
+  const fourth = `${pm}2026-01-20T08-00-00-000Z`;
+  fs.writeFileSync(path.join(backupDir, fourth), 'b');
+  r = run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(
+    fs.readdirSync(backupDir).sort(),
+    [backups[1], backups[2], `${backups[2]}-shm`, `${backups[2]}-wal`, fourth].sort()
+  );
+  assert.match(r.stderr, new RegExp(`removed .*${backups[0]}`));
+  assert.match(r.stderr, /pruned 1 old pre-migration backup\(s\), keeping newest 3/);
+});

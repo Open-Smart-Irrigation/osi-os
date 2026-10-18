@@ -22,7 +22,7 @@
   },
   "warning": {
     "title": "Importante",
-    "message": "Dopo il collegamento, dovrai utilizzare le tue credenziali OSI Server per accedere. OSI OS memorizza un verificatore offline specifico del gateway per l'accesso collegato.",
+    "message": "Dopo il collegamento, devi usare le tue credenziali OSI Server per accedere. OSI OS conserva un verificatore offline specifico per questo gateway per l'accesso collegato.",
     "proceed": "Procedi"
   },
   "success": {
@@ -44,26 +44,43 @@
   },
   "sync": {
     "title": "Sincronizzazione manuale",
-    "description": "Esegui una sincronizzazione di ripristino immediata con OSI Server.",
+    "description": "Esegui una sincronizzazione di recupero immediata con OSI Server.",
     "button": "Forza sincronizzazione ora",
     "running": "Sincronizzazione in corso...",
     "successTitle": "Sincronizzazione manuale completata",
-    "partialTitle": "Sincronizzazione manuale completata con problemi",
+    "partialTitle": "Sincronizzazione manuale terminata con problemi",
     "refreshed": "Token di sincronizzazione aggiornato prima della sincronizzazione.",
-    "usedCurrentToken": "Utilizzo del token di sincronizzazione corrente.",
+    "usedCurrentToken": "Utilizzo del token di sincronizzazione attuale.",
     "bootstrap": "Bootstrap applicato: {{applied}}, saltato: {{skipped}}",
-    "outbox": "Outbox consegnato: {{delivered}} ({{before}} -> {{after}} in sospeso)",
-    "pending": "Comandi in sospeso recuperati: {{fetched}}, in coda per l'applicazione locale: {{queued}}",
-    "pendingAfterResponse": "L'applicazione locale continua dopo la restituzione di questa risposta.",
+    "outbox": "{{delivered}} aggiornamento/i inviato/i a OSI Server ({{after}} in attesa)",
+    "outboxCounts": {
+      "title": "Risultato della posta in uscita",
+      "selected": "Selezionati: {{count}}",
+      "applied": "Applicati: {{count}}",
+      "duplicate": "Duplicati: {{count}}",
+      "retryable": "Riprovabili: {{count}}",
+      "rejected": "Rifiutati: {{count}}",
+      "protocolErrors": "Errori di protocollo: {{count}}",
+      "pendingAfter": "In attesa dopo la sincronizzazione: {{count}}",
+      "rejectedCode": "Rifiutati per {{code}}: {{count}}"
+    },
+    "pending": "Comandi in attesa recuperati: {{fetched}}, in coda per l'applicazione locale: {{queued}}",
+    "pendingAfterResponse": "L'applicazione locale continua dopo il ritorno di questa risposta.",
     "lastError": "Ultimo errore da {{source}}: {{message}}"
+  },
+  "rejected": {
+    "title": "Rifiutato da OSI Server",
+    "count": "{{total}} aggiornamento/i sono stati rifiutati in modo definitivo e non verranno ritentati ({{last24h}} nelle ultime 24 ore).",
+    "lastReason": "Più recente: {{op}} rifiutato per {{reason}} il {{date}}"
   },
   "reauth": {
     "title": "Token di sincronizzazione scaduto",
-    "description": "Autenticati nuovamente con OSI Server per generare un nuovo token di sincronizzazione per questo gateway.",
-    "button": "Autentica nuovamente",
+    "description": "Autenticati di nuovo con OSI Server per generare un nuovo token di sincronizzazione per questo gateway.",
+    "button": "Autentica di nuovo",
     "username": "Nome utente server",
     "password": "Password OSI Server",
     "submit": "Aggiorna connessione",
-    "running": "Aggiornamento in corso..."
+    "running": "Aggiornamento in corso...",
+    "detected": "Il collegamento al cloud richiede una nuova autenticazione. L'ultimo tentativo di sincronizzazione è stato rifiutato con HTTP {{statusCode}}."
   }
 }

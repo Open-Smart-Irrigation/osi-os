@@ -313,13 +313,23 @@ function irrDecision(hist3,rain,zs,nonRef,opts){
     }
   }
 
-  if((rain?.daily_mm||0)>=5&&!suppressionWasActiveAtStart){
+  // Suppression entry and its timeout (rain-resolution policy): the larger of the
+  // day's amount and a received lower bound (suppression_mm); unknown rain (null)
+  // never enters. A caller without suppression_mm passes the daily amount.
+  const hasSuppressionMm=!!rain&&Object.prototype.hasOwnProperty.call(rain,'suppression_mm');
+  const entryRaw=hasSuppressionMm?rain.suppression_mm:rain?.daily_mm;
+  const entryMm=entryRaw!=null&&isFinite(Number(entryRaw))?Number(entryRaw):0;
+  if(entryMm>=5&&!suppressionWasActiveAtStart){
     zs.rain_suppression_active=1;
     zs.rain_suppression_start=computedAt;
-    zs.rain_suppression_timeout_h=rain.daily_mm>=15?72:48;
+    zs.rain_suppression_timeout_h=entryMm>=15?72:48;
     const preTwds=(nonRef||[]).map(t=>t.twd_night_um).filter(v=>v!=null&&isFinite(v));
     zs.pre_rain_twd_norm_avg=preTwds.length?round(avg(preTwds),1):null;
-    return{action:'maintain_rain_suppression',reasoning:'New rain: '+round(rain.daily_mm,1)+'mm'};
+    const amount=rain.daily_mm!=null&&isFinite(Number(rain.daily_mm))?Number(rain.daily_mm):null;
+    const byLowerBound=amount==null||entryMm>amount;
+    return{action:'maintain_rain_suppression',reasoning:byLowerBound
+      ?'New rain: at least '+round(entryMm,1)+'mm received by the local gauge (day incomplete)'
+      :'New rain: '+round(amount,1)+'mm'};
   }
 
   if(today==='unknown')return{action:'maintain',reasoning:'No reliable dendrometer data — maintain current volume'};

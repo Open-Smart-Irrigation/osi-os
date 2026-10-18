@@ -157,6 +157,8 @@ function resourceIdentity(mutation) {
       return resource.custom_field_uuid;
     case 'PLOT_SNAPSHOT':
       return resource.plot_uuid;
+    case 'PLOT_GROUP_SNAPSHOT':
+      return resource.group_uuid;
     case 'CUTOVER_BARRIER_RECEIPT':
       return resource.barrier_uuid;
     default:
@@ -165,7 +167,9 @@ function resourceIdentity(mutation) {
 }
 
 function baseVersion(mutation) {
-  if (mutation.operation === 'PLOT_SNAPSHOT') return mutation.resource.projection_version - 1;
+  if (mutation.operation === 'PLOT_SNAPSHOT' || mutation.operation === 'PLOT_GROUP_SNAPSHOT') {
+    return mutation.resource.projection_version - 1;
+  }
   if (mutation.operation === 'CUTOVER_BARRIER_RECEIPT') return 0;
   return mutation.resource.base_version;
 }
@@ -276,11 +280,14 @@ function validateOutcome(mutation, outcome) {
         outcome.resource_uuid !== resourceIdentity(mutation)) {
       throw error('invalid_outcome', 'Reference mutation result has the wrong resource');
     }
-  } else if (mutation.operation === 'PLOT_SNAPSHOT') {
+  } else if (mutation.operation === 'PLOT_SNAPSHOT' || mutation.operation === 'PLOT_GROUP_SNAPSHOT') {
     assertExactKeys(outcome, [
       'kind', 'mutation_uuid', 'outcome', 'projection_version',
     ], 'Plot mutation result');
-    if (outcome.kind !== 'PLOT_SNAPSHOT_RESULT' ||
+    const expectedKind = mutation.operation === 'PLOT_SNAPSHOT'
+      ? 'PLOT_SNAPSHOT_RESULT'
+      : 'PLOT_GROUP_SNAPSHOT_RESULT';
+    if (outcome.kind !== expectedKind ||
         outcome.projection_version !== mutation.resource.projection_version) {
       throw error('invalid_outcome', 'Plot mutation result has the wrong projection version');
     }
@@ -457,6 +464,24 @@ async function replacePlot(tx, envelope) {
   );
 }
 
+async function replacePlotGroup(tx, envelope) {
+  const payload = envelope.payload;
+  await run(
+    tx,
+    'INSERT INTO journal_v2_plot_group_snapshots(' +
+      'workspace_uuid,group_uuid,snapshot_uuid,gateway_device_eui,projection_version,payload_json,recorded_at' +
+    ') VALUES(?,?,?,?,?,?,?) ON CONFLICT(workspace_uuid,group_uuid) DO UPDATE SET ' +
+      'snapshot_uuid=excluded.snapshot_uuid,gateway_device_eui=excluded.gateway_device_eui,' +
+      'projection_version=excluded.projection_version,payload_json=excluded.payload_json,' +
+      'recorded_at=excluded.recorded_at',
+    [
+      envelope.workspace_uuid, payload.plot_group.group_uuid, payload.snapshot_uuid,
+      payload.gateway_device_eui, payload.projection_version, JSON.stringify(payload.plot_group),
+      envelope.recorded_at,
+    ]
+  );
+}
+
 async function replaceCropCycle(tx, envelope) {
   const payload = envelope.payload;
   await run(
@@ -545,6 +570,7 @@ async function project(tx, envelope) {
     case 'ENTRY_CONFLICT': return replaceConflict(tx, envelope);
     case 'REFERENCE_DATA': return replaceReference(tx, envelope);
     case 'PLOT_SNAPSHOT': return replacePlot(tx, envelope);
+    case 'PLOT_GROUP_SNAPSHOT': return replacePlotGroup(tx, envelope);
     case 'CROP_CYCLE_PROJECTION': return replaceCropCycle(tx, envelope);
     case 'ATTACHMENT_DESCRIPTOR': return replaceAttachment(tx, envelope);
     case 'AUTHORITY_STATE': return replaceAuthority(tx, envelope);
@@ -767,6 +793,68 @@ function clearJournalUnsupported(key) {
 
 function _resetJournalV2BackoffForTests() {
   journalUnsupportedBackoff.clear();
+  entryBatchAdvertisements.clear();
+}
+
+// Journal entry batches (UPSERT_JOURNAL_ENTRY_BATCH) are a separate release
+// on the cloud's capability table. The gateway advertises it only once its
+// journal contract is accepted, and reports edge_producer_ready from the
+// command applier itself: a runtime without the batch applier says false, so
+// the cloud never issues a batch this gateway cannot apply. An unchanged
+// advertisement is repeated at most hourly per link.
+const ENTRY_BATCH_RELEASE_ID = 'journal_entry_batch_v1';
+const ENTRY_BATCH_READVERTISE_MS = 3600000;
+const entryBatchAdvertisements = new Map(); // linkKey -> { ready, at }
+
+function entryBatchApplierReady() {
+  let commands;
+  try {
+    commands = require('../osi-journal/commands');
+  } catch (cause) {
+    return false;
+  }
+  return typeof commands.supportsCommandType === 'function' &&
+    commands.supportsCommandType('UPSERT_JOURNAL_ENTRY_BATCH');
+}
+
+async function advertiseEntryBatchRelease(httpApi, config, linkKey) {
+  const ready = entryBatchApplierReady();
+  const previous = entryBatchAdvertisements.get(linkKey);
+  if (previous && previous.failedUntil) {
+    if (Date.now() < previous.failedUntil) return 'backoff';
+  } else if (previous && previous.ready === ready && Date.now() - previous.at < ENTRY_BATCH_READVERTISE_MS) {
+    return ready ? 'advertised' : 'not_ready';
+  }
+  try {
+    const answer = await cloudRequest(httpApi, {
+      method: 'POST',
+      url: gatewayEndpoint(config, '/capabilities'),
+      headers: authHeaders(config),
+      payload: {
+        release_id: ENTRY_BATCH_RELEASE_ID,
+        schema_fingerprint: config.schema_fingerprint,
+        schema_accepted: true,
+        edge_producer_ready: ready,
+        advertised_at: now(),
+      },
+      timeoutMs: 30000,
+    }, [200]);
+    if (!answer || typeof answer !== 'object' || answer.release_id !== ENTRY_BATCH_RELEASE_ID ||
+        answer.gateway_eui !== config.gateway_device_eui) {
+      throw error('invalid_capability', 'Journal entry batch capability response is malformed');
+    }
+  } catch (cause) {
+    // Reported in the tick result and retried after a backoff (the 403
+    // window: initial doubling to the cap); replication itself does not
+    // depend on this release.
+    const backoffMs = previous && previous.failedUntil
+      ? Math.min(previous.backoffMs * 2, journalV2BackoffCapMs())
+      : journalV2BackoffInitialMs();
+    entryBatchAdvertisements.set(linkKey, { failedUntil: Date.now() + backoffMs, backoffMs });
+    return 'failed:' + String(cause && cause.code || 'unknown');
+  }
+  entryBatchAdvertisements.set(linkKey, { ready, at: Date.now() });
+  return ready ? 'advertised' : 'not_ready';
 }
 
 function journalUnsupportedError(message, extra) {
@@ -1020,6 +1108,10 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
     }
   }
 
+  const entryBatchCapability = capability.locally_accepted
+    ? await advertiseEntryBatchRelease(httpApi, config, journalLinkKey)
+    : 'not_advertised';
+
   const cache = await enforcePhotoCache(db, fsApi, {
     max_bytes: config.photo_cache_bytes,
     min_free_bytes: config.min_free_bytes,
@@ -1027,6 +1119,7 @@ async function runReplicationTick(db, httpApi, fsApi, inputConfig) {
   });
   return {
     capability_state: capability.locally_accepted ? 'accepted' : 'rejected',
+    entry_batch_capability: entryBatchCapability,
     sent_mutations: sentMutations,
     applied_envelopes: appliedEnvelopes,
     committed_sequence: committedSequence,

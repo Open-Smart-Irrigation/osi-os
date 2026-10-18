@@ -51,6 +51,41 @@ separate coefficient identity or equivalent proof that distinguishes an
 unchanged coefficient set from a material recalibration. It must not revoke or
 silently reaccept qualification from the version number alone.
 
+## Unsettled readings (owner decision, 2026-10-05)
+
+The node firmware flags a reading `unsettled` (probe flag `0x04`) when its early
+and late samples differ by more than its tolerance. On a wet, low-resistance
+channel that tolerance is below the normal settling drift, so many valid
+readings carry the flag (#415). The owner decided on 2026-10-05 that the gateway
+stores their value. From `conversion_version` `wm-lsn50-p3-v2` on:
+
+- A reading whose only problem is the unsettled flag gets its kPa in
+  `device_data` and `watermark_readings`. Its status stays `unsettled`, and the
+  raw flag stays in `chN_flags`.
+- Every other diagnostic status (`invalid_sample`, `open`, `short`,
+  `short_suspected`, `wet_offset_clipped`, `calibration_required`,
+  `temperature_missing`, `temperature_out_of_range`, `outside_200ss_range`) still
+  stores no value. When such a fault and the unsettled flag occur together, the
+  status names the fault.
+
+This decision replaces the rule under "Electrical checks" for the `unsettled`
+status only. The change from `wm-lsn50-p3-v1` to `wm-lsn50-p3-v2` is a
+conversion change and is deliberate. Under "When a record is required" it
+revokes qualification evidence collected under v1. No such evidence is in force
+today, because the scheduler excludes every WATERMARK reading. A run under v2
+re-checks:
+
+- the share of readings flagged `unsettled` per channel, with the resistance
+  band of each channel;
+- the continuity of flagged values with their settled neighbours (the
+  difference from the mean of the adjacent settled readings);
+- that no reading with any other diagnostic status carries a value.
+
+Readings stored without a value under v1 can be filled by
+`scripts/repair-watermark-unsettled.js`. A filled reading keeps
+`conversion_version` `wm-lsn50-p3-v1` with status `unsettled` and a kPa; record
+whether evidence includes such rows.
+
 ## Record header
 
 Record these facts before installation:
@@ -126,7 +161,8 @@ Use the installed cable and normal power arrangement.
   stability.
 - Record open, short, unsettled, clipping, invalid-temperature, and invalid
   board-temperature behavior. A diagnostic status must not be replaced with a
-  plausible numeric value.
+  plausible numeric value. Exception since `wm-lsn50-p3-v2`: an `unsettled`
+  reading keeps its status and also stores its value (see "Unsettled readings").
 
 The calibration-fit wizard, if available later, may capture this evidence. A
 complete manual resistor record remains equivalent; the wizard is not required

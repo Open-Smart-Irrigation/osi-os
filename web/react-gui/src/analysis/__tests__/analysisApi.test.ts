@@ -26,6 +26,7 @@ vi.mock('axios', () => ({
 describe('analysisAPI', () => {
   beforeEach(() => {
     axiosMocks.post.mockReset();
+    axiosMocks.delete.mockReset();
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-26T12:00:00.000Z'));
   });
@@ -61,5 +62,14 @@ describe('analysisAPI', () => {
       },
       aggregation: 'auto',
     });
+  });
+
+  it('deletes saved analysis views through the owner-scoped edge route', async () => {
+    axiosMocks.delete.mockResolvedValue({ data: null });
+    const { analysisAPI } = await import('../../services/api');
+
+    await analysisAPI.deleteView(17);
+
+    expect(axiosMocks.delete).toHaveBeenCalledWith('/api/analysis/views/17');
   });
 });

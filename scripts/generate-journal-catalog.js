@@ -39,7 +39,83 @@ const CATALOG_MIGRATIONS = [
   { version: 8, name: '0039__journal_catalog_v8.sql' },
   { version: 9, name: '0040__journal_catalog_v9.sql' },
   { version: 10, name: '0041__journal_catalog_v10.sql' },
+  { version: 11, name: '0070__journal_catalog_v11.sql' },
 ];
+
+// Normative final-entry requirements from the Journal parity specification.
+// Leaf rules replace an activity rule; `missing` names only quantity families
+// that may be represented by one status-only not_observed value.
+const PRODUCT_FAMILY = Object.freeze(['attr.product_uuid', 'attr.product']);
+const FERTILIZER_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_mass_area_product', 'attr.amount_volume_area_product', 'attr.amount_nutrient_rate',
+]);
+const IRRIGATION_AMOUNT_FAMILY = Object.freeze([
+  'attr.irrigation_depth', 'attr.irrigation_volume_area', 'attr.per_plant_volume',
+]);
+const PRODUCT_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_mass_area_product', 'attr.amount_volume_area_product',
+]);
+const BIOCONTROL_AMOUNT_FAMILY = Object.freeze([
+  'attr.amount_biological_count_area', 'attr.amount_mass_area_product', 'attr.amount_volume_area_product',
+]);
+const SEED_AMOUNT_FAMILY = Object.freeze(['attr.amount_mass_area_product', 'attr.amount_count_area']);
+const YIELD_FAMILY = Object.freeze(['attr.harvest_yield_area']);
+const OBSERVATION_FAMILY = Object.freeze(['note', 'attr.observation_text', 'attr.growth_stage_bbch']);
+const NOTE_FAMILY = Object.freeze(['note', 'attr.observation_text']);
+
+function finalRequirement(required = [], requiredAny = [], missing = []) {
+  return Object.freeze({ required: Object.freeze(required), required_any: Object.freeze(requiredAny), missing: Object.freeze(missing) });
+}
+
+function emptyFinalRequirement() {
+  return finalRequirement();
+}
+
+const FINAL_REQUIREMENT_MATRIX_V11 = Object.freeze({
+  activities: Object.freeze({
+    irrigation: finalRequirement([], [IRRIGATION_AMOUNT_FAMILY], [IRRIGATION_AMOUNT_FAMILY]),
+    fertilization: finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    fertigation: finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY, IRRIGATION_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY, IRRIGATION_AMOUNT_FAMILY]),
+    plant_protection_application: finalRequirement([], [PRODUCT_FAMILY, BIOCONTROL_AMOUNT_FAMILY], [BIOCONTROL_AMOUNT_FAMILY]),
+    weed_control_nonchemical: emptyFinalRequirement(),
+    seeding: finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    planting_transplanting: finalRequirement(['attr.crop'], [['attr.amount_count_area']], [['attr.amount_count_area']]),
+    pruning: emptyFinalRequirement(), crop_care: emptyFinalRequirement(),
+    tillage_soil_work: emptyFinalRequirement(), mowing: emptyFinalRequirement(),
+    harvest: finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    sampling: emptyFinalRequirement(),
+    general_observation: finalRequirement([], [OBSERVATION_FAMILY]),
+    pest_disease_observation: finalRequirement([], [['note', 'attr.observation_text', 'attr.target']]),
+    equipment_maintenance: finalRequirement([], [['attr.equipment', 'attr.agroscope.device', 'note']]),
+  }),
+  leaves: Object.freeze({
+    'agroscope.operation.primary_tillage': emptyFinalRequirement(),
+    'agroscope.operation.seedbed_preparation': emptyFinalRequirement(),
+    'agroscope.operation.stubble_cultivation': emptyFinalRequirement(),
+    'agroscope.operation.weed_mechanical': emptyFinalRequirement(),
+    'agroscope.operation.weed_other': emptyFinalRequirement(),
+    'agroscope.operation.cleaning_cut': emptyFinalRequirement(),
+    'agroscope.operation.sowing_main_crop': finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    'agroscope.operation.sowing_cover_crop': finalRequirement(['attr.crop'], [SEED_AMOUNT_FAMILY], [SEED_AMOUNT_FAMILY]),
+    'agroscope.operation.organic_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.mineral_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.other_fertilization': finalRequirement([], [PRODUCT_FAMILY, FERTILIZER_AMOUNT_FAMILY], [FERTILIZER_AMOUNT_FAMILY]),
+    'agroscope.operation.fungicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.insecticide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.growth_regulator': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.weed_herbicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.total_herbicide': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.biocontrol': finalRequirement([], [PRODUCT_FAMILY, BIOCONTROL_AMOUNT_FAMILY], [BIOCONTROL_AMOUNT_FAMILY]),
+    'agroscope.operation.pest_control': finalRequirement([], [PRODUCT_FAMILY, PRODUCT_AMOUNT_FAMILY], [PRODUCT_AMOUNT_FAMILY]),
+    'agroscope.operation.harvest_main_crop': finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.harvest_cover_crop': finalRequirement(['attr.crop'], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.hay_removal': finalRequirement([], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.straw_removal': finalRequirement([], [YIELD_FAMILY], [YIELD_FAMILY]),
+    'agroscope.operation.watering': finalRequirement([], [IRRIGATION_AMOUNT_FAMILY], [IRRIGATION_AMOUNT_FAMILY]),
+    'agroscope.operation.sampling': finalRequirement([], [OBSERVATION_FAMILY]),
+    'agroscope.operation.note': finalRequirement([], [NOTE_FAMILY]),
+  }),
+});
 
 const TABLE_ORDER = [
   'journal_vocab',
@@ -191,6 +267,67 @@ function repairedDevices(operation) {
   return devices;
 }
 
+// The partner vocabulary source is the sole owner of global operation-to-device
+// compatibility. Layout definitions may only narrow that relation; an empty
+// result is a valid, explicit "no machinery configured" outcome.
+function globalOperationDeviceChoices(source) {
+  const relation = {};
+  for (const category of source.categories) {
+    for (const operation of category.operations) {
+      const operationCode = `agroscope.operation.${operation.code}`;
+      relation[operationCode] = repairedDevices(operation)
+        .map((device) => `agroscope.device.${device.code}`);
+    }
+  }
+  return relation;
+}
+
+function effectiveOperationDeviceChoices(source, layoutDefinition, activeDeviceChoices) {
+  const definition = layoutDefinition || {};
+  const hasAllowList = Object.prototype.hasOwnProperty.call(definition, 'available_device_codes');
+  const hasAllCompatible = Object.prototype.hasOwnProperty.call(definition, 'availability_mode');
+  assert(hasAllowList !== hasAllCompatible,
+    'capture layout must declare exactly one availability declaration');
+  if (hasAllCompatible) {
+    assert(definition.availability_mode === 'all_compatible',
+      'capture layout availability_mode must be all_compatible');
+  } else {
+    assert(Array.isArray(definition.available_device_codes),
+      'capture layout available_device_codes must be an array');
+  }
+
+  const global = globalOperationDeviceChoices(source);
+  const knownDevices = new Set(Object.values(global).flat());
+  const available = hasAllCompatible
+    ? knownDevices
+    : new Set(definition.available_device_codes);
+  if (!hasAllCompatible) {
+    for (const deviceCode of available) {
+      assert(typeof deviceCode === 'string' && knownDevices.has(deviceCode),
+        `capture layout availability references unknown device ${deviceCode}`);
+    }
+  }
+  const active = activeDeviceChoices instanceof Set ? activeDeviceChoices : knownDevices;
+  return Object.fromEntries(Object.entries(global).map(([operationCode, devices]) => [
+    operationCode,
+    devices.filter((deviceCode) => available.has(deviceCode) && active.has(deviceCode)),
+  ]));
+}
+
+function validateCurrentCaptureLayoutAvailability(coreDef, source) {
+  const latestByCode = new Map();
+  for (const layout of coreDef.layouts) {
+    const existing = latestByCode.get(layout.code);
+    if (!existing || layout.version > existing.version) latestByCode.set(layout.code, layout);
+  }
+  for (const layout of latestByCode.values()) {
+    if (!layout.derive_agroscope_dependencies) continue;
+    effectiveOperationDeviceChoices(source, layout.definition, new Set(
+      Object.values(globalOperationDeviceChoices(source)).flat()
+    ));
+  }
+}
+
 function categoryActivityMap(coreDef) {
   const result = new Map();
   for (const activity of coreDef.activities) {
@@ -226,8 +363,8 @@ function validateCore(coreDef) {
     'core must define exactly three distinct template codes (any number of versions each)'
   );
   assert(
-    new Set(coreDef.layouts.map((row) => row.code)).size === 3,
-    'core must define exactly three distinct generic layout codes (any number of versions each)'
+    new Set(coreDef.layouts.map((row) => row.code)).size === 4,
+    'core must define three plot layouts plus farm_wide (any number of versions each)'
   );
 
   const templateVersionsByCode = new Map();
@@ -676,6 +813,9 @@ function buildAgroscope(coreDef, source) {
     // `categoryDependencies`/`operationDependencies` (the spread below always
     // allocates a fresh array).
     operationScopedDependencies: [...categoryDependencies, ...operationDependencies],
+    categoryDependencies,
+    operationDependencies,
+    activeDeviceChoices: new Set([...deviceMetadata.keys()].map((device) => `agroscope.device.${device}`)),
     layout: {
       code: 'agroscope_open_field',
       version: 1,
@@ -761,7 +901,8 @@ function buildRows(coreDef, source) {
   validateCore(coreDef);
   validateSource(coreDef, source);
   validateOperationFieldsByOperation(coreDef, source);
-  const agroscope = buildAgroscope(coreDef, source);
+  validateCurrentCaptureLayoutAvailability(coreDef, source);
+  const partnerVocab = buildAgroscope(coreDef, source);
   const rows = [];
 
   for (const activity of coreDef.activities) {
@@ -792,7 +933,7 @@ function buildRows(coreDef, source) {
       constraints: null,
     }));
   }
-  for (const sourceChoice of agroscope.choices) {
+  for (const sourceChoice of partnerVocab.choices) {
     rows.push(vocabRow({
       ...sourceChoice,
       kind: 'choice',
@@ -828,15 +969,18 @@ function buildRows(coreDef, source) {
   }
 
   for (const template of coreDef.templates) {
+    const definition = template.definition.final_requirement_matrix_version === 11
+      ? { ...template.definition, final_requirement_matrix: FINAL_REQUIREMENT_MATRIX_V11 }
+      : template.definition;
     rows.push({
       table: 'journal_templates',
       key: `${template.code}:${template.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
-      values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(template.definition), 1],
+      values: [template.code, template.version, JSON.stringify({ en: template.label }), JSON.stringify(definition), 1],
       since: template.version,
     });
   }
-  for (const layout of [...coreDef.layouts, agroscope.layout]) {
+  for (const layout of [...coreDef.layouts, partnerVocab.layout]) {
     // Injection seam (Task 1): attach the shared dependency build purely —
     // derive a new definition object rather than mutating `layout` or any
     // core module state (compileCatalog may run multiple times per process,
@@ -844,15 +988,39 @@ function buildRows(coreDef, source) {
     // open_field@9 today, including the frozen agroscope_open_field itself,
     // which already carries its own full dependency set from buildAgroscope)
     // are emitted completely unchanged.
-    const definition = layout.derive_agroscope_dependencies
-      ? { ...layout.definition, option_dependencies: agroscope.operationScopedDependencies }
-      : layout.definition;
+    let definition = layout.definition;
+    const hasAvailability = Object.prototype.hasOwnProperty.call(layout.definition, 'availability_mode') ||
+      Object.prototype.hasOwnProperty.call(layout.definition, 'available_device_codes');
+    if (layout.derive_agroscope_dependencies) {
+      if (!hasAvailability) {
+        // Published pre-v11 rows remain byte-identical; only the current
+        // revision is required to carry an explicit availability declaration.
+        definition = { ...layout.definition, option_dependencies: partnerVocab.operationScopedDependencies };
+      } else {
+        const effectiveDevices = effectiveOperationDeviceChoices(
+          source,
+          layout.definition,
+          partnerVocab.activeDeviceChoices
+        );
+        const operationDependencies = partnerVocab.operationDependencies.map((dependency) => ({
+          ...dependency,
+          restrict: {
+            ...dependency.restrict,
+            choices: effectiveDevices[dependency.when.equals],
+          },
+        }));
+        definition = {
+          ...layout.definition,
+          option_dependencies: [...partnerVocab.categoryDependencies, ...operationDependencies],
+        };
+      }
+    }
     rows.push({
       table: 'journal_layouts',
       key: `${layout.code}:${layout.version}`,
       columns: ['code', 'version', 'labels_json', 'definition_json', 'active'],
       values: [layout.code, layout.version, JSON.stringify({ en: layout.label }), JSON.stringify(definition), 1],
-      since: layout.version,
+      since: layout.since_version || layout.version,
     });
   }
   for (const product of coreDef.products) {
@@ -1123,10 +1291,12 @@ module.exports = {
   validateCore,
   validateSource,
   validateOperationFieldsByOperation,
+  effectiveOperationDeviceChoices,
   replaceSeedBlock,
   expectedManifestText,
   writeGeneratedArtifacts,
   CATALOG_MIGRATIONS,
+  FINAL_REQUIREMENT_MATRIX_V11,
 };
 
 if (require.main === module) {

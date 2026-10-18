@@ -2,7 +2,9 @@ import React, { useState, useEffect, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { IrrigationZone } from '../../types/farming';
-import { irrigationZonesAPI } from '../../services/api';
+import { irrigationZonesAPI, zoneRainSourceAPI } from '../../services/api';
+import { initialRainGaugeChoice, type ZoneRainSource } from '../../utils/zoneRainSource';
+import { useSessionFence } from '../../contexts/AuthSessionDataBoundary';
 import {
   getDeviceLocationErrorMessage,
   getDeviceLocationSupport,
@@ -25,6 +27,7 @@ import { stageOptionLabel } from '../../agronomy/stageLabels';
 import { HelpTip } from './shared/HelpTip';
 import { DataExportSection } from './DataExportSection';
 import { TimezoneInput } from './TimezoneInput';
+import { ZoneRainGaugeField } from './ZoneRainGaugeField';
 import { useDateFormat } from '../../utils/datetime';
 
 /** Today in the browser's local time as YYYY-MM-DD (the stage start date pre-fill). */
@@ -106,6 +109,9 @@ function optionLabel(t: Translate, option: Option): string {
 export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSaved }) => {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation('common');
+  // #378: the save is up to three writes in a row; stop it if the session
+  // ends between them.
+  const sessionFence = useSessionFence();
   // One id prefix per mounted modal, so a dashboard with several zone cards
   // open does not produce duplicate control ids.
   const dateFormat = useDateFormat();
@@ -138,6 +144,9 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
   const [deviceLocationError, setDeviceLocationError] = useState<string | null>(null);
   const [deviceLocationMeta, setDeviceLocationMeta] = useState<DeviceLocationCapture | null>(null);
+  const [rainSource, setRainSource] = useState<ZoneRainSource | null>(null);
+  const [rainSourceFailed, setRainSourceFailed] = useState(false);
+  const [rainGauge, setRainGauge] = useState('');
   const hasLegacyCrop = Boolean(
     cropType && cropType !== 'other' && !cropById(cropType)
   );
@@ -183,6 +192,24 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     if (!isOpen) return;
     void refreshDeviceLocationSupport();
   }, [isOpen]);
+
+  // The zone's rain gauge selection, read each time the modal opens.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    setRainSource(null);
+    setRainSourceFailed(false);
+    setRainGauge('');
+    zoneRainSourceAPI.get(zone.id).then(
+      (source) => {
+        if (cancelled) return;
+        setRainSource(source);
+        setRainGauge(initialRainGaugeChoice(source));
+      },
+      () => { if (!cancelled) setRainSourceFailed(true); },
+    );
+    return () => { cancelled = true; };
+  }, [isOpen, zone.id]);
 
   if (!isOpen) return null;
 
@@ -296,10 +323,18 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
         await irrigationZonesAPI.updateConfig(zone.id, configPayload);
       }
       if (calibrationPayload) {
+        sessionFence();
         await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
       }
       if (locationChanged) {
+        sessionFence();
         await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
+      }
+      // Only an operator's change is written: an untouched select never
+      // confirms the suggestion by itself (D1).
+      if (rainSource && rainGauge !== initialRainGaugeChoice(rainSource)) {
+        sessionFence();
+        await zoneRainSourceAPI.set(zone.id, rainGauge || null);
       }
       onSaved();
       onClose();
@@ -747,6 +782,15 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
               )}
             </select>
           </div>
+
+          {/* Rain gauge */}
+          <ZoneRainGaugeField
+            id={id('rainGauge')}
+            source={rainSource}
+            loadFailed={rainSourceFailed}
+            value={rainGauge}
+            onChange={setRainGauge}
+          />
 
           <hr className="border-[var(--border)]" />
 

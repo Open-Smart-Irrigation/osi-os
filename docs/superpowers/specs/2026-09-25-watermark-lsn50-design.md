@@ -137,7 +137,7 @@ This recovers every bench resistor within 0.6 % with |offset| ≤ 1 mV
 | Forward ≥ 4087 or reverse ≤ 8 | `open` (dry beyond range or disconnected); no kPa |
 | Reverse = 4095 or forward = 0 (one direction clipped at the rail) | Evaluate the §5.1 formula with the clipped code at its rail. The result is an **upper bound** `r_upper_bound`. Bound ≤ 550 Ω → 0 kPa, `saturated`. Bound < 300 Ω → `short_suspected`, no kPa. Otherwise `wet_offset_clipped`, no kPa, and the GUI shows "≤ N kPa". N is the largest tension any resistance up to the bound can have: the 200SS relation drops at its 8 kΩ segment edge at warm temperatures, so the tension at the bound alone can understate it. |
 | Neither direction clipped and R < 300 Ω | `short`; no kPa |
-| Neither clipped, flag `0x04` (unsettled) | Resistance and offset are reported. kPa only if R ≤ 550 Ω (`saturated`); otherwise `unsettled`, no kPa. |
+| Neither clipped, flag `0x04` (unsettled) | Converted like a settled reading: temperature rules, then `tensionFromResistance`. A result of `ok` is stored with its kPa and the status `unsettled`; any other result keeps its own status. Until `wm-lsn50-p3-v2` (#415) an unsettled reading above 550 Ω got no kPa. |
 | Neither clipped, settled | Temperature rules, then `tensionFromResistance` |
 
 The firmware decoder's short rule (`fwd ≤ 4 ⇒ short`) is **not** copied. It
@@ -160,8 +160,9 @@ Status vocabulary, per channel: `ok`, `saturated`, `wet_offset_clipped`,
 `calibration_required`, `temperature_missing`, `temperature_out_of_range`,
 `outside_200ss_range`, plus `frame_rejected` at frame level.
 
-`conversion_version` = `wm-lsn50-p3-v1`. It is stored per reading, and any
-change to the formulas bumps it.
+`conversion_version` = `wm-lsn50-p3-v2` since #415 (`v1` withheld kPa from
+unsettled readings). It is stored per reading, and any change to the formulas
+bumps it.
 
 ## 6. Phase 1 — edge: decode, convert, display (no sync, no scheduler admission)
 

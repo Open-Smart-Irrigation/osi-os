@@ -178,3 +178,20 @@ test('the journal module gate is quiet: no warn on the disabled path', () => {
   assert.doesNotMatch(gateBlock, /node\.warn|node\.error/, 'the disabled path must not log every tick');
   assert.match(gateBlock, /node\.status/, 'the disabled path should still show why the node is idle');
 });
+
+test('migration upgrades the worker of the previous schema fingerprint, but no other drift', () => {
+  const previousSchemaFingerprint = 'a2a455a7ab2279dd51b66390173bcede6e3460c0785208d9ffbc1b737ce79092';
+  const flows = JSON.parse(serialize(migrator.EXPECTED_NODES));
+  const worker = flows.find((node) => node.id === 'journal-v2-replication-worker');
+  worker.func = worker.func.replace(migrator.SCHEMA_FINGERPRINT, previousSchemaFingerprint);
+
+  assert.equal(
+    migrator.migrate(serialize(flows)).equals(serialize(migrator.EXPECTED_NODES)),
+    true,
+  );
+  worker.func += '\n// untrusted drift';
+  assert.throws(
+    () => migrator.migrate(serialize(flows)),
+    /Refusing non-exact Journal V2 replication node collision/,
+  );
+});

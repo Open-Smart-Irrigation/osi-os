@@ -239,6 +239,28 @@ class ChirpStackClient {
     this.gatewayClient = new gatewayGrpc.GatewayServiceClient(this.apiUrl.target, this.credentials);
   }
 
+  // Each service client above owns its own grpc-js channel (resolver, load
+  // balancer, channelz registration, idle timer). A caller that creates a
+  // client per run releases all five here. Never throws: a failing close is
+  // returned in the array so the caller can log it. Safe to call twice.
+  close() {
+    const errors = [];
+    for (const serviceClient of [
+      this.deviceClient,
+      this.applicationClient,
+      this.tenantClient,
+      this.deviceProfileClient,
+      this.gatewayClient
+    ]) {
+      try {
+        if (serviceClient && typeof serviceClient.close === 'function') serviceClient.close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  }
+
   async getDevice(devEui, options) {
     const request = new devicePb.GetDeviceRequest();
     request.setDevEui(normalizeDevEui(devEui));
@@ -623,6 +645,26 @@ class ChirpStackClient {
       devEui: normalizedDevEui,
       method: 'DeviceService.FlushQueue'
     };
+  }
+
+  // Lists the device's downlink queue, oldest first. `data` is base64, as
+  // enqueueDownlink accepts it, so a caller can queue an item again unchanged.
+  async getDeviceQueue(devEui) {
+    const normalizedDevEui = normalizeDevEui(devEui);
+    if (!normalizedDevEui) {
+      throw annotateError(new Error('DevEUI is required'), 'getDeviceQueue');
+    }
+    const request = new devicePb.GetDeviceQueueItemsRequest();
+    request.setDevEui(normalizedDevEui);
+    const response = await grpcInvoke(this.deviceClient, 'getQueue', request, this.metadata, 'getDeviceQueue');
+    return response.getResultList().map((item) => ({
+      id: item.getId(),
+      fPort: item.getFPort(),
+      data: item.getData_asB64(),
+      confirmed: item.getConfirmed(),
+      isPending: item.getIsPending(),
+      isEncrypted: item.getIsEncrypted(),
+    }));
   }
 
   // Enqueues one item on the device's downlink queue. `data` is bytes for the

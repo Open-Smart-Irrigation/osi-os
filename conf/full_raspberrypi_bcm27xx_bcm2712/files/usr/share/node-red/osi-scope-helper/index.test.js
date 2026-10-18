@@ -353,6 +353,114 @@ test('assertFreshDeviceAccess gives admins no zone-scope bypass', async () => {
   );
 });
 
+// A device row with no zone (irrigation_zone_id NULL), owned through
+// devices.user_id by the account `ownerUuid`, and the calling account.
+function unassignedDeviceDb({ typeId = 'DRAGINO_LSN50', ownerUuid = 'u-owner', zoneId = null, zoneUuid = null,
+  caller = { id: 7, role: 'researcher', disabled_at: null, user_uuid: 'u-owner' } } = {}) {
+  return fakeDb({
+    get: (sql) => {
+      if (sql.includes('FROM devices')) {
+        return {
+          deveui: 'A840410000000001',
+          type_id: typeId,
+          irrigation_zone_id: zoneId,
+          zone_uuid: zoneUuid,
+          owner_user_uuid: ownerUuid,
+        };
+      }
+      if (sql.includes('FROM users')) return { username: 'caller', ...caller };
+      return undefined;
+    },
+    all: () => [],
+  });
+}
+
+const OWNER_OPT_IN = { scopedMode: true, allowUnassignedOwner: true };
+const isNotFound = (error) => error.status === 404;
+
+test('assertFreshDeviceAccess: an unassigned device stays hidden unless the route opts in', async () => {
+  await assert.rejects(
+    () => scope.assertFreshDeviceAccess(unassignedDeviceDb(), 'u-owner', 'A840410000000001', { scopedMode: true }),
+    isNotFound
+  );
+});
+
+test('assertFreshDeviceAccess: the writing owner of an unassigned soil sensor may configure it when the route opts in', async () => {
+  for (const typeId of ['DRAGINO_LSN50', 'KIWI_SENSOR', 'TEKTELIC_CLOVER']) {
+    const result = await scope.assertFreshDeviceAccess(
+      unassignedDeviceDb({ typeId }), 'u-owner', 'A840410000000001', OWNER_OPT_IN
+    );
+    assert.equal(result.role, 'researcher', typeId);
+  }
+  const admin = await scope.assertFreshDeviceAccess(
+    unassignedDeviceDb({ caller: { id: 1, role: 'admin', disabled_at: null, user_uuid: 'u-owner' } }),
+    'u-owner', 'A840410000000001', OWNER_OPT_IN
+  );
+  assert.equal(admin.role, 'admin');
+});
+
+const ADMIN = Object.freeze({ id: 1, role: 'admin', disabled_at: null, user_uuid: 'u-admin' });
+
+test('assertFreshDeviceAccess: an enabled admin who is not the owner may configure an unassigned soil sensor when the route opts in', async () => {
+  for (const typeId of ['DRAGINO_LSN50', 'KIWI_SENSOR', 'TEKTELIC_CLOVER']) {
+    const result = await scope.assertFreshDeviceAccess(
+      unassignedDeviceDb({ typeId, caller: ADMIN }), 'u-admin', 'A840410000000001', OWNER_OPT_IN
+    );
+    assert.equal(result.role, 'admin', typeId);
+  }
+  const ownerless = await scope.assertFreshDeviceAccess(
+    unassignedDeviceDb({ ownerUuid: null, caller: ADMIN }), 'u-admin', 'A840410000000001', OWNER_OPT_IN
+  );
+  assert.equal(ownerless.role, 'admin', 'a soil sensor without an owner');
+});
+
+test('assertFreshDeviceAccess: the admin exception keeps every other refusal', async () => {
+  const cases = [
+    ['a disabled admin', unassignedDeviceDb({ caller: { ...ADMIN, disabled_at: '2026-01-02' } }), (error) => error.status === 403],
+    ['a route that does not opt in', unassignedDeviceDb({ caller: ADMIN }), isNotFound, { scopedMode: true }],
+    ['an unassigned valve', unassignedDeviceDb({ typeId: 'STREGA_VALVE', caller: ADMIN }), isNotFound],
+    ['an unassigned SDI-12 node', unassignedDeviceDb({ typeId: 'DRAGINO_SDI12', caller: ADMIN }), isNotFound],
+    ['a device whose zone row is gone', unassignedDeviceDb({ zoneId: 99, caller: ADMIN }), isNotFound],
+    ['a sensor in a zone outside the admin\'s scope', unassignedDeviceDb({ zoneId: 3, zoneUuid: 'z-other', caller: ADMIN }), isNotFound],
+  ];
+  for (const [label, db, expected, options = OWNER_OPT_IN] of cases) {
+    await assert.rejects(
+      () => scope.assertFreshDeviceAccess(db, 'u-admin', 'A840410000000001', options),
+      expected,
+      label
+    );
+  }
+});
+
+test('assertFreshDeviceAccess: the owner exception refuses everyone and everything else', async () => {
+  const cases = [
+    ['another researcher', unassignedDeviceDb({ caller: { id: 8, role: 'researcher', disabled_at: null, user_uuid: 'u-other' } }), 'u-other', isNotFound],
+    ['a researcher on a sensor without an owner', unassignedDeviceDb({ ownerUuid: null, caller: { id: 8, role: 'researcher', disabled_at: null, user_uuid: 'u-other' } }), 'u-other', isNotFound],
+    ['a viewer who does not own it', unassignedDeviceDb({ caller: { id: 9, role: 'viewer', disabled_at: null, user_uuid: 'u-viewer' } }), 'u-viewer', isNotFound],
+    ['a viewer who owns it', unassignedDeviceDb({ caller: { id: 7, role: 'viewer', disabled_at: null, user_uuid: 'u-owner' } }), 'u-owner', isNotFound],
+    ['a corrupted role', unassignedDeviceDb({ caller: { id: 7, role: 'superuser', disabled_at: null, user_uuid: 'u-owner' } }), 'u-owner', isNotFound],
+    ['a disabled owner', unassignedDeviceDb({ caller: { id: 7, role: 'researcher', disabled_at: '2026-01-02', user_uuid: 'u-owner' } }), 'u-owner', (error) => error.status === 403],
+    ['a device without an owner', unassignedDeviceDb({ ownerUuid: null }), 'u-owner', isNotFound],
+    ['an unassigned valve', unassignedDeviceDb({ typeId: 'STREGA_VALVE' }), 'u-owner', isNotFound],
+    ['an unassigned SDI-12 node', unassignedDeviceDb({ typeId: 'DRAGINO_SDI12' }), 'u-owner', isNotFound],
+    ['a device whose zone row is gone', unassignedDeviceDb({ zoneId: 99 }), 'u-owner', isNotFound],
+  ];
+  for (const [label, db, caller, expected] of cases) {
+    await assert.rejects(
+      () => scope.assertFreshDeviceAccess(db, caller, 'A840410000000001', OWNER_OPT_IN),
+      expected,
+      label
+    );
+  }
+});
+
+test('assertFreshDeviceAccess: the owner exception changes nothing with the flag off', async () => {
+  const db = unassignedDeviceDb();
+  const result = await scope.assertFreshDeviceAccess(db, 'u-other', 'A840410000000001', { allowUnassignedOwner: true });
+  assert.equal(result.wildcard, true);
+  assert.equal(db.calls.length, 0);
+});
+
 test('buildDisableUserGuardedSql protects only the last enabled admin', () => {
   const { DatabaseSync } = require('node:sqlite');
   const db = new DatabaseSync(':memory:');

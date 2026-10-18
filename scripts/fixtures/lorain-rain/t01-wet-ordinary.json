@@ -1,0 +1,67 @@
+{
+  "id": "wet-ordinary",
+  "truthRows": [
+    "T1"
+  ],
+  "description": "Two rain reports on consecutive 15-minute wakes, fCnt continuous. Each covers the wake window that ends at the report.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000001",
+      "devAddr": "01000001",
+      "fCnt": 10,
+      "time": "2026-10-08T10:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100021221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000002",
+      "devAddr": "01000001",
+      "fCnt": 11,
+      "time": "2026-10-08T10:15:01.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100011221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 2,
+        "amount_mm": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 1,
+        "amount_mm": 0.5,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "dry",
+        "reason": null
+      }
+    ]
+  }
+}

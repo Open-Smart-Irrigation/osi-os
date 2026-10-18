@@ -1106,9 +1106,17 @@ if (silentCatchBaseline) {
   // 87: sync-health honesty (fix/sync-health-honesty) -- sync-outbox-mark's error-path
   // DB-close catch(_){} gains a visible node.warn while the node stops counting terminally
   // rejected events as delivery successes: 88 -> 87.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 87 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 87,
-    'silent-catch baseline records 87 for both maintained profiles',
-    'silent-catch baseline must be 87 for both maintained profiles');
+  // 86: session check on the reference-tree route -- dendro-ref-tree-fn's error-path
+  // DB-close catch(_){} gains a visible node.warn while the node gets its verifyBearer: 87 -> 86.
+  // 84: rain correctness, one LoRain writer -- lorain-process-fn and lorain-rain-agg-fn, each
+  // with one silent close() catch, are replaced by lorain-ingest-fn (none): 86 -> 84.
+  // 82: rain correctness, one S2120 writer -- s2120-process-fn and s2120-rain-agg-fn, each
+  // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
+  // 81: zone-day projection -- lsn50-zone-agg-fn's silent close() catch is replaced by a
+  // close in finally: 82 -> 81.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 81 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 81,
+    'silent-catch baseline records 81 for both maintained profiles',
+    'silent-catch baseline must be 81 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1151,7 +1159,11 @@ if (sizeAllowances) {
     // origin/main, 46212 chars). syncCapabilities gains the three WATERMARK tokens and the
     // bootstrap carries watermark_calibrations. Re-measured fresh: origin/main 46212 ->
     // HEAD 47031 = +819.
-    'sync-bootstrap-build': 819,
+    // Zone-day rain quality sync (migration 0073): re-pinned from 819 to +1089 (the 819 is
+    // baked into origin/main, 47031 chars). The zoneEnvironments snapshot SELECT names the
+    // five rain quality columns and a map parses rain_quality_reasons to a JSON array.
+    // Re-measured fresh: origin/main 47031 -> HEAD 48120 = +1089.
+    'sync-bootstrap-build': 1089,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
     // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
     // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
@@ -1176,8 +1188,15 @@ if (sizeAllowances) {
     // 69244 chars). The force-sync builder gains the three WATERMARK capability tokens and
     // the gateway-bound live/tombstone calibration snapshot. Re-measured fresh:
     // origin/main 69244 -> HEAD 70063 = +819.
-    'sync-force-build': 819,
-    'command-ack-build-batch': 975,
+    // Zone-day rain quality sync (migration 0073): re-pinned from 819 to +1089 (the 819 is
+    // baked into origin/main, 70063 chars), the same snapshot change as sync-bootstrap-build.
+    // Re-measured fresh: origin/main 70063 -> HEAD 71152 = +1089.
+    'sync-force-build': 1089,
+    // Re-pinned from 975 to +2235 (the 975 is baked into origin/main, 4071 chars): the
+    // batch now groups queued rows by commandId and withholds rows that disagree. The
+    // restart-sentinel guard above is unchanged. Re-measured fresh:
+    // origin/main 4071 -> HEAD 6306 = +2235.
+    'command-ack-build-batch': 2235,
     // 1144, not 1089: the sync-health honesty change (fix/sync-health-honesty) added the
     // rejected-outbox counters to GET /api/sync/state. Terminally rejected rows are excluded
     // from the pending count, so rejection_reason was read by nothing and an unbounded
@@ -1589,11 +1608,50 @@ if (sizeAllowances) {
   // Measured on the merged tree, verify-flows-size-ratchet totalChars in each byte-identical
   // profile: origin/main 1598196 -> HEAD 1616019 = +17823 (the stack's nodes; main's and the
   // stack's flow changes touch disjoint nodes except sync-init-fn, whose two changes sit on
-  // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc now
-  // records 1625717 per profile (refreshed 2026-10-05 on feat/coverage-finalize; the merged-tree figure was 1616019).
-  expectCondition(sizeAllowances.total_allowance?.delta === 35601,
-    'size total allowance: exact cumulative delta 35601',
-    'size total allowance: expected exact cumulative delta 35601');
+  // disjoint lines). Standing 17778 + measured 17823 = 35601. The committed baseline doc is
+  // re-written from the same tree (1616019).
+  // 35603: session check on the sensor export, today-liters and reference-tree routes.
+  // origin/main stood 1640381 (24362 above the committed baseline 1616019); this change
+  // measures origin/main 1640381 -> HEAD 1651622 = +11241, so the baseline plus the delta
+  // must cover 24362 + 11241 = 35603. The baseline doc is unchanged.
+  // 36403: history tail cursor (sync-history-mark moves the cursor only on backfill/tail
+  // answers and only forward). origin/main 1651622 -> HEAD 1652422 = +800, so the baseline
+  // plus the delta must cover 35603 + 800 = 36403. The baseline doc is unchanged.
+  // 37109: S2120 rain contract fix (s2120-process-fn differences 4213, keeps 4113 as the
+  // rate, caches the counter-baseline marker in node context). origin/main 1650480 -> HEAD
+  // 1653128 = +2648; the baseline 1616019 plus the delta must cover 1653128, so the delta
+  // rises from 36403 to 37109. The baseline doc is unchanged.
+  // 38394: LoRain dry reports reach the zone table (lorain-process-fn +165,
+  // lorain-rain-agg-fn +1120). origin/main 1653128 -> HEAD 1654413 = +1285; the baseline
+  // 1616019 plus the delta must cover 1654413, so the delta rises from 37109 to 38394.
+  // 39859: rolling 7-day rain over seven calendar days (dendro-compute-fn). origin/main
+  // 1654283 -> HEAD 1655878 = +1595, so the baseline plus the delta must cover
+  // 1655878 - 1616019 = 39859. The baseline doc is unchanged.
+  // 41482: rain farm day on the device list (merge-device-data dates the latest rain value
+  // in the farm timezone). origin/main 1655878 -> HEAD 1657501 = +1623, so the baseline plus
+  // the delta must cover 1657501 - 1616019 = 41482. The baseline doc is unchanged.
+  // 42092: unknown rain stays unknown on the edge (zone-env-fn reads today's rain through
+  // resolveRainTodayMm and flags the verdict rain_unknown; lsn50-zone-agg-fn writes flow only
+  // for a flow-only uplink). origin/main 1657501 -> HEAD 1658111 = +610, so the baseline plus
+  // the delta must cover 1658111 - 1616019 = 42092. The baseline doc is unchanged.
+  // 45088: valve command safety (#427): refused commands answered, VALVE_COMMAND only a
+  // bounded timed open. origin/main 1652422 -> HEAD 1655418 = +2996 (reject-indefinite-open
+  // +1664, Route Command +1422, Build STREGA downlink -90), so 42092 + 2996 = 45088.
+  // 45321: valve command effect keys (#427 b): Route Command carries the action: key of the
+  // three STREGA physical actions (+192) and the STREGA builder ACK carries it (+41):
+  // 45088 + 233 = 45321.
+  // 46109: targeted valve cancel (#428): write-strega-expectation +47, Cancel STREGA
+  // Actuation +745, Valve Cloud Command Bridge -4: 45321 + 788 = 46109.
+  // 47696: timed action as a timed open (reject-indefinite-open +647, Route Command +903,
+  // STREGA builder +41, Build Status + ACK -4): 46109 + 1587 = 47696.
+  // 47644: cancel frame-counter guard (Cancel STREGA Actuation +99, Valve Cloud Command
+  // Bridge -151): 47696 - 52 = 47644.
+  // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
+  // 47589: partial-opening and flushing ports pinned (Route Command -54); re-measured on
+  // 7157ef0fa: origin/main 1658111 -> HEAD 1663608 = +5497, so 42092 + 5497 = 47589.
+  expectCondition(sizeAllowances.total_allowance?.delta === 47589,
+    'size total allowance: exact cumulative delta 47589',
+    'size total allowance: expected exact cumulative delta 47589');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

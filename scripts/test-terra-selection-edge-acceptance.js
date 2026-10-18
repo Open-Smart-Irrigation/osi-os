@@ -853,3 +853,51 @@ test('a Terra stage change starts the stage on the zone-local date; the same sta
     db.raw.close();
   }
 });
+
+// ownerUserUuid is the zone owner's gateway-local users.user_uuid as stored. The
+// first admin and backfilled users hold 32 lower-case hex digits, which must be
+// accepted and compared unchanged; every other form stays malformed.
+const HEX_OWNER = '0123456789abcdef0123456789abcdef';
+
+test('a zone owned by a 32-hex owner accepts a Terra selection naming that owner', async () => {
+  const commands = loadCommands();
+  if (typeof commands._resetForTests === 'function') commands._resetForTests();
+  const db = database();
+  try {
+    db.raw.prepare('UPDATE users SET user_uuid=? WHERE user_uuid=?').run(HEX_OWNER, OWNER_UUID);
+    db.raw.exec('DELETE FROM sync_outbox');
+    const command = envelope(4701, 42, 44, { ownerUserUuid: HEX_OWNER });
+    const result = await apply(commands, db, command);
+    assert.equal(result.ack.result, 'APPLIED', JSON.stringify(result.ack));
+    assert.equal(db.raw.prepare('SELECT sync_version FROM irrigation_zones WHERE zone_uuid=?').get(ZONE_UUID).sync_version, 44);
+    assert.equal(db.raw.prepare('SELECT result FROM applied_commands WHERE command_id=?').get('4701').result, 'APPLIED');
+    assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get('4701').n, 1);
+    const replay = await apply(commands, db, command);
+    assert.deepEqual(replay.ack, result.ack);
+    // Another 32-hex owner is a binding conflict, as for the hyphenated form.
+    const other = await apply(commands, db, envelope(4702, 44, 45, { ownerUserUuid: 'fedcba9876543210fedcba9876543210' }));
+    assert.equal(other.ack.result, 'NACKED');
+    assert.equal(other.ack.reasonCode, 'owner_mismatch');
+  } finally {
+    db.raw.close();
+  }
+});
+
+test('a malformed Terra owner id is refused in both forms', async (t) => {
+  const commands = loadCommands();
+  for (const bad of [HEX_OWNER.slice(1), HEX_OWNER + '0', HEX_OWNER.toUpperCase(), 'g'.repeat(32),
+    HEX_OWNER.slice(0, 8) + '-' + HEX_OWNER.slice(8)]) {
+    await t.test(bad, async () => {
+      if (typeof commands._resetForTests === 'function') commands._resetForTests();
+      const db = database();
+      try {
+        db.raw.prepare('UPDATE users SET user_uuid=? WHERE user_uuid=?').run(HEX_OWNER, OWNER_UUID);
+        await assert.rejects(apply(commands, db, envelope(4710, 42, 44, { ownerUserUuid: bad })),
+          /payload\.ownerUserUuid must be/);
+        assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 0);
+      } finally {
+        db.raw.close();
+      }
+    });
+  }
+});

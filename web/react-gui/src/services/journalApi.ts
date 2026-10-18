@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { SessionBoundRequest } from './authSession';
 import type {
   BatchMutationReceipt,
   CreateFinalBatchPayload,
@@ -95,8 +96,16 @@ export const journalApi = {
   listEntries: async (filters: EntryListFilters = {}): Promise<EntryListResponse> =>
     (await api.get<EntryListResponse>('/api/journal/entries', { params: filters })).data,
 
-  createEntry: async (payload: CreateEntryPayload): Promise<EntryMutationReceipt> =>
-    (await api.post<EntryMutationReceipt>('/api/journal/entries', payload)).data,
+  // `request` binds a queued write to the session that created it (#378);
+  // the api interceptor refuses it once that session has ended.
+  createEntry: async (
+    payload: CreateEntryPayload,
+    request?: SessionBoundRequest,
+  ): Promise<EntryMutationReceipt> =>
+    (request
+      ? await api.post<EntryMutationReceipt>('/api/journal/entries', payload, request)
+      : await api.post<EntryMutationReceipt>('/api/journal/entries', payload)
+    ).data,
 
   createFinalBatch: async (payload: CreateFinalBatchPayload): Promise<BatchMutationReceipt> =>
     (await api.post<BatchMutationReceipt>('/api/journal/entries', payload)).data,
@@ -104,13 +113,15 @@ export const journalApi = {
   updateEntry: async (
     uuid: string,
     payload: UpdateEntryPayload,
-  ): Promise<EntryMutationReceipt> =>
-    (
-      await api.put<EntryMutationReceipt>(
-        `/api/journal/entries/${encodeURIComponent(uuid)}`,
-        payload,
-      )
-    ).data,
+    request?: SessionBoundRequest,
+  ): Promise<EntryMutationReceipt> => {
+    const url = `/api/journal/entries/${encodeURIComponent(uuid)}`;
+    return (
+      request
+        ? await api.put<EntryMutationReceipt>(url, payload, request)
+        : await api.put<EntryMutationReceipt>(url, payload)
+    ).data;
+  },
 
   // cascade_ack (Slice D, R7): voiding a seeding whose crop cycle has
   // dependent entries is refused by the edge (cycle_has_dependents, 409)

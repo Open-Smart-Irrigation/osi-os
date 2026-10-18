@@ -68,7 +68,7 @@
       "zone_id": 1,
       "date": "2026-07-10",
       "zone_stress_summary": "mild",
-      "rainfall_mm": 0,
+      "rainfall_mm": null,
       "water_delivered_liters": 120,
       "irrigation_action": "decrease_10",
       "action_reasoning": "No stress ≥2 of 3 days",

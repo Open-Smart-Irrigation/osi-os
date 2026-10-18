@@ -141,10 +141,27 @@ describe('flags, calibration and temperature', () => {
     const golden = c.convertFrame(c.parseProfile3(GOLDEN).frame, CAL).channels[1];
     assert.equal(golden.status, 'invalid_sample');
   });
-  it('unsettled keeps resistance, withholds kPa unless saturated', () => {
+  it('unsettled keeps its status and gets kPa like a settled reading (#415)', () => {
     const [a, b] = convert([800, 3291], [71, 4058], { flags1: 0x24, flags2: 0x24 });
-    assert.deepEqual([a.status, a.r_solved, a.kpa], ['unsettled', 9977, null]);
+    assert.deepEqual([a.status, a.r_solved, a.kpa, a.flags], ['unsettled', 9977, 56.4, 0x24]);
     assert.deepEqual([b.status, b.kpa], ['saturated', 0]);
+  });
+  it('unsettled on channel 1 only: both channels get kPa, only channel 1 is marked', () => {
+    const [a, b] = convert([800, 3291], [781, 3308], { flags1: 0x24 });
+    assert.deepEqual([a.status, a.kpa], ['unsettled', 56.4]);
+    assert.equal(b.status, 'ok');
+    assert.ok(b.kpa > 0);
+  });
+  it('a real fault wins over unsettled and still withholds kPa', () => {
+    const f = { flags1: 0x24 };
+    const fault = (p1, opts, cal) => pick(convert(p1, [4093, 2], opts, cal)[0]);
+    assert.deepEqual([fault([4093, 2], f).status, fault([4093, 2], f).kpa], ['open', null]);
+    assert.deepEqual([fault([12, 4085], f).status, fault([12, 4085], f).kpa], ['short', null]);
+    assert.deepEqual([fault([800, 3291], { flags1: 0x25 }).status, fault([800, 3291], { flags1: 0x25 }).kpa], ['invalid_sample', null]);
+    assert.deepEqual([fault([800, 3291], f, null).status, fault([800, 3291], f, null).kpa], ['calibration_required', null]);
+    assert.deepEqual([fault([800, 3291], { ...f, status: 1 }).status, fault([800, 3291], { ...f, status: 1 }).kpa], ['temperature_missing', null]);
+    assert.deepEqual([fault([800, 3291], { ...f, soil: 5100 }).status, fault([800, 3291], { ...f, soil: 5100 }).kpa], ['temperature_out_of_range', null]);
+    assert.deepEqual([fault([3700, 400], f).status, fault([3700, 400], f).kpa], ['outside_200ss_range', null]);
   });
   it('no calibration, deleted calibration, invalid calibration', () => {
     assert.equal(convert([800, 3291], [4093, 2], {}, null)[0].status, 'calibration_required');
@@ -165,7 +182,7 @@ describe('flags, calibration and temperature', () => {
   });
   it('records calibration and conversion versions', () => {
     const r = c.convertFrame(c.parseProfile3(frame([800, 3291], [4093, 2])).frame, CAL);
-    assert.deepEqual([r.calibration_sync_version, r.conversion_version], [3, 'wm-lsn50-p3-v1']);
+    assert.deepEqual([r.calibration_sync_version, r.conversion_version], [3, 'wm-lsn50-p3-v2']);
   });
 });
 

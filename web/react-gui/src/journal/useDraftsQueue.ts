@@ -1,4 +1,5 @@
-import useSWR, { mutate as globalMutate } from 'swr';
+import { useCallback } from 'react';
+import useSWR, { useSWRConfig } from 'swr';
 import { journalApi } from '../services/journalApi';
 import type { EntryAggregate } from '../types/journal';
 
@@ -14,8 +15,9 @@ export interface UseDraftsQueueResult {
 const DRAFTS_QUEUE_LIMIT = 100;
 
 // Exported so any component that changes draft state from OUTSIDE this
-// hook's own SWR subscription (see refreshDraftsQueue below) can invalidate
-// the exact same cache entry, rather than duplicating the key literal.
+// hook's own SWR subscription (see useRefreshDraftsQueue below) can
+// invalidate the exact same cache entry, rather than duplicating the key
+// literal.
 export const DRAFTS_QUEUE_SWR_KEY = ['journal:drafts-queue'] as const;
 
 // P2-d: the drafts queue owns its own independent SWR cache (by design — see
@@ -24,11 +26,22 @@ export const DRAFTS_QUEUE_SWR_KEY = ['journal:drafts-queue'] as const;
 // modal, whose own save/close only revalidates the entry TABLE's separate
 // query — see JournalWorkspace.tsx's retryEntries). Left alone, a newly
 // autosaved draft never appears here until an unrelated revalidation (a
-// fresh page load), which reads as "the queue is broken". Call this after
-// any capture-flow session ends so a fresh draft — or a draft that just got
-// finalized and should now disappear — shows up without a reload.
-export function refreshDraftsQueue(): Promise<unknown> {
-  return globalMutate(DRAFTS_QUEUE_SWR_KEY).catch(() => undefined);
+// fresh page load), which reads as "the queue is broken". Call the returned
+// function after any capture-flow session ends so a fresh draft — or a draft
+// that just got finalized and should now disappear — shows up without a
+// reload.
+//
+// #378: the refresh goes through the session-scoped cache of the caller's
+// AuthSessionDataBoundary (useSWRConfig().mutate). SWR's process-global
+// `mutate` acts on a different cache: it would miss the queue the page
+// renders, and a callback kept from an earlier session could reach the next
+// one.
+export function useRefreshDraftsQueue(): () => Promise<unknown> {
+  const { mutate } = useSWRConfig();
+  return useCallback(
+    () => mutate(DRAFTS_QUEUE_SWR_KEY).catch(() => undefined),
+    [mutate],
+  );
 }
 
 /**

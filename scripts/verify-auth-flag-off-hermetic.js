@@ -59,8 +59,9 @@ const PROFILES = [
 // Sanity floor, not a ceiling: if the discovery scan below ever finds
 // suspiciously few nodes (e.g. the scope helper is renamed and this file's
 // literal match silently stops matching anything), fail loudly instead of
-// quietly verifying nothing. Currently measures 86 per profile; floor is set
-// with headroom below that so ordinary future editing doesn't need to bump it,
+// quietly verifying nothing. Measured 86 per profile when it landed and 103 on
+// 2026-10-08 (the reference-tree route joined when it gained its session
+// check); the floor is set with headroom below that so ordinary future editing doesn't need to bump it,
 // while a scan that regresses to near-zero still trips it.
 const MIN_EXPECTED_NODES = 60;
 

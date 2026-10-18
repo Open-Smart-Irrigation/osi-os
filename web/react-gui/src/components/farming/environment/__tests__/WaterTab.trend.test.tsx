@@ -234,6 +234,50 @@ describe('WaterTab rain from a MeteoSwiss station', () => {
     expect(screen.getByText('Source: MeteoSwiss')).toBeInTheDocument();
   });
 
+  it('labels a station value that covers the UTC day', () => {
+    const w = stationWater({
+      daily: week((index) => (index === 1 ? { rainMm: 1.5, rainPeriod: 'utc_day' } : {})),
+    });
+    const chartRow = buildWaterChartRows(w)[1];
+    tooltipFor(chartRow, w);
+
+    expect(screen.getByText('Rain: 1.5 mm')).toBeInTheDocument();
+    expect(screen.getByTestId('water-day-rain-period')).toHaveTextContent('UTC day');
+  });
+
+  it.each([
+    { source: 'meteoswiss_station', rainPeriod: 'local_day' },
+    { source: 'gauge', rainPeriod: undefined },
+  ] as const)('does not add a UTC-day note to $source rain', ({ source, rainPeriod }) => {
+    const base = buildWater();
+    const w = buildWater({
+      dailyRainSource: source,
+      sensorHealth: { ...base.sensorHealth, rainGaugePresent: source === 'gauge' },
+      daily: week((index) => (index === 1 ? { rainMm: 0.5, ...(rainPeriod ? { rainPeriod } : {}) } : {})),
+    });
+    tooltipFor(buildWaterChartRows(w)[1], w);
+
+    expect(screen.getByText('Rain: 0.5 mm')).toBeInTheDocument();
+    expect(screen.queryByTestId('water-day-rain-period')).not.toBeInTheDocument();
+  });
+
+  it('labels an explicit zero for the UTC day but not a null rain value', () => {
+    const zeroWater = stationWater({
+      daily: week((index) => (index === 1 ? { rainMm: 0, rainPeriod: 'utc_day' } : {})),
+    });
+    tooltipFor(buildWaterChartRows(zeroWater)[1], zeroWater);
+    expect(screen.getByText('Rain: 0.0 mm')).toBeInTheDocument();
+    expect(screen.getByTestId('water-day-rain-period')).toHaveTextContent('UTC day');
+
+    cleanup();
+    const unknownWater = stationWater({
+      daily: week((index) => (index === 1 ? { rainMm: null, rainPeriod: 'utc_day' } : {})),
+    });
+    tooltipFor(buildWaterChartRows(unknownWater)[1], unknownWater);
+    expect(screen.getByText('Rain: —')).toBeInTheDocument();
+    expect(screen.queryByTestId('water-day-rain-period')).not.toBeInTheDocument();
+  });
+
   it('does not credit MeteoSwiss in the tooltip of a plot that draws the zone\'s own gauge', () => {
     const base = buildWater();
     const w: WaterEnvironment = {

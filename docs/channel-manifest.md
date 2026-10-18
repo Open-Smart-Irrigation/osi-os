@@ -57,6 +57,23 @@ The canonical `vwc` entry uses `edgeField: null` and `serverField: "vwc"`. This 
 5. Verify the copied osi-server files against the osi-os SHA-256 before making osi-server behavior changes.
 6. Commit osi-os and osi-server changes separately, preserving osi-os as the canonical source.
 
+## Device-source onboarding
+
+When a device type is added to `database/seed-blank.sql` and the GUI
+`DeviceType` union, add its finite Data-view source policy in both bundled
+profiles. Run the source matrix and manifest checks before opening the change:
+
+```bash
+node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.test.js conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/device-sources.test.js
+node scripts/verify-channel-manifest-parity.js
+node scripts/verify-module-file-deploy-coverage.js
+```
+
+The matrix compares the seed device `CHECK`, the GUI type union, and the source
+policy. It also verifies that each declared channel has analysis metadata and a
+persisted edge field. `verify-module-file-deploy-coverage.js` keeps newly shipped
+helper files in `deploy.sh`'s fetch list.
+
 ## Recorded SHA-256
 
 `dfd9a47ff8983afec16d4ceef11b6fb15b54b19bcea2a34fc53748d2679d8cfe  web/react-gui/src/channels/channels.json`

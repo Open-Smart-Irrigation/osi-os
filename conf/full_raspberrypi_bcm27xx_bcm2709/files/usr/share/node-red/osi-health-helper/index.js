@@ -24,6 +24,8 @@ function allNullHealth() {
     sync_rejected: null,
     sync_rejected_recent: null,
     sync_dirty_pending: null,
+    sync_dirty_rejected: null,
+    command_ack_dead_lettered: null,
     disk_free_pct: null,
     crash_count: null,
     crash_looping: null,
@@ -323,10 +325,13 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
   // so on a gateway with real history it never returns to zero on its own and
   // would permanently fail a canary built on it. sync_rejected_recent is the
   // windowed counterpart the health_state derivation below actually uses.
+  // rejected_at is an ISO-8601 string with 'T' and 'Z'; the cutoff must use
+  // the same format, or a text comparison against datetime()'s space form
+  // counts every row on the cutoff's date and the window reaches 48 hours.
   try {
     health.sync_rejected_recent = toCount(await queryGet(
       db,
-      "SELECT COUNT(*) c FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at >= datetime('now','-24 hours')"
+      "SELECT COUNT(*) c FROM sync_outbox WHERE rejected_at IS NOT NULL AND rejected_at >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')"
     ));
   } catch (_) {}
 
@@ -334,6 +339,30 @@ async function gatherWork(db, diskPath, timeoutMs, options) {
     health.sync_dirty_pending = toCount(await queryGet(
       db,
       "SELECT COUNT(*) c FROM sync_history_dirty_keys WHERE status='pending'"
+    ));
+  } catch (_) {}
+
+  // A history key the cloud rejected three times leaves 'pending' for good
+  // (only a change to its row re-queues it), so sync_dirty_pending stops
+  // showing it. Counted apart, and kept out of health_state: like the
+  // all-time sync_rejected it does not return to zero on its own.
+  try {
+    health.sync_dirty_rejected = toCount(await queryGet(
+      db,
+      "SELECT COUNT(*) c FROM sync_history_dirty_keys WHERE status='rejected'"
+    ));
+  } catch (_) {}
+
+  // A command ACK the cloud never accepted and that will not be sent again:
+  // command-ack-mark-delivered and command-ack-build-batch mark such a row
+  // delivered with a 'dead_letter:' reason. The cloud then shows the command
+  // as expired or failed, whatever ran on the edge. Delivered rows are pruned
+  // after their retention, so this is a recent count. Kept out of
+  // health_state: it does not return to zero on its own.
+  try {
+    health.command_ack_dead_lettered = toCount(await queryGet(
+      db,
+      "SELECT COUNT(*) c FROM command_ack_outbox WHERE delivered_at IS NOT NULL AND last_error LIKE 'dead_letter:%'"
     ));
   } catch (_) {}
 

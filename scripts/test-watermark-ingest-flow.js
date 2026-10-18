@@ -927,6 +927,9 @@ const GOLDEN_DEVICE_LIST = Object.freeze([
       light_lux: 45000, ambient_temperature: 19.8, relative_humidity: 61, dendro_saturated: 0,
       rain_mm_delta: 0.2, rain_mm_today: 1.4, barometric_pressure_hpa: 965.3, wind_speed_mps: 2.4,
       wind_direction_deg: 225, wind_gust_mps: 5.1, uv_index: 3, rain_gauge_cumulative_mm: 104.2, bat_pct: 88,
+      // Farm day of the latest rain value: the station has no zone of its own, so its
+      // weather-station zone's timezone (the seed default, UTC) dates the 10:25Z row.
+      rain_day: '2026-09-24', rain_day_timezone: 'UTC', rain_day_timezone_basis: 'weather_station_zone',
     },
   },
   {

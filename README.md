@@ -1,6 +1,6 @@
 # OSI OS — Open Smart Irrigation OS
 
-**v0.7.0 Alpha**
+**v0.8.1 Alpha**
 
 OSI OS is an open-source, offline-first smart irrigation platform for smallholder farmers. It runs on a Raspberry Pi 5 LoRaWAN gateway and combines soil sensing, automated irrigation scheduling, and a farmer-facing web dashboard — all without requiring internet connectivity.
 
@@ -10,13 +10,13 @@ Built on [ChirpStack Gateway OS](https://www.chirpstack.io/docs/chirpstack-gatew
 
 ## Features
 
-- **LoRaWAN integration** — Flexible device support, continious addition of sensors and acutators
+- **LoRaWAN integration** — Flexible device support, continuous addition of sensors and actuators
 - **Automated irrigation scheduling** — threshold-based triggers on soil moisture or dendrometers
 - **Irrigation zones** — group devices into zones with per-zone schedules
 - **Web dashboard** — React-based UI accessible on local Wi-Fi at `http://<device-ip>:1880/gui`
 - **Multi-user support** — individual user accounts per device
 - **Offline-first** — fully functional without internet; cloud sync optional
-- **OSI Cloud integration** — remote monitoring and gateway control via OSI Server; fan speed control and reboot from anywhere
+- **OSI Cloud integration** — remote monitoring and control via OSI Server
 - **Raspberry Pi system monitoring** — CPU temperature, memory usage, CPU load, and fan speed visible in the web dashboard
 - **Forecast** — Weather forecast,agronomic indicators and irrigation prediction (experimental)
 
@@ -34,7 +34,7 @@ Node-RED  (localhost:1880)
         ↕ SQLite  (/data/db/farming.db)
 ChirpStack  (LoRaWAN network server, localhost:8080)
         ↕ LoRa radio
-Field devices  (KIWI soil sensors, Strega valves, Dragino LSN50V2)
+Field devices  (e.g.KIWI soil sensors, Strega valves, Dragino LSN50V2)
 
         ↕ MQTT over WebSocket (wss, port 443)
 OSI Server  (optional cloud — remote monitoring & control)
@@ -60,11 +60,13 @@ OSI Server  (optional cloud — remote monitoring & control)
 | -------------------- | -------------------------------------------------------------------------------------- |
 | **KIWI_SENSOR**      | Soil water tension (kPa), soil moisture                                                |
 | **TEKTELIC_CLOVER**  | Volumetric water content (%), soil moisture                                            |
-| **DRAGINO_LSN50**    | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter |
+| **DRAGINO_LSN50**    | Multi-mode: temperature probe, ADC (dendrometer potentiometer), rain gauge, flow meter, Chameleon or WATERMARK soil water tension (custom LSN50 firmware) |
+| **DRAGINO_SDI12**    | SDI-12 soil probes (VWC, soil temperature, EC), including Sentek EnviroSCAN and TriSCAN |
 | **SENSECAP_S2120**   | Weather station (wind, rain, UV, barometric pressure)                                  |
 | **AQUASCOPE_LORAIN** | Interval rain gauge with ambient temperature and battery                               |
 | **STREGA_VALVE**     | Gen1 and Gen2 (SV2) motorized or solenoid irrigation valve with on-valve scheduler     |
 | **MILESIGHT_UC512**  | Two-channel valve controller with pulse counters and pipe pressure                     |
+| **RAK10701_FIELD_TESTER** | LoRaWAN coverage tester; needs `osi-server.cloud.radio_capture_enabled=1`     |
 
 ---
 
@@ -96,7 +98,7 @@ osi-os/
 
 ### Prerequisites
 
-- Node.js 20+ and npm
+- Node.js 22.12 or later (or 24+) and npm; `web/react-gui/package.json` requires `^22.12.0 || >=24.0.0`
 - A running Node-RED instance (local or on a Pi) with the flows loaded
 - A copy of `farming.db` accessible at the path configured in Node-RED
 
@@ -104,7 +106,7 @@ osi-os/
 
 ```bash
 cd web/react-gui
-npm install
+npm ci
 npm run dev
 ```
 
@@ -116,22 +118,16 @@ To point at a remote Pi instead:
 VITE_NODERED_URL=http://<pi-ip>:1880 npm run dev
 ```
 
-### Build and deploy the React frontend
+### Build the React frontend
 
 ```bash
 cd web/react-gui
 npm run build
-# Deploy to a running Pi:
-scp -r build/* root@<pi-ip>:/usr/lib/node-red/gui/
 ```
 
-### Update Node-RED flows on a running Pi
+### Put a change on a running Pi
 
-```bash
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
-    root@<pi-ip>:/srv/node-red/flows.json
-ssh root@<pi-ip> '/etc/init.d/node-red restart'
-```
+Re-run `deploy.sh` (see [Re-deploying after changes](#re-deploying-after-changes)). Do not copy `flows.json` or the GUI build onto the Pi by hand: on a gateway that `deploy.sh` manages, `/srv/node-red/flows.json` and `/usr/lib/node-red/gui` are symlinks into one versioned payload pair, and a hand copy also skips the schema migrations.
 
 ---
 
@@ -167,13 +163,13 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 | ------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | **When to use**    | Fastest start; no build tools needed                                                                | Latest code from this repo; or no release available for your target |
 | **What you flash** | OSI OS `.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases) | ChirpStack Gateway OS Full                                          |
-| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `chirpstack-bootstrap.js`                     |
+| **After flash**    | Open the UI — done                                                                                  | Run `deploy.sh`, then `/etc/init.d/osi-bootstrap start` (or reboot) |
 
 ---
 
 ### Path A — Flash the OSI OS image
 
-1. Download the latest `osi-os-<version>-bcm2712.img.gz` from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases).
+1. Download the latest factory image from the [Releases page](https://github.com/Open-Smart-Irrigation/osi-os/releases): `osi-os_<version>-rpi5-factory.img.gz` for a Raspberry Pi 5, `osi-os_<version>-rpi4-factory.img.gz` for a Pi 4 / 400 / 3 / 2 (the 0.6.5 assets are named `osi-os_0.65-…`).
 2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
 3. Boot the Pi — OSI OS starts automatically.
 4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) and open the configuration page at 192.168.0.1
@@ -191,7 +187,7 @@ No further setup required. See [Step 4 — Install Tailscale](#step-4--install-t
 #### Prerequisites
 
 - This repository cloned on your dev machine
-- Node.js 20+ and npm on your dev machine
+- Node.js 22.12 or later (or 24+) and npm on your dev machine
 
 ### Step 1 — Flash ChirpStack Gateway OS
 
@@ -205,20 +201,22 @@ The `deploy.sh` script uses an SSH reverse tunnel to pull all files from your de
 
 ```bash
 # 1. Build and package the React GUI
-cd web/react-gui && npm install && npm run build && cd ../..
+cd web/react-gui && npm ci && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # 2. Serve the repo from your dev machine
 python3 -m http.server 9876 --bind 127.0.0.1
 
-# 3. In a second terminal - deploy via tunnel (runs on the Pi, pulls from your machine)
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
+# 3. In a second terminal - deploy via tunnel (runs on the Pi, pulls from your machine).
+#    Download first, then run: a piped `curl ... | sh` exits 0 even when curl fails.
+ssh -R 9876:localhost:9876 root@<pi-ip> \
+  'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 
 # 4. Nothing to restart: deploy.sh restarts Node-RED itself and prints a verdict.
 #    Read the verdict; a manual restart after a green deploy only hides a failed one.
 ```
 
-The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi-chirpstack-helper`, `osi-db-helper`, `osi-dendro-helper`, `osi-chameleon-helper`, `osi-cloud-http`), `chirpstack-bootstrap.js`, the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), the React GUI bundle, and runs `npm install` on-device. It also performs idempotent live-DB schema repair (dendrometer + Chameleon SWT) and fixes Mosquitto file ownership.
+The script deploys `settings.js`, the Node-RED init script, the gateway identity daemon (`osi-identityd`), the `osi-bootstrap` init script (installed and enabled), `flows.json` together with the React GUI bundle as one versioned payload, every Node-RED local helper module (list them with `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `chirpstack-bootstrap.js`, and the device codecs (STREGA Gen1 and Gen2, LSN50, S2120, LoRain, UC512, and SDI12), then runs `npm install` on-device. On a gateway with an existing database it stops Node-RED, backs up the database and applies pending ordered migrations with `scripts/migrate-cli.js` before activating the new payload. It also fixes Mosquitto file ownership.
 
 **Database safety:** `deploy.sh` never overwrites `/data/db/farming.db`. It seeds the bundled `farming.db` only when the target file is absent, and refuses to seed if orphaned SQLite WAL/SHM/journal sidecars exist. On already-provisioned devices the live DB is always preserved.
 
@@ -229,48 +227,33 @@ The script deploys `settings.js`, `flows.json`, all Node-RED local helpers (`osi
 On first boot after a Path B deploy, OSI OS attempts a one-shot in-place resize of the Raspberry Pi writable partition when the SD layout is the expected two-partition `mmcblk0` layout. The helper uses `parted resizepart` without deleting or recreating the root partition, reboots, then runs `resize2fs` on the next boot. It is idempotent: power loss between the reboot and `resize2fs` is recovered on the next boot. It never touches `/data/db/farming.db`.
 
 <details>
-<summary>Alternative: manual file-by-file deployment (if deploy.sh is not available)</summary>
+<summary>Alternative: no reverse tunnel available</summary>
 
-```bash
-PI=root@<pi-ip>
-scp feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js $PI:/srv/node-red/settings.js
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json $PI:/srv/node-red/flows.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db $PI:/tmp/osi-os-seed-farming.db
-ssh $PI 'mkdir -p /data/db && if [ ! -e /data/db/farming.db ]; then mv /tmp/osi-os-seed-farming.db /data/db/farming.db; else rm -f /tmp/osi-os-seed-farming.db; echo "preserved existing /data/db/farming.db"; fi'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json $PI:/srv/node-red/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json $PI:/srv/node-red/package-lock.json
-ssh $PI 'mkdir -p /srv/node-red/osi-chirpstack-helper'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json \
-    $PI:/srv/node-red/osi-chirpstack-helper/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js \
-    $PI:/srv/node-red/osi-chirpstack-helper/index.js
-ssh $PI 'mkdir -p /srv/node-red/osi-db-helper'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json \
-    $PI:/srv/node-red/osi-db-helper/package.json
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js \
-    $PI:/srv/node-red/osi-db-helper/index.js
-scp scripts/chirpstack-bootstrap.js $PI:/srv/node-red/chirpstack-bootstrap.js
-ssh $PI 'mkdir -p /srv/node-red/codecs'
-scp conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/sensecap_s2120_decoder.js \
-    $PI:/srv/node-red/codecs/sensecap_s2120_decoder.js
-ssh $PI 'cd /srv/node-red && npm install --omit=dev --no-fund --no-audit'
-ssh $PI 'mkdir -p /usr/lib/node-red/gui'
-scp -r web/react-gui/build/* $PI:/usr/lib/node-red/gui/
-```
+A manual file-by-file copy is not a supported install: it misses most helper modules, the identity daemon and the schema migrations. When the reverse tunnel cannot be held open, use the offline bundle from **Flaky link?** above: `scripts/deploy-push-bundle.sh` pushes the bundle and starts `scripts/deploy-offline.sh` on the gateway.
 
 </details>
 
 ### Step 3 — ChirpStack auto-provision
 
-ChirpStack applications, device profiles (KIWI, LSN50, STREGA, S2120, RAK10701), and UCI identity fields are provisioned automatically on first boot by the `osi-bootstrap` init script (`START=99`). No manual step is needed on a fresh device.
+ChirpStack applications, device profiles (KIWI, LSN50, STREGA Gen1 and Gen2, S2120, LoRain, UC512, SDI-12, RAK10701), and UCI identity fields are provisioned automatically on first boot of the OSI OS image (Path A) by the `osi-bootstrap` init script (`START=99`).
 
-To re-provision manually (e.g. after wiping profiles):
+On Path B, `deploy.sh` enables `osi-bootstrap`, which provisions ChirpStack at the next boot. To provision at once, run `ssh root@<pi-ip> '/etc/init.d/osi-bootstrap start'`. Do not run `chirpstack-bootstrap.js` directly: only the service writes the stamp `/etc/osi-bootstrap.done`, and without it the next boot runs the script again, which creates a second API key and rewrites `/srv/node-red/.chirpstack.env`.
+
+To re-provision manually (e.g. after wiping profiles), run on the gateway:
 
 ```bash
-ssh root@<pi-ip> 'node /srv/node-red/chirpstack-bootstrap.js && /etc/init.d/node-red restart'
+rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
 ```
 
-The script is idempotent — safe to re-run.
+This reuses the existing API key, writes the stamp and requests the coordinated Node-RED restart. It rewrites `.chirpstack.env` with the `CHIRPSTACK_*` keys only.
+
+The service returns 0 even when provisioning fails; errors go to `logread`. Before you reboot, confirm the stamp is back:
+
+```bash
+ls -l /etc/osi-bootstrap.done || logread | grep -i osi-bootstrap | tail -20
+```
+
+If the stamp is missing, fix the cause and run the command again. A reboot without the stamp runs the bootstrap with no key and creates a second API key.
 
 ### Step 4 — Install Tailscale (remote access)
 
@@ -310,16 +293,17 @@ Re-run `deploy.sh` to update application components. It is safe to re-run on liv
 
 ```bash
 # Rebuild and repackage the GUI if frontend changed
-cd web/react-gui && npm install && npm run build && cd ../..
+cd web/react-gui && npm ci && npm run build && cd ../..
 tar czf react_gui.tar.gz -C web/react-gui/build .
 
 # Serve and deploy
 python3 -m http.server 9876 --bind 127.0.0.1
 # second terminal:
-ssh -R 9876:localhost:9876 root@<pi-ip> 'curl -fsS http://localhost:9876/deploy.sh | sh'
+ssh -R 9876:localhost:9876 root@<pi-ip> \
+  'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
 ```
 
-No need to re-run `chirpstack-bootstrap.js` unless ChirpStack was re-provisioned or device profiles are missing.
+No need to provision ChirpStack again after the first provisioning unless ChirpStack was re-provisioned or device profiles are missing; then use the re-provision command in Step 3.
 
 ---
 

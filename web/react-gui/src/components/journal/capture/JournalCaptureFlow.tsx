@@ -95,6 +95,8 @@ import { SaveState } from './SaveState';
 import { SeedingCropFields } from './SeedingCropFields';
 import { randomUuid } from '../../../utils/uuid';
 import { useDisplayPreferences } from '../../../utils/displayPreferences';
+import { createEdgeLocalJournalCaptureAdapter } from '../../../journal/journalCaptureAdapter';
+import { resolveTemplateCode } from '../../../journal/templatePreference';
 
 export interface JournalCaptureFlowProps {
   catalog: JournalCatalog;
@@ -487,21 +489,6 @@ function tankMixDoseLabel(
   return `${localizedNumber(dose.value_num, locale)}${unit ? ` ${catalogLabel(unit, locale)}` : ''}`;
 }
 
-const DETAIL_LEVEL_ORDER = ['farmer_quick', 'full_record', 'research_observation'];
-
-// Effective capture template = the user's global detail-level preference when
-// the plot's layout supports it, otherwise the layout's lowest supported
-// template (U4: a researcher-only layout like agroscope_open_field floors a
-// Quick user to Research). Slice A: detail level is chosen in Settings, never
-// per entry.
-function effectiveTemplateCode(supportedTemplates: string[], preferred: string): string {
-  if (supportedTemplates.includes(preferred)) return preferred;
-  const ordered = [...supportedTemplates].sort(
-    (a, b) => DETAIL_LEVEL_ORDER.indexOf(a) - DETAIL_LEVEL_ORDER.indexOf(b),
-  );
-  return ordered[0] ?? '';
-}
-
 function activityDependencyInputs(leaf: ActivityLeafSelection | null): CaptureEntryValueInput[] {
   return leaf?.dependent_selections.map(({ attribute_code, value }) => ({
     attribute_code,
@@ -818,7 +805,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const [templateCode, setTemplateCode] = useState(() => {
     const initialLayout = model?.layouts.get(usableInitialPlot?.settings.layout_code ?? '');
     return initialLayout
-      ? effectiveTemplateCode(initialLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(initialLayout.supported_templates, journalDetailLevel)
       : journalDetailLevel;
   });
   const [leaf, setLeaf] = useState<ActivityLeafSelection | null>(null);
@@ -930,6 +917,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const mountedRef = useRef(true);
   const preparationTokenRef = useRef(0);
   const batchPayloadSnapshotRef = useRef<Parameters<typeof journalApi.createFinalBatch>[0] | null>(null);
+  const captureAdapter = useMemo(() => createEdgeLocalJournalCaptureAdapter(), []);
   const batchEntryUuidsRef = useRef(new Map<string, string>());
   const contextKeyRef = useRef('');
   const automaticPrefillRef = useRef(new Map<string, CaptureEntryValueInput>());
@@ -1761,7 +1749,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextLayoutCode = nextPlot?.settings.layout_code ?? '';
     const nextLayout = model?.layouts.get(nextLayoutCode);
     const nextTemplate = nextLayout
-      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
       : '';
     const plotContextChanged = requestedSelection.length !== selectedPlotUuids.length ||
       requestedSelection.some((plotUuid, index) => plotUuid !== selectedPlotUuids[index]);
@@ -1854,6 +1842,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     }
   };
 
+  // Scoped gateways let only the farm owner or an admin record farm-wide
+  // entries; the gateway says so in the catalog and refuses the write too.
+  const farmWideAllowed = catalog.capture_permissions?.farm_wide !== false;
+
+  const selectFarmWide = () => {
+    if (interactionLocked || !farmWideAllowed) return;
+    selectPlot('', []);
+    chooseLayout('farm_wide');
+  };
+
   const chooseLayout = (code: string) => {
     if (interactionLocked) return;
     const contextValues = code !== layoutCode
@@ -1862,7 +1860,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     setLayoutCode(code);
     const nextLayout = model?.layouts.get(code);
     const nextTemplate = nextLayout
-      ? effectiveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
+      ? resolveTemplateCode(nextLayout.supported_templates, journalDetailLevel)
       : '';
     setTemplateCode(nextTemplate);
     const previousDependencyCodes = new Set(leaf?.dependent_selections.map(({ attribute_code }) => attribute_code));
@@ -1968,7 +1966,7 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       return;
     }
     if (step === 'where') {
-      if (!selectedPlot && !layoutCode) {
+      if (selectedPlotUuids.length === 0 && (layoutCode !== 'farm_wide' || !farmWideAllowed)) {
         setWhereError('capture.validation.invalidDefinition');
         return;
       }
@@ -2071,7 +2069,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
       setSaving(true);
       setBatchError(null);
       try {
-        const receipt = await journalApi.createFinalBatch(payload);
+        const submitted = await captureAdapter.submit(payload);
+        if (submitted.kind !== 'confirmed') {
+          throw new Error('The local gateway did not confirm the journal batch');
+        }
+        const receipt = submitted.receipt;
         setDuplicateCandidates([]);
         setDuplicateAckEntryUuids([]);
         setStickyLossWarning(false);
@@ -2301,6 +2303,16 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     );
     return promise;
   }, [closeLocked, finalReceipt, onClose, onSaved]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || closeLocked) return;
+      event.preventDefault();
+      void close();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [close, closeLocked]);
 
   const saveSeparately = () => {
     if (!duplicateCandidate || interactionLocked) return;
@@ -2607,6 +2619,15 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
             onCreateGroup={groupState.createPlotGroup}
             onUpdateGroup={groupState.updatePlotGroup}
           />
+          {farmWideAllowed && <button
+            type="button"
+            aria-pressed={!selectedPlot && layoutCode === 'farm_wide'}
+            disabled={interactionLocked}
+            onClick={selectFarmWide}
+            className={`min-h-[56px] rounded-xl border border-[var(--border)] px-4 font-bold text-[var(--text)] ${FOCUS_RING}`}
+          >
+            {t('capture.where.farmLevel')}
+          </button>}
           {plotEditor ? (
             <PlotForm
               mode={plotEditor.mode}
@@ -2633,12 +2654,12 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
               </button>
             </div>
           )}
-          {!selectedPlot && !plotEditor && (
+          {farmWideAllowed && selectedPlotUuids.length === 0 && !plotEditor && (
             <label className="block text-sm font-bold text-[var(--text)]">
               {t('capture.where.layout')}
               <select aria-label={t('capture.where.layout')} value={layoutCode} onChange={(event) => chooseLayout(event.target.value)} className="mt-1 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 text-[var(--text)]">
                 <option value="">{t('capture.where.selectPlot')}</option>
-                {layoutChoices.map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
+                {layoutChoices.filter((candidate) => candidate.code === 'farm_wide').map((candidate) => <option key={`${candidate.code}:${candidate.version}`} value={candidate.code}>{catalogLabel(catalog.layouts.find((row) => row.code === candidate.code) ?? { code: candidate.code }, locale)} · v{candidate.version}</option>)}
               </select>
             </label>
           )}

@@ -76,6 +76,11 @@ export interface JournalCatalog {
   layouts: JournalDefinitionRow[];
   products: JournalProductRow[];
   mappings: JournalMappingRow[];
+  /**
+   * What the gateway lets this account record. Absent on older gateways,
+   * which keeps the previous behaviour (every option offered).
+   */
+  capture_permissions?: { farm_wide: boolean };
 }
 
 export interface EntryValue {
@@ -280,6 +285,8 @@ export interface EntryDiscardReceipt {
 export interface EntryListFilters {
   entry_uuid?: string;
   plot_uuid?: string;
+  station_code?: string;
+  group_uuid?: string;
   zone_uuid?: string;
   activity_code?: string;
   status?: EntryStatus | 'all';

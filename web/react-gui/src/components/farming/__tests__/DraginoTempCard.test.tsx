@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
-const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+const DAYS_OLD = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   window.localStorage.clear();
@@ -26,6 +26,7 @@ afterEach(() => vi.restoreAllMocks());
 
 vi.mock('../../../services/api', () => ({
   devicesAPI: { remove: vi.fn().mockResolvedValue(undefined) },
+  sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
 }));
 
 const chameleonDevice: Device = {
@@ -96,7 +97,7 @@ describe('DraginoTempCard SWT unit preference', () => {
     expect(screen.getByText('No valid Chameleon sample')).toBeInTheDocument();
   });
 
-  it('withholds stale LSN50 status and keeps each status inside its one row button', () => {
+  it('keeps the LSN50 status on an old reading and keeps each status inside its one row button', () => {
     const { rerender } = render(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
       last_seen: FRESH,
@@ -111,10 +112,10 @@ describe('DraginoTempCard SWT unit preference', () => {
 
     rerender(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
-      last_seen: STALE,
+      last_seen: DAYS_OLD,
       latest_data: { swt_1: 10 },
     }} />);
-    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
 });
@@ -172,5 +173,64 @@ describe('DraginoTempCard WATERMARK probe section', () => {
   it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {
     render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
     expect(screen.getByText('Chameleon SWT')).toBeInTheDocument();
+  });
+});
+
+describe('DraginoTempCard WATERMARK history', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it('opens the legacy history view for a probe value with its own series', async () => {
+    const { sensorAPI } = await import('../../../services/api');
+    render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
+    fireEvent.click(screen.getByText('0.0 kPa'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'swt_2', 24));
+  });
+
+  it('opens the soil temperature series from the measured soil temperature', async () => {
+    const { sensorAPI } = await import('../../../services/api');
+    render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
+    fireEvent.click(screen.getByRole('button', { name: 'watermark.soilTemp' }));
+    expect(await screen.findByRole('dialog', { name: 'environment.soil.temperature' })).toBeInTheDocument();
+    await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'ext_temperature_c', 24));
+  });
+});
+
+describe('DraginoTempCard rain gauge today line (rain review finding 10)', () => {
+  const rainDevice = (rainDay: string | undefined): Device => ({
+    deveui: 'AA00000000000002',
+    name: 'Rain gauge node',
+    type_id: 'DRAGINO_LSN50',
+    last_seen: FRESH,
+    rain_gauge_enabled: 1,
+    latest_data: {
+      rain_mm_today: 8,
+      rain_mm_delta: 0.4,
+      rain_day: rainDay,
+      rain_day_timezone: 'UTC',
+      rain_day_timezone_basis: 'unassigned_default',
+    },
+  } as unknown as Device);
+
+  it('shows the total when its farm day is today', () => {
+    render(<DraginoTempCard device={rainDevice('2026-09-24')} removeContext="farm" />);
+    expect(screen.getByText('8.0 mm')).toBeInTheDocument();
+    expect(screen.getByText(/rain\.recordedToday/)).toBeInTheDocument();
+  });
+
+  it('never labels yesterday\'s total as today', () => {
+    render(<DraginoTempCard device={rainDevice('2026-09-23')} removeContext="farm" />);
+    expect(screen.queryByText('8.0 mm')).not.toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText(/rain\.lastReportOn/)).toBeInTheDocument();
+    expect(screen.getByText(/\(UTC\)/)).toBeInTheDocument();
+  });
+
+  it('a total without a farm day is not shown as today', () => {
+    render(<DraginoTempCard device={rainDevice(undefined)} removeContext="farm" />);
+    expect(screen.queryByText('8.0 mm')).not.toBeInTheDocument();
   });
 });

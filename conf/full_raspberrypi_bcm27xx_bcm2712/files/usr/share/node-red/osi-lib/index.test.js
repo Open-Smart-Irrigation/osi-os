@@ -43,6 +43,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'osi-system-settings',
     'osi-valve-control',
     'radio',
+    'rain',
     'rejection-recovery',
     'scope',
     'scoped-access-commands',
@@ -77,6 +78,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-recipe'], 'osi-sdi12-recipe');
   assert.equal(osiLib.NAME_TO_PATH['station-hours'], 'osi-station-hours');
+  assert.equal(osiLib.NAME_TO_PATH.rain, 'osi-rain');
   assert.equal(osiLib.NAME_TO_PATH['agronomy-daily'], 'osi-agronomy-daily');
   assert.equal(osiLib.NAME_TO_PATH['sdi12-commissioning'], 'osi-sdi12-commissioning');
   assert.equal(osiLib.NAME_TO_PATH['agroscope-uplink-transform'], 'codecs/agroscope_uplink_transform');

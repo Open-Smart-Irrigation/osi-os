@@ -25,9 +25,25 @@ Ad-hoc operator irrigation. `originator` is `cloud` or `edge`. `command_uuid` is
 
 Device configuration commands. `config_version` is a monotonically increasing integer per `(device_eui, config_key)` pair.
 
+### `action:{device_eui}:{action}:{command_uuid}`
+
+STREGA physical actions issued by the cloud. `action` is `timed_action` for
+`SET_STREGA_TIMED_ACTION`, `partial_opening` for `SET_STREGA_PARTIAL_OPENING`
+and `flushing` for `SET_STREGA_FLUSHING`; the edge binds a key only to the
+command type of its own action and to the valve the payload names.
+`command_uuid` is the issuing command's UUID, so each issuance is a separate
+effect and a second delivery of the same issuance under another `command_id`
+replays the stored answer.
+
 ### `journal_entry:{entry_uuid}:{base_sync_version}`
 
 Entry upsert and void commands. `base_sync_version` is the version the originator read before issuing the mutation; creates use `0`. Optimistic concurrency permits only one mutation to win for an entry at a given base version. A new intentional mutation after that result must read the current version and generate a new key.
+
+### `journal_entry_batch:{batch_uuid}:0`
+
+Gateway-backed final-entry batches use one client-generated `batch_uuid` and always use base version `0`. The command carries a separately stored `submitted_intent_hash` over shared facts and members sorted by `(plot_uuid, entry_uuid)`. Reusing the key with another submitted intent is permanently rejected.
+
+The applied receipt contains one record per member: `entry_uuid`, `plot_uuid`, edge-assigned `sync_version`, edge-computed aggregate `payload_hash`, and an optional duplicate-candidate result. The submitted intent hash is not an applied payload hash; the edge derives zone, season, and context separately for each plot before hashing its canonical aggregate.
 
 ### `journal_vocab:{custom_field_uuid}:{base_sync_version}`
 
@@ -112,6 +128,30 @@ binding to match, and a reused key with different intent is a conflict.
 - Force-sync replay must preserve the original `effect_key` from the source command.
 - Two non-journal commands sharing an `effect_key` are deduplicated to a single applied effect, regardless of `command_id`.
 - `command_id` still identifies one delivery record. Retrying that record preserves both `command_id` and `effect_key`; recreating a delivery for the same versioned journal mutation changes `command_id` but preserves `effect_key`.
+
+## Expiry of valve commands
+
+The cloud gives every command that can move a valve a short `expires_at`
+(five minutes) and stops handing such a command out once that instant has
+passed. For the commands that can start or extend water flow
+(`VALVE_COMMAND`, `OPEN_FOR_DURATION`, `UC512_OPEN_FOR_DURATION`,
+`SET_STREGA_TIMED_ACTION`, `SET_STREGA_PARTIAL_OPENING` and
+`SET_STREGA_FLUSHING`) the edge ledger checks the same instant before
+dispatch. The stop commands `CLOSE` and `CANCEL_VALVE_ACTUATION` are never
+refused on their expiry: a gateway clock that runs ahead must not leave a
+valve open. For the checked commands:
+
+- Exact `command_id` replay and effect-key replay are checked first, so a
+  command or an effect that already ran keeps its stored answer.
+- An elapsed command is answered `EXPIRED` (reason `effect_expired`) and never
+  dispatched.
+- An unreadable expiry, or two expiry fields that disagree, is answered
+  `REJECTED_PERMANENT` (reason `invalid_expires_at`) and never dispatched.
+- A command with no expiry comes from an issuer that predates the field and is
+  dispatched as before.
+
+The answer is stored in the terminal ledger and queued as an ACK in the same
+transaction, so a later delivery of the same `command_id` replays it.
 
 Journal effect-key replay also requires an exact `submittedIntentHash` match. The
 edge hashes the pre-normalization logical mutation, command type, owner, author

@@ -43,6 +43,7 @@ vi.mock('../../../services/api', () => ({
     valveAPI: {
         getTodayLiters: vi.fn().mockResolvedValue({ liters: null, source: 'unknown' }),
     },
+    sensorAPI: { getHistory: vi.fn().mockResolvedValue([]) },
 }));
 
 const mockDevice: Device = {
@@ -463,5 +464,30 @@ describe('StregaValveCard', () => {
             expect(devicesAPI.remove).toHaveBeenCalledWith(mockDevice.deveui);
         });
         expect(onRemove).toHaveBeenCalled();
+    });
+});
+
+describe('StregaValveCard enclosure history', () => {
+    it('opens the enclosure temperature series, with humidity one switch away', async () => {
+        const { sensorAPI } = await import('../../../services/api');
+        vi.mocked(sensorAPI.getHistory).mockClear();
+        renderCard({}, {
+            valve: makeValveSummary({ enclosureTemperatureC: 21.5, enclosureHumidityPct: 48.2 }),
+        });
+        const control = await screen.findByRole('button', { name: '21.5 °C · 48.2 % RH' });
+        expect(control).toHaveAttribute('title', 'View history');
+        fireEvent.click(control);
+        expect(await screen.findByRole('dialog', { name: 'Enclosure · Air Temp' })).toBeInTheDocument();
+        await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith(mockDevice.deveui, 'ambient_temperature', 24));
+        fireEvent.click(screen.getByRole('button', { name: 'Enclosure · Humidity' }));
+        await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith(mockDevice.deveui, 'relative_humidity', 24));
+    });
+
+    it('offers no enclosure history on Gen2 or without a reading', async () => {
+        renderCard({}, {
+            valve: makeValveSummary({ stregaGeneration: 'GEN2', enclosureTemperatureC: 21.5, enclosureHumidityPct: 48 }),
+        });
+        await screen.findByText('not measured on Gen2');
+        expect(screen.queryByTitle('View history')).not.toBeInTheDocument();
     });
 });

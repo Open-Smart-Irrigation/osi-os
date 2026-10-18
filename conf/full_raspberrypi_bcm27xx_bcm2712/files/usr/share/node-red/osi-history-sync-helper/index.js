@@ -339,6 +339,18 @@ function cursorPatchFromResponse(response) {
   return patch;
 }
 
+// Cloud reasons that condemn one submitted row, not the protocol, table or
+// phase. Only these may set a dirty key aside; any other permanent answer
+// keeps the table backed off.
+const ROW_REJECTION_REASONS = new Set(['hash_mismatch', 'out_of_order_history_key']);
+
+function rowRejection(response) {
+  const results = response && Array.isArray(response.results) ? response.results : [];
+  const permanent = results.find((result) => result && result.status === 'REJECTED_PERMANENT');
+  if (!permanent || !ROW_REJECTION_REASONS.has(String(permanent.reason || ''))) return null;
+  return { historyKey: String(permanent.historyKey || ''), reason: String(permanent.reason) };
+}
+
 function isBackfillComplete(cursor) {
   if (!cursor || cursor.snapshot_high_id == null) return false;
   return BigInt(encodeInteger(cursor.last_acked_id || 0)) >= BigInt(encodeInteger(cursor.snapshot_high_id));
@@ -519,12 +531,27 @@ function rowByHistoryKeyQuery(tableName, key) {
   throw new Error(`unsupported dirty-key table ${tableName}`);
 }
 
+const LONG_MIN = -(2n ** 63n);
+const LONG_MAX = 2n ** 63n - 1n;
+
+// The text after the last '|' as Java's Long.parseLong reads it, or null.
+function historyKeyLong(key) {
+  const text = String(key || '');
+  const pos = text.lastIndexOf('|');
+  if (pos < 0) return null;
+  const tail = text.slice(pos + 1);
+  if (!/^[+-]?\d+$/.test(tail)) return null;
+  const value = BigInt(tail);
+  return value < LONG_MIN || value > LONG_MAX ? null : value;
+}
+
+// Mirrors the cloud's batch order check for every table: two keys compare
+// numerically when both tails parse as a Long (row ids, and valve expectation
+// ids that are cloud command ids), otherwise by code unit over the whole key.
 function compareHistoryKeys(tableName, left, right) {
-  if (cursorKind(tableName) === 'id') {
-    const leftId = BigInt(String(left || '').split('|').at(-1));
-    const rightId = BigInt(String(right || '').split('|').at(-1));
-    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
-  }
+  definition(tableName);
+  const leftId = historyKeyLong(left), rightId = historyKeyLong(right);
+  if (leftId !== null && rightId !== null) return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
   const leftKey = String(left || ''), rightKey = String(right || '');
   return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
 }
@@ -543,6 +570,7 @@ module.exports = {
   cursorValue,
   nextRawQuery,
   cursorPatchFromResponse,
+  rowRejection,
   isBackfillComplete,
   isCursorComplete,
   batchPhase,

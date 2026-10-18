@@ -68,3 +68,38 @@ describe('axisQuantityLabel', () => {
     expect(axisQuantityLabel('global_radiation_wm2', 'W/m²')).toBe('Global radiation (W/m²)');
   });
 });
+
+import { rainfallLabel, presentRainfallName } from '../channelLabels';
+
+describe('rainfallLabel', () => {
+  it('raw samples are this interval, sums are an amount', () => {
+    expect(rainfallLabel('rain_mm_delta', 'raw')).toBe('Rainfall this interval');
+    expect(rainfallLabel('rain_mm_delta', '15m')).toBe('Rainfall amount');
+    expect(rainfallLabel('rain_mm_delta', 'hourly')).toBe('Rainfall amount');
+    expect(rainfallLabel('rain_mm_delta', 'daily')).toBe('Rainfall amount');
+    expect(rainfallLabel('rain_mm_delta', 'weekly')).toBe('Rainfall amount');
+    expect(rainfallLabel('swt_1', 'raw')).toBeNull();
+    expect(rainfallLabel('rain_mm_per_hour', 'raw')).toBeNull();
+  });
+
+  it('names a device rain amount by the applied aggregation and leaves other names alone', () => {
+    const rain = { channelKey: 'rain_mm_delta', deviceName: 'Gauge', displayName: 'Gauge - Rainfall amount', sourceKind: 'device' };
+    expect(presentRainfallName(rain, 'raw')).toBe('Gauge - Rainfall this interval');
+    expect(presentRainfallName(rain, 'daily')).toBe('Gauge - Rainfall amount');
+    expect(presentRainfallName(rain, undefined)).toBe('Gauge - Rainfall amount');
+    const soil = { channelKey: 'swt_1', deviceName: 'Kiwi', displayName: 'Kiwi - Soil tension 1', sourceKind: 'device' };
+    expect(presentRainfallName(soil, 'raw')).toBe('Kiwi - Soil tension 1');
+  });
+
+  it('the axis of a rain amount follows the manifest name', () => {
+    expect(axisQuantityLabel('rain_mm_delta', 'mm')).toBe('Rainfall amount (mm)');
+  });
+});
+
+describe('axisQuantityLabel with an aggregation', () => {
+  it('names a raw rain axis by the interval and leaves other axes alone', () => {
+    expect(axisQuantityLabel('rain_mm_delta', 'mm', 'raw')).toBe('Rainfall this interval (mm)');
+    expect(axisQuantityLabel('rain_mm_delta', 'mm', 'daily')).toBe('Rainfall amount (mm)');
+    expect(axisQuantityLabel('swt_1', 'kPa', 'raw')).toBe('Soil tension 1 (kPa)');
+  });
+});

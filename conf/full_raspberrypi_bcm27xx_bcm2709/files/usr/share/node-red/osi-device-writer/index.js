@@ -6,17 +6,30 @@ const QUARANTINE_CAP = 1000;
 
 let columnCache = null;
 
+// A zone-less 'YYYY-MM-DD[ T]HH:MM[:SS[.fff]]' is UTC, as SQLite reads it.
+const ZONELESS_TIMESTAMP = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+
+function parseTimestampMs(raw) {
+  const text = String(raw).trim();
+  const zoneless = ZONELESS_TIMESTAMP.exec(text);
+  return Date.parse(zoneless ? zoneless[1] + 'T' + zoneless[2] + 'Z' : text);
+}
+
+// The stored recorded_at is always toISOString's shape
+// ('2026-08-17T17:47:12.123Z'), whatever shape the uplink time came in
+// (ChirpStack sends '2026-08-17T17:47:12.123456789+00:00'). Readers compare
+// recorded_at as text in places, so one shape per column matters.
 function clampRecordedAt(raw, nowMs) {
   const now = Number.isFinite(nowMs) ? nowMs : Date.now();
   const nowIso = new Date(now).toISOString();
   if (raw === undefined || raw === null || raw === '') {
     return { recordedAt: nowIso, clamped: false };
   }
-  const t = Date.parse(String(raw));
+  const t = parseTimestampMs(raw);
   if (!Number.isFinite(t) || t < FLOOR || t > now + SKEW_MS) {
     return { recordedAt: nowIso, clamped: true };
   }
-  return { recordedAt: String(raw), clamped: false };
+  return { recordedAt: new Date(t).toISOString(), clamped: false };
 }
 
 function resetColumnCache() {

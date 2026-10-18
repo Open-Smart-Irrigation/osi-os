@@ -97,14 +97,8 @@
       "issue": 384
     },
     {
-      "path": "docs/contracts/journal-catalog/README.md",
-      "max": 1,
-      "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
-      "issue": 384
-    },
-    {
       "path": "docs/contracts/journal-catalog/journal-catalog.json",
-      "max": 1094,
+      "max": 1830,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
       "issue": 384
     },

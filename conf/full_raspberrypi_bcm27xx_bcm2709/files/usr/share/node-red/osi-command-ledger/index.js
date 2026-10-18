@@ -270,7 +270,7 @@ function protectedContext(envelope, runtime, type) {
       !/^[0-9A-F]{16}$/.test(String(values.resource_id || '')) ||
       !/^[0-9A-F]{16}$/.test(String(values.gateway_device_eui || '')) ||
       values.gateway_device_eui !== runtimeGateway ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
+      !/^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(String(values.actor_user_uuid || '')) ||
       !Number.isSafeInteger(values.base_sync_version) || values.base_sync_version < 0 ||
       !['set', 'delete'].includes(values.operation) ||
       values.operation !== spec.operation) {
@@ -318,6 +318,12 @@ function protectedBindingMatches(row, context) {
     row.operation === context.operation;
 }
 
+const PHYSICAL_ACTION_SETTINGS = {
+  SET_STREGA_TIMED_ACTION: 'timed_action',
+  SET_STREGA_PARTIAL_OPENING: 'partial_opening',
+  SET_STREGA_FLUSHING: 'flushing',
+};
+
 function validNonJournalEffectBinding(envelope, runtime) {
   if (!runtime || runtime.command_type_recognized !== true) return false;
   const payload = envelope.payload;
@@ -350,6 +356,14 @@ function validNonJournalEffectBinding(envelope, runtime) {
     const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
       .trim().toUpperCase();
     return deviceEui === match[1];
+  }
+  // STREGA physical actions: one key per cloud issuance, bound to the valve
+  // the payload names and to the action its command type performs.
+  match = /^action:([0-9A-F]{16}):(timed_action|partial_opening|flushing):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/.exec(effectKey);
+  if (match) {
+    const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '')
+      .trim().toUpperCase();
+    return deviceEui === match[1] && PHYSICAL_ACTION_SETTINGS[type] === match[2];
   }
   if (isZoneCommandType(type)) {
     const zoneUuid = String(payload.zone_uuid || '').trim().toLowerCase();
@@ -425,7 +439,7 @@ function journalEffectProvenanceMatches(row, payload, gatewayDeviceEui, type, in
 // type it defers entirely to opts.extraEffectBindingValidator (osi-journal's
 // validJournalEffectBinding, injected by the caller); every other type is
 // validated against the built-in irrigation:scheduler / irrigation:manual /
-// config: grammar.
+// config: / action: grammar.
 async function validEffectBinding(envelope, opts) {
   opts = opts || {};
   const type = commandType(envelope);
@@ -434,6 +448,115 @@ async function validEffectBinding(envelope, opts) {
     return opts.extraEffectBindingValidator(opts.db, envelope, opts, type);
   }
   return validNonJournalEffectBinding(envelope, opts);
+}
+
+// Commands that can start or extend water flow. The cloud gives each of them
+// a short expires_at (five minutes) and stops handing them out once it has
+// passed (osi-server CommandService: PHYSICAL_ACTION_EFFECTS plus
+// VALVE_ACTUATIONS). The edge enforces the same instant before dispatch, so a
+// command that reaches it late is answered EXPIRED and never opens a valve.
+//
+// The cloud gives the two stop commands, CLOSE and CANCEL_VALVE_ACTUATION,
+// the same expiry, but they are deliberately absent here: their only effect
+// is to end or prevent an actuation. Refusing one on a gateway clock that runs
+// ahead would leave a valve open, so they are dispatched whatever their expiry
+// says, exactly as before this fence existed. With the same skew an open is
+// refused, which fails safe.
+const VALVE_EXPIRY_COMMANDS = new Set([
+  'SET_STREGA_TIMED_ACTION',
+  'SET_STREGA_PARTIAL_OPENING',
+  'SET_STREGA_FLUSHING',
+  'OPEN_FOR_DURATION',
+  'UC512_OPEN_FOR_DURATION',
+  'VALVE_COMMAND',
+]);
+
+function valveCommandExpiry(envelope, type, runtime) {
+  if (!VALVE_EXPIRY_COMMANDS.has(type)) return null;
+  const payload = envelope.payload && typeof envelope.payload === 'object' &&
+    !Array.isArray(envelope.payload)
+    ? envelope.payload
+    : {};
+  const supplied = [
+    envelope.expiresAt,
+    envelope.expires_at,
+    payload.expiresAt,
+    payload.expires_at,
+  ].filter((value) => value != null && String(value).trim() !== '');
+  // No expiry anywhere means an issuer that predates the field, not a
+  // malformed command: such commands are dispatched as before.
+  if (supplied.length === 0) return null;
+  const parsed = supplied.map((value) => Date.parse(String(value).trim()));
+  if (parsed.some((millis) => !Number.isFinite(millis)) ||
+      parsed.some((millis) => millis !== parsed[0])) {
+    return { result: 'REJECTED_PERMANENT', reason: 'invalid_expires_at', expiresAt: null, terminal: true };
+  }
+  const runtimeNow = runtime && runtime.now;
+  const nowMillis = runtimeNow == null
+    ? Date.now()
+    : Date.parse(runtimeNow instanceof Date ? runtimeNow.toISOString() : String(runtimeNow));
+  if (!Number.isFinite(nowMillis)) {
+    throw commandError('invalid_runtime_clock', 'Command ledger runtime clock is invalid');
+  }
+  return {
+    result: 'EXPIRED',
+    reason: 'effect_expired',
+    expiresAt: new Date(parsed[0]).toISOString(),
+    terminal: parsed[0] <= nowMillis,
+  };
+}
+
+// Records the edge's own terminal answer for a command that is not
+// dispatched, in the same transaction as its ACK, so a replay of the same
+// delivery returns this answer through the exact command-ID path.
+async function persistPreDispatchTerminalAck(tx, envelope, runtime, type, decision) {
+  const commandId = queueCommandId(envelope);
+  const payload = envelope.payload && typeof envelope.payload === 'object' &&
+    !Array.isArray(envelope.payload)
+    ? envelope.payload
+    : {};
+  const effectKey = String(payload.effect_key || payload.effectKey || envelope.effectKey || '').trim() || null;
+  const deviceEui = String(payload.device_eui || payload.deviceEui || payload.devEui || '').trim().toUpperCase() ||
+    String(runtime.gateway_device_eui || '').trim().toUpperCase() || 'UNKNOWN';
+  const runtimeNow = runtime && runtime.now;
+  const appliedAt = runtimeNow == null
+    ? new Date().toISOString()
+    : new Date(Date.parse(runtimeNow instanceof Date ? runtimeNow.toISOString() : String(runtimeNow))).toISOString();
+  const ack = {
+    commandId: commandId.ack,
+    eventUuid: envelope.eventUuid == null ? null : envelope.eventUuid,
+    aggregateType: envelope.aggregateType == null ? null : envelope.aggregateType,
+    aggregateKey: envelope.aggregateKey == null ? null : envelope.aggregateKey,
+    commandType: type,
+    effectKey,
+    status: replayStatus(decision.result),
+    result: decision.result,
+    appliedAt,
+    appliedSyncVersion: null,
+    duplicate: false,
+    reason: decision.reason,
+    detail: decision.reason,
+  };
+  await tx.run(
+    'INSERT INTO applied_commands (' +
+      'command_id,effect_key,device_eui,command_type,result,applied_at,result_detail,originator,expires_at' +
+    ') VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(command_id) DO NOTHING',
+    [commandId.stored, effectKey, deviceEui, type, decision.result, appliedAt,
+      JSON.stringify(ack), 'edge', decision.expiresAt]
+  );
+  const hooks = runtime.lifecycle_hooks;
+  if (hooks && typeof hooks.afterCommandLedger === 'function') {
+    await hooks.afterCommandLedger(ack);
+  }
+  await tx.run(
+    'DELETE FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL',
+    [commandId.stored]
+  );
+  await tx.run(
+    'INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)',
+    [commandId.stored, JSON.stringify(ack), appliedAt]
+  );
+  return ack;
 }
 
 async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
@@ -458,15 +581,22 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
       }
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
+    // The expiry check answers in place of every dispatch below, after both
+    // replay lookups: a command, or an effect, that already ran keeps its
+    // stored answer.
+    const expiry = valveCommandExpiry(envelope, type, opts);
+    const notHandled = async () => (expiry && expiry.terminal
+      ? { handled: true, ack: await persistPreDispatchTerminalAck(tx, envelope, opts, type, expiry) }
+      : { handled: false });
     const journalType = isJournalCommandType(type);
     const zoneType = isZoneCommandType(type);
     const validEffect = await validEffectBinding(envelope, Object.assign({}, opts, { db: tx }));
     if (!validEffect) {
-      return { handled: false };
+      return notHandled();
     }
     if (!envelope.payload || typeof envelope.payload !== 'object' ||
         Array.isArray(envelope.payload)) {
-      return { handled: false };
+      return notHandled();
     }
     const effectKey = String(
       envelope.payload.effect_key || envelope.payload.effectKey || envelope.effectKey || ''
@@ -532,7 +662,7 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
         [effectKey, type]
       );
     }
-    if (!row) return { handled: false };
+    if (!row) return notHandled();
     return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, false) };
   })();
 }

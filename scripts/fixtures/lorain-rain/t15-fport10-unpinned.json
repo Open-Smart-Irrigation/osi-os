@@ -1,0 +1,118 @@
+{
+  "id": "fport10-unpinned",
+  "truthRows": [
+    "T15"
+  ],
+  "description": "A gauge on FPort 10 with a build date after its join, a configuration reply (900 s, 16 wakes) and continuous fCnt. No pinned source covers FPort 10, so nothing is promoted and the silent spans are not dry.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000044",
+      "devAddr": "01000003",
+      "fCnt": 0,
+      "time": "2026-10-08T00:00:00.000Z",
+      "fPort": 10,
+      "bytesHex": "0a0003ad770305000106030000060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000045",
+      "devAddr": "01000003",
+      "fCnt": 1,
+      "time": "2026-10-08T04:00:16.000Z",
+      "fPort": 10,
+      "bytesHex": "040403840402001006030000060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000046",
+      "devAddr": "01000003",
+      "fCnt": 2,
+      "time": "2026-10-08T08:00:32.000Z",
+      "fPort": 10,
+      "bytesHex": "06030000060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000047",
+      "devAddr": "01000003",
+      "fCnt": 3,
+      "time": "2026-10-08T08:15:33.000Z",
+      "fPort": 10,
+      "bytesHex": "06030000060100b8068100021221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "build_unpinned",
+        "fw_version": 241015
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "build_unpinned",
+        "conf_interval": 900,
+        "conf_heartbeat": 16
+      },
+      {
+        "frameIndex": 2,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "build_unpinned"
+      },
+      {
+        "frameIndex": 3,
+        "counted": true,
+        "tips": 2,
+        "amount_mm": 1,
+        "frame_kind": "ordinary",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "build_unpinned"
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "unknown",
+        "reason": "build_unpinned"
+      },
+      {
+        "fromFrameIndex": 1,
+        "toFrameIndex": 2,
+        "state": "unknown",
+        "reason": "build_unpinned"
+      },
+      {
+        "fromFrameIndex": 2,
+        "toFrameIndex": 3,
+        "state": "unknown",
+        "reason": "build_unpinned"
+      }
+    ]
+  }
+}

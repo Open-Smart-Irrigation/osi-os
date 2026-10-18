@@ -9,8 +9,9 @@
 // assumes one schema.
 //
 // Consumers: scripts/build-seed-db.js (writes them),
-// scripts/verify-seed-db-ledger.js and scripts/verify-db-schema-consistency.js
-// (read them).
+// scripts/apply-chameleon-calibration-seed.js (adds the calibration snapshot
+// to all of them), scripts/verify-seed-db-ledger.js and
+// scripts/verify-db-schema-consistency.js (read them).
 const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');

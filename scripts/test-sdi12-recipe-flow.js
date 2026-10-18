@@ -1248,3 +1248,58 @@ test('Build UPDATE SQL rejects a malformed SET_SDI12_IDENTIFY device identity wi
   assert.match(result.result.syncAck.error, /Invalid SDI-12 Identify device identity/);
   assert.equal(result.result.topic, 'SELECT 1');
 });
+
+// The poll, apply and rollback nodes release their ChirpStack client with
+// client.close() in a finally block. Run them against the real
+// osi-chirpstack-helper client (not a stub with a close method), so a client
+// without close() shows up here as the "close failed" warning the poll used
+// to log every 60 seconds on gateways with an SDI-12 device.
+test('the recipe poll, apply and rollback close the real ChirpStack client without a warning', async (t) => {
+  const realChirpstack = require(path.join(
+    ROOT,
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'
+  ));
+  const created = [];
+  const chirpstack = {
+    createProvisioningClientFromEnv: (env) => {
+      const client = realChirpstack.createProvisioningClientFromEnv(env);
+      created.push(client);
+      return client;
+    },
+  };
+  const commissioning = {
+    pollDeployments: async () => ({ checked: 0 }),
+    applyDesiredRecipe: async () => ({ deployment: { status: 'PENDING' } }),
+    rollbackCompatibleRecipe: async () => ({ deployment: { status: 'PENDING' } }),
+  };
+  const env = { CHIRPSTACK_API_URL: 'http://127.0.0.1:1', CHIRPSTACK_API_KEY: 'test-key' };
+  const deveui = 'A840410000000043';
+
+  for (const nodeId of [
+    'sdi12-recipe-poll-fn',
+    'sdi12-recipe-apply-action-fn',
+    'sdi12-recipe-rollback-action-fn',
+  ]) {
+    await t.test(nodeId, async () => {
+      const db = seedTestDb();
+      insertDevice(db, { deveui });
+      const before = created.length;
+      try {
+        const execution = await executeFunction(nodeById(nodeId, 'function'), {
+          msg: { payload: Date.now(), deviceRow: { deveui }, req: { body: {} } },
+          env,
+          db,
+          osiLibModules: { 'sdi12-commissioning': commissioning, chirpstack },
+        });
+        assert.equal(created.length, before + 1, 'the node must create exactly one client');
+        assert.deepEqual(
+          execution.warnings.filter((warning) => /close failed/i.test(warning)),
+          [],
+          'closing the real client must not warn'
+        );
+      } finally {
+        db.close();
+      }
+    });
+  }
+});

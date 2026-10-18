@@ -35,6 +35,11 @@ vi.mock('../../../services/api', () => ({
     updateCalibration: vi.fn().mockResolvedValue(undefined),
     setZoneLocation: vi.fn().mockResolvedValue(undefined),
   },
+  // A zone without a rain gauge: the rain gauge field stays hidden.
+  zoneRainSourceAPI: {
+    get: vi.fn().mockResolvedValue({ state: 'none', selectedDeveui: null, basis: null, candidates: [], suggestedDeveui: null }),
+    set: vi.fn(),
+  },
   zoneExportAPI: { download: vi.fn().mockResolvedValue(undefined) },
 }));
 

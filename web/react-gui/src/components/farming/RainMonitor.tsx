@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Bar,
   BarChart,
@@ -10,12 +11,11 @@ import {
 } from 'recharts';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
 import {
-  fillMissingRainDays,
-  localDayIso,
-  localTzOffsetMinutes,
+  hasRainData,
   summarizeRainDays,
   summarizeRainIntervals,
-  type RainDay,
+  type RainHistory,
+  type RainHistoryDay,
 } from '../../utils/rain';
 
 interface Props {
@@ -28,10 +28,9 @@ type RainWindow =
   | { label: string; mode: 'interval'; hours: number }
   | { label: string; mode: 'daily'; days: number };
 
-// Bar-chart row for the daily view: total_mm is nulled out for no-data
-// (samples === 0) days so recharts omits the bar instead of drawing a
-// misleading 0.0 mm bar.
-type RainChartDay = Omit<RainDay, 'total_mm'> & { total_mm: number | null };
+// Bar-chart row for the daily view: total_mm is null for no-data days so
+// recharts omits the bar instead of drawing a misleading 0.0 mm bar.
+type RainChartDay = RainHistoryDay;
 
 const TIME_WINDOWS: RainWindow[] = [
   { label: '12 h', mode: 'interval', hours: 12 },
@@ -51,10 +50,12 @@ function fmtIntervalTick(iso: string): string {
     : iso;
 }
 
+// A farm day key is already the farm's calendar date: format it as that
+// date, never re-read in the browser's zone.
 function fmtDayTick(day: string): string {
-  const date = new Date(`${day}T00:00:00`);
+  const date = new Date(`${day}T12:00:00Z`);
   return Number.isFinite(date.getTime())
-    ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    ? date.toLocaleDateString(undefined, { timeZone: 'UTC', month: 'short', day: 'numeric' })
     : day;
 }
 
@@ -72,27 +73,30 @@ const IntervalTooltip = ({ active, payload, label }: any) => {
   );
 };
 
-// A day with samples === 0 is a zero-filled "no data" placeholder (station
-// offline / no valid uplinks that day) — never present it as a measured
-// "0.0 mm" day. samples > 0 with total_mm === 0 is a genuine measured-dry day.
-const DailyTooltip = ({ active, payload, label }: any) => {
+// A day without samples is a "no data" day (station offline / no valid
+// uplinks that day) — never present it as a measured "0.0 mm" day.
+// samples > 0 with total_mm === 0 is a genuine measured-dry day. The current
+// day is labelled "so far": it ends at the request time.
+const DailyTooltip = ({ active, payload, label, soFarLabel }: any) => {
   if (!active || !payload?.length) return null;
   const row: RainChartDay | undefined = payload[0]?.payload;
-  const noData = row?.samples === 0;
+  const noData = !row || row.total_mm === null;
+  const amount = noData ? 'no data' : fmtMm(row.total_mm);
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 text-sm shadow-xl">
       <p className="mb-1 text-[var(--text-tertiary)]">{fmtDayTick(label)}</p>
       <p className="font-bold text-[var(--text)]">
-        {noData ? 'no data' : fmtMm(row?.total_mm ?? null)}
+        {row?.so_far ? `${amount} · ${soFarLabel}` : amount}
       </p>
     </div>
   );
 };
 
 export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) => {
+  const { t } = useTranslation('devices');
   const [windowIndex, setWindowIndex] = useState(DEFAULT_WINDOW_INDEX);
   const [intervalData, setIntervalData] = useState<SensorHistoryPoint[]>([]);
-  const [dailyData, setDailyData] = useState<RainDay[]>([]);
+  const [dailyHistory, setDailyHistory] = useState<RainHistory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,12 +112,12 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
         ? sensorAPI.getHistory(deveui, 'rain_mm_delta', selected.hours).then((rows) => {
             if (!cancelled) {
               setIntervalData(rows);
-              setDailyData([]);
+              setDailyHistory(null);
             }
           })
-        : sensorAPI.getDailyRainHistory(deveui, selected.days, localTzOffsetMinutes()).then((rows) => {
+        : sensorAPI.getDailyRainHistory(deveui, selected.days).then((history) => {
             if (!cancelled) {
-              setDailyData(rows);
+              setDailyHistory(history);
               setIntervalData([]);
             }
           });
@@ -132,22 +136,24 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
     };
   }, [deveui, windowIndex]);
 
-  const filledDays = useMemo(
-    () =>
-      selectedWindow.mode === 'daily'
-        ? fillMissingRainDays(dailyData, selectedWindow.days, localDayIso())
-        : [],
-    [dailyData, selectedWindow],
+  // The gateway lists every farm day of the window; the browser neither
+  // fills nor re-buckets them.
+  const historyDays = useMemo(
+    () => (selectedWindow.mode === 'daily' && dailyHistory ? dailyHistory.days : []),
+    [dailyHistory, selectedWindow],
   );
-  const dailySummary = useMemo(() => summarizeRainDays(filledDays), [filledDays]);
-  // Bar chart input: no-data days (samples === 0) get a null bar value so
-  // recharts omits the bar entirely, instead of drawing a misleading 0.0 mm
-  // bar indistinguishable from a genuinely measured dry day. `samples` is
-  // preserved on each row for DailyTooltip to detect the no-data case.
-  const chartDays = useMemo(
-    () => filledDays.map((entry) => ({ ...entry, total_mm: entry.samples === 0 ? null : entry.total_mm })),
-    [filledDays],
+  const dailySummary = useMemo(() => summarizeRainDays(historyDays), [historyDays]);
+  // Bar chart input: no-data days get a null bar value so recharts omits the
+  // bar entirely, instead of drawing a misleading 0.0 mm bar
+  // indistinguishable from a genuinely measured dry day.
+  const chartDays = useMemo<RainChartDay[]>(
+    () => historyDays.map((entry) => ({ ...entry, total_mm: hasRainData(entry) ? entry.total_mm : null })),
+    [historyDays],
   );
+  // An older gateway answers without a timezone; it bucketed in UTC.
+  const farmTimezone = dailyHistory?.timezone ?? 'UTC';
+  const timezoneNeedsCheck =
+    dailyHistory?.timezoneBasis === 'abbreviation' || dailyHistory?.timezoneBasis === 'invalid';
   const intervalSummary = useMemo(() => summarizeRainIntervals(intervalData), [intervalData]);
   const intervalTicks = useMemo(() => {
     if (!intervalData.length) return [];
@@ -158,7 +164,7 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
   const hasData =
     selectedWindow.mode === 'interval'
       ? intervalData.some((point) => point.value != null)
-      : dailyData.length > 0;
+      : historyDays.some(hasRainData);
 
   return (
     <div
@@ -307,14 +313,23 @@ export const RainMonitor: React.FC<Props> = ({ deveui, deviceName, onClose }) =>
                       tickLine={false}
                       width={48}
                     />
-                    <Tooltip content={<DailyTooltip />} />
+                    <Tooltip content={<DailyTooltip soFarLabel={t('rainMonitor.soFar', { defaultValue: 'so far' })} />} />
                     <Bar dataKey="total_mm" fill={RAIN_COLOR} radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
-                {filledDays.length} days · daily totals (local time)
+                {t('rainMonitor.dailyFooter', {
+                  days: historyDays.length,
+                  timezone: farmTimezone,
+                  defaultValue: '{{days}} days · daily totals ({{timezone}})',
+                })}
               </p>
+              {timezoneNeedsCheck && (
+                <p className="pb-2 text-center text-xs text-[var(--text-tertiary)]">
+                  {t('rainMonitor.timezoneCheck', { defaultValue: 'Check the zone time zone in its settings.' })}
+                </p>
+              )}
             </>
           )}
         </div>

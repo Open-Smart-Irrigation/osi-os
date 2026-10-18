@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Verlauf",
+      "admin": "Admin",
       "legacyDashboard": "Bestehendes Dashboard",
       "logout": "Abmelden"
     },
@@ -18,19 +19,13 @@
       "cardsFailed": "Verlaufskarten konnten nicht geladen werden.",
       "retryCards": "Karten erneut laden"
     },
+    "export": {
+      "open": "Exportieren",
+      "title": "Daten exportieren"
+    },
     "desktop": {
-      "toolbarTitle": "Werkzeugleiste",
-      "maxPanels": "Bis zu {{count}} Vergleichsansichten",
-      "singleMode": "Einzeln",
-      "comparisonMode": "Vergleich",
-      "addPanel": "Panel {{title}} hinzufügen",
-      "removePanel": "Panel entfernen",
-      "panelLimitWarning": "Auf diesem Edge-Gateway können nur {{count}} Vergleichsansichten angezeigt werden.",
-      "selectedTimestampNone": "Kein Zeitstempel ausgewählt",
-      "selectedTimestamp": "Ausgewählter Zeitstempel: {{timestamp}}",
-      "inspectorTitle": "Inspektor",
-      "inspectorPlaceholder": "Wählen Sie einen Zeitstempel oder eine Kalenderzelle aus, um Interpretation, Ereignisse, Datenqualität und erweiterte Metadaten zu sehen.",
       "railLabel": "Karten",
+      "toolbarTitle": "Werkzeugleiste",
       "modeLabel": "Desktop-Modus",
       "modeFocus": "Fokus",
       "modeCompare": "Vergleichen",
@@ -41,7 +36,17 @@
       "chartSurfaceLabel": "Verlaufsdiagramm, mit Pfeiltasten verschieben und mit Plus oder Minus zoomen",
       "zoomIn": "Hineinzoomen",
       "zoomOut": "Herauszoomen",
-      "resetZoom": "Zoom zurücksetzen"
+      "resetZoom": "Zoom zurücksetzen",
+      "maxPanels": "Bis zu {{count}} Vergleichsansichten",
+      "singleMode": "Einzeln",
+      "comparisonMode": "Vergleich",
+      "addPanel": "Panel {{title}} hinzufügen",
+      "removePanel": "Panel entfernen",
+      "panelLimitWarning": "Es können nur {{count}} Vergleichsfelder gleichzeitig angezeigt werden.",
+      "selectedTimestampNone": "Kein Zeitstempel ausgewählt",
+      "selectedTimestamp": "Ausgewählter Zeitstempel: {{timestamp}}",
+      "inspectorTitle": "Inspektor",
+      "inspectorPlaceholder": "Wählen Sie einen Zeitstempel oder eine Kalenderzelle aus, um Interpretation, Ereignisse, Datenqualität und erweiterte Metadaten zu sehen."
     },
     "mobile": {
       "zoneLabel": "Zone",
@@ -113,7 +118,7 @@
       "timelineBrush": "Zeitleisten-Viewport",
       "timelineBrushKeyboardHelp": "Mit den Pfeiltasten verschieben, mit Plus oder Minus zoomen und mit Pos1 oder Enter zurücksetzen.",
       "aggregationBadge": "Aggregation: {{aggregation}}",
-      "placeholderBody": "Diagramm- und Kalenderdaten werden hier geladen, sobald die Karten-Daten-APIs aktiviert sind.",
+      "placeholderBody": "Diagramme und Kalenderdaten erscheinen hier, sobald diese Karte Messwerte hat.",
       "cardDataLoading": "Kartendaten werden geladen...",
       "cardDataError": "Kartendaten konnten nicht geladen werden: {{message}}",
       "cardDataUnknownError": "Unbekannter Fehler"
@@ -197,11 +202,15 @@
       "emptyBody": "Bewässerungsaktionen und Reaktionsfenster werden hier angezeigt, sobald Verlaufsdaten verfügbar sind.",
       "eventsCount": "{{count}} Ereignisse",
       "eventLabel": {
+        "serviceAction": "Serviceeingriff",
         "irrigation": "Bewässerungsereignis",
-        "scheduled": "Geplante Bewässerung",
+        "scheduled": "Sensorgesteuerte Bewässerung",
         "manualOverride": "Manueller Eingriff",
         "possibleIneffective": "Möglicherweise unwirksame Bewässerung",
-        "responseWindow": "Reaktionsfenster"
+        "responseWindow": "Reaktionsfenster",
+        "onValveSchedule": "Zeitplan (auf Ventil)",
+        "oneTime": "Einmalige Öffnung",
+        "unexplained": "Am Ventil geöffnet"
       },
       "detail": {
         "duration": "Dauer: {{value}}",
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Quellen",
       "menuLabel": "Kartenquellen"
-    },
-    "export": {
-      "open": "Exportieren",
-      "title": "Daten exportieren"
     }
   }
 }

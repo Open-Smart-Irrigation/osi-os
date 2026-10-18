@@ -2,6 +2,7 @@
   "history": {
     "nav": {
       "history": "Cronologia",
+      "admin": "Admin",
       "legacyDashboard": "Dashboard legacy",
       "logout": "Esci"
     },
@@ -18,19 +19,13 @@
       "cardsFailed": "Impossibile caricare le schede storiche.",
       "retryCards": "Riprova schede"
     },
+    "export": {
+      "open": "Esporta",
+      "title": "Esporta dati"
+    },
     "desktop": {
-      "toolbarTitle": "Barra strumenti",
-      "maxPanels": "Fino a {{count}} pannelli di confronto",
-      "singleMode": "Singolo",
-      "comparisonMode": "Confronto",
-      "addPanel": "Aggiungi pannello {{title}}",
-      "removePanel": "Rimuovi pannello",
-      "panelLimitWarning": "Su questo gateway edge possono essere mostrati solo {{count}} pannelli di confronto.",
-      "selectedTimestampNone": "Nessun timestamp selezionato",
-      "selectedTimestamp": "Timestamp selezionato: {{timestamp}}",
-      "inspectorTitle": "Ispettore",
-      "inspectorPlaceholder": "Seleziona un timestamp o una cella del calendario per vedere interpretazione, eventi, qualità dei dati e metadati avanzati.",
       "railLabel": "Schede",
+      "toolbarTitle": "Barra strumenti",
       "modeLabel": "Modalità desktop",
       "modeFocus": "Focus",
       "modeCompare": "Confronta",
@@ -41,7 +36,17 @@
       "chartSurfaceLabel": "Grafico storico, usa le frecce per spostarti e più o meno per zoomare",
       "zoomIn": "Ingrandisci",
       "zoomOut": "Riduci",
-      "resetZoom": "Reimposta zoom"
+      "resetZoom": "Reimposta zoom",
+      "maxPanels": "Fino a {{count}} pannelli di confronto",
+      "singleMode": "Singolo",
+      "comparisonMode": "Confronto",
+      "addPanel": "Aggiungi pannello {{title}}",
+      "removePanel": "Rimuovi pannello",
+      "panelLimitWarning": "È possibile mostrare solo {{count}} pannelli di confronto per volta.",
+      "selectedTimestampNone": "Nessun timestamp selezionato",
+      "selectedTimestamp": "Timestamp selezionato: {{timestamp}}",
+      "inspectorTitle": "Ispettore",
+      "inspectorPlaceholder": "Seleziona un timestamp o una cella del calendario per vedere interpretazione, eventi, qualità dei dati e metadati avanzati."
     },
     "mobile": {
       "zoneLabel": "Zona",
@@ -113,7 +118,7 @@
       "timelineBrush": "Finestra della timeline",
       "timelineBrushKeyboardHelp": "Usa le frecce per spostarti, più o meno per zoomare, e Home o Invio per reimpostare.",
       "aggregationBadge": "Aggregazione: {{aggregation}}",
-      "placeholderBody": "I dati del grafico e del calendario verranno caricati qui quando le API dei dati della scheda saranno abilitate.",
+      "placeholderBody": "Grafici e calendario compariranno qui quando questa scheda avrà letture.",
       "cardDataLoading": "Caricamento dati della scheda...",
       "cardDataError": "Impossibile caricare i dati della scheda: {{message}}",
       "cardDataUnknownError": "Errore sconosciuto"
@@ -197,11 +202,15 @@
       "emptyBody": "Le azioni di irrigazione e le finestre di risposta appariranno qui quando saranno disponibili dati storici.",
       "eventsCount": "{{count}} eventi",
       "eventLabel": {
+        "serviceAction": "Intervento di servizio",
         "irrigation": "Evento di irrigazione",
-        "scheduled": "Irrigazione programmata",
+        "scheduled": "Irrigazione attivata da sensore",
         "manualOverride": "Sovrascrittura manuale",
         "possibleIneffective": "Possibile irrigazione inefficace",
-        "responseWindow": "Finestra di risposta"
+        "responseWindow": "Finestra di risposta",
+        "onValveSchedule": "Programmato (sulla valvola)",
+        "oneTime": "Apertura singola",
+        "unexplained": "Aperta sulla valvola"
       },
       "detail": {
         "duration": "Durata: {{value}}",
@@ -563,10 +572,6 @@
     "sources": {
       "button": "Sorgenti",
       "menuLabel": "Sorgenti della scheda"
-    },
-    "export": {
-      "open": "Esporta",
-      "title": "Esporta dati"
     }
   }
 }

@@ -52,9 +52,9 @@ function freshDb() {
 }
 
 const w = (v) => [(v >> 8) & 255, v & 255];
-function frameB64(p1, p2, { soil = 1988, source = 2 } = {}) {
-  return Buffer.from([0xA2, 3, ...w(3300), ...w(soil & 0xffff), ...w(2146), source, 0x20,
-    ...w(p1[0]), ...w(p1[0]), ...w(p1[1]), ...w(p1[1]), 0x20,
+function frameB64(p1, p2, { soil = 1988, source = 2, flags1 = 0x20, flags2 = 0x20 } = {}) {
+  return Buffer.from([0xA2, 3, ...w(3300), ...w(soil & 0xffff), ...w(2146), source, flags1,
+    ...w(p1[0]), ...w(p1[0]), ...w(p1[1]), ...w(p1[1]), flags2,
     ...w(p2[0]), ...w(p2[0]), ...w(p2[1]), ...w(p2[1])]).toString('base64');
 }
 const deps = {
@@ -86,7 +86,7 @@ describe('ingestProfile3', () => {
     const dd = ctx.native.prepare('SELECT swt_1, swt_2 FROM device_data WHERE deveui = ?').get(DEVEUI);
     assert.deepEqual({ ...dd }, { swt_1: 56.4, swt_2: 0 });
     const wr = ctx.native.prepare('SELECT ch1_r_solved, ch2_status, calibration_sync_version, conversion_version FROM watermark_readings').get();
-    assert.deepEqual({ ...wr }, { ch1_r_solved: 9977, ch2_status: 'saturated', calibration_sync_version: 1, conversion_version: 'wm-lsn50-p3-v1' });
+    assert.deepEqual({ ...wr }, { ch1_r_solved: 9977, ch2_status: 'saturated', calibration_sync_version: 1, conversion_version: 'wm-lsn50-p3-v2' });
   });
 
   it('keeps a rejected frame as raw only', async () => {
@@ -129,6 +129,36 @@ describe('ingestProfile3', () => {
 
   it('rejects a malformed DevEUI in the store', async () => {
     await assert.rejects(wm.getCalibration(ctx.db, { deveui: 'xyz', userId: USER_ID }), (e) => e.statusCode === 400);
+  });
+});
+
+describe('unsettled readings are stored with their flag (#415)', () => {
+  let ctx;
+  beforeEach(async () => {
+    ctx = freshDb();
+    await wm.saveCalibration(ctx.db, { deveui: DEVEUI, userId: USER_ID, body: { ...CAL, expected_sync_version: 0 } });
+  });
+
+  it('unsettled on channel 1 only: both channels get a value, channel 1 keeps its flag', async () => {
+    const res = await ingestAt(ctx.db, T1, frameB64([800, 3291], [781, 3308], { flags1: 0x24 }));
+    assert.deepEqual(res.statuses, ['unsettled', 'ok']);
+    const dd = ctx.native.prepare('SELECT id, swt_1, swt_2 FROM device_data WHERE deveui = ?').get(DEVEUI);
+    assert.equal(dd.swt_1, 56.4);
+    assert.ok(dd.swt_2 > 0);
+    const wr = ctx.native.prepare('SELECT device_data_id, ch1_flags, ch1_status, ch1_kpa, ch2_flags, ch2_status, ch2_kpa FROM watermark_readings').get();
+    assert.deepEqual({ ...wr }, {
+      device_data_id: dd.id, ch1_flags: 0x24, ch1_status: 'unsettled', ch1_kpa: 56.4,
+      ch2_flags: 0x20, ch2_status: 'ok', ch2_kpa: dd.swt_2
+    });
+  });
+
+  it('a real fault on a channel still stores no value for it, unsettled or not', async () => {
+    await ingestAt(ctx.db, T1, frameB64([4093, 2], [781, 3308], { flags1: 0x24 }));
+    const dd = ctx.native.prepare('SELECT swt_1, swt_2 FROM device_data WHERE deveui = ?').get(DEVEUI);
+    assert.equal(dd.swt_1, null);
+    assert.ok(dd.swt_2 > 0);
+    const wr = ctx.native.prepare('SELECT ch1_flags, ch1_status, ch1_kpa FROM watermark_readings').get();
+    assert.deepEqual({ ...wr }, { ch1_flags: 0x24, ch1_status: 'open', ch1_kpa: null });
   });
 });
 

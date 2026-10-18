@@ -40,8 +40,20 @@ function editableRow(
   return {
     attribute_code: row.attribute_code,
     ...(row.group_index == null ? {} : { group_index: row.group_index }),
-    ...(row.value_status == null ? {} : { value_status: row.value_status }),
+    // Any numeric edit is an explicit reversal of a prior "not observed"
+    // decision. Do not keep a missing-value status beside a newly entered
+    // value.
     ...changes,
+  };
+}
+
+function notObservedRow(row: CaptureEntryValueInput, unitCode: string): CaptureEntryValueInput {
+  return {
+    attribute_code: row.attribute_code,
+    ...(row.group_index == null ? {} : { group_index: row.group_index }),
+    value_status: 'not_observed',
+    unit_code: unitCode,
+    entered_unit_code: unitCode,
   };
 }
 
@@ -147,6 +159,7 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
       <div className="space-y-3">
         {normalizedValues.map((row, index) => {
           const groupIndex = row.group_index ?? index;
+          const selectedUnit = row.entered_unit_code ?? row.unit_code ?? (units.length === 1 ? units[0]?.code : null);
           return (
             <div
               key={groupIndex}
@@ -198,6 +211,16 @@ export const NutrientRepeater: React.FC<NutrientRepeaterProps> = ({
                       })
                     : value))}
               />
+
+              <button
+                type="button"
+                disabled={selectedUnit == null}
+                onClick={() => selectedUnit && onChange(normalizedValues.map((value, valueIndex) =>
+                  valueIndex === index ? notObservedRow(value, selectedUnit) : value))}
+                className={`min-h-11 rounded-xl border border-[var(--border)] px-3 text-sm font-bold text-[var(--primary)] disabled:opacity-50 ${FOCUS_RING}`}
+              >
+                {t('capture.carry.valueStatus.not_observed')}
+              </button>
 
               <button
                 type="button"

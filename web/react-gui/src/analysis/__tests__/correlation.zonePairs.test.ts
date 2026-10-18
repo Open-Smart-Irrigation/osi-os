@@ -38,6 +38,6 @@ describe('zonePairs', () => {
       series(1, 'dendro', [10, 20]),
     ], 'temperature', 'dendro');
 
-    expect(result).toEqual([{ zoneId: 1, label: 'Zone 1', points: [[1, 10], [2, 20]] }]);
+    expect(result).toEqual([{ groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[1, 10], [2, 20]] }]);
   });
 });

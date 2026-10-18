@@ -436,6 +436,9 @@
       "lastSevenDaysHelpLabel": "Über die letzten 7 Tage",
       "setupRequiredHelpLabel": "Warum die effektive Bewässerung fehlt",
       "rainSourceHelpLabel": "Woher dieser Regenwert stammt",
+      "rainSoFar": "bisher",
+      "utcDay": "UTC-Tag",
+      "rainReceivedOnly": "nur {{value}} empfangen (Tag unvollständig)",
       "demandNoSource": "keine Wetterquelle für diesen Tag",
       "demandMixedStation": "Stunden von zwei MeteoSchweiz-Stationen",
       "demandUnknownStation": "MeteoSchweiz-Station für diese Stunden unbekannt",
@@ -448,7 +451,11 @@
         "cloud": "ET0 aus dem Open-Meteo-Wettermodell (nicht auf diesem Betrieb gemessen); OSI Cloud wendet den Kulturkoeffizienten an"
       },
       "modelAccuracyNote": "Modellbasierte ET0 kann an einem einzelnen Tag um 10-20 % von einer lokalen Station abweichen, am stärksten an bewölkten und windigen Tagen oder in den Bergen; Wochensummen stimmen besser überein.",
-      "meteoswissCloudNote": "Diese Zone nutzt auf dem Gateway MeteoSchweiz; die eigene Historie von OSI Cloud nutzt Open-Meteo, bis die MeteoSchweiz-Historie in der Cloud verfügbar ist."
+      "meteoswissCloudNote": "Diese Zone nutzt auf dem Gateway MeteoSchweiz; die eigene Historie von OSI Cloud nutzt Open-Meteo, bis die MeteoSchweiz-Historie in der Cloud verfügbar ist.",
+      "rainCoverage": {
+        "providerPartial": "Anbietermenge — teilweise Abdeckung",
+        "receivedOnlyLabel": "nur empfangen (Tag unvollständig)"
+      }
     },
     "generatedAt": "Erstellt {{time}}",
     "sectionTitle": "Umgebung & Wettervorhersage",
@@ -513,6 +520,7 @@
       "etaTomorrow": "{{time}} morgen",
       "next24h": "Nächste 24 Std.",
       "next72h": "Nächste 72 Std.",
+      "coverage": "{{covered}} von {{expected}} Std.",
       "nextRain": "Nächster Regen",
       "rainHours": "Regenstunden",
       "maxHourly": "Max. stündlich",
@@ -921,5 +929,34 @@
       "invalidField": "Prüfen Sie {{field}}: ausserhalb des Bereichs.",
       "loadFailed": "Die Kalibrierung konnte nicht geladen werden."
     }
+  },
+  "rainMonitor": {
+    "dailyFooter": "{{days}} Tage · Tagessummen ({{timezone}})",
+    "soFar": "bisher",
+    "timezoneCheck": "Zeitzone der Zone in ihren Einstellungen prüfen."
+  },
+  "rain": {
+    "recordedToday": "Heute gemessener Regen",
+    "soFar": "bisher",
+    "lastReportOn": "Letzte Meldung {{date}}: {{value}} mm"
+  },
+  "loRain": {
+    "intervalRainfall": "Niederschlag dieses Intervalls",
+    "lastReport": "Letzte Meldung",
+    "tips_one": "{{count}} Kippung",
+    "tips_other": "{{count}} Kippungen",
+    "tipsUnavailable": "Anzahl Kippungen nicht verfügbar"
+  },
+  "zoneRainGauge": {
+    "label": "Regenmesser für diese Zone",
+    "helpLabel": "Über den Regenmesser",
+    "help": "Melden mehrere Regenmesser für diese Zone, stammt der tägliche Regen der Zone vom hier gewählten Regenmesser. Der Regen zweier Regenmesser wird nie addiert. Eine Änderung berechnet die letzten 30 Tage neu.",
+    "notChosen": "— Kein Regenmesser gewählt —",
+    "optionShared": "{{name}} (gemeinsame Wetterstation)",
+    "optionSuggested": "{{label}} — vorgeschlagen",
+    "ambiguous": "Zwei Regenmesser melden für diese Zone. Bis Sie einen wählen, hat die Zone keinen gemessenen Regen.",
+    "onlyCandidate": "Der einzige Regenmesser dieser Zone wird verwendet.",
+    "loadFailed": "Die Regenmesser dieser Zone konnten nicht geladen werden.",
+    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen."
   }
 }

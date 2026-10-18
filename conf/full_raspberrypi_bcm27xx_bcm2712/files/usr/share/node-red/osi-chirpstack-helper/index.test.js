@@ -815,3 +815,84 @@ test('enqueueDownlink accepts a Date created in another vm realm (Node-RED funct
   await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: at });
   assert.equal(calls.enqueue[0].getQueueItem().getExpiresAt().toDate().getTime(), 1790000000000);
 });
+
+// Each ChirpStackClient owns five gRPC service clients, and grpc-js gives each
+// one its own channel (resolver, load balancer, channelz registration, idle
+// timer). Callers that create a client per run (the 60-second SDI-12 recipe
+// poll, the recipe apply and rollback routes) release them through close().
+const SERVICE_CLIENT_FIELDS = [
+  'deviceClient',
+  'applicationClient',
+  'tenantClient',
+  'deviceProfileClient',
+  'gatewayClient'
+];
+
+function channelState(serviceClient) {
+  return grpc.getClientChannel(serviceClient).getConnectivityState(false);
+}
+
+test('close() shuts down the channel of every gRPC service client and reports no errors', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  for (const field of SERVICE_CLIENT_FIELDS) {
+    assert.notEqual(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} starts open`);
+  }
+  assert.equal(typeof client.close, 'function');
+  assert.deepEqual(client.close(), []);
+  for (const field of SERVICE_CLIENT_FIELDS) {
+    assert.equal(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} must be shut down`);
+  }
+});
+
+test('close() can be called twice without throwing', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  assert.deepEqual(client.close(), []);
+  assert.deepEqual(client.close(), []);
+});
+
+test('close() returns a failing service close as an error and still closes the others', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
+  const realClose = client.tenantClient.close.bind(client.tenantClient);
+  client.tenantClient.close = () => { throw new Error('tenant channel close failed'); };
+  let errors;
+  assert.doesNotThrow(() => { errors = client.close(); });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /tenant channel close failed/);
+  for (const field of SERVICE_CLIENT_FIELDS.filter((name) => name !== 'tenantClient')) {
+    assert.equal(channelState(client[field]), grpc.connectivityState.SHUTDOWN, `${field} must be shut down`);
+  }
+  realClose();
+});
+
+// #428: a cancel reads the device queue so it can take out only the cancelled
+// actuation's open and queue every other item again unchanged.
+test('getDeviceQueue lists the queue oldest first with base64 data, through DeviceService.GetQueue', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  const seen = [];
+  function item(id, fPort, bytes, pending) {
+    const queueItem = new devicePb.DeviceQueueItem();
+    queueItem.setId(id);
+    queueItem.setFPort(fPort);
+    queueItem.setData(Uint8Array.from(bytes));
+    queueItem.setConfirmed(false);
+    queueItem.setIsPending(!!pending);
+    return queueItem;
+  }
+  client.deviceClient = {
+    getQueue: (request, metadata, options, callback) => {
+      seen.push({ devEui: request.getDevEui(), deadline: options.deadline });
+      const response = new devicePb.GetDeviceQueueItemsResponse();
+      response.setTotalCount(2);
+      response.setResultList([item('q-1', 2, [0x41, 10], false), item('q-2', 10, [0x01, 0x02], true)]);
+      callback(null, response);
+    },
+  };
+  const queue = await client.getDeviceQueue('a840410000000001');
+  assert.equal(seen.length, 1);
+  assert.ok(seen[0].deadline instanceof Date, 'the call carries a deadline');
+  assert.deepEqual(queue, [
+    { id: 'q-1', fPort: 2, data: Buffer.from([0x41, 10]).toString('base64'), confirmed: false, isPending: false, isEncrypted: false },
+    { id: 'q-2', fPort: 10, data: Buffer.from([0x01, 0x02]).toString('base64'), confirmed: false, isPending: true, isEncrypted: false },
+  ]);
+  await assert.rejects(client.getDeviceQueue(''), /DevEUI is required/);
+});

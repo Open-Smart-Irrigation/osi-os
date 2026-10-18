@@ -104,7 +104,10 @@ zone update event and both snapshots carry it, null when unset (see "Zone
 
 ## MQTT topics (edge → cloud only)
 
-Broker: `wss://server.opensmartirrigation.org/mqtt`
+Broker: `${OSI_CLOUD_BROKER_URL}` in the "OSI Cloud Broker" node, set by
+`node-red.init` from `osi-server.cloud.mqtt_broker_url`, else
+`wss://<osi-server.cloud.server_host>/mqtt`, else the default
+`wss://server.opensmartirrigation.org/mqtt`.
 
 | Topic | Payload | Cadence |
 |-------|---------|---------|
@@ -295,15 +298,15 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 | Device | ChirpStack app | Profile | Sensors |
 |--------|----------------|---------|---------|
-| KIWI_SENSOR | Sensors | Kiwi | SWT, light, temp, humidity |
-| TEKTELIC_CLOVER | Sensors | (same as Kiwi) | VWC, temp, humidity |
+| KIWI_SENSOR | Sensors | OSI KIWI Sensor (Tektelic agriculture codec) | SWT, light, temp, humidity |
+| TEKTELIC_CLOVER | Sensors | OSI CLOVER Sensor (Tektelic agriculture codec) | Ambient temp, humidity, light (VWC not stored) |
 | DRAGINO_LSN50 | Sensors | LSN50 | Ext temp, ADC (dendrometer, rain, flow), WATERMARK or Chameleon SWT |
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
 | AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |
 | STREGA_VALVE | Actuators | STREGA | Valve state, battery |
 
-**SWT canonicalization:** `device_data.swt_1`, `swt_2`, `swt_3` (kPa) are the canonical channels. Legacy `swt_wm1` / `swt_wm2` are read-only aliases for old rows. pF is a display/export derivative, not stored measurement state: `pF = log10(kPa * 10)`. Positive SWT kPa rows in zone CSV exports are paired with derived `_pf` rows; non-positive or non-finite kPa has no pF row.
+**SWT canonicalization:** `device_data.swt_1`, `swt_2`, `swt_3` (kPa) are the canonical channels. Legacy `swt_wm1` / `swt_wm2` are read-only aliases for old rows. pF is a display/export derivative, not stored measurement state: `pF = log10(kPa * 10)`, never below 0. Finite kPa at or below 0.1 (a saturated probe reads 0) shows and exports the floor, `0.00 pF` on screen and `0` in CSV; missing or non-finite kPa has no pF. Finite SWT kPa rows in zone CSV exports are paired with derived `_pf` rows. One helper per runtime: `web/react-gui/src/utils/swt.ts` (`kpaToPf`) and `osi-history-helper` (`kpaToPf`).
 
 **Aqua-Scope LoRain:** `AQUASCOPE_LORAIN` is the Aqua-Scope LoRain / `RANLWE01` rain gauge, provisioned into ChirpStack `Sensors` as LoRaWAN 1.0.3 OTAA Class A. Public onboarding uses FPort `10`; the legacy firmware decoder uses FPort `2`, so `aquascope_lorain_decoder.js` accepts both. JoinEUI/AppEUI is `4943485448592021`; AppKey is retrieved from Aqua-Scope with DevEUI + email and must not be stored in this repo. Payload command `0x06 0x81` reports raw 0.5 mm steps: the decoder keeps vendor `rainlevel` as raw steps and exposes normalized `rain_mm_delta` in millimeters. LoRain rainfall is interval rainfall, not cumulative; duplicate or out-of-order timestamps must not aggregate twice. Assigned LoRain gauges update `zone_daily_environment` with `rain_source='aquascope_lorain'`.
 
@@ -324,6 +327,7 @@ node scripts/verify-sync-flow.js              # sync implementation
 node scripts/verify-no-new-silent-catch.js    # empty catch ratchet
 node scripts/verify-strega-gen1.js            # STREGA Gen1 decoder
 node scripts/verify-lorain-codec.js           # Aqua-Scope LoRain decoder
+node scripts/verify-tektelic-agriculture-codec.js # Tektelic KIWI/CLOVER decoder
 node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
@@ -366,6 +370,9 @@ until the stack is rebased onto the current `origin/main`.
 5. Add React card/component and render in dashboard.
 6. Regenerate the bundled DB copies with `node scripts/build-seed-db.js` (it replays the ordered migrations into a fresh image, so the shipped ledger advances with the schema); verify with `scripts/verify-db-schema-consistency.js` and `scripts/verify-seed-db-ledger.js`.
 7. Map ChirpStack app + profile; update `osi-bootstrap` if profile is new.
+8. For Data-view support, update the finite source policy in both payload
+   profiles and run the source matrix, manifest parity, and deploy-file coverage
+   checks documented in [docs/channel-manifest.md](docs/channel-manifest.md).
 
 ---
 
@@ -392,6 +399,7 @@ until the stack is rebased onto the current `origin/main`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
 - **Foreign-numbered ledger recovery:** a gateway that ran one of the two customer lines (one valve-focused, one not) has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer line, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
+- **Rehearsing that cutover on a copy:** `node scripts/rehearse-ledger-cutover.js --db <pulled copy> --work <scratch directory>` runs, on a copy only, the same chain deploy.sh runs for such a gateway (reconcile `--report`, `--apply`, `migrate-cli.js`, `verify-head-cli.js`), then the devices-rebuild rehearsal twice, the shipped boot node with the gateway's EUI, `integrity_check`/`foreign_key_check`, a schema comparison against `seed-blank.sql`, and per-table row counts and content hashes before and after; a second pass on the result must change nothing. Row changes the migrations make by design are listed in its `EXPECTED_CHANGES`; any other change fails. It refuses paths under `/data/db` and a non-empty `--work` it did not create, and writes `<work>/rehearsal-report.json` with every step's result and duration.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
   artifacts. Current `node-red.init` does not read identity from that file, and
   `settings.js` protects identity keys, but operators should still remove stale

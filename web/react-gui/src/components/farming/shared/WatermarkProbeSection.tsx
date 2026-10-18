@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import type { WatermarkChannelLatest } from '../../../types/farming';
 import { classifySwtWaterStatus, formatSwtCardValue, type SwtUnit } from '../../../utils/swt';
 import { SwtStatusIndicator } from './SwtStatusIndicator';
+import { FOCUS_VISIBLE_RING, HISTORY_VALUE_CUE } from './cardHistory';
 
 // Node-neutral view of IRROMETER WATERMARK 200SS probes. The LSN50 card uses it
 // now; the KIWI card can embed it later (spec D5). Physics stays on the edge:
@@ -15,12 +16,13 @@ export interface WatermarkProbeView {
 
 interface WatermarkProbeSectionProps {
   probes: WatermarkProbeView[];
-  isCurrent: boolean;
   swtUnit: SwtUnit;
   soilTempC: number | null;
   soilTempMeasured: boolean;
   dieTempC: number | null;
   supplyMv: number | null;
+  // Opens the card history view for a series: a probe key (swt_1, swt_2) or
+  // 'ext_temperature_c' for the measured soil temperature.
   onOpenHistory?: (key: string) => void;
 }
 
@@ -37,9 +39,15 @@ function clippedWaterStatus(bound: number | null) {
 }
 
 export function WatermarkProbeSection({
-  probes, isCurrent, swtUnit, soilTempC, soilTempMeasured, dieTempC, supplyMv, onOpenHistory,
+  probes, swtUnit, soilTempC, soilTempMeasured, dieTempC, supplyMv, onOpenHistory,
 }: WatermarkProbeSectionProps) {
   const { t } = useTranslation('devices');
+  const historyTitle = onOpenHistory ? t('common.viewHistory', { defaultValue: 'View history' }) : undefined;
+  const soilTempText = soilTempMeasured && soilTempC != null ? t('watermark.soilTemp', { value: soilTempC.toFixed(1) }) : null;
+  const otherDetails = [
+    dieTempC != null ? t('watermark.dieTemp', { value: dieTempC.toFixed(1) }) : null,
+    supplyMv != null ? t('watermark.supply', { value: (supplyMv / 1000).toFixed(2) }) : null,
+  ].filter(Boolean).join(' · ');
   return (
     <div className="grid grid-cols-1 gap-2">
       {probes.map(({ key, label, depthLabel, channel }) => {
@@ -51,7 +59,7 @@ export function WatermarkProbeSection({
           : clipped && bound !== null
             ? t('watermark.wetUpTo', { value: formatSwtCardValue(bound, swtUnit) })
             : null;
-        const waterStatus = !isCurrent ? null : kpa !== null ? classifySwtWaterStatus(kpa) : clipped ? clippedWaterStatus(bound) : null;
+        const waterStatus = kpa !== null ? classifySwtWaterStatus(kpa) : clipped ? clippedWaterStatus(bound) : null;
         // A clipped reading with no upper bound (the bound resistance is itself
         // beyond range) has no value to promise "at most" against; use the
         // distinct unbounded status text instead of the misleading default.
@@ -66,7 +74,8 @@ export function WatermarkProbeSection({
             type="button"
             disabled={!onOpenHistory}
             onClick={() => onOpenHistory?.(key)}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left"
+            title={historyTitle}
+            className={`flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-left ${onOpenHistory ? `transition-colors hover:border-[var(--focus)] ${FOCUS_VISIBLE_RING}` : ''}`}
           >
             <span>
               <span className="block text-sm font-semibold text-[var(--text)]">{label}</span>
@@ -79,18 +88,24 @@ export function WatermarkProbeSection({
               {details.length > 0 && <span className="block text-xs text-[var(--text-tertiary)]">{details.join(' · ')}</span>}
             </span>
             <span className="flex flex-wrap items-center justify-end gap-2">
-              <span className="text-lg font-bold tabular-nums text-[var(--text)]">{value ?? '—'}</span>
+              <span className={`text-lg font-bold tabular-nums text-[var(--text)] ${onOpenHistory && value !== null ? HISTORY_VALUE_CUE : ''}`}>{value ?? '—'}</span>
               <SwtStatusIndicator status={waterStatus} />
             </span>
           </button>
         );
       })}
       <p className="text-xs text-[var(--text-tertiary)]">
-        {[
-          soilTempMeasured && soilTempC != null ? t('watermark.soilTemp', { value: soilTempC.toFixed(1) }) : t('watermark.soilTempNotMeasured'),
-          dieTempC != null ? t('watermark.dieTemp', { value: dieTempC.toFixed(1) }) : null,
-          supplyMv != null ? t('watermark.supply', { value: (supplyMv / 1000).toFixed(2) }) : null,
-        ].filter(Boolean).join(' · ')}
+        {soilTempText !== null && onOpenHistory ? (
+          <button
+            type="button"
+            onClick={() => onOpenHistory('ext_temperature_c')}
+            title={historyTitle}
+            className={`text-left ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
+          >
+            {soilTempText}
+          </button>
+        ) : (soilTempText ?? t('watermark.soilTempNotMeasured'))}
+        {otherDetails && ` · ${otherDetails}`}
       </p>
     </div>
   );

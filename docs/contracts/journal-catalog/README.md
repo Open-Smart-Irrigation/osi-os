@@ -14,7 +14,16 @@ Regenerate with `node scripts/export-journal-catalog.js` after any catalog
 change, and re-vendor it to osi-server (`backend/src/main/resources/journal-catalog/`)
 in the same change. `scripts/verify-journal-catalog-vendor.sh` and the
 osi-server twin gate CI on both sides: `.github/workflows/journal-catalog.yml`
-here (on `AgroLink`), `.github/workflows/backend-ci.yml` there.
+here (on `main`; it prefers an osi-server branch of the same name, so a
+catalog change and its re-vendor travel on one branch name in both repos),
+`.github/workflows/backend-ci.yml` there.
+
+Catalog v11 (`0070__journal_catalog_v11.sql`) adds `full_record@11` with a
+`final_requirement_matrix` (which fields a final entry needs per activity or
+operation, and which quantity families may be recorded as not observed), the
+`open_field`/`greenhouse`/`lysimeter@11` layouts with an explicit
+`availability_mode`, and the `farm_wide@1` layout for farm-wide entries
+(equipment maintenance and general observations).
 
 osi-server serves this artifact to its GUI and compares its `catalog_version` /
 `catalog_hash` against the values a gateway advertises at bootstrap

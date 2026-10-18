@@ -44,6 +44,43 @@ function buildDevice(
   };
 }
 
+// Focus checks compare elements by identity and describe them in a few words.
+// They must not hand the elements to assert.equal: on a mismatch node:assert
+// builds its message with util.inspect at depth 1000, and a React-rendered
+// jsdom element carries __reactFiber$ / __reactProps$ properties that lead
+// into the whole fiber tree. For this modal that walk does not finish and the
+// process grows until it is killed (#393).
+function describeElement(element: Element | null): string {
+  if (!element) return 'no element';
+  const tag = element.tagName.toLowerCase();
+  const id = element.id ? `#${element.id}` : '';
+  const text = ['select', 'input', 'textarea'].includes(tag) ? '' : element.textContent?.trim().slice(0, 40);
+  const label = element.getAttribute('aria-label') ?? text ?? '';
+  return label ? `<${tag}${id}> "${label}"` : `<${tag}${id}>`;
+}
+
+function assertFocused(document: Document, expected: Element, context: string): void {
+  const active = document.activeElement;
+  if (active !== expected) {
+    assert.fail(`${context}: expected focus on ${describeElement(expected)}, found it on ${describeElement(active)}`);
+  }
+}
+
+function assertNotFocused(document: Document, unexpected: Element, context: string): void {
+  if (document.activeElement === unexpected) {
+    assert.fail(`${context}: focus is still on ${describeElement(unexpected)}`);
+  }
+}
+
+// jsdom with pretendToBeVisual runs animation frames on a 1000/60 ms interval
+// and calls the callbacks in the order they were requested, so a frame
+// requested here runs after every frame the component requested earlier.
+function nextAnimationFrame(window: JSDOM['window']): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
+}
+
 test('renders blank dendrometer calibration inputs when saved values are null', () => {
   const html = renderToStaticMarkup(
     React.createElement(DraginoDendroCalibrationSection, {
@@ -200,24 +237,27 @@ test('treats aria-hidden="false" as focusable but excludes aria-hidden="true"', 
   assert.deepEqual(ids, ['visible']);
 });
 
-test('warns before switching temperature-enabled devices away from MOD1', async () => {
+const DOM_GLOBALS = [
+  'window',
+  'document',
+  'HTMLElement',
+  'KeyboardEvent',
+  'Node',
+  'requestAnimationFrame',
+  'cancelAnimationFrame',
+  'IS_REACT_ACT_ENVIRONMENT',
+] as const;
+
+// Creates a visual jsdom page with an opener button and a React root, makes
+// it the global DOM for React, and returns a function that puts the previous
+// globals back and closes the page.
+function installModalDom(): { dom: JSDOM; restore: () => void } {
   const dom = new JSDOM(
     '<!doctype html><html><body><button id="opener">Open</button><div id="root"></div></body></html>',
     { url: 'http://localhost/', pretendToBeVisual: true },
   );
-  const runtimeGlobals = globalThis as Record<string, unknown> & {
-    IS_REACT_ACT_ENVIRONMENT?: boolean;
-  };
-
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-  const previousHTMLElement = globalThis.HTMLElement;
-  const previousKeyboardEvent = globalThis.KeyboardEvent;
-  const previousNode = globalThis.Node;
-  const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
-  const previousCancelAnimationFrame = globalThis.cancelAnimationFrame;
-  const previousActEnvironment = runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
-  const previousSetMode = lsn50API.setMode;
+  const runtimeGlobals = globalThis as Record<string, unknown>;
+  const previous = DOM_GLOBALS.map((key) => [key, runtimeGlobals[key]] as const);
 
   Object.assign(runtimeGlobals, {
     window: dom.window,
@@ -227,8 +267,35 @@ test('warns before switching temperature-enabled devices away from MOD1', async 
     Node: dom.window.Node,
     requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0) as unknown as number,
     cancelAnimationFrame: (id: number) => clearTimeout(id),
+    IS_REACT_ACT_ENVIRONMENT: true,
   });
-  runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = true;
+
+  return {
+    dom,
+    restore: () => {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete runtimeGlobals[key];
+        else runtimeGlobals[key] = value;
+      }
+      dom.window.close();
+    },
+  };
+}
+
+function renderModal(root: ReturnType<typeof createRoot>, device: Device): void {
+  root.render(
+    React.createElement(DraginoSettingsModal, {
+      device,
+      dendroNeedsCalibration: false,
+      onUpdate: () => {},
+      onClose: () => {},
+    }),
+  );
+}
+
+test('warns before switching temperature-enabled devices away from MOD1', async () => {
+  const { dom, restore } = installModalDom();
+  const previousSetMode = lsn50API.setMode;
 
   let confirmCalls = 0;
   let setModeCalls = 0;
@@ -251,18 +318,11 @@ test('warns before switching temperature-enabled devices away from MOD1', async 
       },
       { lsn50_mode_label: 'MOD1' },
     );
-    const container = dom.window.document.getElementById('root') as HTMLDivElement;
-    root = createRoot(container);
+    const reactRoot = createRoot(dom.window.document.getElementById('root') as HTMLDivElement);
+    root = reactRoot;
 
     await act(async () => {
-      root.render(
-        React.createElement(DraginoSettingsModal, {
-          device,
-          dendroNeedsCalibration: false,
-          onUpdate: () => {},
-          onClose: () => {},
-        }),
-      );
+      renderModal(reactRoot, device);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
@@ -284,121 +344,118 @@ test('warns before switching temperature-enabled devices away from MOD1', async 
     assert.equal(confirmCalls, 1);
     assert.equal(setModeCalls, 0);
   } finally {
-    if (root) {
-      act(() => root.unmount());
+    const mounted = root;
+    if (mounted) {
+      act(() => mounted.unmount());
     }
     lsn50API.setMode = previousSetMode;
-    if (previousWindow) runtimeGlobals.window = previousWindow;
-    else delete runtimeGlobals.window;
-    if (previousDocument) runtimeGlobals.document = previousDocument;
-    else delete runtimeGlobals.document;
-    if (previousHTMLElement) runtimeGlobals.HTMLElement = previousHTMLElement;
-    else delete runtimeGlobals.HTMLElement;
-    if (previousKeyboardEvent) runtimeGlobals.KeyboardEvent = previousKeyboardEvent;
-    else delete runtimeGlobals.KeyboardEvent;
-    if (previousNode) runtimeGlobals.Node = previousNode;
-    else delete runtimeGlobals.Node;
-    if (previousRequestAnimationFrame) runtimeGlobals.requestAnimationFrame = previousRequestAnimationFrame;
-    else delete runtimeGlobals.requestAnimationFrame;
-    if (previousCancelAnimationFrame) runtimeGlobals.cancelAnimationFrame = previousCancelAnimationFrame;
-    else delete runtimeGlobals.cancelAnimationFrame;
-    if (previousActEnvironment === undefined) delete runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
-    else runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
-    dom.window.close();
+    restore();
   }
 });
 
 test('keeps focus inside the modal when the parent rerenders with a new onClose callback', async () => {
-  const dom = new JSDOM(
-    '<!doctype html><html><body><button id="opener">Open</button><div id="root"></div></body></html>',
-    { url: 'http://localhost/', pretendToBeVisual: true },
-  );
-  const runtimeGlobals = globalThis as Record<string, unknown> & {
-    IS_REACT_ACT_ENVIRONMENT?: boolean;
-  };
-
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-  const previousHTMLElement = globalThis.HTMLElement;
-  const previousKeyboardEvent = globalThis.KeyboardEvent;
-  const previousNode = globalThis.Node;
-  const previousRequestAnimationFrame = globalThis.requestAnimationFrame;
-  const previousCancelAnimationFrame = globalThis.cancelAnimationFrame;
-  const previousConfirm = globalThis.window?.confirm;
-  const previousActEnvironment = runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
-
-  Object.assign(runtimeGlobals, {
-    window: dom.window,
-    document: dom.window.document,
-    HTMLElement: dom.window.HTMLElement,
-    KeyboardEvent: dom.window.KeyboardEvent,
-    Node: dom.window.Node,
-    requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0) as unknown as number,
-    cancelAnimationFrame: (id: number) => clearTimeout(id),
-  });
-  runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = true;
+  const { dom, restore } = installModalDom();
+  const doc = dom.window.document;
   dom.window.confirm = () => true;
 
   let root: ReturnType<typeof createRoot> | null = null;
   try {
     const device = buildDevice();
-    const opener = dom.window.document.getElementById('opener') as HTMLButtonElement;
-    const container = dom.window.document.getElementById('root') as HTMLDivElement;
-    root = createRoot(container);
+    const opener = doc.getElementById('opener') as HTMLButtonElement;
+    const reactRoot = createRoot(doc.getElementById('root') as HTMLDivElement);
+    root = reactRoot;
 
     opener.focus();
 
     await act(async () => {
-      root.render(
-        React.createElement(DraginoSettingsModal, {
-          device,
-          dendroNeedsCalibration: false,
-          onUpdate: () => {},
-          onClose: () => {},
-        }),
-      );
+      renderModal(reactRoot, device);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const modeSelect = dom.window.document.getElementById(`lsn50-mode-${device.deveui}`) as HTMLSelectElement;
-    modeSelect.focus();
-    assert.equal(dom.window.document.activeElement, modeSelect);
+    const closeButton = Array.from(doc.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === 'Close') as HTMLButtonElement | undefined;
+    assert.ok(closeButton);
 
+    // The modal moves focus to its close button one animation frame after it
+    // opens. Let that frame run before the user moves focus; otherwise it can
+    // land after the move and take focus back, which happened whenever the
+    // test ran slowly (#393).
     await act(async () => {
-      root.render(
-        React.createElement(DraginoSettingsModal, {
-          device,
-          dendroNeedsCalibration: false,
-          onUpdate: () => {},
-          onClose: () => {},
-        }),
-      );
+      await nextAnimationFrame(dom.window);
+    });
+    assertFocused(doc, closeButton, 'after the opening frame');
+
+    const modeSelect = doc.getElementById(`lsn50-mode-${device.deveui}`) as HTMLSelectElement;
+    modeSelect.focus();
+    assertFocused(doc, modeSelect, 'after focusing the mode select');
+
+    // A new onClose callback on every render, as a parent that does not
+    // memoise it would pass.
+    await act(async () => {
+      renderModal(reactRoot, device);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    // If the rerender ran the focus effect again, its cleanup would return
+    // focus to the opener at once and its new frame would move it to the
+    // close button; wait for that frame so either shows here.
+    await act(async () => {
+      await nextAnimationFrame(dom.window);
+    });
 
-    assert.equal(dom.window.document.activeElement, modeSelect);
-    assert.notEqual(dom.window.document.activeElement, opener);
+    assertFocused(doc, modeSelect, 'after the parent rerendered');
+    assertNotFocused(doc, opener, 'after the parent rerendered');
   } finally {
-    if (root) {
-      act(() => root.unmount());
+    const mounted = root;
+    if (mounted) {
+      act(() => mounted.unmount());
     }
-    if (previousWindow) runtimeGlobals.window = previousWindow;
-    else delete runtimeGlobals.window;
-    if (previousDocument) runtimeGlobals.document = previousDocument;
-    else delete runtimeGlobals.document;
-    if (previousHTMLElement) runtimeGlobals.HTMLElement = previousHTMLElement;
-    else delete runtimeGlobals.HTMLElement;
-    if (previousKeyboardEvent) runtimeGlobals.KeyboardEvent = previousKeyboardEvent;
-    else delete runtimeGlobals.KeyboardEvent;
-    if (previousNode) runtimeGlobals.Node = previousNode;
-    else delete runtimeGlobals.Node;
-    if (previousRequestAnimationFrame) runtimeGlobals.requestAnimationFrame = previousRequestAnimationFrame;
-    else delete runtimeGlobals.requestAnimationFrame;
-    if (previousCancelAnimationFrame) runtimeGlobals.cancelAnimationFrame = previousCancelAnimationFrame;
-    else delete runtimeGlobals.cancelAnimationFrame;
-    if (previousActEnvironment === undefined) delete runtimeGlobals.IS_REACT_ACT_ENVIRONMENT;
-    else runtimeGlobals.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
-    if (previousConfirm && globalThis.window) globalThis.window.confirm = previousConfirm;
-    dom.window.close();
+    restore();
+  }
+});
+
+test('a focus mismatch inside the rendered modal fails at once with a short message', async () => {
+  // assert.equal(doc.activeElement, modeSelect) with the close button focused
+  // is the check that hung in #393: building its message never finished and
+  // the process grew past 3 GB within seconds. assertFocused must fail fast.
+  const { dom, restore } = installModalDom();
+  const doc = dom.window.document;
+
+  let root: ReturnType<typeof createRoot> | null = null;
+  try {
+    const device = buildDevice();
+    const reactRoot = createRoot(doc.getElementById('root') as HTMLDivElement);
+    root = reactRoot;
+    await act(async () => {
+      renderModal(reactRoot, device);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await nextAnimationFrame(dom.window);
+    });
+
+    const modeSelect = doc.getElementById(`lsn50-mode-${device.deveui}`) as HTMLSelectElement;
+    assert.ok(Object.keys(modeSelect).some((key) => key.startsWith('__reactFiber$')));
+
+    const started = performance.now();
+    let message = '';
+    try {
+      assertFocused(doc, modeSelect, 'probe');
+    } catch (error) {
+      assert.ok(error instanceof assert.AssertionError);
+      message = error.message;
+    }
+    const elapsedMs = performance.now() - started;
+
+    assert.equal(
+      message,
+      `probe: expected focus on <select#lsn50-mode-${device.deveui}>, found it on <button> "Close"`,
+    );
+    assert.ok(elapsedMs < 1000, `the failing check took ${Math.round(elapsedMs)} ms`);
+  } finally {
+    const mounted = root;
+    if (mounted) {
+      act(() => mounted.unmount());
+    }
+    restore();
   }
 });

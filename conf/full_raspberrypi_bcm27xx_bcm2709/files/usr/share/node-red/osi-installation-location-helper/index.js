@@ -13,6 +13,15 @@ function requiredUuid(value, name) {
   return result;
 }
 
+// A gateway-local actor may also be 32 lower-case hex digits (users.user_uuid of
+// the first admin and backfilled users); that form is kept unchanged.
+const LOCAL_HEX_USER_UUID = /^[0-9a-f]{32}$/;
+
+function actorUuid(value, name) {
+  if (typeof value === 'string' && LOCAL_HEX_USER_UUID.test(value)) return value;
+  return requiredUuid(value, name);
+}
+
 function requiredEui(value, name) {
   const result = text(value).toUpperCase();
   if (!EUI.test(result)) throw new Error(name + ' must be an uppercase 16-hex DevEUI');
@@ -46,7 +55,7 @@ function validateCommon(input, now) {
     revisionUuid, deviceEui, installationUuid,
     gatewayEui: requiredEui(input.gatewayEui, 'gatewayEui'),
     baseRevisionUuid: input.baseRevisionUuid == null || text(input.baseRevisionUuid) === '' ? null : requiredUuid(input.baseRevisionUuid, 'baseRevisionUuid'),
-    actorUserUuid: input.actorUserUuid == null || text(input.actorUserUuid) === '' ? null : requiredUuid(input.actorUserUuid, 'actorUserUuid'),
+    actorUserUuid: input.actorUserUuid == null || text(input.actorUserUuid) === '' ? null : actorUuid(input.actorUserUuid, 'actorUserUuid'),
     revisionNo: 0, effectiveFrom, recordedAt,
     now: timestamp(now, 'now')
   };

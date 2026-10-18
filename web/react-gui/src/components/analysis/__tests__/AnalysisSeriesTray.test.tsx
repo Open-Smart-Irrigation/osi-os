@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({
@@ -14,7 +15,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { AnalysisSeriesTray } from '../AnalysisSeriesTray';
-import type { AnalysisCatalogEntry } from '../../../analysis/types';
+import type { AnalysisCatalogEntry, DeviceSource } from '../../../analysis/types';
 
 const channels: AnalysisCatalogEntry[] = [
   { seriesId: 's1', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
@@ -24,6 +25,47 @@ const channels: AnalysisCatalogEntry[] = [
 afterEach(cleanup);
 
 describe('AnalysisSeriesTray', () => {
+  it('renders a source with no chart channels and keeps same-name devices separate', () => {
+    const sources = [
+      { id: 'device-rain-1', hubEui: 'HUB-1', zoneId: null, zoneName: null, name: 'Rain gauge', typeId: 'AQUASCOPE_LORAIN', channelIds: ['rain-1'], presentation: 'timeseries', destination: null, limitation: null },
+      { id: 'device-rain-2', hubEui: 'HUB-1', zoneId: null, zoneName: null, name: 'Rain gauge', typeId: 'AQUASCOPE_LORAIN', channelIds: [], presentation: 'specialized', destination: null, limitation: null },
+    ];
+    const sourceOnlyChannels: AnalysisCatalogEntry[] = [{
+      ...channels[0]!, seriesId: 'rain-1', zoneId: null, zoneName: null, deviceName: 'Rain gauge', deviceSourceId: 'device-rain-1',
+    }];
+    render(<AnalysisSeriesTray channels={sourceOnlyChannels} sources={sources as DeviceSource[]} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.getAllByText('Rain gauge')).toHaveLength(2);
+    expect(screen.getByText('analysis.tray.unassigned')).toBeInTheDocument();
+    expect(screen.getByText('analysis.tray.emptySource')).toBeInTheDocument();
+  });
+
+  it('only links a specialized RAK source when the network module is enabled', () => {
+    const source: DeviceSource = {
+      id: 'device-rak', hubEui: 'HUB-1', zoneId: null, zoneName: null, name: 'Coverage tester', typeId: 'RAK10701_FIELD_TESTER', channelIds: [], presentation: 'specialized', destination: 'network', limitation: null,
+    };
+    const view = render(<MemoryRouter><AnalysisSeriesTray channels={[]} sources={[source]} gatewayModules={{ data: true, network: true, gatewayHub: true, journal: true }} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: 'analysis.tray.openNetwork' })).toHaveAttribute('href', '/network');
+    view.rerender(<MemoryRouter><AnalysisSeriesTray channels={[]} sources={[source]} gatewayModules={{ data: true, network: false, gatewayHub: true, journal: true }} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    expect(screen.queryByRole('link', { name: 'analysis.tray.openNetwork' })).not.toBeInTheDocument();
+    expect(screen.getByText('analysis.tray.networkDisabled')).toBeInTheDocument();
+    view.rerender(<MemoryRouter><AnalysisSeriesTray channels={[]} sources={[source]} gatewayModules={null} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText('analysis.tray.networkLoading')).toBeInTheDocument();
+  });
+
+  it('keeps other-supported channels selectable under a collapsed explanation', () => {
+    const channel: AnalysisCatalogEntry = {
+      ...channels[0]!, seriesId: 'historical-swt', deviceName: 'Kiwi', deviceSourceId: 'device-kiwi',
+      configurationState: 'other_supported', displayName: 'Kiwi - SWT 3', channelKey: 'swt_3',
+    };
+    const onAdd = vi.fn();
+    render(<AnalysisSeriesTray channels={[channel]} sources={[{ id: 'device-kiwi', hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', name: 'Kiwi', typeId: 'KIWI_SENSOR', channelIds: ['historical-swt'], presentation: 'timeseries', destination: null, limitation: null }]} selectedIds={[]} onAdd={onAdd} onRemove={vi.fn()} />);
+    expect(screen.getByText('analysis.tray.otherSupported')).toBeInTheDocument();
+    expect(screen.getByText('analysis.tray.otherSupported').closest('details')).not.toHaveAttribute('open');
+    fireEvent.click(screen.getByText('analysis.tray.otherSupported'));
+    fireEvent.click(screen.getByRole('button', { name: /SWT 3/ }));
+    expect(onAdd).toHaveBeenCalledWith('historical-swt');
+  });
+
   it('adds an available channel on click and disables unsupported ones', () => {
     const onAdd = vi.fn();
     render(<AnalysisSeriesTray channels={channels} selectedIds={[]} onAdd={onAdd} onRemove={vi.fn()} />);
@@ -213,5 +255,32 @@ describe('AnalysisSeriesTray', () => {
     const provider = screen.getByRole('group', { name: 'Open-Meteo 46.80°N 6.95°E' });
     expect(within(device).getByRole('button', { name: /Air temperature/ })).toBeInTheDocument();
     expect(within(provider).getByRole('button', { name: /Air temperature/ })).toBeInTheDocument();
+  });
+
+  it('offers a legacy estimate only on request, but always shows one a saved view selected', () => {
+    const base = { hubEui: 'HUB-1', zoneId: 1, zoneName: 'North', cardType: 'environment', sourceKey: 'environment-src-1', availability: 'available' as const, deviceName: 'Gauge', depthCm: null, sourceKind: 'device', deviceSourceId: 'device-gauge' };
+    const rain: AnalysisCatalogEntry[] = [
+      { ...base, seriesId: 'amount', channelKey: 'rain_mm_delta', displayName: 'Gauge - Rainfall amount', unit: 'mm', legacy: false },
+      { ...base, seriesId: 'rate', channelKey: 'rain_mm_per_hour', displayName: 'Gauge - Rain rate', unit: 'mm/h', legacy: true },
+      { ...base, seriesId: 'ten', channelKey: 'rain_mm_per_10min', displayName: 'Gauge - Rain (10 min)', unit: 'mm/10min', legacy: true },
+    ];
+    const view = render(<AnalysisSeriesTray channels={rain} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.getByText('Rainfall amount')).toBeInTheDocument();
+    expect(screen.queryByText(/Rain rate/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Rain \(10 min\)/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'analysis.tray.showLegacy' }));
+    expect(screen.getByText('Rain rate (analysis.legacyEstimate)')).toBeInTheDocument();
+    expect(screen.getByText('Rain (10 min) (analysis.legacyEstimate)')).toBeInTheDocument();
+
+    view.unmount();
+    render(<AnalysisSeriesTray channels={rain} selectedIds={['rate']} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /Rain rate \(analysis.legacyEstimate\)/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText(/Rain \(10 min\)/)).not.toBeInTheDocument();
+  });
+
+  it('shows no legacy switch when the catalogue has no legacy entry', () => {
+    render(<AnalysisSeriesTray channels={channels} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
+    expect(screen.queryByRole('checkbox', { name: 'analysis.tray.showLegacy' })).not.toBeInTheDocument();
   });
 });

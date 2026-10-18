@@ -782,6 +782,30 @@ test('rain context selects one deterministic source and excludes invalid and dup
   assert.equal(rain.reason, null);
 });
 
+test('a zone\'s selected rain gauge is the journal\'s direct rain source', async () => {
+  await db.run(
+    'INSERT INTO zone_rain_source(zone_id,selected_deveui,selected_at,updated_at) VALUES (?,?,?,?)',
+    [1, SECOND_RAIN_DEVICE_EUI, '2026-07-12T00:00:00.000Z', '2026-07-12T00:00:00.000Z']
+  );
+  for (const sample of [
+    [RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 7, 'ok'],
+    [SECOND_RAIN_DEVICE_EUI, '2026-07-12T07:15:00.000Z', 9, 'ok'],
+  ]) {
+    await db.run(
+      'INSERT INTO device_data(deveui,recorded_at,rain_mm_delta,rain_delta_status) ' +
+      'VALUES (?,?,?,?)',
+      sample
+    );
+  }
+
+  await journal.finalize(db, catalog, validEntry(), principal());
+  const rain = (await storedContext()).channels.rain_24h;
+
+  assert.equal(rain.value, 9);
+  assert.equal(rain.source_device, SECOND_RAIN_DEVICE_EUI);
+  assert.equal(rain.sample_count, 1);
+});
+
 test('a selected subject rain device takes precedence over other direct gauges', async () => {
   await db.run(
     'UPDATE devices SET rain_gauge_enabled=1 WHERE deveui=?',

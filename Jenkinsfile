@@ -179,7 +179,7 @@ EOF
 
                     # Install dependencies
                     echo "Installing dependencies..."
-                    npm install
+                    npm ci
 
                     # Build the React application
                     echo "Building React application..."

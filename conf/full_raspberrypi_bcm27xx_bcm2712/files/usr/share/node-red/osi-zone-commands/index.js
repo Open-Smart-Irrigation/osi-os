@@ -81,6 +81,16 @@ function uuid(value, field) {
   return normalized;
 }
 
+// ownerUserUuid is the zone owner's gateway-local users.user_uuid as stored.
+// The first admin and backfilled users hold 32 lower-case hex digits; that form
+// is accepted and compared unchanged.
+const LOCAL_HEX_USER_UUID = /^[0-9a-f]{32}$/;
+
+function ownerUuid(value, field) {
+  if (typeof value === 'string' && LOCAL_HEX_USER_UUID.test(value)) return value;
+  return uuid(value, field);
+}
+
 function eui(value, field) {
   const normalized = text(value, field, 16).toUpperCase();
   if (!EUI64.test(normalized)) {
@@ -186,7 +196,7 @@ function validate(envelope, runtime) {
     zoneUuid,
     gateway: runtimeGateway,
     payloadGateway,
-    ownerUserUuid: uuid(payload.ownerUserUuid, 'payload.ownerUserUuid'),
+    ownerUserUuid: ownerUuid(payload.ownerUserUuid, 'payload.ownerUserUuid'),
     base,
     target,
     effectKey,

@@ -752,3 +752,129 @@ test('a preflight conflict recorded without a binding is not effect-key evidence
   assert.equal(applied.ack.result, 'APPLIED', JSON.stringify(applied.ack));
   assert.deepEqual(deviceRow(raw), { chameleon_enabled: 1, sync_version: base + 1 });
 });
+
+// Gateways give their first admin and every backfilled user a users.user_uuid
+// of 32 lower-case hex digits (lower(hex(randomblob(16))) in the users insert
+// trigger and the scoped-access backfill); only users created through the
+// admin account route carry the hyphenated form. The cloud passes that value
+// through unchanged as actor_user_uuid, and the lookup is an exact match, so
+// both forms must be accepted and neither may be rewritten.
+const HEX_OWNER = '0123456789abcdef0123456789abcdef';
+const HEX_UNKNOWN = 'fedcba9876543210fedcba9876543210';
+const HEX_DISABLED = '00112233445566778899aabbccddeeff';
+
+function hexOwnerFixture(t) {
+  const state = fixture(t);
+  state.raw.prepare('UPDATE users SET user_uuid=? WHERE id=1').run(HEX_OWNER);
+  state.raw.prepare(
+    'INSERT INTO users(id,username,password_hash,created_at,updated_at,user_uuid,role,disabled_at) VALUES(6,?,?,?,?,?,?,?)'
+  ).run('disabled-hex', 'hash', NOW, NOW, HEX_DISABLED, 'admin', NOW);
+  return state;
+}
+
+function protectedAt(state, id, type, actor) {
+  const values = {
+    SET_WATERMARK_CALIBRATION: CAL,
+    DELETE_WATERMARK_CALIBRATION: undefined,
+    SET_CHAMELEON_CONFIG: { chameleon_enabled: true },
+    UPSERT_DEVICE_SOIL_DEPTHS: { soil_moisture_probe_depths_json: { swt_1: 20 }, soil_moisture_probe_depths_configured: true },
+  }[type];
+  const base = type === 'SET_WATERMARK_CALIBRATION' ? 0
+    : type === 'DELETE_WATERMARK_CALIBRATION'
+      ? state.raw.prepare('SELECT sync_version FROM watermark_calibrations WHERE deveui=?').get(DEVICE).sync_version
+      : deviceRow(state.raw).sync_version;
+  return envelope(id, type, values, {
+    payload: { actor_user_uuid: actor, base_sync_version: base, effect_key: commands.expectedEffect(type, GATEWAY, DEVICE, base) },
+  });
+}
+
+function protectedState(raw) {
+  const cal = raw.prepare('SELECT sync_version,deleted_at FROM watermark_calibrations WHERE deveui=?').get(DEVICE);
+  const dev = raw.prepare('SELECT chameleon_enabled,soil_moisture_probe_depths_json,sync_version FROM devices WHERE deveui=?').get(DEVICE);
+  return { cal: cal ? { ...cal } : null, dev: { ...dev } };
+}
+
+const PROTECTED_TYPES = ['SET_WATERMARK_CALIBRATION', 'DELETE_WATERMARK_CALIBRATION', 'SET_CHAMELEON_CONFIG', 'UPSERT_DEVICE_SOIL_DEPTHS'];
+
+test('a 32-hex gateway-local actor is applied, ledgered, acknowledged and replayed for every protected type', async (t) => {
+  let id = 900;
+  for (const scopedMode of [true, false]) {
+    for (const type of PROTECTED_TYPES) {
+      const label = `${type} scoped=${scopedMode}`;
+      const state = hexOwnerFixture(t);
+      if (type === 'DELETE_WATERMARK_CALIBRATION') await seedCalibration(state);
+      const command = protectedAt(state, id++, type, HEX_OWNER);
+      const result = await commands.applyWatermarkCommand(state.db, command, runtime({ scopedMode }));
+      assert.equal(result.ack.result, 'APPLIED', `${label}: ${JSON.stringify(result.ack)}`);
+      assert.equal(result.ack.duplicate, false, label);
+      const row = state.raw.prepare('SELECT * FROM applied_commands WHERE command_id=?').get(String(command.commandId));
+      assert.equal(row.result, 'APPLIED', label);
+      assert.equal(row.actor_user_uuid, HEX_OWNER, `${label}: the actor is stored unchanged`);
+      assert.equal(row.binding_hash, bindingCanonicalization.sha256({
+        command_type: type,
+        resource: type.includes('WATERMARK') ? 'WATERMARK_CALIBRATION' : 'DEVICE',
+        device_eui: DEVICE,
+        gateway_device_eui: GATEWAY,
+        actor_user_uuid: HEX_OWNER,
+        base_sync_version: command.payload.base_sync_version,
+        operation: command.payload.operation,
+        normalized_intent: command.payload.values === undefined ? {} : command.payload.values,
+      }), `${label}: the binding hash covers the unchanged actor`);
+      const outbox = state.raw.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get(String(command.commandId));
+      assert.ok(outbox, `${label}: acknowledgement queued`);
+      assert.equal(JSON.parse(outbox.payload_json).result, 'APPLIED', label);
+      const applied = protectedState(state.raw);
+
+      const replay = await commands.applyWatermarkCommand(state.db, command, runtime({ scopedMode }));
+      assert.deepEqual(replay.ack, result.ack, `${label}: exact redelivery returns the stored result`);
+      assert.deepEqual(protectedState(state.raw), applied, `${label}: redelivery does not mutate`);
+      assert.equal(state.raw.prepare('SELECT COUNT(*) AS n FROM applied_commands').get().n, 1, label);
+    }
+  }
+});
+
+test('an unknown or disabled 32-hex actor is refused as actor_missing_or_disabled without mutation', async (t) => {
+  let id = 940;
+  for (const actor of [HEX_UNKNOWN, HEX_DISABLED]) {
+    for (const type of PROTECTED_TYPES) {
+      const label = `${type} ${actor === HEX_UNKNOWN ? 'unknown' : 'disabled'}`;
+      const state = hexOwnerFixture(t);
+      if (type === 'DELETE_WATERMARK_CALIBRATION') await seedCalibration(state);
+      const before = protectedState(state.raw);
+      const result = await commands.applyWatermarkCommand(state.db, protectedAt(state, id++, type, actor), runtime());
+      assert.equal(result.ack.result, 'REJECTED_PERMANENT', label);
+      assert.equal(result.ack.reason, 'actor_missing_or_disabled', label);
+      assert.deepEqual(protectedState(state.raw), before, label);
+    }
+  }
+});
+
+test('the hyphenated actor form is unchanged and stored as sent', async (t) => {
+  const state = fixture(t);
+  const command = protectedAt(state, 960, 'SET_CHAMELEON_CONFIG', OWNER);
+  const result = await commands.applyWatermarkCommand(state.db, command, runtime());
+  assert.equal(result.ack.result, 'APPLIED', JSON.stringify(result.ack));
+  assert.equal(state.raw.prepare('SELECT actor_user_uuid FROM applied_commands WHERE command_id=?').get('960').actor_user_uuid, OWNER);
+});
+
+test('a malformed actor id is refused as malformed in both forms', async (t) => {
+  const malformed = [
+    ['31 hex digits', HEX_OWNER.slice(1)],
+    ['33 hex digits', HEX_OWNER + '0'],
+    ['upper-case 32 hex digits', HEX_OWNER.toUpperCase()],
+    ['upper-case hyphenated', OWNER.toUpperCase().replace(/2/g, 'A')],
+    ['non-hex 32 characters', 'g'.repeat(32)],
+    ['32 hex digits with one hyphen', HEX_OWNER.slice(0, 8) + '-' + HEX_OWNER.slice(8)],
+    ['hyphens in the wrong places', '0123456789ab-cdef-0123-4567-89abcdef'],
+    ['surrounding whitespace', ' ' + HEX_OWNER],
+  ];
+  let id = 970;
+  for (const [label, actor] of malformed) {
+    const state = hexOwnerFixture(t);
+    const before = protectedState(state.raw);
+    const result = await commands.applyWatermarkCommand(state.db, protectedAt(state, id++, 'SET_CHAMELEON_CONFIG', actor), runtime());
+    assert.equal(result.ack.result, 'REJECTED_PERMANENT', label);
+    assert.equal(result.ack.reason, 'malformed_command', label);
+    assert.deepEqual(protectedState(state.raw), before, label);
+  }
+});

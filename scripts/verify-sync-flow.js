@@ -12,6 +12,8 @@ const {
 
 const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'flows.json');
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
+const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
+const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
 const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
@@ -295,11 +297,8 @@ const requiredFunctionNodes = [
   'Build LSN50 mode downlink',
   'Process STREGA',
   'Persist STREGA Uplink',
-  'Process S2120',
-  'Aggregate Zone Rain',
-  'Process LoRain',
-  'Build LoRain SQL INSERT',
-  'Aggregate LoRain Zone Rain',
+  'Ingest S2120',
+  'Ingest LoRain',
   'Insert Chameleon Reading',
   'Get Zone Assignments',
   'Auth + Set Zone Assignments',
@@ -683,7 +682,7 @@ function createMockOsiDb(queryHandler) {
       all(sql, params, callback) {
         const cb = typeof params === 'function' ? params : callback;
         Promise.resolve()
-          .then(() => queryHandler(String(sql)))
+          .then(() => queryHandler(String(sql), Array.isArray(params) ? params : undefined))
           .then((rows) => cb(null, rows || []))
           .catch((error) => cb(error));
       }
@@ -1414,6 +1413,28 @@ if (bootstrapNode) {
     }
   }
 }
+// Zone-day rain quality: the bootstrap and force-sync zoneEnvironments SELECTs name
+// the five quality columns, and the reasons travel as a parsed JSON array.
+for (const id of ['sync-bootstrap-build', 'sync-force-build']) {
+  const node = flows.find((entry) => entry.id === id);
+  const func = String(node?.func || '');
+  const start = func.indexOf('const zoneEnvironments = await q([');
+  const end = start >= 0 ? func.indexOf("].join('\\n'));", start) : -1;
+  const query = start >= 0 && end > start ? func.slice(start, end) : '';
+  if (!query) {
+    fail(`${id} zoneEnvironments query not found`);
+    continue;
+  }
+  for (const column of ['sync_version', 'rain_coverage', 'rain_selected_deveui', 'rain_policy_version', 'rain_quality_reasons', 'rain_received_mm']) {
+    if (!query.includes(`'  ze.${column}`)) fail(`${id} zoneEnvironments SELECT missing ze.${column}`);
+    else console.log(`OK ${id} zoneEnvironments SELECT names ze.${column}`);
+  }
+  if (!func.includes('JSON.parse(ze.rain_quality_reasons)') || !func.includes('ze.rain_quality_reasons = null;')) {
+    fail(`${id} zoneEnvironments rain_quality_reasons is not parsed to an array (null on failure)`);
+  } else {
+    console.log(`OK ${id} zoneEnvironments rain_quality_reasons parsed to an array`);
+  }
+}
 
 expectIncludes('Validate & decode token', 'const auth = verifyBearer', 'uses decoded local auth');
 expectIncludes('Validate & decode token', 'function allowPrivateTargets()', 'supports a private-target maintenance override');
@@ -1495,7 +1516,7 @@ expectExcludes('Process Result', "gateway/([0-9A-Fa-f]{16})/event/", 'ad hoc Chi
 expectExcludes('Process Result', "chirpstack-concentratord.@sx1302[0].gateway_id", 'ad hoc concentratord gateway probing during linked login');
 expectExcludes('Process Result', "uci -q get osi-server.cloud.device_eui 2>/dev/null || true", 'ad hoc UCI gateway probing during linked login');
 expectExcludes('Process Result', "/sys/class/net/eth0/address", 'ad hoc MAC-derived gateway probing during linked login');
-expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from either deviceEui or devEui');
+expectIncludes('Route Command', "var valveTargetEui = String(cmd.deviceEui || cmd.device_eui || cmd.devEui || '').trim().toUpperCase();", 'normalizes valve commands from deviceEui, device_eui or devEui');
 expectIncludes('Route Command', 'device: { devEui: valveTargetEui }', 'routes normalized valve commands to the STREGA actuator path');
 expectIncludes('Route Command', "commandType === 'SYNC_LINKED_AUTH'", 'routes linked-auth sync commands through the special command handler');
 expectIncludes('Route Command', "commandType === 'FORCE_EDGE_SYNC'", 'routes force-edge-sync commands through the special command handler');
@@ -1607,6 +1628,22 @@ for (const triggerName of [
   expectFileIncludes('seed-blank.sql', seedSqlSource, triggerName, `defines ${triggerName}`);
   expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
   expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, "WHERE peer_node = 'cloud' AND linked = 1", 'cloud link gate');
+}
+// Zone-day rain quality (migration 0073, docs/contracts/rainfall/zone-day-projection.md):
+// both zone-environment outbox triggers carry the five keys, null on a row
+// without a rain policy version, the reasons as a JSON array.
+for (const triggerName of ['trg_dp_zone_env_outbox_ai', 'trg_dp_zone_env_outbox_au']) {
+  for (const [needle, description] of [
+    ["'rain_coverage', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_coverage END", 'rain_coverage payload key'],
+    ["'rain_selected_deveui', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_selected_deveui END", 'rain_selected_deveui payload key'],
+    ["'rain_policy_version', NEW.rain_policy_version", 'rain_policy_version payload key'],
+    ["'rain_quality_reasons', json(CASE WHEN NEW.rain_policy_version IS NOT NULL AND json_valid(NEW.rain_quality_reasons) AND json_type(NEW.rain_quality_reasons) = 'array' THEN NEW.rain_quality_reasons END)", 'rain_quality_reasons as a JSON array'],
+    ["'rain_received_mm', CASE WHEN NEW.rain_policy_version IS NOT NULL THEN NEW.rain_received_mm END", 'rain_received_mm payload key'],
+    ["'contract_version', 1", 'contract_version 1'],
+  ]) {
+    expectTriggerIncludes('seed-blank.sql', seedSqlSource, triggerName, needle, description);
+    expectTriggerIncludes('Sync Init Schema + Triggers', syncInitSource, triggerName, needle, description);
+  }
 }
 for (const triggerName of [
   'trg_sync_device_data_dirty_au',
@@ -2384,7 +2421,7 @@ expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'minTempC: day.
 expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'rainProbabilityPct: day.rainProbabilityPct ?? day.precipitationProbabilityPct ?? null', 'returns the frontend daily forecast rain-probability field');
 expectFileIncludes('osi-zone-env/index.js', zoneEnvModuleSource, 'tempC: hour.tempC ?? hour.airTemperatureC ?? null', 'returns the frontend hourly forecast temperature field');
 expectIncludes('Get Zone Environment Summary', 'areaM2: ZE.toFiniteNumber(zone && zone.area_m2)', 'exposes zone area in water summary');
-expectIncludes('Get Zone Environment Summary', 'sensorHealth: ZE.buildSensorHealth(deviceRows, local)', 'reports water sensor health and warnings');
+expectIncludes('Get Zone Environment Summary', 'const sensorHealth = ZE.buildSensorHealth(deviceRows, local);', 'reports water sensor health and warnings');
 expectIncludes('Build Telemetry', 'lsn50_mode_code: observedModeCode', 'publishes observed LSN50 mode in edge telemetry');
 expectIncludes('Build Telemetry', 'convertHzToKPa(numberOrNull(obj.watermark1_frequency))', 'converts Kiwi watermark frequency telemetry to kPa for cloud mirroring');
 expectIncludes('Build Telemetry', "var isLsn50 = profileKind === 'DRAGINO_LSN50';", 'gates LSN50-only telemetry fields by profile');
@@ -2422,15 +2459,24 @@ expectIncludes('Apply Config', 'd.swt1Kpa = swt.swt1Kpa;', 'stores derived SWT1 
 expectIncludes('Apply Config', 'if (!dendroEnabled)', 'keeps dendrometer enablement as the persistence gate after Chameleon derivation');
 expectExcludes('Apply Config', '} else if (d.isChameleon === true) {', 'the old dedicated Chameleon bypass branch');
 expectIncludes('Apply Config', 'Chameleon flags 0x', 'surfaces Chameleon status in node status text');
-expectIncludes('Apply Config', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
-expectIncludes('Apply Config', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
-expectIncludes('Apply Config', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
-expectIncludes('Apply Config', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
-expectIncludes('Apply Config', 'd.rainMmPerHour = d.counterIntervalSeconds', 'derives a rain rate from the elapsed interval');
-expectIncludes('Apply Config', 'd.flowLitersPerMin = d.counterIntervalSeconds', 'derives a flow rate from the elapsed interval');
-expectIncludes('Apply Config', 'd.rainMmPer10Min = d.counterIntervalSeconds', 'derives normalized rain per 10 minutes');
-expectIncludes('Apply Config', 'd.flowLitersPer10Min = d.counterIntervalSeconds', 'derives normalized flow per 10 minutes');
-expectIncludes('Apply Config', 'loadTodayCounterTotals', 'derives running daily rain and flow totals from persisted counters');
+// MOD9 counters (review finding 4): the previous-counter read and the delta derivation moved
+// from Apply Config into LSN50 Normalize + Write, inside the transaction that inserts the row.
+// Behaviour: scripts/test-lsn50-counter-concurrency.js.
+expectIncludes('LSN50 Normalize + Write', 'loadPreviousMod9Sample', 'loads the last persisted MOD9 sample before computing deltas');
+expectExcludes('Apply Config', 'loadPreviousMod9Sample', 'leaves no MOD9 counter read outside the write transaction');
+expectIncludes('LSN50 Normalize + Write', 'await deriveMod9Counters(t, d)', 'derives MOD9 counters inside the write transaction');
+expectIncludes('LSN50 Normalize + Write', 'var writeResult = await writerRes.value.writeDeviceData(t, edgeManifest, normalizeResult', 'writes the MOD9 row on the same transaction scope');
+expectIncludes('LSN50 Normalize + Write', 'WHERE id = last_insert_rowid()', 'reads the persisted/clamped raw row before any observation insert');
+expectIncludes('LSN50 Normalize + Write', 'await rainRes.value.captureLsn50Observation(t, savedRow)', 'captures LSN50 rain provenance inside the raw transaction');
+expectIncludes('LSN50 Normalize + Write', 'd.rainObservationId = result.rainObservation.id', 'passes the linked snapshot identifier to zone aggregation');
+expectIncludes('LSN50 Normalize + Write', 'd.counterIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0 ? intervalSeconds : null;', 'computes elapsed seconds between MOD9 uplinks');
+expectIncludes('LSN50 Normalize + Write', "if (currentCount < previousCount) return { deltaCount: null, status: 'counter_reset' };", 'treats counter decreases as resets instead of inflating deltas');
+expectIncludes('LSN50 Normalize + Write', "const duplicateState = futureRecordedAt === d.timestamp ? 'duplicate_timestamp' : 'out_of_order';", 'guards MOD9 deltas against duplicate and out-of-order uplinks');
+expectIncludes('LSN50 Normalize + Write', 'd.rainMmPerHour = d.counterIntervalSeconds', 'derives a rain rate from the elapsed interval');
+expectIncludes('LSN50 Normalize + Write', 'd.flowLitersPerMin = d.counterIntervalSeconds', 'derives a flow rate from the elapsed interval');
+expectIncludes('LSN50 Normalize + Write', 'd.rainMmPer10Min = d.counterIntervalSeconds', 'derives normalized rain per 10 minutes');
+expectIncludes('LSN50 Normalize + Write', 'd.flowLitersPer10Min = d.counterIntervalSeconds', 'derives normalized flow per 10 minutes');
+expectIncludes('LSN50 Normalize + Write', 'loadTodayCounterTotals', 'derives running daily rain and flow totals from persisted counters');
 expectIncludes('Apply Config', 'const derived = dendro.buildDendroDerivedMetrics({', 'uses the shared dual-path dendrometer conversion helper');
 expectIncludes('Apply Config', 'd.dendroModeUsed = derived.dendroModeUsed;', 'stores which dendrometer conversion path was applied');
 expectIncludes('Apply Config', 'd.dendroRatio = derived.dendroRatio;', 'stores the derived dendrometer ratio');
@@ -2498,9 +2544,19 @@ expectIncludesById('460e0bfd95f89e67', 'device-writer', 'loads device-writer via
 expectIncludesById('460e0bfd95f89e67', 'edge-channels.json', 'reads edge manifest for column mapping');
 expectLibById('460e0bfd95f89e67', 'osiDb', 'osi-db-helper', 'opens the local database for LSN50 writes');
 expectLibById('460e0bfd95f89e67', 'osiLib', 'osi-lib', 'loads normalizer and writer via quarantine-safe loader');
-expectIncludesById('lsn50-zone-agg-fn', "localDateIso(d.timestamp || computedAt", 'bins MOD9 zone totals by uplink timestamp instead of processing time');
-expectIncludesById('lsn50-zone-agg-fn', "d.rainDeltaStatus === 'ok'", 'only aggregates valid rain deltas into zone totals');
-expectIncludesById('lsn50-zone-agg-fn', "d.flowDeltaStatus === 'ok'", 'only aggregates valid flow deltas into zone totals');
+expectIncludesById('lsn50-zone-agg-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib for the zone-day projection');
+expectIncludesById('lsn50-zone-agg-fn', 'await db.transaction(async (t) => rainLoad.value.aggregateLsn50ZoneDay(t, d))', 'delegates snapshot-based rain aggregation inside the helper transaction');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function captureLsn50Observation(t, row)', 'captures MOD9 zone provenance at raw-write time');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function aggregateLsn50ZoneDay(t, d)', 'keeps LSN50 rain and flow projection in the transaction helper');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'async function recomputeLsn50PreviousDay(t, deveui, currentObservationId)', 'closes prior days from captured zone snapshots');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'config.rain_gauge_enabled === true', 'does not retroactively enable captured non-gauge frames');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'accepted', amountMm: Number(d.rainMmDelta)", 'writes captured rain through the zone-day projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "trigger: 'flow', flowLitersDelta: flowDelta", 'keeps flow arithmetic on the current owner');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const rainOk = d.rainDeltaStatus === 'ok' && d.rainMmDelta != null && Number(d.rainMmDelta) >= 0", 'only aggregates valid rain deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, "const flowAvailable = d.flowDeltaStatus === 'ok' && d.flowLitersDelta != null", 'only aggregates valid flow deltas into zone totals');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'const acceptedRain = rainOk && observation && observation.status === \'accepted\' && config.rain_gauge_enabled === true', 'requires an accepted enabled rain observation before zone rain projection');
+expectFileIncludes('osi-rain/index.js', rainHelperSource, 'if (zone && flowAvailable && !flowZones.has(Number(zone.zone_id)))', 'requires a valid flow delta before current-owner flow projection');
+expectLibById('lsn50-zone-agg-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
 expectIncludesById('format-devices', 'dd.lsn50_mode_code', 'returns observed LSN50 mode in GET /api/devices');
 expectIncludesById('format-devices', 'dd.adc_ch1v', 'returns dendrometer CH1 voltage in GET /api/devices');
 expectIncludesById('format-devices', 'dd.dendro_ratio', 'returns dendrometer ratio in GET /api/devices');
@@ -2608,25 +2664,55 @@ expectIncludesById('merge-device-data', 'wind_gust_mps: latest.wind_gust_mps', '
 expectIncludesById('merge-device-data', 'uv_index: latest.uv_index', 'merges S2120 UV into GET /api/devices');
 expectIncludesById('merge-device-data', 'rain_gauge_cumulative_mm: latest.rain_gauge_cumulative_mm', 'merges S2120 cumulative rain into GET /api/devices');
 expectIncludesById('merge-device-data', 'bat_pct: latest.bat_pct', 'merges S2120 battery into GET /api/devices');
-expectIncludesById('s2120-process-fn', 'data.object?.messages', 'accepts live decoded S2120 message shape');
-expectIncludesById('s2120-process-fn', 'data.object?.data?.messages', 'accepts nested decoded S2120 message shape');
-expectIncludesById('s2120-process-fn', "normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID');
-expectIncludesById('s2120-process-fn', "measurements['4113']", 'uses the Seeed cumulative-rain measurement ID');
-expectIncludesById('s2120-process-fn', "windGustMps: measurements['4191'] ?? null", "reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)");
-expectIncludesById('s2120-process-fn', "measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field');
-expectIncludesById('s2120-process-fn', 'duplicate_timestamp', 'skips duplicate S2120 rain-counter uplinks');
-expectIncludesById('s2120-process-fn', 'out_of_order', 'skips out-of-order S2120 rain-counter uplinks');
-expectIncludesById('s2120-process-fn', 'counter_reset', 'detects S2120 rain-counter resets');
-expectIncludesById('s2120-process-fn', 'invalid_interval', 'skips S2120 rain deltas when the interval is invalid');
-expectIncludesById('s2120-process-fn', 'rainMmPer10Min', 'computes normalized S2120 rain telemetry per 10 minutes');
-expectIncludesById('s2120-process-fn', 'counterIntervalSeconds', 'stores the elapsed S2120 counter interval in seconds');
-expectIncludesById('s2120-rain-agg-fn', 'SELECT wsz.zone_id', 'prefers explicit S2120 weather station zone assignments');
-expectIncludesById('s2120-rain-agg-fn', 'if (!zones.length)', 'falls back when S2120 weather station zone assignments are absent');
-expectIncludesById('s2120-rain-agg-fn', 'd.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback');
-expectIncludesById('s2120-rain-agg-fn', 'const rainToday = sn(d.rainMmToday != null ? d.rainMmToday : d.rainMmDelta)', 'seeds S2120 zone totals from device daily rain');
-expectIncludesById('s2120-rain-agg-fn', 'MAX(COALESCE(rainfall_mm,0)+${rainDelta}, ${rainToday})', 'keeps S2120 zone totals caught up with device daily rain');
-expectLibById('s2120-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
-expectLibById('s2120-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+// S2120 has one writer (rain correctness programme, review finding 4): s2120-ingest-fn hands
+// the uplink to osi-rain, which reads the previous 4213 counter, derives the increment and
+// writes rain_observations, device_data and the zone days inside one osiDb transaction.
+// Behaviour: scripts/test-s2120-rain-ingest.js, scripts/test-s2120-ingest-concurrency.js.
+for (const removedId of ['s2120-process-fn', 's2120-sql-fn', 's2120-sqlite', 's2120-rain-agg-fn']) {
+  expectCondition(!findNodeById(removedId), `S2120 second writer path ${removedId} is gone`, `S2120 second writer path ${removedId} is still present`);
+}
+expectCondition(JSON.stringify((findNodeById('s2120-mqtt-in') || {}).wires) === JSON.stringify([['s2120-ingest-fn']]),
+  'S2120 MQTT input feeds only s2120-ingest-fn', 'S2120 MQTT input must feed only s2120-ingest-fn');
+expectIncludesById('s2120-ingest-fn', "device.type_id !== 'SENSECAP_S2120'", 'opens a write transaction only for S2120 devices');
+expectIncludesById('s2120-ingest-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib');
+expectIncludesById('s2120-ingest-fn', 'db.transaction((t) => R.ingestS2120Uplink(t, uplink,', 'ingests inside one osiDb transaction');
+expectIncludesById('s2120-ingest-fn', 'eventId: data.deduplicationId || null', 'hands the ChirpStack deduplicationId to the durable identity claim');
+expectIncludesById('s2120-ingest-fn', "const MARKER_KEY = 's2120CounterBaseline'", 'caches the counter-baseline marker per device in node context instead of scanning the history on every uplink');
+expectIncludesById('s2120-ingest-fn', 'delete c[devEui]', 'forgets the cached counter-baseline marker when the transaction rolls back');
+expectLibById('s2120-ingest-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('s2120-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
+{
+  const rainModuleSource = fs.readFileSync(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'), 'utf8');
+  // SenseCAP S2120 user guide 10.3.1 and 13.3: 4113 is rainfall INTENSITY (mm/h,
+  // six times the rain of the past ten minutes); 4213 (frame 4C, firmware v2.0+)
+  // is CUMULATIVE rainfall (mm). Only 4213 is a counter; 4113 is a rate.
+  for (const [needle, description] of [
+    ['object?.messages', 'accepts live decoded S2120 message shape'],
+    ['object?.data?.messages', 'accepts nested decoded S2120 message shape'],
+    ["normalizePressureHpa(measurements['4101'])", 'uses current S2120 pressure ID'],
+    ["rainGaugeCumulativeMm: finiteOrNull(measurements['4213'])", 'differences only the Seeed cumulative-rainfall measurement 4213 as the rain counter'],
+    ["rainMmPerHour: finiteOrNull(measurements['4113'])", 'stores the Seeed rain-intensity measurement 4113 as the rain rate, never as a counter'],
+    ["const S2120_COUNTER_BASELINE = 'cumulative_baseline';", 'marks the first 4213 row so rows written under the old 4113 interpretation never become a counter baseline'],
+    ['const S2120_LEGACY_WINDOW_S = 600;', 'integrates legacy intensity only over the vendor ten-minute window'],
+    ["return { deltaMm: null, status: 'intensity_only' };", 'leaves the legacy rain amount unknown when the cadence does not match the ten-minute window'],
+    ["windGustMps: measurements['4191'] ?? null", 'reads only measurement 4191 (Peak Wind Gust) for wind gust -- 4213 is Rain Accumulation and must never be read as gust (PR-I fix/s2120-gust-and-gen2-battery)'],
+    ["measurements['4103'] ?? measurements.bat_pct", 'uses the decoded S2120 battery-percent field'],
+    ["'duplicate_timestamp' : 'out_of_order'", 'skips duplicate and out-of-order S2120 rain-counter uplinks'],
+    ["status: 'counter_reset'", 'detects S2120 rain-counter resets'],
+    ["status: 'invalid_interval'", 'skips S2120 rain deltas when the interval is invalid'],
+    ['out.per10Mm = roundTo((d.deltaMm / out.intervalSeconds) * 600, 3)', 'computes normalized S2120 rain telemetry per 10 minutes'],
+    ['rain.intervalSeconds, rain.status', 'stores the elapsed S2120 counter interval in seconds'],
+    ["reasons.push('late_counter_frame')", 'marks a late S2120 counter frame and never counts it'],
+    ['FROM weather_station_zones wsz', 'prefers explicit S2120 weather station zone assignments'],
+    ['if (!zones.length) zones = await t.all(S2120_DEVICE_ZONE_SQL', 'falls back when S2120 weather station zone assignments are absent'],
+    ['SELECT d.irrigation_zone_id AS zone_id', 'uses legacy S2120 irrigation zone fallback'],
+    ['zones: zoneIds,', 'records the zones an S2120 observation was received under'],
+    ['zoneDays = await recomputeRainDays(t, id.deveui, items, { nowMs });', 'projects the S2120 zone days through the zone-day projection in the zone timezone'],
+    ["const filter = instrument.typeId === S2120_TYPE_ID", 'assesses S2120 days from S2120 rain frames only, never with the LoRain chain'],
+  ]) {
+    expectCondition(rainModuleSource.includes(needle), `osi-rain S2120 ${description}`, `osi-rain S2120 missing: ${description}`);
+  }
+}
 const lorainMqttNode = findNodeById('lorain-mqtt-in');
 if (!lorainMqttNode) {
   fail('missing LoRain MQTT input node');
@@ -2641,14 +2727,35 @@ expectIncludesById('post-devices-insert', '4943485448592021', 'sets the Aqua-Sco
 expectIncludesById('cs-reg-cloud-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'maps cloud LoRain registration to the LoRain ChirpStack profile');
 expectIncludesById('cs-reg-cloud-fn', '4943485448592021', 'sets the Aqua-Scope LoRain JoinEUI for cloud registration');
 expectIncludesById('cs-reg-cloud-fn', 'CHIRPSTACK_PROFILE_S2120', 'keeps cloud SenseCAP registration support while adding LoRain');
-expectIncludesById('lorain-process-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'filters LoRain uplinks by profile ID');
-expectIncludesById('lorain-process-fn', 'AQUASCOPE_LORAIN', 'guards LoRain uplinks by local device type');
-expectIncludesById('lorain-process-fn', 'duplicate_or_out_of_order', 'skips duplicate or out-of-order LoRain interval rain');
-expectIncludesById('lorain-process-fn', 'rainMmPer10Min', 'computes normalized LoRain rain telemetry per 10 minutes');
-expectIncludesById('lorain-sql-fn', 'rain_tips_delta', 'persists LoRain tip deltas');
-expectIncludesById('lorain-rain-agg-fn', 'aquascope_lorain', 'labels LoRain zone rainfall source');
-expectLibById('lorain-process-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
-expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+// LoRain has one writer (rain correctness programme, migration 0071): lorain-ingest-fn hands
+// the uplink to osi-rain inside one osiDb transaction. Behaviour: scripts/test-lorain-ingest.js,
+// scripts/test-lorain-ingest-concurrency.js, scripts/test-lorain-dry-zone-row.js.
+for (const removedId of ['lorain-process-fn', 'lorain-sql-fn', 'lorain-sqlite', 'lorain-rain-agg-fn']) {
+  expectCondition(!findNodeById(removedId), `LoRain second writer path ${removedId} is gone`, `LoRain second writer path ${removedId} is still present`);
+}
+expectCondition(JSON.stringify((findNodeById('lorain-mqtt-in') || {}).wires) === JSON.stringify([['lorain-ingest-fn']]),
+  'LoRain MQTT input feeds only lorain-ingest-fn', 'LoRain MQTT input must feed only lorain-ingest-fn');
+expectIncludesById('lorain-ingest-fn', 'CHIRPSTACK_PROFILE_LORAIN', 'filters LoRain uplinks by profile ID');
+expectIncludesById('lorain-ingest-fn', "osiLib.require('rain')", 'loads osi-rain through osi-lib');
+expectIncludesById('lorain-ingest-fn', 'db.transaction((t) => R.ingestLoRainUplink(t, uplink,', 'ingests inside one osiDb transaction');
+expectIncludesById('lorain-ingest-fn', "String(env.get('OSI_LORAIN_CONFIG_QUERY') || '').trim() === '1'", 'keeps the unverified configuration query off unless explicitly enabled');
+expectLibById('lorain-ingest-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper as osiDb');
+expectLibById('lorain-ingest-fn', 'osiLib', 'osi-lib', 'imports osi-lib as osiLib');
+{
+  const rainModuleSource = fs.readFileSync(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'), 'utf8');
+  for (const [needle, description] of [
+    ["const LORAIN_TYPE_ID = 'AQUASCOPE_LORAIN';", 'guards LoRain uplinks by local device type'],
+    ["const LORAIN_RAIN_SOURCE = 'aquascope_lorain';", 'labels LoRain zone rainfall source'],
+    ["else if (trigger === 'accepted' && row.rain_source && row.rain_source !== 'none' && row.rain_source !== p.source", 'never lets a zero report take over a legacy zone day another source owns'],
+    ["amountMm: coverage === 'complete' ? amountMm : null,", 'projects a zone rainfall amount only for a certified complete day'],
+    ["zoneReasons.add(selection.state === 'ambiguous' ? 'gauge_ambiguous' : 'no_gauge');", 'never adds two gauges: an ambiguous zone has no amount'],
+    ["'SELECT * FROM rain_observations WHERE deveui = ? AND instrument_type = ? AND received_at < ? ORDER BY received_at DESC, id DESC LIMIT 1'", 'runs the LoRain chain only on LoRain observations'],
+    ['rain_tips_delta', 'persists LoRain tip deltas'],
+    ['const PINNED_LORAIN_BUILDS = Object.freeze([]);', 'promotes no installed LoRain build until the owner confirms one'],
+  ]) {
+    expectCondition(rainModuleSource.includes(needle), `osi-rain ${description}`, `osi-rain missing: ${description}`);
+  }
+}
 
 // F83-V5: static pins so a future flows.json edit cannot silently drop the
 // uplink-dedup guard from any of the 7 device_data-writing decode functions
@@ -2657,8 +2764,9 @@ expectLibById('lorain-rain-agg-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-he
 for (const dedupNodeId of [
   '81c98fb07344a787', // KIWI/CLOVER "Process Data"
   'strega-process-fn', // "Process STREGA"
-  's2120-process-fn',
-  'lorain-process-fn',
+  // LoRain (migration 0071) and S2120 (one transactional writer) left this
+  // list: rain_observations' unique (deveui, event_id) index makes their
+  // identity durable across restarts.
   'lsn50-decode-fn', // "Decode LSN50"
   '6b28e0d879808dd9', // "UC512 Normalize + Write"
   'sdi12-gate-fn', // "SDI12 Gate + Decode"
@@ -2911,7 +3019,11 @@ expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'format
 expectFileIncludes('SenseCapWeatherCard.tsx', senseCapWeatherCardSource, 'formatWindDirection', 'uses shared wind-direction formatting on the S2120 card');
 expectFileIncludes('farming.ts', farmingTypesSource, 'AQUASCOPE_LORAIN', 'types Aqua-Scope LoRain as a supported device');
 expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_delta', 'renders LoRain interval rainfall');
-expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'shows normalized LoRain rain-rate history options');
+// Owner decision D4 (rain presentation): the LoRain card shows amounts only. Its
+// elapsed-time rate and 10-minute value stay in Data view (legacy) and the export.
+expectFileIncludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_today', 'offers the LoRain farm-day total in the rain history');
+expectFileExcludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_10min', 'never offers the legacy LoRain 10-minute value on the card');
+expectFileExcludes('LoRainGaugeCard.tsx', loRainGaugeCardSource, 'rain_mm_per_hour', 'never offers the legacy LoRain elapsed-time rate on the card');
 // Every device card now removes through the shared hook, which is the only place allowed
 // to call devicesAPI.remove (the account unlink) and does so only in 'farm' context. A
 // card that calls it directly again is the zone-detach-deletes-the-device bug returning.
@@ -3096,8 +3208,10 @@ expectIncludes('Cancel STREGA Actuation', 'flushDeviceQueue(deveui)', 'flushes t
 // CANCEL_VALVE_ACTUATION cloud command applier (one code path, two entry points - see
 // cloud-commands.js's header comment). This node now delegates instead of inlining the
 // SQL, so the pin checks the delegation call; cancel.js's own cancel.test.js pins the
-// CANCELLED-marking and latest-active-only targeting behavior directly.
-expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark CANCELLED, latest-active-only) to cancel.js');
+// CANCELLED-marking and the named-actuation targeting (#428) directly.
+expectIncludes('Cancel STREGA Actuation', 'VC.cancelActuation(', 'delegates actuation cancellation (mark the named actuation CANCELLED, keep other queue items) to cancel.js');
+expectIncludes('Cancel STREGA Actuation', 'expectationId: body.expectation_id', 'passes the actuation the caller names to cancel.js');
+expectIncludes('Valve Cloud Command Bridge', 'queueClient: queueClient', 'lets a cloud cancel keep the queue items of other commands');
 expectExcludes('Cancel STREGA Actuation', "action: 'CLOSE'", 'bare CLOSE downlink emission from cancel path');
 expectExcludes('Cancel STREGA Actuation', 'return [closeMsg, responseMsg]', 'actuator fanout from cancel path');
 // --- System Stats fan detection: hwmon preferred, raw PWM fallback ---
@@ -3108,12 +3222,15 @@ expectIncludes('System Stats', '/sys/class/pwm/pwmchip2', 'falls back to raw PWM
 expectIncludes('System Stats', 'fanAvailable = false', 'fan defaults to unavailable when neither path found');
 pendingChecks.push((async () => {
   // Fixed fixture values mirror the live command-193 failure; the test has no hardware dependency.
+  // #427: a VALVE_COMMAND is dispatched only as a timed open, so the fixture carries
+  // OPEN_FOR_DURATION with the duration Reject Indefinite Open normalises into duration_seconds.
   const gatewayEui = '0016C001F151B1D6';
   const valveEui = '70B3D57708000334';
   const fixture = {
     commandId: 193,
     commandType: 'VALVE_COMMAND',
-    action: 'CLOSE',
+    action: 'OPEN_FOR_DURATION',
+    duration_seconds: 600,
     deviceEui: valveEui,
     devEui: valveEui,
     gatewayDeviceEui: gatewayEui,
@@ -3131,12 +3248,22 @@ pendingChecks.push((async () => {
     commandType: fixture.commandType,
   };
 
+  const closeResult = await executeFunctionNodeById(findNodeByName('Route Command').id, { payload: Object.assign({}, fixture, { action: 'CLOSE' }) });
+  const closeAck = Array.isArray(closeResult) && closeResult[2] && typeof closeResult[2].payload === 'string'
+    ? JSON.parse(closeResult[2].payload) : null;
+  if (!Array.isArray(closeResult) || closeResult[0] || !closeAck || closeAck.result !== 'REJECTED_PERMANENT') {
+    fail('VALVE_COMMAND with action CLOSE must produce no actuator payload and a REJECTED_PERMANENT ACK');
+  }
+
   const routeResult = await executeFunctionNodeById('934bf2bc19a8ce22', { payload: fixture });
   const valveMsg = Array.isArray(routeResult) ? routeResult[0] : null;
   const routeData = valveMsg && valveMsg.payload && valveMsg.payload.data;
   if (!routeData) {
     fail('VALVE_COMMAND route did not produce an actuator_command payload');
     return;
+  }
+  if (routeData.action !== 'OPEN_FOR_DURATION' || routeData.duration_minutes !== 10) {
+    fail('VALVE_COMMAND route must send OPEN_FOR_DURATION for the normalised duration');
   }
   for (const [key, value] of Object.entries(expectedContext)) {
     if (routeData[key] !== value) {
@@ -3165,9 +3292,6 @@ pendingChecks.push((async () => {
   const statusResult = await executeFunctionNodeById('c8628cffe45f64f7', logMsg, {
     env: {
       DEVICE_EUI: gatewayEui,
-    },
-    flowState: {
-      lastCommandId: fixture.commandId,
     },
   });
   const ackMsg = Array.isArray(statusResult) ? statusResult[1] : null;
@@ -3351,6 +3475,11 @@ expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bc
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js"', 'deploys the shipped STREGA ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/dragino_lsn50_decoder.js"', 'deploys the shipped LSN50 ChirpStack decoder to live devices');
 expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/aquascope_lorain_decoder.js"', 'deploys the shipped LoRain ChirpStack decoder to live devices');
+expectFileIncludes('deploy.sh', deployScript, '"conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/tektelic_agriculture_decoder.js"', 'deploys the shipped Tektelic KIWI/CLOVER decoder to live devices');
+expectFileIncludes('deploy.sh', deployScript, 'node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles', 'repairs the Kiwi and Clover profiles on provisioned gateways');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'TEKTELIC_CODEC_PATH', 'allows overriding the Tektelic decoder path during bootstrap');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'getOrCreateKiwiProfile(client, tenantId, tektelicCodecScript)', 'creates the Kiwi profile with the Tektelic codec');
+expectFileIncludes('chirpstack-bootstrap.js', chirpstackBootstrapScript, 'CHIRPSTACK_PROFILE_CLOVER: cloverProfileId', 'writes the Clover profile id, not the field-tester alias');
 expectFileIncludes('deploy.sh', deployScript, 'STAGED_GUI="$TMP_DIR/gui"', 'extracts the React bundle into a staged GUI payload before activation');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call stagePayload "$DEPLOY_STAMP" "$STAGED_FLOWS" "$STAGED_GUI"', 'stages flows and GUI as one payload pair');
 expectFileIncludes('deploy.sh', deployScript, 'swap_call captureExisting "$PREV_STAMP" "/srv/node-red/flows.json" "$GUI_ROOT"', 'captures an existing flows and GUI pair before first activation');
@@ -3596,8 +3725,8 @@ for (const seedDatabasePath of v2SeedDatabasePaths) {
   }
 }
 
-// --- firmware version 0.7.0 ---
-const EXPECTED_VERSION = '0.7.0';
+// --- firmware version 0.8.1 ---
+const EXPECTED_VERSION = '0.8.1';
 const osiServerDefaultsContent = fs.existsSync(osiServerDefaultsPath) ? fs.readFileSync(osiServerDefaultsPath, 'utf8') : '';
 expectFileIncludes('96_osi_server_config', osiServerDefaultsContent, `firmware_version=${EXPECTED_VERSION}`, `96_osi_server_config seeds firmware_version ${EXPECTED_VERSION}`);
 expectFileIncludes('node-red.init', nodeRedInitScript, `echo "${EXPECTED_VERSION}"`, `node-red.init fallback version is ${EXPECTED_VERSION}`);
@@ -4351,35 +4480,18 @@ if (!dendroHelperPath) {
               { measurementId: 4103, measurementValue: options.batteryPct ?? 84 },
               { measurementId: 4104, measurementValue: 182.4 },
               { measurementId: 4105, measurementValue: 3.2 },
-              { measurementId: 4113, measurementValue: options.rainGaugeCumulativeMm ?? 12.4 },
+              // 4113 = rain intensity (mm/h); 4213 = cumulative rainfall (mm).
+              { measurementId: 4113, measurementValue: options.rainIntensityMmH ?? 8.4 },
               { measurementId: 4190, measurementValue: 2.7 },
-              // 4191 is the real Peak Wind Gust id; 4213 (Rain Accumulation) is included
-              // as a same-uplink distractor with a deliberately different value so this
-              // fixture also proves windGustMps never reads it (PR-I regression: s2120-process-fn
-              // used to prefer 4213 over 4191 for windGustMps).
+              // 4191 is the real Peak Wind Gust id; 4213 (Rain Accumulation) carries a
+              // deliberately different value so this fixture also proves windGustMps never
+              // reads it (PR-I regression: s2120-process-fn used to prefer 4213 over 4191
+              // for windGustMps).
               { measurementId: 4191, measurementValue: options.windGustMps ?? 7.6 },
-              { measurementId: 4213, measurementValue: options.rainAccumulationMm ?? 99.9 },
+              { measurementId: 4213, measurementValue: options.rainCumulativeMm ?? 12.4 },
             ]],
           },
         },
-      };
-    }
-
-    function createS2120QueryHandler(options = {}) {
-      return (sql) => {
-        if (sql.includes('SELECT type_id FROM devices')) {
-          return [{ type_id: options.deviceType || 'SENSECAP_S2120' }];
-        }
-        if (sql.includes('SELECT recorded_at, rain_gauge_cumulative_mm')) {
-          return options.previousSample ? [options.previousSample] : [];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_gauge_cumulative_mm IS NOT NULL')) {
-          return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
-        }
-        if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
-          return [{ rain_mm_today: options.todayTotal ?? 0 }];
-        }
-        return [];
       };
     }
 
@@ -4409,252 +4521,96 @@ if (!dendroHelperPath) {
       };
     }
 
-    function createLorainQueryHandler(options = {}) {
-      return (sql) => {
-        if (sql.includes('SELECT type_id FROM devices')) {
-          return [{ type_id: options.deviceType || 'AQUASCOPE_LORAIN' }];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at >=') && sql.includes('rain_mm_delta IS NOT NULL')) {
-          return options.duplicateOrFuture ? [options.duplicateOrFuture] : [];
-        }
-        if (sql.includes('SELECT recorded_at') && sql.includes('recorded_at <') && sql.includes('rain_mm_delta IS NOT NULL')) {
-          return options.previousSample ? [options.previousSample] : [];
-        }
-        if (sql.includes('SELECT COALESCE(SUM(rain_mm_delta), 0) AS rain_mm_today')) {
-          return [{ rain_mm_today: options.todayTotal ?? 0 }];
-        }
-        return [];
+    // lorain-ingest-fn's contract with osi-rain: profile filter, the uplink it
+    // hands over, one transaction, nothing emitted before the commit, and the
+    // configuration query only when explicitly enabled. Behaviour on a real
+    // database: scripts/test-lorain-ingest*.js.
+    function lorainRainLib(result, calls) {
+      return {
+        require(name) {
+          if (name !== 'rain') return { ok: false, error: 'unexpected module ' + name };
+          return { ok: true, value: { async ingestLoRainUplink(t, uplink, opts) {
+            calls.push({ t, uplink, opts });
+            if (result instanceof Error) throw result;
+            return result;
+          } } };
+        },
       };
     }
+    function lorainTxDb(log) {
+      return { Database: class LorainTxDatabase {
+        transaction(fn) {
+          log.push('BEGIN');
+          return Promise.resolve().then(() => fn({ scope: 'tx' })).then(
+            (value) => { log.push('COMMIT'); return value; },
+            (error) => { log.push('ROLLBACK'); throw error; });
+        }
+        close(callback) { log.push('CLOSE'); if (callback) callback(); }
+      } };
+    }
+    const lorainUplink = (profileName) => {
+      const msg = buildLorainFixture(profileName ? { profileId: 'profile-other', profileName } : {});
+      Object.assign(msg.payload, { deduplicationId: 'ev-1', devAddr: '01000001', fCnt: 7, fPort: 2, data: 'BgOBAAM=' });
+      msg.payload.deviceInfo.applicationId = 'app-1';
+      return msg;
+    };
+    const accepted = { outcome: 'accepted', status: 'accepted', observationId: 1, deviceDataId: 1, zoneDays: [], configQuery: null };
 
     pendingChecks.push((async () => {
-      const rejected = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({ profileId: 'profile-s2120', profileName: 'SenseCAP S2120' }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler()),
-          },
-        }
-      );
-      expectCondition(
-        Array.isArray(rejected) && rejected[0] === null && rejected[1] === null,
-        'LoRain branch rejects non-LoRain profiles',
-        'LoRain branch accepted a non-LoRain profile'
-      );
-    })().catch((error) => {
-      fail(`failed to execute non-LoRain rejection fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink('SenseCAP S2120'), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(accepted, calls), osiDb: lorainTxDb(log) },
+      });
+      expectCondition(result === null && calls.length === 0 && log.length === 0,
+        'LoRain ingest rejects non-LoRain profiles', 'LoRain ingest accepted a non-LoRain profile');
+    })().catch((error) => fail(`failed to execute non-LoRain rejection fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain first interval sample is valid rain');
-      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain fixture preserves interval rain delta');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain fixture preserves tip count');
-      expectEqual(formatted.counterIntervalSeconds, null, 'LoRain first interval sample does not fabricate elapsed seconds');
-      expectEqual(formatted.rainMmPer10Min, null, 'LoRain first interval sample does not fabricate a rate');
-      expectApprox(formatted.rainMmToday, 2.7, 0.000001, 'LoRain fixture accumulates local-day rain totals');
-      expectCondition(!!rainOut, 'LoRain first interval sample emits zone-rain update', 'LoRain first interval sample did not emit zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute first-sample LoRain fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(accepted, calls), osiDb: lorainTxDb(log) },
+      });
+      const call = calls[0] || { uplink: {}, opts: {} };
+      expectCondition(result === null && calls.length === 1 && call.t && call.t.scope === 'tx',
+        'LoRain ingest runs osi-rain once inside the transaction and emits nothing', 'LoRain ingest did not run osi-rain once inside the transaction');
+      expectCondition(JSON.stringify(log) === JSON.stringify(['BEGIN', 'COMMIT', 'CLOSE']),
+        'LoRain ingest commits then closes its handle', `LoRain ingest transaction log ${JSON.stringify(log)}`);
+      expectCondition(call.uplink.deveui === 'ABC123' && call.uplink.eventId === 'ev-1' && call.uplink.devAddr === '01000001'
+        && call.uplink.fCnt === 7 && call.uplink.fPort === 2 && call.uplink.data === 'BgOBAAM=' && call.uplink.object.rain_tips_delta === 3
+        && call.uplink.time === '2026-04-21T10:00:00.000Z' && call.uplink.applicationId === 'app-1',
+        'LoRain ingest hands osi-rain the identity, session, payload and decoded object', `LoRain ingest uplink ${JSON.stringify(call.uplink)}`);
+      expectCondition(call.opts.configQueryEnabled === false,
+        'LoRain configuration query stays off by default', 'LoRain configuration query is on without OSI_LORAIN_CONFIG_QUERY=1');
+    })().catch((error) => fail(`failed to execute LoRain ingest fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
-      const [processedMsg] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          includeRainMmDelta: false,
-          includeRainTipsDelta: false,
-          rainLevel: 3,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectApprox(formatted.rainMmDelta, 1.5, 0.000001, 'LoRain raw rainlevel fixture converts 0.5 mm steps to millimeters');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain raw rainlevel fixture uses raw rainlevel as tip count');
-    })().catch((error) => {
-      fail(`failed to execute raw-rainlevel LoRain fixture: ${error.message}`);
-    }));
+      const errors = [];
+      const log = [];
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
+        scope: { osiLib: lorainRainLib(new Error('disk I/O error'), []), osiDb: lorainTxDb(log) },
+        node: { error: (message) => errors.push(String(message)) },
+      });
+      expectCondition(result === null && JSON.stringify(log) === JSON.stringify(['BEGIN', 'ROLLBACK', 'CLOSE'])
+        && errors.some((m) => m.includes('rolled back') && m.includes('disk I/O error')),
+        'LoRain ingest failure rolls back, reports, and emits nothing', `LoRain ingest failure handling: ${JSON.stringify({ log, errors })}`);
+    })().catch((error) => fail(`failed to execute LoRain ingest failure fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
-      const [processedMsg] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          rainMmDelta: 2.0,
-          rainLevel: 3,
-          includeRainTipsDelta: false,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectApprox(formatted.rainMmDelta, 2.0, 0.000001, 'LoRain normalized rain_mm_delta wins over disagreeing raw rainlevel fallback');
-      expectEqual(formatted.rainTipsDelta, 3, 'LoRain disagreeing-source fixture still uses raw rainlevel as fallback tip count');
-    })().catch((error) => {
-      fail(`failed to execute disagreeing-source LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture({
-          includeRainMmDelta: false,
-          includeRainTipsDelta: false,
-          rainLevel: -1,
-        }),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({ todayTotal: 1.2 })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'invalid_rain_delta', 'LoRain negative rain fixture marks invalid rain');
-      expectEqual(formatted.rainMmDelta, null, 'LoRain negative rain fixture does not persist a negative rain delta');
-      expectEqual(rainOut, null, 'LoRain negative rain fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute negative-rain LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({
-              previousSample: { recorded_at: '2026-04-21T09:50:00.000Z' },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'LoRain interval fixture marks valid rain');
-      expectApprox(formatted.rainMmPerHour, 9, 0.000001, 'LoRain interval fixture computes hourly rain rate');
-      expectApprox(formatted.rainMmPer10Min, 1.5, 0.000001, 'LoRain interval fixture computes normalized rain per 10 minutes');
-      expectEqual(formatted.counterIntervalSeconds, 600, 'LoRain interval fixture stores elapsed seconds');
-      expectCondition(!!rainOut, 'LoRain interval fixture emits zone-rain update', 'LoRain interval fixture did not emit zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute valid-interval LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        'lorain-process-fn',
-        buildLorainFixture(),
-        {
-          env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain' },
-          scope: {
-            osiDb: createMockOsiDb(createLorainQueryHandler({
-              duplicateOrFuture: { recorded_at: '2026-04-21T10:00:00.000Z' },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'duplicate_or_out_of_order', 'LoRain duplicate fixture skips duplicate timestamps');
-      expectEqual(formatted.rainMmDelta, null, 'LoRain duplicate fixture does not emit a duplicate rain delta');
-      expectEqual(rainOut, null, 'LoRain duplicate fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute duplicate-timestamp LoRain fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push(executeFunctionNodeById('lorain-sql-fn', {
-      formattedData: {
-        devEui: 'ABC123',
-        timestamp: '2026-04-21T10:00:00.000Z',
-        ambientTemperature: 20.5,
-        batV: 3.3,
-        rainTipsDelta: 3,
-        rainMmDelta: 1.5,
-        rainMmPerHour: 9,
-        rainMmPer10Min: 1.5,
-        rainMmToday: 2.7,
-        counterIntervalSeconds: 600,
-        rainDeltaStatus: 'ok',
-      },
-    }).then((sqlMsg) => {
-      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
-      expectCondition(
-        sql.includes('rain_tips_delta') && sql.includes('rain_mm_delta') && sql.includes('rain_mm_per_10min'),
-        'LoRain SQL insert persists normalized rain telemetry',
-        'LoRain SQL insert is missing normalized rain telemetry columns'
-      );
-      expectCondition(
-        sql.includes('3.3') && sql.includes('1.5') && sql.includes("'ok'"),
-        'LoRain SQL insert includes battery, rain-rate values, and status',
-        'LoRain SQL insert is missing battery, rain-rate values, or status'
-      );
-    }).catch((error) => {
-      fail(`failed to execute LoRain SQL fixture: ${error.message}`);
-    }));
-
-    pendingChecks.push((async () => {
-      const writes = [];
-      const queryHandler = (sql) => {
-        if (sql.includes('SELECT d.irrigation_zone_id AS zone_id')) {
-          return [{ zone_id: 7, timezone: 'Europe/Zurich' }];
-        }
-        return [];
-      };
-      queryHandler.run = (sql) => {
-        writes.push(sql);
-      };
-      await executeFunctionNodeById(
-        'lorain-rain-agg-fn',
-        {
-          formattedData: {
-            devEui: 'ABC123',
-            timestamp: '2026-04-21T10:00:00.000Z',
-            rainDeltaStatus: 'ok',
-            rainMmDelta: 1.5,
-            rainMmToday: 2.7,
-          },
-        },
-        {
-          scope: {
-            osiDb: createMockOsiDb(queryHandler),
-          },
-        }
-      );
-      const sql = writes.join('\n');
-      expectCondition(
-        sql.includes('zone_daily_environment') && sql.includes('aquascope_lorain'),
-        'LoRain zone aggregate writes source aquascope_lorain',
-        'LoRain zone aggregate did not write aquascope_lorain source'
-      );
-      expectCondition(
-        sql.includes('MAX(COALESCE(rainfall_mm,0)+1.5, 2.7)'),
-        'LoRain zone aggregate adds deltas while honoring device daily total',
-        'LoRain zone aggregate did not preserve delta-plus-daily total behavior'
-      );
-    })().catch((error) => {
-      fail(`failed to execute LoRain zone aggregate fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const query = { topic: 'application/app-1/device/abc123/command/down', payload: { devEui: 'abc123', confirmed: false, fPort: 2, data: 'AA==' } };
+      const result = await executeFunctionNodeById('lorain-ingest-fn', lorainUplink(), {
+        env: { CHIRPSTACK_PROFILE_LORAIN: 'profile-lorain', OSI_LORAIN_CONFIG_QUERY: '1' },
+        scope: { osiLib: lorainRainLib({ ...accepted, configQuery: query }, calls), osiDb: lorainTxDb([]) },
+      });
+      expectCondition((calls[0] || { opts: {} }).opts.configQueryEnabled === true && result && result.topic === query.topic
+        && result.payload === JSON.stringify(query.payload),
+        'LoRain configuration query leaves the node only when enabled and after the commit', 'LoRain configuration query output is wrong');
+    })().catch((error) => fail(`failed to execute LoRain configuration query fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
       const processedMsg = await executeFunctionNodeById(
@@ -4733,119 +4689,109 @@ if (!dendroHelperPath) {
       fail(`failed to execute STREGA telemetry fixture: ${error.message}`);
     }));
 
-    pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture(),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler()),
-          },
+    // S2120 measurement mapping and counter rules, now in osi-rain (moved from the
+    // former Process S2120 node); behaviour on a real database:
+    // scripts/test-s2120-rain-ingest.js and scripts/test-s2120-ingest-concurrency.js.
+    {
+      const rain = require(path.join(path.dirname(flowPath), 'node-red/osi-rain/index.js'));
+      const parsed = rain.parseS2120Measurements(buildS2120Fixture().payload.object);
+      expectEqual(parsed.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4213 to cumulative rain');
+      expectEqual(parsed.rainMmPerHour, 8.4, 'S2120 fixture keeps measurement 4113 as the reported rain intensity');
+      expectEqual(parsed.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
+      expectEqual(parsed.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
+      expectApprox(parsed.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
+      const baseline = rain.deriveS2120Counter(null, 12.4, { hasBaseline: false });
+      expectEqual(baseline.status, 'cumulative_baseline', 'S2120 fixture marks the first cumulative-rain sample as the counter baseline without fabricating a delta');
+      expectEqual(baseline.deltaMm, null, 'S2120 first-sample fixture stores no rain increment');
+      const valid = rain.deriveS2120Counter(10.0, 11.4, { intervalSeconds: 600 });
+      expectEqual(valid.status, 'ok', 'S2120 fixture marks increasing cumulative rain as valid');
+      expectApprox(valid.deltaMm, 1.4, 0.000001, 'S2120 fixture computes rain deltas from cumulative rain');
+    }
+
+    // s2120-ingest-fn's contract with osi-rain: only an S2120 opens a transaction, the
+    // uplink it hands over, one transaction, nothing emitted, and a rollback that is
+    // reported and forgets the cached counter-baseline marker.
+    function s2120RainLib(result, calls) {
+      return {
+        require(name) {
+          if (name !== 'rain') return { ok: false, error: 'unexpected module ' + name };
+          return { ok: true, value: { async ingestS2120Uplink(t, uplink, opts) {
+            calls.push({ t, uplink, opts });
+            if (opts && opts.markerCache) opts.markerCache.set(uplink.deveui, '2026-04-21T09:00:00.000Z');
+            if (result instanceof Error) throw result;
+            return result;
+          } } };
+        },
+      };
+    }
+    function s2120TxDb(log, typeId) {
+      return { Database: class S2120TxDatabase {
+        get(sql, params) { log.push('GET'); return Promise.resolve(typeId ? { type_id: typeId } : undefined); }
+        transaction(fn) {
+          log.push('BEGIN');
+          return Promise.resolve().then(() => fn({ scope: 'tx' })).then(
+            (value) => { log.push('COMMIT'); return value; },
+            (error) => { log.push('ROLLBACK'); throw error; });
         }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainGaugeCumulativeMm, 12.4, 'S2120 fixture maps measurement 4113 to cumulative rain');
-      expectEqual(formatted.windGustMps, 7.6, 'S2120 fixture maps measurement 4191 to wind gust, ignoring the 4213 (Rain Accumulation) distractor');
-      expectEqual(formatted.batPct, 84, 'S2120 fixture maps measurement 4103 to battery percent');
-      expectApprox(formatted.barometricPressureHpa, 1008.7, 0.000001, 'S2120 fixture normalizes pressure to hPa');
-      expectEqual(formatted.rainDeltaStatus, 'first_sample', 'S2120 fixture marks the first rain sample without fabricating a delta');
-      expectEqual(formatted.rainMmPer10Min, null, 'S2120 first-sample fixture leaves the normalized rain rate empty');
-      expectEqual(rainOut, null, 'S2120 first-sample fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute first-sample S2120 fixture: ${error.message}`);
-    }));
+        close(callback) { log.push('CLOSE'); if (callback) callback(); }
+      } };
+    }
+    function s2120Context() {
+      const store = new Map();
+      return { store, get: (key) => store.get(key), set: (key, value) => store.set(key, value) };
+    }
+    const s2120Uplink = () => {
+      const msg = buildS2120Fixture();
+      Object.assign(msg.payload, { deduplicationId: 'ev-s1', devAddr: '01000002', fCnt: 9, fPort: 3, data: 'TAALAAAwcA==' });
+      return msg;
+    };
+    const s2120Accepted = { outcome: 'accepted', status: 'accepted', observationId: 1, deviceDataId: 1, zoneDays: [], configQuery: null, rainDeltaStatus: 'ok', rainMmDelta: 1.4 };
 
     pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainGaugeCumulativeMm: 11.4 }),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler({
-              previousSample: {
-                recorded_at: '2026-04-21T09:50:00.000Z',
-                rain_gauge_cumulative_mm: 10.0,
-              },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'ok', 'S2120 fixture marks increasing cumulative rain as valid');
-      expectApprox(formatted.rainMmDelta, 1.4, 0.000001, 'S2120 fixture computes rain deltas from cumulative rain');
-      expectApprox(formatted.rainMmPerHour, 8.4, 0.000001, 'S2120 fixture computes hourly rain rate from elapsed time');
-      expectApprox(formatted.rainMmPer10Min, 1.4, 0.000001, 'S2120 fixture computes normalized rain per 10 minutes');
-      expectApprox(formatted.rainMmToday, 2.6, 0.000001, 'S2120 fixture accumulates local-day rain totals');
-      expectEqual(formatted.counterIntervalSeconds, 600, 'S2120 fixture stores the elapsed rain-counter interval in seconds');
-      expectCondition(!!rainOut, 'S2120 fixture emits valid rain deltas to the zone aggregation path', 'S2120 fixture did not emit a valid rain delta to the zone aggregation path');
-    })().catch((error) => {
-      fail(`failed to execute valid-delta S2120 fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(s2120Accepted, calls), osiDb: s2120TxDb(log, 'DRAGINO_LSN50') },
+      });
+      expectCondition(result === null && calls.length === 0 && JSON.stringify(log) === JSON.stringify(['GET', 'CLOSE']),
+        'S2120 ingest opens no transaction for another device type', `S2120 ingest handled another device type: ${JSON.stringify(log)}`);
+    })().catch((error) => fail(`failed to execute non-S2120 rejection fixture: ${error.message}`)));
 
     pendingChecks.push((async () => {
-      const [processedMsg, rainOut] = await executeFunctionNodeById(
-        's2120-process-fn',
-        buildS2120Fixture({ timestamp: '2026-04-21T10:00:00.000Z', rainGaugeCumulativeMm: 11.4 }),
-        {
-          scope: {
-            osiDb: createMockOsiDb(createS2120QueryHandler({
-              previousSample: {
-                recorded_at: '2026-04-21T09:50:00.000Z',
-                rain_gauge_cumulative_mm: 10.0,
-              },
-              duplicateOrFuture: {
-                recorded_at: '2026-04-21T10:00:00.000Z',
-              },
-              todayTotal: 1.2,
-            })),
-          },
-        }
-      );
-      const formatted = processedMsg.formattedData || {};
-      expectEqual(formatted.rainDeltaStatus, 'duplicate_timestamp', 'S2120 fixture skips duplicate timestamps');
-      expectEqual(formatted.rainMmDelta, null, 'S2120 duplicate fixture does not emit a duplicate rain delta');
-      expectEqual(rainOut, null, 'S2120 duplicate fixture does not emit a zone-rain update');
-    })().catch((error) => {
-      fail(`failed to execute duplicate-timestamp S2120 fixture: ${error.message}`);
-    }));
+      const calls = [];
+      const log = [];
+      const ctx = s2120Context();
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(s2120Accepted, calls), osiDb: s2120TxDb(log, 'SENSECAP_S2120') },
+        context: ctx,
+      });
+      const call = calls[0] || { uplink: {}, opts: {} };
+      expectCondition(result === null && calls.length === 1 && call.t && call.t.scope === 'tx',
+        'S2120 ingest runs osi-rain once inside the transaction and emits nothing', 'S2120 ingest did not run osi-rain once inside the transaction');
+      expectCondition(JSON.stringify(log) === JSON.stringify(['GET', 'BEGIN', 'COMMIT', 'CLOSE']),
+        'S2120 ingest commits then closes its handle', `S2120 ingest transaction log ${JSON.stringify(log)}`);
+      expectCondition(call.uplink.deveui === 'ABC123' && call.uplink.eventId === 'ev-s1' && call.uplink.devAddr === '01000002'
+        && call.uplink.fCnt === 9 && call.uplink.fPort === 3 && call.uplink.data === 'TAALAAAwcA==' && call.uplink.time === '2026-04-21T10:00:00.000Z'
+        && Array.isArray(call.uplink.object.messages),
+        'S2120 ingest hands osi-rain the identity, session, payload and decoded object', `S2120 ingest uplink ${JSON.stringify(call.uplink)}`);
+      expectCondition((ctx.store.get('s2120CounterBaseline') || {}).ABC123 === '2026-04-21T09:00:00.000Z',
+        'S2120 ingest keeps the counter-baseline marker cache in node context', 'S2120 ingest did not keep the marker cache in node context');
+    })().catch((error) => fail(`failed to execute S2120 ingest fixture: ${error.message}`)));
 
-    pendingChecks.push(executeFunctionNodeById('s2120-sql-fn', {
-      formattedData: {
-        devEui: 'ABC123',
-        timestamp: '2026-04-21T10:00:00.000Z',
-        ambientTemperature: 18.2,
-        relativeHumidity: 66.1,
-        lightLux: 1234,
-        barometricPressureHpa: 1008.7,
-        windSpeedMps: 3.2,
-        windDirectionDeg: 182.4,
-        windGustMps: 7.6,
-        uvIndex: 2.7,
-        rainGaugeCumulativeMm: 11.4,
-        rainMmDelta: 1.4,
-        rainMmPerHour: 8.4,
-        rainMmPer10Min: 1.4,
-        rainMmToday: 2.6,
-        counterIntervalSeconds: 600,
-        rainDeltaStatus: 'ok',
-        batPct: 84,
-      },
-    }).then((sqlMsg) => {
-      const sql = String((sqlMsg && (sqlMsg.topic || sqlMsg.payload)) || '');
-      expectCondition(
-        sql.includes('rain_mm_per_10min') && sql.includes('counter_interval_seconds'),
-        'S2120 SQL insert persists normalized rain telemetry and interval length',
-        'S2120 SQL insert is missing normalized rain telemetry or interval length'
-      );
-      expectCondition(
-        sql.includes('8.4') && sql.includes('600') && sql.includes("'ok'"),
-        'S2120 SQL insert includes the computed rain-rate values and status',
-        'S2120 SQL insert is missing computed rain-rate values or status'
-      );
-    }).catch((error) => {
-      fail(`failed to execute S2120 SQL fixture: ${error.message}`);
-    }));
+    pendingChecks.push((async () => {
+      const errors = [];
+      const log = [];
+      const ctx = s2120Context();
+      const result = await executeFunctionNodeById('s2120-ingest-fn', s2120Uplink(), {
+        scope: { osiLib: s2120RainLib(new Error('disk I/O error'), []), osiDb: s2120TxDb(log, 'SENSECAP_S2120') },
+        context: ctx,
+        node: { error: (message) => errors.push(String(message)) },
+      });
+      expectCondition(result === null && JSON.stringify(log) === JSON.stringify(['GET', 'BEGIN', 'ROLLBACK', 'CLOSE'])
+        && errors.some((m) => m.includes('rolled back') && m.includes('disk I/O error'))
+        && !Object.prototype.hasOwnProperty.call(ctx.store.get('s2120CounterBaseline') || {}, 'ABC123'),
+        'S2120 ingest failure rolls back, reports, forgets the cached marker and emits nothing', `S2120 ingest failure handling: ${JSON.stringify({ log, errors })}`);
+    })().catch((error) => fail(`failed to execute S2120 ingest failure fixture: ${error.message}`)));
   }
 }
 

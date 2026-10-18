@@ -1,0 +1,67 @@
+{
+  "id": "heartbeat-fcnt-gap",
+  "truthRows": [
+    "T14"
+  ],
+  "description": "Two heartbeats 8 hours apart with fCnt 141 missing. The missing frame may have been a rain report whose tips are lost, so the span is unknown.",
+  "config": {
+    "conf_interval": null,
+    "conf_heartbeat": null,
+    "firmwareRevision": "unknown"
+  },
+  "promotedConfig": {
+    "conf_interval": 900,
+    "conf_heartbeat": 16,
+    "fPort": 2
+  },
+  "frames": [
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000040",
+      "devAddr": "01000001",
+      "fCnt": 140,
+      "time": "2026-10-08T00:00:00.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    },
+    {
+      "deduplicationId": "00000000-0000-4000-8000-000000000041",
+      "devAddr": "01000001",
+      "fCnt": 142,
+      "time": "2026-10-08T08:00:32.000Z",
+      "fPort": 2,
+      "bytesHex": "06030005060100b8068100001221000a"
+    }
+  ],
+  "expect": {
+    "observations": [
+      {
+        "frameIndex": 0,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "protocol_verified",
+        "reason": null
+      },
+      {
+        "frameIndex": 1,
+        "counted": true,
+        "tips": 0,
+        "amount_mm": 0,
+        "frame_kind": "heartbeat_zero",
+        "interval_basis": "unknown",
+        "interval_basis_promoted": "unknown",
+        "reason": "frame_gap"
+      }
+    ],
+    "spans": [
+      {
+        "fromFrameIndex": 0,
+        "toFrameIndex": 1,
+        "state": "unknown",
+        "reason": "frame_gap"
+      }
+    ]
+  }
+}

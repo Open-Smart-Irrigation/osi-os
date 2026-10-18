@@ -84,6 +84,7 @@ test('immutable token subject blocks username reuse across scoped shared reads',
   const cases = [
     ['zone environment', 'zone-env-fn', { zone_id: '1' }],
     ['dendrometer recommendations', 'dendro-zone-rec-fn', { zone_id: '1' }],
+    ['zone rain gauge selection', 'zone-rain-source-fn', { zone_id: '1' }],
     ['device history', 'dendro-daily-fn', { deveui: 'DENDRO1' }],
     ['today liters', 'strega-today-liters-fn', { deveui: 'VALVE1' }],
   ];
@@ -176,6 +177,46 @@ test('F2: recommendations are account-wide and a disabled account is refused', a
     db.close();
   }
 
+  scopeHelper._resetForTests();
+  const disabledDb = seedScopedDb();
+  disabledDb.prepare(
+    "UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'"
+  ).run();
+  try {
+    const disabled = await executeFunction(node, {
+      msg: requestFor(3, 'view1', { zone_id: '2' }),
+      env: ENV,
+      db: disabledDb,
+    });
+    assert.equal(disabled.result && disabled.result.statusCode, 403);
+  } finally {
+    disabledDb.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F2: every enabled role reads the rain gauge selection of any zone; a disabled account is refused', async () => {
+  const node = loadNode('zone-rain-source-fn');
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    for (const zoneId of ['1', '2']) {
+      scopeHelper._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const response = await executeFunction(node, {
+          msg: requestFor(userId, username, { zone_id: zoneId }),
+          env: ENV,
+          db,
+        });
+        assert.equal(
+          response.result && response.result.statusCode,
+          200,
+          `${username} must read the rain gauge selection of zone ${zoneId}`
+        );
+      } finally {
+        db.close();
+      }
+    }
+  }
   scopeHelper._resetForTests();
   const disabledDb = seedScopedDb();
   disabledDb.prepare(
@@ -542,11 +583,21 @@ test('F3: the sensor export is account-wide and keeps its flag-off behavior', as
     scopeHelper._resetForTests();
   }
 
+  // Flag off: the export needs a signed-in session (it once answered without
+  // one), and a session gets the same unscoped query as before.
   const unscopedDb = seedScopedDb();
   try {
-    const unscoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+    const refused = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
       msg: { req: { headers: {}, params: {}, query: {} } },
-      env: { OSI_SCOPED_ACCESS: '0' },
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db: unscopedDb,
+    });
+    assert.equal(refused.result && refused.result[0], null);
+    assert.equal(refused.result && refused.result[1] && refused.result[1].statusCode, 401);
+
+    const unscoped = await executeFunction(loadNode('fn_build_sensor_sql_params'), {
+      msg: requestFor(3, 'view1'),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
       db: unscopedDb,
     });
     const output = unscoped.result && unscoped.result[0];
@@ -616,15 +667,25 @@ test('W1: history of an unclaimed device stays exportable and stays in recent ac
   }
 });
 
-test('F3: today-liters remains callable without auth while the flag is off', async () => {
+// F3 once pinned the opposite: today-liters answered without a token while
+// the flag was off. It now needs a signed-in session in both flag states, like
+// the device history routes (scripts/test-export-routes-require-session.js).
+test('F3: today-liters needs a signed-in session while the flag is off', async () => {
   const db = seedScopedDb();
   try {
-    const response = await executeFunction(loadNode('strega-today-liters-fn'), {
+    const refused = await executeFunction(loadNode('strega-today-liters-fn'), {
       msg: { req: { headers: {}, params: { deveui: 'VALVE1' }, query: {} } },
-      env: { OSI_SCOPED_ACCESS: '0' },
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
       db,
     });
-    assert.equal(response.result && response.result.statusCode, 200);
+    assert.equal(refused.result && refused.result.statusCode, 401);
+
+    const answered = await executeFunction(loadNode('strega-today-liters-fn'), {
+      msg: requestFor(2, 'res1', { deveui: 'VALVE1' }),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(answered.result && answered.result.statusCode, 200);
   } finally {
     db.close();
   }
@@ -1322,6 +1383,115 @@ test('F7: analysis views remain per-user while selectors are account-wide', asyn
   } finally {
     db.close();
   }
+});
+
+function seedExportRows(db) {
+  db.exec(`
+    INSERT INTO devices (
+      deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
+    ) VALUES
+      ('A840410000000011', 'Zone one sensor', 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01'),
+      ('A840410000000012', 'Zone two sensor', 'KIWI_SENSOR', 1, 2, '2026-01-01', '2026-01-01');
+    INSERT INTO device_data(deveui, recorded_at, swt_1) VALUES
+      ('A840410000000011', '2026-01-02T08:00:00.000Z', 20),
+      ('A840410000000012', '2026-01-02T09:00:00.000Z', 40);
+  `);
+}
+
+function allZonesExportRequest(userId, username) {
+  const msg = historyRequest(userId, username, 'GET', '/api/history/export.csv');
+  msg.req.query = { scope: 'allZones', from: '2026-01-02', to: '2026-01-02', granularity: 'raw' };
+  return msg;
+}
+
+test('F4: the all-zones history export is account-wide for every enabled role', async () => {
+  for (const [userId, username] of [[1, 'admin1'], [2, 'res1'], [3, 'view1']]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    seedExportRows(db);
+    try {
+      const response = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: allZonesExportRequest(userId, username),
+        env: ENV,
+        db,
+      });
+      assert.equal(response.result && response.result.statusCode, 200, username);
+      assert.match(response.result.payload, /Z One/, username);
+      assert.match(response.result.payload, /Z Two/, username);
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
+});
+
+test('P1: the all-zones history export refuses a disabled account', async () => {
+  scopeHelper._resetForTests();
+  const db = seedScopedDb();
+  seedExportRows(db);
+  db.prepare("UPDATE users SET disabled_at = '2026-01-01T00:00:00.000Z' WHERE user_uuid = 'u-view1'").run();
+  try {
+    const response = await executeFunction(loadNode('portable-history-api-fn'), {
+      msg: allZonesExportRequest(3, 'view1'),
+      env: ENV,
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 403);
+    assert.doesNotMatch(JSON.stringify(response.result.payload), /Z One|Z Two/);
+  } finally {
+    db.close();
+    scopeHelper._resetForTests();
+  }
+});
+
+test('F4: flag-off all-zones history export stays owner-only', async () => {
+  const db = seedScopedDb();
+  seedExportRows(db);
+  try {
+    const response = await executeFunction(loadNode('portable-history-api-fn'), {
+      msg: allZonesExportRequest(2, 'res1'),
+      env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+      db,
+    });
+    assert.equal(response.result && response.result.statusCode, 200);
+    assert.match(response.result.payload, /Z One/);
+    assert.doesNotMatch(response.result.payload, /Z Two/);
+  } finally {
+    db.close();
+  }
+});
+
+test('F7: analysis view deletion cannot cross user ownership', async () => {
+  for (const env of [ENV, { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' }]) {
+    scopeHelper._resetForTests();
+    const db = seedScopedDb();
+    db.exec(`
+      INSERT INTO analysis_views(id, user_id, owner_user_uuid, name, view_json) VALUES
+        (1, 2, 'u-res1', 'Researcher view', '{"schemaVersion":1,"selectors":[]}'),
+        (2, 3, 'u-view1', 'Viewer view', '{"schemaVersion":1,"selectors":[]}');
+    `);
+    try {
+      const foreign = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/1', { id: '1' }),
+        env,
+        db,
+      });
+      assert.equal(foreign.result && foreign.result.statusCode, 404);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 1').get().count, 1);
+
+      scopeHelper._resetForTests();
+      const own = await executeFunction(loadNode('portable-history-api-fn'), {
+        msg: historyRequest(3, 'view1', 'DELETE', '/api/analysis/views/2', { id: '2' }),
+        env,
+        db,
+      });
+      assert.equal(own.result && own.result.statusCode, 204);
+      assert.equal(db.prepare('SELECT COUNT(*) AS count FROM analysis_views WHERE id = 2').get().count, 0);
+    } finally {
+      db.close();
+    }
+  }
+  scopeHelper._resetForTests();
 });
 
 test('F7: recent actuations are account-wide, not owned-plus-granted only', async () => {

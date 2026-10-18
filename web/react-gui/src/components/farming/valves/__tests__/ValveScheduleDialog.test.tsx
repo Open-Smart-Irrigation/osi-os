@@ -275,6 +275,23 @@ describe('ValveScheduleDialog', () => {
     expect(await screen.findByText(/Dispatch: Sent to the radio network/)).toBeInTheDocument();
   });
 
+  it('badges each weekday with the first push row as the API returns it, even when queuedAt disagrees (clock stepped back)', async () => {
+    // The gateway returns the ledger newest first by insertion order. After its clock stepped
+    // back, the newest (still queued) push carries an EARLIER queuedAt than the acked one it
+    // replaced; re-sorting by queuedAt would show the replaced plan as acknowledged.
+    schedulesMock.mockResolvedValueOnce({
+      ...emptyResponse(),
+      pushState: [
+        { purpose: 'WEEKDAY_PLAN', weekday: 1, state: 'QUEUED', queuedAt: '2026-09-17 14:00:00', ackedAt: null, error: null },
+        { purpose: 'WEEKDAY_PLAN', weekday: 1, state: 'ACKED', queuedAt: '2026-09-17 14:05:00', ackedAt: '2026-09-17T14:05:30.000Z', error: null },
+      ],
+    });
+    renderDialog(makeValve());
+    const monday = await screen.findByRole('group', { name: 'Mon' });
+    expect(await within(monday).findByText('waiting for valve')).toBeInTheDocument();
+    expect(within(monday).queryByText(/acknowledged/)).not.toBeInTheDocument();
+  });
+
   it('shows the window count for a weekday with two compiled windows', async () => {
     schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
     renderDialog(makeValve());

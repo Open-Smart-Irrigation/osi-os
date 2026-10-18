@@ -28,6 +28,10 @@ jobs:
       # profile parity). Must end with "All parity checks passed."
       - name: Scoped-access endpoint ratchet
         run: node scripts/verify-scoped-access.js
+      # The ratchet's own tests: each removes, hides or misplaces a guard's
+      # scope decision and expects the ratchet to fail (#389).
+      - name: Scoped-access ratchet tests
+        run: node --test scripts/verify-scoped-access.test.js
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
@@ -49,11 +53,13 @@ jobs:
           node scripts/test-command-ack-mark-delivered.js
           node scripts/test-delete-device-flow.js
           node scripts/test-deploy-init-log-check.js
+          node scripts/test-device-list-rain-day.js
           node scripts/test-improvement-requests-schema.js
           node scripts/test-installation-helper.js
           node scripts/test-installation-recovery-flow.js
           node scripts/test-installation-recovery-schema.js
           node scripts/test-installation-revision-command.js
+          node scripts/test-lsn50-flow-only-zone-row.js
           node scripts/test-migration-helpers.js
           node scripts/test-node-red-admin-root-off.js
           node scripts/test-protected-command-replay-chain.js
@@ -78,6 +84,9 @@ jobs:
           node scripts/test-watermark-cloud-command-path.js
           node scripts/test-watermark-contact-payload.js
           node scripts/test-zone-device-assignment-flow.js
+          node scripts/test-zone-env-forecast-instants.js
+          node scripts/test-zone-env-unknown-rain.js
+          node scripts/test-zone-env-rain-policy.js
           node scripts/test-zone-timezone-route.js
           node scripts/verify-chameleon-calibration.js
           node scripts/verify-lsn50-chameleon-persistence.js
@@ -86,6 +95,12 @@ jobs:
       # Both tests open SQLite through node:sqlite, so they need no native addon (#392).
       - name: Radio and network API module tests
         run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js
+      # Valve command safety through the shipped flow (pending split, gate, real command
+      # ledger, Route Command, STREGA downlink builder, valve command bridge): only a
+      # bounded timed open reaches a STREGA valve, refused commands are answered, and
+      # stop commands still run with the gateway clock ahead of their expiry.
+      - name: Valve command safety path
+        run: node --test scripts/test-valve-command-safety-path.js
       # WATERMARK protected configuration commands (SET/DELETE_WATERMARK_CALIBRATION,
       # SET_CHAMELEON_CONFIG, UPSERT_DEVICE_SOIL_DEPTHS): the receiver and the command
       # ledger on the seed schema, including a rejected or conflicting command that
@@ -100,6 +115,33 @@ jobs:
       # temperature-enabled WATERMARK node kept as a soil source (cards, series, CSV).
       - name: Soil history source and rollup rule
         run: node --test scripts/test-history-router-soil-projection.js
+      # S2120 rain contract through the shipped codec and the one S2120 writer,
+      # s2120-ingest-fn with osi-rain (node:sqlite on the seed schema): 4213 is the
+      # counter, 4113 is a rate, legacy intensity is integrated only over the vendor
+      # ten-minute window; durable identity, replay, rollback, late counter frames
+      # and zone-local days. The read-only history assessment runs on a synthetic
+      # copy of the seed schema.
+      - name: S2120 rain ingest contract
+        run: node --test scripts/test-s2120-rain-ingest.js scripts/test-assess-s2120-rain-history.js
+      # S2120 under the real osi-db-helper: two distinct uplinks of one device in
+      # flight together count each counter interval once (100 -> 101, 102 = 2 mm),
+      # plus concurrent first frames, duplicate deliveries, a rollback and a restart.
+      - name: S2120 ingestion under the real database helper
+        run: node --test scripts/test-s2120-ingest-concurrency.js
+      # LSN50 MOD9 rain counter (same race, regression only): the shipped Apply Config
+      # and LSN50 Normalize + Write bodies under the real osi-db-helper; the counter read
+      # and the device_data insert share one transaction, so 100 then 101 and 102 in
+      # flight together store 2 x 0.2 mm.
+      - name: LSN50 MOD9 counter under concurrent uplinks
+        run: node --test scripts/test-lsn50-counter-concurrency.js
+      # History correction queue (shipped Build / POST / Mark History Batch and
+      # History Manifest bodies of both profiles, node:sqlite, a fake cloud with
+      # the cloud's ordering, hash, row-index and manifest rules): batches go out
+      # in ascending key order, a key whose row is gone is dropped, and a
+      # row-level permanent rejection sets one key aside, and the 5-minute
+      # manifest keeps a queued key in place so a mismatching segment converges.
+      - name: History correction queue drain
+        run: node --test scripts/test-sync-history-queue-drain.js
       # The staged, digest-pinned command-ledger install in deploy.sh (activation
       # after the schema migration, stale stage cleanup), the fetch list and the
       # payload lifecycle. The pin check fails when a ledger, binding or installer
@@ -109,6 +151,21 @@ jobs:
           node --test scripts/deploy-command-ledger-dependency.test.js \
             scripts/deploy-fetch-list.test.js \
             scripts/deploy-payload-lifecycle.test.js
+      # Gateway records deploy.sh keeps outside the payload: the reported
+      # firmware version, which follows the active payload through activation
+      # and every rollback, and the
+      # osi-bootstrap service enabled on a stock gateway OS install.
+      - name: Deploy gateway setup
+        run: node --test scripts/test-deploy-gateway-setup.js
+      # TEKTELIC Kiwi and Clover: chirpstack-bootstrap.js puts the Tektelic codec
+      # on the Kiwi profile and gives the Clover its own profile with it instead
+      # of aliasing the codec-less field-tester profile; --repair-soil-profiles
+      # fixes an already provisioned gateway without provisioning. A decoded
+      # Clover uplink lands in device_data, the sync outbox and GET /api/devices.
+      - name: Kiwi and Clover device profiles, Clover ingest
+        run: |
+          node --test scripts/test-chirpstack-bootstrap-clover.js
+          node scripts/test-clover-ingest-flow.js
       # Migration 0068 rehearsal (bound applied-command columns, calibration-only
       # outbox triggers, live and tombstone events, readings stay local) and the
       # journal v2 replication flows migration this branch touches.
@@ -167,6 +224,10 @@ jobs:
             scripts/test-entity-name-command-path.js \
             scripts/test-entity-name-create-paths.js \
             scripts/test-legacy-upsert-zone-name.js
+      # The zone rain gauge selection routes (GET/PUT rain-source): auth, the
+      # zone settings guard, candidate validation and the re-projection.
+      - name: Zone rain gauge selection gates
+        run: node --test scripts/test-zone-rain-source-route.js
       # F128: a local zone create/delete must ping the outbox flush gate over the
       # link pair instead of waiting up to 30 s for the "Flush Sync Outbox" inject.
       # Pins the wiring (both scoped and legacy routes tap it) and the gate's
@@ -184,6 +245,29 @@ jobs:
       # legacy command path, each against the shipped source.
       - name: Zone weather provider round trip
         run: node --test scripts/test-zone-weather-source.js
+      # LoRain zone rain: a valid dry report writes a zone row with 0 mm received, a non-ok one does
+      # not, and a new zone day starts from the zone's own day window, never the host
+      # day. TZ pins the host clock the old 'localtime' path depended on.
+      - name: LoRain dry reports and zone day window
+        run: TZ=UTC node --test scripts/test-lorain-dry-zone-row.js
+      # LoRain single writer (migration 0071, osi-rain): durable observation identity,
+      # atomic persistence and rollback, the contract fixtures through lorain-ingest-fn,
+      # delayed and rejoined frames, the verified-interval rate; then the real
+      # osi-db-helper under concurrent and repeated deliveries and a restart.
+      - name: LoRain ingestion through one writer
+        run: TZ=UTC node --test scripts/test-lorain-ingest.js
+      - name: LoRain ingestion under the real database helper
+        run: TZ=UTC node --test scripts/test-lorain-ingest-concurrency.js
+      # Zone-day rain projection (migration 0072, osi-rain): one selected gauge per zone
+      # (never a sum), instrument days with coverage, rainfall_mm only for a certified
+      # complete day, late corrections, the move-day rule, through the ingest nodes.
+      - name: Zone-day rain projection
+        run: TZ=UTC node --test scripts/test-rain-zone-days.js
+      # Zone-day rain quality on the sync paths (migration 0073): the event payload,
+      # bootstrap and force-sync snapshot items and history rows carry the five
+      # quality fields; the history hash v1 input stays the six columns.
+      - name: Zone-day rain quality sync
+        run: TZ=UTC node --test scripts/test-zone-env-rain-quality-sync.js
       # Daily agronomy parity: the zone stage start date -- the 0066 zone trigger on
       # the seven bundled databases and the legacy command path, against the shipped source.
       - name: Zone stage start date round trip
@@ -192,5 +276,29 @@ jobs:
       # (0067), the writer's versions and retraction, and the bootstrap list.
       - name: Daily agronomy record sync
         run: node --test scripts/test-zone-agronomy-sync-triggers.js
+      # Rain finding 13: the dendro rolling rain covers the seven calendar days ending on
+      # the zone-local analytics date; missing or unknown days are counted, never zero
+      # days, and unknown rain warns without starting rain suppression. Both profiles.
+      - name: Dendro rolling 7-day rain
+        run: node --test scripts/test-dendro-rolling-7d-rain.js
+      # Rain finding 7: dendro advice follows the rain-resolution policy. The zone's certified
+      # gauge day (a certified 0 mm included) outranks provider rain; an uncertified day's
+      # received amount may start suppression but is never the amount; unknown is NULL.
+      - name: Dendro rain-resolution policy
+        run: node --test scripts/test-dendro-rain-policy.js
+      # osi-os #377: the valve, zone-schedule and zone-delete routes keep each
+      # request's target, duration and identity on msg. Runs the shipped function
+      # bodies with two requests interleaved at every sqlite boundary, flag off and
+      # scoped, plus the STREGA and cloud command ACKs; the guard rejects per-request
+      # keys in shared flow or global context in both profiles.
+      - name: Valve, schedule and zone delete request isolation
+        run: |
+          node --test scripts/test-request-context-isolation.js
+          node scripts/verify-request-context-isolation.js
+      # pipefail: without it the step took tee's exit status, and the grep
+      # also matched the failure message, so a failing upgrade leg stayed green.
       - name: Guard against silent upgrade-leg skip
-        run: node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out && grep -q "base seed + history migration" /tmp/schema.out
+        run: |
+          set -o pipefail
+          node scripts/test-sync-history-schema.js 2>&1 | tee /tmp/schema.out
+          grep -qx 'OK sync history schema base seed + history migration' /tmp/schema.out

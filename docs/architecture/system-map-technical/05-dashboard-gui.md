@@ -78,7 +78,7 @@ cloud copies aligned.
 |---|---|---|
 | REST client | `src/services/api.ts` | Single entry point for HTTP; snake_case/camelCase bridging and EUI normalization live here. Auth token storage and expiry cleanup with `src/contexts/AuthContext.tsx`, `src/services/authEvents.ts`. |
 | Types | `src/types/farming.ts` | Shared domain types (Device, Zone, Schedule, readings). |
-| Unit helpers | `src/utils/swt.ts` (`kpaToPf = log10(kPa·10)`, null for non-positive input; wet/moderate/dry bucketing at 20/60 kPa), `src/utils/rain.ts` (no-sample vs measured-dry), `src/utils/wind.ts`, `displayPreferences.ts`, `forecastFormat.ts` | Unit conversions and missing-data semantics, each with tests under `src/utils/__tests__/`. |
+| Unit helpers | `src/utils/swt.ts` (`kpaToPf = log10(kPa·10)`, floored at 0 pF for kPa at or below 0.1, null for missing input; wet/moderate/dry bucketing at 20/60 kPa), `src/utils/rain.ts` (no-sample vs measured-dry), `src/utils/wind.ts`, `displayPreferences.ts`, `forecastFormat.ts` | Unit conversions and missing-data semantics, each with tests under `src/utils/__tests__/`. |
 | i18n | `src/i18n/config.ts`, `public/locales/<lng>/<ns>.json`, `components/LanguageSwitcher.tsx` | i18next with HTTP backend at `/gui/locales/…`; coverage incomplete (issue #47), new keys go to every locale directory. |
 
 ## Build and test
