@@ -783,3 +783,16 @@ test('exports a stored zero VWC', async () => {
   assert.ok(row, 'a vwc_1 row');
   assert.equal(row.value, 0);
 });
+
+// A zero or negative depth is not a depth (docs/contracts/vwc-display/):
+// the label keeps the channel name instead of printing "VWC 0cm".
+test('never names a zero or negative depth in a VWC series label', async () => {
+  for (const depth of [0, -10]) {
+    const result = await vwcExport(
+      { soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: depth }), sdi12_channel_layout_json: null },
+      { vwc_1: 30 },
+      { channels: 'vwc_1' },
+    );
+    assert.equal(rowFor(result, 'vwc_1').series_label, 'Probe - VWC 1', `depth ${depth}`);
+  }
+});

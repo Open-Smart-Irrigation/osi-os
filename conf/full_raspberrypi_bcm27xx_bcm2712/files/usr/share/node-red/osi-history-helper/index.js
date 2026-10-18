@@ -2391,7 +2391,8 @@ const DEPTH_LABEL_FAMILIES = Object.freeze({ vwc: 'VWC', soil_vic: 'VIC' });
 
 function soilChannelLabel(channel, depthCm) {
   const match = /^(vwc|soil_vic)_\d+$/.exec(String(channel.id || ''));
-  if (match && depthCm !== null && depthCm !== undefined) return `${DEPTH_LABEL_FAMILIES[match[1]]} ${depthCm}cm`;
+  // A zero or negative depth is not a depth: keep the channel name rather than print "VWC 0cm".
+  if (match && typeof depthCm === 'number' && depthCm > 0) return `${DEPTH_LABEL_FAMILIES[match[1]]} ${depthCm}cm`;
   return channel.label || channel.id;
 }
 
