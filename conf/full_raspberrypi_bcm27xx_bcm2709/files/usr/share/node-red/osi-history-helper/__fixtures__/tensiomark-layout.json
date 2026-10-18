@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "kind": "tensiomark",
+  "source_unit": "pF",
+  "field_order": "temperature_pf",
+  "qualification": "bench_observed",
+  "sensors": [
+    {
+      "address": "1",
+      "channel": 1,
+      "identity": "111TENSIOMARK_2Vh_10A00001",
+      "depth_cm": null,
+      "calibration_range": "unverified"
+    },
+    {
+      "address": "4",
+      "channel": 2,
+      "identity": "411TENSIOMARK_2Vh_10A00002",
+      "depth_cm": null,
+      "calibration_range": "unverified"
+    }
+  ]
+}

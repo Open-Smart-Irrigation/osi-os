@@ -1,0 +1,194 @@
+[
+  {
+    "name": "standard-crc",
+    "evidence": "standard_example",
+    "source": "https://www.sdi-12.org/current_specification/SDI-12%20Specification%201.4%20February%2020%202023.pdf",
+    "locator": "§4.4.12.3(b)",
+    "transformations": "Printed CR/LF notation expanded; service request omitted because this preview has no timing model.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "command": "0MC!",
+        "response": "00053\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+3.14+2.718+1.414Ipz\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "complete",
+      "values": [
+        3.14,
+        2.718,
+        1.414
+      ]
+    }
+  },
+  {
+    "name": "sparse-concurrent",
+    "evidence": "synthetic",
+    "description": "All three values fit D0 but the hypothetical sensor uses three blocks, which the standard permits.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "command": "AC3!",
+        "response": "A00203\r\n",
+        "blocks": [
+          {
+            "command": "AD0!",
+            "response": "A+1\r\n"
+          },
+          {
+            "command": "AD1!",
+            "response": "A+2\r\n"
+          },
+          {
+            "command": "AD2!",
+            "response": "A+3\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "complete",
+      "values": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  {
+    "name": "pr2-incomplete",
+    "evidence": "synthetic",
+    "description": "PR2-like declared six-value sequence stops after three values; grouping and values are invented.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "command": "0M3!",
+        "response": "00026\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+10+20+30\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "incomplete",
+      "next_command": "0D1!"
+    }
+  },
+  {
+    "name": "aborted-after-partial",
+    "evidence": "synthetic",
+    "description": "An empty D response after partial data aborts; no next-D continuation.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "command": "0M!",
+        "response": "00012\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+1\r\n"
+          },
+          {
+            "command": "0D1!",
+            "response": "0\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "aborted"
+    }
+  },
+  {
+    "name": "tensiomark-short-announcement",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "locator": "§5.1.5",
+    "transformations": "The printed 0082 text is retained; address 0 in the command and CR/LF are synthetic. This is not a vendor wire capture.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "command": "0M!",
+        "response": "0082\r\n",
+        "blocks": []
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "invalid"
+    }
+  },
+  {
+    "name": "pr2-four-wide-m",
+    "evidence": "synthetic",
+    "description": "Four hypothetical width-nine values need at least two tightly packed M blocks.",
+    "input": {
+      "operation": "capacity",
+      "input": {
+        "family": "M",
+        "value_count": 4,
+        "value_width": 9,
+        "crc": false
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "capacity",
+      "packed_blocks": 2,
+      "packed_wire_bytes": 42
+    }
+  },
+  {
+    "name": "pr2-six-m",
+    "evidence": "synthetic",
+    "description": "Six hypothetical width-six values with CRC need two tightly packed M blocks.",
+    "input": {
+      "operation": "capacity",
+      "input": {
+        "family": "M",
+        "value_count": 6,
+        "value_width": 6,
+        "crc": true
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "capacity",
+      "packed_blocks": 2,
+      "packed_wire_bytes": 48
+    }
+  },
+  {
+    "name": "pr2-six-c",
+    "evidence": "synthetic",
+    "description": "Six hypothetical width-nine values fit one C block; actual grouping unknown.",
+    "input": {
+      "operation": "capacity",
+      "input": {
+        "family": "C",
+        "value_count": 6,
+        "value_width": 9,
+        "crc": true
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "capacity",
+      "packed_blocks": 1,
+      "packed_wire_bytes": 60
+    }
+  }
+]

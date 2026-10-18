@@ -113,7 +113,7 @@ describe('summarizeZoneSoil', () => {
   });
 
   it('flags an out-of-range tension as invalid rather than plotting it', () => {
-    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900 } })];
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001 } })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.invalid).toBe(true);
     expect(status.value).toBeNull();
@@ -226,7 +226,7 @@ describe('summarizeZoneSoil channel selection', () => {
   });
 
   it('skips a channel with no usable reading rather than reporting nothing', () => {
-    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900, swt_2: 40 } })];
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001, swt_2: 40 } })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.value).toBe(40);
     expect(status.channel).toBe('swt_2');
@@ -309,7 +309,7 @@ it('does not establish a last-valid historical value with a non-finite clock', (
   ], Number.NaN)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
 });
 
-it.each([{ swt_1: 301 }, { swt_1: 45, chameleon_timeout: 1 }])(
+it.each([{ swt_1: 1_000_000.1 }, { swt_1: 45, chameleon_timeout: 1 }])(
   'retains actual measurement faults even with an untrusted timestamp: %o', (latestData) => {
     expect(summarizeZoneSoil([device({
       type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
@@ -593,4 +593,21 @@ it('accepts the three-hour age and five-minute skew boundaries only', () => {
   expect(isSensorObservationFresh('not-a-date', NOW)).toBe(false);
   expect(isSensorObservationFresh(FRESH, Number.NaN)).toBe(false);
   expect(isSensorObservationFresh(FRESH, Number.POSITIVE_INFINITY)).toBe(false);
+});
+
+describe('canonical soil tension across sources', () => {
+  it.each(['wet_offset_clipped', 'unsettled', 'saturated', 'open'] as const)('uses finite canonical SWT without gating on diagnostic status %s', status => {
+    const result = summarizeZoneSoil([device({type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH, latest_data: { swt_1: 30, watermark: watermarkLatest({ status, kpa: 30 }, { status: 'ok', kpa: null }) }})], NOW);
+    expect(result.value).toBe(30);
+    expect(result.invalid).toBe(false);
+  });
+  it.each([0, 500, 1_000_000])('gives KIWI and Tensiomark the same domain and weight at %s kPa', value => {
+    const result = summarizeZoneSoil([
+      device({ type_id: 'KIWI_SENSOR', last_seen: FRESH, latest_data: { swt_1: value } }),
+      device({ type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK', last_seen: FRESH, latest_data: { swt_1: value } }),
+    ], NOW);
+    expect(result.value).toBe(value);
+    expect(result.invalid).toBe(false);
+    expect(result.sensorCount).toBe(2);
+  });
 });

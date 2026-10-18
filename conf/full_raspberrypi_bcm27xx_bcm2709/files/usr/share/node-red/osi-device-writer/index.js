@@ -186,9 +186,9 @@ function writeDeviceDataSync(db, manifest, normalizeResult, meta, options) {
 
   const placeholders = cols.map(() => '?').join(', ');
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
-  db.prepare(sql).run(...vals);
+  const insertedRow = db.prepare(sql + ' RETURNING id').get(...vals);
 
-  return { inserted: true, deadLettered: plan.deadLettered, columns: cols.slice() };
+  return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
 
 async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options) {
@@ -238,9 +238,9 @@ async function writeDeviceDataAsync(db, manifest, normalizeResult, meta, options
 
   const placeholders = cols.map(() => '?').join(', ');
   const sql = 'INSERT INTO device_data (' + cols.join(', ') + ') VALUES (' + placeholders + ')';
-  await db.run(sql, vals);
+  const insertedRow = await db.get(sql + ' RETURNING id', vals);
 
-  return { inserted: true, deadLettered: plan.deadLettered, columns: cols.slice() };
+  return { inserted: true, deviceDataId: Number(insertedRow.id), deadLettered: plan.deadLettered, columns: cols.slice() };
 }
 
 // Dispatch on the shape of `db`: node:sqlite's DatabaseSync (used by this

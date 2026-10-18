@@ -26,6 +26,22 @@ const NORMALIZE = require(path.join(
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize'
 ));
 
+const COMMISSIONING_PATH = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning');
+const COMMISSIONING = require(COMMISSIONING_PATH);
+function implementationSource(node) {
+  const handlers = {
+    'sdi12-config-action-fn': ['config-handler.js', 'handleConfig'],
+    'sdi12-write-fn': ['write-handler.js', 'handleWrite'],
+    'sdi12-identify-action-fn': ['identify-handler.js', 'handleIdentifyAction'],
+    'sdi12-identify-trigger-fn': ['identify-handler.js', 'handleIdentifyTrigger'],
+    'sdi12-identify-fn': ['identify-handler.js', 'handleIdentifyReply'],
+  };
+  const handler = handlers[node.id];
+  if (!handler) return node.func;
+  assert.ok(node.func.includes('helper.value.' + handler[1] + '('), 'flow delegates to checked helper');
+  return fs.readFileSync(path.join(COMMISSIONING_PATH, handler[0]), 'utf8');
+}
+
 function nodesById(id) {
   return flows.filter((node) => node.id === id);
 }
@@ -237,7 +253,8 @@ test('handled SDI-12 HTTP failures emit one bounded response without a Catch dup
       expectedStatus: 500,
       msg: {
         deviceRow: { deveui },
-        req: { body: { probe_profile: 'TENSIOMARK' } },
+        // Tensiomark requires its layout here, so the legacy path uses a layout-free profile.
+        req: { body: { probe_profile: 'HYDRASCOUT' } },
       },
       libOverrides: {
         osiDb: {
@@ -312,8 +329,8 @@ test('deployment adapters use declared helpers, bound EUI data, and visible reso
   }
 
   const save = nodeById('sdi12-config-action-fn', 'function');
-  assert.match(save.func, /saveSentekLayout\(/);
-  assert.match(save.func, /Layout saved; acquisition configuration not applied\./);
+  assert.match(implementationSource(save), /saveSentekLayout\(/);
+  assert.match(implementationSource(save), /Layout saved; acquisition configuration not applied\./);
 });
 
 test('the 60-second recipe poller is isolated and failure-visible', async () => {
@@ -342,7 +359,7 @@ test('the 60-second recipe poller is isolated and failure-visible', async () => 
       env: {},
       db,
       osiLibModules: {
-        'sdi12-commissioning': {
+        'sdi12-commissioning': { ...COMMISSIONING,
           pollDeployments: async () => {
             const error = new Error('bounded poll failure');
             error.code = 'chirpstack_unavailable';
@@ -413,7 +430,7 @@ test('the recipe poller distinguishes a real helper failure from having no SDI-1
         env: {},
         db,
         osiLibModules: {
-          'sdi12-commissioning': {
+          'sdi12-commissioning': { ...COMMISSIONING,
             pollDeployments: async () => { pollCalled = true; return []; },
           },
           chirpstack: {
@@ -452,7 +469,7 @@ test('the recipe poller distinguishes a real helper failure from having no SDI-1
           sdi12_recipe_poll_no_devices_noticed_at: Date.now(),
         },
         osiLibModules: {
-          'sdi12-commissioning': { pollDeployments: async () => [] },
+          'sdi12-commissioning': { ...COMMISSIONING, pollDeployments: async () => [] },
           chirpstack: { createProvisioningClientFromEnv: () => ({ close: () => [] }) },
         },
       });
@@ -477,7 +494,7 @@ test('the recipe poller distinguishes a real helper failure from having no SDI-1
           sdi12_recipe_poll_no_devices_noticed_at: Date.now() - (31 * 60 * 1000),
         },
         osiLibModules: {
-          'sdi12-commissioning': { pollDeployments: async () => [] },
+          'sdi12-commissioning': { ...COMMISSIONING, pollDeployments: async () => [] },
           chirpstack: { createProvisioningClientFromEnv: () => ({ close: () => [] }) },
         },
       });
@@ -498,15 +515,15 @@ test('Identify compiles discovery/address frames and never carries a hardcoded a
   const trigger = nodeById('sdi12-identify-trigger-fn', 'function');
   const response = nodeById('sdi12-identify-fn', 'function');
 
-  assert.match(action.func, /sdi12_channel_layout_json/);
-  assert.match(action.func, /validateSentekLayout/);
-  assert.match(trigger.func, /encodeIdentifyFrame\(/);
-  assert.doesNotMatch(trigger.func, /0x30\s*,\s*0x49\s*,\s*0x21/);
-  assert.doesNotMatch(trigger.func, /\[0xA8/);
-  assert.doesNotMatch(trigger.func, /['"]0I!['"]/);
-  assert.match(response.func, /\bdiscovering\b/);
-  assert.match(response.func, /\^\[0-9A-Za-z\]\$/);
-  assert.match(response.func, /discovered_address/);
+  assert.match(implementationSource(action), /sdi12_channel_layout_json/);
+  assert.match(implementationSource(action), /validateSentekLayout/);
+  assert.match(implementationSource(trigger), /encodeIdentifyFrame\(/);
+  assert.doesNotMatch(implementationSource(trigger), /0x30\s*,\s*0x49\s*,\s*0x21/);
+  assert.doesNotMatch(implementationSource(trigger), /\[0xA8/);
+  assert.doesNotMatch(implementationSource(trigger), /['"]0I!['"]/);
+  assert.match(implementationSource(response), /\bdiscovering\b/);
+  assert.match(implementationSource(response), /\^\[0-9A-Za-z\]\$/);
+  assert.match(implementationSource(response), /discovered_address/);
   assert.equal(response.outputs, 2);
   assert.deepEqual(response.wires, [['sdi12-debug'], ['sdi12-identify-trigger-fn']]);
 });
@@ -627,9 +644,9 @@ test('SDI-12 acquisition query and writer carry exact best-effort observation ou
   assert.match(query.sql, /last_observed_at/);
   assert.match(query.sql, /WHERE d\.deveui = \$deveui/);
   assert.match(queryBuilder.func, /\$deveui/);
-  assert.match(writer.func, /observeAcquisition\(/);
-  assert.match(writer.func, /writeFailed/);
-  assert.match(writer.func, /quarantined/);
+  assert.match(implementationSource(writer), /observeAcquisition\(/);
+  assert.match(implementationSource(writer), /writeFailed/);
+  assert.match(implementationSource(writer), /quarantined/);
 
   const db = seedTestDb();
   const observations = [];
@@ -672,7 +689,7 @@ test('SDI-12 acquisition query and writer carry exact best-effort observation ou
           clampRecordedAt: (value) => ({ recordedAt: value, clamped: false }),
           writeDeviceData: async () => writeResult,
         },
-        'sdi12-commissioning': {
+        'sdi12-commissioning': { ...COMMISSIONING,
           observeAcquisition: async (_db, input) => { observations.push(input); return null; },
         },
       },
@@ -840,7 +857,7 @@ test('observation adapter preserves telemetry across pre-drain and failed acquis
                 return scenario.writeResult;
               },
             },
-            'sdi12-commissioning': {
+            'sdi12-commissioning': { ...COMMISSIONING,
               observeAcquisition: async (_db, input) => { observations.push(input); return null; },
             },
           },
@@ -916,7 +933,7 @@ test('incomplete reassembly and writer failure are observed without invented rea
             quarantineOnly: async () => undefined,
             writeDeviceData: async () => { throw new Error('write failed'); },
           },
-          'sdi12-commissioning': {
+          'sdi12-commissioning': { ...COMMISSIONING,
             observeAcquisition: async (_db, input) => { observations.push(input); return null; },
           },
         },
@@ -971,7 +988,7 @@ test('an observation-state failure warns without rejecting a valid telemetry wri
           clampRecordedAt: (value) => ({ recordedAt: value, clamped: false }),
           writeDeviceData: async () => writeResult,
         },
-        'sdi12-commissioning': {
+        'sdi12-commissioning': { ...COMMISSIONING,
           observeAcquisition: async () => { throw new Error('state unavailable'); },
         },
       },
@@ -1081,7 +1098,7 @@ test('Apply and Rollback action nodes return 202 projections and map non-contrac
         env: {},
         db,
         osiLibModules: {
-          'sdi12-commissioning': {
+          'sdi12-commissioning': { ...COMMISSIONING,
             [helperMethod]: async (_db, _client, deveui, options) => {
               calls.push({ deveui, options });
               return { statusCode: 202, deployment: { desired_version: 4, status: 'queued' } };
@@ -1106,7 +1123,7 @@ test('Apply and Rollback action nodes return 202 projections and map non-contrac
         env: {},
         db,
         osiLibModules: {
-          'sdi12-commissioning': {
+          'sdi12-commissioning': { ...COMMISSIONING,
             [helperMethod]: async () => {
               throw Object.assign(new Error('external detail must not leak'), {
                 statusCode: 502,

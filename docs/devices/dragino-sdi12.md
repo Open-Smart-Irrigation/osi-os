@@ -1,10 +1,10 @@
 # Dragino SDI-12 soil node
 
-`DRAGINO_SDI12` represents a Dragino SDI-12-LB or SDI-12-LS converter with one SDI-12 probe. The probe address is saved layout data, never an edge default. The edge stores battery voltage and the probe channels in `device_data`; the probe profile supplies the meaning and order of the ASCII values.
+`DRAGINO_SDI12` represents a Dragino SDI-12-LB or SDI-12-LS converter with a saved probe layout. Supported layouts include one probe and an explicitly configured pair of Tensiomarks. Probe addresses are saved layout data, never edge defaults. The edge stores battery voltage and probe channels in `device_data`; the profile supplies the meaning and order of the ASCII values.
 
 The LB uses an 8500 mAh Li-SOCl2 battery. The LS uses solar charging with a 3000 mAh Li-ion battery. Their SDI-12 and LoRaWAN payloads are the same, so both use this device type.
 
-Probe layouts, identity matchers, and AT recipes remain provisional where the registry marks them provisional. The Sentek EnviroSCAN and TriSCAN recipe below was bench-verified on 2026-08-28 and field-verified on 2026-08-30; the other probe recipes still require their own captures. The full investigation record is [Sentek EnviroSCAN/TriSCAN and Dragino SDI-12 commissioning](../operations/sentek-dragino-sdi12-commissioning-2026-08-31.md).
+Probe layouts, identity matchers, and AT recipes remain provisional where the registry marks them provisional. The Sentek EnviroSCAN and TriSCAN recipe below was bench-verified on 2026-08-28 and field-verified on 2026-08-30; PR2, Tensiomark and HydraScout do not yet have qualified recipes in this guide. The full investigation record is [Sentek EnviroSCAN/TriSCAN and Dragino SDI-12 commissioning](../operations/sentek-dragino-sdi12-commissioning-2026-08-31.md).
 
 ## Commissioning
 
@@ -112,6 +112,8 @@ The cut keeps bytes 2 through 11, producing `+2.48+21.5`. For any other response
 
 `AT+DATAUP=1` splits one probe response across up to 15 LoRaWAN frames instead of one, for profiles whose value count would otherwise exceed the 51-byte DR0 uplink budget. The field converter split the verified eight-module/two-TriSCAN vector into three 42-character ASCII slices. The registry allows five for the supported worst case of ten TriSCAN modules: ten moisture plus ten VIC values. Every other profile stays single-uplink until it has its own reviewed reason to change.
 
+A configured Tensiomark layout requires `AT+PAYVER=1` and `AT+DATAUP=0`. Its strict path validates the whole addressed response from one uplink; under `AT+PAYVER=2` only the final segment's bytes reach it, so every acquisition is refused as `rejected_framing` and kept as evidence, never stored as a reading.
+
 A device set to `AT+DATAUP=1` must also be set `AT+PAYVER=2`. The codec reads the header layout from the `payver` byte, never from frame length:
 
 - `payver=1`: 3-byte header, `[bat_hi][bat_lo][payver][ascii...]`.
@@ -186,40 +188,70 @@ This recipe is address-specific. Replace the leading `0` in every command only
 when the probe itself has another confirmed SDI-12 address. The Dragino does not
 have a separate SDI-12 address to set.
 
-### Delta-T PR2/4
+### Delta-T PR2/4 and PR2/6
 
-Use the four-depth profile only after the capture shows four VWC values in order.
+The former `M!` recipes in this guide were incorrect for VWC and have been
+withdrawn. Delta-T documents `aM!` as permittivity, `aM1!` as mineral VWC fraction,
+and `aM3!` as mineral VWC percent. The probe's command calibration can be edited,
+so selecting `M3!` alone does not confirm its installed calibration.
+See the [PR2 SDI-12 manual, pp. 49–50](https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf).
 
-Sample four-value response: `0+30.5+28.1+25.9+20.0\r\n`.
+No replacement Dragino recipe is bench-qualified here. A valid recipe must cover
+all data-response blocks, variable response lengths, startup/measurement time
+and transport segmentation. PR2/4 needs four positions and PR2/6 six. Their
+identity strings do not establish the variant by themselves.
 
-```text
-AT+COMMAND1=0M!,10,1,1
-AT+DATACUT1=23,2,2~21
-```
-
-### Delta-T PR2/6
-
-Use the six-depth profile only after the capture shows six VWC values in order. PR2/4 and PR2/6 are deliberately not auto-matched by the v1 registry because their identity strings may not distinguish the depth variant.
-
-Sample six-value response: `0+30.5+28.1+25.9+20.0+19.0+18.0\r\n`.
-
-```text
-AT+COMMAND1=0M!,10,1,1
-AT+DATACUT1=33,2,2~31
-```
+Use the [offline preview](sdi12-offline-preview.md) for synthetic percent vectors;
+its result does not establish the installed command mode. Complete the
+[PR2 acquisition design](../superpowers/specs/2026-09-29-pr2-shared-sdi12-design.md)
+and source-backed compiler tests before applying settings to a probe.
 
 ### ecoTech Tensiomark
 
-The first value is expected to be pF or hPa, depending on the probe configuration. The v1 `TENSIOMARK` profile assumes pF and transforms it to kPa with `10^pF / 10`; a hPa capture requires a profile decision before deployment. The second value is expected to be soil temperature in °C.
+The 2014 manual's SDI-12 output is pF and temperature. The former hPa suggestion
+and fixed five-second recipe in this guide are withdrawn. The
+[ecoTech manual, §§5.1.5 and 7](https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf)
+requires timing that the previous recipe did not establish; do not copy the
+Sentek power window.
 
-Sample response: `0+2.48+21.5\r\n`.
+Candidate version 3 covers an explicitly selected variant-1 pF rehearsal with
+required `field_order: "pf_temperature"` or `"temperature_pf"`. Under the first
+assumption, synthetic `+2.48+21.5` previews as 30.2 kPa and 21.5 °C. Installed
+variant, source units, ordering and fault behavior still need evidence; see the
+[unit investigation](tensiomark-output-units-investigation.md). Unversioned live
+normalization quarantines Tensiomark replies without an explicit live layout and
+emits battery only. The candidate remains available through the
+[offline preview](sdi12-offline-preview.md).
 
-```text
-AT+COMMAND1=0M!,5,1,1
-AT+DATACUT1=13,2,2~11
-```
+The separate [field integration](../superpowers/specs/2026-10-15-tensiomark-field-integration.md)
+supports one or two explicitly configured Tensiomarks. Its live layout uses
+`version: 1`, `kind: "tensiomark"`, `source_unit: "pF"` and
+`field_order: "temperature_pf"`. Save each observed address and complete identity,
+its channel number and actual depth when known. Leave unknown depths empty. The
+qualification is `bench_observed`; `calibration_range: "unverified"` remains
+explicit. The identity suffix `_2` does not establish a calibration variant.
 
-The expected normalized vector is `+2.48+21.5`, which becomes `swt_1 = 30.2 kPa` and `soil_temp_1 = 21.5 °C`. A response with an extra value is quarantined as `sdi12_value_count`; the writer inserts battery only.
+This path requires PAYVER 1 on FPort 2 and complete addressed replies. It validates
+original payload bytes, including each command envelope, before numeric parsing.
+Each address must occur exactly once with temperature followed by pF. A malformed
+or missing record rejects all soil channels in that acquisition while retaining
+raw evidence and available battery data. Unconfigured legacy Tensiomarks continue
+to quarantine their replies.
+
+For accepted readings the edge stores `10 ** pF / 10` in `swt_<channel>` and the
+temperature in `soil_temp_<channel>`, each rounded to two decimals. It does not
+clip these readings at 300 kPa. The accepted pF range 0..7 and temperature range
+−40..80 °C are software plausibility checks, not calibration claims. Original
+payload, addressed text, configuration snapshot and normalized values are retained
+in `tensiomark_observations`, linked atomically to the canonical history row.
+
+The two-probe bench configuration used whole replies with `ALLDATAMOD=1`,
+`DATAUP=0`, `PAYVER=1`, cleared cuts, two addressed `M!,10,1,0` command slots,
+`12VT=30000` and `TDC=1200000`. These are recorded settings for the observed
+converter firmware, not a generic recipe for unknown Tensiomark revisions. Saving
+the edge layout does not send these settings to the converter. The actual power
+waveform and battery budget still require electrical measurement. See the
+[Dragino output-time and payload settings](https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/#33-set-the-output-time).
 
 ### IMKO TRIME PICO64
 
@@ -234,16 +266,17 @@ AT+DATACUT1=13,2,2~11
 
 ### HydraScout
 
-The v1 profile supports two depths with VWC, temperature, and EC at each depth. Its provisional order is `vwc_1`, `soil_temp_1`, `soil_ec_1`, then the same three channels for depth 2. Confirm the EC unit; the target storage unit is µS/cm.
+The deployed legacy profile assumes two interleaved VWC/temperature/EC groups.
+That interpretation has not been established for the installed probe. Its former
+illustrative command/cut recipe is withdrawn; it must not be used to commission
+new installations.
 
-Sample response: `0+30.5+21.5+250.0+28.1+22.0+300.0\r\n`.
-
-```text
-AT+COMMAND1=0M!,10,1,1
-AT+DATACUT1=35,2,2~33
-```
-
-The six-value order and EC conversion are **unverified until bench capture**. More than two HydraScout depths would need [multi-segment uplinks](#multi-segment-uplinks); that stays gated on a HydraScout bench capture, not on missing reassembly support — its six-value order and interleave are unverified at any depth count.
+[Banner's HydraScout application note, Rev. A](https://info.bannerengineering.com/cs/groups/public/documents/literature/b_4182045.pdf)
+shows grouped moisture and temperature commands for an example installation.
+It is evidence for that integration, not an authoritative definition of every
+HydraScout model, salinity quantity or unit. Obtain the installed model's protocol
+before defining a candidate mapping. The offline resolver returns
+`protocol_evidence_required` for HydraScout.
 
 ## Identify and downlink frames
 

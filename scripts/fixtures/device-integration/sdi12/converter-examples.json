@@ -1,0 +1,475 @@
+[
+  {
+    "name": "vendor-pdta",
+    "description": "Inspect the manual PDTA log payload under declared settings.",
+    "evidence": "vendor_example",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Manual section 3.7 first PDTA entry: remove log addresses, timestamp and decimal length 18; join hex byte lines unchanged. DATAUP=0, no cuts, no conversion and no EXT settings are interpretation assumptions; FPort 2 is supplied, not captured.",
+    "input": {
+      "operation": "frame",
+      "input": {
+        "fport": 2,
+        "bytes": [
+          12,
+          132,
+          1,
+          241,
+          13,
+          48,
+          43,
+          49,
+          46,
+          48,
+          56,
+          43,
+          50,
+          52,
+          46,
+          54,
+          13,
+          10
+        ],
+        "configuration": {
+          "dataup": 0,
+          "payver": 1,
+          "alldatamod": 1,
+          "datacut": "none",
+          "dataconv": "none",
+          "ext": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "wrapped",
+      "text": "0+1.08+24.6\r\n"
+    }
+  },
+  {
+    "name": "wrapped-crc",
+    "description": "Synthetic wrappers carrying a published standard CRC reply.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/ ; SDI-12 1.4 section 4.4.12: https://www.sdi-12.org/current_specification/SDI-12%20Specification%201.4%20February%2020%202023.pdf",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            132,
+            1,
+            241,
+            7,
+            48,
+            48,
+            48,
+            49,
+            49,
+            13,
+            10,
+            242,
+            11,
+            48,
+            43,
+            51,
+            46,
+            49,
+            52,
+            79,
+            113,
+            90,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 1,
+            "response_command": "0MC!"
+          },
+          {
+            "slot": 2,
+            "response_command": "0D0!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "complete",
+      "values": [
+        3.14
+      ]
+    }
+  },
+  {
+    "name": "wrapped-incomplete",
+    "description": "Only two of three announced values supplied.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            132,
+            1,
+            241,
+            7,
+            48,
+            48,
+            48,
+            49,
+            51,
+            13,
+            10,
+            242,
+            7,
+            48,
+            43,
+            49,
+            43,
+            50,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 1,
+            "response_command": "0M!"
+          },
+          {
+            "slot": 2,
+            "response_command": "0D0!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "incomplete",
+      "values": [
+        1,
+        2
+      ]
+    }
+  },
+  {
+    "name": "wrapped-aborted",
+    "description": "An empty addressed D reply terminates the exchange.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "exchange",
+      "input": {
+        "frame": {
+          "fport": 2,
+          "bytes": [
+            12,
+            132,
+            1,
+            241,
+            7,
+            48,
+            48,
+            48,
+            49,
+            49,
+            13,
+            10,
+            242,
+            3,
+            48,
+            13,
+            10
+          ],
+          "configuration": {
+            "dataup": 0,
+            "payver": 1,
+            "alldatamod": 1,
+            "datacut": "none",
+            "dataconv": "none",
+            "ext": [
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "bindings": [
+          {
+            "slot": 1,
+            "response_command": "0M!"
+          },
+          {
+            "slot": 2,
+            "response_command": "0D0!"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "aborted"
+    }
+  },
+  {
+    "name": "payver-five",
+    "description": "Single-frame layout explicitly declared despite PAYVER5.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "frame",
+      "input": {
+        "fport": 2,
+        "bytes": [
+          12,
+          132,
+          5,
+          241,
+          5,
+          48,
+          43,
+          49,
+          13,
+          10
+        ],
+        "configuration": {
+          "dataup": 0,
+          "payver": 5,
+          "alldatamod": 1,
+          "datacut": "none",
+          "dataconv": "none",
+          "ext": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "wrapped",
+      "text": "0+1\r\n"
+    }
+  },
+  {
+    "name": "split-marker",
+    "description": "A fragment ending at a marker retains that marker without parsing.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "frame",
+      "input": {
+        "fport": 2,
+        "bytes": [
+          12,
+          132,
+          1,
+          2,
+          0,
+          241
+        ],
+        "configuration": {
+          "dataup": 1,
+          "payver": 1,
+          "alldatamod": 1,
+          "datacut": "none",
+          "dataconv": "none",
+          "ext": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "fragment",
+      "code": "fragment_requires_reassembly"
+    }
+  },
+  {
+    "name": "wrong-length",
+    "description": "Length claims bytes absent from the frame.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "frame",
+      "input": {
+        "fport": 2,
+        "bytes": [
+          12,
+          132,
+          1,
+          241,
+          99,
+          48,
+          43,
+          49,
+          13,
+          10
+        ],
+        "configuration": {
+          "dataup": 0,
+          "payver": 1,
+          "alldatamod": 1,
+          "datacut": "none",
+          "dataconv": "none",
+          "ext": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "invalid"
+    }
+  },
+  {
+    "name": "model-crc",
+    "description": "Serialize supplied replies within a caller-defined 25-byte budget.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "model",
+      "input": {
+        "battery_mv": 3204,
+        "interrupt": false,
+        "payver": 1,
+        "returns": [
+          {
+            "slot": 1,
+            "bytes": [
+              48,
+              48,
+              48,
+              49,
+              49,
+              13,
+              10
+            ]
+          },
+          {
+            "slot": 2,
+            "bytes": [
+              48,
+              43,
+              51,
+              46,
+              49,
+              52,
+              79,
+              113,
+              90,
+              13,
+              10
+            ]
+          }
+        ],
+        "max_payload_bytes": 25
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "modelled",
+      "required_bytes": 25
+    }
+  },
+  {
+    "name": "model-over-budget",
+    "description": "The same returns do not fit a 24-byte budget.",
+    "evidence": "synthetic",
+    "source": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+    "transformation": "Constructed bytes under explicit model assumptions; not a hardware capture.",
+    "input": {
+      "operation": "model",
+      "input": {
+        "battery_mv": 3204,
+        "interrupt": false,
+        "payver": 1,
+        "returns": [
+          {
+            "slot": 1,
+            "bytes": [
+              48,
+              48,
+              48,
+              49,
+              49,
+              13,
+              10
+            ]
+          },
+          {
+            "slot": 2,
+            "bytes": [
+              48,
+              43,
+              51,
+              46,
+              49,
+              52,
+              79,
+              113,
+              90,
+              13,
+              10
+            ]
+          }
+        ],
+        "max_payload_bytes": 24
+      }
+    },
+    "expected": {
+      "ok": false,
+      "disposition": "invalid",
+      "code": "payload_budget_exceeded",
+      "required_bytes": 25
+    }
+  }
+]

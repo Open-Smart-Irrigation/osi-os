@@ -110,11 +110,13 @@ function runHelperAssertions(helper, label) {
     'zone_daily_environment',
     'zone_daily_recommendations',
     'irrigation_events',
-    'valve_actuation_expectations'
+    'valve_actuation_expectations',
+    'tensiomark_observations'
   ], `${label} table registry`);
   assert.strictEqual(helper.nextTable(null), 'device_data', label);
   assert.strictEqual(helper.nextTable('device_data'), 'chameleon_readings', label);
-  assert.strictEqual(helper.nextTable('valve_actuation_expectations'), 'device_data', label);
+  assert.strictEqual(helper.nextTable('valve_actuation_expectations'), 'tensiomark_observations', label);
+  assert.strictEqual(helper.nextTable('tensiomark_observations'), 'device_data', label);
   assert.strictEqual(helper.cursorKind('irrigation_events'), 'id', label);
   assert.strictEqual(helper.cursorKind('dendrometer_daily'), 'key', label);
   assert.match(helper.snapshotHighQuery('zone_daily_environment'), /MAX.*zone_uuid/i, label);
@@ -127,6 +129,7 @@ function runHelperAssertions(helper, label) {
 
   assert.strictEqual(helper.historyKey('device_data', '0016C001F11715E2', row), 'DEVICE_DATA|0016C001F11715E2|123', label);
   assert.strictEqual(helper.nextRawQuery('device_data'), 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', label);
+  assert.match(helper.nextRawQuery('tensiomark_observations'), /hex\(CAST\(raw_response AS BLOB\)\) AS raw_response_hex/, label);
   assert.deepStrictEqual(helper.buildCanonicalColumns('device_data', row), [
     ['id', 'INTEGER', '123'],
     ['deveui', 'TEXT', 'A84041CAFECAFE01'],

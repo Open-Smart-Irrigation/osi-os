@@ -22,8 +22,11 @@ vi.mock('../../../services/api', async () => {
 // t() returns the key itself, matching this codebase's convention
 // (CreateZoneModal.uicore.test.tsx, ValveCard.test.tsx, ZoneConfigModal.test.tsx) --
 // assertions below query the i18n key, not rendered English prose.
+// Row-scoped keys append their row so per-row labels stay distinct.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, options?: { row?: number }) => (options && options.row !== undefined ? `${key}:${options.row}` : key),
+  }),
 }));
 
 const device: Device = {
@@ -40,11 +43,18 @@ describe('Sdi12SettingsModal', () => {
     vi.clearAllMocks();
     vi.mocked(fetchSdi12Profiles).mockResolvedValue({
       profiles: [{
+        id: 'HYDRASCOUT',
+        label: 'HydraScout',
+        provisional: true,
+        expectedValues: 2,
+        defaultDepthsCm: [30],
+        channels: ['vwc_1'],
+      }, {
         id: 'TENSIOMARK',
         label: 'ecoTech Tensiomark',
         provisional: true,
         expectedValues: 2,
-        defaultDepthsCm: [30],
+        defaultDepthsCm: [],
         channels: ['swt_1', 'soil_temp_1'],
       }],
     });
@@ -58,14 +68,14 @@ describe('Sdi12SettingsModal', () => {
   it('lists profiles from the API and saves profile + depths', async () => {
     render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
 
-    expect(await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'TENSIOMARK' } });
+    expect(await screen.findByRole('option', { name: /HydraScout.*unverified/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Probe profile'), { target: { value: 'HYDRASCOUT' } });
     fireEvent.change(screen.getByLabelText('Depth slot 1 (cm)'), { target: { value: '35' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
-        probe_profile: 'TENSIOMARK',
+        probe_profile: 'HYDRASCOUT',
         depths: { '1': 35 },
       });
     });
@@ -74,14 +84,121 @@ describe('Sdi12SettingsModal', () => {
   it('omits depths when the user edits none', async () => {
     render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
 
-    await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i });
+    await screen.findByRole('option', { name: /HydraScout.*unverified/i });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
-        probe_profile: 'TENSIOMARK',
+        probe_profile: 'HYDRASCOUT',
       });
     });
+  });
+
+  it('saves two explicitly confirmed Tensiomark address, identity, and nullable-depth mappings', async () => {
+    const layout = {
+      version: 1 as const,
+      kind: 'tensiomark' as const,
+      source_unit: 'pF' as const,
+      field_order: 'temperature_pf' as const,
+      qualification: 'bench_observed' as const,
+      sensors: [
+        { address: '1', channel: 1 as const, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' as const },
+        { address: '4', channel: 2 as const, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: 40, calibration_range: 'unverified' as const },
+      ],
+    };
+    render(<Sdi12SettingsModal device={{ ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_channel_layout_json: layout }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    expect(await screen.findByLabelText('sdi12.tensiomark.addressAria:1')).toHaveValue('1');
+    expect(screen.getByLabelText('sdi12.tensiomark.identityAria:2')).toHaveValue('411TENSIOMARK_2Vh_10A00002');
+    expect(screen.getByLabelText('sdi12.tensiomark.depthAria:1')).toHaveValue(null);
+    expect(screen.getByText('sdi12.tensiomark.qualification')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('sdi12.tensiomark.confirmRequired')).toBeInTheDocument();
+    expect(putSdi12Config).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('sdi12.tensiomark.confirmation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
+      probe_profile: 'TENSIOMARK',
+      tensiomark_layout: layout,
+    }));
+  });
+
+  it('refuses duplicate Tensiomark addresses before saving', async () => {
+    const layout = {
+      version: 1 as const, kind: 'tensiomark' as const, source_unit: 'pF' as const,
+      field_order: 'temperature_pf' as const, qualification: 'bench_observed' as const,
+      sensors: [
+        { address: '1', channel: 1 as const, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' as const },
+        { address: '4', channel: 2 as const, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' as const },
+      ],
+    };
+    render(<Sdi12SettingsModal device={{ ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_channel_layout_json: layout }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+
+    await screen.findByLabelText('sdi12.tensiomark.addressAria:2');
+    fireEvent.change(screen.getByLabelText('sdi12.tensiomark.addressAria:2'), { target: { value: '1' } });
+    fireEvent.click(screen.getByLabelText('sdi12.tensiomark.confirmation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('sdi12.tensiomark.errors.duplicateAddress:2')).toBeInTheDocument();
+    expect(putSdi12Config).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['addressInvalid', 'sdi12.tensiomark.addressAria:1', ''],
+    ['identityInvalid', 'sdi12.tensiomark.identityAria:1', '111TENSIOMARK_2Vh_10A0001'],
+    ['depthInvalid', 'sdi12.tensiomark.depthAria:1', '0'],
+  ])('names the failing field: %s', async (error, label, value) => {
+    const tensiomarkDevice = { ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_identity: '111TENSIOMARK_2Vh_10A00001' };
+    render(<Sdi12SettingsModal device={tensiomarkDevice} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByLabelText('sdi12.tensiomark.confirmation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(`sdi12.tensiomark.errors.${error}:1`)).toBeInTheDocument();
+    expect(putSdi12Config).not.toHaveBeenCalled();
+  });
+
+  it('refuses a duplicate channel on the second row', async () => {
+    const tensiomarkDevice = { ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_identity: '111TENSIOMARK_2Vh_10A00001' };
+    render(<Sdi12SettingsModal device={tensiomarkDevice} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'sdi12.tensiomark.addSensor' }));
+    fireEvent.change(screen.getByLabelText('sdi12.tensiomark.addressAria:2'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('sdi12.tensiomark.identityAria:2'), { target: { value: '411TENSIOMARK_2Vh_10A00002' } });
+    fireEvent.change(screen.getByLabelText('sdi12.tensiomark.channelAria:2'), { target: { value: '1' } });
+    fireEvent.click(screen.getByLabelText('sdi12.tensiomark.confirmation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('sdi12.tensiomark.errors.duplicateChannel:2')).toBeInTheDocument();
+    expect(putSdi12Config).not.toHaveBeenCalled();
+  });
+
+  it('prefills the first sensor from the stored Tensiomark identity and removes an added row', async () => {
+    const tensiomarkDevice = { ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_identity: '411TENSIOMARK_2Vh_10A00002\r\n' };
+    render(<Sdi12SettingsModal device={tensiomarkDevice} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    expect(await screen.findByLabelText('sdi12.tensiomark.addressAria:1')).toHaveValue('4');
+    expect(screen.getByLabelText('sdi12.tensiomark.identityAria:1')).toHaveValue('411TENSIOMARK_2Vh_10A00002');
+    expect(screen.queryByRole('button', { name: 'sdi12.tensiomark.removeSensorAria:1' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'sdi12.tensiomark.addSensor' }));
+    expect(screen.getByLabelText('sdi12.tensiomark.addressAria:2')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', { name: 'sdi12.tensiomark.removeSensorAria:2' }));
+    expect(screen.queryByLabelText('sdi12.tensiomark.addressAria:2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('sdi12.tensiomark.confirmation'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(putSdi12Config).toHaveBeenCalledWith(device.deveui, {
+      probe_profile: 'TENSIOMARK',
+      tensiomark_layout: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed',
+        sensors: [{ address: '4', channel: 1, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' }],
+      },
+    }));
+  });
+
+  it('prefills only the discovered address when the identity is not a Tensiomark', async () => {
+    render(<Sdi12SettingsModal device={{ ...device, sdi12_probe_profile: 'TENSIOMARK', sdi12_discovered_address: '7' }} onClose={vi.fn()} onUpdate={vi.fn()} />);
+    expect(await screen.findByLabelText('sdi12.tensiomark.addressAria:1')).toHaveValue('7');
+    expect(screen.getByLabelText('sdi12.tensiomark.identityAria:1')).toHaveValue('');
   });
 
   it('detect button posts identify', async () => {
@@ -252,7 +369,7 @@ describe('Sdi12SettingsModal', () => {
       response: { data: { message: 'Depths must be whole centimeters between 0 and 500.' } },
     });
     render(<Sdi12SettingsModal device={device} onClose={vi.fn()} onUpdate={vi.fn()} />);
-    await screen.findByRole('option', { name: /ecoTech Tensiomark.*unverified/i });
+    await screen.findByRole('option', { name: /HydraScout.*unverified/i });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() =>
       expect(screen.getByText('Depths must be whole centimeters between 0 and 500.')).toBeInTheDocument(),

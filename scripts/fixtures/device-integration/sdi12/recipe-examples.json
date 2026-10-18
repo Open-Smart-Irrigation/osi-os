@@ -1,0 +1,580 @@
+[
+  {
+    "name": "pr2-four-plan",
+    "description": "Four-position PR2 readbacks and logical M3 plan.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "DELTAT_PR2_4",
+        "profile_version": 2,
+        "address": "A",
+        "settings": {
+          "measurement_mode": "mineral_vwc_percent"
+        },
+        "depths": [
+          10,
+          20,
+          30,
+          40
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": null
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "planned",
+      "recipe.measurement.command": "AM3!",
+      "recipe.expected_values": 4,
+      "recipe.capacity.packed_payload_bytes": 58,
+      "recipe.capacity.max_payload_bytes": 68
+    },
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352"
+  },
+  {
+    "name": "pr2-six-split",
+    "description": "Six synthetic PR2 values in two D replies fit 80 bytes.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "DELTAT_PR2_6",
+        "profile_version": 2,
+        "address": "0",
+        "settings": {
+          "measurement_mode": "mineral_vwc_percent"
+        },
+        "depths": [
+          10,
+          20,
+          30,
+          40,
+          60,
+          100
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 80
+      },
+      "exchange": {
+        "command": "0M3!",
+        "response": "00026\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+12.34+23.45+34.56\r\n"
+          },
+          {
+            "command": "0D1!",
+            "response": "0+45.67+56.78+67.89\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "simulated",
+      "recipe.capacity.max_payload_fits": false,
+      "simulation.payload.required_bytes": 58,
+      "simulation.protocol.values": [
+        12.34,
+        23.45,
+        34.56,
+        45.67,
+        56.78,
+        67.89
+      ]
+    },
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352"
+  },
+  {
+    "name": "pr2-six-concurrent",
+    "description": "Synthetic standard C3 announcement and one D reply.",
+    "evidence": "synthetic",
+    "source": "https://delta-t.co.uk/wp-content/uploads/2016/09/PR2_SDI-12-_User_Manual_version_4_1.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "DELTAT_PR2_6",
+        "profile_version": 2,
+        "address": "0",
+        "settings": {
+          "measurement_mode": "mineral_vwc_percent"
+        },
+        "depths": [
+          10,
+          20,
+          30,
+          40,
+          60,
+          100
+        ]
+      },
+      "command_family": "C",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": {
+        "command": "0C3!",
+        "response": "000206\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+10+20+30+40+50+60\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "simulated",
+      "recipe.measurement.command": "0C3!",
+      "recipe.capacity.packed_payload_bytes": 72,
+      "simulation.protocol.values": [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60
+      ]
+    },
+    "source_locator": "PR2 manual v4.1, pp. 17 and 49\u201352"
+  },
+  {
+    "name": "teros-eleven-crc",
+    "description": "Two raw TEROS 11 numbers with generated CRC.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified. CRC generated from the synthetic addressed body using SDI-12 CRC16; not a published reply.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "METER_TEROS_11",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "calibration": "mineral"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "MC",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": {
+        "command": "1MC!",
+        "response": "10012\r\n",
+        "blocks": [
+          {
+            "command": "1D0!",
+            "response": "1+2650+20A_j\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "simulated",
+      "simulation.protocol.values": [
+        2650,
+        20
+      ]
+    },
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope"
+  },
+  {
+    "name": "teros-twelve",
+    "description": "Three raw TEROS 12 numbers, including negative temperature and zero.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "METER_TEROS_12",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "calibration": "mineral"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": {
+        "command": "1M!",
+        "response": "10013\r\n",
+        "blocks": [
+          {
+            "command": "1D0!",
+            "response": "1+2999.25-10+0\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "simulated",
+      "simulation.protocol.values": [
+        2999.25,
+        -10,
+        0
+      ]
+    },
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope"
+  },
+  {
+    "name": "tensiomark-raw",
+    "description": "Two framed numbers without assigning pF/temperature positions.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "0",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": {
+        "command": "0M!",
+        "response": "00082\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+4+20\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": true,
+      "disposition": "simulated",
+      "simulation.protocol.values": [
+        4,
+        20
+      ],
+      "simulation.payload.required_bytes": 22
+    },
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7"
+  },
+  {
+    "name": "tensiomark-too-fast",
+    "description": "Refuse starts less than 900 seconds apart.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "0",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 899,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "measurement_interval_too_short"
+    },
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7"
+  },
+  {
+    "name": "tensiomark-printed-ack",
+    "description": "Printed 0082 with added synthetic CRLF remains malformed.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "transformation": "Manual printed 0082 given synthetic CRLF solely to test rejection; no missing address or digit inserted.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "0",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": {
+        "command": "0M!",
+        "response": "0082\r\n",
+        "blocks": []
+      }
+    },
+    "expected": {
+      "ok": false,
+      "code": "invalid_announcement"
+    },
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7"
+  },
+  {
+    "name": "payload-too-small",
+    "description": "The 22-byte modelled exchange cannot fit a 21-byte budget.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "0",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 21
+      },
+      "exchange": {
+        "command": "0M!",
+        "response": "00082\r\n",
+        "blocks": [
+          {
+            "command": "0D0!",
+            "response": "0+4+20\r\n"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "ok": false,
+      "code": "payload_budget_exceeded",
+      "simulation.payload.required_bytes": 22
+    },
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7"
+  },
+  {
+    "name": "hydrascout-blocked",
+    "description": "Unknown HydraScout wire contract remains unavailable.",
+    "evidence": "synthetic",
+    "source": "docs/devices/sdi12-protocol-audit/RECONCILIATION.md",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "HYDRASCOUT",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {},
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "M",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "protocol_evidence_required"
+    },
+    "source_locator": "Audit reconciliation, Sensor qualification remains separate: HydraScout"
+  },
+  {
+    "name": "teros-concurrent-refused",
+    "description": "Nonstandard TEROS concurrent behavior stays outside this recipe.",
+    "evidence": "synthetic",
+    "source": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "METER_TEROS_12",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "calibration": "mineral"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "C",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "unsupported_sensor_command"
+    },
+    "source_locator": "TEROS integrator guide 18224-12, pp. 2 and 7\u20138; firmware 3.00+ reference scope"
+  },
+  {
+    "name": "tensiomark-crc-unavailable",
+    "description": "No reviewed Tensiomark CRC command contract.",
+    "evidence": "synthetic",
+    "source": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+    "transformation": "Addressed commands follow the referenced contract. All supplied announcements, values, grouping and converter settings are constructed hypotheses, not vendor or installed captures. Response positions are not qualified.",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "0",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "command_family": "MC",
+      "supply_v": 12,
+      "power_mode": "switched",
+      "interval_seconds": 1200,
+      "converter": {
+        "battery_mv": 3300,
+        "interrupt": false,
+        "payver": 1,
+        "max_slots": 8,
+        "max_payload_bytes": 51
+      },
+      "exchange": null
+    },
+    "expected": {
+      "ok": false,
+      "code": "unsupported_sensor_command"
+    },
+    "source_locator": "Tensiomark manual May 2014, sections 5.1.5, 6 and 7"
+  }
+]

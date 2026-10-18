@@ -182,7 +182,7 @@ for (const profile of PROFILES) {
     }
   });
 
-  test(`${label}: soil tension is exported in kPa with a pF row that is never below 0`, async () => {
+  test(`${label}: soil tension exports full-precision pF for positive kPa and omits undefined pF at zero`, async () => {
     const raw = seedDb();
     try {
       raw.exec("UPDATE device_data SET swt_2 = 0 WHERE deveui = 'A840410000000002'");
@@ -193,9 +193,9 @@ for (const profile of PROFILES) {
       const byKey = Object.fromEntries(rows.map((row) => [row.channel_key, row]));
       assert.equal(byKey.swt_1.unit, 'kPa');
       assert.equal(byKey.swt_1_pf.unit, 'pF');
-      assert.equal(Number(byKey.swt_1_pf.value), Number(Math.log10(40 * 10).toFixed(4)));
+      assert.equal(Number(byKey.swt_1_pf.value), Math.log10(40) + 1);
       assert.equal(byKey.swt_2.value, '0');
-      assert.equal(byKey.swt_2_pf.value, '0', 'a saturated probe gets the pF floor of 0');
+      assert.equal(byKey.swt_2_pf, undefined, 'zero kPa has no finite logarithmic pF value');
     } finally {
       raw.close();
     }
@@ -225,6 +225,24 @@ for (const profile of PROFILES) {
         UPDATE devices SET temp_enabled = 1, chameleon_enabled = 0 WHERE deveui = 'A840410000000002';
         INSERT INTO watermark_readings(deveui, recorded_at, payload_hex, frame_status, conversion_version, ch1_status, ch1_kpa, ch2_status, ch2_kpa)
         VALUES ('A840410000000002', '2026-07-01T00:30:00.000Z', 'aa', 'accepted', 'wm-lsn50-p3-v2', 'unsettled', 40, 'ok', 50);
+      `);
+      const result = await helper.buildAllZonesExportCsv(facadeDb(raw), {
+        zoneIds: [13], from: '2026-07-01', to: '2026-07-01', granularity: 'raw', nowMs: NOW_MS,
+      });
+      const soil = parseCsv(result.csv).filter((row) => row.card_type === 'soil' && row.unit === 'kPa');
+      assert.deepEqual(soil.map((row) => [row.channel_key, row.value]), [['swt_1', '40'], ['swt_2', '50']]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${label}: a finite clipped WATERMARK estimate exports identically to ordinary SWT`, async () => {
+    const raw = seedDb();
+    try {
+      raw.exec(`
+        UPDATE devices SET temp_enabled = 1, chameleon_enabled = 0 WHERE deveui = 'A840410000000002';
+        INSERT INTO watermark_readings(deveui, recorded_at, payload_hex, frame_status, conversion_version, ch1_status, ch1_kpa, ch2_status, ch2_kpa)
+        VALUES ('A840410000000002', '2026-07-01T00:30:00.000Z', 'aa', 'accepted', 'wm-lsn50-p3-v3', 'wet_offset_clipped', 40, 'ok', 50);
       `);
       const result = await helper.buildAllZonesExportCsv(facadeDb(raw), {
         zoneIds: [13], from: '2026-07-01', to: '2026-07-01', granularity: 'raw', nowMs: NOW_MS,

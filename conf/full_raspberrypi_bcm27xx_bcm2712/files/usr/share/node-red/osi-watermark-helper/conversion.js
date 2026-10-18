@@ -5,8 +5,8 @@
 //  - LSN50 profile 3 front end: parseProfile3, resistanceFromCodes, convertFrame
 // Spec: docs/superpowers/specs/2026-09-25-watermark-lsn50-design.md sections 4-5.
 
-// v2 (#415): an unsettled reading keeps its 'unsettled' status and gets kPa.
-var CONVERSION_VERSION = 'wm-lsn50-p3-v2';
+// v3: finite clipped estimates join ordinary SWT; raw clipping diagnostics remain.
+var CONVERSION_VERSION = 'wm-lsn50-p3-v3';
 var FRAME_BYTES = 27;
 var FRAME_TAG = 0xA2;
 var FRAME_PROFILE = 3;
@@ -178,7 +178,12 @@ function convertChannel(probe, cal, temperature, supplyMv) {
     if (solved.r < SHORT_BELOW_OHM) { out.status = 'short_suspected'; return out; }
     if (solved.r > SATURATED_MAX_OHM) {
       out.status = 'wet_offset_clipped';
-      if (temperature.value !== null) out.kpa_upper_bound = tensionUpperBound(solved.r, temperature.value);
+      if (temperature.value !== null) {
+        out.kpa_upper_bound = tensionUpperBound(solved.r, temperature.value);
+        // The operator-selected estimate policy uses the finite boundary value
+        // as canonical SWT. Keep the bound/status for diagnostic inspection.
+        out.kpa = out.kpa_upper_bound;
+      }
       return out;
     }
     // Bound within the saturated band: fall through as a saturated reading.

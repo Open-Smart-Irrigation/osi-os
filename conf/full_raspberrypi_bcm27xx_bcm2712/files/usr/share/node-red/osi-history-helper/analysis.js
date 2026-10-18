@@ -570,9 +570,10 @@ function createAnalysis(deps) {
           const sourceKey = sourceKeyForCsv(card, device);
           if (!sourceKey) continue;
           for (const channelKey of family.channelKeys) {
-            const meta = channelMeta(channelKey);
+            const soilTemperature = family.cardType === 'soil' && channelKey === 'ext_temperature_c';
+            const meta = soilTemperature ? { ...channelMeta(channelKey), label: 'Soil temperature' } : channelMeta(channelKey);
             const configurationState = description.currentChannelKeys.includes(channelKey) ? 'current' : 'other_supported';
-            const depthCm = family.cardType === 'soil' ? soilDepthCm(device, channelKey) : null;
+            const depthCm = family.cardType === 'soil' && !soilTemperature ? soilDepthCm(device, channelKey) : null;
             const entry = buildCatalogEntry({
               zone,
               hubEui,

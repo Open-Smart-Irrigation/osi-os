@@ -123,43 +123,18 @@ pF is the base-10 logarithm of tension expressed in hPa (1 kPa = 10 hPa); it
 compresses the wide dynamic range of soil suction into a small number
 range (roughly 0-4.5) more familiar to some agronomists.
 
-**pF is never stored.** It is derived at read time everywhere it is shown —
-GUI display, CSV export, and (per the sync contract) any cloud consumer.
-There is no `swt_*_pf` column and no schema change was needed to add it
-(osi-os PR #98, "swt-pf-display-csv", merged as `22cffe6d`).
+Canonical SWT channels store positive kPa magnitudes. Native Tensiomark pF is also retained as exact source tokens in observation provenance on the edge and cloud; it does not replace canonical kPa or add a duplicate display channel.
 
-**Exact formula, verified in `web/react-gui/src/utils/swt.ts`:**
-```ts
-export const PF_FLOOR_KPA = 0.1;
-export function kpaToPf(kpa: unknown): number | null {
-  const value = toFiniteSwtValue(kpa);
-  if (value === null) return null;
-  if (value <= PF_FLOOR_KPA) return 0;
-  return Math.log10(value * 10);
-}
-```
-So **`pF = log10(kPa * 10)`**, and the inverse `pfToKpa` is
-`kPa = 10^pF / 10` (exact above the floor; 0 pF maps to 0.1 kPa; a negative
-pF is rejected). **pF is never shown below 0**: a finite kPa at or below 0.1
-(a saturated probe reads 0 kPa) shows the floor `0.00 pF` and exports `0`.
-Missing or non-finite kPa still produces `null` pF (consistent with the
-missing-data rule below). kPa displays are unaffected by the floor.
+The shared mathematical contract is [matric-potential/v1.md](../../../docs/contracts/matric-potential/v1.md): `pF = log10(abs(kPa)) + 1`, inverse magnitude `10 ** (pF - 1)`. Zero and non-finite inputs have no finite pF. Negative pF is valid mathematically; each sensor adapter applies its own range and sentinel rules before conversion. The former zero floor and four-decimal CSV rule are legacy behavior.
 
-This exact formula, and its rounding, is pinned as
-a cross-runtime contract in `docs/contracts/sync-schema/canonicalization.md`
-("SWT pF Derivation") with golden vectors edge JS / GUI TS / server Java must
-all match, e.g. 30 kPa → `2.4771212547196626` (2.48 at 2 dp, 2.4771 at 4 dp),
-0 or negative kPa → `0` (the floor), missing kPa → `null`. Display rounds pF to 2 decimals
-(`formatSwtValue`); CSV export rounds to 4 decimals.
+Keep calculated doubles and raw CSV values without decimal rounding. Format display strings only. The contract vectors cover edge JavaScript, GUI TypeScript and server Java. Native tokens preserve source signs and trailing zeros; transport tests require identical IEEE754 bits for the calculated value.
 
-**CSV pairing:** each finite SWT kPa row exported gets a paired `_pf` row — verified
-in `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js`:
-`channel_key: \`${channel.id}_pf\`` and `series_label: \`${kpaRow.series_label} (pF)\`` — with `unit: 'pF'`.
+**CSV pairing:** each SWT kPa row with a valid pF conversion gets a paired `_pf` row with unit `pF`. Aggregate canonical kPa first, then convert; never average pF for a kPa-based scheduler.
 
 **What did NOT ship:** an earlier spec draft considered adding
 `threshold_unit` + `threshold_pf` authoring columns to `irrigation_schedules`
 so operators could author thresholds in pF. That was descoped — PR #98 is
-"zero-schema": pF is display/export only, and the scheduler **always**
+"zero-schema": that change added no pF measurement columns, and the scheduler **always**
 compares in kPa regardless of the operator's display preference (comparing
 in pF would silently change trigger behavior, since a mean of pF values is a
 geometric-mean-like quantity in kPa space — Jensen's inequality). If you see
@@ -595,9 +570,7 @@ on Gen2" for a payload that cannot carry it.
   own `meanKpa >= threshold` comparison.
 - Treating `swt_wm1`/`swt_wm2` as writable in new code — they are read-only
   legacy aliases; write to `swt_1`/`swt_2`/`swt_3`.
-- Assuming pF is stored anywhere, or that the scheduler compares in pF — it
-  doesn't; pF is derive-at-read display/export only, and the scheduler
-  always compares kPa.
+- Confusing native pF provenance with canonical SWT: the observation mirror preserves native tokens, while the scheduler always compares kPa.
 - Assuming `TWD_rel` is available on the edge dashboard — it's cloud-only
   (v6, osi-server); the edge still runs its own absolute-µm v5 TWD/MDS.
   Don't conflate the two TWD implementations.

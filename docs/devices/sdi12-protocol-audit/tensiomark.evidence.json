@@ -1,0 +1,375 @@
+{
+ "package": "tensiomark",
+ "accessed": "2026-10-04",
+ "sources": [
+  {
+   "id": "TM14",
+   "title": "TensioMark - Manual for installation and use of Tensiomarks",
+   "edition": "May 2014",
+   "publisher": "ecoTech GmbH (hosted by Stevens Water)",
+   "host_type": "partner_hosted_manufacturer",
+   "url": "https://www.stevenswater.com/resources/documentation/Stevens_Tensiomark_Manual.pdf",
+   "sha256": "f6c97abcfdac0e1dedb007d21f52861d57e12f7a2e8a8fcb3d7d5d67574c5ebe",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "STV-BR",
+   "title": "TensioMark brochure (marked DISCONTINUED)",
+   "edition": "PDF created 2016-01",
+   "publisher": "Stevens Water",
+   "host_type": "third_party",
+   "url": "https://stevenswater.com/resources/datasheets/Tensiomark_brochure_web.pdf",
+   "sha256": "7e55eb0b5f7ec0ed7243f48f03a3ced6802c2c670fbcab1d3059ce445090fbd8",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "UP25",
+   "title": "10853 TensioMARK-Sensoren datasheet",
+   "edition": "26.04.25",
+   "publisher": "UP GmbH",
+   "host_type": "third_party",
+   "url": "https://www.upgmbh.com/fileadmin/user_upload/up_products/pdf/10853_TensioMARK.pdf",
+   "sha256": "412b9417451c422c7f02f34e4e897b022fde077cc2d2462e0765938afdf20f83",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "UP16",
+   "title": "UP TensioMARK Kurzanleitung (text via ManualsLib)",
+   "edition": "27.10.16",
+   "publisher": "UP GmbH",
+   "host_type": "third_party",
+   "url": "https://www.manualslib.de/manual/759576/Up-Tensiomark.html",
+   "sha256": "777086af6c0a34411ae9 (prefix of the HTML page hash, not the PDF)",
+   "retrieved": "2026-10-04"
+  },
+  {
+   "id": "ECO-WEB",
+   "title": "ecoTech Tensiomark product page (EN)",
+   "edition": "web, 2026-10-04",
+   "publisher": "ecoTech GmbH",
+   "host_type": "manufacturer",
+   "url": "https://www.ecotech.de/en/product/tensiomark",
+   "sha256": "d4423e94df98e36c1ed3 (prefix of HTML hash)",
+   "retrieved": "2026-10-04"
+  }
+ ],
+ "claims": [
+  {
+   "id": "TM-CMD-1",
+   "model": "Tensiomark 4244/x",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "5.1.5 pp.12-13",
+   "quote": "aI! sensor transmits identification and serial number; aAb! change SDI-12 address from a to b; aM! measure pF value and temperature; answer: 0082 (2 values within 8 seconds); aM9! measure supply voltage; answer 0011 (1 value within 1 seconds); aD0! display readings; aR0! same properties as aD0!",
+   "derived_rule": "complete command list; atttn reply 0082 = address 0, 008 s, 2 values",
+   "category": "vendor_specification",
+   "test": {
+    "input": "aM! reply 0082",
+    "expected": "ttt=8 s, n=2"
+   },
+   "confidence": "high",
+   "limitation": "no reply strings for aD0!/aI!/aM9! printed; aC!, aV!, CRC not mentioned"
+  },
+  {
+   "id": "TM-ADDR-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "p.13",
+   "quote": "Possible addresses are 0 ... 9, a ... z and A ... Z. Factory-set value is SDI-12 address \"0\" for all sensors",
+   "derived_rule": "default address 0",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-RNG-1",
+   "model": "4244/1",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "3 p.6, 7 p.18",
+   "quote": "Tensiomark 1 (4244/1) pF 0 ... pF 7,0 ≙ 1 ... 10.000.000 hPa",
+   "derived_rule": "range",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-RNG-2",
+   "model": "4244/2",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "3 p.6, 7 p.18",
+   "quote": "Tensiomark 2 (4244/2) pF 0 ... pF 3,8 ≙ 1 ... 6.500 hPa",
+   "derived_rule": "range; 10^3.8 = 6309.6 hPa so 6.500 is rounded",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-RNG-3",
+   "model": "4244/3",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "3 p.6, 7 p.18",
+   "quote": "Tensiomark 3 (4244/3) pF 0 ... pF 3,0 ≙ 1 ... 1000 hPa",
+   "derived_rule": "range pF 3.0",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "conflicts with p.5 intro (pF 2,9 ≙ 800 hPa) and UP datasheets (pF 2,85, 700 hPa)"
+  },
+  {
+   "id": "TM-RNG-4",
+   "model": "4244/3-like",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "p.5",
+   "quote": "it is enough to cover a measuring range between pF 0 und pF 2,9 ≙ 1 ... 800 hPa",
+   "derived_rule": "second bound for the reduced range inside the same manual",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "10^2.9 = 794.3 hPa"
+  },
+  {
+   "id": "TM-RNG-5",
+   "model": "reduced SDI-12 variant (10853c)",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "UP16",
+   "locator": "datasheet text",
+   "quote": "Meßbereich: 0..700hPa (pF 2,85) oder 0..pF 7",
+   "derived_rule": "third bound",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "distributor datasheet; 10^2.85 = 707.9 hPa; maps to ecoTech 4244/3 only by inference"
+  },
+  {
+   "id": "TM-CAL-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "2.2 p.5",
+   "quote": "the sensors are calibrated up to a pF value of about pF 6,59 and the range up to pF 7 is covered by extrapolation",
+   "derived_rule": "calibration limit 6.59 pF = 389,045 kPa",
+   "category": "vendor_specification",
+   "test": {
+    "input": "pF 6.59",
+    "expected": "389045 kPa"
+   },
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-TIME-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "7 p.18",
+   "quote": "Duration of measurement 4 sec",
+   "derived_rule": "4 s",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "conflicts with aM! 8 s and 5.2.5 5 s"
+  },
+  {
+   "id": "TM-TIME-2",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "5.2.5 p.15",
+   "quote": "after its duration of 5 seconds, the reading is calculated ... a warm-up period of 5 seconds is not sufficient ... a warm-up period of 15-20 seconds has to be set up",
+   "derived_rule": "warm-up 15-20 s recommended",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-TIME-3",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "5.2.3 p.15",
+   "quote": "the sensing cycle of Tensiomarks must not be shorter than 15 minutes",
+   "derived_rule": "min cycle 15 min because heat pulses accumulate (6A p.16)",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "whether this applies to SDI-12 polling is not stated separately"
+  },
+  {
+   "id": "TM-PWR-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "7 p.18",
+   "quote": "inactive: 1,5 mA active: 55 mA (during measurement )",
+   "derived_rule": "current",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "ecotech.de 45-50 mA; Stevens 50 mA 5 s; UP 30 mA 6 s"
+  },
+  {
+   "id": "TM-PWR-2",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "7 p.18",
+   "quote": "7 - 14 V DC (12 V recommended)",
+   "derived_rule": "supply",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": ""
+  },
+  {
+   "id": "TM-UNIT-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "7 p.18",
+   "quote": "SDI-12-Signal pF-Wert 0 ... 7, Temp. in °C ; Resolution 0,01 pF, 0,1 °C",
+   "derived_rule": "SDI-12 output is pF and degrees C; kPa = 10^pF/10",
+   "category": "vendor_specification",
+   "test": {
+    "input": "pF 2.00",
+    "expected": "10 kPa"
+   },
+   "confidence": "high",
+   "limitation": "separator, sign and decimal format not printed"
+  },
+  {
+   "id": "TM-CONV-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "derived",
+   "quote": "",
+   "derived_rule": "kPa = 10^pF/10 for pF 0,0.01,1,2,2.48,3,3.8,4.2,6.59,7 = 0.1,0.10233,1,10,30.1995,100,630.957,1584.89,389045,1000000",
+   "category": "derived_expectation",
+   "test": {
+    "input": "[0,0.01,1,2,2.48,3.0,3.8,4.2,6.59,7]",
+    "expected": "[0.1,0.102329,1,10,30.1995,100,630.957,1584.89,389045,1000000]"
+   },
+   "confidence": "high",
+   "limitation": "0.01 pF = 2.329 % of the reading (0.2329 kPa at pF 2, 2329 kPa at pF 6)"
+  },
+  {
+   "id": "TM-WIRE-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "5.1.4 p.12",
+   "quote": "Brown Voltage supply (+12 V DC), Pink Output signal SDI-12, Grey Ground / GND",
+   "derived_rule": "SDI-12 wiring",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "UP16 says gelb = minus, grau = SDI12 (different)"
+  },
+  {
+   "id": "TM-PB-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "derived from 5.2.5, 5.1.5, 7",
+   "quote": "",
+   "derived_rule": "minimum power-on window for switched cycle: 15-20 s warm-up + up to 8 s aM! + aD0! = 23-28 s (25-30 s with margin); energy 12 V x 55 mA x 28 s = 18.48 J = 5.13 mWh = 0.428 mAh (23 s: 15.18 J, 0.351 mAh); 96 cycles/day: 33.7-41.1 mAh/day",
+   "category": "derived_expectation",
+   "test": {
+    "input": "window 28 s",
+    "expected": "18.48 J"
+   },
+   "confidence": "medium",
+   "limitation": "assumes aM! needs its own 8 s after warm-up; unknown from documents"
+  },
+  {
+   "id": "TM-ERR-1",
+   "model": "Tensiomark",
+   "firmware": "unknown (not stated in documents)",
+   "source_id": "TM14",
+   "locator": "whole manual",
+   "quote": "",
+   "derived_rule": "no error value, aI! reply string, early-D0 behaviour, aC!/aV!/CRC statement exists in this manual",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "absence of statement in the document read"
+  }
+ ],
+ "transcripts": [
+  {
+   "id": "X-TM-AM",
+   "source_id": "TM14",
+   "locator": "5.1.5 p.13",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "aM!"
+    },
+    {
+     "dir": "reply",
+     "text": "0082"
+    },
+    {
+     "dir": "command",
+     "text": "aM9!"
+    },
+    {
+     "dir": "reply",
+     "text": "0011"
+    }
+   ],
+   "notes": "vendor_example as printed: 'answer: 0082 (2 values within 8 seconds)' and 'answer 0011 (1 value within 1 seconds)'. The printed replies show address 0; no aD0! reply printed."
+  }
+ ],
+ "unknowns": [
+  {
+   "id": "U1",
+   "question": "aD0!/aR0! reply format, order, decimals, aI! string",
+   "why_it_matters": "parser"
+  },
+  {
+   "id": "U2",
+   "question": "error/out-of-range sentinel and behaviour above the calibrated range of variants 2/3",
+   "why_it_matters": "would a clipped value look valid"
+  },
+  {
+   "id": "U3",
+   "question": "whether SDI-12 aM! triggers a new heat pulse and how soon after power-up commands are accepted",
+   "why_it_matters": "minimum power window"
+  },
+  {
+   "id": "U4",
+   "question": "true measurement time (4, 5 or 8 s)",
+   "why_it_matters": "timeouts"
+  },
+  {
+   "id": "U5",
+   "question": "variant-3 upper bound: pF 3.0 vs 2.9 vs 2.85",
+   "why_it_matters": "range validation limit"
+  },
+  {
+   "id": "U6",
+   "question": "label of the -40 ... +80 C row; firmware version of any sensor",
+   "why_it_matters": "temperature range"
+  },
+  {
+   "id": "U7",
+   "question": "existence of a second ecoTech manual edition (not found online)",
+   "why_it_matters": "claim from user could not be verified"
+  },
+  {
+   "id": "U8",
+   "question": "active current: 55 mA vs 45-50 mA vs 30 mA",
+   "why_it_matters": "energy budget"
+  }
+ ]
+}

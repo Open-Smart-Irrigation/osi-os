@@ -12,24 +12,23 @@ test('parseSdi12Values: strict grammar', () => {
   assert.strictEqual(m.parseSdi12Values(''), null);
 });
 
-test('transforms: tension units and Sentek scaled frequency', () => {
-  const r = m.normalize({ BatV: 3.3, data_sum: '+2.48+21.5' }, { probeProfile: 'TENSIOMARK' }, {});
-  assert.strictEqual(r.channels.swt_1, 30.2);        // 10^2.48/10 rounded to 2dp
-  assert.strictEqual(r.channels.soil_temp_1, 21.5);
-  assert.strictEqual(r.channels.bat_v, 3.3);
-  const dry = m.normalize({ BatV: 3.3, data_sum: '+7.0+21.5' }, { probeProfile: 'TENSIOMARK' }, {});
-  assert.strictEqual(dry.channels.swt_1, 300);       // pF 7 clamps to 300 kPa
+test('transforms: Sentek scaled frequency', () => {
   assert.strictEqual(m.TRANSFORMS.sentek_sf_to_vwc(0), 0);
   assert.ok(Number.isNaN(m.TRANSFORMS.sentek_sf_to_vwc(-999.9999)));
   assert.ok(Math.abs(m.TRANSFORMS.sentek_sf_to_vwc(0.73284) - 23.8057) < 0.0001);
 });
 
-test('exact cardinality rejects the frame atomically', () => {
-  // TENSIOMARK expects exactly 2 values: 1 or 3 must write NOTHING but battery.
+test('transforms: pF to kPa uses the shared matric-potential contract', () => {
+  assert.ok(Math.abs(m.TRANSFORMS.pf_to_kpa(1.395) - 2.48313310529557) < 2e-14);
+  assert.equal(m.TRANSFORMS.pf_to_kpa(-400), null);
+});
+
+test('unqualified Tensiomark retains malformed counts without emitting soil values', () => {
+  // Unqualified interpretation is refused before assigning positions or counts.
   for (const raw of ['+2.48', '+2.48+21.5+9.9']) {
     const r = m.normalize({ BatV: 3.3, data_sum: raw }, { probeProfile: 'TENSIOMARK' }, {});
     assert.deepStrictEqual(Object.keys(r.channels), ['bat_v']);
-    assert.strictEqual(r.unknown.sdi12_value_count, raw);
+    assert.strictEqual(r.unknown.sdi12_tensiomark_unqualified, raw);
   }
 });
 
@@ -185,17 +184,13 @@ test('A6: HYDRASCOUT ignores any learned sdi12ValueCount -- interleaved labels n
   assert.deepStrictEqual(r.unknown, {});
 });
 
-test('A6 review fix: TENSIOMARK ignores a mismatched learned sdi12ValueCount', () => {
-  // TENSIOMARK expectedValues is 2; a stale learned count of 3 must not
-  // become the cardinality check -- a normal 2-value frame must still map,
-  // not get quarantined as sdi12_value_count.
+test('Tensiomark learned counts cannot bypass qualification refusal', () => {
   const r = m.normalize(
     { BatV: 3.3, data_sum: '+2.48+21.5' },
     { probeProfile: 'TENSIOMARK', sdi12ValueCount: 3 },
     {});
-  assert.strictEqual(r.channels.swt_1, 30.2);
-  assert.strictEqual(r.channels.soil_temp_1, 21.5);
-  assert.deepStrictEqual(r.unknown, {});
+  assert.deepStrictEqual(r.channels, { bat_v: 3.3 });
+  assert.deepStrictEqual(r.unknown, { sdi12_tensiomark_unqualified: '+2.48+21.5' });
 });
 
 test('listProfiles is GUI-serializable and slot-aware', () => {

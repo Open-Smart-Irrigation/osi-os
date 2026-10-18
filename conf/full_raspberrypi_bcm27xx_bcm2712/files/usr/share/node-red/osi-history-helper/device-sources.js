@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { validateTensiomarkLayout } = require('../osi-sdi12-normalize');
 
 const DEVICE_TYPE_IDS = Object.freeze([
   'KIWI_SENSOR', 'STREGA_VALVE', 'DRAGINO_LSN50', 'TEKTELIC_CLOVER',
@@ -26,7 +27,7 @@ const SOIL_CHANNELS = Object.freeze([
 const SDI12_CHANNELS = Object.freeze([
   ...Array.from({ length: 10 }, (_, index) => `vwc_${index + 1}`),
   ...Array.from({ length: 10 }, (_, index) => `soil_vic_${index + 1}`),
-  'swt_1', 'soil_temp_1', 'soil_temp_2', 'soil_ec_1', 'soil_ec_2',
+  'swt_1', 'swt_2', 'soil_temp_1', 'soil_temp_2', 'soil_ec_1', 'soil_ec_2',
 ]);
 const CLIMATE_CHANNELS = Object.freeze(['ambient_temperature', 'relative_humidity', 'light_lux']);
 const WEATHER_CHANNELS = Object.freeze([
@@ -90,6 +91,18 @@ function sdi12Channels(device) {
   const depths = parseObject(device && (device.soil_moisture_probe_depths_json || device.soilMoistureProbeDepthsJson));
   const layout = parseObject(device && (device.sdi12_channel_layout_json || device.sdi12ChannelLayoutJson));
   const current = [];
+  // The acquisition layout owns these pairs, including when depths are unknown
+  // or the latest frame was rejected. Never reinterpret it as a Sentek rail.
+  if (layout && layout.kind === 'tensiomark') {
+    const validation = validateTensiomarkLayout(layout);
+    if (validation.ok) {
+      for (const sensor of validation.layout.sensors) {
+        addUnique(current, [`swt_${sensor.channel}`, `soil_temp_${sensor.channel}`]);
+      }
+    }
+    addUnique(current, ['bat_v']);
+    return { declared: supported, current };
+  }
   if (depths) addUnique(current, Object.keys(depths).filter((key) => supported.includes(key)));
   if (!current.length && layout && Array.isArray(layout.sensors)) {
     for (const sensor of layout.sensors) {
@@ -107,6 +120,16 @@ function sdi12Channels(device) {
   return { declared: supported, current };
 }
 
+function isWatermarkSoilTemperatureSource(device) {
+  return typeId(device) === 'DRAGINO_LSN50'
+    && bool(device && (device.watermark_evidence ?? device.watermarkEvidence))
+    && !bool(device && (device.dendro_enabled ?? device.dendroEnabled))
+    && !bool(device && (device.rain_gauge_enabled ?? device.rainGaugeEnabled))
+    && !bool(device && (device.flow_meter_enabled ?? device.flowMeterEnabled))
+    && (!bool(device && (device.chameleon_enabled ?? device.chameleonEnabled))
+      || bool(device && (device.watermark_calibration_retained ?? device.watermarkCalibrationRetained)));
+}
+
 function lsn50Channels(device) {
   const current = [];
   const chameleon = bool(device && (device.chameleon_enabled ?? device.chameleonEnabled));
@@ -115,17 +138,19 @@ function lsn50Channels(device) {
   const rain = bool(device && (device.rain_gauge_enabled ?? device.rainGaugeEnabled));
   const flow = bool(device && (device.flow_meter_enabled ?? device.flowMeterEnabled));
   const dendro = bool(device && (device.dendro_enabled ?? device.dendroEnabled));
-  if (chameleon) addUnique(current, ['swt_1', 'swt_2', 'swt_3']);
+  const soilTemperature = isWatermarkSoilTemperatureSource(device);
+  if (soilTemperature) addUnique(current, ['swt_1', 'swt_2']);
+  else if (chameleon) addUnique(current, ['swt_1', 'swt_2', 'swt_3']);
   else if (watermark || (!temp && !rain && !flow && !dendro)) addUnique(current, ['swt_1', 'swt_2']);
-  if (temp) addUnique(current, ['ext_temperature_c']);
+  if (temp || soilTemperature) addUnique(current, ['ext_temperature_c']);
   if (rain) addUnique(current, ['rain_count_cumulative', 'rain_tips_delta', 'rain_gauge_cumulative_mm', 'rain_mm_per_hour', 'rain_mm_per_10min', 'rain_mm_today', 'rain_mm_delta']);
   if (flow) addUnique(current, FLOW_CHANNELS);
   if (dendro) addUnique(current, DENDRO_CHANNELS);
   addUnique(current, ['bat_v']);
   return {
     families: [
-      ['soil', ['swt_1', 'swt_2', 'swt_3']],
-      ['environment', ['ext_temperature_c', ...WEATHER_CHANNELS.filter((key) => key.startsWith('rain_')), ...FLOW_CHANNELS]],
+      ['soil', ['swt_1', 'swt_2', 'swt_3', ...(soilTemperature ? ['ext_temperature_c'] : [])]],
+      ['environment', [...(soilTemperature ? [] : ['ext_temperature_c']), ...WEATHER_CHANNELS.filter((key) => key.startsWith('rain_')), ...FLOW_CHANNELS]],
       ['dendro', DENDRO_CHANNELS],
       ['device_health', ['bat_v']],
     ],
@@ -213,4 +238,5 @@ module.exports = {
   SOIL_CHANNELS,
   deviceSourceId,
   describeDeviceSource,
+  isWatermarkSoilTemperatureSource,
 };

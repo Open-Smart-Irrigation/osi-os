@@ -1,19 +1,28 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
 import { devicesAPI } from '../../../services/api';
 import { Sdi12SoilCard } from '../Sdi12SoilCard';
+import { writeDisplayPreferences } from '../../../utils/displayPreferences';
 
 const STATUS_LABELS: Record<string, string> = {
   'history.soil.state.wet': 'Wet',
   'history.soil.state.moist': 'Moist',
   'history.soil.state.dry': 'Dry',
+  'sdi12.tensiomark.addressDepth': 'Address {{address}} · {{depth}}',
+  'sdi12.tensiomark.depthUnknown': 'Depth unknown',
+  'sdi12.tensiomark.depthCm': '{{depth}} cm',
+  'sdi12.tensiomark.swt': 'SWT',
+  'sdi12.tensiomark.soilTemperature': 'Soil temperature',
 };
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => STATUS_LABELS[key] ?? key }),
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, string | number>) => (STATUS_LABELS[key] ?? key)
+      .replace(/{{(\w+)}}/g, (_, name: string) => String(values?.[name] ?? `{{${name}}}`)),
+  }),
 }));
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
@@ -179,12 +188,110 @@ describe('Sdi12SoilCard', () => {
       last_seen: FRESH,
       latest: { swt_1: 30.2, soil_temp_1: 21.5 },
     })} />);
-    expect(screen.getByText('30.2 kPa · 2.48 pF')).toBeInTheDocument();
+    expect(screen.getByText('30.2 kPa')).toBeInTheDocument();
     expect(screen.getByText('Moist')).toBeInTheDocument();
     expect(screen.getAllByText(/Soil temperature/)).toHaveLength(1);
   });
 
-  it('keeps the status on an old reading and withholds it for an out-of-range one', () => {
+  it('renders strict Tensiomark address-mapped SWT and temperature pairs with honest null depth', () => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      deveui: 'A840410000000207',
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      sdi12_channel_layout_json: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed',
+        sensors: [
+          { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+          { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: 40, calibration_range: 'unverified' },
+        ],
+      },
+      latest: { swt_1: 1000, soil_temp_1: 16.1, swt_2: 0.1, soil_temp_2: 18.25, bat_v: 3.606 },
+    })} />);
+
+    expect(screen.getByText('Address 1 · Depth unknown')).toBeInTheDocument();
+    expect(screen.getByText('Address 4 · 40 cm')).toBeInTheDocument();
+    expect(screen.getByText('1000.0 kPa')).toBeInTheDocument();
+    expect(screen.getByText('0.1 kPa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Soil temperature, Address 4 · 40 cm: 18.3 °C' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SWT, Address 1 · Depth unknown: 1000.0 kPa' })).toBeInTheDocument();
+  });
+
+  it('uses the common water-state badge for an explicit Tensiomark layout', () => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      sdi12_channel_layout_json: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed',
+        sensors: [
+          { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+          { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' },
+        ],
+      },
+      latest: { swt_1: 30.2, soil_temp_1: 21.5, bat_v: 3.6 },
+    })} />);
+
+    expect(screen.queryByText('sdi12.tensiomark.calibrationRange')).not.toBeInTheDocument();
+    expect(screen.getByText('30.2 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Moist')).toBeInTheDocument();
+  });
+
+  it('keeps missing readings unavailable when the explicit Tensiomark layout has no accepted reading', () => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_channel_layout_json: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed',
+        sensors: [
+          { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+          { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' },
+        ],
+      },
+      latest: { bat_v: 3.6 },
+    })} />);
+
+    expect(screen.queryByText('sdi12.tensiomark.calibrationRange')).not.toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(4);
+    expect(screen.queryByText(/Wet|Moist|Dry/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [0, '0.0 kPa'],
+    [0.1, '0.1 kPa'],
+    [1000, '1000.0 kPa'],
+    [1000000, '1000000.0 kPa'],
+  ])('displays the qualified Tensiomark range endpoint %s with the common SWT status', (value, label) => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: value },
+    })} />);
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+    if (value > 300) expect(screen.getByText('Dry')).toBeInTheDocument();
+  });
+
+  it.each([-1, 1000000.1])('withholds out-of-range Tensiomark value %s and its status', (value) => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: value },
+    })} />);
+
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.queryByText(/Wet|Moist|Dry/)).not.toBeInTheDocument();
+  });
+
+  it.each([null, Number.NaN, Number.POSITIVE_INFINITY])('treats missing or non-finite Tensiomark value %s as unavailable', (value) => {
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: FRESH,
+      latest: { swt_1: value },
+    })} />);
+
+    expect(screen.getByText('No soil readings available.')).toBeInTheDocument();
+    expect(screen.queryByText(/Wet|Moist|Dry/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the status on a qualified Tensiomark reading days old', () => {
     const { rerender } = render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'TENSIOMARK',
       last_seen: DAYS_OLD,
@@ -194,33 +301,71 @@ describe('Sdi12SoilCard', () => {
 
     rerender(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       sdi12_probe_profile: 'TENSIOMARK',
+      last_seen: DAYS_OLD,
+      latest: { swt_1: 1000 },
+    })} />);
+    expect(screen.getByText('1000.0 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
+  });
+
+  it('uses the same range and measured zero for other profiles', () => {
+    const { rerender } = render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       last_seen: FRESH,
       latest: { swt_1: 301 },
     })} />);
-    expect(screen.getByText('—')).toBeInTheDocument();
-    expect(screen.queryByText('Dry')).not.toBeInTheDocument();
-  });
+    expect(screen.getByText('301.0 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
 
-  // Before the pF floor rule a zero showed kPa only, without its pF.
-  it('renders zero as kPa with the 0 pF floor and marks it Wet', () => {
-    window.localStorage.setItem('osi.display.swtUnit', 'pF');
-    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
-      sdi12_probe_profile: 'TENSIOMARK',
+    rerender(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       last_seen: FRESH,
       latest: { swt_1: 0 },
     })} />);
-    expect(screen.getByText('0.0 kPa · 0.00 pF')).toBeInTheDocument();
+    expect(screen.getAllByText('0.0 kPa')).toHaveLength(1);
     expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
-  it('never shows a negative pF for tension between 0 and 0.1 kPa', () => {
+  it('shows a measured zero as 0.0 kPa in pF mode next to its Wet status', () => {
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
     render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
-      sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_probe_profile: 'TENSIOMARK', last_seen: FRESH, latest: { swt_1: 0 },
+    })} />);
+    expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+    expect(screen.queryByText('—')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
+  });
+
+  it('shows negative pF for tension below 0.1 kPa', () => {
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
+    render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
+      sdi12_probe_profile: 'SENTEK_ENVIROSCAN',
       last_seen: FRESH,
       latest: { swt_1: 0.05 },
     })} />);
-    expect(screen.getByText('0.1 kPa · 0.00 pF')).toBeInTheDocument();
-    expect(screen.queryByText(/-0\.30 pF/)).not.toBeInTheDocument();
+    expect(screen.getByText('-0.30 pF')).toBeInTheDocument();
+  });
+
+  it('switches both mounted Tensiomark probes to pF without changing temperature or depth context', () => {
+    render(<Sdi12SoilCard removeContext='farm' device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_channel_layout_json: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed',
+        sensors: [
+          { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+          { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' },
+        ],
+      },
+      latest: { swt_1: 1.97, soil_temp_1: 13.96, swt_2: 0.1, soil_temp_2: 14.92 },
+    })} />);
+
+    act(() => writeDisplayPreferences({ swtUnit: 'pF' }));
+
+    expect(screen.getByText('1.29 pF')).toBeInTheDocument();
+    expect(screen.getByText('0.00 pF')).toBeInTheDocument();
+    expect(screen.getByText('14.0 °C')).toBeInTheDocument();
+    expect(screen.getByText('14.9 °C')).toBeInTheDocument();
+    expect(screen.getAllByText(/Depth unknown/)).toHaveLength(2);
   });
 
 });
@@ -304,5 +449,24 @@ describe('Sdi12SoilCard history', () => {
     })} />);
     expect(screen.getByText('18.5 °C').closest('button')).toBeNull();
     expect(screen.getByText('20.1 %').closest('button')).not.toBeNull();
+  });
+
+  it('opens Tensiomark history from canonical kPa and reprojects the mounted monitor when the preference changes', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+    const getHistory = await historyMock();
+    vi.mocked(getHistory).mockResolvedValue([{ t: '2026-09-24T07:00:00.000Z', value: 1.97 }] as never);
+    window.localStorage.setItem('osi.display.swtUnit', 'pF');
+    render(<Sdi12SoilCard removeContext='farm' device={makeDevice({
+      sdi12_probe_profile: 'TENSIOMARK',
+      latest: { swt_1: 1.97 },
+    })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'SWT, #1: 1.29 pF' }));
+    expect(await screen.findByRole('heading', { name: 'SWT · #1 (pF)' })).toBeInTheDocument();
+    expect(screen.getAllByText('1.29 pF').length).toBeGreaterThan(1);
+    act(() => writeDisplayPreferences({ swtUnit: 'kPa' }));
+    expect(await screen.findByRole('heading', { name: 'SWT · #1 (kPa)' })).toBeInTheDocument();
+    expect(screen.getAllByText('2.0 kPa').length).toBeGreaterThan(1);
+    expect(getHistory).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

@@ -220,12 +220,45 @@ describe('SDI-12 round-trip: codec → profile normalizer → writer → DB', ()
           'SELECT channel, reason FROM ingest_quarantine ORDER BY id'
         ).all().map(({ channel, reason }) => ({ channel, reason }));
         assert.deepEqual(quarantineRows, expectedQuarantine);
+        if (vector.probeProfile === 'TENSIOMARK') {
+          const quarantined = syncDb.prepare('SELECT raw_value FROM ingest_quarantine ORDER BY id').all();
+          assert.deepEqual(quarantined.map(item => item.raw_value), [decodedData.data_sum]);
+        }
         assert.deepEqual(
           result.deadLettered.map(({ channel, reason }) => ({ channel, reason })),
           expectedQuarantine
         );
       } finally {
         syncDb.close();
+      }
+    });
+  }
+});
+
+describe('Tensiomark candidate rehearsal: explicit pF positions → canonical SQLite values', () => {
+  const normalizer = require(path.join(NR_ROOT, 'osi-sdi12-normalize'));
+  const codec = loadCodecViaVm(path.join(NR_ROOT, 'codecs/dragino_sdi12_decoder.js'));
+  const writer = require(path.join(NR_ROOT, 'osi-device-writer'));
+  const manifest = loadEdgeManifest();
+  for (const [field_order, text] of [['pf_temperature', '+4+20'], ['temperature_pf', '+20+4']]) {
+    it(`stores 1,000 kPa once for declared ${field_order} without granting acquisition`, () => {
+      const config = { version: 1, profile_id: 'TENSIOMARK', profile_version: 3, address: '2',
+        settings: { source_unit: 'pF', variant: '1', field_order }, depths: [30] };
+      const resolved = normalizer.resolveConfiguration(config);
+      assert.equal(resolved.acquisition_available, false);
+      assert.equal(resolved.provisional, true);
+      const decoded = codec.decodeUplink({ fPort: 2, bytes: [12, 228, 1, ...Buffer.from(text)] });
+      const normalized = normalizer.normalizeConfigured(decoded.data, config, {});
+      assert.equal(normalized.disposition, 'complete');
+      const db = createTestDb();
+      try {
+        writer.resetColumnCache();
+        writer.writeDeviceData(db, manifest, normalized, { deveui: TEST_DEVEUI }, {});
+        const row = db.prepare('SELECT swt_1, soil_temp_1, bat_v FROM device_data').get();
+        assert.deepEqual({ ...row }, { swt_1: 1000, soil_temp_1: 20, bat_v: 3.3 });
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM ingest_quarantine').get().n, 0);
+      } finally {
+        db.close();
       }
     });
   }

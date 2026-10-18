@@ -45,6 +45,80 @@ describe('SDI-12 device API normalization', () => {
     expect(device.sdi12_layout_status).toBe('invalid');
   });
 
+  it('normalizes a strict Tensiomark layout from its persisted JSON text', () => {
+    const device = normaliseDevice({
+      deveui: 'a840410000000205',
+      type_id: 'DRAGINO_SDI12',
+      latest_data: { swt_1: 0.1, soil_temp_2: 18.25 },
+      sdi12_channel_layout_json: JSON.stringify({
+        version: 1,
+        kind: 'tensiomark',
+        source_unit: 'pF',
+        field_order: 'temperature_pf',
+        qualification: 'bench_observed',
+        sensors: [
+          { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+          { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: 40, calibration_range: 'unverified' },
+        ],
+      }),
+    });
+
+    expect(device.sdi12_channel_layout_json).toEqual({
+      version: 1,
+      kind: 'tensiomark',
+      source_unit: 'pF',
+      field_order: 'temperature_pf',
+      qualification: 'bench_observed',
+      sensors: [
+        { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' },
+        { address: '4', channel: 2, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: 40, calibration_range: 'unverified' },
+      ],
+    });
+  });
+
+  it('rejects a Tensiomark layout with duplicate addresses, identities, or channels', () => {
+    const validSensor = { address: '1', channel: 1, identity: '111TENSIOMARK_2Vh_10A00001', depth_cm: null, calibration_range: 'unverified' };
+    for (const sensors of [
+      [validSensor, { ...validSensor, channel: 2, identity: '111TENSIOMARK_2Vh_10A00002' }],
+      [validSensor, { address: '4', channel: 2, identity: validSensor.identity, depth_cm: null, calibration_range: 'unverified' }],
+      [validSensor, { address: '4', channel: 1, identity: '411TENSIOMARK_2Vh_10A00002', depth_cm: null, calibration_range: 'unverified' }],
+    ]) {
+      const device = normaliseDevice({
+        deveui: 'A840410000000206', type_id: 'DRAGINO_SDI12', latest_data: {},
+        sdi12_channel_layout_json: {
+          version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed', sensors,
+        },
+      });
+      expect(device.sdi12_channel_layout_json).toBeNull();
+      expect(device.sdi12_layout_status).toBe('invalid');
+    }
+  });
+
+  it('fails closed for a malformed camel-case Tensiomark alias instead of exposing its raw layout', () => {
+    const device = normaliseDevice({
+      deveui: 'A840410000000207', type_id: 'DRAGINO_SDI12', latest_data: {},
+      sdi12ChannelLayoutJson: {
+        version: 1, kind: 'tensiomark', source_unit: 'pF', field_order: 'temperature_pf', qualification: 'bench_observed', sensors: null,
+      },
+    });
+
+    expect(device.sdi12_channel_layout_json).toBeNull();
+    expect(device.sdi12_layout_status).toBe('invalid');
+  });
+
+  it('does not treat an unknown layout kind as a legacy Sentek layout', () => {
+    const device = normaliseDevice({
+      deveui: 'A840410000000208', type_id: 'DRAGINO_SDI12', latest_data: {},
+      sdi12_channel_layout_json: {
+        version: 1, kind: 'unknown', address: 'L',
+        sensors: [{ channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' }],
+      },
+    });
+
+    expect(device.sdi12_channel_layout_json).toBeNull();
+    expect(device.sdi12_layout_status).toBe('invalid');
+  });
+
   it('normalizes only bounded deployment state and a valid discovered address', () => {
     const device = normaliseDevice({
       deveui: 'a840410000000203', type_id: 'DRAGINO_SDI12', latest_data: {},

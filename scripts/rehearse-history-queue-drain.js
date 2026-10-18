@@ -32,7 +32,7 @@ const { createHarness } = require('./history-sync-flow-harness');
 
 const LIVE_DB_DIR = '/data/db';
 const WORK_MARKER = '.history-queue-rehearsal';
-const TABLES = ['device_data', 'chameleon_readings', 'dendrometer_readings', 'dendrometer_daily',
+const TABLES = ['device_data', 'chameleon_readings', 'dendrometer_readings', 'tensiomark_observations', 'dendrometer_daily',
   'zone_daily_environment', 'zone_daily_recommendations', 'irrigation_events', 'valve_actuation_expectations'];
 // A table is drained when no key queued longer ago than this is still pending.
 const DRAINED_AGE_MS = 15 * 60 * 1000;

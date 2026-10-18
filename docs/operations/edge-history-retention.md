@@ -282,3 +282,7 @@ stations, each assigned to a zone, accumulates that count per device.
 Retention is unbounded in the same way as `zone_daily_agronomy` — no prune
 job, no retention knob — and the table stays edge-only, with no sync
 trigger touching it.
+
+## Tensiomark acquisition evidence
+
+`tensiomark_observations` retains accepted and rejected addressed responses indefinitely on the gateway in v1. It has no automatic pruning and does not share the 1,000-row ingest quarantine cap. Each row carries the original text, original uplink payload when available, explicit interpretation snapshot and hash, and the retained canonical channel snapshot. Its `device_data_id` identifies the exact canonical row; history pruning sets this link to null without deleting evidence. The observation and canonical row are written in one transaction. Since migration 0075 the observations travel to the cloud through history sync as their own table (`tensiomark_observations`, see `docs/contracts/matric-potential/v1.md`); they are not part of the `device_data` measurement events, and the gateway keeps its copy. The synced `raw_response_hex` encodes the stored TEXT, which SQLite holds as UTF-8, so a received byte at or above 0x80 appears as its two-byte UTF-8 sequence. Accepted responses are ASCII; for a rejected response, `payload_base64` is the byte-exact evidence.

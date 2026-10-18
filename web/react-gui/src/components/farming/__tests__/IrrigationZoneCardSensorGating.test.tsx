@@ -212,11 +212,11 @@ describe('water card sensor gating', () => {
   });
 
   it('calls an out-of-range reading invalid instead of charting it', async () => {
-    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 4200 } })]);
+    await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 1_000_001 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
     expect(tile).toHaveTextContent('Invalid reading');
-    expect(tile).not.toHaveTextContent('4200');
+    expect(tile).not.toHaveTextContent('1000001');
   });
 
   it('reports an SDI-12 probe as volumetric water content in percent', async () => {

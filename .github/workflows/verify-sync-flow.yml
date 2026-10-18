@@ -35,6 +35,31 @@ jobs:
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
+      - name: SDI-12 offline profiles and helper regressions
+        run: >-
+          node --test scripts/preview-sdi12-profile.test.js
+          scripts/test-sdi12-transport-lab.js scripts/replay-sdi12-transport.test.js
+          scripts/test-sdi12-protocol-lab.js scripts/preview-sdi12-exchange.test.js
+          scripts/test-sdi12-converter-lab.js scripts/preview-sdi12-converter.test.js
+          scripts/test-sdi12-sensor-recipes.js scripts/preview-sdi12-recipe.test.js
+          scripts/test-sdi12-bench-capture.js scripts/check-sdi12-capture.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
+      # Tensiomark storage, sync and precision; the shared matric-potential
+      # conversion; the clipped-WATERMARK and Tensiomark history repair CLIs;
+      # the unified soil-tension scheduler.
+      - name: Tensiomark, matric potential and soil-tension repairs
+        run: >-
+          node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.test.js
+          scripts/test-tensiomark-contract.js scripts/test-tensiomark-precision.js
+          scripts/test-tensiomark-runtime.js scripts/test-tensiomark-schema.js
+          scripts/repair-watermark-clipped.test.js scripts/test-repair-tensiomark-history.js
+          scripts/test-unified-soil-tension-scheduler.js
       # WATERMARK LSN50 profile 3: FPort 11 dispatch in lsn50-decode-fn, the
       # config-query drop and watermark-ingest-fn, run against the real
       # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build

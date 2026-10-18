@@ -1,0 +1,981 @@
+{
+  "category": "independent_calculation",
+  "note": "Arithmetic from published equations. Not vendor replies, not captures.",
+  "cases": [
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 0
+      },
+      "expected": {
+        "vwc_percent": -69.56
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 1780
+      },
+      "expected": {
+        "vwc_percent": -0.514
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 1793.2
+      },
+      "expected": {
+        "vwc_percent": -0.002
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 1793.3
+      },
+      "expected": {
+        "vwc_percent": 0.002
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 1797.7
+      },
+      "expected": {
+        "vwc_percent": 0.173
+      },
+      "remark": "RAW from guide DDI example (TEROS 11)"
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 1806.5
+      },
+      "expected": {
+        "vwc_percent": 0.514
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 2000
+      },
+      "expected": {
+        "vwc_percent": 8.02
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 2650
+      },
+      "expected": {
+        "vwc_percent": 33.234
+      },
+      "remark": "verification-clip bounds, manual p.9"
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 2730
+      },
+      "expected": {
+        "vwc_percent": 36.337
+      },
+      "remark": "verification-clip bounds, manual p.9"
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 2749
+      },
+      "expected": {
+        "vwc_percent": 37.074
+      },
+      "remark": "RAW from guide DDI example (TEROS 12)"
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 3000
+      },
+      "expected": {
+        "vwc_percent": 46.81
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 3596.5
+      },
+      "expected": {
+        "vwc_percent": 69.948
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 3597.9
+      },
+      "expected": {
+        "vwc_percent": 70.003
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "mineral_vwc_percent = 100*(3.879e-4*RAW - 0.6956)",
+      "input": {
+        "raw": 3600
+      },
+      "expected": {
+        "vwc_percent": 70.084
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "RAW at theta=0",
+      "input": {
+        "theta": 0
+      },
+      "expected": {
+        "raw": 1793.25
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "RAW at theta=0.70",
+      "input": {
+        "theta": 0.7
+      },
+      "expected": {
+        "raw": 3597.83
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "eps = (2.887e-9*RAW^3 - 2.080e-5*RAW^2 + 5.276e-2*RAW - 43.39)^2",
+      "input": {
+        "raw": 1797.7
+      },
+      "expected": {
+        "eps": 1.02
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "eps = (2.887e-9*RAW^3 - 2.080e-5*RAW^2 + 5.276e-2*RAW - 43.39)^2",
+      "input": {
+        "raw": 2650
+      },
+      "expected": {
+        "eps": 16.66
+      },
+      "remark": null
+    },
+    {
+      "sensor": "TEROS 11/12",
+      "rule": "eps = (2.887e-9*RAW^3 - 2.080e-5*RAW^2 + 5.276e-2*RAW - 43.39)^2",
+      "input": {
+        "raw": 3596.5
+      },
+      "expected": {
+        "eps": 135.04
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 0
+      },
+      "expected": {
+        "hPa": 1,
+        "kPa": 0.1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 0.01
+      },
+      "expected": {
+        "hPa": 1.023,
+        "kPa": 0.102
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 1
+      },
+      "expected": {
+        "hPa": 10,
+        "kPa": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 2
+      },
+      "expected": {
+        "hPa": 100,
+        "kPa": 10
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 2.48
+      },
+      "expected": {
+        "hPa": 301.995,
+        "kPa": 30.2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 3
+      },
+      "expected": {
+        "hPa": 1000,
+        "kPa": 100
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 3.8
+      },
+      "expected": {
+        "hPa": 6309.573,
+        "kPa": 630.957
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 4.2
+      },
+      "expected": {
+        "hPa": 15848.932,
+        "kPa": 1584.893
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 6.59
+      },
+      "expected": {
+        "hPa": 3890451.45,
+        "kPa": 389045.145
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa = 10^pF / 10 (hPa = 10^pF)",
+      "input": {
+        "pF": 7
+      },
+      "expected": {
+        "hPa": 10000000,
+        "kPa": 1000000
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa step for 0.01 pF resolution",
+      "input": {
+        "pF": 2
+      },
+      "expected": {
+        "kPa_step": 0.233
+      },
+      "remark": null
+    },
+    {
+      "sensor": "Tensiomark",
+      "rule": "kPa step for 0.01 pF resolution",
+      "input": {
+        "pF": 6
+      },
+      "expected": {
+        "kPa_step": 2329.299
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, mineral a0=1.6 a1=8.4",
+      "input": {
+        "eps": 1
+      },
+      "expected": {
+        "theta": -0.0714,
+        "percent": -7.14
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, mineral a0=1.6 a1=8.4",
+      "input": {
+        "eps": 2.56
+      },
+      "expected": {
+        "theta": 0,
+        "percent": 0
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, mineral a0=1.6 a1=8.4",
+      "input": {
+        "eps": 24.6016
+      },
+      "expected": {
+        "theta": 0.4,
+        "percent": 40
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, mineral a0=1.6 a1=8.4",
+      "input": {
+        "eps": 81
+      },
+      "expected": {
+        "theta": 0.881,
+        "percent": 88.1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, mineral a0=1.6 a1=8.4",
+      "input": {
+        "eps": 100
+      },
+      "expected": {
+        "theta": 1,
+        "percent": 100
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, organic a0=1.3 a1=7.7",
+      "input": {
+        "eps": 1
+      },
+      "expected": {
+        "theta": -0.039,
+        "percent": -3.9
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, organic a0=1.3 a1=7.7",
+      "input": {
+        "eps": 2.56
+      },
+      "expected": {
+        "theta": 0.039,
+        "percent": 3.9
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, organic a0=1.3 a1=7.7",
+      "input": {
+        "eps": 24.6016
+      },
+      "expected": {
+        "theta": 0.4753,
+        "percent": 47.53
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, organic a0=1.3 a1=7.7",
+      "input": {
+        "eps": 81
+      },
+      "expected": {
+        "theta": 1,
+        "percent": 100
+      },
+      "remark": null
+    },
+    {
+      "sensor": "PR2",
+      "rule": "theta = (sqrt(eps) - a0)/a1, organic a0=1.3 a1=7.7",
+      "input": {
+        "eps": 100
+      },
+      "expected": {
+        "theta": 1.1299,
+        "percent": 112.99
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 7,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 4,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 4,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 3,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 7,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 4,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 6,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 3,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 7,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 5,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 4,
+        "blocks": 2
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "M",
+        "values": 7,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 3,
+        "blocks": 3
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 18,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 15,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 12,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 10,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 9,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 4,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 18,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 15,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 12,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 10,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 9,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 6,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 4
+      },
+      "expected": {
+        "values_per_block": 18,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 5
+      },
+      "expected": {
+        "values_per_block": 15,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 6
+      },
+      "expected": {
+        "values_per_block": 12,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 7
+      },
+      "expected": {
+        "values_per_block": 10,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 8
+      },
+      "expected": {
+        "values_per_block": 9,
+        "blocks": 1
+      },
+      "remark": null
+    },
+    {
+      "sensor": "SDI-12",
+      "rule": "D blocks = ceil(k / floor(cap/w)) if all values have width w",
+      "input": {
+        "mode": "C",
+        "values": 7,
+        "width": 9
+      },
+      "expected": {
+        "values_per_block": 8,
+        "blocks": 1
+      },
+      "remark": null
+    }
+  ]
+}

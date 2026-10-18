@@ -160,10 +160,14 @@ producing a canonical body or hash.
 - Input: `{"note": "2026-05-03T12:00:00.1234567890Z"}`
 - Result: invalid
 
-## SWT pF Derivation
+## SWT pF Derivation (legacy)
 
-pF is never stored or synced for measurements; every consumer derives it from
-canonical kPa with this exact rule:
+This section records the pre-2026-10-16 floor and CSV rounding behavior. Current
+implementations follow [Matric potential conversion v1](../matric-potential/v1.md),
+including native pF provenance on edge and cloud. General payload canonicalization
+and hash rules elsewhere in this document are unchanged.
+
+The legacy behavior derived pF from canonical kPa with this rule:
 
 - `pF = log10(kPa * 10)` for finite kPa above 0.1 (pF is the decimal logarithm of
   tension in hPa; 1 kPa = 10 hPa)
@@ -181,7 +185,7 @@ canonical kPa with this exact rule:
   gains the `_pf` suffix, `unit` is `pF`, and `series_label` gains the ` (pF)`
   suffix
 
-Golden vectors (all implementations - edge JS, GUI TS, server Java - must match):
+Legacy vectors (current conversion vectors are in `../matric-potential/vectors.json`):
 
 | kPa | pF (exact double) | pF @ 2 dp | pF @ 4 dp |
 |-----|-------------------|-----------|-----------|
