@@ -209,6 +209,20 @@ function alternatingRollupDatabase() {
   };
 }
 
+function syntheticRows(count, startMs, spanMs, sourceKeys, channelKeys) {
+  return Array.from({ length: count }, (_, index) => {
+    const source = sourceKeys[index % sourceKeys.length];
+    const channel = channelKeys[index % channelKeys.length];
+    return {
+      id: index + 1,
+      deveui: source,
+      recorded_at: new Date(startMs + (index % Math.max(1, Math.floor(spanMs / 1000))) * 1000).toISOString(),
+      swt_1: channel === 'swt_1' ? 10 : null,
+      swt_2: channel === 'swt_2' ? 20 : null,
+    };
+  });
+}
+
 function loadHelper(profile) {
   return require(path.join(
     ROOT,
@@ -479,6 +493,119 @@ for (const profile of PROFILES) {
       available: false,
       reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
     });
+  });
+
+  test(`${profile}: shared recovery budget covers all source-channel pairs`, async () => {
+    const helper = loadHelper(profile);
+    const sourceKeys = ['A8404100000000A1', 'A8404100000000B1'];
+    const channelKeys = ['swt_1', 'swt_2'];
+    let queryCount = 0;
+    const rows = syntheticRows(30001, Date.parse('2026-10-01T00:00:00Z'), 48 * 60 * 60 * 1000, sourceKeys, channelKeys);
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        queryCount += 1;
+        if (sql.includes('history_channel_rollups')) return [];
+        return rows;
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: sourceKeys,
+      sourceDevices: sourceKeys.map((deveui) => ({ deveui, type_id: 'KIWI_SENSOR' })),
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: channelKeys.map((id) => ({ id, field: id, unit: 'kPa' })),
+    });
+    assert.equal(queryCount, 2, 'one rollup query plus one shared recovery query');
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+    assert.equal(aggregate.sourceAggregates.length, 4);
+    assert.ok(aggregate.sourceAggregates.every((entry) => entry.buckets.length === 0));
+  });
+
+  test(`${profile}: completed and live reads share the 30000-row budget`, async () => {
+    const helper = loadHelper(profile);
+    const sqls = [];
+    let rawQuery = 0;
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        sqls.push(sql);
+        if (sql.includes('history_channel_rollups')) return [];
+        rawQuery += 1;
+        if (rawQuery === 1) return syntheticRows(20000, Date.parse('2026-10-01T00:00:00Z'), 48 * 60 * 60 * 1000, ['A8404100000000A1'], ['swt_1']);
+        return syntheticRows(10001, Date.parse('2026-10-03T00:00:00Z'), 48 * 60 * 60 * 1000, ['A8404100000000A1'], ['swt_1']);
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-03T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(rawQuery, 2);
+    assert.match(sqls[2], /LIMIT 10001$/);
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+  });
+
+  test(`${profile}: SQL margin rows still consume the shared sentinel budget`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const boundaryRows = (startMs) => syntheticRows(30000, startMs, 48 * 60 * 60 * 1000, [source], ['swt_1'])
+      .concat({
+        id: 30001,
+        deveui: source,
+        recorded_at: new Date(startMs - 1).toISOString(),
+        swt_1: 1,
+      });
+    const query = (rows) => ({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [];
+        return rows;
+      },
+    });
+    const options = {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      aggregation: 'daily',
+      useRollups: true,
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    };
+    const recoveryOverflow = await helper.aggregateDeviceData(query(boundaryRows(Date.parse('2026-10-01T00:00:00Z'))), {
+      ...options,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+    });
+    const liveOverflow = await helper.aggregateDeviceData(query(boundaryRows(Date.parse('2026-10-03T00:00:00Z'))), {
+      ...options,
+      start: '2026-10-03T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      nowMs: Date.parse('2026-10-03T00:00:00Z'),
+    });
+    const expectedAvailability = {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    };
+    assert.deepEqual(recoveryOverflow.availability, expectedAvailability);
+    assert.deepEqual(liveOverflow.availability, expectedAvailability);
   });
 
   test(`${profile}: legacy 24h and 48h boundaries stay source isolated`, async () => {

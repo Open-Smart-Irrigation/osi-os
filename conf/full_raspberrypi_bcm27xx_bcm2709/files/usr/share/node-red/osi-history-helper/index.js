@@ -1848,7 +1848,7 @@ function sourceRollupResults(rows, query, channels, sourceDevices) {
 
 async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, channels, rollupRows, start, end, aggregation) {
   const recovered = [];
-  recovered.rawScanOverflow = false;
+  const missingPairs = [];
   for (const device of sourceDevices || []) {
     const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
     const logicalKey = sourceLogicalKeyForDevice(query.cardType || query.card_type, device);
@@ -1870,57 +1870,79 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
       });
       const missing = (skeleton.buckets || []).filter((bucket) => !existingStarts.has(String(bucket.bucketStart)));
       if (!missing.length) continue;
-      // Read one bounded source/channel range for the whole missing span. A
-      // query per contiguous gap makes alternating rollup holes proportional
-      // to the number of holes and can exhaust the request before the live
-      // tail is read. The existing raw scan sentinel bounds the batch.
-      const gapStart = missing[0].bucketStart;
-      const gapEnd = missing[missing.length - 1].bucketEnd;
-      const range = recordedAtRangeSql('recorded_at', gapStart, gapEnd);
-      const sql = `SELECT id, deveui, recorded_at, ${Array.from(new Set(channelFieldNames(channel))).join(', ')} FROM device_data WHERE deveui = ? AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
-      const rows = (await dbAll(db, sql, [sourceKey].concat(range.params))).filter(recordedAtRangeFilter(gapStart, gapEnd));
-      if (rows.length > RAW_HISTORY_MAX_ROWS) {
-        recovered.rawScanOverflow = true;
-        recovered.push({
-          sourceKey,
-          channelKey: channel.id,
-          unit: channel.unit || null,
-          aggregation,
-          series: { [channel.id]: { unit: channel.unit || null, points: [] } },
-          buckets: [],
-        });
-        return recovered;
-      }
-      const aggregate = aggregateRows(rows, {
-        aggregation,
-        aggregationRequested: query.aggregationRequested || aggregation,
-        channels: [channel],
-        sourceDevices: [device],
-        sourceKeys: [sourceKey],
-        start: gapStart,
-        end: gapEnd,
-        timezone: query.timezone || query.time_zone || 'UTC',
-        nowMs: query.nowMs,
-      });
-      const sourceAggregate = (aggregate.sourceAggregates || []).find((entry) => entry.sourceKey === sourceKey && entry.channelKey === channel.id);
-      const missingStarts = new Set(missing.map((bucket) => String(bucket.bucketStart)));
-      const recoveredBuckets = (sourceAggregate ? sourceAggregate.buckets : (aggregate.buckets || []))
-        .filter((bucket) => missingStarts.has(String(bucket.bucketStart)));
-      recovered.push({
+      missingPairs.push({
         sourceKey,
+        device,
+        gapStart: missing[0].bucketStart,
+        gapEnd: missing[missing.length - 1].bucketEnd,
+        missingStarts: new Set(missing.map((bucket) => String(bucket.bucketStart))),
         channelKey: channel.id,
-        unit: channel.unit || null,
-        aggregation,
-        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
-        coverageConfidence: sourceAggregate ? sourceAggregate.coverageConfidence : aggregate.coverageConfidence,
-        coveragePct: sourceAggregate ? sourceAggregate.coveragePct : aggregate.coveragePct,
-        sourceCadences: sourceAggregate ? sourceAggregate.sourceCadences : aggregate.sourceCadences,
-        series: sourceAggregate ? sourceAggregate.series : aggregate.series,
-        buckets: recoveredBuckets,
+        channel,
       });
     }
   }
-  return recovered;
+  if (!missingPairs.length) return { aggregates: recovered, rawRowsRead: 0, rawScanOverflow: false };
+  // One bounded envelope covers all missing source/channel pairs. The raw
+  // sentinel is shared with the live-tail query by aggregateDeviceData.
+  const envelopeStart = missingPairs
+    .map((pair) => pair.gapStart)
+    .sort((left, right) => parseTime(left) - parseTime(right))[0];
+  const envelopeEnd = missingPairs
+    .map((pair) => pair.gapEnd)
+    .sort((left, right) => parseTime(right) - parseTime(left))[0];
+  const sourceKeys = Array.from(new Set(missingPairs.map((pair) => pair.sourceKey)));
+  const selectedFields = Array.from(new Set(missingPairs.flatMap((pair) => channelFieldNames(pair.channel))));
+  const placeholders = sourceKeys.map(() => '?').join(',');
+  const range = recordedAtRangeSql('recorded_at', envelopeStart, envelopeEnd);
+  const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
+  const fetchedRows = await dbAll(db, sql, sourceKeys.concat(range.params));
+  const rows = fetchedRows.filter(recordedAtRangeFilter(envelopeStart, envelopeEnd));
+  if (fetchedRows.length > RAW_HISTORY_MAX_ROWS) {
+    return {
+      aggregates: missingPairs.map((pair) => ({
+        sourceKey: pair.sourceKey,
+        channelKey: pair.channelKey,
+        unit: pair.channel.unit || null,
+        aggregation,
+        series: { [pair.channelKey]: { unit: pair.channel.unit || null, points: [] } },
+        buckets: [],
+      })),
+      rawRowsRead: fetchedRows.length,
+      rawScanOverflow: true,
+    };
+  }
+  for (const pair of missingPairs) {
+    const pairRows = rows
+      .filter((row) => normalizeDeveui(row && (row.deveui || row.device_eui || row.deviceEui)) === pair.sourceKey)
+      .filter(recordedAtRangeFilter(pair.gapStart, pair.gapEnd));
+    const aggregate = aggregateRows(pairRows, {
+      aggregation,
+      aggregationRequested: query.aggregationRequested || aggregation,
+      channels: [pair.channel],
+      sourceDevices: [pair.device],
+      sourceKeys: [pair.sourceKey],
+      start: pair.gapStart,
+      end: pair.gapEnd,
+      timezone: query.timezone || query.time_zone || 'UTC',
+      nowMs: query.nowMs,
+    });
+    const sourceAggregate = (aggregate.sourceAggregates || []).find((entry) => entry.sourceKey === pair.sourceKey && entry.channelKey === pair.channelKey);
+    const recoveredBuckets = (sourceAggregate ? sourceAggregate.buckets : (aggregate.buckets || []))
+      .filter((bucket) => pair.missingStarts.has(String(bucket.bucketStart)));
+    recovered.push({
+      sourceKey: pair.sourceKey,
+      channelKey: pair.channelKey,
+      unit: pair.channel.unit || null,
+      aggregation,
+      bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+      coverageConfidence: sourceAggregate ? sourceAggregate.coverageConfidence : aggregate.coverageConfidence,
+      coveragePct: sourceAggregate ? sourceAggregate.coveragePct : aggregate.coveragePct,
+      sourceCadences: sourceAggregate ? sourceAggregate.sourceCadences : aggregate.sourceCadences,
+      series: sourceAggregate ? sourceAggregate.series : aggregate.series,
+      buckets: recoveredBuckets,
+    });
+  }
+  return { aggregates: recovered, rawRowsRead: fetchedRows.length, rawScanOverflow: false };
 }
 
 function mergeSourceAggregates(completed, live) {
@@ -2160,7 +2182,7 @@ async function aggregateDeviceData(db, query = {}) {
       channels,
       rollupDevices
     );
-    const recoveredSources = splitMs > startMs
+    const recoveredResult = splitMs > startMs
       ? await recoverMissingSourceRollupBuckets(
         db,
         { ...query, cardType, aggregation, aggregationRequested: aggregationInfo.requested },
@@ -2171,21 +2193,29 @@ async function aggregateDeviceData(db, query = {}) {
         splitIso,
         aggregation
       )
-      : [];
+      : { aggregates: [], rawRowsRead: 0, rawScanOverflow: false };
+    const recoveredSources = recoveredResult.aggregates;
     let live = null;
     let liveOverflow = false;
     const hasTrailingWindow = splitMs < endMs;
     if (hasTrailingWindow && deveuis.length > 0) {
+      const remainingRawBudget = Math.max(0, RAW_HISTORY_MAX_ROWS - recoveredResult.rawRowsRead);
       const livePlaceholders = deveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
       const range = recordedAtRangeSql('recorded_at', splitIso, end);
-      const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
-      const rows = await dbAll(db, sql, deveuis.concat(range.params));
-      if (rows.length > RAW_HISTORY_MAX_ROWS) {
+      if (remainingRawBudget === 0) {
         liveOverflow = true;
         live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
       } else {
-        live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+        const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${remainingRawBudget + 1}`;
+        const fetchedRows = await dbAll(db, sql, deveuis.concat(range.params));
+        const rows = fetchedRows.filter(recordedAtRangeFilter(splitIso, end));
+        if (fetchedRows.length > remainingRawBudget) {
+          liveOverflow = true;
+          live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+        } else {
+          live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+        }
       }
     }
     if (rollupRows.length || recoveredSources.length || live) {
@@ -2209,7 +2239,7 @@ async function aggregateDeviceData(db, query = {}) {
         coverageConfidence,
         coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
         buckets,
-        ...(recoveredSources.rawScanOverflow || liveOverflow ? {
+        ...(recoveredResult.rawScanOverflow || liveOverflow ? {
           availability: {
             available: false,
             reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
