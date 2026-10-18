@@ -148,10 +148,10 @@ describe('history locale value parity', () => {
     // irrigationTimeline.eventLabel keys from the valve-control work
     // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
     // history.nav.admin key added for the scoped-access admin nav entry
-    // point, plus the five source-selection and recovery labels. All ten are
+    // point, plus the seven source-selection and recovery labels. All twelve are
     // already translated in every shipped locale, so
     // only the count moves.
-    expect(Object.keys(english)).toHaveLength(424);
+    expect(Object.keys(english)).toHaveLength(426);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);

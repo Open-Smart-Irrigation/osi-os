@@ -961,10 +961,10 @@ describe('History card detail route', () => {
       cards: [
         zoneCard({
           sourceDeviceCount: 2,
-          sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+          sourceLabels: ['Soil sensor', 'Soil sensor'],
           sourceDevices: [
-            { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
-            { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
+            { name: 'Soil sensor', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
+            { name: 'Soil sensor', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
           ],
         }),
       ],
@@ -973,21 +973,21 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
-    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
+    expect(screen.getByText('2 sources: Soil sensor, Soil sensor')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Sources/i }));
-    const chameleonOne = screen.getByLabelText('Chameleon 1');
-    const chameleonTwo = screen.getByLabelText('Chameleon 2');
+    const soilOne = screen.getByLabelText('Soil sensor · source-1');
+    const soilTwo = screen.getByLabelText('Soil sensor · source-2');
 
-    expect(chameleonOne).toBeChecked();
-    expect(chameleonTwo).toBeChecked();
+    expect(soilOne).toBeChecked();
+    expect(soilTwo).toBeChecked();
     expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
     historyAPIMock.getZoneCardData.mockClear();
 
-    fireEvent.click(chameleonTwo);
+    fireEvent.click(soilTwo);
 
     await waitFor(() => {
-      expect(chameleonTwo).not.toBeChecked();
+      expect(soilTwo).not.toBeChecked();
       expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
         12,
         'soil-card:root-zone',

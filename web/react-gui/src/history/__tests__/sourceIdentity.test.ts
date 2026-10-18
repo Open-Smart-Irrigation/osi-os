@@ -6,7 +6,7 @@ import {
   historySeriesStyles,
   historySeriesValue,
 } from '../sourceIdentity';
-import { historySourceChoicesFromSeries } from '../sourceSelection';
+import { historyRecoveryCapabilities, historySourceChoicesFromSeries } from '../sourceSelection';
 
 describe('history source identity', () => {
   it('classifies by channel key and keeps explicit null values', () => {
@@ -60,5 +60,21 @@ describe('history source identity', () => {
       { sourceKey: 'soil-src-one', label: 'Soil sensor · -src-one', deviceSourceId: 'device-a' },
       { sourceKey: 'soil-src-two', label: 'Soil sensor · -src-two', deviceSourceId: 'device-b' },
     ]);
+  });
+
+  it('keeps duplicate source labels distinct when the server reorders descriptors', () => {
+    const sources = [
+      { sourceKey: 'soil-source-1', sourceLabel: 'Soil sensor', deviceSourceId: 'device-a' },
+      { sourceKey: 'soil-source-2', sourceLabel: 'Soil sensor', deviceSourceId: 'device-b' },
+    ];
+    const forward = historySourceChoicesFromSeries(sources);
+    const reverse = historySourceChoicesFromSeries([...sources].reverse());
+    expect(new Map(forward.map((item) => [item.sourceKey, item.label]))).toEqual(new Map(reverse.map((item) => [item.sourceKey, item.label])));
+  });
+
+  it('maps complete availability reason pairs to the permitted recovery actions', () => {
+    expect(historyRecoveryCapabilities(['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'])).toEqual({ kind: 'raw', canChooseSource: true, canShortenRange: true, canCoarsenAggregation: false });
+    expect(historyRecoveryCapabilities(['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'])).toEqual({ kind: 'point', canChooseSource: true, canShortenRange: false, canCoarsenAggregation: true });
+    expect(historyRecoveryCapabilities(['no_data'])).toEqual({ kind: null, canChooseSource: false, canShortenRange: false, canCoarsenAggregation: false });
   });
 });

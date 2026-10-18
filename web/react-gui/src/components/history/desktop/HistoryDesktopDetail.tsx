@@ -22,6 +22,7 @@ import {
   desktopSourceOptions,
   selectableDesktopViews,
 } from '../../../history/desktopHistory';
+import { historyRecoveryCapabilities } from '../../../history/sourceSelection';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type {
   HistoryCardSummary,
@@ -146,6 +147,8 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
   });
+  const recovery = historyRecoveryCapabilities(cardData.data?.availability?.reasons);
+  const recoveryActive = Boolean(!requiresExplicitSource && cardData.data?.availability?.available === false && recovery.kind);
 
   // Derive bounds from loaded series timestamps (fall back to preset range)
   const derivedBounds = useMemo(() => {
@@ -424,6 +427,18 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                   <div data-testid="history-source-choice-required" className="m-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
                     {(() => { const label = t('history.sourceFilter.chooseOne', { defaultValue: 'Choose one source to view this history' }); return <p className="text-sm font-semibold text-[var(--text)]">{label === 'history.sourceFilter.chooseOne' ? 'Choose one source to view this history' : label}</p>; })()}
                   </div>
+                ) : recoveryActive ? (
+                  <div data-testid="history-recovery-state" className="m-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 p-6 text-center">
+                    <div className="max-w-md space-y-3 text-sm text-amber-950">
+                      <p className="font-semibold">{t('history.sourceFilter.limitsTitle', { defaultValue: 'History response limited' })}</p>
+                      <p>{t(recovery.kind === 'raw' ? 'history.sourceFilter.recoveryRaw' : 'history.sourceFilter.recoveryPoint', { defaultValue: recovery.kind === 'raw' ? 'This request covers too many raw readings. Choose one source or shorten the range.' : 'This result is too large. Choose a source or use coarser data.' })}</p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {(cardData.data?.limits.availableSources ?? []).map((source) => <button key={source.sourceKey} type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setSelectedSourceKey(source.sourceKey)}>{source.label || source.sourceKey}</button>)}
+                        {recovery.canShortenRange && <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={handleShorterRange}>{t('history.sourceFilter.shorterRange', { defaultValue: 'Use a shorter range' })}</button>}
+                        {recovery.canCoarsenAggregation && coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) !== (aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) && <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setAggregationOverride(coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)))}>{t('history.sourceFilter.coarserAggregation', { defaultValue: 'Use coarser aggregation' })}</button>}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
                   <HistoryCardVisualization
                     card={selectedCard}
@@ -436,19 +451,6 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     advancedError={advancedData.error}
                     window={chartWindow}
                   />
-                )}
-                {!requiresExplicitSource && !cardData.isLoading && cardData.data?.limits?.reason && (
-                  <div className="m-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                    <p className="font-semibold">{t('history.sourceFilter.limitsTitle', { defaultValue: 'History response limited' })}</p>
-                    <p className="mt-1">{cardData.data.limits.reason}</p>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {(cardData.data.limits.availableSources ?? []).map((source) => <button key={source.sourceKey} type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setSelectedSourceKey(source.sourceKey)}>{source.label || source.sourceKey}</button>)}
-                      <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={handleShorterRange}>{t('history.sourceFilter.shorterRange', { defaultValue: 'Use a shorter range' })}</button>
-                      {coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) !== (aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) && (
-                        <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setAggregationOverride(coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)))}>{t('history.sourceFilter.coarserAggregation', { defaultValue: 'Use coarser aggregation' })}</button>
-                      )}
-                    </div>
-                  </div>
                 )}
               </div>
             </div>

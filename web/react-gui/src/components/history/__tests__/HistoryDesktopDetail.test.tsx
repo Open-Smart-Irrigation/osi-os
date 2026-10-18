@@ -401,7 +401,7 @@ describe('HistoryDesktopDetail', () => {
     expect(screen.getByRole('button', { name: 'Chameleon 2' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('serializes narrower range and coarser aggregation recovery actions', () => {
+  it('serializes the raw recovery actions and omits point-only coarsening', () => {
     const card = makeCard({
       cardType: 'environment',
       title: 'Environment',
@@ -409,10 +409,11 @@ describe('HistoryDesktopDetail', () => {
       views: ['line-chart'],
     });
     vi.mocked(useHistoryCardData).mockReturnValue({
-      data: {
-        limits: { maxPointsPerSeries: 1000, maxPointsTotal: 30000, maxEvents: 100, maxInterpretations: 20, truncated: true, reason: 'point_budget_exceeded', availableSources: [] },
+      data: normaliseHistoryCardDataResponse({
+        availability: { available: false, reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'] },
+        limits: { maxPointsPerSeries: 1000, maxPointsTotal: 30000, maxEvents: 100, maxInterpretations: 20, truncated: false },
         series: [],
-      } as never,
+      }) as never,
       error: null,
       isLoading: false,
       refresh: vi.fn(),
@@ -426,8 +427,7 @@ describe('HistoryDesktopDetail', () => {
     const narrowedRangeMs = Date.parse(narrowed.range.to!) - Date.parse(narrowed.range.from!);
     expect(narrowedRangeMs).toBeLessThan(initialRangeMs);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use coarser aggregation' }));
-    expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ aggregation: '15m' }));
+    expect(screen.queryByRole('button', { name: 'Use coarser aggregation' })).not.toBeInTheDocument();
   });
 
   it('renders recovery controls from the real normalized unavailable response', () => {
@@ -450,7 +450,28 @@ describe('HistoryDesktopDetail', () => {
     expect(screen.getByRole('button', { name: 'Environment sensor · nv-src-a' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Environment sensor · nv-src-b' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use a shorter range' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use coarser aggregation' })).not.toBeInTheDocument();
+  });
+
+  it('offers point-budget coarsening without a raw shorter-range action', () => {
+    const card = makeCard({ cardType: 'environment', title: 'Environment', defaultView: 'line-chart', views: ['line-chart'] });
+    vi.mocked(useHistoryCardData).mockReturnValue({
+      data: normaliseHistoryCardDataResponse({
+        availability: { available: false, reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'] },
+        limits: { maxPointsPerSeries: 2000, maxPointsTotal: 30000, truncated: false },
+        series: [],
+      }) as never,
+      error: null,
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+    renderDesktopDetail([card], card);
+
+    expect(screen.getByTestId('history-recovery-state')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Use coarser aggregation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use a shorter range' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use coarser aggregation' }));
+    expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ aggregation: '15m' }));
   });
 
   it('resets the selected source to All when the selected card changes', () => {

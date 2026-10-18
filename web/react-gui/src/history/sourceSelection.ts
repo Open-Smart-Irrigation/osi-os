@@ -7,6 +7,22 @@ export interface HistorySourceDescriptor {
   label?: string | null;
 }
 
+export interface HistoryRecoveryCapabilities {
+  kind: 'raw' | 'point' | null;
+  canChooseSource: boolean;
+  canShortenRange: boolean;
+  canCoarsenAggregation: boolean;
+}
+
+export function historyRecoveryCapabilities(reasons: readonly string[] | undefined): HistoryRecoveryCapabilities {
+  const values = reasons ?? [];
+  const raw = values.some((reason) => reason === 'raw_read_limit_exceeded' || reason === 'select_fewer_sources_or_shorter_interval');
+  const point = values.some((reason) => reason === 'point_budget_exceeded' || reason === 'select_fewer_sources_or_coarser_aggregation');
+  if (raw) return { kind: 'raw', canChooseSource: true, canShortenRange: true, canCoarsenAggregation: false };
+  if (point) return { kind: 'point', canChooseSource: true, canShortenRange: false, canCoarsenAggregation: true };
+  return { kind: null, canChooseSource: false, canShortenRange: false, canCoarsenAggregation: false };
+}
+
 function sourceSuffix(sourceKey: string): string {
   return sourceKey.trim().slice(-8) || 'unknown';
 }
