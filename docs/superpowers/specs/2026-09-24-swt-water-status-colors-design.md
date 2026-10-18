@@ -166,7 +166,7 @@ For an unscheduled tension value, the badge replaces the old Wet/Moderate/Dry de
 
 Color is redundant with visible text. Screen readers encounter the same localized label as sighted users, and no live region announces polling updates.
 
-Status colors are reserved for the dot, border, and wash. Values and labels retain neutral high-contrast text. Existing history affordances remain unchanged: KIWI keeps its dotted underline; LSN50 keeps its bordered row, title, hover border, and focus ring. Touch targets stay intact. The pill may wrap below a value on narrow screens; it must not force horizontal scrolling or reduce the history target.
+Status colors are reserved for the dot, border, and wash. Values and labels retain neutral high-contrast text. Since 2026-10-19 the dot also carries a fill level, so the state reads without hue: wet is a full disc, moist a half-filled ring, dry an empty ring. Moist and dry are hard to tell apart for red-green dichromats on colour alone; the measured contrast ratios and colour-vision simulation are in `docs/superpowers/previews/swt-water-status/implemented/verification.md`. Existing history affordances remain unchanged: KIWI keeps its dotted underline; LSN50 keeps its bordered row, title, hover border, and focus ring. Touch targets stay intact. The pill may wrap below a value on narrow screens; it must not force horizontal scrolling or reduce the history target.
 
 Light and dark themes use the existing soil tokens. This feature does not edit `ui-core`, so it does not trigger a cloud-vendoring change.
 
