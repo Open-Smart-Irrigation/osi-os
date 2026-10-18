@@ -5,8 +5,8 @@
     "channelKey": "swt_1",
     "unit": "kPa",
     "request": {
-      "from": "2026-10-03T02:45:00Z",
-      "to": "2026-10-03T03:30:00Z",
+      "from": "2026-10-03T02:45:00.000Z",
+      "to": "2026-10-03T03:30:00.000Z",
       "aggregation": "15m",
       "timezone": "UTC"
     },
@@ -16,8 +16,8 @@
         "name": "Synthetic A",
         "depthCm": 20,
         "observations": [
-          {"recordedAt": "2026-10-03T02:57:47Z", "value": 2.296696},
-          {"recordedAt": "2026-10-03T03:27:47Z", "value": 2.322412}
+          {"recordedAt": "2026-10-03T02:57:47.000Z", "value": 2.296696},
+          {"recordedAt": "2026-10-03T03:27:47.000Z", "value": 2.322412}
         ],
         "expected15m": [2.296696, null, 2.322412]
       },
@@ -26,19 +26,53 @@
         "name": "Synthetic B",
         "depthCm": 20,
         "observations": [
-          {"recordedAt": "2026-10-03T02:55:04Z", "value": 9.507932},
-          {"recordedAt": "2026-10-03T03:10:04Z", "value": 9.507932},
-          {"recordedAt": "2026-10-03T03:25:04Z", "value": 9.507932}
+          {"recordedAt": "2026-10-03T02:55:04.000Z", "value": 9.507932},
+          {"recordedAt": "2026-10-03T03:10:04.000Z", "value": 9.507932},
+          {"recordedAt": "2026-10-03T03:25:04.000Z", "value": 9.507932}
         ],
         "expected15m": [9.507932, 9.507932, 9.507932]
       }
     ],
     "expectedSeries": [
-      {"deviceSourceId": "device-537a49c74508", "channelKey": "swt_1", "values": [2.296696, null, 2.322412]},
-      {"deviceSourceId": "device-2b53ef351e8a", "channelKey": "swt_1", "values": [9.507932, 9.507932, 9.507932]}
+      {"deviceSourceId": "device-537a49c74508", "sourceKey": {"edge": "soil-src-537a49c74508", "cloud": "soil-src-537a49c74508"}, "channelKey": "swt_1", "values": [2.296696, null, 2.322412]},
+      {"deviceSourceId": "device-2b53ef351e8a", "sourceKey": {"edge": "soil-src-2b53ef351e8a", "cloud": "soil-src-2b53ef351e8a"}, "channelKey": "swt_1", "values": [9.507932, 9.507932, 9.507932]}
     ],
     "edgeAggregateToleranceKpa": 0.0005,
-    "rawValuesExact": true
+    "rawValuesExact": true,
+    "expectedResponses": {
+      "edge": {
+        "seriesIdentityVersion": 2,
+        "aggregation": {"level": "15m", "bucketSizeSeconds": 900, "bucketTimezone": "UTC", "bucketAlignment": "request_anchored", "coveredFrom": "2026-10-03T02:45:00.000Z", "coveredTo": "2026-10-03T03:30:00.000Z"},
+        "series": [
+          {"id": "device-537a49c74508:swt_1", "deviceSourceId": "device-537a49c74508", "sourceKey": "soil-src-537a49c74508", "channelKey": "swt_1", "sourceLabel": "Synthetic A", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 2.296696},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": null},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 2.322412}
+          ]},
+          {"id": "device-2b53ef351e8a:swt_1", "deviceSourceId": "device-2b53ef351e8a", "sourceKey": "soil-src-2b53ef351e8a", "channelKey": "swt_1", "sourceLabel": "Synthetic B", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 9.507932}
+          ]}
+        ]
+      },
+      "cloud": {
+        "seriesIdentityVersion": 2,
+        "aggregation": {"level": "15m", "bucketSizeSeconds": 900, "bucketTimezone": "UTC", "bucketAlignment": "epoch_utc", "coveredFrom": "2026-10-03T02:45:00.000Z", "coveredTo": "2026-10-03T03:30:00.000Z"},
+        "series": [
+          {"id": "device-537a49c74508:swt_1", "deviceSourceId": "device-537a49c74508", "sourceKey": "soil-src-537a49c74508", "channelKey": "swt_1", "sourceLabel": "Synthetic A", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 2.296696},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": null},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 2.322412}
+          ]},
+          {"id": "device-2b53ef351e8a:swt_1", "deviceSourceId": "device-2b53ef351e8a", "sourceKey": "soil-src-2b53ef351e8a", "channelKey": "swt_1", "sourceLabel": "Synthetic B", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 9.507932}
+          ]}
+        ]
+      }
+    }
   },
   "acceptanceCases": [
     {"id": "same-time-cross-device", "expectation": "same timestamps remain in separate physical source series"},

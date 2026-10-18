@@ -7,8 +7,14 @@
       "canonicalDeveui": "A8404100000000A1",
       "deviceSourceId": "device-537a49c74508",
       "sourceKeys": {
-        "edge": "environment-src-537a49c74508",
-        "cloud": "env-src-537a49c74508"
+        "soil": {
+          "edge": "soil-src-537a49c74508",
+          "cloud": "soil-src-537a49c74508"
+        },
+        "environment": {
+          "edge": "environment-src-537a49c74508",
+          "cloud": "env-src-537a49c74508"
+        }
       },
       "seriesIds": [
         "device-537a49c74508:swt_1",
@@ -20,8 +26,14 @@
       "canonicalDeveui": "A8404100000000B1",
       "deviceSourceId": "device-2b53ef351e8a",
       "sourceKeys": {
-        "edge": "environment-src-2b53ef351e8a",
-        "cloud": "env-src-2b53ef351e8a"
+        "soil": {
+          "edge": "soil-src-2b53ef351e8a",
+          "cloud": "soil-src-2b53ef351e8a"
+        },
+        "environment": {
+          "edge": "environment-src-2b53ef351e8a",
+          "cloud": "env-src-2b53ef351e8a"
+        }
       },
       "seriesIds": [
         "device-2b53ef351e8a:swt_1",
@@ -33,8 +45,14 @@
       "canonicalDeveui": "0016C001F1170001",
       "deviceSourceId": "device-441e30789ef0",
       "sourceKeys": {
-        "edge": "soil-src-441e30789ef0",
-        "cloud": "soil-src-441e30789ef0"
+        "soil": {
+          "edge": "soil-src-441e30789ef0",
+          "cloud": "soil-src-441e30789ef0"
+        },
+        "environment": {
+          "edge": "environment-src-441e30789ef0",
+          "cloud": "env-src-441e30789ef0"
+        }
       },
       "seriesIds": ["device-441e30789ef0:swt_1"]
     }
