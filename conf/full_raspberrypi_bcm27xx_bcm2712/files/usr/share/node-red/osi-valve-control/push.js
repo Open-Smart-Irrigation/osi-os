@@ -217,9 +217,8 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs }) {
       if (!current || current.raw !== p.raw) return; // re-edited since the read: the next tick decides
       await store.clearSnapshotPending(tx, p.device_eui);
       rows = await store.queuedPushesById(tx, p.device_eui, current.push_ids);
-      // (R5 re-review N3) Real wall-clock time, not the injected `now`: a cancel compares it
-      // with the instant its own flush started, to tell rows emitted after that flush (still on
-      // the air) from rows the flush removed.
+      // (R5 re-review N3/N4) A cancel compares this marker's raw value before and after its
+      // flush to tell rows emitted during the flush (still on the air) from rows it removed.
       if (rows.length) await store.setSnapshotEmitted(tx, p.device_eui, { emitted_at: new Date().toISOString(), push_ids: rows.map((r) => r.push_id) });
     });
     if (!rows.length) continue;

@@ -281,8 +281,9 @@ async function cancelActuation({ db, deviceEui, expectationId, all, reason, flus
   // Queue work BEFORE the write, and let a flush failure propagate uncaught: if the queue
   // can't be flushed, the expectation must not be marked CANCELLED either (fail closed,
   // nothing mutated).
-  // (R5 re-review N3) Wall-clock instant before any flush, for markFlushedSnapshotLost.
-  const flushStartedAtMs = Date.now();
+  // (R5 re-review N3/N4) The emitted-snapshot marker as it was before any flush, for
+  // markFlushedSnapshotLost: a change means the tick emitted during the flush. No clock.
+  const emittedRawBeforeFlush = await store.getSnapshotEmittedRaw(db, eui);
   const queue = all === true
     ? { scope: 'full_flush', flushed: await flushQueue(eui), kept: 0, lost: 0, dropped: null }
     : await removeTargetDownlink({ eui, target: active, active: resolved.active, flushQueue, readQueue, enqueue, warn });
@@ -290,7 +291,7 @@ async function cancelActuation({ db, deviceEui, expectationId, all, reason, flus
   await db.transaction(async (tx) => {
     // (R5 H1) A whole-queue flush also removed the plan snapshot on the air: surface it as LOST
     // now. Not re-sent (Q02 c); whether a cancel may arm a fresh snapshot is an owner question.
-    if (queue.scope === 'full_flush') await store.markFlushedSnapshotLost(tx, eui, { flushStartedAtMs });
+    if (queue.scope === 'full_flush') await store.markFlushedSnapshotLost(tx, eui, { emittedRawBeforeFlush });
     for (const target of targets) {
       await tx.run(
         "UPDATE valve_actuation_expectations SET reconciliation_state='CANCELLED', cancel_reason=? " +

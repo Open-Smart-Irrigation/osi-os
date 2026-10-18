@@ -754,3 +754,49 @@ test('N3 (probe H): a tick that emits between a cancel\'s flush and its transact
   assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED'], 'so it is not LOST');
   db.close();
 });
+
+// ---------------------------------------------------------------------------------------------
+// R5 final re-review N4: the emission/flush ordering must not depend on the wall clock. With
+// the clock frozen, the emission and the cancel's flush fall in the same millisecond.
+// ---------------------------------------------------------------------------------------------
+async function withFrozenClock(fn) {
+  const RealDate = Date;
+  const FIXED = RealDate.parse('2026-10-19T03:00:00.000Z');
+  class FrozenDate extends RealDate {
+    constructor(...args) { if (args.length) super(...args); else super(FIXED); }
+    static now() { return FIXED; }
+  }
+  global.Date = FrozenDate;
+  try { return await fn(); } finally { global.Date = RealDate; }
+}
+
+test('N4: same-millisecond tie, emitted before the cancel -> the flushed clears are LOST (probe C with a frozen clock)', async () => {
+  await withFrozenClock(async () => {
+    const { db } = await tempDb();
+    const h = harness(db);
+    await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
+    await h.compile(0);
+    await h.emit(WINDOW_SEC);
+    await store.softDeleteSchedule(db, 'a', EUI);
+    const clears = await h.compile(100);
+    await h.emit(100 + WINDOW_SEC);
+    await runningOpen(db, 'e-run');
+    await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: h.cs.flushQueue, now: at(200) });
+    for (const s of await statesById(db, clears.rows.map((r) => r.push_id))) assert.deepEqual({ state: s.state, error: s.error }, { state: 'FAILED', error: 'not_resent_q02c' });
+    db.close();
+  });
+});
+
+test('N4: same-millisecond tie, emitted inside the cancel\'s flush -> the rows stay QUEUED (probe H with a frozen clock)', async () => {
+  await withFrozenClock(async () => {
+    const { db } = await tempDb();
+    const h = harness(db);
+    await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+    const snap = await h.compile(0);
+    await runningOpen(db, 'e-run');
+    const flushThenTick = async (eui) => { const r = await h.cs.flushQueue(eui); await h.emit(WINDOW_SEC + 30); return r; };
+    await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: flushThenTick, now: at(WINDOW_SEC + 30) });
+    assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED']);
+    db.close();
+  });
+});
