@@ -376,7 +376,6 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   // Fixed soil status and the zone-specific trigger comparison are separate facts.
   const soilWaterStatus = soilNow.quantity === 'tension'
     && soilNow.value !== null
-    && !soilNow.stale
     && !soilNow.invalid
     ? classifySwtWaterStatus(soilNow.value)
     : null;

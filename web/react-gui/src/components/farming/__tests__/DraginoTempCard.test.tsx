@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
-const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+const DAYS_OLD = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   window.localStorage.clear();
@@ -97,7 +97,7 @@ describe('DraginoTempCard SWT unit preference', () => {
     expect(screen.getByText('No valid Chameleon sample')).toBeInTheDocument();
   });
 
-  it('withholds stale LSN50 status and keeps each status inside its one row button', () => {
+  it('keeps the LSN50 status on an old reading and keeps each status inside its one row button', () => {
     const { rerender } = render(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
       last_seen: FRESH,
@@ -112,10 +112,10 @@ describe('DraginoTempCard SWT unit preference', () => {
 
     rerender(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
-      last_seen: STALE,
+      last_seen: DAYS_OLD,
       latest_data: { swt_1: 10 },
     }} />);
-    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
 });

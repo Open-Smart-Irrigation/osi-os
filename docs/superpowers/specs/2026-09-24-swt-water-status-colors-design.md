@@ -100,6 +100,8 @@ The locale files nest these labels at `history.soil.state.wet`, `.moist`, and `.
 
 ## Freshness and validity
 
+Superseded 2026-10-18 (owner ruling): the pill shows on the latest stored reading; the card's last-seen line carries the age. Value selection in the zone summary still prefers current contributors.
+
 The three-hour `SENSOR_FRESHNESS_WINDOW_MS` remains the age limit for current telemetry. Add a small exported predicate beside that constant so device cards and the zone summary use the same timestamp rule. A reading is current only when `nowMs` is finite, `last_seen` parses to a finite timestamp, and `-5 minutes <= nowMs - observedMs <= 3 hours`. Both endpoints are inclusive. This admits at most five minutes of device clock skew; a timestamp five minutes and one millisecond in the future is not current. Missing, unparseable, and far-future timestamps cannot establish freshness.
 
 A device-card indicator renders only when:

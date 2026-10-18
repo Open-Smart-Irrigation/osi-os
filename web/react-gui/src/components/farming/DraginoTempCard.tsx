@@ -12,7 +12,6 @@ import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConf
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
-import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { WatermarkProbeSection } from './shared/WatermarkProbeSection';
 
@@ -139,7 +138,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     && (dendroHasStemChange || dendroAwaitingBaseline || dendroNeedsCalibration || dendroSensorError || dendroSaturated);
   const chameleonEnabled = device.chameleon_enabled === 1;
   const chameleonDataInvalid = data?.chameleon_i2c_missing === 1 || data?.chameleon_timeout === 1;
-  const chameleonIsCurrent = isSensorObservationFresh(device.last_seen);
   const chameleonChannels = [
     { field: 'swt_1', label: 'SWT1', value: data?.swt_1, depth: device.chameleon_swt1_depth_cm, color: '#0f766e', open: data?.chameleon_ch1_open === 1 },
     { field: 'swt_2', label: 'SWT2', value: data?.swt_2, depth: device.chameleon_swt2_depth_cm, color: '#2563eb', open: data?.chameleon_ch2_open === 1 },
@@ -295,7 +293,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                         {formatSwtCardValue(channel.value, swtUnit) ?? '—'}
                       </span>
                       <SwtStatusIndicator
-                        status={chameleonIsCurrent && !chameleonDataInvalid && !channel.open
+                        status={!chameleonDataInvalid && !channel.open
                           ? classifySwtWaterStatus(channel.value)
                           : null}
                       />
@@ -311,7 +309,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('watermark.sectionTitle')}</p>
             <WatermarkProbeSection
-              isCurrent={isSensorObservationFresh(watermark.recorded_at)}
               swtUnit={swtUnit}
               soilTempC={watermark.soil_temp_c}
               soilTempMeasured={watermark.soil_temp_source === 2}

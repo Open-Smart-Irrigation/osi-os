@@ -8,7 +8,6 @@ import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue } from '../../utils/swt';
-import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { SensorMonitor } from './SensorMonitor';
 import {
@@ -118,7 +117,6 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
-  const swtIsCurrent = isSensorObservationFresh(device.last_seen);
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -284,7 +282,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
                           )}
                         </span>
                         {kind === 'swt' && value != null && (
-                          <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(value) : null} />
+                          <SwtStatusIndicator status={classifySwtWaterStatus(value)} />
                         )}
                       </span>
                     );

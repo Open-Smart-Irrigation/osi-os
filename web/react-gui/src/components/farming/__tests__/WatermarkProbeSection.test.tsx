@@ -17,7 +17,7 @@ vi.mock('react-i18next', () => ({
 const ch = (over: Partial<WatermarkChannelLatest>): WatermarkChannelLatest => ({
   status: 'ok', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null, ...over,
 });
-const base = { isCurrent: true, swtUnit: 'kPa' as const, soilTempC: 19.9, soilTempMeasured: true, dieTempC: 21.5, supplyMv: 3300 };
+const base = { swtUnit: 'kPa' as const, soilTempC: 19.9, soilTempMeasured: true, dieTempC: 21.5, supplyMv: 3300 };
 
 describe('WatermarkProbeSection', () => {
   it('shows kPa with the shared soil status colour', () => {
@@ -56,9 +56,15 @@ describe('WatermarkProbeSection', () => {
     expect(screen.queryByText('Wet')).not.toBeInTheDocument();
   });
 
-  it('shows no colour for a stale reading or a probe without kPa', () => {
-    render(<WatermarkProbeSection {...base} isCurrent={false} probes={[
+  it('shows the status colour for a valid kPa reading regardless of its age', () => {
+    render(<WatermarkProbeSection {...base} probes={[
       { key: 'swt_1', label: 'Probe 1', depthLabel: null, channel: ch({ kpa: 56.4 }) },
+    ]} />);
+    expect(screen.getByText('Dry')).toBeInTheDocument();
+  });
+
+  it('shows no colour for a probe without kPa', () => {
+    render(<WatermarkProbeSection {...base} probes={[
       { key: 'swt_2', label: 'Probe 2', depthLabel: null, channel: ch({ status: 'calibration_required', r_solved: null }) },
     ]} />);
     expect(screen.queryByText('Dry')).not.toBeInTheDocument();

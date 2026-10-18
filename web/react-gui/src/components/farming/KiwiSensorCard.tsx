@@ -10,7 +10,6 @@ import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConf
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { canonicalSwtChannels, classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
-import { isSensorObservationFresh } from '../../utils/zoneSoil';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 
 interface KiwiSensorCardProps {
@@ -330,7 +329,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
   const { swtUnit } = useDisplayPreferences();
-  const swtIsCurrent = isSensorObservationFresh(device.last_seen);
   const lastSeenStr = device.last_seen ?? null;
   const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
   const minutesAgo = lastSeen
@@ -425,7 +423,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {renderValue('swt_1', formatSwtCardValue(swt1, swtUnit))}
-            <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(swt1) : null} />
+            <SwtStatusIndicator status={classifySwtWaterStatus(swt1)} />
           </div>
         </div>
 
@@ -436,7 +434,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {renderValue('swt_2', formatSwtCardValue(swt2, swtUnit))}
-              <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(swt2) : null} />
+              <SwtStatusIndicator status={classifySwtWaterStatus(swt2)} />
             </div>
           </div>
         )}
