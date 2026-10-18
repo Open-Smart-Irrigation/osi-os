@@ -29,6 +29,13 @@ export function safeHistoryLabel(value: string | null | undefined): string | nul
   return text;
 }
 
+export function historySourceLabel(name: string | null | undefined, sourceKey: string): string {
+  const safeName = safeHistoryLabel(name);
+  if (safeName) return safeName;
+  const suffix = sourceKey.trim().slice(-8) || 'unknown';
+  return `Source · ${suffix}`;
+}
+
 function sourceCount(card: HistoryCardSummary): number {
   return card.sourceDeviceCount
     ?? card.sourceDevices?.length
@@ -73,7 +80,7 @@ export function desktopSourceOptions(card: HistoryCardSummary): DesktopSourceOpt
 
   const sources = (card.sourceDevices ?? []).reduce<DesktopSourceOption[]>((options, device) => {
     const key = cleanText(device.sourceKey);
-    const label = safeHistoryLabel(device.name);
+    const label = key ? historySourceLabel(device.name, key) : null;
     if (!key || !label || options.some((option) => option.key === key)) {
       return options;
     }

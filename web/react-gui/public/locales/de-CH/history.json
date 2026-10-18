@@ -529,7 +529,12 @@
     },
     "sourceFilter": {
       "label": "Quelle",
-      "all": "Alle"
+      "all": "Alle",
+      "chooseOne": "Wählen Sie eine Quelle für diesen Kalender.",
+      "limitsTitle": "Diese Anfrage benötigt weniger Daten.",
+      "shorterRange": "Kürzeren Zeitraum verwenden",
+      "coarserAggregation": "Grobere Daten verwenden",
+      "availableSources": "Quelle wählen"
     },
     "settings": {
       "open": "Karteneinstellungen öffnen",

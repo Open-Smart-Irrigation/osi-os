@@ -400,6 +400,35 @@ describe('HistoryDesktopDetail', () => {
     expect(screen.getByRole('button', { name: 'Chameleon 2' })).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('serializes narrower range and coarser aggregation recovery actions', () => {
+    const card = makeCard({
+      cardType: 'environment',
+      title: 'Environment',
+      defaultView: 'line-chart',
+      views: ['line-chart'],
+    });
+    vi.mocked(useHistoryCardData).mockReturnValue({
+      data: {
+        limits: { maxPointsPerSeries: 1000, maxPointsTotal: 30000, maxEvents: 100, maxInterpretations: 20, truncated: true, reason: 'point_budget_exceeded', availableSources: [] },
+        series: [],
+      } as never,
+      error: null,
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+    renderDesktopDetail([card], card);
+
+    const initial = lastHistoryCardDataRequest();
+    const initialRangeMs = Date.parse(initial.range.to!) - Date.parse(initial.range.from!);
+    fireEvent.click(screen.getByRole('button', { name: 'Use a shorter range' }));
+    const narrowed = lastHistoryCardDataRequest();
+    const narrowedRangeMs = Date.parse(narrowed.range.to!) - Date.parse(narrowed.range.from!);
+    expect(narrowedRangeMs).toBeLessThan(initialRangeMs);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use coarser aggregation' }));
+    expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ aggregation: '15m' }));
+  });
+
   it('resets the selected source to All when the selected card changes', () => {
     const soil = makeCard({
       cardId: 'soil',

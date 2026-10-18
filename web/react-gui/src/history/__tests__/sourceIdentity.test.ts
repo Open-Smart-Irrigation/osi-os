@@ -3,6 +3,7 @@ import {
   classifyHistoryChannel,
   displayHistorySeriesLabel,
   historySeriesColor,
+  historySeriesStyles,
   historySeriesValue,
 } from '../sourceIdentity';
 
@@ -26,5 +27,26 @@ describe('history source identity', () => {
     expect(historySeriesColor('device-a:swt_1')).toBe(historySeriesColor('device-a:swt_1'));
     expect(historySeriesColor('device-a:swt_1')).not.toBe(historySeriesColor('device-b:swt_1'));
     expect(historySeriesColor('device-537a49c74508:swt_1')).not.toBe(historySeriesColor('device-2b53ef351e8a:swt_1'));
+  });
+
+  it('probes colliding color and dash candidates without depending on input order', () => {
+    const ids = ['device-000000000216:swt_1', 'device-0000000002cd:swt_1'];
+    const first = historySeriesStyles(ids);
+    const second = historySeriesStyles([...ids].reverse());
+    expect(first.get(ids[0])).not.toEqual(first.get(ids[1]));
+    expect(first.get(ids[0])?.color.match(/^hsl\((\d+)/)?.[1] !== first.get(ids[1])?.color.match(/^hsl\((\d+)/)?.[1]
+      || first.get(ids[0])?.dash !== first.get(ids[1])?.dash).toBe(true);
+    expect(second).toEqual(first);
+  });
+
+  it('terminates with unique perceptible candidates for a large concurrent set', () => {
+    const ids = Array.from({ length: 1200 }, (_, index) => `same-hue-source-${index.toString(16).padStart(4, '0')}`);
+    const styles = historySeriesStyles(ids);
+    const keys = ids.map((id) => {
+      const style = styles.get(id)!;
+      return `${style.color}|${style.dash}`;
+    });
+    expect(styles.size).toBe(ids.length);
+    expect(new Set(keys).size).toBe(ids.length);
   });
 });

@@ -529,7 +529,12 @@
     },
     "sourceFilter": {
       "label": "Fuente",
-      "all": "Todo"
+      "all": "Todo",
+      "chooseOne": "Elige una fuente para ver este calendario.",
+      "limitsTitle": "Esta solicitud necesita menos datos.",
+      "shorterRange": "Usar un periodo más corto",
+      "coarserAggregation": "Usar datos más agrupados",
+      "availableSources": "Elegir una fuente"
     },
     "settings": {
       "open": "Abrir configuración de la tarjeta",

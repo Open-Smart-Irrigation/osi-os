@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { HistoryCardSourceDevice, HistoryCardSummary } from '../../../history/types';
+import { historySourceLabel } from '../../../history/desktopHistory';
 
 interface HistorySourceFilterProps {
   card: HistoryCardSummary;
@@ -15,7 +16,7 @@ function shouldRenderSourceFilter(card: HistoryCardSummary): boolean {
     (card.cardType === 'soil' || card.cardType === 'environment')
     && (card.sourceDeviceCount ?? card.sourceDevices?.length ?? 0) > 1
     && Array.isArray(card.sourceDevices)
-    && card.sourceDevices.some((device) => Boolean(device.sourceKey && device.name))
+    && card.sourceDevices.some((device) => Boolean(device.sourceKey))
   );
 }
 
@@ -23,8 +24,7 @@ function sourceOptions(card: HistoryCardSummary): HistoryCardSourceDevice[] {
   const seen = new Set<string>();
   return (card.sourceDevices ?? []).filter((device) => {
     const sourceKey = typeof device.sourceKey === 'string' ? device.sourceKey.trim() : '';
-    const name = typeof device.name === 'string' ? device.name.trim() : '';
-    if (!sourceKey || !name || /\b[A-F0-9]{16}\b/i.test(name) || seen.has(sourceKey)) return false;
+    if (!sourceKey || seen.has(sourceKey)) return false;
     seen.add(sourceKey);
     return true;
   });
@@ -75,7 +75,7 @@ export const HistorySourceFilter: React.FC<HistorySourceFilterProps> = ({
                 : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]'
             }`}
           >
-            {device.name}
+            {historySourceLabel(device.name, sourceKey)}
           </button>
         );
       })}

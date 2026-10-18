@@ -11,7 +11,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { HistoryCardDataResponse, HistorySeriesPoint } from '../../../history/types';
-import { classifyHistoryChannel, displayHistorySeriesLabel, historySeriesColor, historySeriesDash, historySeriesValue } from '../../../history/sourceIdentity';
+import { classifyHistoryChannel, displayHistorySeriesLabel, historySeriesStyles, historySeriesValue } from '../../../history/sourceIdentity';
 import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface SoilLineChartViewProps {
@@ -20,7 +20,7 @@ interface SoilLineChartViewProps {
 }
 
 type HistoryTranslate = (key: string, options?: Record<string, unknown>) => string;
-type ChartRow = { timestamp: string; tMs: number } & Record<string, number | string | null>;
+type ChartRow = { timestamp: string; tMs: number; __seriesMeta?: Record<string, { statisticAvailability?: Record<string, string>; coverageAvailability?: string | null }> } & Record<string, unknown>;
 type ChartWindow = { fromMs: number; toMs: number };
 export type RenderSeries = {
   key: string;
@@ -30,7 +30,7 @@ export type RenderSeries = {
   deviceSourceId?: string | null;
   sourceKey?: string | null;
   channelKey?: string;
-  points: Array<{ t: string; value: number | null }>;
+  points: Array<{ t: string; value: number | null; statisticAvailability?: Record<string, string>; coverageAvailability?: string | null }>;
 };
 
 const MAX_CONTINUOUS_GAP_MS = 90 * 60 * 1000;
@@ -68,11 +68,6 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
-}
-
-function formatTimestampMs(value: unknown): string {
-  const ms = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
 }
 
 function looksLikeRawSourceToken(value: string): boolean {
@@ -142,10 +137,10 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
     const seriesDepth = seriesDepthCm(series);
     const duplicateDepth = (depthCounts.get(depthKey(seriesDepth) ?? '') ?? 0) > 1;
     const points = Array.isArray(rawPoints)
-      ? rawPoints.reduce<Array<{ t: string; value: number | null }>>((accumulator, point) => {
+          ? rawPoints.reduce<Array<{ t: string; value: number | null; statisticAvailability?: Record<string, string>; coverageAvailability?: string | null }>>((accumulator, point) => {
           const timestamp = validTimestamp(isRecord(point) ? point.t : null);
           if (!timestamp) return accumulator;
-          accumulator.push({ t: timestamp, value: pointValue(point) });
+          accumulator.push({ t: timestamp, value: pointValue(point), statisticAvailability: isRecord(point) ? point.statisticAvailability as Record<string, string> | undefined : undefined, coverageAvailability: isRecord(point) ? typeof point.coverageAvailability === 'string' ? point.coverageAvailability : null : null });
           return accumulator;
         }, [])
       : [];
@@ -171,9 +166,12 @@ function hasVisiblePoints(series: RenderSeries): boolean {
 }
 
 export function soilSeriesShouldShowDots(series: RenderSeries): boolean {
-  let previousVisibleIndex: number | null = null;
-  let previousVisibleMs: number | null = null;
+  return soilSeriesMarkerIndices(series).size > 0;
+}
+
+export function soilSeriesMarkerIndices(series: RenderSeries): Set<number> {
   let visibleCount = 0;
+  const visibleIndices: Array<{ index: number; ms: number }> = [];
 
   for (let index = 0; index < series.points.length; index += 1) {
     const point = series.points[index];
@@ -182,16 +180,25 @@ export function soilSeriesShouldShowDots(series: RenderSeries): boolean {
     if (!Number.isFinite(currentMs)) continue;
 
     visibleCount += 1;
-    if (previousVisibleIndex !== null && previousVisibleMs !== null) {
-      if (index - previousVisibleIndex > 1) return true;
-      if (currentMs - previousVisibleMs > MAX_CONTINUOUS_GAP_MS) return true;
-    }
+    visibleIndices.push({ index, ms: currentMs });
 
-    previousVisibleIndex = index;
-    previousVisibleMs = currentMs;
   }
 
-  return visibleCount === 1;
+  const markers = new Set<number>();
+  if (visibleCount === 1) {
+    markers.add(visibleIndices[0].index);
+    return markers;
+  }
+  visibleIndices.forEach(({ index, ms }, position) => {
+    const previous = visibleIndices[position - 1];
+    const next = visibleIndices[position + 1];
+    if (series.points[index - 1]?.value === null || series.points[index + 1]?.value === null
+      || (previous && (index - previous.index > 1 || ms - previous.ms > MAX_CONTINUOUS_GAP_MS))
+      || (next && (next.index - index > 1 || next.ms - ms > MAX_CONTINUOUS_GAP_MS))) {
+      markers.add(index);
+    }
+  });
+  return markers;
 }
 
 export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
@@ -202,16 +209,25 @@ export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
       if (!Number.isFinite(tMs)) return;
       const row = rows.get(point.t) ?? { timestamp: point.t, tMs };
       row[series.key] = point.value;
+      row.__seriesMeta ??= {};
+      row.__seriesMeta[series.key] = {
+        statisticAvailability: point.statisticAvailability,
+        coverageAvailability: point.coverageAvailability,
+      };
       rows.set(point.t, row);
     });
   });
   return [...rows.values()].sort((left, right) => left.tMs - right.tMs);
 }
 
-export function seriesPlotPoints(series: RenderSeries): Array<{ tMs: number } & Record<string, number | null>> {
-  return series.points
-    .map((point) => ({ tMs: Date.parse(point.t), [series.key]: point.value }))
-    .filter((point) => Number.isFinite(point.tMs));
+export function seriesPlotPoints(series: RenderSeries): Array<{ tMs: number; timestamp: string; statisticAvailability?: Record<string, string>; coverageAvailability?: string | null } & Record<string, unknown>> {
+  return series.points.map((point) => ({
+    tMs: Date.parse(point.t),
+    timestamp: point.t,
+    statisticAvailability: point.statisticAvailability,
+    coverageAvailability: point.coverageAvailability,
+    [series.key]: point.value,
+  }));
 }
 
 function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; series: RenderSeries[] }> {
@@ -231,6 +247,26 @@ function formatValue(value: number | null, unit: string): string {
 
 function formatTooltipValue(value: unknown, unit: string): string {
   return typeof value === 'number' && Number.isFinite(value) ? formatValue(value, unit) : '-';
+}
+
+export function HistorySeriesTooltip({ active, payload, label, byKey, rows }: { active?: boolean; payload?: Array<{ dataKey?: string; value?: unknown; name?: string; payload?: Record<string, unknown> }>; label?: unknown; byKey: Map<string, RenderSeries>; rows?: ChartRow[]; locale?: string }) {
+  if (!active || !payload?.length) return null;
+  const labelMs = Number(label);
+  const targetMs = Number.isFinite(labelMs) ? labelMs : Number(payload[0]?.payload?.tMs);
+  const row = rows?.find((candidate) => candidate.tMs === targetMs);
+  const entries = row
+    ? [...byKey.entries()].map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
+    : payload.filter((item) => Number(item.payload?.tMs) === targetMs).map((item) => ({
+      key: String(item.dataKey),
+      series: byKey.get(String(item.dataKey)),
+      value: item.value,
+      metadata: {
+        statisticAvailability: item.payload?.statisticAvailability as Record<string, string> | undefined,
+        coverageAvailability: item.payload?.coverageAvailability as string | null | undefined,
+      },
+    }));
+  if (entries.length === 0) return null;
+  return <div className="rounded border border-slate-200 bg-white p-2 text-xs shadow"><p className="mb-1 font-semibold">{formatTimestamp(new Date(targetMs).toISOString())}</p>{entries.map(({ key, series, value, metadata }) => { const statistics = metadata?.statisticAvailability ?? {}; const reason = statistics.latest ?? statistics.value ?? statistics.mean ?? statistics.median ?? metadata?.coverageAvailability ?? null; return <p key={key}><span className="font-semibold">{series?.label ?? 'Source'}:</span> {value === null || value === undefined ? `Unavailable${reason ? `: ${reason}` : ''}` : formatTooltipValue(value, series?.unit ?? '')}</p>; })}</div>;
 }
 
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
@@ -254,6 +290,8 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
       })),
     };
   }, [data, t]);
+  const styles = historySeriesStyles(visibleSeries.map((series) => series.key));
+  const markerSets = new Map(visibleSeries.map((series) => [series.key, new Set([...soilSeriesMarkerIndices(series)].map((index) => Date.parse(series.points[index]?.t ?? '')))]));
   const spanMs = chartWindow
     ? chartWindow.toMs - chartWindow.fromMs
     : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
@@ -284,7 +322,7 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
       <div data-testid="history-series-legend" className="mb-3 flex flex-wrap gap-2">
         {visibleSeries.map((series) => (
           <span key={series.key} className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)]">
-            <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ backgroundColor: historySeriesColor(series.key) }} />
+            <svg aria-hidden="true" width="28" height="8" viewBox="0 0 28 8" className="shrink-0"><line x1="1" y1="4" x2="27" y2="4" stroke={styles.get(series.key)?.color} strokeWidth="2" strokeDasharray={styles.get(series.key)?.dash} /></svg>
             {series.label}
           </span>
         ))}
@@ -308,11 +346,8 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
                   {hoverCapable && (
                     <Tooltip
                       isAnimationActive={false}
-                      labelFormatter={formatTimestampMs}
-                      formatter={(value, _name, item) => {
-                        const series = group.seriesByKey.get(String(item.dataKey));
-                        return [formatTooltipValue(value, series?.unit ?? ''), series?.label ?? t('history.soilLineChart.series.soil')];
-                      }}
+                      filterNull={false}
+                      content={<HistorySeriesTooltip byKey={group.seriesByKey} rows={group.rows} />}
                     />
                   )}
                   {group.series.map((series) => (
@@ -322,10 +357,15 @@ const SoilLineChartViewComponent: React.FC<SoilLineChartViewProps> = ({ data, wi
                       data={seriesPlotPoints(series)}
                       dataKey={series.key}
                       name={series.label}
-                      stroke={historySeriesColor(series.key)}
-                      strokeDasharray={historySeriesDash(series.key)}
+                      stroke={styles.get(series.key)?.color}
+                      strokeDasharray={styles.get(series.key)?.dash}
                       strokeWidth={2}
-                      dot={soilSeriesShouldShowDots(series) ? { r: 3, strokeWidth: 1 } : false}
+                      dot={(props) => {
+                        const tMs = Number((props as { payload?: { tMs?: number } }).payload?.tMs);
+                          return markerSets.get(series.key)?.has(tMs)
+                          ? <circle cx={(props as { cx?: number }).cx} cy={(props as { cy?: number }).cy} r={3} strokeWidth={1} fill={styles.get(series.key)?.color} />
+                          : <React.Fragment />;
+                      }}
                       isAnimationActive={false}
                       connectNulls={false}
                     />

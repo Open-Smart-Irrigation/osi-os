@@ -88,7 +88,7 @@ describe('desktopHistory helpers', () => {
     ]);
   });
 
-  it('filters raw source names from source options', () => {
+  it('keeps raw-named sources selectable with a stable fallback label', () => {
     const options = desktopSourceOptions(card({
       sourceDevices: [
         { name: 'A84041A75D5E7CFB', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'raw' },
@@ -98,6 +98,7 @@ describe('desktopHistory helpers', () => {
 
     expect(options).toEqual([
       { key: null, label: 'All', labelKey: 'history.sourceFilter.all' },
+      { key: 'raw', label: 'Source · raw' },
       { key: 'safe', label: 'Chameleon 1' },
     ]);
   });

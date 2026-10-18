@@ -234,6 +234,8 @@ export interface HistorySeriesPoint {
   count?: number;
   unit?: string | null;
   quality?: 'ok' | 'partial' | 'gap' | 'estimated' | 'unknown';
+  statisticAvailability?: Record<string, string>;
+  coverageAvailability?: string | null;
 }
 
 export interface HistorySeries {

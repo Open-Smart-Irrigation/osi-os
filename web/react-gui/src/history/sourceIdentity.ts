@@ -54,15 +54,48 @@ export function displayHistorySeriesLabel(
   return sameLabel.length > 1 ? `${descriptor} · ${stableSuffix(series)}` : descriptor;
 }
 
-export function historySeriesColor(id: string): string {
+export interface HistorySeriesStyle {
+  color: string;
+  dash: string;
+}
+
+function styleCandidate(id: string, probe: number): HistorySeriesStyle {
   let hash = 2166136261;
   for (const character of id) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
   const unsigned = hash >>> 0;
-  return `hsl(${unsigned % 360} ${55 + ((unsigned >>> 8) % 30)}% ${40 + ((unsigned >>> 16) % 20)}%)`;
+  const hue = (unsigned % 360 + probe * 47) % 360;
+  const dashPatterns = ['0', '6 3', '3 2', '12 4 2 4', '2 3 8 3'];
+  const dashSlot = (unsigned + probe) % dashPatterns.length;
+  const dash = probe < dashPatterns.length * 2
+    ? dashPatterns[dashSlot]
+    : `${dashPatterns[dashSlot]} ${probe}`;
+  return {
+    color: `hsl(${hue} ${55 + ((unsigned >>> 8) % 30)}% ${40 + ((unsigned >>> 16) % 20)}%)`,
+    dash,
+  };
+}
+
+export function historySeriesStyles(ids: readonly string[]): Map<string, HistorySeriesStyle> {
+  const styles = new Map<string, HistorySeriesStyle>();
+  const used = new Set<string>();
+  [...new Set(ids)].sort().forEach((id) => {
+    let probe = 0;
+    let candidate = styleCandidate(id, probe);
+    const candidateKey = (style: HistorySeriesStyle): string => `${style.color.match(/^hsl\((\d+)/)?.[1] ?? style.color}|${style.dash}`;
+    while (used.has(candidateKey(candidate))) {
+      probe += 1;
+      candidate = styleCandidate(id, probe);
+    }
+    used.add(candidateKey(candidate));
+    styles.set(id, candidate);
+  });
+  return styles;
+}
+
+export function historySeriesColor(id: string): string {
+  return historySeriesStyles([id]).get(id)?.color ?? 'hsl(210 60% 45%)';
 }
 
 export function historySeriesDash(id: string): string {
-  let hash = 2166136261;
-  for (const character of id) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  return (hash >>> 0) % 3 === 0 ? '6 3' : (hash >>> 0) % 3 === 1 ? '3 2' : '0';
+  return historySeriesStyles([id]).get(id)?.dash ?? '0';
 }

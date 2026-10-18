@@ -6,6 +6,7 @@ import {
   buildNumericRows,
   SoilLineChartView,
   soilSeriesDisplayLabel,
+  soilSeriesMarkerIndices,
   soilSeriesShouldShowDots,
 } from '../visualizations/SoilLineChartView';
 import type { HistoryCardDataResponse } from '../../../history/types';
@@ -145,6 +146,20 @@ describe('SoilLineChartView', () => {
         { t: '2026-06-24T08:00:00Z', value: 7 },
       ],
     })).toBe(false);
+  });
+
+  it('marks only isolated observations and explicit-null gap endpoints', () => {
+    const series = {
+      key: 'a', label: 'A', unit: 'kPa', depthCm: 10,
+      points: [
+        { t: '2026-10-03T00:00:00Z', value: 1 },
+        { t: '2026-10-03T00:15:00Z', value: 2 },
+        { t: '2026-10-03T00:30:00Z', value: null },
+        { t: '2026-10-03T00:45:00Z', value: 3 },
+        { t: '2026-10-03T01:00:00Z', value: 4 },
+      ],
+    };
+    expect([...soilSeriesMarkerIndices(series)]).toEqual([1, 3]);
   });
 
   it('prefers soil depth labels and disambiguates duplicate depths', () => {

@@ -529,7 +529,12 @@
     },
     "sourceFilter": {
       "label": "Sorgente",
-      "all": "Tutte"
+      "all": "Tutte",
+      "chooseOne": "Scegli una fonte per vedere questo calendario.",
+      "limitsTitle": "Questa richiesta richiede meno dati.",
+      "shorterRange": "Usa un intervallo più breve",
+      "coarserAggregation": "Usa dati più aggregati",
+      "availableSources": "Scegli una fonte"
     },
     "settings": {
       "open": "Apri impostazioni scheda",

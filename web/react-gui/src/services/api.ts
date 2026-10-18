@@ -935,6 +935,8 @@ function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
       points: Array.isArray(series?.points) ? series.points.map((point: any) => ({
         ...point,
         t: String(point?.t ?? ''),
+        statisticAvailability: point?.statisticAvailability ?? point?.statistic_availability,
+        coverageAvailability: point?.coverageAvailability ?? point?.coverage_availability ?? null,
         value: Object.prototype.hasOwnProperty.call(point ?? {}, 'value')
           ? (typeof point.value === 'number' && Number.isFinite(point.value) ? point.value : null)
           : null,
