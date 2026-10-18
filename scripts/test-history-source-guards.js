@@ -196,6 +196,34 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: HTTP route keeps an authoritative empty source list out of pooled history`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    const card = {
+      id: helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' }),
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+    };
+    const guardedHelper = Object.assign({}, helper, {
+      deriveCardsForZone() { return [card]; },
+      aggregateDeviceData() { throw new Error('empty source route must not query pooled history'); },
+    });
+    try {
+      const response = await executeFunction(node, {
+        msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${card.id}/data`, { zoneId: '1', cardId: card.id }, { range: '24h' }),
+        env: ENV,
+        db,
+        libOverrides: { osiHistory: guardedHelper, HR: router },
+      });
+      assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+      assert.deepEqual(response.result.payload.availability, { available: false, reasons: ['no_authorized_sources'] });
+      assert.deepEqual(response.result.payload.series, []);
+      assert.deepEqual(response.result.payload.profiles, []);
+    } finally {
+      db.close();
+    }
+  });
+
   test(`${profile}: mixed-device filtered exports preserve supported soil and LoRain rows`, async () => {
     const { helper, router, node } = historyProfile(profile);
     const db = seedScopedDb();
