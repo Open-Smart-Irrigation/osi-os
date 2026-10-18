@@ -49,14 +49,23 @@ latest-observation timestamp, so their `t` is the bucket start. The shared
 response fixture records `t`, `bucketStart`, and `bucketEnd` so a consumer can
 distinguish plot placement from the covered interval.
 
-Interactive edge measurement responses accept at most 30,000 retained points
-across the complete source-by-channel bucket grid, in addition to the existing
-2,000-point per-series bound. The grid count includes null gap cells and is
-checked before retained reads and response allocation. A request over either
-bound returns the authorized source descriptors with empty point arrays and
-`point_budget_exceeded` plus a request-shaping suggestion. Raw responses count
-after equal-time deduplication and validity filtering; the legacy and CSV
-interfaces keep their existing limits.
+Interactive measurement responses on both hosts expose a total point limit of
+`30000` in `limits.maxPointsTotal`, alongside the existing `2000`
+per-series limit and `30000` raw-row limit. For aggregated responses, the
+eligible physical source/channel grid is counted before retained reads and
+grid allocation, including null gap cells. For raw responses, eligible
+returned physical points are counted after each host's existing deduplication
+and validity rules and before DTO expansion. A request at exactly `30000`
+points succeeds; a request over either point bound returns the complete set of
+authorized source descriptors with empty point arrays, `truncated: true`, and
+`point_budget_exceeded` plus
+`select_fewer_sources_or_coarser_aggregation`. The response retains
+`limits.maxPointsTotal: 30000` so clients can recover by selecting fewer
+sources or a coarser aggregation. Raw-row overflow remains distinct and
+returns `raw_read_limit_exceeded` plus
+`select_fewer_sources_or_shorter_interval`. These limits apply to interactive
+measurement responses only; maintenance, export, and legacy interfaces retain
+their existing behavior.
 
 Within each source, the affected sensor plots use the latest observation in a
 bucket. Specialized rain, counter, and analysis reducers keep their existing

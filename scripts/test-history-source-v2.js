@@ -318,6 +318,53 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: every supported measurement resolution keeps physical sources separate`, () => {
+    const helper = loadHelper(profile);
+    const sourceA = 'A8404100000000A1';
+    const sourceB = 'A8404100000000B1';
+    const sourceDevices = [
+      { deveui: sourceA, type_id: 'KIWI_SENSOR' },
+      { deveui: sourceB, type_id: 'KIWI_SENSOR' },
+    ];
+    const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+    const cases = {
+      raw: ['2026-10-01T00:00:00Z', '2026-10-01T00:30:00Z'],
+      '15m': ['2026-10-01T00:00:00Z', '2026-10-01T00:30:00Z'],
+      hourly: ['2026-10-01T00:00:00Z', '2026-10-01T02:00:00Z'],
+      daily: ['2026-10-01T00:00:00Z', '2026-10-03T00:00:00Z'],
+      weekly: ['2026-10-05T00:00:00Z', '2026-10-19T00:00:00Z'],
+    };
+    for (const [aggregation, [start, end]] of Object.entries(cases)) {
+      const rows = [
+        { id: 1, deveui: sourceA, recorded_at: start, swt_1: 0 },
+        { id: 2, deveui: sourceB, recorded_at: start, swt_1: 99 },
+        { id: 3, deveui: sourceA, recorded_at: new Date(Date.parse(start) + 60_000).toISOString(), swt_1: 1 },
+        { id: 4, deveui: sourceB, recorded_at: new Date(Date.parse(start) + 60_000).toISOString(), swt_1: 100 },
+      ];
+      const result = helper.aggregateRows(rows, {
+        aggregation,
+        channels: [channel],
+        sourceDevices,
+        sourceKeys: [sourceA, sourceB],
+        start,
+        end,
+        expectedCadenceSeconds: aggregation === 'raw' ? undefined : 3600,
+      });
+      const bySource = new Map(result.sourceAggregates.map((entry) => [entry.sourceKey, entry]));
+      assert.ok(bySource.has(sourceA), `${aggregation}: source A missing`);
+      assert.ok(bySource.has(sourceB), `${aggregation}: source B missing`);
+      if (aggregation === 'raw') {
+        assert.deepEqual(bySource.get(sourceA).series.swt_1.points.map((point) => point.value), [0, 1], aggregation);
+        assert.deepEqual(bySource.get(sourceB).series.swt_1.points.map((point) => point.value), [99, 100], aggregation);
+      } else {
+        const firstA = bySource.get(sourceA).buckets[0].series.swt_1;
+        const firstB = bySource.get(sourceB).buckets[0].series.swt_1;
+        assert.deepEqual([firstA.min, firstA.max, firstA.sampleCount], [0, 1, 2], aggregation);
+        assert.deepEqual([firstB.min, firstB.max, firstB.sampleCount], [99, 100, 2], aggregation);
+      }
+    }
+  });
+
   test(`${profile}: equal-time row identity is selected before validity and point budget is explicit`, async () => {
     const helper = loadHelper(profile);
     const sourceA = 'A8404100000000A1';
