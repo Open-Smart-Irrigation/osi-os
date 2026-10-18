@@ -188,6 +188,24 @@ function createHarness(options) {
       cb(null, rows);
     }
     run(sql, params, cb) { try { db.prepare(sql).run(...params); cb(null); } catch (e) { cb(e); } }
+    // osi-db-helper's Database.transaction(executor): BEGIN IMMEDIATE, the
+    // executor's statements, COMMIT; ROLLBACK and rethrow on failure.
+    async transaction(executor) {
+      const scope = {
+        run: async (sql, params = []) => { db.prepare(sql).run(...params); },
+        all: async (sql, params = []) => db.prepare(sql).all(...params),
+        get: async (sql, params = []) => db.prepare(sql).get(...params)
+      };
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const result = await executor(scope);
+        db.exec('COMMIT');
+        return result;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    }
     close(cb) { if (cb) cb(); }
   }
   const cloud = createFakeCloud(helper, Object.assign({ now: () => clock }, options.cloud || {}));
