@@ -8,6 +8,7 @@
 |---|---|
 | `reading_state` | `null` or `undefined` is `absent` (no reading). A finite number from 0 to 100 inclusive is a `value`; a measured `0` is a reading. Anything else (out of range, non-finite, a string, a boolean) is `invalid` and is never printed as a number. |
 | `format` | A `value` prints with one decimal, a plain space, then `%` (`28.0 %`). Everything else formats to `null`, and the GUI shows its own unavailable or out-of-range text. CSV exports keep the stored value and do not use this format. |
+| `display.rounding` | Half away from zero on the shortest decimal form of the stored value: `28.45` prints `28.5 %`, although the binary double is just below 28.45. A result of zero never carries a sign, so `-0` prints `0.0 %`. Neither `toFixed` (it rounds the binary value) nor `Intl.NumberFormat` (its rounding input is engine-dependent) is used for the rounding. |
 | `qualification` | `SENTEK_ENVIROSCAN` is `field_verified`. `GENERIC_VWC` is `generic`. `TENSIOMARK`, an empty profile and no profile give `null` (not a VWC probe). Every other profile, including one this list does not know yet, is `provisional`. |
 | `derivation` | A layout sensor of type `TRISCAN` is `sentek_default_curve`: the normalizer converts its scaled frequency with the Sentek default calibration. Everything else is `probe_reported`. |
 | `depth` | For a `vwc_N` or `soil_vic_N` key: a positive finite depth in the device's depth map wins. Otherwise, on a `DRAGINO_SDI12` whose layout has no `kind`, the layout sensor with channel `N` supplies its positive `depth_cm`. A zero or negative depth, a Tensiomark layout (`"kind": "tensiomark"`) and any non-SDI-12 device give `null`. |
@@ -33,6 +34,8 @@ This directory is canonical. osi-server keeps a byte-identical copy at `docs/con
 |---|---|
 | Edge GUI | `web/react-gui/tests/vwcDisplayVectors.test.ts` (`npm run test:unit`) |
 | Cloud frontend | osi-server `frontend/tests/vwcDisplayVectors.test.ts` (`npm run test:unit`) |
+
+The `format` vectors are the English form. A GUI may localise the decimal mark: the cloud follows its interface language (`28,0 %` in French), and the edge prints `.` until it gains locale-aware number formatting. Rounding, the space and the unit do not change with the locale.
 
 `non_json_inputs` lists values JSON cannot carry; each test maps the names to `undefined`, `NaN` and the two infinities.
 

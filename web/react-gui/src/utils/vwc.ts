@@ -55,8 +55,27 @@ export function vwcReadingState(value: unknown): VwcReadingState {
   return value >= VWC_PCT_RANGE[0] && value <= VWC_PCT_RANGE[1] ? 'value' : 'invalid';
 }
 
+/**
+ * One decimal, rounded half away from zero on the shortest decimal form of the
+ * stored value (28.45 → 28.5, although the binary double is 28.4499…).
+ * `toFixed` rounds the binary value and Intl's rounding is engine-dependent,
+ * so the edge and the cloud both use this. A result of zero never carries a sign.
+ */
+export function roundVwcTenths(value: number): string {
+  const text = String(Math.abs(value));
+  // Exponent form only appears below 1e-6 inside the 0..100 domain: rounds to zero.
+  let tenths = 0;
+  if (!text.includes('e')) {
+    const [whole, fraction = ''] = text.split('.');
+    tenths = Number(whole) * 10 + Number(fraction[0] ?? '0');
+    if (Number(fraction[1] ?? '0') >= 5) tenths += 1;
+  }
+  const sign = value < 0 && tenths > 0 ? '-' : '';
+  return `${sign}${Math.floor(tenths / 10)}.${tenths % 10}`;
+}
+
 export function formatVwcPercent(value: unknown): string | null {
-  return vwcReadingState(value) === 'value' ? `${(value as number).toFixed(1)} %` : null;
+  return vwcReadingState(value) === 'value' ? `${roundVwcTenths(value as number)} %` : null;
 }
 
 const QUALIFICATION_BY_PROFILE: Record<string, VwcQualification | null> = {
