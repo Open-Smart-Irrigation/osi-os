@@ -6,6 +6,7 @@ import {
   historySeriesStyles,
   historySeriesValue,
 } from '../sourceIdentity';
+import { historySourceChoicesFromSeries } from '../sourceSelection';
 
 describe('history source identity', () => {
   it('classifies by channel key and keeps explicit null values', () => {
@@ -48,5 +49,16 @@ describe('history source identity', () => {
     });
     expect(styles.size).toBe(ids.length);
     expect(new Set(keys).size).toBe(ids.length);
+  });
+
+  it('disambiguates duplicate recovery choices by stable source key', () => {
+    expect(historySourceChoicesFromSeries([
+      { sourceKey: 'soil-src-one', sourceLabel: 'Soil sensor', deviceSourceId: 'device-a' },
+      { sourceKey: 'soil-src-two', sourceLabel: 'Soil sensor', deviceSourceId: 'device-b' },
+      { sourceKey: 'soil-src-one', sourceLabel: 'Soil sensor', deviceSourceId: 'device-a' },
+    ])).toEqual([
+      { sourceKey: 'soil-src-one', label: 'Soil sensor · -src-one', deviceSourceId: 'device-a' },
+      { sourceKey: 'soil-src-two', label: 'Soil sensor · -src-two', deviceSourceId: 'device-b' },
+    ]);
   });
 });

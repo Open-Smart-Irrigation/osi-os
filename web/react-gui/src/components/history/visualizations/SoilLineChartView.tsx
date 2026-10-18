@@ -33,8 +33,6 @@ export type RenderSeries = {
   points: Array<{ t: string; value: number | null; statisticAvailability?: Record<string, string>; coverageAvailability?: string | null }>;
 };
 
-const MAX_CONTINUOUS_GAP_MS = 90 * 60 * 1000;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -171,30 +169,24 @@ export function soilSeriesShouldShowDots(series: RenderSeries): boolean {
 
 export function soilSeriesMarkerIndices(series: RenderSeries): Set<number> {
   let visibleCount = 0;
-  const visibleIndices: Array<{ index: number; ms: number }> = [];
+  const visibleIndices: number[] = [];
 
   for (let index = 0; index < series.points.length; index += 1) {
     const point = series.points[index];
     if (point.value === null) continue;
-    const currentMs = Date.parse(point.t);
-    if (!Number.isFinite(currentMs)) continue;
-
     visibleCount += 1;
-    visibleIndices.push({ index, ms: currentMs });
+    visibleIndices.push(index);
 
   }
 
   const markers = new Set<number>();
   if (visibleCount === 1) {
-    markers.add(visibleIndices[0].index);
+    markers.add(visibleIndices[0]);
     return markers;
   }
-  visibleIndices.forEach(({ index, ms }, position) => {
-    const previous = visibleIndices[position - 1];
-    const next = visibleIndices[position + 1];
+  visibleIndices.forEach((index) => {
     if (series.points[index - 1]?.value === null || series.points[index + 1]?.value === null
-      || (previous && (index - previous.index > 1 || ms - previous.ms > MAX_CONTINUOUS_GAP_MS))
-      || (next && (next.index - index > 1 || next.ms - ms > MAX_CONTINUOUS_GAP_MS))) {
+    ) {
       markers.add(index);
     }
   });
@@ -255,7 +247,9 @@ export function HistorySeriesTooltip({ active, payload, label, byKey, rows }: { 
   const targetMs = Number.isFinite(labelMs) ? labelMs : Number(payload[0]?.payload?.tMs);
   const row = rows?.find((candidate) => candidate.tMs === targetMs);
   const entries = row
-    ? [...byKey.entries()].map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
+    ? [...byKey.entries()]
+      .filter(([key]) => Object.prototype.hasOwnProperty.call(row, key) || Boolean(row.__seriesMeta?.[key]))
+      .map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
     : payload.filter((item) => Number(item.payload?.tMs) === targetMs).map((item) => ({
       key: String(item.dataKey),
       series: byKey.get(String(item.dataKey)),

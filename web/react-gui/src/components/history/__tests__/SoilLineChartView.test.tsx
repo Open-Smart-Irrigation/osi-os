@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildNumericRows,
+  HistorySeriesTooltip,
   SoilLineChartView,
   soilSeriesDisplayLabel,
   soilSeriesMarkerIndices,
@@ -106,7 +107,7 @@ describe('SoilLineChartView', () => {
     expect(rows[0].tMs).toBe(Date.parse('2026-06-01T00:00:00Z'));
   });
 
-  it('marks sparse recovery segments so points after outages remain visible', () => {
+  it('does not infer outages from sparse continuous timestamps', () => {
     expect(soilSeriesShouldShowDots({
       key: 'swt_1',
       label: 'Layer 1',
@@ -117,7 +118,7 @@ describe('SoilLineChartView', () => {
         { t: '2026-06-29T20:00:00Z', value: 20 },
         { t: '2026-06-29T21:00:00Z', value: 21 },
       ],
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it('shows isolated observations on both sides of an explicit null gap', () => {
@@ -134,6 +135,28 @@ describe('SoilLineChartView', () => {
     })).toBe(true);
   });
 
+  it('omits alignment-absent sources while retaining explicit null entries', () => {
+    const hovered = Date.parse('2026-10-03T00:15:00Z');
+    render(<HistorySeriesTooltip
+      active
+      label={hovered}
+      byKey={new Map([
+        ['source-a', { key: 'source-a', label: 'Source A', unit: 'kPa', depthCm: null, points: [] }],
+        ['source-b', { key: 'source-b', label: 'Source B', unit: 'kPa', depthCm: null, points: [] }],
+        ['source-c', { key: 'source-c', label: 'Source C', unit: 'kPa', depthCm: null, points: [] }],
+      ])}
+      rows={[{ timestamp: '2026-10-03T00:15:00Z', tMs: hovered, 'source-a': null, 'source-b': 9, __seriesMeta: {
+        'source-a': { statisticAvailability: { latest: 'latest_missing' } },
+        'source-b': {},
+      } }]}
+      payload={[{ dataKey: 'source-b', value: 9, payload: { tMs: hovered } }]}
+    />);
+    expect(screen.getByText(/Source A/)).toBeInTheDocument();
+    expect(screen.getByText(/latest_missing/)).toBeInTheDocument();
+    expect(screen.getByText(/Source B/)).toBeInTheDocument();
+    expect(screen.queryByText(/Source C/)).not.toBeInTheDocument();
+  });
+
   it('keeps dots hidden for continuous hourly soil series', () => {
     expect(soilSeriesShouldShowDots({
       key: 'swt_1',
@@ -145,6 +168,16 @@ describe('SoilLineChartView', () => {
         { t: '2026-06-24T07:00:00Z', value: 6 },
         { t: '2026-06-24T08:00:00Z', value: 7 },
       ],
+    })).toBe(false);
+  });
+
+  it('keeps dots hidden for sparse but continuous soil series', () => {
+    const points = Array.from({ length: 2000 }, (_, index) => ({
+      t: new Date(Date.parse('2026-06-24T00:00:00Z') + index * 2 * 60 * 60 * 1000).toISOString(),
+      value: index,
+    }));
+    expect(soilSeriesShouldShowDots({
+      key: 'swt_1', label: 'Layer 1', unit: 'kPa', depthCm: null, points,
     })).toBe(false);
   });
 

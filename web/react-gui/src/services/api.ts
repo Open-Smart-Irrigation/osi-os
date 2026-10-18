@@ -42,6 +42,7 @@ import type {
   HistoryWorkspaceRecord,
 } from '../history/types';
 import { migrateHistoryWorkspace } from '../history/workspaceModel';
+import { historySourceChoicesFromSeries } from '../history/sourceSelection';
 import { parseRainHistory, type RainHistory } from '../utils/rain';
 import { normaliseZoneRainSource, type ZoneRainSource } from '../utils/zoneRainSource';
 import type {
@@ -885,12 +886,31 @@ function normaliseHistoryRangeSelection(row: any): HistoryRangeSelection {
   };
 }
 
-function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
+export function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
   const aggregation = row?.aggregation ?? {};
   const limits = row?.limits ?? {};
   const freshness = row?.freshness ?? {};
+  const rawAvailability = row?.availability ?? {};
+  const availabilityReasons = Array.isArray(rawAvailability?.reasons)
+    ? rawAvailability.reasons.filter((reason: unknown): reason is string => typeof reason === 'string' && reason.length > 0)
+    : [];
+  const rawSeries = Array.isArray(row?.series) ? row.series : [];
+  const recoveryReason = availabilityReasons.find((reason: string) => /(?:limit|budget|select_fewer|shorter|coarser)/i.test(reason)) ?? null;
+  const derivedSources = historySourceChoicesFromSeries(rawSeries);
+  const explicitSources = Array.isArray(limits?.availableSources ?? limits?.available_sources)
+    ? (limits.availableSources ?? limits.available_sources).map((source: any) => ({
+        sourceKey: String(source?.sourceKey ?? source?.source_key ?? ''),
+        label: String(source?.label ?? source?.name ?? source?.sourceLabel ?? 'Source'),
+        deviceSourceId: source?.deviceSourceId ?? source?.device_source_id ?? null,
+      })).filter((source: { sourceKey: string }) => source.sourceKey.length > 0)
+    : [];
+  const normalizedExplicitSources = explicitSources.length > 0 ? historySourceChoicesFromSeries(explicitSources) : [];
 
   return {
+    availability: {
+      available: rawAvailability?.available !== false,
+      reasons: availabilityReasons,
+    },
     cardId: String(row?.cardId ?? row?.card_id ?? ''),
     cardType: String(row?.cardType ?? row?.card_type ?? 'soil') as HistoryCardType,
     view: String(row?.view ?? 'line-chart') as HistoryViewMode,
@@ -911,17 +931,11 @@ function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
       maxEvents: Number(limits?.maxEvents ?? limits?.max_events ?? 0),
       maxInterpretations: Number(limits?.maxInterpretations ?? limits?.max_interpretations ?? 0),
       truncated: asBoolean(limits?.truncated),
-      reason: limits?.reason ?? null,
-      availableSources: Array.isArray(limits?.availableSources ?? limits?.available_sources)
-        ? (limits.availableSources ?? limits.available_sources).map((source: any) => ({
-            sourceKey: String(source?.sourceKey ?? source?.source_key ?? ''),
-            label: String(source?.label ?? source?.name ?? source?.sourceLabel ?? 'Source'),
-            deviceSourceId: source?.deviceSourceId ?? source?.device_source_id ?? null,
-          })).filter((source: { sourceKey: string }) => source.sourceKey.length > 0)
-        : undefined,
+      reason: limits?.reason ?? recoveryReason,
+      availableSources: normalizedExplicitSources.length > 0 ? normalizedExplicitSources : (derivedSources.length > 0 ? derivedSources : undefined),
     },
     seriesIdentityVersion: Number(row?.seriesIdentityVersion ?? row?.series_identity_version ?? 0),
-    series: Array.isArray(row?.series) ? row.series.map((series: any) => ({
+    series: rawSeries.map((series: any) => ({
       ...series,
       id: String(series?.id ?? ''),
       deviceSourceId: series?.deviceSourceId ?? series?.device_source_id ?? null,
@@ -941,7 +955,7 @@ function normaliseHistoryCardDataResponse(row: any): HistoryCardDataResponse {
           ? (typeof point.value === 'number' && Number.isFinite(point.value) ? point.value : null)
           : null,
       })) : [],
-    })) : [],
+    })),
     profiles: Array.isArray(row?.profiles) ? row.profiles : [],
     events: Array.isArray(row?.events) ? row.events : [],
     calendar: row?.calendar ?? null,

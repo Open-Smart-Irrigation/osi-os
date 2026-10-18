@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { HistoryCardSourceDevice, HistoryCardSummary } from '../../../history/types';
-import { historySourceLabel } from '../../../history/desktopHistory';
+import { historySourceChoiceLabel } from '../../../history/sourceSelection';
 
 interface HistorySourceFilterProps {
   card: HistoryCardSummary;
@@ -63,6 +63,7 @@ export const HistorySourceFilter: React.FC<HistorySourceFilterProps> = ({
       </button>
       {options.map((device) => {
         const sourceKey = String(device.sourceKey);
+        const duplicate = options.filter((candidate) => candidate.name?.trim() === device.name?.trim()).length > 1;
         return (
           <button
             key={sourceKey}
@@ -75,7 +76,7 @@ export const HistorySourceFilter: React.FC<HistorySourceFilterProps> = ({
                 : 'border-[var(--border)] bg-[var(--secondary-bg)] text-[var(--text)]'
             }`}
           >
-            {historySourceLabel(device.name, sourceKey)}
+            {historySourceChoiceLabel(device.name, sourceKey, duplicate)}
           </button>
         );
       })}

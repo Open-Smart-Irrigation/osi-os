@@ -83,8 +83,8 @@ describe('desktopHistory helpers', () => {
       ],
     }))).toEqual([
       { key: null, label: 'All', labelKey: 'history.sourceFilter.all' },
-      { key: 'soil-src-one', label: 'Chameleon' },
-      { key: 'soil-src-two', label: 'Chameleon' },
+      { key: 'soil-src-one', label: 'Chameleon · -src-one' },
+      { key: 'soil-src-two', label: 'Chameleon · -src-two' },
     ]);
   });
 

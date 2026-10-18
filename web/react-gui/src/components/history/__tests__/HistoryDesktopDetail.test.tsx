@@ -7,6 +7,7 @@ import { SWRConfig } from 'swr';
 import { HistoryDesktopDetail } from '../desktop/HistoryDesktopDetail';
 import type { HistoryCardSummary } from '../../../history/types';
 import { useHistoryCardData } from '../../../history/useHistoryCardData';
+import { normaliseHistoryCardDataResponse } from '../../../services/api';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 
 // Mock the translation hook
@@ -427,6 +428,29 @@ describe('HistoryDesktopDetail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use coarser aggregation' }));
     expect(lastHistoryCardDataRequest()).toEqual(expect.objectContaining({ aggregation: '15m' }));
+  });
+
+  it('renders recovery controls from the real normalized unavailable response', () => {
+    const card = makeCard({ cardType: 'environment', title: 'Environment', defaultView: 'line-chart', views: ['line-chart'] });
+    vi.mocked(useHistoryCardData).mockReturnValue({
+      data: normaliseHistoryCardDataResponse({
+        availability: { available: false, reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'] },
+        limits: { maxPointsPerSeries: 2000, maxPointsTotal: 30000, truncated: false },
+        series: [
+          { sourceKey: 'env-src-a', deviceSourceId: 'device-a', sourceLabel: 'Environment sensor', label: 'Temperature', points: [] },
+          { sourceKey: 'env-src-b', deviceSourceId: 'device-b', sourceLabel: 'Environment sensor', label: 'Temperature', points: [] },
+        ],
+      }) as never,
+      error: null,
+      isLoading: false,
+      refresh: vi.fn(),
+    });
+    renderDesktopDetail([card], card);
+
+    expect(screen.getByRole('button', { name: 'Environment sensor · nv-src-a' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Environment sensor · nv-src-b' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use a shorter range' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Use coarser aggregation' })).toBeInTheDocument();
   });
 
   it('resets the selected source to All when the selected card changes', () => {

@@ -230,7 +230,9 @@ export function HistorySeriesTooltip({ active, payload, label, byKey, rows }: { 
   const targetMs = Number.isFinite(labelMs) ? labelMs : Number(payload[0]?.payload?.tMs);
   const row = rows?.find((candidate) => candidate.tMs === targetMs);
   const entries = row
-    ? [...byKey.entries()].map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
+    ? [...byKey.entries()]
+      .filter(([key]) => Object.prototype.hasOwnProperty.call(row, key) || Boolean(row.__seriesMeta?.[key]))
+      .map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
     : payload.filter((item) => Number(item.payload?.tMs) === targetMs).map((item) => ({
       key: String(item.dataKey),
       series: byKey.get(String(item.dataKey)),

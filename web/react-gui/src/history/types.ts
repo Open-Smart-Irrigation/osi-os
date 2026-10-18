@@ -211,6 +211,11 @@ export interface HistoryResponseLimits {
   availableSources?: HistorySourceChoice[];
 }
 
+export interface HistoryCardDataAvailability {
+  available: boolean;
+  reasons: string[];
+}
+
 export interface HistorySourceChoice {
   sourceKey: string;
   label: string;
@@ -350,6 +355,7 @@ export interface HistoryAdvancedPlaceholder {
 }
 
 export interface HistoryCardDataResponse<TCardType extends HistoryCardType = HistoryCardType> {
+  availability?: HistoryCardDataAvailability;
   seriesIdentityVersion?: number;
   cardId: string;
   cardType: TCardType;
