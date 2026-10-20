@@ -191,10 +191,18 @@ async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, 
 // (R5 M5) While an open awaits observation the compile could not flush, so the snapshot is
 // held: edit bursts during one unobserved open then append one snapshot behind the radio
 // queue, not one per burst.
-async function emitPendingSnapshots({ db, now, appId, warn, debounceMs }) {
+//
+// (R13 M3) `enqueue` (optional): a transport that reports acceptance, e.g. the ChirpStack
+// client's enqueueDownlink. With it, each row is enqueued in order; a row the transport did
+// not accept (it threw, or answered { accepted: false }) is marked LOST ('not_resent_q02c') at
+// once, together with a runtime emission, so a snapshot cut off halfway shows "device may not
+// hold this plan" now instead of "queued" for 24 h. The remaining rows are still offered (each
+// is a separate slot). Nothing re-sends a lost row (Q02 c). Without `enqueue`, the rows are
+// returned as MQTT messages, whose delivery the gateway cannot observe.
+async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, enqueue }) {
   const windowMs = debounceMs == null ? SNAPSHOT_DEBOUNCE_MS : debounceMs;
   const nowMs = (now || new Date()).getTime();
-  const out = { messages: [], emitted: 0 };
+  const out = { messages: [], emitted: 0, transportFailures: 0 };
   let pending = [];
   try { pending = await store.listSnapshotPending(db); }
   catch (e) { warn && warn('[valve-control] pending snapshots unreadable: ' + (e && e.message ? e.message : e)); return out; }
@@ -223,7 +231,28 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs }) {
     });
     if (!rows.length) continue;
     out.emitted += 1;
-    for (const r of rows) out.messages.push(buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex }));
+    if (typeof enqueue !== 'function') {
+      for (const r of rows) out.messages.push(buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex }));
+      continue;
+    }
+    const notAccepted = [];
+    for (const r of rows) {
+      const msg = buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex });
+      try {
+        const result = await enqueue({ devEui: msg.payload.devEui, fPort: msg.payload.fPort, data: msg.payload.data, confirmed: false });
+        if (result && result.accepted === false) notAccepted.push(r);
+      } catch (e) {
+        notAccepted.push(r);
+      }
+    }
+    if (!notAccepted.length) continue;
+    out.transportFailures += notAccepted.length;
+    warn && warn('[valve-control] ' + p.device_eui + ': ' + notAccepted.length + ' of ' + rows.length + ' snapshot row(s) not accepted by the transport; marked LOST, not re-sent (Q02c)');
+    await db.transaction(async (tx) => {
+      await store.markPushesLost(tx, notAccepted.map((r) => r.push_id), store.LOST_NOT_RESENT);
+      try { await runtime.emitRuntimeChanged(tx, p.device_eui, warn); }
+      catch (e) { warn && warn('[valve-control] emitPendingSnapshots: runtime emit failed: ' + (e && e.message ? e.message : e)); }
+    });
   }
   return out;
 }

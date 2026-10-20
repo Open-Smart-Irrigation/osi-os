@@ -228,10 +228,20 @@ async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atI
   const where = weekdayOrNull == null ? '' : ' AND weekday=?';
   const selParams = [deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
   const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY rowid DESC LIMIT 1', selParams);
-  if (!row) return 0;
+  if (!row) {
+    // (R13 M3) No outstanding row: a LOST row stays an ACK candidate while it is still the
+    // newest row of its slot. LOST means "may not hold", not "proven unsent" -- a transport
+    // timeout after acceptance, or a row already transmitted when a cancel flushed the queue,
+    // can still reach the valve, and its ACK recovers the slot. A row replaced by a newer
+    // snapshot (SUPERSEDED, or followed by newer rows) is never credited.
+    const newest = await db.get("SELECT push_id, state, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=?" + where + ' ORDER BY rowid DESC LIMIT 1', selParams);
+    if (!newest || !isLostRow(newest)) return 0;
+    await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=?, error=NULL WHERE push_id=? AND state='FAILED'", [status, atIso, newest.push_id]);
+    return 1;
+  }
   // CMD-04 PR0: a snapshot still waiting out the debounce window has not been sent, so an ACK
   // arriving now answers an earlier (superseded) push and must not confirm the new row.
-  // SUPERSEDED and LOST rows are never matched (state='QUEUED' above). The remaining weak spot,
+  // SUPERSEDED rows are never matched (state='QUEUED' above). The remaining weak spot,
   // recorded for CMD-04 proper: once the new snapshot is on the air, an earlier push's late ACK
   // on the same port/purpose/weekday still credits the new row.
   const pendingSnap = await getSnapshotPending(db, deviceEui);
@@ -373,6 +383,14 @@ async function supersedeOutstanding(db, deviceEui, purposes) {
   const rows = await db.all('SELECT push_id FROM valve_schedule_pushes WHERE ' + where, [deviceEui].concat(purposes));
   if (rows.length) await db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE " + where, [deviceEui].concat(purposes));
   return rows.length;
+}
+
+// (R13 M3) Mark rows LOST (FAILED + reason). Guarded on state='QUEUED', so an ACK that raced
+// in first wins.
+async function markPushesLost(db, pushIds, reason) {
+  for (const id of pushIds || []) {
+    await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [reason || LOST_NOT_RESENT, id]);
+  }
 }
 
 // (R5 L1) Has the valve ever had a WEEKLY schedule here, tombstones included? (Bluetooth
@@ -562,4 +580,4 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, markPushesLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };

@@ -800,3 +800,100 @@ test('N4: same-millisecond tie, emitted inside the cancel\'s flush -> the rows s
     db.close();
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// R13 M3 (inherited by PR0): a transport failure partway through a snapshot. With a transport
+// (ChirpStack enqueue), every row the transport did not accept is LOST at emission time and
+// surfaced at once; nothing re-sends it, and the 24 h sweep has nothing left to change.
+// ---------------------------------------------------------------------------------------------
+function failingTransport(cs, { acceptFirst, mode }) {
+  let calls = 0;
+  return async (item) => {
+    calls += 1;
+    if (calls > acceptFirst) {
+      if (mode === 'reject') return { accepted: false };
+      throw new Error('ChirpStack unavailable');
+    }
+    cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]);
+    return { id: 'q-' + calls };
+  };
+}
+
+for (const mode of ['throw', 'reject']) {
+  test(`R13 M3 (${mode}): the transport fails after 3 rows of a snapshot -> the other 5 rows are LOST at once, surfaced, never re-sent`, async () => {
+    const { db } = await tempDb();
+    await linkCloud(db);
+    workers._resetHousekeepingForTests();
+    const h = harness(db);
+    await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
+    const snap = await h.compile(0);
+    const enqueue = failingTransport(h.cs, { acceptFirst: 3, mode });
+    const warnings = [];
+    const out = await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: (m) => warnings.push(m), enqueue });
+    assert.deepEqual(out.messages, [], 'sent through the transport, not returned for MQTT');
+    assert.equal(out.transportFailures, 5);
+    assert.deepEqual(h.cs.getQueue(), asItems(snap.rows.slice(0, 3)), 'status + Sun + Mon reached the queue');
+    const states = await statesById(db, snap.rows.map((r) => r.push_id));
+    assert.deepEqual(states.slice(0, 3).map((s) => s.state), ['QUEUED', 'QUEUED', 'QUEUED']);
+    for (const s of states.slice(3)) assert.deepEqual({ state: s.state, error: s.error }, { state: 'FAILED', error: 'not_resent_q02c' });
+    const summary = await store.pushSummary(db, EUI, at(WINDOW_SEC));
+    assert.deepEqual({ lost: summary.lost, queued: summary.queued, statusLost: summary.scheduler_status_lost }, { lost: 5, queued: 2, statusLost: false });
+    const payload = JSON.parse((await db.get("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED' ORDER BY rowid DESC LIMIT 1")).payload_json);
+    assert.equal(payload.push_state.lost, 5, 'the tile says "device may not hold this plan" now, not in 24 h');
+    assert.ok(warnings.some((w) => /not accepted/.test(w)));
+
+    // Nothing re-sends the lost rows, and the 24 h sweep has nothing left to change on them.
+    const before = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE push_id IN (' + snap.rows.slice(3).map(() => '?').join(',') + ')', snap.rows.slice(3).map((r) => r.push_id));
+    const ok = async (item) => { h.cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]); return { id: 'x' }; };
+    for (let s = 120; s <= 3720; s += 600) await workers.runHousekeeping({ db, now: at(s), appId: 'app', warn: () => {}, enqueue: ok });
+    assert.equal(h.cs.getQueue().length, 3, 'nothing re-sent');
+    await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-08-17 10:00:00'");
+    await store.failStalePushes(db, '2026-08-18T10:00:00.000Z');
+    const after = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE push_id IN (' + snap.rows.slice(3).map(() => '?').join(',') + ')', snap.rows.slice(3).map((r) => r.push_id));
+    assert.deepEqual(after, before);
+    db.close();
+  });
+}
+
+test('R13 M3: runHousekeeping sends snapshots through the transport it is given; without one it returns MQTT messages', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const snap = await h.compile(0);
+  const sent = [];
+  const r = await workers.runHousekeeping({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: async (item) => { sent.push(item); return { id: 'q' }; } });
+  assert.equal(r.messages.length, 0);
+  assert.equal(sent.length, 8);
+  assert.deepEqual(sent.map((i) => [i.fPort, Buffer.from(i.data, 'base64').toString('hex').toUpperCase(), i.confirmed, i.devEui]), snap.rows.map((row) => [row.fport, row.payload_hex, false, EUI]));
+  await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
+  await h.compile(100);
+  const r2 = await workers.runHousekeeping({ db, now: at(100 + WINDOW_SEC), appId: 'app', warn: () => {} });
+  assert.equal(r2.messages.length, 8, 'MQTT fallback');
+  db.close();
+});
+
+test('R13 M3: a LOST row stays an ACK candidate while it is the newest row of its slot (a row that did reach the valve recovers); a SUPERSEDED one never is', async () => {
+  const { db } = await tempDb();
+  const h = harness(db);
+  await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
+  const snap = await h.compile(0);
+  // A timeout after ChirpStack had in fact accepted the row: the gateway marks it LOST.
+  await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: failingTransport(h.cs, { acceptFirst: 3, mode: 'throw' }) });
+  const tuesday = snap.rows.find((r) => r.weekday === 2);
+  assert.equal((await statesById(db, [tuesday.push_id]))[0].state, 'FAILED');
+  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', tuesday.fport, 2, 0, '2026-08-19T11:00:00.000Z'), 1, 'the valve says it holds Tuesday');
+  assert.equal((await statesById(db, [tuesday.push_id]))[0].state, 'ACKED');
+  assert.equal((await store.pushSummary(db, EUI, at(100))).lost, 4);
+
+  // A newer snapshot replaces the slot: the old LOST row is no longer a candidate.
+  await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
+  const next = await h.compile(200);
+  await h.emit(200 + WINDOW_SEC);
+  for (const row of next.rows) await store.ackPush(db, EUI, row.purpose, row.fport, row.weekday, 0, '2026-08-19T12:00:00.000Z');
+  const wednesdayOld = snap.rows.find((r) => r.weekday === 3);
+  const before = await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid');
+  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', wednesdayOld.fport, 3, 0, '2026-08-19T12:05:00.000Z'), 0);
+  assert.deepEqual(await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid'), before);
+  db.close();
+});

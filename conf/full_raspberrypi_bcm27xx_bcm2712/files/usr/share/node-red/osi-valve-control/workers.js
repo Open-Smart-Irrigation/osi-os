@@ -280,17 +280,20 @@ let lastClockTickMs = null;
 function _resetHousekeepingForTests() { lastClockTickMs = null; }
 const CLOCK_JUMP_BACKWARD_MS = -60 * 1000;
 const CLOCK_JUMP_FORWARD_MS = 6 * 3600 * 1000;
-async function runHousekeeping({ db, now, appId, warn }) {
+async function runHousekeeping({ db, now, appId, warn, enqueue }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
   const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
-  const out = { resets: 0, clockJump: false, decommissioned: 0, snapshotsEmitted: 0, messages: [] };
+  const out = { resets: 0, clockJump: false, decommissioned: 0, snapshotsEmitted: 0, transportFailures: 0, messages: [] };
   // (d) CMD-04 PR0 (C): send the plan snapshots whose debounce window has passed. Run before
   // runClockTick, so a clock sync queued in the same tick lands behind the snapshot. A clock
   // re-queued on an earlier tick (after the compile's flush superseded the old one) lands
   // ahead of it; either order is harmless (R5 L2).
-  const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn });
+  // (R13 M3) With `enqueue` (the ChirpStack client, passed by the valve tick node) the snapshot
+  // rows go through a transport that reports acceptance; without it they are MQTT messages.
+  const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn, enqueue });
   out.snapshotsEmitted = snaps.emitted;
+  out.transportFailures = snaps.transportFailures;
   out.messages.push(...snaps.messages);
   const skips = await db.all("SELECT vs.device_eui, vs.skip_today_date, iz.timezone AS zone_timezone FROM valve_settings vs JOIN devices d ON d.deveui = vs.device_eui LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE vs.scheduler_status='SKIP_TODAY'");
   for (const s of skips) {
