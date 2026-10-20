@@ -1000,10 +1000,9 @@
   "soilTension": {
     "sectionTitle": "Tensione idrica del suolo",
     "channel": "Tensione del suolo {{channel}}",
-    "channelAtDepth": "Tensione del suolo {{channel}} ({{depth}} cm)",
+    "depthCm": "({{depth}} cm)",
     "soilTemp": "Suolo {{value}} °C",
     "soilTempSeries": "Temperatura del suolo {{channel}}",
-    "soilTempSeriesAtDepth": "Temperatura del suolo {{channel}} ({{depth}} cm)",
     "invalidReading": "Lettura non valida",
     "noReadings": "Nessuna lettura del suolo disponibile.",
     "family": {

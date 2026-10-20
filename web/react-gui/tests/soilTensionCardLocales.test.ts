@@ -25,8 +25,8 @@ const SDI12_CARD_KEYS = [
   'sdi12Soil.status.manual',
   'sdi12Soil.status.unknown',
 ];
-// Product names and the bus name read the same in every language.
-const SAME_IN_ALL = new Set(['soilTension.family.watermark', 'soilTension.family.tensiomark', 'sdi12Soil.badge']);
+// The depth unit, product names and the bus name read the same in every language.
+const SAME_IN_ALL = new Set(['soilTension.depthCm', 'soilTension.family.watermark', 'soilTension.family.tensiomark', 'sdi12Soil.badge']);
 
 const read = (locale: string) => JSON.parse(fs.readFileSync(path.join(localeRoot, locale, 'devices.json'), 'utf8'));
 const flatten = (tree: Record<string, unknown>, prefix: string): Array<[string, unknown]> => Object.entries(tree).flatMap(
@@ -51,7 +51,7 @@ const EN = block('en');
 const PENDING_HUMAN_LUGANDA = new Set(EN.keys());
 
 test('soil tension card strings exist in every locale with the English key set and placeholders', () => {
-  assert.ok(EN.size >= 29, 'English soil tension card block is unexpectedly small');
+  assert.ok(EN.size >= 28, 'English soil tension card block is unexpectedly small');
   for (const [key, value] of EN) assert.equal(typeof value, 'string', `en ${key}`);
   for (const locale of [...EUROPEAN, 'lg']) {
     const values = block(locale);

@@ -24,13 +24,21 @@ export interface SoilTensionProbe {
 }
 
 interface SoilTensionReadingsProps {
-  /** Product name of the probe family, shown beside the section title. */
+  /** Name of the probe family shown beside the section title (a product name, passed in through a locale key). */
   family: string;
   probes: SoilTensionProbe[];
 }
 
-const VALUE_CLASS = 'text-2xl font-bold tabular-nums';
-const SECONDARY_CLASS = 'mt-1 text-sm font-semibold text-[var(--text-secondary)]';
+/**
+ * Below `sm` a tile holds about 100 px of content, so the value steps down a size and may wrap
+ * anywhere: a Tensiomark reads up to pF 7, and "150000.0 kPa" must not spill into the next tile.
+ * Kept identical to the OSI Cloud component.
+ */
+const VALUE_CLASS = 'min-w-0 max-w-full text-xl font-bold tabular-nums [overflow-wrap:anywhere] sm:text-2xl';
+/** A 44 px touch target; the negative margin keeps the value row at its text height. */
+const VALUE_TARGET_CLASS = 'inline-flex min-h-11 -my-1.5 items-center';
+const SECONDARY_TARGET_CLASS = 'inline-flex min-h-11 items-center';
+const SECONDARY_CLASS = 'text-sm font-semibold text-[var(--text-secondary)]';
 
 function byDepth(left: SoilTensionProbe, right: SoilTensionProbe): number {
   const depth = (probe: SoilTensionProbe) => probe.depthCm ?? Number.POSITIVE_INFINITY;
@@ -41,26 +49,39 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
   const { t } = useTranslation('devices');
   const { swtUnit } = useDisplayPreferences();
   const labelId = useId();
+  const historyId = useId();
   const formatted = formatSwtCardValue(probe.kpa, swtUnit);
   const invalid = toFiniteSwtValue(probe.kpa) !== null && classifySwtWaterStatus(probe.kpa) === null;
-  const label = probe.depthCm === null
-    ? t('soilTension.channel', { channel: probe.channel })
-    : t('soilTension.channelAtDepth', { channel: probe.channel, depth: probe.depthCm });
+  const channelLabel = t('soilTension.channel', { channel: probe.channel });
+  const depthLabel = probe.depthCm === null ? null : t('soilTension.depthCm', { depth: probe.depthCm });
   const historyTitle = t('common.viewHistory');
   const { secondary } = probe;
+  const valueOpensHistory = formatted !== null && probe.onOpenHistory !== undefined;
+  const hasHistoryButton = valueOpensHistory || secondary?.onOpenHistory !== undefined;
+  // Spoken with every history button: which probe, and what the button does (the title is hover-only).
+  const historyDescription = `${labelId} ${historyId}`;
 
   return (
-    <div role="group" aria-labelledby={labelId} data-testid="soil-tension-tile" className="min-w-0 rounded-lg bg-[var(--card)] p-3">
-      <p id={labelId} className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{label}</p>
-      <div className="flex flex-wrap items-center gap-2">
+    <div
+      role="group"
+      aria-labelledby={labelId}
+      data-testid="soil-tension-tile"
+      className="row-span-3 grid min-w-0 grid-rows-subgrid gap-y-2 rounded-lg bg-[var(--card)] p-3"
+    >
+      <p id={labelId} className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+        {channelLabel}
+        {depthLabel !== null && <>{' '}<span className="normal-case">{depthLabel}</span></>}
+      </p>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {formatted === null ? (
           <p className={`${VALUE_CLASS} text-[var(--text-tertiary)]`}>—</p>
-        ) : probe.onOpenHistory ? (
+        ) : valueOpensHistory ? (
           <button
             type="button"
             onClick={probe.onOpenHistory}
-            className={`${VALUE_CLASS} text-left text-[var(--text)] ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
+            className={`${VALUE_CLASS} ${VALUE_TARGET_CLASS} text-left text-[var(--text)] ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
             title={historyTitle}
+            aria-describedby={historyDescription}
           >
             {formatted}
           </button>
@@ -69,24 +90,28 @@ function SoilTensionTile({ probe }: { probe: SoilTensionProbe }) {
         )}
         <SwtStatusIndicator status={classifySwtWaterStatus(probe.kpa)} />
       </div>
-      {invalid && (
-        <p className="mt-1 text-xs text-[var(--text-tertiary)]">{t('soilTension.invalidReading')}</p>
-      )}
-      {formatted === null && !invalid && probe.note && (
-        <p className="mt-1 text-xs text-[var(--text-secondary)]">{probe.note}</p>
-      )}
-      {secondary && (secondary.onOpenHistory ? (
-        <button
-          type="button"
-          onClick={secondary.onOpenHistory}
-          className={`${SECONDARY_CLASS} text-left ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
-          title={historyTitle}
-        >
-          {secondary.text}
-        </button>
-      ) : (
-        <p className={SECONDARY_CLASS}>{secondary.text}</p>
-      ))}
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        {invalid && (
+          <p className="text-xs text-[var(--text-tertiary)]">{t('soilTension.invalidReading')}</p>
+        )}
+        {formatted === null && !invalid && probe.note && (
+          <p className="text-xs text-[var(--text-secondary)]">{probe.note}</p>
+        )}
+        {secondary && (secondary.onOpenHistory ? (
+          <button
+            type="button"
+            onClick={secondary.onOpenHistory}
+            className={`${SECONDARY_TARGET_CLASS} ${SECONDARY_CLASS} text-left ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
+            title={historyTitle}
+            aria-describedby={historyDescription}
+          >
+            {secondary.text}
+          </button>
+        ) : (
+          <p className={SECONDARY_CLASS}>{secondary.text}</p>
+        ))}
+        {hasHistoryButton && <span id={historyId} className="sr-only">{historyTitle}</span>}
+      </div>
     </div>
   );
 }
@@ -114,8 +139,8 @@ export function SoilTensionReadings({ family, probes }: SoilTensionReadingsProps
       {sorted.length === 0 ? (
         <p className="rounded-lg bg-[var(--card)] px-3 py-4 text-sm text-[var(--text-tertiary)]">{t('soilTension.noReadings')}</p>
       ) : (
-        <div data-testid="soil-tension-grid" className="grid grid-cols-2 gap-3">
-          {sorted.map((probe) => <SoilTensionTile key={probe.channel} probe={probe} />)}
+        <div data-testid="soil-tension-grid" className="grid grid-cols-2 gap-x-3 gap-y-3">
+          {sorted.map((probe) => <SoilTensionTile key={`${probe.channel}-${probe.depthCm ?? 'unknown'}`} probe={probe} />)}
         </div>
       )}
     </section>

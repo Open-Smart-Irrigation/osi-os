@@ -10,6 +10,7 @@ import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
 import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { useFormatNumber } from '../../utils/number';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { SensorMonitor } from './SensorMonitor';
 import { SoilTensionReadings, type SoilTensionProbe } from './shared/SoilTensionReadings';
@@ -139,7 +140,7 @@ function tensiomarkSeries(t: TFunction<'devices'>, { channel, depthCm }: Tensiom
     field: `swt_${channel}`,
     label: depthCm === null
       ? t('soilTension.channel', { channel })
-      : t('soilTension.channelAtDepth', { channel, depth: depthCm }),
+      : `${t('soilTension.channel', { channel })} ${t('soilTension.depthCm', { depth: depthCm })}`,
     unit: 'kPa',
     color: HISTORY_COLORS.swt,
     decimals: 1,
@@ -148,7 +149,7 @@ function tensiomarkSeries(t: TFunction<'devices'>, { channel, depthCm }: Tensiom
     field: `soil_temp_${channel}`,
     label: depthCm === null
       ? t('soilTension.soilTempSeries', { channel })
-      : t('soilTension.soilTempSeriesAtDepth', { channel, depth: depthCm }),
+      : `${t('soilTension.soilTempSeries', { channel })} ${t('soilTension.depthCm', { depth: depthCm })}`,
     unit: '°C',
     color: HISTORY_COLORS.soil_temp,
     decimals: 1,
@@ -173,6 +174,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 }) => {
   const { t } = useTranslation('devices');
   const { swtUnit } = useDisplayPreferences();
+  const formatLocaleNumber = useFormatNumber();
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -209,7 +211,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         kpa: data[`swt_${probe.channel}` as keyof typeof data],
         onOpenHistory: open(`swt_${probe.channel}`),
         secondary: temperature === null ? null : {
-          text: t('soilTension.soilTemp', { value: temperature.toFixed(1) }),
+          text: t('soilTension.soilTemp', { value: formatLocaleNumber(temperature, 1) }),
           onOpenHistory: open(`soil_temp_${probe.channel}`),
         },
       };

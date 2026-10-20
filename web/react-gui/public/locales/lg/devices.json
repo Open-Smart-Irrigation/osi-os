@@ -1000,10 +1000,9 @@
   "soilTension": {
     "sectionTitle": "Soil tension",
     "channel": "Soil tension {{channel}}",
-    "channelAtDepth": "Soil tension {{channel}} ({{depth}} cm)",
+    "depthCm": "({{depth}} cm)",
     "soilTemp": "Soil {{value}} °C",
     "soilTempSeries": "Soil temperature {{channel}}",
-    "soilTempSeriesAtDepth": "Soil temperature {{channel}} ({{depth}} cm)",
     "invalidReading": "Invalid reading",
     "noReadings": "No soil readings available.",
     "family": {

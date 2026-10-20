@@ -1000,10 +1000,9 @@
   "soilTension": {
     "sectionTitle": "Bodenwasserspannung",
     "channel": "Bodenspannung {{channel}}",
-    "channelAtDepth": "Bodenspannung {{channel}} ({{depth}} cm)",
+    "depthCm": "({{depth}} cm)",
     "soilTemp": "Boden {{value}} °C",
     "soilTempSeries": "Bodentemperatur {{channel}}",
-    "soilTempSeriesAtDepth": "Bodentemperatur {{channel}} ({{depth}} cm)",
     "invalidReading": "Ungültiger Messwert",
     "noReadings": "Keine Bodenmesswerte verfügbar.",
     "family": {

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { WatermarkChannelLatest } from '../../../types/farming';
+import { useFormatNumber } from '../../../utils/number';
 import { SoilTensionReadings, type SoilTensionProbe } from './SoilTensionReadings';
 
 // Node-neutral view of IRROMETER WATERMARK 200SS probes. The LSN50 card uses it
@@ -30,6 +31,7 @@ interface WatermarkProbeSectionProps {
  */
 export function WatermarkProbeSection({ probes, soilTempC, onOpenHistory }: WatermarkProbeSectionProps) {
   const { t } = useTranslation('devices');
+  const formatNumber = useFormatNumber();
   const note = (reading: WatermarkChannelLatest | null): string | null => {
     if (!reading?.status || reading.status === 'ok' || reading.kpa !== null) return null;
     return reading.status === 'wet_offset_clipped' && reading.kpa_upper_bound == null
@@ -44,7 +46,7 @@ export function WatermarkProbeSection({ probes, soilTempC, onOpenHistory }: Wate
     onOpenHistory: onOpenHistory ? () => onOpenHistory(`swt_${channel}`) : undefined,
     secondary: channel === 1 && soilTempC != null
       ? {
-        text: t('soilTension.soilTemp', { value: soilTempC.toFixed(1) }),
+        text: t('soilTension.soilTemp', { value: formatNumber(soilTempC, 1) }),
         onOpenHistory: onOpenHistory ? () => onOpenHistory('ext_temperature_c') : undefined,
       }
       : null,

@@ -172,7 +172,8 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
     const section = readings();
     expect(within(section).getByRole('heading', { name: "Tension de l'eau du sol" })).toBeInTheDocument();
     expect(within(tile('Tension du sol 1 (20 cm)')).getByRole('button', { name: '12.0 kPa' })).toHaveAttribute('title', "Voir l'historique");
-    expect(within(tile('Tension du sol 1 (20 cm)')).getByRole('button', { name: /^Sol 16[.,]\d °C$/ })).toBeInTheDocument();
+    // Locale-aware decimal separator, as on the cloud: 16,8 / 16,1 in French.
+    expect(within(tile('Tension du sol 1 (20 cm)')).getByRole('button', { name: family === 'watermark' ? 'Sol 16,8 °C' : 'Sol 16,1 °C' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: "Paramètres de l'appareil" })).toBeInTheDocument();
     expect(screen.getByText(/Vu il y a 5 minutes/)).toBeInTheDocument();
     expect(screen.queryByText(/Soil tension|Soil temperature|^SWT\b|Last seen|minutes ago/)).not.toBeInTheDocument();
@@ -271,5 +272,69 @@ describe('SoilTensionReadings', () => {
     );
     expect(within(tile('Soil tension 1')).getByText('25.0 kPa')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('keeps two probes on one channel at different depths as two tiles', () => {
+    render(
+      <I18nextProvider i18n={i18n()}>
+        <SoilTensionReadings family="Tensiomark" probes={[
+          { channel: 1, depthCm: 20, kpa: 10 },
+          { channel: 1, depthCm: 40, kpa: 30 },
+        ]} />
+      </I18nextProvider>,
+    );
+    expect(tiles()).toHaveLength(2);
+  });
+
+  it('applies the same overflow guard to a value shown without a history link', () => {
+    render(
+      <I18nextProvider i18n={i18n()}>
+        <SoilTensionReadings family="Tensiomark" probes={[{ channel: 1, depthCm: 20, kpa: 150_000 }]} />
+      </I18nextProvider>,
+    );
+    expect(within(tile('Soil tension 1 (20 cm)')).getByText('150000.0 kPa'))
+      .toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]');
+  });
+});
+
+// The R15 review fixes, kept class-for-class identical to the OSI Cloud component.
+describe('soil tension tiles at phone width (R15)', () => {
+  // S1-1: at 320 px a tile holds about 98 px of content; "150000.0" in text-2xl is wider.
+  it.each(FAMILIES)('%s: lets a very large value shrink and wrap inside its tile instead of overflowing', (family) => {
+    renderFamily(family, { kpa: [150_000, 60.6] });
+    const value = within(tile('Soil tension 1 (20 cm)')).getByRole('button', { name: '150000.0 kPa' });
+    expect(value).toHaveClass('min-w-0', 'max-w-full', '[overflow-wrap:anywhere]', 'text-xl', 'sm:text-2xl');
+    expect(statusOf(tile('Soil tension 1 (20 cm)'))).toBe('dry');
+  });
+
+  // S1-2: the caption is uppercase; the depth unit must stay "cm".
+  it.each(FAMILIES)('%s: keeps the depth unit lowercase inside the uppercase caption', (family) => {
+    renderFamily(family);
+    const caption = tile('Soil tension 1 (20 cm)').querySelector('p') as HTMLElement;
+    expect(caption).toHaveClass('uppercase');
+    const depth = within(caption).getByText('(20 cm)');
+    expect(depth.tagName).toBe('SPAN');
+    expect(depth).toHaveClass('normal-case');
+  });
+
+  // S1-3: a wrapped caption must not push one value below its neighbour.
+  it.each(FAMILIES)('%s: aligns caption and value rows across tiles with a subgrid', (family) => {
+    renderFamily(family);
+    expect(screen.getByTestId('soil-tension-grid')).toHaveClass('grid', 'grid-cols-2');
+    for (const element of tiles()) {
+      expect(element).toHaveClass('grid', 'grid-rows-subgrid', 'row-span-3');
+      expect(element.children).toHaveLength(3);
+    }
+  });
+
+  // S1-4: touch targets of at least 44 px, and the action named for assistive technology.
+  it.each(FAMILIES)('%s: gives history buttons a 44 px target and a spoken "View history" description', (family) => {
+    renderFamily(family);
+    const value = within(tile('Soil tension 1 (20 cm)')).getByRole('button', { name: '12.0 kPa' });
+    const soil = within(tile('Soil tension 1 (20 cm)')).getByRole('button', { name: /^Soil 16\.\d °C$/ });
+    for (const button of [value, soil]) {
+      expect(button).toHaveClass('min-h-11');
+      expect(button).toHaveAccessibleDescription('Soil tension 1 (20 cm) View history');
+    }
   });
 });
