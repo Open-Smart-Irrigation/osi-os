@@ -728,11 +728,6 @@
       "title": "Tensiomark interpretation",
       "qualification": "Readings are pF, with temperature reported first. The calibration range is not verified.",
       "calibrationRange": "Calibration range: unverified",
-      "addressDepth": "Address {{address}} · {{depth}}",
-      "depthUnknown": "Depth unknown",
-      "depthCm": "{{depth}} cm",
-      "swt": "SWT",
-      "soilTemperature": "Soil temperature",
       "addSensor": "Add sensor",
       "confirmation": "I confirm the sensor reports temperature first, then pF.",
       "confirmRequired": "Before saving, confirm that the sensor reports temperature first, then pF.",
@@ -766,7 +761,18 @@
     "removeSubtitle": "This will unlink the device from your account.",
     "yesRemove": "Yes, Remove",
     "removing": "Removing...",
-    "failedToRemove": "Failed to remove device"
+    "failedToRemove": "Failed to remove device",
+    "badge": "SDI-12",
+    "noProfile": "No probe profile",
+    "detecting": "Detecting probe (pending)",
+    "invalidLayout": "The saved Sentek channel layout is invalid. Open device settings and save a valid layout before relying on soil readings.",
+    "status": {
+      "pending_identify": "Identifying",
+      "identified": "Identified",
+      "unmatched": "Not recognised",
+      "manual": "Set manually",
+      "unknown": "Status unknown"
+    }
   },
   "deviceRemoval": {
     "titleZone": "Remove from this zone?",
@@ -908,15 +914,11 @@
     "chameleonNeedsMod3": "Chameleon SWT can only be enabled after MOD3 is active."
   },
   "watermark": {
-    "sectionTitle": "WATERMARK soil tension",
-    "probe": "Probe {{n}}",
-    "depthUnset": "Depth unset",
     "wet": "Wet",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Resistance {{value}}",
     "resistanceUpTo": "Resistance ≤ {{value}}",
     "offset": "Offset {{value}} mV",
-    "soilTemp": "Soil {{value}} °C",
     "soilTempNotMeasured": "Soil temperature not measured",
     "dieTemp": "Board {{value}} °C",
     "supply": "Supply {{value}} V",
@@ -991,5 +993,33 @@
     "onlyCandidate": "The only rain gauge of this zone is used.",
     "loadFailed": "The rain gauges of this zone could not be loaded.",
     "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
+  },
+  "soilTension": {
+    "sectionTitle": "Soil tension",
+    "channel": "Soil tension {{channel}}",
+    "channelAtDepth": "Soil tension {{channel}} ({{depth}} cm)",
+    "soilTemp": "Soil {{value}} °C",
+    "soilTempSeries": "Soil temperature {{channel}}",
+    "soilTempSeriesAtDepth": "Soil temperature {{channel}} ({{depth}} cm)",
+    "invalidReading": "Invalid reading",
+    "noReadings": "No soil readings available.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "lastSeen": {
+      "justNow": "Last seen: just now",
+      "minutes_one": "Last seen: {{count}} minute ago",
+      "minutes_other": "Last seen: {{count}} minutes ago",
+      "hours_one": "Last seen: {{count}} hour ago",
+      "hours_other": "Last seen: {{count}} hours ago",
+      "days_one": "Last seen: {{count}} day ago",
+      "days_other": "Last seen: {{count}} days ago",
+      "never": "Never seen"
+    },
+    "settings": "Device settings",
+    "closeSettings": "Close device settings"
   }
 }

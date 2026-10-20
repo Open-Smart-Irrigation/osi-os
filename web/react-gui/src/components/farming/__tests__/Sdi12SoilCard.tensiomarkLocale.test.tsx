@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import i18next from 'i18next';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,6 +30,7 @@ const device: Device = {
   name: 'Tensiomark pair',
   type_id: 'DRAGINO_SDI12',
   sdi12_probe_profile: 'TENSIOMARK',
+  sdi12_probe_status: 'identified',
   last_seen: new Date(NOW - 30 * 60 * 1000).toISOString(),
   sdi12_channel_layout_json: {
     version: 1,
@@ -60,11 +61,13 @@ describe('Sdi12SoilCard Tensiomark locale', () => {
     );
 
     expect(screen.queryByText('Kalibrierbereich: nicht verifiziert')).not.toBeInTheDocument();
-    expect(screen.getByText('Adresse 1 · Tiefe unbekannt')).toBeInTheDocument();
-    expect(screen.getAllByText(/^SWT:/)).toHaveLength(2);
-    expect(screen.getAllByText(/^Bodentemperatur:/)).toHaveLength(2);
-    expect(screen.getByText('30.2 kPa')).toBeInTheDocument();
-    expect(screen.getByText('12.5 kPa')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bodenwasserspannung' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByRole('button', { name: '30.2 kPa' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByRole('button', { name: 'Boden 21.5 °C' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Bodenspannung 2' })).getByRole('button', { name: '12.5 kPa' })).toBeInTheDocument();
+    expect(screen.getByText('Identifiziert')).toBeInTheDocument();
+    expect(screen.getByText(/Zuletzt gesehen: vor 30 Minuten/)).toBeInTheDocument();
+    expect(screen.queryByText(/^SWT|Bodentemperatur|TENSIOMARK|Last seen/)).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-swt-status]')).toHaveLength(2);
   });
 });
