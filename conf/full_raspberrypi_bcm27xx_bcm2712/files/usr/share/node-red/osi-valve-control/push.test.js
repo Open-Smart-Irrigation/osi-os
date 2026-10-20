@@ -58,7 +58,8 @@ test('status and clock pushes', () => {
 const { tempDb, linkCloud, FIXTURE_EUI: EUI, fakeChirpStack, applyToValve } = require('./test-helpers');
 const store = require('./store');
 const workers = require('./workers');
-const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS } = require('./push');
+const push = require('./push');
+const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS } = push;
 
 const T0 = Date.parse('2026-08-19T10:00:00Z');
 const at = (sec) => new Date(T0 + sec * 1000);
@@ -895,5 +896,140 @@ test('R13 M3: a LOST row stays an ACK candidate while it is the newest row of it
   const before = await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid');
   assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', wednesdayOld.fport, 3, 0, '2026-08-19T12:05:00.000Z'), 0);
   assert.deepEqual(await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid'), before);
+  db.close();
+});
+
+// ---------------------------------------------------------------------------------------------
+// Review of d3b0efb85: T1 (client lifecycle), T2 (stop at the first failure, tick re-entrancy),
+// T3 (warn once about the MQTT fallback).
+// ---------------------------------------------------------------------------------------------
+function fakeClientFactory(cs, behaviour) {
+  const stats = { created: 0, closed: 0, calls: 0 };
+  const factory = () => {
+    stats.created += 1;
+    return {
+      enqueueDownlink: async (item) => {
+        stats.calls += 1;
+        if (behaviour && behaviour.enqueue) return behaviour.enqueue(item, stats);
+        cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]);
+        return { id: 'q' + stats.calls };
+      },
+      close: () => { stats.closed += 1; return []; },
+    };
+  };
+  return { factory, stats };
+}
+
+function deferred() {
+  let resolve; let reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const OTHER_VALVE = EUI.slice(0, 15) + '3';
+async function addValve(db, eui) {
+  await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve C','STREGA_VALVE',1,datetime('now'),datetime('now'))", [eui]);
+}
+
+test('T1: the tick creates a ChirpStack client only when a snapshot is due, and closes it, also after a failure', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  const cs = fakeChirpStack();
+  const { factory, stats } = fakeClientFactory(cs);
+  await workers.runValveTick({ db, now: at(0), appId: 'app', warn: () => {}, transportFactory: factory });
+  assert.equal(stats.created, 0, 'nothing pending: no client');
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(10), flushQueue: cs.flushQueue, warn: () => {} });
+  await workers.runValveTick({ db, now: at(20), appId: 'app', warn: () => {}, transportFactory: factory });
+  assert.equal(stats.created, 0, 'pending but inside the debounce window: no client');
+  await workers.runValveTick({ db, now: at(10 + WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: factory });
+  assert.deepEqual({ created: stats.created, closed: stats.closed, calls: stats.calls }, { created: 1, closed: 1, calls: 8 });
+
+  const failing = fakeClientFactory(cs, { enqueue: async () => { throw new Error('unavailable'); } });
+  await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(200), flushQueue: cs.flushQueue, warn: () => {} });
+  await workers.runValveTick({ db, now: at(200 + WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: failing.factory });
+  assert.deepEqual({ created: failing.stats.created, closed: failing.stats.closed }, { created: 1, closed: 1 }, 'closed after a failure too');
+  db.close();
+});
+
+test('T2: the first transport failure stops the snapshot: the rest is LOST without being tried, other valves wait for the next tick', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  await addValve(db, OTHER_VALVE);
+  const cs = fakeChirpStack();
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  await store.insertSchedule(db, Object.assign(weekly('b', 0x04, '07:00', 30), { device_eui: OTHER_VALVE }));
+  const s1 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
+  const s2 = await compileAndQueue({ db, deviceEui: OTHER_VALVE, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
+  let calls = 0;
+  const down = async () => { calls += 1; throw new Error('DEADLINE_EXCEEDED'); };
+  const out = await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: down });
+  assert.equal(calls, 1, 'one attempt, not one per row and per valve');
+  const first = (await db.all('SELECT device_eui FROM valve_schedule_pushes WHERE state=? GROUP BY device_eui', ['FAILED'])).map((r) => r.device_eui);
+  assert.equal(first.length, 1, 'only the valve whose snapshot was attempted has LOST rows');
+  const attempted = first[0] === EUI ? s1 : s2;
+  const waiting = first[0] === EUI ? s2 : s1;
+  const waitingEui = first[0] === EUI ? OTHER_VALVE : EUI;
+  const lostRows = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE device_eui=?', [first[0]]);
+  assert.equal(lostRows.length, attempted.rows.length);
+  for (const r of lostRows) assert.deepEqual({ state: r.state, error: r.error }, { state: 'FAILED', error: 'not_resent_q02c' });
+  assert.equal(out.transportFailures, attempted.rows.length);
+  assert.ok(await store.getSnapshotPending(db, waitingEui), 'the other snapshot is still pending, never emitted');
+  const ok = await emitPendingSnapshots({ db, now: at(WINDOW_SEC + 60), appId: 'app', warn: () => {}, enqueue: async (item) => { cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]); return { id: 'x' }; } });
+  assert.equal(ok.emitted, 1);
+  assert.equal(cs.getQueue().length, waiting.rows.length);
+  db.close();
+});
+
+test('T2: a hanging transport (bounded by its deadline) stalls one tick; an overlapping tick skips, so no duplicate clock or decommission send', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  const cs = fakeChirpStack();
+  await addValve(db, OTHER_VALVE);
+  // A decommissioned valve with a real plan on record: the sweep sends its clear once.
+  await store.insertPushes(db, [{ push_id: 'acked-other', device_eui: OTHER_VALVE, purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: '00'.repeat(24), plan_hash: 'a-real-plan' }]);
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id='acked-other'");
+  await db.run('UPDATE devices SET deleted_at=? WHERE deveui=?', [new Date(Date.now() - 2000).toISOString(), OTHER_VALVE]);
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const snap = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
+  const hang = deferred();
+  let calls = 0;
+  const { factory } = fakeClientFactory(cs, { enqueue: async () => { calls += 1; return hang.promise; } });
+
+  const tick1 = workers.runValveTick({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: factory });
+  await new Promise((res) => setImmediate(res));
+  const tick2 = await workers.runValveTick({ db, now: at(WINDOW_SEC + 60), appId: 'app', warn: () => {}, transportFactory: factory });
+  assert.equal(tick2.skipped, true, 'the overlapping tick skips while one is running');
+  assert.deepEqual(tick2.messages, []);
+  hang.reject(new Error('DEADLINE_EXCEEDED'));
+  const r1 = await tick1;
+  assert.equal(r1.skipped, false);
+  assert.equal(calls, 1, 'the hanging call was the only attempt');
+  assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['FAILED']);
+  const tick3 = await workers.runValveTick({ db, now: at(WINDOW_SEC + 120), appId: 'app', warn: () => {}, transportFactory: factory });
+  assert.equal(tick3.skipped, false, 'the next tick runs again');
+  const all = r1.messages.concat(tick2.messages, tick3.messages);
+  assert.equal(all.filter((m) => m.payload.fPort === 12).length, 1, 'one clock sync');
+  assert.equal(all.filter((m) => m.payload.devEui === OTHER_VALVE && m.payload.fPort === 21).length, 1, 'one decommission send');
+  assert.equal((await db.all("SELECT 1 FROM valve_schedule_pushes WHERE purpose='CLOCK_SYNC'")).length, 1);
+  db.close();
+});
+
+test('T3: the MQTT fallback (no ChirpStack client) is warned about once, not on every tick', async () => {
+  const { db } = await tempDb();
+  workers._resetHousekeepingForTests();
+  push._resetTransportWarningsForTests();
+  const cs = fakeChirpStack();
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  const warnings = [];
+  const broken = () => { throw new Error('CHIRPSTACK_API_URL is not set'); };
+  for (let i = 0; i < 3; i += 1) {
+    await store.updateSchedule(db, 'a', { duration_minutes: 30 + i }, EUI);
+    await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(i * 100), flushQueue: cs.flushQueue, warn: () => {} });
+    const r = await workers.runValveTick({ db, now: at(i * 100 + WINDOW_SEC), appId: 'app', warn: (m) => warnings.push(m), transportFactory: broken });
+    assert.equal(r.messages.filter((m) => m.payload.fPort !== 12).length, 8, 'the snapshot still leaves over MQTT');
+  }
+  assert.equal(warnings.filter((w) => /MQTT/.test(w)).length, 1);
   db.close();
 });

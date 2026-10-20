@@ -654,8 +654,8 @@
       "reason": "Zone rain gauge selection (rain correctness R-ZSEL): the zone settings guard takes PUT /api/irrigation-zones/:zone_id/rain-source as its fifth route (one more entry in its route table, index 4; the error output moves to index 5), so the selection write gets exactly the zone settings decisions (fresh role, canMutate, assertFreshZoneAccess). Measured with verify-flows-size-ratchet nodeSizes per profile; bcm2712 and bcm2709 are byte-identical and each measures origin/main 3724 -> HEAD 3808 = +84. Replaces this node's new_node_ceilings entry (max_chars 3724, Wave 3 scoped-access port commit E6, canMutate allowlist), which origin/main has fully consumed: the node exists there at exactly 3724 chars, so it is no longer a new node and the ceiling no longer applied."
     },
     "valve-clock-fn": {
-      "delta": 426,
-      "reason": "CMD-04 PR0, R13 M3 (2026-10-20): the valve tick hands runHousekeeping a ChirpStack enqueue (createProvisioningClientFromEnv, enqueueDownlink) so plan-snapshot rows go through a transport that reports acceptance; rows it does not accept are marked LOST at once instead of reading 'queued' for 24 h. MQTT stays the fallback when the client cannot be created. Measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: base 698f04c8b 1637 -> HEAD 2063 = +426."
+      "delta": 86,
+      "reason": "CMD-04 PR0, R13 M3 + review of d3b0efb85 T1/T2 (2026-10-21): the valve tick calls VC.runValveTick (housekeeping then clock tick, with a module-level re-entrancy guard) and hands it a transportFactory (chirpstack.createProvisioningClientFromEnv). The module builds the ChirpStack client only when a plan snapshot is due, sends the rows through enqueueDownlink so non-accepted rows are marked LOST at once, and closes the client. Re-measured with verify-flows-size-ratchet nodeSizes over both byte-identical profiles: origin/main 55b3d4b7b 1637 -> HEAD 1723 = +86 (supersedes the earlier +426 entry, measured before the lifecycle fix)."
     }
   },
   "total_allowance": {

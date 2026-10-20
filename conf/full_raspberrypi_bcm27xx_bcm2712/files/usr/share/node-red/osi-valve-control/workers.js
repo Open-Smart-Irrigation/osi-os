@@ -280,7 +280,7 @@ let lastClockTickMs = null;
 function _resetHousekeepingForTests() { lastClockTickMs = null; }
 const CLOCK_JUMP_BACKWARD_MS = -60 * 1000;
 const CLOCK_JUMP_FORWARD_MS = 6 * 3600 * 1000;
-async function runHousekeeping({ db, now, appId, warn, enqueue }) {
+async function runHousekeeping({ db, now, appId, warn, enqueue, transportFactory }) {
   const nowDate = now || new Date();
   // (FW-T5) Read once per tick, same rationale as runObserveTick above.
   const gatewayTimezone = await store.getGatewaySetting(db, 'gateway_timezone', warn);
@@ -291,7 +291,7 @@ async function runHousekeeping({ db, now, appId, warn, enqueue }) {
   // ahead of it; either order is harmless (R5 L2).
   // (R13 M3) With `enqueue` (the ChirpStack client, passed by the valve tick node) the snapshot
   // rows go through a transport that reports acceptance; without it they are MQTT messages.
-  const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn, enqueue });
+  const snaps = await push.emitPendingSnapshots({ db, now: nowDate, appId, warn, enqueue, transportFactory });
   out.snapshotsEmitted = snaps.emitted;
   out.transportFailures = snaps.transportFailures;
   out.messages.push(...snaps.messages);
@@ -318,6 +318,24 @@ async function runHousekeeping({ db, now, appId, warn, enqueue }) {
     out.messages.push(...q.messages); out.decommissioned += 1;
   }
   return out;
+}
+
+// The valve tick (flows node valve-clock-fn, every 60 s): housekeeping (snapshots first), then
+// the clock tick. (Review of d3b0efb85 T2) A tick that starts while the previous one is still
+// running -- e.g. a ChirpStack call waiting out its deadline -- is skipped, so two ticks never
+// queue the same clock sync or decommission sweep twice. Per runtime (module state); the flag
+// is released in `finally`, also when a tick throws.
+let valveTickRunning = false;
+async function runValveTick({ db, now, appId, warn, transportFactory }) {
+  if (valveTickRunning) return { skipped: true, messages: [], housekeeping: null, clock: null };
+  valveTickRunning = true;
+  try {
+    const housekeeping = await runHousekeeping({ db, now: now || new Date(), appId, warn, transportFactory });
+    const clock = await runClockTick({ db, now: now || new Date(), appId, warn });
+    return { skipped: false, messages: housekeeping.messages.concat(clock.messages), housekeeping, clock };
+  } finally {
+    valveTickRunning = false;
+  }
 }
 
 // Fill trigger on expectation rows written by the legacy writer (which does not know the column).
@@ -391,4 +409,4 @@ async function runTriggerBackfill({ db, warn }) {
   return { updated };
 }
 
-module.exports = { handleUplink, runOnceTick, runObserveTick, runClockTick, runHousekeeping, runTriggerBackfill, ONCE_GRACE_MS, _resetHousekeepingForTests };
+module.exports = { handleUplink, runOnceTick, runObserveTick, runClockTick, runHousekeeping, runValveTick, runTriggerBackfill, ONCE_GRACE_MS, _resetHousekeepingForTests };

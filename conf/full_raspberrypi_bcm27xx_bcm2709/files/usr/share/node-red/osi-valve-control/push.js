@@ -185,74 +185,114 @@ async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, 
 }
 
 // Run by the valve tick. Sends each pending snapshot exactly once -- the marker is deleted in
-// the same transaction that reads the rows, before the messages are handed to the flow -- when
-// its last edit is at least debounceMs old, when its first edit is SNAPSHOT_MAX_DELAY_MS old
-// (R5 L3), or when the gateway clock stepped back past it. Only rows still QUEUED are sent.
+// the same transaction that reads the rows, before anything is sent -- when its last edit is
+// at least debounceMs old, when its first edit is SNAPSHOT_MAX_DELAY_MS old (R5 L3), or when
+// the gateway clock stepped back past it. Only rows still QUEUED are sent.
 // (R5 M5) While an open awaits observation the compile could not flush, so the snapshot is
 // held: edit bursts during one unobserved open then append one snapshot behind the radio
 // queue, not one per burst.
 //
-// (R13 M3) `enqueue` (optional): a transport that reports acceptance, e.g. the ChirpStack
-// client's enqueueDownlink. With it, each row is enqueued in order; a row the transport did
-// not accept (it threw, or answered { accepted: false }) is marked LOST ('not_resent_q02c') at
-// once, together with a runtime emission, so a snapshot cut off halfway shows "device may not
-// hold this plan" now instead of "queued" for 24 h. The remaining rows are still offered (each
-// is a separate slot). Nothing re-sends a lost row (Q02 c). Without `enqueue`, the rows are
-// returned as MQTT messages, whose delivery the gateway cannot observe.
-async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, enqueue }) {
+// Transport (R13 M3; review of d3b0efb85 T1-T3). With `enqueue` (a function) or
+// `transportFactory` (returns a ChirpStack client with enqueueDownlink/close), rows go through
+// a transport that reports acceptance. The factory is called lazily, only once a due snapshot
+// is about to be sent, and the client is closed before returning (each client owns five gRPC
+// channels; the tick runs every 60 s). If the factory throws (the client cannot be built), the
+// rows fall back to MQTT messages, whose delivery the gateway cannot observe; that is warned
+// about once per runtime. The first row the transport does not accept (it threw -- e.g. its
+// deadline passed -- or answered { accepted: false }) stops the snapshot: that row and every
+// row after it are marked LOST ('not_resent_q02c') at once, without being tried, together
+// with a runtime emission, so the tile says "device may not hold this plan" now. A ChirpStack
+// that refused one row will not take the next within the same tick, and trying would stall
+// the tick for one deadline per row. Snapshots of other valves due in the same tick are left
+// pending (never emitted, so not a re-send) for the next tick. Nothing re-sends a lost row
+// (Q02 c).
+let mqttFallbackWarned = false;
+function _resetTransportWarningsForTests() { mqttFallbackWarned = false; }
+
+async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, enqueue, transportFactory }) {
   const windowMs = debounceMs == null ? SNAPSHOT_DEBOUNCE_MS : debounceMs;
   const nowMs = (now || new Date()).getTime();
-  const out = { messages: [], emitted: 0, transportFailures: 0 };
+  const out = { messages: [], emitted: 0, transportFailures: 0, transportDown: false };
   let pending = [];
   try { pending = await store.listSnapshotPending(db); }
   catch (e) { warn && warn('[valve-control] pending snapshots unreadable: ' + (e && e.message ? e.message : e)); return out; }
-  for (const p of pending) {
-    const editedMs = Date.parse(p.edited_at);
-    const firstMs = Date.parse(p.first_edited_at || p.edited_at);
-    const capReached = Number.isFinite(firstMs) && nowMs - firstMs >= SNAPSHOT_MAX_DELAY_MS;
-    const due = capReached || !Number.isFinite(editedMs) || nowMs - editedMs >= windowMs || editedMs - nowMs > windowMs;
-    if (!due) continue;
-    // (R5 re-review N1) The M5 hold never outlasts the 5-minute cap: a delete compiled during
-    // an unobserved open must not wait for the open (plus the 30-min reconciliation grace) to
-    // end. At the cap the snapshot is appended behind the unflushed queue, so the queue grows
-    // by at most one snapshot per 5 minutes per unobserved open. No separate bypass for
-    // snapshots that carry clears: the cap already bounds every snapshot, clears included, and
-    // telling "carries a clear" apart would need the previous snapshot's content.
-    if (!capReached && await store.hasPendingObservation(db, p.device_eui)) continue;
-    let rows = [];
-    await db.transaction(async (tx) => {
-      const current = await store.getSnapshotPending(tx, p.device_eui);
-      if (!current || current.raw !== p.raw) return; // re-edited since the read: the next tick decides
-      await store.clearSnapshotPending(tx, p.device_eui);
-      rows = await store.queuedPushesById(tx, p.device_eui, current.push_ids);
-      // (R5 re-review N3/N4) A cancel compares this marker's raw value before and after its
-      // flush to tell rows emitted during the flush (still on the air) from rows it removed.
-      if (rows.length) await store.setSnapshotEmitted(tx, p.device_eui, { emitted_at: new Date().toISOString(), push_ids: rows.map((r) => r.push_id) });
-    });
-    if (!rows.length) continue;
-    out.emitted += 1;
-    if (typeof enqueue !== 'function') {
-      for (const r of rows) out.messages.push(buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex }));
-      continue;
+  let send = typeof enqueue === 'function' ? enqueue : null;
+  let client = null;
+  let factoryTried = false;
+  try {
+    for (const p of pending) {
+      if (out.transportDown) break;
+      const editedMs = Date.parse(p.edited_at);
+      const firstMs = Date.parse(p.first_edited_at || p.edited_at);
+      const capReached = Number.isFinite(firstMs) && nowMs - firstMs >= SNAPSHOT_MAX_DELAY_MS;
+      const due = capReached || !Number.isFinite(editedMs) || nowMs - editedMs >= windowMs || editedMs - nowMs > windowMs;
+      if (!due) continue;
+      // (R5 re-review N1) The M5 hold never outlasts the 5-minute cap: a delete compiled during
+      // an unobserved open must not wait for the open (plus the 30-min reconciliation grace) to
+      // end. At the cap the snapshot is appended behind the unflushed queue, so the queue grows
+      // by at most one snapshot per 5 minutes per unobserved open. No separate bypass for
+      // snapshots that carry clears: the cap already bounds every snapshot, clears included, and
+      // telling "carries a clear" apart would need the previous snapshot's content.
+      if (!capReached && await store.hasPendingObservation(db, p.device_eui)) continue;
+      if (!send && !factoryTried && typeof transportFactory === 'function') {
+        factoryTried = true;
+        try {
+          client = transportFactory();
+          send = (item) => client.enqueueDownlink(item);
+        } catch (e) {
+          client = null;
+          if (!mqttFallbackWarned && warn) warn('[valve-control] ChirpStack client unavailable, plan snapshots go out over MQTT (delivery not observable): ' + (e && e.message ? e.message : e));
+          mqttFallbackWarned = true;
+        }
+      }
+      let rows = [];
+      await db.transaction(async (tx) => {
+        const current = await store.getSnapshotPending(tx, p.device_eui);
+        if (!current || current.raw !== p.raw) return; // re-edited since the read: the next tick decides
+        await store.clearSnapshotPending(tx, p.device_eui);
+        rows = await store.queuedPushesById(tx, p.device_eui, current.push_ids);
+        // (R5 re-review N3/N4) A cancel compares this marker's raw value before and after its
+        // flush to tell rows emitted during the flush (still on the air) from rows it removed.
+        if (rows.length) await store.setSnapshotEmitted(tx, p.device_eui, { emitted_at: new Date().toISOString(), push_ids: rows.map((r) => r.push_id) });
+      });
+      if (!rows.length) continue;
+      out.emitted += 1;
+      if (!send) {
+        for (const r of rows) out.messages.push(buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex }));
+        continue;
+      }
+      let failedAt = -1;
+      for (let i = 0; i < rows.length; i += 1) {
+        const msg = buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: rows[i].fport, payloadHex: rows[i].payload_hex });
+        let accepted = true;
+        try {
+          const result = await send({ devEui: msg.payload.devEui, fPort: msg.payload.fPort, data: msg.payload.data, confirmed: false });
+          if (result && result.accepted === false) accepted = false;
+        } catch (e) {
+          accepted = false;
+        }
+        if (!accepted) { failedAt = i; break; }
+      }
+      if (failedAt < 0) continue;
+      const notAccepted = rows.slice(failedAt);
+      out.transportFailures += notAccepted.length;
+      out.transportDown = true;
+      warn && warn('[valve-control] ' + p.device_eui + ': the transport stopped at snapshot row ' + (failedAt + 1) + ' of ' + rows.length + '; ' + notAccepted.length + ' row(s) not accepted, marked LOST, not re-sent (Q02c)');
+      await db.transaction(async (tx) => {
+        await store.markPushesLost(tx, notAccepted.map((r) => r.push_id), store.LOST_NOT_RESENT);
+        try { await runtime.emitRuntimeChanged(tx, p.device_eui, warn); }
+        catch (e) { warn && warn('[valve-control] emitPendingSnapshots: runtime emit failed: ' + (e && e.message ? e.message : e)); }
+      });
     }
-    const notAccepted = [];
-    for (const r of rows) {
-      const msg = buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex });
+  } finally {
+    if (client && typeof client.close === 'function') {
       try {
-        const result = await enqueue({ devEui: msg.payload.devEui, fPort: msg.payload.fPort, data: msg.payload.data, confirmed: false });
-        if (result && result.accepted === false) notAccepted.push(r);
+        const errors = client.close();
+        if (Array.isArray(errors) && errors.length && warn) warn('[valve-control] ChirpStack client close: ' + errors.map((e) => (e && e.message ? e.message : e)).join('; '));
       } catch (e) {
-        notAccepted.push(r);
+        warn && warn('[valve-control] ChirpStack client close failed: ' + (e && e.message ? e.message : e));
       }
     }
-    if (!notAccepted.length) continue;
-    out.transportFailures += notAccepted.length;
-    warn && warn('[valve-control] ' + p.device_eui + ': ' + notAccepted.length + ' of ' + rows.length + ' snapshot row(s) not accepted by the transport; marked LOST, not re-sent (Q02c)');
-    await db.transaction(async (tx) => {
-      await store.markPushesLost(tx, notAccepted.map((r) => r.push_id), store.LOST_NOT_RESENT);
-      try { await runtime.emitRuntimeChanged(tx, p.device_eui, warn); }
-      catch (e) { warn && warn('[valve-control] emitPendingSnapshots: runtime emit failed: ' + (e && e.message ? e.message : e)); }
-    });
   }
   return out;
 }
@@ -301,4 +341,4 @@ async function compileAndQueue({ db, deviceEui, appId, now, flushQueue, warn, sc
   return Object.assign({ compiled: built.compiled }, queued);
 }
 
-module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, buildSnapshotPushes, statusCodeFor, queuePushes, queueSnapshot, emitPendingSnapshots, compileAndQueue, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS, SNAPSHOT_PURPOSES, GEN2_CLEAR_PREFIX_KEY };
+module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, buildSnapshotPushes, statusCodeFor, queuePushes, queueSnapshot, emitPendingSnapshots, _resetTransportWarningsForTests, compileAndQueue, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS, SNAPSHOT_PURPOSES, GEN2_CLEAR_PREFIX_KEY };
