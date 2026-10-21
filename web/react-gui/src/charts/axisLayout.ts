@@ -119,12 +119,14 @@ export function valueAxisTickLabels(values: Iterable<number | null | undefined>,
   const decimals = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
   const start = Math.floor(min / step) * step;
   const end = Math.ceil(max / step) * step;
-  const format = opts.format ?? ((value: number) => String(Number(value.toFixed(decimals))));
+  // Rounding only (the labels feed a width estimate), so no locale formatting here.
+  const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places;
+  const format = opts.format ?? ((value: number) => String(round(value, decimals)));
   const labels: string[] = [];
   for (let i = 0; i <= 50; i += 1) {
     const value = start + i * step;
     if (value > end + step / 2) break;
-    labels.push(format(Number(value.toFixed(decimals + 2))));
+    labels.push(format(round(value, decimals + 2)));
   }
   return labels;
 }

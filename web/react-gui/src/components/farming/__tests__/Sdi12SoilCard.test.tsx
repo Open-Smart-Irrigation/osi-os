@@ -462,10 +462,15 @@ describe('Sdi12SoilCard history', () => {
     })} />);
     fireEvent.click(screen.getByRole('button', { name: 'SWT, #1: 1.29 pF' }));
     expect(await screen.findByRole('heading', { name: 'SWT · #1 (pF)' })).toBeInTheDocument();
-    expect(screen.getAllByText('1.29 pF').length).toBeGreaterThan(1);
+    // The monitor's stats render the number and the unit in separate spans, so
+    // match the innermost element whose whole text is the reading.
+    const reading = (text: string) => (_: string, el: Element | null) => (
+      el?.textContent === text && !Array.from(el.children).some((child) => child.textContent === text)
+    );
+    expect(screen.getAllByText(reading('1.29 pF')).length).toBeGreaterThan(1);
     act(() => writeDisplayPreferences({ swtUnit: 'kPa' }));
     expect(await screen.findByRole('heading', { name: 'SWT · #1 (kPa)' })).toBeInTheDocument();
-    expect(screen.getAllByText('2.0 kPa').length).toBeGreaterThan(1);
+    expect(screen.getAllByText(reading('2.0 kPa')).length).toBeGreaterThan(1);
     expect(getHistory).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });

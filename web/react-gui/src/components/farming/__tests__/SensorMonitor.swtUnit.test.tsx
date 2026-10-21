@@ -27,12 +27,14 @@ describe('SensorMonitor SWT display units', () => {
     getHistory.mockResolvedValue([{ t: '2026-10-16T08:00:00Z', value: 1.97 }, { t: '2026-10-16T09:00:00Z', value: null }, { t: '2026-10-16T10:00:00Z', value: 0.1 }]);
     render(<SensorMonitor deveui='EDGE-1' deviceName='Tensiomark pair' field='swt_1' label='SWT' unit='kPa' onClose={() => undefined} />);
 
-    await waitFor(() => expect(screen.getByText('2.0 kPa')).toBeInTheDocument());
+    // A stat renders its number and unit in separate spans (the unit may wrap on a phone).
+    const stat = (text: string) => (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === text;
+    await waitFor(() => expect(screen.getByText(stat('2.0 kPa'))).toBeInTheDocument());
     expect(getHistory).toHaveBeenCalledTimes(1);
     act(() => writeDisplayPreferences({ swtUnit: 'pF' }));
 
-    expect(screen.getByText('1.29 pF')).toBeInTheDocument();
-    expect(screen.getAllByText('0.00 pF')).toHaveLength(2);
+    expect(screen.getByText(stat('1.29 pF'))).toBeInTheDocument();
+    expect(screen.getAllByText(stat('0.00 pF'))).toHaveLength(2);
     expect(screen.getByText('SWT (pF)')).toBeInTheDocument();
     expect(getHistory).toHaveBeenCalledTimes(1);
   });
