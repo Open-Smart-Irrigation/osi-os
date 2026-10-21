@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { act, render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
@@ -46,6 +46,30 @@ describe('AnalysisChartPanel', () => {
     expect(chartMinHeight('small-multiples', 5)).toBe(440);
   });
 
+  it('stacks small multiples in one column on a phone-width frame', () => {
+    expect(chartMinHeight('small-multiples', 4, 390)).toBe(880);
+    expect(chartMinHeight('small-multiples', 4, 1440)).toBe(440);
+  });
+
+  it('passes the measured frame size to the option builders', () => {
+    let notify: ((entries: Array<{ contentRect: { width: number; height: number } }>) => void) | null = null;
+    class ResizeObserverStub {
+      constructor(cb: typeof notify) { notify = cb; }
+      observe() {}
+      disconnect() {}
+    }
+    const previous = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+    try {
+      render(<AnalysisChartPanel series={[s('a', 'kPa')]} mode="timeline" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
+      act(() => notify?.([{ contentRect: { width: 390, height: 360 } }]));
+      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ includeLegend: true, viewport: { width: 390, height: 360 } }));
+      expect(buildTimeSeriesOption).toHaveBeenCalledWith(expect.objectContaining({ viewport: { width: 390, height: 360 } }));
+    } finally {
+      globalThis.ResizeObserver = previous;
+    }
+  });
+
   it('shows an empty state with no series', () => {
     render(<AnalysisChartPanel series={[]} mode="timeline" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
     expect(screen.queryByTestId('echart')).not.toBeInTheDocument();
@@ -71,7 +95,7 @@ describe('AnalysisChartPanel', () => {
   it('routes small-multiples layout to the small-multiples builder with normalize', () => {
     const series = [mkSeries('a', 'swt_1', 'kPa')];
     render(<AnalysisChartPanel series={series} mode="timeline" layout="small-multiples" toggles={{ normalize: true }} channelMeta={new Map()} resolveAxisLabel={(k) => k} />);
-    expect(buildSmallMultiplesOption).toHaveBeenCalledWith(series, true, expect.any(Function), expect.any(Function));
+    expect(buildSmallMultiplesOption).toHaveBeenCalledWith(series, true, expect.any(Function), expect.any(Function), undefined);
     expect(buildTimeSeriesOption).not.toHaveBeenCalled();
   });
 

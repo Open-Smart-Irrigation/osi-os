@@ -5,6 +5,8 @@ import { groupByUnit } from '../../analysis/unitGrouping';
 import { buildSmallMultiplesOption, buildTimeSeriesOption, formatPointNote } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
 import type { EChartHandle } from './EChart';
+import { smallMultiplesColumns, type ChartViewport } from '../../analysis/chartGeometry';
+import { useElementSize } from '../../hooks/useElementSize';
 
 const EChart = lazy(() => import('./EChart').then((module) => ({ default: module.EChart })));
 const CorrelationPanel = lazy(() => import('./CorrelationPanel').then((module) => ({ default: module.CorrelationPanel })));
@@ -27,10 +29,10 @@ const SINGLE_PANEL_MIN = 360;
 const STACKED_PANEL_MIN = 240;
 const SMALL_MULTIPLE_CELL_MIN = 220;
 
-export function chartMinHeight(layout: TimelineLayout, panelCount: number): number {
+export function chartMinHeight(layout: TimelineLayout, panelCount: number, width?: number): number {
   const count = Math.max(1, panelCount);
   if (layout === 'small-multiples') {
-    const columns = Math.ceil(Math.sqrt(count));
+    const columns = smallMultiplesColumns(count, width);
     const rows = Math.ceil(count / columns);
     return rows * SMALL_MULTIPLE_CELL_MIN;
   }
@@ -45,6 +47,8 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   const t = translate as AnalysisTranslate;
   const [editing, setEditing] = useState<{ channelKey: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState('');
+  const [frameRef, frameSize] = useElementSize<HTMLDivElement>();
+  const viewport: ChartViewport | undefined = frameSize ?? undefined;
 
   const commitAxis = () => {
     if (!editing) return;
@@ -67,7 +71,7 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
 
   const option = useMemo(() => {
     if (series.length === 0 || mode === 'correlation') return null;
-    if (layout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel, formatPartial);
+    if (layout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel, formatPartial, viewport);
     return buildTimeSeriesOption({
       panels: timeSeriesPanels,
       series,
@@ -75,8 +79,9 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
       multiAxis: layout === 'overlaid',
       resolveAxisLabel,
       formatPartial,
+      viewport,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
+  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial, viewport]);
 
   const exportOption = useMemo(() => {
     if (series.length === 0 || mode === 'correlation' || layout === 'small-multiples') return undefined;
@@ -88,15 +93,17 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
       includeLegend: true,
       resolveAxisLabel,
       formatPartial,
+      // The export renders off-screen at the live chart's width and at least 320 px tall.
+      viewport: viewport ? { width: viewport.width, height: Math.max(320, viewport.height) } : undefined,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
+  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial, viewport]);
 
   const heightPanelCount = layout === 'small-multiples'
     ? series.length
     : layout === 'stacked'
       ? timeSeriesPanels.length
       : 1;
-  const minHeight = chartMinHeight(layout, heightPanelCount);
+  const minHeight = chartMinHeight(layout, heightPanelCount, viewport?.width);
 
   if (series.length === 0) return <div className="analysis-empty">{t('analysis.empty')}</div>;
   if (mode === 'correlation') return (
@@ -106,6 +113,7 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   );
   return (
     <div
+      ref={frameRef}
       data-testid="analysis-chart-frame"
       className="analysis-chart-frame h-full"
       style={{ minHeight, position: 'relative' }}
@@ -128,7 +136,8 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
           onBlur={() => commitAxis()}
           onKeyDown={(e) => { if (e.key==='Enter') commitAxis(); if (e.key==='Escape') setEditing(null); }}
           className="absolute z-10 w-48 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)]"
-          style={{ left: editing.x, top: editing.y }}
+          // Keep the 12rem field inside the frame when the clicked title is a right-hand axis.
+          style={{ left: viewport ? Math.max(0, Math.min(editing.x, viewport.width - 196)) : editing.x, top: editing.y }}
         />
       )}
     </div>

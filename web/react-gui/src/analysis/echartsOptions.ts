@@ -4,6 +4,8 @@ import type { UnitPanel } from './unitGrouping';
 import { SERIES_PALETTE, seriesColor } from './seriesColors';
 import { canonicalize } from '../channels/registry';
 import { prettyUnit } from './channelLabels';
+import { smallMultiplesColumns, type ChartViewport } from './chartGeometry';
+import { fitAxisTitle, valueAxisLabelWidth } from '../charts/axisLayout';
 
 export interface TimeSeriesOptionInput {
   panels: UnitPanel[];
@@ -13,6 +15,8 @@ export interface TimeSeriesOptionInput {
   includeLegend?: boolean;
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string;
   formatPartial?: PartialFormatter;
+  /** Measured chart size. Margins and title fitting use it; a default stands in before the first measurement. */
+  viewport?: ChartViewport;
 }
 
 /** Text appended to a tooltip value, e.g. " (23 of 24 h)" for a partial sum; '' for none. */
@@ -41,16 +45,37 @@ const tooltipValueFormatter = (value: number | null | undefined, unit?: string |
   value == null || !Number.isFinite(Number(value)) ? '–' : Number(value).toFixed(unit === 'pF' ? 2 : 1)
 );
 
-const NAME_STYLE = {
-  nameLocation: 'middle' as const,
-  nameRotate: 90,
-  nameGap: 58,
-  nameTextStyle: { fontSize: 12, fontWeight: 500 as const, color: '#475569' },
-};
-const Y_AXIS_GRID_LEFT = 80;
+// Axis-band geometry, in px. ECharts draws value-axis tick labels 8 px
+// (axisLabel.margin) from the axis line in its default 12 px font; the rotated
+// title sits NAME_SPACING beyond the widest label and takes NAME_BAND.
+const TICK_FONT_PX = 12;
+const NAME_FONT_PX = 12;
+const LABEL_MARGIN = 8;
+const NAME_SPACING = 6;
+const NAME_BAND = 16;
+const OUTER_PAD = 4;
+const RIGHT_PAD_NO_AXIS = 24;
+const DEFAULT_WIDTH = 720;
+const SINGLE_DEFAULT_HEIGHT = 360;
+const STACKED_DEFAULT_PANEL_HEIGHT = 240;
+const SMALL_MULTIPLE_DEFAULT_CELL_HEIGHT = 220;
+
+const NAME_TEXT_STYLE = { fontSize: NAME_FONT_PX, fontWeight: 500 as const, color: '#475569' };
+
+/** ECharts' default value-axis label: the number with thousands separators. */
+function echartsTickLabel(value: number): string {
+  const [integer, fraction] = String(value).split('.');
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return fraction ? `${grouped}.${fraction}` : grouped;
+}
 
 function escapeHtml(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // The markup of ECharts 5.6's default axis tooltip (component/tooltip/tooltipMarkup.js
@@ -120,22 +145,87 @@ function symbolSpec(s: AnalysisSeries): Record<string, unknown> {
   return s.cadence === 'daily' ? { showSymbol: true, symbolSize: 4 } : { showSymbol: false };
 }
 
-function axisNameSpec(
+interface AxisTitle {
+  full: string;
+  /** Unit-only fallback for a cramped axis. */
+  short: string | null;
+  /** Channel key of an editable (renameable) title. */
+  editableKey?: string;
+}
+
+function axisTitle(
   axisSeries: AnalysisSeries[],
   normalize: boolean,
-  axisIndex: number,
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string,
-): Record<string, unknown> {
-  if (normalize) return { name: '%', ...NAME_STYLE };
-  if (axisSeries.length === 0) return { name: '', ...NAME_STYLE };
+): AxisTitle {
+  if (normalize) return { full: '%', short: null };
+  if (axisSeries.length === 0) return { full: '', short: null };
   const units = Array.from(new Set(axisSeries.map((s) => s.unit ?? '').filter(Boolean)));
   if (units.length > 1) {
-    return { name: units.map((u) => prettyUnit(u)).join(', '), ...NAME_STYLE };
+    return { full: units.map((u) => prettyUnit(u)).join(', '), short: null };
   }
   const key = canonicalize(axisSeries[0]?.resolved.channelKey ?? '');
   const unit = axisSeries[0]?.unit ?? null;
-  const name = resolveAxisLabel ? resolveAxisLabel(key, unit) : (unit ? `${key} (${prettyUnit(unit)})` : key);
-  return { name, ...NAME_STYLE, id: `${key}#${axisIndex}`, triggerEvent: true };
+  const full = resolveAxisLabel ? resolveAxisLabel(key, unit) : (unit ? `${key} (${prettyUnit(unit)})` : key);
+  return { full, short: unit ? prettyUnit(unit) : null, editableKey: key };
+}
+
+function axisValues(axisSeries: AnalysisSeries[], normalize: boolean): number[] {
+  if (normalize) return [0, 100];
+  const values: number[] = [];
+  for (const s of axisSeries) {
+    for (const p of s.points) if (p.value !== null && Number.isFinite(p.value)) values.push(p.value);
+  }
+  return values;
+}
+
+function tickLabelWidth(values: number[]): number {
+  return valueAxisLabelWidth(values, { fontPx: TICK_FONT_PX, format: echartsTickLabel });
+}
+
+/** Width of an axis band: tick labels plus, when titled, the rotated title. */
+function axisBand(labelWidth: number, titled: boolean): number {
+  return labelWidth + LABEL_MARGIN + (titled ? NAME_SPACING + NAME_BAND : 0);
+}
+
+/**
+ * Name options for one value axis. `parallel` draws the title rotated along the
+ * axis, `top` draws it horizontally above the plot (small-multiple cells).
+ * A title longer than `maxPx` falls back to its unit, then to an ellipsis; the
+ * full title then shows as a tooltip on hover.
+ */
+function axisNameOptions(
+  title: AxisTitle,
+  placement: 'parallel' | 'top',
+  maxPx: number,
+  labelWidth: number,
+  axisIndex: number,
+): Record<string, unknown> {
+  const fitted = fitAxisTitle(title.full, { maxPx: Math.max(0, maxPx), short: title.short, fontPx: NAME_FONT_PX });
+  const base: Record<string, unknown> = placement === 'parallel'
+    ? {
+      name: fitted.text,
+      nameLocation: 'middle',
+      nameRotate: 90,
+      nameGap: labelWidth + LABEL_MARGIN + NAME_SPACING,
+      nameTextStyle: NAME_TEXT_STYLE,
+    }
+    : {
+      name: fitted.text,
+      nameLocation: 'end',
+      nameRotate: 0,
+      nameGap: 8,
+      nameTextStyle: { ...NAME_TEXT_STYLE, align: 'left' },
+    };
+  if (title.editableKey) {
+    base.id = `${title.editableKey}#${axisIndex}`;
+    base.triggerEvent = true;
+  }
+  if (fitted.shortened) {
+    const full = escapeHtml(fitted.full);
+    base.tooltip = { show: true, formatter: () => full };
+  }
+  return base;
 }
 
 const TIME_AXIS_LABEL = {
@@ -233,12 +323,26 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
   const singleGrid = panels.length <= 1 || multiAxis;
 
   if (singleGrid) {
-    const yAxis = multiAxis && !normalize
-      ? panels.map((panel, i) => {
-        const axisSeries = series.filter((s) => panel.seriesIds.includes(s.seriesId));
-        return { type: 'value', position: i === 0 ? 'left' : 'right', offset: i > 1 ? (i - 1) * 56 : 0, ...axisNameSpec(axisSeries, false, i, input.resolveAxisLabel) };
-      })
-      : [{ type: 'value', ...axisNameSpec(series, normalize, 0, input.resolveAxisLabel) }];
+    const height = input.viewport?.height ?? SINGLE_DEFAULT_HEIGHT;
+    const top = 24;
+    const bottom = includeLegend ? 88 : 56;
+    const titleMax = height - top - bottom - 8;
+    const axisGroups = multiAxis && !normalize
+      ? panels.map((panel) => series.filter((s) => panel.seriesIds.includes(s.seriesId)))
+      : [series];
+    let rightOffset = 0;
+    const bands: number[] = [];
+    const yAxis = axisGroups.map((axisSeries, i) => {
+      const title = axisTitle(axisSeries, normalize, input.resolveAxisLabel);
+      const labelWidth = tickLabelWidth(axisValues(axisSeries, normalize));
+      const band = axisBand(labelWidth, title.full !== '');
+      bands.push(band);
+      const placement = i === 0
+        ? { position: 'left' }
+        : { position: 'right', offset: rightOffset };
+      if (i > 0) rightOffset += band;
+      return { type: 'value', ...placement, ...axisNameOptions(title, 'parallel', titleMax, labelWidth, i) };
+    });
     const echSeries = series.map((s, i) => {
       const panelIndex = panels.findIndex((p) => p.seriesIds.includes(s.seriesId));
       const yIndex = multiAxis && !normalize ? Math.max(0, panelIndex) : 0;
@@ -248,27 +352,49 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
       color: SERIES_PALETTE,
       tooltip: axisTooltip(series, input.formatPartial),
       ...(includeLegend ? { legend: EXPORT_LEGEND } : {}),
-      grid: [{ left: Y_AXIS_GRID_LEFT, right: 56, top: 48, bottom: includeLegend ? 88 : 56 }],
+      grid: [{
+        left: bands[0] + OUTER_PAD,
+        right: rightOffset > 0 ? rightOffset + OUTER_PAD : RIGHT_PAD_NO_AXIS,
+        top,
+        bottom,
+      }],
       xAxis: [{ type: 'time', axisLabel: TIME_AXIS_LABEL }],
       yAxis,
       series: echSeries,
     };
   }
 
+  // Stacked: one grid per unit. Pixel geometry with a fixed gap for each
+  // panel's own time labels; percentage gaps grew with the panel count and
+  // left 100 px plots under five units.
   const gridCount = panels.length;
-  const availableHeight = includeLegend ? 92 : 100;
-  const rowHeight = availableHeight / gridCount;
+  const height = input.viewport?.height ?? gridCount * STACKED_DEFAULT_PANEL_HEIGHT;
+  const top = 16;
+  const gap = 40;
+  const bottom = includeLegend ? 72 : 32;
+  const panelHeight = Math.max(40, Math.floor((height - top - bottom - gap * (gridCount - 1)) / gridCount));
+  const axes = panels.map((panel) => {
+    const axisSeries = series.filter((s) => panel.seriesIds.includes(s.seriesId));
+    const title = axisTitle(axisSeries, normalize, input.resolveAxisLabel);
+    const labelWidth = tickLabelWidth(axisValues(axisSeries, normalize));
+    return { title, labelWidth };
+  });
+  // One shared left edge keeps the time axes of all panels aligned, and one
+  // shared title distance keeps the rotated titles in a column.
+  const sharedLabelWidth = Math.max(...axes.map((a) => a.labelWidth));
+  const left = axisBand(sharedLabelWidth, axes.some((a) => a.title.full !== '')) + OUTER_PAD;
   const grid = panels.map((_, i) => ({
-    left: Y_AXIS_GRID_LEFT,
-    right: 24,
-    top: `${i * rowHeight + 6}%`,
-    height: `${rowHeight - 12}%`,
+    left,
+    right: RIGHT_PAD_NO_AXIS,
+    top: top + i * (panelHeight + gap),
+    height: panelHeight,
   }));
   const xAxis = panels.map((_, i) => ({ type: 'time', gridIndex: i, axisLabel: TIME_AXIS_LABEL }));
-  const yAxis = panels.map((panel, i) => {
-    const axisSeries = series.filter((s) => panel.seriesIds.includes(s.seriesId));
-    return { type: 'value', gridIndex: i, ...axisNameSpec(axisSeries, normalize, i, input.resolveAxisLabel) };
-  });
+  const yAxis = axes.map(({ title }, i) => ({
+    type: 'value',
+    gridIndex: i,
+    ...axisNameOptions(title, 'parallel', panelHeight - 8, sharedLabelWidth, i),
+  }));
   const echSeries = panels.flatMap((panel, i) =>
     panel.seriesIds.map((id) => lineSeries(
       byId.get(id) as AnalysisSeries,
@@ -297,30 +423,43 @@ export function buildSmallMultiplesOption(
   normalize: boolean,
   resolveAxisLabel?: (channelKey: string, unit: string | null) => string,
   formatPartial?: PartialFormatter,
+  viewport?: ChartViewport,
 ): Record<string, unknown> {
   const displayLabels = uniqueDisplayLabels(series.map((item) => ({ identity: item.seriesId, label: item.label })));
   const count = series.length;
-  const cols = count === 0 ? 1 : Math.ceil(Math.sqrt(count));
+  const cols = smallMultiplesColumns(count, viewport?.width);
   const rows = count === 0 ? 0 : Math.ceil(count / cols);
-  const cellW = 100 / cols;
-  const cellH = rows === 0 ? 0 : 100 / rows;
+  const width = viewport?.width ?? DEFAULT_WIDTH;
+  const height = viewport?.height ?? rows * SMALL_MULTIPLE_DEFAULT_CELL_HEIGHT;
+  const cellW = width / cols;
+  const cellH = rows === 0 ? 0 : height / rows;
+  const titleBand = 28;
+  const timeLabelBand = 32;
+  const cellRightPad = 16;
 
-  const grid = series.map((_, i) => {
+  const cells = series.map((s, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    return {
-      left: `${col * cellW + 4}%`,
-      width: `${cellW - 8}%`,
-      top: `${row * cellH + 8}%`,
-      height: `${cellH - 16}%`,
+    const labelWidth = tickLabelWidth(axisValues([s], normalize));
+    const plotLeft = Math.round(col * cellW + labelWidth + LABEL_MARGIN + OUTER_PAD);
+    const grid = {
+      left: plotLeft,
+      width: Math.max(40, Math.floor(cellW - (plotLeft - col * cellW) - cellRightPad)),
+      top: Math.round(row * cellH + titleBand),
+      height: Math.max(40, Math.floor(cellH - titleBand - timeLabelBand)),
     };
+    // The title starts at the plot's left edge and may run to the cell's right edge.
+    const titleMax = Math.floor((col + 1) * cellW - plotLeft - 8);
+    return { s, grid, labelWidth, titleMax };
   });
+
+  const grid = cells.map((c) => c.grid);
   const xAxis = series.map((_, i) => ({ type: 'time', gridIndex: i, axisLabel: TIME_AXIS_LABEL }));
-  const yAxis = series.map((s, i) => (
-    normalize
-      ? { type: 'value', gridIndex: i, name: '%', ...NAME_STYLE }
-      : { type: 'value', gridIndex: i, ...axisNameSpec([s], false, i, resolveAxisLabel) }
-  ));
+  const yAxis = cells.map((c, i) => ({
+    type: 'value',
+    gridIndex: i,
+    ...axisNameOptions(axisTitle([c.s], normalize, resolveAxisLabel), 'top', c.titleMax, c.labelWidth, i),
+  }));
   const echSeries = series.map((s, i) => ({
     name: displayLabels.get(s.seriesId) ?? s.label,
     type: 'line',
@@ -348,9 +487,27 @@ export interface CorrelationOptionInput {
   channelYLabel: string;
   channelXUnit?: string | null;
   channelYUnit?: string | null;
+  viewport?: ChartViewport;
 }
 
 export function buildCorrelationOption(input: CorrelationOptionInput): Record<string, unknown> {
+  const width = input.viewport?.width ?? DEFAULT_WIDTH;
+  const height = input.viewport?.height ?? SINGLE_DEFAULT_HEIGHT;
+  const ys: number[] = [];
+  for (const zone of input.zonePairs) {
+    for (const [, y] of zone.points) {
+      if (Number.isFinite(y)) ys.push(y);
+    }
+  }
+  const yLabelWidth = tickLabelWidth(ys);
+  const left = axisBand(yLabelWidth, input.channelYLabel !== '') + OUTER_PAD;
+  const right = RIGHT_PAD_NO_AXIS;
+  const top = 40; // room for the scrolling legend
+  const xNameGap = 28;
+  const bottom = xNameGap + NAME_BAND + 8;
+  const xTitle: AxisTitle = { full: input.channelXLabel, short: input.channelXUnit ? prettyUnit(input.channelXUnit) : null };
+  const yTitle: AxisTitle = { full: input.channelYLabel, short: input.channelYUnit ? prettyUnit(input.channelYUnit) : null };
+  const xName = axisNameOptions(xTitle, 'parallel', width - left - right, 0, 0);
   const displayLabels = uniqueDisplayLabels(input.zonePairs.map((zone) => ({ identity: zone.groupId, label: zone.label })));
   const correlationTooltip = input.channelXUnit === 'pF' || input.channelYUnit === 'pF'
     ? {
@@ -366,14 +523,14 @@ export function buildCorrelationOption(input: CorrelationOptionInput): Record<st
     color: SERIES_PALETTE,
     tooltip: correlationTooltip,
     legend: { type: 'scroll' },
-    grid: [{ left: 64, right: 24, top: 32, bottom: 56 }],
+    grid: [{ left, right, top, bottom }],
     xAxis: [{
       type: 'value',
-      name: input.channelXLabel,
-      nameLocation: 'middle',
-      nameGap: 28,
+      ...xName,
+      nameRotate: 0,
+      nameGap: xNameGap,
     }],
-    yAxis: [{ type: 'value', name: input.channelYLabel, nameLocation: 'middle', nameRotate: 90, nameGap: 48 }],
+    yAxis: [{ type: 'value', ...axisNameOptions(yTitle, 'parallel', height - top - bottom - 8, yLabelWidth, 0) }],
     series: input.zonePairs.map((zone) => ({
       id: zone.groupId,
       name: displayLabels.get(zone.groupId) ?? zone.label,

@@ -34,9 +34,9 @@ export function AnalysisChartLegend({ series, onRename }: AnalysisChartLegendPro
   };
 
   return (
-    <ul className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2" aria-label={t('analysis.legend.label')}>
+    <ul className="mt-3 flex min-w-0 flex-wrap items-center justify-center gap-x-4 gap-y-2" aria-label={t('analysis.legend.label')}>
       {series.map((s, i) => (
-        <li key={s.seriesId} className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+        <li key={s.seriesId} className="flex min-w-0 max-w-full items-center gap-1.5 text-xs text-[var(--text-secondary)]">
           <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: seriesColor(i) }} aria-hidden />
           {editingId === s.seriesId ? (
             <input
@@ -48,17 +48,18 @@ export function AnalysisChartLegend({ series, onRename }: AnalysisChartLegendPro
                 if (e.key === 'Enter') commit(s.seriesId);
                 if (e.key === 'Escape') setEditingId(null);
               }}
-              className="w-40 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)] focus:border-[var(--focus)] focus:outline-none"
+              className="w-40 max-w-full rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)] focus:border-[var(--focus)] focus:outline-none"
               aria-label={t('analysis.legend.rename')}
             />
           ) : (
             <button
               type="button"
               onClick={() => startEdit(s)}
-              title={t('analysis.legend.rename')}
-              className="rounded px-0.5 hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
+              // The label may be cut with an ellipsis; the title carries it in full.
+              title={`${s.label} · ${t('analysis.legend.rename')}`}
+              className="flex min-w-0 max-w-full rounded px-0.5 hover:bg-[var(--secondary-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]"
             >
-              {s.label}
+              <span className="truncate">{s.label}</span>
             </button>
           )}
         </li>
