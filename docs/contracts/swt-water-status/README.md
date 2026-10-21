@@ -19,7 +19,7 @@ The classifier takes the stored canonical kPa, before rounding and before any pF
 
 The original spec capped the classifier at 300 kPa, the Chameleon conversion range. The cloud frontend caps at `SWT_DISPLAY_MAX_KPA` (1,000,000 kPa, pF 7), because a Tensiomark can report tensions far above 300 kPa and those readings are dry, not invalid. The contract follows the cloud: `bands.max_kpa` is 1,000,000.
 
-Edge main still caps at 300. The edge Tensiomark field integration moves the edge to the same 1,000,000 kPa domain. Until it lands, `implementations` records each GUI's actual cap, and each side's test expects `null` for a vector above its own cap. When the edge cap changes, update `implementations["osi-os web/react-gui"].max_kpa` in both copies; the edge test fails until the file and the code agree.
+The edge reached the same 1,000,000 kPa domain with the Tensiomark integration (#503; `SWT_KPA_RANGE` in `web/react-gui/src/utils/swt.ts`). `implementations` still records each GUI's actual cap, and each side's test expects `null` for a vector above its own cap, so a later change to either cap must update `implementations` in both copies; the tests fail until the file and the code agree.
 
 ## Copies and tests
 

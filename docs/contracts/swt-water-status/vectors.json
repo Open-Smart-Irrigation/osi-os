@@ -8,8 +8,8 @@
   },
   "implementations": {
     "osi-os web/react-gui": {
-      "max_kpa": 300,
-      "note": "Edge main still caps at the Chameleon range; the Tensiomark field integration moves it to the contract max."
+      "max_kpa": 1000000,
+      "note": "SWT_KPA_RANGE in web/react-gui/src/utils/swt.ts (raised from the Chameleon range of 300 kPa by the Tensiomark integration, #503)."
     },
     "osi-server frontend": {
       "max_kpa": 1000000,

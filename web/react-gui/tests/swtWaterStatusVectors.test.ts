@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { classifySwtWaterStatus } from '../src/utils/swt.ts';
+import { classifySwtWaterStatus, SWT_KPA_RANGE } from '../src/utils/swt.ts';
 
 const contract = JSON.parse(readFileSync(
   join(import.meta.dirname, '..', '..', '..', 'docs', 'contracts', 'swt-water-status', 'vectors.json'),
@@ -26,7 +26,8 @@ const edgeMaxKpa = contract.implementations['osi-os web/react-gui'].max_kpa;
 
 test('the contract is the one this test was written against', () => {
   assert.equal(contract.contract, 'swt-water-status-v1');
-  assert.ok(edgeMaxKpa > 50 && edgeMaxKpa <= contract.bands.max_kpa);
+  assert.equal(edgeMaxKpa, SWT_KPA_RANGE[1]);
+  assert.ok(edgeMaxKpa <= contract.bands.max_kpa);
 });
 
 for (const { input, expected } of contract.classify) {

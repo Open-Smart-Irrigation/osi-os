@@ -71,7 +71,7 @@ dry    for 50 < value <= 300
 null   otherwise
 ```
 
-Classification happens before rounding and before `kpaToPf()`. Thus `19.999` is Wet, `20` is Moist, `50` is Moist, and `50.001` is Dry. A numeric string is invalid. Zero is valid Wet. pF mode shows a floor of `0.00 pF` for any finite tension at or below `PF_FLOOR_KPA` (0.1 kPa), so a saturated probe at 0 kPa is shown, not hidden (this replaced the original "pF undefined at zero, fall back to `0.0 kPa`" rule).
+Classification happens before rounding and before `kpaToPf()`. Thus `19.999` is Wet, `20` is Moist, `50` is Moist, and `50.001` is Dry. A numeric string is invalid. Zero is valid Wet. pF follows `docs/contracts/matric-potential/v1.md`: it is undefined at zero, so pF mode shows a measured 0 kPa as `0.0 kPa` (`formatMeasuredSwtValue`) rather than an em dash, and a real reading is not hidden. Finite tensions between 0 and 0.1 kPa show a negative pF.
 
 `summarizeSwtValues()` must delegate to this classifier if it remains exported. It returns a language-neutral status code, with user-visible labels resolved from the existing locale resources. It may not retain a competing 60 kPa boundary or hardcoded English labels.
 

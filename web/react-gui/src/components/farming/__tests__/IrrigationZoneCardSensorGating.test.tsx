@@ -207,11 +207,11 @@ describe('water card sensor gating', () => {
   });
 
   it('shows no value and no pill for an invalid reading', async () => {
-    await openCard([sensor({ last_seen: STALE, latest_data: { swt_1: 4200 } })]);
+    await openCard([sensor({ last_seen: STALE, latest_data: { swt_1: 1_000_001 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
     expect(tile).toHaveTextContent('Invalid reading');
-    expect(tile).not.toHaveTextContent('4200');
+    expect(tile).not.toHaveTextContent('1000001');
     expect(tile.querySelector('[data-swt-status]')).toBeNull();
   });
 
