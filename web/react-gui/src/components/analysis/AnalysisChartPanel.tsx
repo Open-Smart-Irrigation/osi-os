@@ -5,7 +5,7 @@ import { groupByUnit } from '../../analysis/unitGrouping';
 import { buildSmallMultiplesOption, buildTimeSeriesOption, formatPointNote } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
 import type { EChartHandle } from './EChart';
-import { smallMultiplesColumns, type ChartViewport } from '../../analysis/chartGeometry';
+import { CHART_SIZE_STEP, smallMultiplesColumns, type ChartViewport } from '../../analysis/chartGeometry';
 import { useElementSize } from '../../hooks/useElementSize';
 
 const EChart = lazy(() => import('./EChart').then((module) => ({ default: module.EChart })));
@@ -47,7 +47,7 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   const t = translate as AnalysisTranslate;
   const [editing, setEditing] = useState<{ channelKey: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState('');
-  const [frameRef, frameSize] = useElementSize<HTMLDivElement>();
+  const [frameRef, frameSize] = useElementSize<HTMLDivElement>({ step: CHART_SIZE_STEP });
   const viewport: ChartViewport | undefined = frameSize ?? undefined;
 
   const commitAxis = () => {

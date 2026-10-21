@@ -123,3 +123,46 @@ describe('rechartsYAxisWidth', () => {
     expect(twoDecimals).toBeGreaterThan(plain);
   });
 });
+
+/**
+ * Independent reference: advance widths (1/1000 em) from the Adobe Helvetica
+ * AFM, which Arial and Liberation Sans match. ECharts draws in `sans-serif`,
+ * i.e. one of these on most systems. The estimate must never be narrower than
+ * the real text (that is what overflows) and should not waste more than ~25 %.
+ * Limit: other UI faces (Segoe UI, Roboto, SF) differ by a few per cent per
+ * glyph; the rendered check at 320/390/1440 px stays the real gate.
+ */
+const HELVETICA_AFM: Record<string, number> = {
+  '0': 556, '1': 556, '2': 556, '3': 556, '4': 556, '5': 556, '6': 556, '7': 556, '8': 556, '9': 556,
+  '.': 278, ',': 278, '-': 333, ' ': 278, '%': 889, '(': 333, ')': 333, '°': 400,
+  S: 667, P: 667, C: 722,
+  a: 556, e: 556, i: 222, k: 500, l: 222, n: 556, o: 556, r: 333, s: 500, t: 278, w: 722,
+};
+
+function helveticaWidth(text: string, fontPx: number): number {
+  let units = 0;
+  for (const char of text) {
+    const width = HELVETICA_AFM[char];
+    if (width === undefined) throw new Error(`no reference width for ${char}`);
+    units += width;
+  }
+  return (units / 1000) * fontPx;
+}
+
+describe('estimateTextWidth against Helvetica/Arial metrics', () => {
+  const samples = ['0', '100', '-1,250.5', '12,000', '0.25', '85.3 kPa', '20 °C', '45 %', 'Soil water tension (kPa)'];
+  for (const text of samples) {
+    it(`never underestimates and stays within 25 % for "${text}"`, () => {
+      const reference = helveticaWidth(text, 12);
+      const estimate = estimateTextWidth(text, 12);
+      expect(estimate).toBeGreaterThanOrEqual(reference);
+      expect(estimate).toBeLessThanOrEqual(reference * 1.25 + 1);
+    });
+  }
+
+  it('matches a hand-computed width exactly: "-1,250.5" at 12 px', () => {
+    // Helvetica: 333 + 556 + 278 + 3*556 + 278 + 556 = 3669 units → 44.0 px.
+    expect(helveticaWidth('-1,250.5', 12)).toBeCloseTo(44.03, 1);
+    expect(estimateTextWidth('-1,250.5', 12)).toBe(45);
+  });
+});

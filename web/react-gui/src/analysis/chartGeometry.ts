@@ -5,6 +5,12 @@ export interface ChartViewport {
   height: number;
 }
 
+/**
+ * Measured chart sizes are floored to this step (useElementSize) so a resize
+ * by a few pixels does not rebuild the option and re-scan every point.
+ */
+export const CHART_SIZE_STEP = 16;
+
 /** A small-multiples cell narrower than this squeezes its plot to a sliver. */
 export const SMALL_MULTIPLE_MIN_CELL_WIDTH = 260;
 

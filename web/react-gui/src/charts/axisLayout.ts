@@ -11,7 +11,15 @@
  *
  * The width estimate is a per-glyph table for a generic sans-serif face. It is
  * deterministic (no canvas, so it behaves the same in jsdom tests and in the
- * browser) and errs on the wide side.
+ * browser) and errs on the wide side: the tests hold it at or above the
+ * Helvetica/Arial AFM widths. Other UI faces (Segoe UI, Roboto, SF) differ by
+ * a few per cent per glyph.
+ *
+ * The tick labels are approximated from a tight min/max domain. Recharts
+ * (`[0, 'auto']` on some charts) and ECharts (`scale: false`) may include 0 and
+ * draw a different extreme label; the widest label is usually the largest
+ * magnitude, so the estimate rarely differs by more than one glyph. The
+ * rendered check at 320/390/1440 px remains the real gate.
  */
 
 /** Approximate advance widths in em for a generic sans-serif face. */
@@ -23,11 +31,13 @@ function glyphEm(char: string): number {
   if ('.,:;\'|!'.includes(char)) return 0.28;
   if ('iljI'.includes(char)) return 0.24;
   if ('ftr()[]-'.includes(char)) return 0.36;
-  if ('mwMW%'.includes(char)) return 0.88;
+  if ('MW'.includes(char)) return 0.95;
+  if ('mw%'.includes(char)) return 0.9;
+  if ('OQG'.includes(char)) return 0.78;
   if ('°'.includes(char)) return 0.4;
   if (char === '—') return 1;
   if ('…–'.includes(char)) return 0.6;
-  if (/[A-Z]/.test(char)) return 0.68;
+  if (/[A-Z]/.test(char)) return 0.73;
   return 0.56;
 }
 

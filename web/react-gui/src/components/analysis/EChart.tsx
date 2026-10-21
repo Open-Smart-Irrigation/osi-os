@@ -6,6 +6,12 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
+function withLegendSelection(option: Record<string, unknown>, selected: Record<string, boolean> | null): Record<string, unknown> {
+  const legend = option.legend;
+  if (!selected || !legend || typeof legend !== 'object' || Array.isArray(legend)) return option;
+  return { ...option, legend: { ...(legend as Record<string, unknown>), selected: { ...selected } } };
+}
+
 interface EChartProps {
   option: Record<string, unknown>;
   exportOption?: Record<string, unknown>;
@@ -27,6 +33,9 @@ export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ op
   exportOptionRef.current = exportOption;
   const onAxisNameClickRef = useRef(onAxisNameClick);
   onAxisNameClickRef.current = onAxisNameClick;
+  // Legend toggles live in the chart instance; `setOption(..., true)` would
+  // reset them on every new option (resizes rebuild the option). Keep them.
+  const legendSelectedRef = useRef<Record<string, boolean> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -42,6 +51,10 @@ export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ op
       onAxisNameClickRef.current?.(channelKey, { x: params.event?.offsetX ?? 0, y: params.event?.offsetY ?? 0 });
     });
 
+    chart.on('legendselectchanged', (params: any) => {
+      if (params?.selected && typeof params.selected === 'object') legendSelectedRef.current = { ...params.selected };
+    });
+
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(containerRef.current);
     return () => {
@@ -52,7 +65,7 @@ export const EChart = forwardRef<EChartHandle, EChartProps>(function EChart({ op
   }, []);
 
   useEffect(() => {
-    chartRef.current?.setOption(option, true);
+    chartRef.current?.setOption(withLegendSelection(option, legendSelectedRef.current), true);
   }, [option]);
 
   useImperativeHandle(ref, () => {

@@ -15,8 +15,10 @@ class ResizeObserverStub {
   disconnect() { disconnected += 1; }
 }
 
-function Probe() {
-  const [ref, size] = useElementSize<HTMLDivElement>();
+let renders = 0;
+function Probe({ step }: { step?: number }) {
+  const [ref, size] = useElementSize<HTMLDivElement>(step === undefined ? undefined : { step });
+  renders += 1;
   return <div ref={ref} data-testid="probe">{size ? `${size.width}x${size.height}` : 'unmeasured'}</div>;
 }
 
@@ -53,5 +55,17 @@ describe('useElementSize', () => {
   it('stays unmeasured without ResizeObserver', () => {
     render(<Probe />);
     expect(screen.getByTestId('probe')).toHaveTextContent('unmeasured');
+  });
+
+  it('quantises to the step so small resizes do not produce a new size', () => {
+    globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+    render(<Probe step={16} />);
+    act(() => lastCallback?.([{ contentRect: { width: 390, height: 361 } }]));
+    expect(screen.getByTestId('probe')).toHaveTextContent('384x352');
+    const before = renders;
+    act(() => lastCallback?.([{ contentRect: { width: 395, height: 366 } }]));
+    expect(renders).toBe(before);
+    act(() => lastCallback?.([{ contentRect: { width: 401, height: 366 } }]));
+    expect(screen.getByTestId('probe')).toHaveTextContent('400x352');
   });
 });

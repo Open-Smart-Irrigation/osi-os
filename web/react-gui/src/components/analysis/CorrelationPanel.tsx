@@ -7,6 +7,7 @@ import { axisLabel, type ChannelMeta } from '../../analysis/channelLabels';
 import { canonicalize } from '../../channels/registry';
 import { EChart, type EChartHandle } from './EChart';
 import { useElementSize } from '../../hooks/useElementSize';
+import { CHART_SIZE_STEP } from '../../analysis/chartGeometry';
 
 type AnalysisTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -33,7 +34,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
   const [channelX, setChannelX] = useState(channels[0] ?? '');
   const [channelY, setChannelY] = useState(channels.find((c) => c !== channels[0]) ?? '');
   const [pooled, setPooled] = useState(false);
-  const [chartBoxRef, chartBox] = useElementSize<HTMLDivElement>();
+  const [chartBoxRef, chartBox] = useElementSize<HTMLDivElement>({ step: CHART_SIZE_STEP });
 
   const canonicalChannelX = canonicalize(channelX);
   const canonicalChannelY = canonicalize(channelY);

@@ -63,8 +63,13 @@ describe('AnalysisChartPanel', () => {
     try {
       render(<AnalysisChartPanel series={[s('a', 'kPa')]} mode="timeline" layout="stacked" toggles={{ normalize: false }} channelMeta={new Map()} />);
       act(() => notify?.([{ contentRect: { width: 390, height: 360 } }]));
-      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ includeLegend: true, viewport: { width: 390, height: 360 } }));
-      expect(buildTimeSeriesOption).toHaveBeenCalledWith(expect.objectContaining({ viewport: { width: 390, height: 360 } }));
+      // Floored to the 16 px step.
+      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ includeLegend: true, viewport: { width: 384, height: 352 } }));
+      expect(buildTimeSeriesOption).toHaveBeenCalledWith(expect.objectContaining({ viewport: { width: 384, height: 352 } }));
+      // A resize inside the step does not rebuild the options.
+      const calls = vi.mocked(buildTimeSeriesOption).mock.calls.length;
+      act(() => notify?.([{ contentRect: { width: 396, height: 362 } }]));
+      expect(vi.mocked(buildTimeSeriesOption).mock.calls.length).toBe(calls);
     } finally {
       globalThis.ResizeObserver = previous;
     }
