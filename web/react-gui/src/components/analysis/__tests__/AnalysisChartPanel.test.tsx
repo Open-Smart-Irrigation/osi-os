@@ -199,6 +199,18 @@ describe('AnalysisChartPanel', () => {
       expect(onAxisRename).not.toHaveBeenCalled();
     });
 
+    it('gives the toggle a 44 px touch target without a 44 px tall pill, and a visible pressed mark', () => {
+      renderAt(390);
+      const toggle = screen.getByRole('button', { name: 'analysis.autoStack.showOverlaid' });
+      // min-h-11 = 44 px hit area; the negative block margin keeps the note bar compact.
+      expect(toggle).toHaveClass('min-h-11', 'inline-flex', 'items-center', '-my-3');
+      const pill = toggle.querySelector('[data-part="pill"]');
+      expect(pill).toHaveClass('py-0.5', 'border');
+      expect(toggle.querySelector('[data-part="check"]')).toBeNull();
+      fireEvent.click(toggle);
+      expect(toggle.querySelector('[data-part="check"]')).toHaveAttribute('aria-hidden', 'true');
+    });
+
     it('stays overlaid without a note on a wide screen', () => {
       renderAt(1440);
       expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ multiAxis: true }));

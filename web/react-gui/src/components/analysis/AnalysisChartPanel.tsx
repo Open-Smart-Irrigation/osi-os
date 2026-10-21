@@ -129,17 +129,24 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
       {autoStacked && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
           {!showOverlaidAnyway && <p role="status" className="min-w-0">{t('analysis.autoStack.note')}</p>}
+          {/* 44 px hit area (min-h-11); -my-3 keeps the note bar as compact as the pill. */}
           <button
             type="button"
             aria-pressed={showOverlaidAnyway}
             onClick={() => setShowOverlaidAnyway((value) => !value)}
-            className={`shrink-0 rounded border px-2 py-0.5 font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] ${
-              showOverlaidAnyway
-                ? 'border-[var(--text-secondary)] bg-[var(--secondary-bg)] text-[var(--text)]'
-                : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--secondary-bg)]'
-            }`}
+            className="group -my-3 inline-flex min-h-11 shrink-0 items-center focus:outline-none"
           >
-            {t('analysis.autoStack.showOverlaid')}
+            <span
+              data-part="pill"
+              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-semibold group-focus-visible:ring-2 group-focus-visible:ring-[var(--focus)] ${
+                showOverlaidAnyway
+                  ? 'border-[var(--text-secondary)] bg-[var(--secondary-bg)] text-[var(--text)]'
+                  : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] group-hover:bg-[var(--secondary-bg)]'
+              }`}
+            >
+              {showOverlaidAnyway && <span data-part="check" aria-hidden="true">✓</span>}
+              {t('analysis.autoStack.showOverlaid')}
+            </span>
           </button>
         </div>
       )}
