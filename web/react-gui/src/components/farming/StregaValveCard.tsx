@@ -1047,7 +1047,8 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
         )}
       </div>}
 
-      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} />
+      {/* Gen1 reports a percentage; Gen2 stores bat_pct null and its voltage, shown raw. */}
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} rawBatteryVoltage={device.latest_data?.bat_v} />
 
       {enclosureHistory && (
         <SensorMonitor

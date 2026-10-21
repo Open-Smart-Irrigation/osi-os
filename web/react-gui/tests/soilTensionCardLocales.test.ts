@@ -101,3 +101,15 @@ test('the footer carries the cloud key names: relative tiers, the absolute date,
   );
   assert.equal(EN.get('deviceCard.footer.lastSeenAt'), 'Last seen {{date}}');
 });
+
+test('every footer key still English in lg is on the Luganda release gate (R16 M2)', () => {
+  const ledger = fs.readFileSync(path.resolve(process.cwd(), '../../docs/i18n/pending-luganda-translations.md'), 'utf8');
+  const start = ledger.indexOf('## Release gate');
+  assert.ok(start >= 0, 'the ledger has no "Release gate" section');
+  const end = ledger.indexOf('\n## ', start + 1);
+  const gate = ledger.slice(start, end === -1 ? undefined : end);
+  const english = [...PENDING_HUMAN_LUGANDA].filter((key) => key.startsWith('deviceCard.footer.'));
+  assert.ok(english.length > 0);
+  for (const key of english) assert.ok(gate.includes(`\`${key}\``), `${key} missing from the release gate`);
+  assert.ok(gate.includes('`common.batteryEstimated`'), 'common.batteryEstimated missing from the release gate');
+});

@@ -34,10 +34,12 @@ export interface ValveTileProps {
   busy: boolean;
   // Battery for the shared footer, as on the cloud's ValveTile. `ValveSummary` (GET /api/valves)
   // carries no battery field -- only `Device.latest_data` does -- so the caller
-  // (ValveControlPanel, fed by FarmingDashboard's `batteryByEui`) passes `bat_pct` through. A
-  // valve reports a percentage; the LSN50 voltage curve does not apply to it. Loose-typed
+  // (ValveControlPanel, fed by FarmingDashboard's `batteryByEui`) passes `bat_pct` and `bat_v` through. A
+  // Gen1 valve reports a percentage; a Gen2 valve stores `bat_pct` null and only its voltage,
+  // which the footer shows raw (the LSN50 curve does not fit a valve). Loose-typed
   // (`unknown`): a raw sensor value is never assumed clean.
   batteryPercent?: unknown;
+  batteryVoltage?: unknown;
 }
 
 function formatRelativePast(iso: string, nowMs: number): string {
@@ -71,6 +73,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   onRename,
   busy,
   batteryPercent,
+  batteryVoltage,
 }) => {
   const { t, i18n } = useTranslation('valves');
   const { t: tDevices } = useTranslation('devices');
@@ -302,7 +305,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
       )}
 
       {/* The footer every device card shares: battery (never fabricated) and last uplink. */}
-      <DeviceCardFooter lastSeen={valve.lastUplinkAt} batteryPercent={batteryPercent} nowMs={nowMs} />
+      <DeviceCardFooter lastSeen={valve.lastUplinkAt} batteryPercent={batteryPercent} rawBatteryVoltage={batteryVoltage} nowMs={nowMs} />
     </div>
   );
 };

@@ -12,6 +12,40 @@ for finished translation work. Each entry must be removed once a human
 Luganda pass supplies correct text, and the corresponding test allowlist
 entry (see below) removed in the same change.
 
+
+## Release gate: Luganda before a Luganda-language release
+
+Most pending keys above are new surfaces that never had Luganda. The keys in
+this section are different: they replaced text that **was** human Luganda on
+screen. Before the shared device card footer, the Kiwi and STREGA cards
+rendered their whole last-seen line in Luganda (`kiwiSensor.lastSeen`,
+`kiwiSensor.neverSeen`, `stregaValve.lastSeen`). The footer keeps that human
+text for the minutes age and "never seen", but the tiers below are English in
+`lg`, and a quiet device spends most of its time in them (every age of six
+hours or more is the date line). Shipping them to a gateway whose interface
+runs in Luganda is a visible regression.
+
+**Gate:** an edge release that contains the shared footer is not deployed to
+any gateway whose interface runs in Luganda until a human Luganda pass has
+supplied these keys, or the owner has accepted the English in writing for
+that release. The release checklist (`docs/versioning-workflow.md`,
+Pre-flight) points here. Never fill them by machine translation.
+
+| `devices.json` key | English source | Replaces human Luganda for |
+|---|---|---|
+| `deviceCard.footer.lastSeenJustNow` | "Last seen just now" | an age under one minute |
+| `deviceCard.footer.lastSeenHours` | "Last seen {{count}} h ago" | ages from 1 to 6 hours |
+| `deviceCard.footer.lastSeenAt` | "Last seen {{date}}" | every age of 6 hours or more |
+| `deviceCard.footer.battery` | "Battery" | (spoken label of the battery slot) |
+| `deviceCard.footer.batteryLow` | "Battery low" | (spoken label below 20 %) |
+| `common.batteryEstimated` | "Estimated from battery voltage" | (now also spoken on an estimated percentage) |
+
+When the pass lands, drop the key from `PENDING_HUMAN_LUGANDA` in
+`web/react-gui/tests/soilTensionCardLocales.test.ts` (or `waterCardLocales.test.ts`
+for `common.batteryEstimated`), remove its row here, and delete the old
+`kiwiSensor.lastSeen`, `kiwiSensor.neverSeen` and `stregaValve.lastSeen` keys
+once the reviewer confirms the move.
+
 ## `accountLink.json`
 
 | Key | Reason |
@@ -270,5 +304,5 @@ English meaning instead of adding English:
 | `kiwiSensor.lastSeen`, `kiwiSensor.neverSeen`, `stregaValve.lastSeen` | Human text left in place, untouched. No card reads them any more; delete them only after the Luganda reviewer confirms the move. |
 | `valves.lastSeen.*`, `valves.battery`, `loRain.lastReport` | English in `lg`; no card reads them any more (the valve tile and the LoRain card use the shared footer). |
 
-`soilTensionCardLocales.test.ts` (`HUMAN_LUGANDA_REUSED`) asserts the three
+`soilTensionCardLocales.test.ts` (`HUMAN_LUGANDA_REUSED`) asserts the two
 kept keys still equal their human source strings.

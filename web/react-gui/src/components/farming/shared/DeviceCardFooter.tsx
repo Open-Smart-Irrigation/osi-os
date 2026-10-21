@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { formatDateTime } from '../../../utils/datetime';
-import { footerBattery, footerLastSeen } from './deviceCardFooterModel';
+import { footerBattery, footerLastSeen, footerRawVoltage } from './deviceCardFooterModel';
 
 export interface DeviceCardFooterProps {
   /** The device's last uplink (ISO time); null when it was never seen. */
@@ -11,6 +11,11 @@ export interface DeviceCardFooterProps {
   batteryPercent?: unknown;
   /** LSN50-family battery voltage, used only when no valid percentage is reported. */
   batteryVoltage?: unknown;
+  /**
+   * Edge only (R16 M1): the voltage of a cell no curve fits (STREGA Gen2, LoRain). Shown as
+   * volts, e.g. "3.52 V", when there is neither a percentage nor an LSN50 curve value.
+   */
+  rawBatteryVoltage?: unknown;
   /** Injectable clock for tests. */
   nowMs?: number;
   /**
@@ -19,6 +24,15 @@ export interface DeviceCardFooterProps {
    * not claim "Never seen" for a device that is reporting.
    */
   lastSeenText?: string;
+}
+
+function formatVolts(volts: number, locale: string | undefined): string {
+  const options: Intl.NumberFormatOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  try {
+    return `${new Intl.NumberFormat(locale, options).format(volts)} V`;
+  } catch {
+    return `${volts.toFixed(2)} V`;
+  }
 }
 
 function formatPercent(percent: number, locale: string | undefined): string {
@@ -44,12 +58,17 @@ const BatteryGlyph: React.FC = () => (
  * identity only and the body measurements only, so cards of the same width line up in the
  * grid (`mt-auto` keeps the footer at the card's bottom in a `flex flex-col` card). A type
  * without a battery reading keeps the slot, empty. Edge additions: a voltage-derived
- * percentage reads "≈" with an "estimated" hint, and `lastSeenText` for the field tester.
+ * percentage reads "≈" with an "estimated" hint (also spoken), `rawBatteryVoltage` shows the
+ * volts of a cell no curve fits, and `lastSeenText` serves the field tester.
  */
-export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({ lastSeen, batteryPercent, batteryVoltage, nowMs, lastSeenText }) => {
+export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
+  lastSeen, batteryPercent, batteryVoltage, rawBatteryVoltage, nowMs, lastSeenText,
+}) => {
   const { t, i18n } = useTranslation('devices');
   const locale = i18n?.language;
   const battery = footerBattery(batteryPercent, batteryVoltage);
+  const rawVolts = battery ? null : footerRawVoltage(rawBatteryVoltage);
+  const estimatedHint = t('common.batteryEstimated');
   const seen = footerLastSeen(lastSeen, nowMs);
 
   let seenText: string;
@@ -78,7 +97,7 @@ export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({ lastSeen, ba
         <span
           data-testid="device-card-battery"
           data-battery-low={battery?.low ? 'true' : undefined}
-          title={battery?.derived ? t('common.batteryEstimated') : undefined}
+          title={battery?.derived ? estimatedHint : undefined}
           className={`inline-flex min-h-5 shrink-0 items-center gap-1 tabular-nums ${battery?.low ? 'font-semibold text-[var(--warn-text)]' : ''}`}
         >
           {battery && (
@@ -88,7 +107,17 @@ export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({ lastSeen, ba
                 {battery.low ? t('deviceCard.footer.batteryLow') : t('deviceCard.footer.battery')}
                 {' '}
               </span>
-              {battery.derived ? '≈ ' : ''}{formatPercent(battery.percent, locale)}
+              {battery.derived && <span aria-hidden="true">≈ </span>}
+              {formatPercent(battery.percent, locale)}
+              {/* The estimate reaches screen-reader and touch users, not only a hover title. */}
+              {battery.derived && <span className="sr-only">{' '}{estimatedHint}</span>}
+            </>
+          )}
+          {rawVolts !== null && (
+            <>
+              <BatteryGlyph />
+              <span className="sr-only">{t('deviceCard.footer.battery')}{' '}</span>
+              {formatVolts(rawVolts, locale)}
             </>
           )}
         </span>

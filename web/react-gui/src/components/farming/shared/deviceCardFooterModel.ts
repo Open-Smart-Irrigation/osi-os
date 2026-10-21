@@ -15,10 +15,9 @@ export interface FooterBattery {
   percent: number;
   low: boolean;
   /**
-   * Edge only: the percentage comes from the LSN50 voltage curve, not a reported `bat_pct`.
-   * The gateway GUI marked such a value "≈" with an "estimated" hint before the shared footer
-   * existed (the LiSOCl2 cell holds ~3.6 V for most of its life, then drops off a cliff), and
-   * keeps that marker; the cloud footer has no marker yet.
+   * The percentage comes from the LSN50 voltage curve, not a reported `bat_pct`. The footer
+   * marks it "≈" with an "estimated" hint, as the gateway GUI does: the LiSOCl2 cell holds
+   * about 3.6 V for most of its life and then drops off a cliff.
    */
   derived: boolean;
 }
@@ -55,4 +54,21 @@ export function footerLastSeen(lastSeen: string | null | undefined, nowMs: numbe
   if (minutes < 1) return { kind: 'justNow' };
   if (minutes < 60) return { kind: 'minutes', count: minutes };
   return { kind: 'hours', count: Math.floor(minutes / 60) };
+}
+
+/** Highest voltage read as a battery cell; anything above is a decoding error, not a battery. */
+const MAX_RAW_BATTERY_VOLTS = 60;
+
+/**
+ * Edge rule (review R16 M1), proposed to the cloud: a device that reports neither a valid
+ * percentage nor a voltage the LSN50 curve fits (STREGA Gen2 stores `bat_pct` null and
+ * `bat_v` in volts; the LoRain reports volts only) shows its raw voltage instead of an empty
+ * slot. No curve is guessed and the value is never amber, since no threshold is known.
+ * Returns the volts to show, or null when there is no plausible reading (missing, not a
+ * number, zero or below, or above 60 V).
+ */
+export function footerRawVoltage(voltage: unknown): number | null {
+  const value = typeof voltage === 'number' ? voltage
+    : typeof voltage === 'string' && voltage.trim() !== '' ? Number(voltage) : Number.NaN;
+  return Number.isFinite(value) && value > 0 && value <= MAX_RAW_BATTERY_VOLTS ? value : null;
 }

@@ -248,6 +248,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
               canEdit={canWrite}
               onRename={(nextName: string) => handleRename(valve.deviceEui, nextName)}
               batteryPercent={batteryByEui?.get(valve.deviceEui)?.batPct}
+              batteryVoltage={batteryByEui?.get(valve.deviceEui)?.batV}
             />
           ))}
         </div>

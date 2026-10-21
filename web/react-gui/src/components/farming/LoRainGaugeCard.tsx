@@ -172,8 +172,8 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
         </div>
       </div>
 
-      {/* The LoRain reports a voltage only; the LSN50 curve does not fit its cell, so the slot stays empty (as on the cloud). */}
-      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} />
+      {/* The LoRain reports a voltage only and the LSN50 curve does not fit its cell: the footer shows the volts. */}
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} rawBatteryVoltage={data.bat_v} />
 
       {sensorMonitor && (
         <SensorMonitor

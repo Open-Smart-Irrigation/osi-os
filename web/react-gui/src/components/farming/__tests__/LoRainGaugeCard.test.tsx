@@ -73,9 +73,10 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getByText('1.5 mm')).toBeInTheDocument();
     expect(screen.getByText('2.7 mm')).toBeInTheDocument();
     expect(screen.getByText('20.5 °C')).toBeInTheDocument();
-    // The LoRain reports a voltage only: no LSN50-curve percentage, an empty footer slot.
-    expect(screen.getByTestId('device-card-battery')).toBeEmptyDOMElement();
-    expect(screen.queryByText(/3\.3 V/)).not.toBeInTheDocument();
+    // The LoRain reports a voltage only: no LSN50-curve percentage, the raw volts in the footer
+    // (R16 M1), and no battery line in the body.
+    expect(screen.getByTestId('device-card-battery')).toHaveTextContent(/3[.,]30 V$/);
+    expect(screen.getAllByText(/3[.,]30? V/)).toHaveLength(1);
   });
 
   it('leads with amounts: no elapsed-time rate; the interval tile has amount and tips; the time is in the footer', () => {

@@ -9,7 +9,7 @@ import enDevices from '../../../../public/locales/en/devices.json';
 import frDevices from '../../../../public/locales/fr/devices.json';
 import lgDevices from '../../../../public/locales/lg/devices.json';
 import { DeviceCardFooter } from '../shared/DeviceCardFooter';
-import { ABSOLUTE_LAST_SEEN_AFTER_MINUTES, footerBattery, footerLastSeen } from '../shared/deviceCardFooterModel';
+import { ABSOLUTE_LAST_SEEN_AFTER_MINUTES, footerBattery, footerLastSeen, footerRawVoltage } from '../shared/deviceCardFooterModel';
 import { formatDateTime } from '../../../utils/datetime';
 
 // The one footer of every device card (owner decision 2026-10-21): battery left, last seen right.
@@ -57,10 +57,49 @@ describe('DeviceCardFooter battery', () => {
     expect(battery()).toHaveClass('text-[var(--warn-text)]', 'font-semibold');
   });
 
-  it('marks a percentage estimated from the LSN50 voltage curve', () => {
+  it('marks a percentage estimated from the LSN50 voltage curve, also for screen readers (R16 M4)', () => {
     renderFooter({ lastSeen: ago(5 * MIN), batteryVoltage: 3.5 });
     expect(battery()).toHaveTextContent('≈ 93%');
     expect(battery()).toHaveAttribute('title', 'Estimated from battery voltage');
+    // The hint is in the spoken text, not only in the hover title; "≈" itself is not read out.
+    expect(battery()).toHaveTextContent('Battery ≈ 93% Estimated from battery voltage');
+    expect(screen.getByText('≈', { exact: false, selector: '[aria-hidden="true"]' })).toBeInTheDocument();
+    expect([...battery().querySelectorAll('.sr-only')].map((node) => node.textContent?.trim()))
+      .toEqual(['Battery', 'Estimated from battery voltage']);
+  });
+
+  it('shows the raw voltage of a cell no curve fits when no percentage exists (R16 M1)', () => {
+    // STREGA Gen2 stores bat_pct null and bat_v in volts; the LoRain reports volts only.
+    renderFooter({ lastSeen: ago(5 * MIN), batteryPercent: null, rawBatteryVoltage: 3.52 });
+    expect(battery()).toHaveTextContent('Battery 3.52 V');
+    expect(battery()).not.toHaveAttribute('data-battery-low');
+    expect(battery()).not.toHaveTextContent('%');
+    cleanup();
+    renderFooter({ lastSeen: ago(5 * MIN), batteryPercent: null, rawBatteryVoltage: 1.1 });
+    // No threshold is known for a raw voltage, so it is never amber.
+    expect(battery()).not.toHaveAttribute('data-battery-low');
+    expect(battery().className).not.toContain('warn');
+  });
+
+  it('prefers a reported percentage, then the LSN50 curve, over the raw voltage', () => {
+    renderFooter({ lastSeen: ago(5 * MIN), batteryPercent: 64, rawBatteryVoltage: 3.52 });
+    expect(battery()).toHaveTextContent('64%');
+    expect(battery()).not.toHaveTextContent('V');
+    cleanup();
+    renderFooter({ lastSeen: ago(5 * MIN), batteryVoltage: 3.5, rawBatteryVoltage: 3.5 });
+    expect(battery()).toHaveTextContent('≈ 93%');
+  });
+
+  it('formats the raw voltage for the interface language and rejects implausible readings', () => {
+    renderFooter({ lastSeen: ago(5 * MIN), rawBatteryVoltage: 3.6 }, 'fr');
+    expect(battery()).toHaveTextContent('Batterie 3,60 V');
+    expect(footerRawVoltage('3.4')).toBe(3.4);
+    expect(footerRawVoltage(0)).toBeNull();
+    expect(footerRawVoltage(-1)).toBeNull();
+    expect(footerRawVoltage(65.5)).toBeNull();
+    expect(footerRawVoltage('')).toBeNull();
+    expect(footerRawVoltage(null)).toBeNull();
+    expect(footerRawVoltage(Number.NaN)).toBeNull();
   });
 
   it('reads a reported percentage before the voltage curve', () => {

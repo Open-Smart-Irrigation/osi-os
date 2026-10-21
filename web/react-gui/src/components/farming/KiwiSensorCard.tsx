@@ -464,7 +464,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
         </div>
       </div>
 
-      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} />
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} rawBatteryVoltage={device.latest_data?.bat_v} />
 
       {monitor && (
         <SensorMonitor

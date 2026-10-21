@@ -358,7 +358,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
       </p>
 
-      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} />
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} rawBatteryVoltage={data.bat_v} />
 
       {sensorMonitor && (
         <SensorMonitor
