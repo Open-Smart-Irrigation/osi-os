@@ -15,7 +15,7 @@ const { bootstrapFresh } = require('../lib/osi-migrate');
 const REPO = path.resolve(__dirname, '..');
 const MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const DEVICE_EUI = 'A84041CAFECAFE20';
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 
 let failures = 0;
 function ok(cond, label) {

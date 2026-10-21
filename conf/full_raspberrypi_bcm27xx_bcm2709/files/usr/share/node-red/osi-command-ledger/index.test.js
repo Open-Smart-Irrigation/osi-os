@@ -22,7 +22,7 @@ const protectedBinding = require('../osi-watermark-binding/canonicalization');
 const repoRoot = path.resolve(__dirname, '../../../../../../..');
 const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 'utf8');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-command-ledger-test-'));
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 const ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 
 function canonicalHash(value) {

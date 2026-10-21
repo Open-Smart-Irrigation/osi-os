@@ -43,7 +43,7 @@ function token(identity) {
 
 function linkCloud(db) {
   db.exec("INSERT OR REPLACE INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) "
-    + "VALUES ('cloud', 1, '0016C001F11715E2', datetime('now'))");
+    + "VALUES ('cloud', 1, 'AABBCCDDEEFF0003', datetime('now'))");
 }
 
 async function callRoute(db, env, options) {

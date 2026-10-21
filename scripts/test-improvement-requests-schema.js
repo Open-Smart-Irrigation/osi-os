@@ -40,7 +40,7 @@ try {
       1,
       1,
       '{"sync":{"pending_outbox_count":0}}',
-      '0016C001F11715E2',
+      'AABBCCDDEEFF0003',
       'sha256:status-secret-fixture',
       'field-user@example.test',
       '2026-07-08T12:00:00.000Z'
@@ -82,7 +82,7 @@ try {
   if (payload.contact_email !== 'field-user@example.test') {
     throw new Error(`expected payload.contact_email to match inserted contact email, got ${payload.contact_email}`);
   }
-  if (payload.gateway_device_eui !== '0016C001F11715E2') {
+  if (payload.gateway_device_eui !== 'AABBCCDDEEFF0003') {
     throw new Error(`expected payload.gateway_device_eui to match inserted gateway EUI, got ${payload.gateway_device_eui}`);
   }
   if (!payload.gui_user || payload.gui_user.local_user_id !== 7) {

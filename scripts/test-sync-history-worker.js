@@ -68,7 +68,7 @@ const advertisedTableRows = {
   irrigation_events: {
     id: 13,
     zone_uuid: 'zone-uuid-1',
-    event_uuid: 'irrig-0016C001F11715E2-000000000001',
+    event_uuid: 'irrig-AABBCCDDEEFF0003-000000000001',
     created_at: '2026-06-28T23:02:00Z',
     action: 'OPEN',
     reason: 'threshold',
@@ -125,9 +125,9 @@ function runHelperAssertions(helper, label) {
   assert.match(helper.batchQuery('dendrometer_daily', 'backfill'), /deveui.*date.*> \?.*<= \?/i, label);
   assert.match(helper.rowByHistoryKeyQuery(
     'valve_actuation_expectations',
-    'VALVE_ACTUATION|0016C001F11715E2|expectation-1').sql, /expectation_id = \?/i, label);
+    'VALVE_ACTUATION|AABBCCDDEEFF0003|expectation-1').sql, /expectation_id = \?/i, label);
 
-  assert.strictEqual(helper.historyKey('device_data', '0016C001F11715E2', row), 'DEVICE_DATA|0016C001F11715E2|123', label);
+  assert.strictEqual(helper.historyKey('device_data', 'AABBCCDDEEFF0003', row), 'DEVICE_DATA|AABBCCDDEEFF0003|123', label);
   assert.strictEqual(helper.nextRawQuery('device_data'), 'SELECT * FROM device_data WHERE id > ? ORDER BY id ASC LIMIT ?', label);
   assert.match(helper.nextRawQuery('tensiomark_observations'), /hex\(CAST\(raw_response AS BLOB\)\) AS raw_response_hex/, label);
   assert.deepStrictEqual(helper.buildCanonicalColumns('device_data', row), [
@@ -165,18 +165,18 @@ function runHelperAssertions(helper, label) {
 
   assert.deepStrictEqual(helper.cursorPatchFromResponse({
     ackedThroughId: 123,
-    results: [{ historyKey: 'DEVICE_DATA|0016C001F11715E2|123', status: 'APPLIED' }]
+    results: [{ historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|123', status: 'APPLIED' }]
   }), { last_acked_id: '123', last_error: null, retry_count: 0 }, label);
 
   assert.deepStrictEqual(helper.cursorPatchFromResponse({
-    results: [{ historyKey: 'DEVICE_DATA|0016C001F11715E2|124', status: 'REJECTED_PERMANENT', reason: 'unsupported_hash_version' }]
+    results: [{ historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|124', status: 'REJECTED_PERMANENT', reason: 'unsupported_hash_version' }]
   }), { last_error: 'permanent: unsupported_hash_version', next_attempt_at: '9999-12-31T00:00:00.000Z' }, label);
 
   assert.deepStrictEqual(helper.cursorPatchFromResponse({
     ackedThroughId: 123,
     results: [
-      { historyKey: 'DEVICE_DATA|0016C001F11715E2|123', status: 'APPLIED' },
-      { historyKey: 'DEVICE_DATA|0016C001F11715E2|124', status: 'REJECTED_PERMANENT', reason: 'hash_mismatch' }
+      { historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|123', status: 'APPLIED' },
+      { historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|124', status: 'REJECTED_PERMANENT', reason: 'hash_mismatch' }
     ]
   }), {
     last_acked_id: '123',
@@ -228,9 +228,9 @@ function runHelperAssertions(helper, label) {
   assert.strictEqual(
     helper.historyKey(
       'valve_actuation_expectations',
-      '0016C001F11715E2',
+      'AABBCCDDEEFF0003',
       advertisedTableRows.valve_actuation_expectations),
-    'VALVE_ACTUATION|0016C001F11715E2|expectation-1',
+    'VALVE_ACTUATION|AABBCCDDEEFF0003|expectation-1',
     label);
 
   for (const [tableName, sourceRow] of Object.entries(advertisedTableRows)) {
@@ -246,23 +246,23 @@ function runHelperAssertions(helper, label) {
 
   const segmentRows = [
     {
-      historyKey: 'DEVICE_DATA|0016C001F11715E2|124',
+      historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|124',
       payloadHash: 'hash-2'
     },
     {
-      historyKey: 'DEVICE_DATA|0016C001F11715E2|123',
+      historyKey: 'DEVICE_DATA|AABBCCDDEEFF0003|123',
       payloadHash: 'hash-1'
     }
   ];
   const expectedSegmentHash = crypto.createHash('sha256')
-    .update('DEVICE_DATA|0016C001F11715E2|123\0hash-1\n', 'utf8')
-    .update('DEVICE_DATA|0016C001F11715E2|124\0hash-2\n', 'utf8')
+    .update('DEVICE_DATA|AABBCCDDEEFF0003|123\0hash-1\n', 'utf8')
+    .update('DEVICE_DATA|AABBCCDDEEFF0003|124\0hash-2\n', 'utf8')
     .digest('hex');
   assert.strictEqual(helper.segmentHash(segmentRows), expectedSegmentHash, label);
 
   const builtSegment = helper.buildSegment(
     'device_data',
-    '0016C001F11715E2',
+    'AABBCCDDEEFF0003',
     'A84041CAFECAFE01|2026-06-28',
     [
       row,

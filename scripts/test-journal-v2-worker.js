@@ -25,7 +25,7 @@ const golden = JSON.parse(fs.readFileSync(
 const SCHEMA_FINGERPRINT = require('node:crypto').createHash('sha256').update(
   fs.readFileSync(path.join(ROOT, 'docs/contracts/sync-schema/journal-v2.schema.json')),
 ).digest('hex');
-const GATEWAY = '0016C001F11715E2';
+const GATEWAY = 'AABBCCDDEEFF0003';
 
 function facade(database) {
   const db = {

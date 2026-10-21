@@ -14,7 +14,7 @@ const helper = require(path.join(
 ));
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-durable-history-'));
 const dbPath = path.join(tmpDir, 'farming.db');
-const gatewayEui = '0016C001F11715E2';
+const gatewayEui = 'AABBCCDDEEFF0003';
 
 function exec(sql) {
   execFileSync('sqlite3', [dbPath], {
