@@ -771,11 +771,6 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
     }).catch(() => { /* non-critical — display remains blank */ });
     return () => { cancelled = true; };
   }, [device.deveui, onUpdate]);
-  const lastSeenStr = device.last_seen ?? null;
-  const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
-  const minutesAgo = lastSeen
-    ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
-    : null;
 
   const displayedState = getDisplayedStregaState(device);
   const isOpen = displayedState === 'OPEN';
@@ -855,7 +850,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   };
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-4 shadow-sm transition-colors">
+    <div className="flex h-full flex-col bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--focus)] rounded-xl p-4 shadow-sm transition-colors">
       <div className="flex flex-col items-stretch gap-2 mb-0.5">
         <EditableName
           name={device.name}
@@ -1052,12 +1047,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
         )}
       </div>}
 
-      <DeviceCardFooter
-        lastSeenLabel={minutesAgo !== null
-          ? t('stregaValve.lastSeen', { minutes: minutesAgo })
-          : t('stregaValve.neverSeen', { defaultValue: 'Never seen' })}
-        batteryPercent={device.latest_data?.bat_pct}
-      />
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} />
 
       {enclosureHistory && (
         <SensorMonitor

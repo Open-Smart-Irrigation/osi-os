@@ -13,6 +13,7 @@ import type { Device, WatermarkChannelLatest } from '../../../types/farming';
 import { DraginoTempCard } from '../DraginoTempCard';
 import { Sdi12SoilCard } from '../Sdi12SoilCard';
 import { SoilTensionReadings } from '../shared/SoilTensionReadings';
+import { formatDateTime } from '../../../utils/datetime';
 
 // The edge counterpart of the OSI Cloud SoilTensionCardParity test: the WATERMARK card
 // (DraginoTempCard) and the Tensiomark card (Sdi12SoilCard) render one soil tension layout,
@@ -175,7 +176,7 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
     // Locale-aware decimal separator, as on the cloud: 16,8 / 16,1 in French.
     expect(within(tile('Tension du sol 1 (20 cm)')).getByRole('button', { name: family === 'watermark' ? 'Sol 16,8 °C' : 'Sol 16,1 °C' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: "Paramètres de l'appareil" })).toBeInTheDocument();
-    expect(screen.getByText(/Vu il y a 5 minutes/)).toBeInTheDocument();
+    expect(screen.getByText(/Vu il y a 5 min/)).toBeInTheDocument();
     expect(screen.queryByText(/Soil tension|Soil temperature|^SWT\b|Last seen|minutes ago/)).not.toBeInTheDocument();
   });
 
@@ -186,10 +187,12 @@ describe('WATERMARK and Tensiomark cards share one soil tension layout', () => {
   });
 
   it.each(FAMILIES)('%s: keeps value and pill on a five-day-old reading and puts the age on the last-seen line', (family) => {
-    renderFamily(family, { lastSeen: minutesAgo(5 * 24 * 60) });
+    const old = minutesAgo(5 * 24 * 60);
+    renderFamily(family, { lastSeen: old });
     expect(within(tile('Soil tension 2 (60 cm)')).getByRole('button', { name: '60.6 kPa' })).toBeInTheDocument();
     expect(statusOf(tile('Soil tension 2 (60 cm)'))).toBe('dry');
-    expect(screen.getByText(/Last seen: 5 days ago/)).toBeInTheDocument();
+    // From six hours on the shared footer shows the full date and time.
+    expect(screen.getByTestId('device-card-last-seen')).toHaveTextContent(`Last seen ${formatDateTime(old, 'en')}`);
   });
 
   it.each(FAMILIES)('%s: shows a missing value as an empty tile with no pill and no history link', (family) => {

@@ -1011,15 +1011,14 @@
     }
   },
   "deviceCard": {
-    "lastSeen": {
-      "justNow": "Zuletzt gesehen: gerade eben",
-      "minutes_one": "Zuletzt gesehen: vor {{count}} Minute",
-      "minutes_other": "Zuletzt gesehen: vor {{count}} Minuten",
-      "hours_one": "Zuletzt gesehen: vor {{count}} Stunde",
-      "hours_other": "Zuletzt gesehen: vor {{count}} Stunden",
-      "days_one": "Zuletzt gesehen: vor {{count}} Tag",
-      "days_other": "Zuletzt gesehen: vor {{count}} Tagen",
-      "never": "Noch nie gesehen"
+    "footer": {
+      "lastSeenJustNow": "Zuletzt gesehen: gerade eben",
+      "lastSeenMinutes": "Zuletzt gesehen: vor {{count}} Min.",
+      "lastSeenHours": "Zuletzt gesehen: vor {{count}} Std.",
+      "lastSeenAt": "Zuletzt gesehen: {{date}}",
+      "neverSeen": "Noch nie gesehen",
+      "battery": "Batterie",
+      "batteryLow": "Batterie schwach"
     },
     "settings": "Geräteeinstellungen",
     "closeSettings": "Geräteeinstellungen schliessen"

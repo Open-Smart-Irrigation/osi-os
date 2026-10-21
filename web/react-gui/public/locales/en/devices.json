@@ -1008,15 +1008,14 @@
     }
   },
   "deviceCard": {
-    "lastSeen": {
-      "justNow": "Last seen: just now",
-      "minutes_one": "Last seen: {{count}} minute ago",
-      "minutes_other": "Last seen: {{count}} minutes ago",
-      "hours_one": "Last seen: {{count}} hour ago",
-      "hours_other": "Last seen: {{count}} hours ago",
-      "days_one": "Last seen: {{count}} day ago",
-      "days_other": "Last seen: {{count}} days ago",
-      "never": "Never seen"
+    "footer": {
+      "lastSeenJustNow": "Last seen just now",
+      "lastSeenMinutes": "Last seen {{count}} min ago",
+      "lastSeenHours": "Last seen {{count}} h ago",
+      "lastSeenAt": "Last seen {{date}}",
+      "neverSeen": "Never seen",
+      "battery": "Battery",
+      "batteryLow": "Battery low"
     },
     "settings": "Device settings",
     "closeSettings": "Close device settings"

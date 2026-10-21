@@ -251,9 +251,24 @@ and from the table above in the same change.
 
 | Keys | Reason |
 |---|---|
-| `soilTension.*` (9 keys: `sectionTitle`, `channel`, `depthCm`, `soilTemp`, `soilTempSeries`, `invalidReading`, `noReadings`, `family.watermark`, `family.tensiomark`), `deviceCard.*` (10 keys: `lastSeen.justNow`, `lastSeen.minutes_one`/`_other`, `lastSeen.hours_one`/`_other`, `lastSeen.days_one`/`_other`, `lastSeen.never`, `settings`, `closeSettings`), `sdi12Soil.badge`, `sdi12Soil.noProfile`, `sdi12Soil.detecting`, `sdi12Soil.invalidLayout`, `sdi12Soil.status.*` (5 keys) | Added when the WATERMARK card (`DraginoTempCard.tsx`, `WatermarkProbeSection.tsx`) and the Tensiomark card (`Sdi12SoilCard.tsx`) moved onto one shared soil tension layout (`SoilTensionReadings.tsx`), the same layout and text as the OSI Cloud cards, and their footers and headers lost their English literals. They replace `watermark.sectionTitle`, `watermark.probe`, `watermark.soilTemp`, `watermark.depthUnset` and `sdi12.tensiomark.addressDepth`/`depthUnknown`/`depthCm`/`swt`/`soilTemperature`, whose `lg` values were English too, so no human Luganda was dropped. de-CH/es/fr/it/pt carry the cloud's translations for the shared keys; the new strings (`soilTempSeries`, `invalidReading`, `deviceCard.settings`/`closeSettings`, the `sdi12Soil` header, notice and status texts) were drafted without a native speaker and need a review. `lg` ships the English source text until a human Luganda pass. |
+| `soilTension.*` (9 keys: `sectionTitle`, `channel`, `depthCm`, `soilTemp`, `soilTempSeries`, `invalidReading`, `noReadings`, `family.watermark`, `family.tensiomark`), `deviceCard.*` (7 keys pending: `footer.lastSeenJustNow`, `footer.lastSeenHours`, `footer.lastSeenAt`, `footer.battery`, `footer.batteryLow`, `settings`, `closeSettings`), `sdi12Soil.badge`, `sdi12Soil.noProfile`, `sdi12Soil.detecting`, `sdi12Soil.invalidLayout`, `sdi12Soil.status.*` (5 keys) | Added when the WATERMARK card (`DraginoTempCard.tsx`, `WatermarkProbeSection.tsx`) and the Tensiomark card (`Sdi12SoilCard.tsx`) moved onto one shared soil tension layout (`SoilTensionReadings.tsx`), the same layout and text as the OSI Cloud cards, and their footers and headers lost their English literals. They replace `watermark.sectionTitle`, `watermark.probe`, `watermark.soilTemp`, `watermark.depthUnset` and `sdi12.tensiomark.addressDepth`/`depthUnknown`/`depthCm`/`swt`/`soilTemperature`, whose `lg` values were English too, so no human Luganda was dropped. de-CH/es/fr/it/pt carry the cloud's translations for the shared keys; the new strings (`soilTempSeries`, `invalidReading`, `deviceCard.settings`/`closeSettings`, the `sdi12Soil` header, notice and status texts) were drafted without a native speaker and need a review. `lg` ships the English source text until a human Luganda pass. |
 
 Tracked in code at `web/react-gui/tests/soilTensionCardLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
+
+The shared device card footer (owner decision 2026-10-21: battery and last
+seen on every card) kept the human Luganda that already existed for the same
+English meaning instead of adding English:
+
+| `lg` key | State |
+|---|---|
+| `deviceCard.footer.lastSeenMinutes` | Human text kept: the Kiwi card's `kiwiSensor.lastSeen` ("Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"; English "Last seen: N minutes ago", now "Last seen N min ago", the same meaning), with `{{minutes}}` renamed to `{{count}}`. |
+| `deviceCard.footer.neverSeen` | Human text kept: `kiwiSensor.neverSeen` ("Tekalabikangako"). |
+| `deviceCard.footer.lastSeenJustNow`, `lastSeenHours`, `lastSeenAt` ("Last seen {{date}}", from six hours on), `battery`, `batteryLow` | English placeholders, pending (rows above). Key names and the other locales' text are the cloud's (osi-server `6296119e5`). |
+| `kiwiSensor.lastSeen`, `kiwiSensor.neverSeen`, `stregaValve.lastSeen` | Human text left in place, untouched. No card reads them any more; delete them only after the Luganda reviewer confirms the move. |
+| `valves.lastSeen.*`, `valves.battery`, `loRain.lastReport` | English in `lg`; no card reads them any more (the valve tile and the LoRain card use the shared footer). |
+
+`soilTensionCardLocales.test.ts` (`HUMAN_LUGANDA_REUSED`) asserts the three
+kept keys still equal their human source strings.

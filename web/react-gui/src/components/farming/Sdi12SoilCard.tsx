@@ -14,7 +14,6 @@ import { useFormatNumber } from '../../utils/number';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { SensorMonitor } from './SensorMonitor';
 import { SoilTensionReadings, type SoilTensionProbe } from './shared/SoilTensionReadings';
-import { lastSeenLabel } from './shared/lastSeenLabel';
 import {
   FOCUS_VISIBLE_RING,
   HISTORY_VALUE_CUE,
@@ -240,7 +239,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
     }).filter(({ values }) => values.length > 0);
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
@@ -383,7 +382,7 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
       )}
 
       <DeviceCardFooter
-        lastSeenLabel={lastSeenLabel(t, device.last_seen)}
+        lastSeen={device.last_seen}
         batteryPercent={data.bat_pct}
         batteryVoltage={data.bat_v}
       />

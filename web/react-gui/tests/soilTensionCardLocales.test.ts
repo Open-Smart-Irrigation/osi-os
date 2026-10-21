@@ -47,11 +47,17 @@ function block(locale: string): Map<string, unknown> {
 const placeholders = (s: string) => (s.match(/\{\{\w+\}\}/g) ?? []).sort();
 
 const EN = block('en');
+// Human Luganda that already existed for the same English meaning, kept under the shared footer
+// keys: the Kiwi card's "Last seen: N minutes ago" and "Never seen". Never machine text.
+const HUMAN_LUGANDA_REUSED: Record<string, { key: string; from: string; to: string }> = {
+  'deviceCard.footer.lastSeenMinutes': { key: 'kiwiSensor.lastSeen', from: '{{minutes}}', to: '{{count}}' },
+  'deviceCard.footer.neverSeen': { key: 'kiwiSensor.neverSeen', from: '', to: '' },
+};
 // A human Luganda pass drops a key from this set and from the pending table in the same change.
-const PENDING_HUMAN_LUGANDA = new Set(EN.keys());
+const PENDING_HUMAN_LUGANDA = new Set([...EN.keys()].filter((key) => !(key in HUMAN_LUGANDA_REUSED)));
 
 test('soil tension card strings exist in every locale with the English key set and placeholders', () => {
-  assert.ok(EN.size >= 28, 'English soil tension card block is unexpectedly small');
+  assert.ok(EN.size >= 27, 'English soil tension card block is unexpectedly small');
   for (const [key, value] of EN) assert.equal(typeof value, 'string', `en ${key}`);
   for (const locale of [...EUROPEAN, 'lg']) {
     const values = block(locale);
@@ -76,8 +82,22 @@ test('European locales translate; Luganda carries English for the human pass', (
   for (const key of PENDING_HUMAN_LUGANDA) assert.equal(lg.get(key), EN.get(key), `lg ${key} changed`);
 });
 
-test('every last-seen tier has its singular and plural form', () => {
-  for (const tier of ['minutes', 'hours', 'days']) {
-    for (const form of ['one', 'other']) assert.ok(EN.has(`deviceCard.lastSeen.${tier}_${form}`), `${tier}_${form}`);
+test('the shared footer keeps the existing human Luganda last-seen strings', () => {
+  const lgDevices = read('lg');
+  const enDevices = read('en');
+  const lg = block('lg');
+  for (const [key, source] of Object.entries(HUMAN_LUGANDA_REUSED)) {
+    const human = lookup(lgDevices, source.key) as string;
+    assert.notEqual(human, lookup(enDevices, source.key), `lg ${source.key} is no longer human Luganda`);
+    assert.equal(lg.get(key), source.from ? human.replace(source.from, source.to) : human, `lg ${key}`);
   }
+});
+
+test('the footer carries the cloud key names: relative tiers, the absolute date, battery', () => {
+  assert.deepEqual(
+    [...EN.keys()].filter((key) => key.startsWith('deviceCard.footer.')).sort(),
+    ['battery', 'batteryLow', 'lastSeenAt', 'lastSeenHours', 'lastSeenJustNow', 'lastSeenMinutes', 'neverSeen']
+      .map((key) => `deviceCard.footer.${key}`),
+  );
+  assert.equal(EN.get('deviceCard.footer.lastSeenAt'), 'Last seen {{date}}');
 });

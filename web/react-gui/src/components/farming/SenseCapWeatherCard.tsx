@@ -43,14 +43,6 @@ function fmtLux(value: number | null | undefined): string {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}k lux` : `${Math.round(value)} lux`;
 }
 
-function lastSeenLabel(lastSeen: string | null | undefined): string {
-  if (!lastSeen) return 'never';
-  const diff = Math.floor((Date.now() - new Date(lastSeen).getTime()) / 60000);
-  if (diff < 1) return 'just now';
-  if (diff < 60) return `${diff} min ago`;
-  return `${Math.floor(diff / 60)}h ago`;
-}
-
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
   if (!Number.isFinite(value) || value <= 0) return null;
@@ -197,7 +189,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
     : 'No zones assigned';
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="mb-0.5 flex items-center justify-between gap-2">
         <EditableName
           name={device.name}
@@ -362,15 +354,11 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
         </div>
       </div>
 
-      <DeviceCardFooter
-        lastSeenLabel={lastSeenLabel(device.last_seen)}
-        batteryPercent={data.bat_pct}
-        leftContent={(
-          <p className="max-w-[60%] truncate">
-            Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
-          </p>
-        )}
-      />
+      <p className="mt-3 truncate text-xs text-[var(--text-tertiary)]">
+        Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
+      </p>
+
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} />
 
       {sensorMonitor && (
         <SensorMonitor

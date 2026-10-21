@@ -66,7 +66,7 @@ describe('Sdi12SoilCard Tensiomark locale', () => {
     expect(within(screen.getByRole('group', { name: 'Bodenspannung 1' })).getByRole('button', { name: 'Boden 21.5 °C' })).toBeInTheDocument();
     expect(within(screen.getByRole('group', { name: 'Bodenspannung 2' })).getByRole('button', { name: '12.5 kPa' })).toBeInTheDocument();
     expect(screen.getByText('Identifiziert')).toBeInTheDocument();
-    expect(screen.getByText(/Zuletzt gesehen: vor 30 Minuten/)).toBeInTheDocument();
+    expect(screen.getByText(/Zuletzt gesehen: vor 30 Min\./)).toBeInTheDocument();
     expect(screen.queryByText(/^SWT|Bodentemperatur|TENSIOMARK|Last seen/)).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-swt-status]')).toHaveLength(2);
   });

@@ -73,32 +73,33 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getByText('1.5 mm')).toBeInTheDocument();
     expect(screen.getByText('2.7 mm')).toBeInTheDocument();
     expect(screen.getByText('20.5 °C')).toBeInTheDocument();
-    expect(screen.getByText(/3\.3 V/)).toBeInTheDocument();
+    // The LoRain reports a voltage only: no LSN50-curve percentage, an empty footer slot.
+    expect(screen.getByTestId('device-card-battery')).toBeEmptyDOMElement();
+    expect(screen.queryByText(/3\.3 V/)).not.toBeInTheDocument();
   });
 
-  it('leads with amounts: no elapsed-time rate; the interval tile has amount and tips, "Last report" the time', () => {
+  it('leads with amounts: no elapsed-time rate; the interval tile has amount and tips; the time is in the footer', () => {
     const { container } = render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
 
     expect(container.textContent).not.toMatch(/mm\/h|10 min/);
     const interval = screen.getByText('loRain.intervalRainfall').parentElement as HTMLElement;
     expect(interval).toHaveTextContent('1.5 mm');
     expect(interval).toHaveTextContent('3 loRain.tips');
-    const tile = screen.getByTestId('lorain-last-report');
-    expect(within(tile).getByText('loRain.lastReport')).toBeInTheDocument();
-    expect(tile).not.toHaveTextContent('1.5 mm');
-    expect(tile).not.toHaveTextContent('loRain.tips');
-    expect(within(tile).getByTestId('lorain-last-report-time')).toHaveTextContent(/12:00/);
-    expect(within(tile).getByTestId('lorain-last-report-time')).toHaveTextContent(/UTC/);
+    // No "Last report" tile in the body any more: the shared footer carries the last uplink.
+    expect(screen.queryByTestId('lorain-last-report')).not.toBeInTheDocument();
+    expect(screen.queryByText('loRain.lastReport')).not.toBeInTheDocument();
+    const lastSeen = screen.getByTestId('device-card-last-seen');
+    expect(lastSeen).toHaveTextContent('30 deviceCard.footer.lastSeenMinutes');
   });
 
-  it('the interval tile says when the tip count is unavailable; the last report shows a dash without a report', () => {
+  it('the interval tile says when the tip count is unavailable; the footer says never seen without a report', () => {
     const noTips = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_tips_delta: null } } as Device;
     const view = render(<LoRainGaugeCard device={noTips} removeContext="farm" />);
     expect(screen.getByText('loRain.intervalRainfall').parentElement).toHaveTextContent('loRain.tipsUnavailable');
     view.unmount();
 
     render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: null, latest_data: {} } as unknown as Device} removeContext="farm" />);
-    expect(screen.getByTestId('lorain-last-report-time')).toHaveTextContent('—');
+    expect(screen.getByTestId('device-card-last-seen')).toHaveTextContent('deviceCard.footer.neverSeen');
   });
 
   it('never labels a previous day\'s total as today', () => {
@@ -127,7 +128,7 @@ describe('LoRainGaugeCard', () => {
   it('renders invalid last-seen timestamps as never seen', () => {
     render(<LoRainGaugeCard device={{ ...lorainDevice, last_seen: 'not-a-date' }} removeContext="farm" />);
 
-    expect(screen.getByText(/Never seen/)).toBeInTheDocument();
+    expect(screen.getByTestId('device-card-last-seen')).toHaveTextContent('deviceCard.footer.neverSeen');
   });
 
   it('removes the device after confirmation', async () => {

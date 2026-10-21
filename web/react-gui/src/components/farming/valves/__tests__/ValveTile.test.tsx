@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 
@@ -311,60 +311,41 @@ describe('ValveTile #171 disclosures', () => {
 // OSI Server cloud's ValveTile.tsx placement. Tier logic itself (describeLastSeen) is unit
 // tested directly in valveCardHelpers.test.ts; these assert the tile actually renders what
 // that helper produces, and that the battery line is honestly omitted rather than "—".
-describe('ValveTile last-seen label (I6)', () => {
-  it('shows the "never" tier when the valve has no lastUplinkAt', () => {
+// The tile ends in the footer every device card shares (owner decision 2026-10-21); the
+// footer's own tiers and thresholds are covered by DeviceCardFooter.test.tsx.
+describe('ValveTile shared device card footer', () => {
+  const lastSeen = () => screen.getByTestId('device-card-last-seen');
+  const battery = () => screen.getByTestId('device-card-battery');
+
+  it('shows "never" when the valve has no lastUplinkAt', () => {
     renderTile({ lastUplinkAt: null });
-    expect(screen.getByText('Last seen: never')).toBeInTheDocument();
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.neverSeen');
   });
 
-  it('shows the "just now" tier for a contact under a minute old', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 10_000).toISOString() });
-    expect(screen.getByText('Last seen: just now')).toBeInTheDocument();
-  });
-
-  it('shows the singular minutes tier for a one-minute-old contact', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 60_000).toISOString() });
-    expect(screen.getByText('Last seen: 1 minute ago')).toBeInTheDocument();
-  });
-
-  it('shows the plural minutes tier for a contact several minutes old', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 5 * 60_000).toISOString() });
-    expect(screen.getByText('Last seen: 5 minutes ago')).toBeInTheDocument();
-  });
-
-  it('shows the hours tier for a contact several hours old', () => {
+  it('shows a relative age under six hours and the date from six hours on', () => {
     renderTile({ lastUplinkAt: new Date(Date.now() - 3 * 3_600_000).toISOString() });
-    expect(screen.getByText('Last seen: 3 hours ago')).toBeInTheDocument();
-  });
-
-  it('shows the days tier for a contact several days old', () => {
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.lastSeenHours');
+    cleanup();
     renderTile({ lastUplinkAt: new Date(Date.now() - 2 * 86_400_000).toISOString() });
-    expect(screen.getByText('Last seen: 2 days ago')).toBeInTheDocument();
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.lastSeenAt');
   });
-});
 
-describe('ValveTile battery footer (I6)', () => {
-  it('shows nothing at all when no battery data is available', () => {
-    const { container } = renderTile();
-    expect(container.textContent).not.toMatch(/Battery:/);
+  it('has no last-seen line at the top of the tile any more', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 60_000).toISOString() });
+    expect(screen.queryByTestId('valve-last-seen')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('device-card-footer')).toHaveLength(1);
+  });
+
+  it('keeps an empty battery slot when no battery data is available', () => {
+    renderTile();
+    expect(battery()).toBeEmptyDOMElement();
   });
 
   it('shows the battery percent when bat_pct is present', () => {
     renderTile({}, { batteryPercent: 72 });
-    expect(screen.getByText('Battery: 72 %')).toBeInTheDocument();
+    expect(battery()).toHaveTextContent('72%');
   });
 
-  it('falls back to the voltage-derived percent when bat_pct is absent', () => {
-    // LSN50 usable range is 2.1V-3.6V (deviceCardBattery.ts) -- 3.6V is a full battery.
-    renderTile({}, { batteryVoltage: 3.6 });
-    expect(screen.getByText('Battery: 100 %')).toBeInTheDocument();
-  });
-
-  it('prefers bat_pct over the voltage fallback when both are present', () => {
-    renderTile({}, { batteryPercent: 40, batteryVoltage: 3.6 });
-    expect(screen.getByText('Battery: 40 %')).toBeInTheDocument();
-    expect(screen.queryByText('Battery: 100 %')).not.toBeInTheDocument();
-  });
 });
 
 // M-2 (final fix wave review): the pending-state primary action used to share the

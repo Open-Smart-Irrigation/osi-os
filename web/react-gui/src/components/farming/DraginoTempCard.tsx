@@ -14,7 +14,6 @@ import { useDisplayPreferences } from '../../utils/displayPreferences';
 import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { WatermarkProbeSection } from './shared/WatermarkProbeSection';
-import { lastSeenLabel } from './shared/lastSeenLabel';
 
 function formatCounterInterval(seconds: number | null | undefined): string | null {
   const value = Number(seconds);
@@ -169,14 +168,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
   } | null>(null);
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
 
-  const batColour =
-    data?.bat_v === undefined ? 'var(--text-tertiary)' :
-    data.bat_v >= 3.2 ? '#22c55e' :
-    data.bat_v >= 2.9 ? '#f59e0b' :
-    '#ef4444';
-
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
@@ -266,20 +259,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             ) : (
               <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
             )}
-          </div>
-        )}
-
-        {data?.bat_v != null && (
-          <div className="rounded-lg bg-[var(--card)] p-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">BATTERY</p>
-            <button
-              onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
-              className={`cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75 ${FOCUS_VISIBLE_RING}`}
-              style={{ color: batColour }}
-              title={t('common.viewHistory', { defaultValue: 'View history' })}
-            >
-              {data.bat_v.toFixed(2)} V
-            </button>
           </div>
         )}
 
@@ -470,7 +449,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
       </div>
 
       <DeviceCardFooter
-        lastSeenLabel={lastSeenLabel(t, device.last_seen)}
+        lastSeen={device.last_seen}
         batteryPercent={device.latest_data?.bat_pct}
         batteryVoltage={device.latest_data?.bat_v}
       />
