@@ -385,15 +385,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     ? t('zone.water.soil.invalidReading', { defaultValue: 'Invalid reading' })
     : soilNow.stale
       ? soilObservedRelative
-        ? t('zone.water.soil.noReadingSince', {
+        ? t('zone.water.soil.lastReading', {
             since: soilObservedRelative,
-            defaultValue: 'No reading since {{since}}',
+            defaultValue: 'Last reading {{since}}',
           })
         : t('zone.water.soil.noReadingYet', { defaultValue: 'No reading yet' })
       : null;
   // Owner ruling 2026-10-18 (#500): the latest stored reading keeps its value
-  // and water-status pill when it is older than three hours; the "No reading
-  // since" line carries its age. An invalid reading shows no value and no pill.
+  // and water-status pill when it is older than three hours; the "Last reading"
+  // line carries its age. An invalid reading shows no value and no pill.
   const soilShowsValue = !soilNow.invalid && soilValue !== null;
   // Current probes supplied the figure while the probe on the trigger channel
   // has gone quiet: say so on its own line rather than let it lead.
@@ -401,9 +401,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     ? dateFormat.relativeToNow(soilNow.staleTrigger.observedAt)
     : null;
   const soilTriggerProbeLine = staleTriggerSince
-    ? t('zone.water.soil.triggerProbeNoReadingSince', {
+    ? t('zone.water.soil.triggerProbeLastReading', {
         since: staleTriggerSince,
-        defaultValue: 'Trigger probe: no reading since {{since}}',
+        defaultValue: 'Trigger probe: last reading {{since}}',
       })
     : null;
 

@@ -100,7 +100,7 @@ The locale files nest these labels at `history.soil.state.wet`, `.moist`, and `.
 
 ## Freshness and validity
 
-Superseded 2026-10-18 (owner ruling, #500): the pill shows on the latest stored reading; the card's last-seen line carries the age. This applies to the device cards and to the Water card: a stale "Soil now" shows the latest stored value and its pill, and the "No reading since …" line carries the age (the separate "Last valid … · time" line is gone). An invalid or faulted reading still shows no value and no pill, and a stale value never gets the trigger-relative line. Value selection in the zone summary still prefers current contributors. Where the text below says "stale … no indicator" or requires a current `last_seen` for the pill, read it as history.
+Superseded 2026-10-18 (owner ruling, #500): the pill shows on the latest stored reading; the card's last-seen line carries the age. This applies to the device cards and to the Water card: a stale "Soil now" shows the latest stored value and its pill, and the "Last reading …" line carries the age (the separate "Last valid … · time" line is gone). An invalid or faulted reading still shows no value and no pill, and a stale value never gets the trigger-relative line. Value selection in the zone summary still prefers current contributors. Where the text below says "stale … no indicator" or requires a current `last_seen` for the pill, read it as history.
 
 The three-hour `SENSOR_FRESHNESS_WINDOW_MS` remains the age limit for current telemetry. Add a small exported predicate beside that constant so device cards and the zone summary use the same timestamp rule. A reading is current only when `nowMs` is finite, `last_seen` parses to a finite timestamp, and `-5 minutes <= nowMs - observedMs <= 3 hours`. Both endpoints are inclusive. This admits at most five minutes of device clock skew; a timestamp five minutes and one millisecond in the future is not current. Missing, unparseable, and far-future timestamps cannot establish freshness.
 
@@ -146,7 +146,7 @@ The live SWT values inside `DraginoChameleonSwtSection` are settings-modal diagn
 
 “Soil now” continues to show one selected quantity. Tension takes precedence over volumetric data when both exist. A Tensiomark-only zone now follows the tension path.
 
-For a valid tension value, render the shared indicator beside the number. For VWC, retain the neutral “Volumetric water content” text and show no VIA color. Missing and invalid states keep their existing warning copy without a value or status indicator. A stale value (2026-10-18 ruling) keeps its number and indicator; the warning line "No reading since …" carries its age and the trigger-relative line is withheld.
+For a valid tension value, render the shared indicator beside the number. For VWC, retain the neutral “Volumetric water content” text and show no VIA color. Missing and invalid states keep their existing warning copy without a value or status indicator. A stale value (2026-10-18 ruling) keeps its number and indicator; the warning line "Last reading …" carries its age and the trigger-relative line is withheld.
 
 Trigger proximity remains a separate neutral line:
 
@@ -156,7 +156,7 @@ Soil now
 At or past the trigger
 ```
 
-Owner decision 2026-10-21: the figure's origin follows the value and its pill, in brackets, rather than sitting in the title. It is the channel's depth with a space and lowercase `cm` (`(20 cm)`), or, when no depth is recorded, the name of the probe (the device) behind a single-channel figure. A pooled mean names nothing. Current probes win over a stale one even when only the stale probe carries the trigger channel; the figure then comes from the current probes, makes no trigger claim, and a separate warning line reads "Trigger probe: no reading since …". The cloud Water card uses the same format.
+Owner decision 2026-10-21: the figure's origin follows the value and its pill, in brackets, rather than sitting in the title. It is the channel's depth with a space and lowercase `cm` (`(20 cm)`), or, when no depth is recorded, the name of the probe (the device) behind a single-channel figure. A pooled mean names nothing. Current probes win over a stale one even when only the stale probe carries the trigger channel; the figure then comes from the current probes, makes no trigger claim, and a separate warning line reads "Trigger probe: last reading …". The age line reads "Last reading 5 days ago" (owner copy decision 2026-10-21; "No reading since 5 days ago" was ungrammatical). The cloud Water card uses the same format.
 
 A status and trigger message can differ without contradiction: `35 kPa` is Moist under VIA's fixed bands and may also be At or past a farm trigger of `30 kPa`.
 

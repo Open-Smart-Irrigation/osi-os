@@ -289,7 +289,8 @@
         "invalidReading": "Ungültige Messung",
         "lastValid": "Letzte gültige {{value}} · {{time}}",
         "depthSuffix": "({{depth}} cm)",
-        "triggerProbeNoReadingSince": "Auslösesonde: keine Messung seit {{since}}"
+        "lastReading": "Letzte Messung {{since}}",
+        "triggerProbeLastReading": "Auslösesonde: letzte Messung {{since}}"
       },
       "rainFromStation": "Gemessen an der MeteoSchweiz-Station {{station}} ({{distance}} km entfernt)",
       "rainFromWeather": "Aus Wetterdaten (nicht gemessen)",
