@@ -246,3 +246,14 @@ Tracked in code at `web/react-gui/tests/tensiomarkLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
+
+## `common.json` — auto-stacked Data view chart
+
+| Keys | Reason |
+|---|---|
+| `analysis.autoStack.note`, `analysis.autoStack.showOverlaid` (2 keys in `common.json`) | Added when an overlaid Data view chart whose unit axes leave too little room for the plot started to render stacked, with a short note and a session-only "Show overlaid anyway" toggle (ported from the cloud Analysis page, 2026-10-21). de-CH/es/fr/it/pt carry the cloud's translations, which still need a native-speaker review. No human Luganda pass yet, so `lg` ships the English source text. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the
+auto-stack test's `PENDING_HUMAN_LUGANDA` set, which asserts each key's `lg`
+value is still byte-identical to `en`. A human Luganda pass must drop each key
+from that set and from this table in the same change.

@@ -153,4 +153,57 @@ describe('AnalysisChartPanel', () => {
     const amount: AnalysisSeries = { ...rain, resolved: { ...rain.resolved, channelKey: 'rain_mm_delta' } };
     expect(formatPartial?.({ ...partial, count: 2, expected: null, quality: null }, amount)).toBe('analysis.tooltip.reportsReceived');
   });
+  describe('auto-stack of a crowded overlaid chart', () => {
+    let notify: ((entries: Array<{ contentRect: { width: number; height: number } }>) => void) | null = null;
+    class ResizeObserverStub {
+      constructor(cb: typeof notify) { notify = cb; }
+      observe() {}
+      disconnect() {}
+    }
+    const threeUnits = () => [s('a', 'kPa'), s('b', 'C'), s('c', 'um')];
+    const renderAt = (width: number, onAxisRename = vi.fn()) => {
+      globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+      const utils = render(<AnalysisChartPanel series={threeUnits()} mode="timeline" layout="overlaid" toggles={{ normalize: false }} channelMeta={new Map()} onAxisRename={onAxisRename} />);
+      act(() => notify?.([{ contentRect: { width, height: 360 } }]));
+      return utils;
+    };
+    const previous = globalThis.ResizeObserver;
+    afterEach(() => { globalThis.ResizeObserver = previous; notify = null; });
+
+    it('renders stacked panels on a phone, with a note, while the requested layout stays overlaid', () => {
+      renderAt(390);
+      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ multiAxis: false }));
+      expect(screen.getByRole('status')).toHaveTextContent('analysis.autoStack.note');
+      const frame = screen.getByTestId('analysis-chart-frame');
+      expect(frame).toHaveAttribute('data-requested-layout', 'overlaid');
+      expect(frame).toHaveAttribute('data-effective-layout', 'stacked');
+      // Stacked panels need the stacked height.
+      expect(frame).toHaveStyle({ minHeight: '720px' });
+    });
+
+    it('stacks at 320 px as well', () => {
+      renderAt(320);
+      expect(screen.getByTestId('analysis-chart-frame')).toHaveAttribute('data-effective-layout', 'stacked');
+    });
+
+    it('offers a session-only toggle back to overlaid without touching the saved view', () => {
+      const onAxisRename = vi.fn();
+      renderAt(390, onAxisRename);
+      const toggle = screen.getByRole('button', { name: 'analysis.autoStack.showOverlaid' });
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ multiAxis: true }));
+      expect(screen.getByTestId('analysis-chart-frame')).toHaveAttribute('data-effective-layout', 'overlaid');
+      // The panel has no way to write the view; nothing else was called.
+      expect(onAxisRename).not.toHaveBeenCalled();
+    });
+
+    it('stays overlaid without a note on a wide screen', () => {
+      renderAt(1440);
+      expect(buildTimeSeriesOption).toHaveBeenLastCalledWith(expect.objectContaining({ multiAxis: true }));
+      expect(screen.getByTestId('analysis-chart-frame')).toHaveAttribute('data-effective-layout', 'overlaid');
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+  });
 });

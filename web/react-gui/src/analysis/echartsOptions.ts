@@ -5,7 +5,18 @@ import { SERIES_PALETTE, seriesColor } from './seriesColors';
 import { canonicalize } from '../channels/registry';
 import { prettyUnit } from './channelLabels';
 import { smallMultiplesColumns, type ChartViewport } from './chartGeometry';
-import { fitAxisTitle, valueAxisLabelWidth } from '../charts/axisLayout';
+import { fitAxisTitle } from '../charts/axisLayout';
+import {
+  LABEL_MARGIN,
+  NAME_BAND,
+  NAME_SPACING,
+  OUTER_PAD,
+  RIGHT_PAD_NO_AXIS,
+  axisBand,
+  axisValues,
+  overlaidMargins,
+  tickLabelWidth,
+} from './axisBands';
 
 export interface TimeSeriesOptionInput {
   panels: UnitPanel[];
@@ -45,29 +56,13 @@ const tooltipValueFormatter = (value: number | null | undefined, unit?: string |
   value == null || !Number.isFinite(Number(value)) ? '–' : Number(value).toFixed(unit === 'pF' ? 2 : 1)
 );
 
-// Axis-band geometry, in px. ECharts draws value-axis tick labels 8 px
-// (axisLabel.margin) from the axis line in its default 12 px font; the rotated
-// title sits NAME_SPACING beyond the widest label and takes NAME_BAND.
-const TICK_FONT_PX = 12;
 const NAME_FONT_PX = 12;
-const LABEL_MARGIN = 8;
-const NAME_SPACING = 6;
-const NAME_BAND = 16;
-const OUTER_PAD = 4;
-const RIGHT_PAD_NO_AXIS = 24;
 const DEFAULT_WIDTH = 720;
 const SINGLE_DEFAULT_HEIGHT = 360;
 const STACKED_DEFAULT_PANEL_HEIGHT = 240;
 const SMALL_MULTIPLE_DEFAULT_CELL_HEIGHT = 220;
 
 const NAME_TEXT_STYLE = { fontSize: NAME_FONT_PX, fontWeight: 500 as const, color: '#475569' };
-
-/** ECharts' default value-axis label: the number with thousands separators. */
-function echartsTickLabel(value: number): string {
-  const [integer, fraction] = String(value).split('.');
-  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return fraction ? `${grouped}.${fraction}` : grouped;
-}
 
 function escapeHtml(value: string): string {
   return value
@@ -168,24 +163,6 @@ function axisTitle(
   const unit = axisSeries[0]?.unit ?? null;
   const full = resolveAxisLabel ? resolveAxisLabel(key, unit) : (unit ? `${key} (${prettyUnit(unit)})` : key);
   return { full, short: unit ? prettyUnit(unit) : null, editableKey: key };
-}
-
-function axisValues(axisSeries: AnalysisSeries[], normalize: boolean): number[] {
-  if (normalize) return [0, 100];
-  const values: number[] = [];
-  for (const s of axisSeries) {
-    for (const p of s.points) if (p.value !== null && Number.isFinite(p.value)) values.push(p.value);
-  }
-  return values;
-}
-
-function tickLabelWidth(values: number[]): number {
-  return valueAxisLabelWidth(values, { fontPx: TICK_FONT_PX, format: echartsTickLabel });
-}
-
-/** Width of an axis band: tick labels plus, when titled, the rotated title. */
-function axisBand(labelWidth: number, titled: boolean): number {
-  return labelWidth + LABEL_MARGIN + (titled ? NAME_SPACING + NAME_BAND : 0);
 }
 
 /**
@@ -352,12 +329,7 @@ export function buildTimeSeriesOption(input: TimeSeriesOptionInput): Record<stri
       color: SERIES_PALETTE,
       tooltip: axisTooltip(series, input.formatPartial),
       ...(includeLegend ? { legend: EXPORT_LEGEND } : {}),
-      grid: [{
-        left: bands[0] + OUTER_PAD,
-        right: rightOffset > 0 ? rightOffset + OUTER_PAD : RIGHT_PAD_NO_AXIS,
-        top,
-        bottom,
-      }],
+      grid: [{ ...overlaidMargins(bands), top, bottom }],
       xAxis: [{ type: 'time', axisLabel: TIME_AXIS_LABEL }],
       yAxis,
       series: echSeries,
