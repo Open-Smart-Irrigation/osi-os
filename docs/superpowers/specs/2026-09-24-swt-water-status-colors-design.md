@@ -151,10 +151,12 @@ For a valid tension value, render the shared indicator beside the number. For VW
 Trigger proximity remains a separate neutral line:
 
 ```text
-Soil now · 20 cm
-56.5 kPa   [● Dry]
+Soil now
+56.5 kPa   [● Dry]   (20 cm)
 At or past the trigger
 ```
+
+Owner decision 2026-10-21: the figure's origin follows the value and its pill, in brackets, rather than sitting in the title. It is the channel's depth with a space and lowercase `cm` (`(20 cm)`), or, when no depth is recorded, the name of the probe (the device) behind a single-channel figure. A pooled mean names nothing. Current probes win over a stale one even when only the stale probe carries the trigger channel; the figure then comes from the current probes, makes no trigger claim, and a separate warning line reads "Trigger probe: no reading since …". The cloud Water card uses the same format.
 
 A status and trigger message can differ without contradiction: `35 kPa` is Moist under VIA's fixed bands and may also be At or past a farm trigger of `30 kPa`.
 

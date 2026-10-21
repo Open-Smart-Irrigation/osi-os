@@ -197,13 +197,6 @@ function triggerChannelOf(metric: string | null | undefined): SoilChannelSelecti
   }
 }
 
-const CHANNEL_METRIC: Record<string, string> = { swt_1: 'SWT_1', swt_2: 'SWT_2', swt_3: 'SWT_3' };
-
-function formatSoilChannel(t: Translate, channel: SoilChannelSelection): string {
-  const metric = CHANNEL_METRIC[channel] ?? 'SWT_AVG';
-  return t(`schedule.metric.${metric}`, { defaultValue: metric === 'SWT_AVG' ? 'Mean (all sensors)' : `Sensor ${metric.slice(-1)}` });
-}
-
 function formatScheduleMetric(t: Translate, metric: string): string {
   const fallback = SCHEDULE_METRIC_LABELS[metric];
   return fallback
@@ -359,20 +352,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     : soilNow.quantity === 'tension'
       ? formatSwtCardValue(soilNow.value, swtUnit)
       : `${soilNow.value.toFixed(1)} %`;
-  // Which channel the number came from: its depth when the installation
-  // recorded one, otherwise the channel's own name. A cross-depth mean names
-  // nothing, which is why it is no longer reported.
-  const soilTitle = soilNow.depthCm != null
-    ? t('zone.water.soil.titleAtDepth', {
-        depth: soilNow.depthCm,
-        defaultValue: 'Soil now · {{depth}} cm',
-      })
-    : soilNow.channel != null && soilNow.channel !== 'mean'
-      ? t('zone.water.soil.titleChannel', {
-          channel: formatSoilChannel(t, soilNow.channel),
-          defaultValue: 'Soil now · {{channel}}',
-        })
-      : t('zone.water.soil.title', { defaultValue: 'Soil now' });
+  const soilTitle = t('zone.water.soil.title', { defaultValue: 'Soil now' });
+  // Where the number came from, after the value and its pill (owner decision
+  // 2026-10-21): "15.0 kPa [Wet] (20 cm)", or the probe's name when no depth
+  // is recorded. A pooled mean names nothing.
+  const soilSource = soilNow.depthCm != null
+    ? t('zone.water.soil.depthSuffix', { depth: soilNow.depthCm, defaultValue: '({{depth}} cm)' })
+    : soilNow.probeNames.length > 0
+      ? `(${soilNow.probeNames.join(', ')})`
+      : null;
   // Fixed soil status and the zone-specific trigger comparison are separate facts.
   const soilWaterStatus = soilNow.quantity === 'tension'
     && soilNow.value !== null
@@ -407,6 +395,17 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   // and water-status pill when it is older than three hours; the "No reading
   // since" line carries its age. An invalid reading shows no value and no pill.
   const soilShowsValue = !soilNow.invalid && soilValue !== null;
+  // Current probes supplied the figure while the probe on the trigger channel
+  // has gone quiet: say so on its own line rather than let it lead.
+  const staleTriggerSince = soilNow.staleTrigger
+    ? dateFormat.relativeToNow(soilNow.staleTrigger.observedAt)
+    : null;
+  const soilTriggerProbeLine = staleTriggerSince
+    ? t('zone.water.soil.triggerProbeNoReadingSince', {
+        since: staleTriggerSince,
+        defaultValue: 'Trigger probe: no reading since {{since}}',
+      })
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -740,12 +739,18 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                     {soilShowsValue ? soilValue : '—'}
                   </p>
                   {soilShowsValue && <SwtStatusIndicator status={soilWaterStatus} />}
+                  {soilShowsValue && soilSource && (
+                    <span className="text-sm text-[var(--text-secondary)]">{soilSource}</span>
+                  )}
                 </div>
                 {soilDescriptor && soilStatusLine === null && (
                   <p className="text-sm text-[var(--text-secondary)]">{soilDescriptor}</p>
                 )}
                 {soilStatusLine && (
                   <p className="text-sm font-semibold text-[var(--warn-text)]">{soilStatusLine}</p>
+                )}
+                {soilTriggerProbeLine && (
+                  <p className="text-sm font-semibold text-[var(--warn-text)]">{soilTriggerProbeLine}</p>
                 )}
               </div>
             )}

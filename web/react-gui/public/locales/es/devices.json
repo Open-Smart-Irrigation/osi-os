@@ -287,7 +287,9 @@
         "noReadingSince": "Sin lecturas desde {{since}}",
         "noReadingYet": "Todavía sin lecturas",
         "invalidReading": "Lectura no válida",
-        "lastValid": "Última válida {{value}} · {{time}}"
+        "lastValid": "Última válida {{value}} · {{time}}",
+        "depthSuffix": "({{depth}} cm)",
+        "triggerProbeNoReadingSince": "Sonda de activación: sin lecturas desde {{since}}"
       },
       "rainFromStation": "Medida en la estación MeteoSwiss {{station}} (a {{distance}} km)",
       "rainFromWeather": "De los datos meteorológicos (no medida)",
