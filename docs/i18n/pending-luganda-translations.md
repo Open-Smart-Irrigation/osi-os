@@ -236,6 +236,11 @@ and from the table above in the same change.
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.
+The CMD-04 valve keys listed under `valves.json` above (`planLost`,
+`scheduleDialog.push.LOST`) get no demo override: the simulator shows their
+English source text too. `web/react-gui/demo/tests/valve-locale.test.ts`
+enforces this, and a human Luganda pass removes the key from its pending list
+in the same change.
 
 ## `devices.json` — Tensiomark settings and SDI-12 card
 
