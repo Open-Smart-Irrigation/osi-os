@@ -969,7 +969,17 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} giorni · totali giornalieri ({{timezone}})",
     "soFar": "finora",
-    "timezoneCheck": "Controlla il fuso orario della zona nelle sue impostazioni."
+    "timezoneCheck": "Controlla il fuso orario della zona nelle sue impostazioni.",
+    "exportDailyCsv": "Esporta la cronologia giornaliera della pioggia in CSV",
+    "exportUnavailable": "Esportazione CSV non disponibile per questo storico del gateway",
+    "qualityLabel": "Qualità: {{quality}}",
+    "quality": {
+      "complete": "completa",
+      "completeSoFar": "completa finora",
+      "partial": "parziale",
+      "receivedOnly": "solo ricevuta",
+      "unknown": "copertura sconosciuta"
+    }
   },
   "rain": {
     "recordedToday": "Pioggia registrata oggi",

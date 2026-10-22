@@ -966,7 +966,17 @@
   "rainMonitor": {
     "dailyFooter": "{{days}} days · daily totals ({{timezone}})",
     "soFar": "so far",
-    "timezoneCheck": "Check the zone time zone in its settings."
+    "timezoneCheck": "Check the zone time zone in its settings.",
+    "exportDailyCsv": "Export daily rain CSV",
+    "exportUnavailable": "Daily rain CSV unavailable for this gateway history",
+    "qualityLabel": "Quality: {{quality}}",
+    "quality": {
+      "complete": "complete",
+      "completeSoFar": "complete so far",
+      "partial": "partial",
+      "receivedOnly": "received only",
+      "unknown": "coverage unknown"
+    }
   },
   "rain": {
     "recordedToday": "Rain recorded today",

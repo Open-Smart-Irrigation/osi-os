@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { CSV_V2_EXTRA_COLUMNS, toTidyCsv } from '../csv';
 import { catalogById as fixtureCatalog, rain as fixtureRain, seriesList as fixtureSeries } from './fixtures/csvSeries';
 import type { AnalysisSeries, AnalysisCatalogEntry } from '../types';
+import { A12_DST_DAYS, A19_EXPORT, RAIN_ACCEPTANCE_CATALOG, a12Export } from './fixtures/rainAcceptance';
 
 const series: AnalysisSeries = {
   seriesId: 'abc',
@@ -125,11 +126,51 @@ describe('toTidyCsv versions', () => {
     expect(lines[4].endsWith(',Europe/Zurich,2026-10-24T22:00:00.000Z,2026-10-25T23:00:00.000Z,,,1')).toBe(true);
   });
 
-  it('v2 names a raw rain report "this interval", ending at the report, start unknown', () => {
-    const raw = { ...fixtureRain, points: [{ t: '2026-10-25T06:15:00.000Z', value: 0.5, count: 1, expected: null, quality: null }] };
+  it('A3 v2 keeps the 0.5 mm raw report time while its measurement start and rate are unknown', () => {
+    const raw = { ...fixtureRain, points: [{ t: '2026-10-08T11:15:00.000Z', value: 0.5, count: 1, expected: null, quality: null }] };
     const lines = toTidyCsv([raw], fixtureCatalog, { version: 2, aggregation: 'raw', rangeEnd: '2026-10-26T00:00:00.000Z' }).split('\n');
-    expect(lines[2]).toBe('2026-10-25T06:15:00.000Z,HUB-1,"North, Plot A",Gauge - Rainfall this interval,environment,environment-src-1,rain_mm_delta,,,mm,0.5,'
-      + ',Europe/Zurich,,2026-10-25T06:15:00.000Z,received_only,,1');
+    expect(lines[2]).toBe('2026-10-08T11:15:00.000Z,HUB-1,"North, Plot A",Gauge - Rainfall this interval,environment,environment-src-1,rain_mm_delta,,,mm,0.5,'
+      + ',Europe/Zurich,,2026-10-08T11:15:00.000Z,received_only,,1');
+  });
+
+  it.each(A12_DST_DAYS)('A12 producer-shaped hourly series keeps the $day UTC bucket start and DST bounds', (fixtureDay) => {
+    const series = a12Export(fixtureDay);
+    const fields = toTidyCsv([series], RAIN_ACCEPTANCE_CATALOG, {
+      version: 2, aggregation: 'daily', rangeEnd: fixtureDay.period_end!,
+    }).split('\n')[2].split(',');
+    expect(series.cadence).toBe('hourly');
+    expect(fields[0]).toBe(fixtureDay.period_start);
+    expect(fields[12]).toBe('Europe/Zurich');
+    expect(fields[13]).toBe(fixtureDay.period_start);
+    expect(fields[14]).toBe(fixtureDay.period_end);
+    expect(fields[15]).toBe('received_only');
+    expect(fields[16]).toBe('');
+    expect(fields[17]).toBe(String(fixtureDay.samples));
+    if (fixtureDay.day === '2026-03-29') {
+      expect(Date.parse(fields[14]) - Date.parse(fields[13])).toBe(23 * 60 * 60 * 1000);
+    } else {
+      expect(Date.parse(fields[14]) - Date.parse(fields[13])).toBe(25 * 60 * 60 * 1000);
+    }
+  });
+
+  it('A19 producer-shaped hourly series keeps ISO bucket timestamps, next-bucket bounds, and received-only', () => {
+    const rows = toTidyCsv([A19_EXPORT], RAIN_ACCEPTANCE_CATALOG, {
+      version: 2, aggregation: 'daily', rangeEnd: '2026-10-25T23:00:00.000Z',
+    }).split('\n').slice(2);
+    const actual = rows.map((line) => {
+      const fields = line.split(',');
+      return {
+        timestamp: fields[0], timezone: fields[12], period_start: fields[13], period_end: fields[14],
+        quality: fields[15], value: fields[10], samples: fields[17],
+      };
+    });
+
+    expect(actual).toEqual([
+      { timestamp: '2026-10-21T22:00:00.000Z', timezone: 'Europe/Zurich', period_start: '2026-10-21T22:00:00.000Z', period_end: '2026-10-22T22:00:00.000Z', quality: 'received_only', value: '', samples: '0' },
+      { timestamp: '2026-10-22T22:00:00.000Z', timezone: 'Europe/Zurich', period_start: '2026-10-22T22:00:00.000Z', period_end: '2026-10-23T22:00:00.000Z', quality: 'received_only', value: '0.5', samples: '1' },
+      { timestamp: '2026-10-23T22:00:00.000Z', timezone: 'Europe/Zurich', period_start: '2026-10-23T22:00:00.000Z', period_end: '2026-10-24T22:00:00.000Z', quality: 'received_only', value: '1', samples: '2' },
+      { timestamp: '2026-10-24T22:00:00.000Z', timezone: 'Europe/Zurich', period_start: '2026-10-24T22:00:00.000Z', period_end: '2026-10-25T23:00:00.000Z', quality: 'received_only', value: '0', samples: '3' },
+    ]);
   });
 
   it('v2 states the coverage of a partial weather sum as a fraction, never for rain reports', () => {

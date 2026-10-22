@@ -56,6 +56,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.9.0] - Unreleased
+
+### Rainfall records, advice, and monitoring
+
+Rainfall history now distinguishes a certified full farm-day total from rain received so far. Each zone uses one eligible gauge; competing gauges are never summed or chosen by arrival order. A complete measured zero remains a real value and takes priority over provider rain. Incomplete, unknown, or stale evidence remains visibly qualified instead of becoming zero. On the current farm day, continuous coverage from local midnight through the latest accepted observation cutoff may inform advice as `complete_so_far`; it is not represented as a completed farm-day total. Partial and unknown amounts remain lower bounds, separate from provider rain and rolling totals.
+
+Farm-day boundaries follow the zone's IANA timezone, including daylight-saving days of 23 or 25 hours and transitions that occur at local midnight. A Cairo midnight regression now uses the same zone-day boundary routine as the rainfall projection, preventing an interval from the preceding local day from being counted in today's provider total. Saved gauge selections remain stored when a gauge leaves a zone and apply again if it returns; while it is absent, normal sole-gauge or ambiguity rules apply.
+
+The zone water advice remains available when rain is unknown, with an explicit warning and no rain contribution. Missing demand remains unknown rather than zero. Current-day provider rain includes only complete hourly intervals elapsed by the evaluation cutoff; future intervals remain forecast input. A received lower bound does not certify the rolling seven-day total or enter the water balance; the separately documented dendrometer suppression threshold remains the limited exception. LoRain remains received-only unless interval, continuity, configuration, and pinned-build evidence support stronger quality. Configuration queries remain disabled, and synthetic FPort 2 evidence does not certify an installed FPort 10 build.
+
+### Data compatibility and recovery
+
+Edge migrations 0071–0073 add immutable observation snapshots, per-instrument daily coverage and explicit zone gauge selection, then quality fields in zone-day history sync. Existing zone rows remain legacy data; migrations do not rewrite historical rainfall. Cloud migrations `V2026_10_10_001__zone_environment_rain_quality.sql` and `V2026_10_10_002__zone_recommendation_rain_nullable.sql` make the corresponding rainfall fields nullable while preserving existing values. Deploy and verify a compatible cloud receiver and policy before linking an edge that emits the new fields; older receivers can retain an old value for explicit null or misread a new row as zero.
+
+Recovery after edge migration head 73 is forward-only. Older bundles must refuse the advanced ledger; do not restore an older database over newly collected observations or convert unknown rain to zero. Preserve applied migration files and fix forward. Historical null-to-zero rollback comments in cloud migrations 001 and 002 are superseded by this recovery guidance.
+
+The RainMonitor has a separate opt-in daily-history CSV based on the same qualified history response as its chart. It preserves day keys, timezone, exact server bounds, quality, reasons, sample count, and current-day cutoff; no-data remains blank while a sampled zero remains `0`. Its version marker and schema are separate from existing Data-view raw-device CSV v1/v2, whose sparse device readings remain received-only. The chart shows daily quality, and the qualified export is unavailable for legacy responses missing timezone or bounds.
+
+### Offline rain-history comparison
+
+The offline `rain-history-diff` command reads a local database in immutable, read-only mode and writes a day-by-day CSV and summary; it does not repair historical records. It reports numeric differences only when retained evidence and historical assignment and gauge provenance establish a comparable farm day. Without that proof, the comparison delta remains unknown; retained amounts, where present, are contextual or received-only rather than recovered or certified history.
+
 ## [0.8.1] — 2026-10-10
 
 Rain fixes from the October rainfall review, plus valve command safety. No

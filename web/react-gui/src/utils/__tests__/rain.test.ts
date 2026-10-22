@@ -40,6 +40,20 @@ describe('parseRainHistory', () => {
     expect(history.days[0].quality).toBe('complete_so_far');
   });
 
+  it('preserves non-empty string quality reasons and filters malformed values', () => {
+    const history = parseRainHistory({
+      version: 2,
+      timezone: 'Europe/Zurich',
+      timezone_basis: 'zone',
+      days: [{
+        day: '2026-10-24', total_mm: 1, samples: 2, quality: 'partial',
+        reasons: ['instrument says "coverage, incomplete"', '', null, 5],
+      }],
+    });
+
+    expect(history.days[0].reasons).toEqual(['instrument says "coverage, incomplete"']);
+  });
+
   it('reads the version 2 payload of the gateway', () => {
     const history = parseRainHistory({
       version: 2,
@@ -81,6 +95,7 @@ describe('parseRainHistory', () => {
         total_mm: 1.5,
         samples: 3,
         quality: 'received_only',
+        reasons: [],
         so_far: false,
       },
       {
@@ -90,6 +105,7 @@ describe('parseRainHistory', () => {
         total_mm: null,
         samples: 0,
         quality: 'received_only',
+        reasons: [],
         so_far: true,
       },
     ]);
@@ -127,6 +143,7 @@ describe('parseRainHistory', () => {
         total_mm: 1.6,
         samples: 2,
         quality: 'received_only',
+        reasons: [],
         so_far: false,
       },
     ]);
