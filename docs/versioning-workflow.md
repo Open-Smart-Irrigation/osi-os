@@ -293,8 +293,8 @@ Cloud environments:
 | Production | `osicloud.ch` |
 | Test | `server.opensmartirrigation.org` (`<test-host-address>`) |
 
-Production access needs explicit consent in the current conversation; see
-AGENTS.md, "Production cloud access". Do not store production SSH
+Production access needs the user to name the host in the current turn; see
+AGENTS.md, "Host access gate". Do not store production SSH
 credentials, private keys, or host aliases in this repo or local agent
 memory. Use an ephemeral SSH key supplied for the specific rollout.
 

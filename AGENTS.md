@@ -365,7 +365,7 @@ until the stack is rebased onto the current `origin/main`.
 
 > **Why this is still a manual checklist:** there is no plugin registry — see ADR [`docs/adr/2026-05-28-static-device-plugin-registry.md`](docs/adr/2026-05-28-static-device-plugin-registry.md) for the deferral rationale. Do not propose a plugin system without a concrete second-party candidate.
 
-1. Update DB schema (`database/farming.db` + `seed-blank.sql`). If the change extends the `devices.type_id` `CHECK` list, register an idempotent table-rebuild in `scripts/repair-pi-schema.js` (SQLite cannot alter `CHECK` in place).
+1. Add an ordered migration `database/migrations/ordered/NNNN__<slug>.sql` and the matching `seed-blank.sql` change (load `osi-schema-change-control`); the bundled `database/farming.db` copies are regenerated in step 6, never edited by hand. A new `devices.type_id` member also needs the `REQUIRED_TYPES` set and `DEVICES_COLUMNS` (`scripts/gen-devices-columns.js`) in `sync-init-fn`, under the boot-node merge gate; use the existing `scripts/repair-pi-schema.js` rebuild path, not a second one.
 2. Add TypeScript types (`web/react-gui/src/types/farming.ts`).
 3. Add Node-RED ingest flow in `flows.json` (use the `application/+/device/+/event/up` topic; guard the branch head with a `deviceProfileName` filter so other branches don't double-process the same message).
 4. Add catalog / merge logic.
@@ -397,7 +397,7 @@ until the stack is rebased onto the current `origin/main`.
   (`COMMAND_LEDGER_*_SHA256`). A change to any of them updates its pin in the
   same commit; `node --test scripts/deploy-command-ledger-dependency.test.js`
   fails otherwise, and a deploy with a stale pin aborts before activation.
-- Before risky repair: timestamped backup at `/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`, `/usr/lib/node-red/gui/`, `flows.json`, `settings.js`.
+- Before risky repair: timestamped backup under `/data/db/backups/osi-os-<timestamp>/` taken with `sqlite3 /data/db/farming.db ".backup '<dir>/farming.db'"` (online, WAL-consistent; never copy `farming.db`, `-wal` and `-shm` as separate files while Node-RED runs), plus `cp -aL` of `/srv/node-red/flows.json` (a symlink into `payloads/`), `settings.js`, `flows_cred.json` and `/usr/lib/node-red/gui/`. Procedure: `osi-live-ops-runbook`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
 - **Foreign-numbered ledger recovery:** a gateway that ran one of the two customer lines (one valve-focused, one not) has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer line, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
@@ -408,11 +408,11 @@ until the stack is rebased onto the current `origin/main`.
   identity lines during repair so no future or manual env-file path can revive
   them. Canonical EUI is uppercase and comes from the helper / UCI path.
 
-## Production cloud access
+## Host access gate
 
-- `osicloud.ch` is the production OSI Server. Treat any SSH access to that host, including through a local alias or loaded SSH key, as restricted production access.
-- Do not connect to `osicloud.ch`, inspect its files, read its environment, copy secrets from it, or run commands there unless the user explicitly asks for production/`osicloud.ch` access in the current turn.
-- A working SSH key or successful `ssh` check is not permission. Ambiguous requests such as "the other server" are not enough; clarify or use the test host instead.
+- Gated hosts: the production OSI Server (`osicloud.ch`) and every customer-hosted cloud instance (listed in the private operations docs, never here).
+- Before any SSH session, file inspection, environment read, secret copy or command on a gated host, the user must name that host in the current turn. A loaded key, a local alias or a successful `ssh` probe is never consent.
+- Ambiguous requests such as "the other server" are not enough; clarify, or use the test host `server.opensmartirrigation.org` instead. The test host can carry production gateway data (noted 2026-10-22); treat data-changing operations there as production-affecting.
 
 ---
 
@@ -497,13 +497,11 @@ config to disable a scan root, so deduping symlinked roots is an OpenCode-side
 fix, not ours. Keep the single symlink; a second real copy to silence the
 warning would drift from the first.
 
-Process discipline is not at parity. Claude Code carries the
-plan→review→execute→verify loop as auto-loaded superpowers skills (TDD,
-systematic-debugging, verification-before-completion). Codex and OpenCode do
-not. Agents on those harnesses apply the same loop manually from
-`docs/engineering-playbook.md`, which all three read through this file. The
-`osi-*` skills above cover the domain layer for every harness; the process
-layer is playbook-driven outside Claude Code.
+Process discipline comes from the superpowers skills where a harness has them
+installed (on the maintainer workstation: Claude Code via its plugin hook, and
+Codex via its superpowers plugin and `~/.agents/skills`). A harness without them
+applies the same loop by hand from `docs/engineering-playbook.md`. The
+`osi-*` skills above cover the domain layer for every harness.
 
 ## Session closeout
 
@@ -512,8 +510,8 @@ When the user says `finish the session`:
 1. Run `git status --short --branch` and report staged/unstaged/untracked.
 2. Remove only clearly temporary files. List ambiguous files as cleanup candidates instead of deleting them.
 3. Review and update this `AGENTS.md` for durable repo-level changes.
-4. Review and update `/home/phil/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md` for cross-session operational context.
-5. Run `scripts/session-closeout.sh` and report warnings.
+4. Record cross-session operational context in the memory store of the harness you are running in (Claude Code: its auto-memory for this repo). A harness without a memory store writes it to the run's `HANDOVER.md` under `.superpowers/sdd/<run>/` and says so in the closeout report. Never edit another harness's memory files. A rule every harness must follow goes into this file or a repo skill by PR, not into memory.
+5. Run `scripts/session-closeout.sh` (set `OSI_OS_MEMORY_FILE` to your harness's memory index if you want it checked) and report warnings.
 6. If no context files needed changes, say so explicitly.
 7. End with remaining risks, skipped verification, and the next recommended step.
 
