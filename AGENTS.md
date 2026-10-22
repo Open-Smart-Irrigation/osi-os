@@ -12,7 +12,7 @@ Sister repo: [`osi-server`](../osi-server/AGENTS.md).
 
 ```
 Pi (edge)
-  ├── Node-RED  (localhost:1880)        — REST API, scheduler, sync orchestration
+  ├── Node-RED  (:1880, LAN-reachable)  — REST API, scheduler, sync orchestration
   │     ├── SQLite  /data/db/farming.db — canonical local state
   │     └── React GUI  /gui             — farmer dashboard
   ├── ChirpStack (LoRaWAN NS, :8080)    — sensor uplinks / valve downlinks
@@ -45,9 +45,12 @@ Per-module system map (both repos, every module described with location): [docs/
 | `/api/v1/sync/edge/bootstrap` | POST | Full state snapshot upload | Every 6 h |
 | `/api/v1/sync/edge/events` | POST | Outbox event delivery | Every 30 s |
 | `/api/v1/sync/gateways/{eui}/pending-commands` | GET | Pull cloud-originated commands | Every 30 s |
-| `/api/v1/sync/gateways/{eui}/status` | GET | Sync state info | On-demand |
-| `/api/v1/sync/gateways/{eui}/reconciliation` | GET | Reconciliation status | On-demand |
-| `/api/v1/devices/claim-bulk` | POST | Bulk claim during link | On-demand |
+| `/api/v1/sync/gateways/{eui}/command-acks` | POST | Command ACK batch | Every 30 s |
+| `/api/v1/sync/edge/history/batches` | POST | Durable history batch | Every 30 s |
+| `/api/v1/sync/edge/history/manifests` | POST | History manifest | Every 300 s |
+| `/api/v1/sync/gateways/{eui}/environment-bundles` | GET | Zone environment | On-demand |
+
+`/api/v1/sync/gateways/{eui}/status` and `/reconciliation` are cloud diagnostics; the edge never calls them, nor the legacy `/api/v1/devices/claim-bulk`.
 
 **Cloud → edge command types** (via pending-commands):
 `UPSERT_ZONE`, `DELETE_ZONE`, `UPSERT_SCHEDULE`, `UPDATE_SCHEDULE`, `UPSERT_ZONE_CONFIG`, `UPSERT_ZONE_LOCATION`, `ASSIGN_DEVICE_TO_ZONE`, `REMOVE_DEVICE_FROM_ZONE`, `UPSERT_DEVICE_FLAGS`, `UNCLAIM_DEVICE`, `SYNC_LINKED_AUTH`, `FORCE_EDGE_SYNC`, `VALVE_COMMAND`, `SET_LSN50_*`, `SET_KIWI_*`, `SET_STREGA_*`, `SET_FAN`, `REBOOT`, `REGISTER_DEVICE`, `UPSERT_ZONE_NAME`, `UPSERT_DEVICE_NAME`.
@@ -61,8 +64,8 @@ without mirror convergence. The cloud never updates the confirmed edge-owned
 value when it queues a command.
 
 `UPSERT_ZONE_NAME` and `UPSERT_DEVICE_NAME` are applied by
-`entity-name-command-apply-fn` and are only sent to a gateway that reported the
-`entity_name_commands_v1` sync capability.
+`entity-name-command-apply-fn`. Cloud main does not issue them yet; when it
+does, only to a gateway that reported `entity_name_commands_v1`.
 
 **Edge rename routes** (local dashboard → gateway, HMAC bearer):
 `PUT /api/irrigation-zones/:id/name` answers
@@ -86,14 +89,11 @@ per call.
 `field_journal_v1` when the journal is enabled. `watermark_v1` covers the
 calibration resource, its set/delete commands, snapshots, and events. The other
 two tokens independently gate their named exact-base device commands. The cloud
-reads the list as `gatewayIdentity.syncCapabilities()` and sends
-a name command only to a gateway that reported `entity_name_commands_v1`. From
-sub-project 4 on it will put each zone field into `UPSERT_ZONE` and
-`UPSERT_ZONE_CONFIG` only for a gateway that reported that field's capability:
-`weatherSource` with `zone_config_weather_source_v1`, `stageStartedOn` with
-`zone_config_stage_started_on_v1`; today cloud main sends neither field in zone
-commands. The edge itself, on every zone update event and in the bootstrap and
-force-sync snapshots, sends `weather_source` only when the stored value is not
+reads the list as `gatewayIdentity.syncCapabilities()`. It puts `weatherSource`
+into `UPSERT_ZONE` and `UPSERT_ZONE_CONFIG` only for a gateway that reported
+`zone_config_weather_source_v1`, and `stageStartedOn` only for one that
+reported `zone_config_stage_started_on_v1`. The edge itself, on every zone
+update event and in the bootstrap and force-sync snapshots, sends `weather_source` only when the stored value is not
 `auto` or (update event only) changed in that update, never as an unconditional
 default -- see "Zone weather_source" in `docs/contracts/sync-schema/README.md` and
 the deploy-order note there. `stage_started_on` is an ordinary zone field: every
@@ -116,7 +116,7 @@ Broker: `${OSI_CLOUD_BROKER_URL}` in the "OSI Cloud Broker" node, set by
 | `devices/{eui}/status` | Valve state | On change |
 | `devices/{eui}/command_ack` | Command result | Per command |
 
-**Fan telemetry/control:** gateway stats expose `fan_available`, `fan_mode`, `fan_value`, and `fan_max`; cloud fan control arrives as `SET_FAN`. The current Node-RED fan path uses raw PWM sysfs (`/sys/class/pwm/pwmchip2/pwm3`). If the Pi 5 kernel `pwm-fan` driver is enabled through `dtparam=cooling_fan=okay` and `kmod-hwmon-pwmfan`, switch fan detection/control to the `pwmfan` hwmon device (`/sys/class/hwmon/*/pwm1`, `pwm1_enable`) because the driver owns the raw PWM channel and direct writes can fail with `EBUSY`.
+**Fan telemetry/control:** gateway stats expose `fan_available`, `fan_mode`, `fan_value`, and `fan_max`; cloud fan control arrives as `SET_FAN`. Fan detection/control prefers the `pwmfan` hwmon device (`/sys/class/hwmon/*/pwm1`, `pwm1_enable`; the Pi 5 image enables it through `dtparam=cooling_fan=okay` and `kmod-hwmon-pwmfan`) and falls back to raw `/sys/class/pwm/pwmchip2/pwm3` only when no `pwmfan` hwmon exists; raw writes fail with `EBUSY` while the driver owns the channel.
 
 **Gateway health persistence:** the same CPU/memory/load/fan facts the 60 s heartbeat reports are also persisted locally (osi-os #68) via its own 60s inject `gateway-health-sample-tick`: `gateway_health_samples` (raw, default 14 d) and `gateway_health_hourly` (min/mean/max rollups, default 365 d) in `/data/db/farming.db`, written by the `Persist Gateway Health` node and rolled up + pruned daily at 02:10 by `Gateway Health Rollup`. Includes the best-effort `get_throttled` bitfield. Schema: `database/migrations/ordered/0002__gateway_health.sql`; local-only (not cloud-synced) in v1. Operator guide: [docs/operations/edge-history-retention.md](docs/operations/edge-history-retention.md).
 
@@ -156,7 +156,7 @@ rehearsal.
 
 ### Migration risk classes
 
-- `additive` — append-only schema (new tables, columns, indexes, views, triggers). No backup, no transaction fence.
+- `additive` — append-only schema (new tables, columns, indexes, views, triggers). No backup, no FK toggle; runs in one `BEGIN IMMEDIATE` transaction with its ledger row.
 - `destructive` — schema mutation (drop/rename/rebuild/alter). Requires `writersStopped=true` (deploy pre-start), toggles `PRAGMA foreign_keys` outside the transaction, and takes a backup. Fenced: `BEGIN`/`COMMIT` inside the FK toggle.
 - `data` — data backfill/mutation: takes an online backup, applies in a normal transaction (no FK fence, no writers-stopped gate). Run at deploy (a long backfill holds the write lock past the 5s runtime busy timeout); write it idempotently against the pre-migration row format.
 
@@ -266,9 +266,9 @@ GUI `/api/system/reboot` route, and do not edit `sync-init-fn` or any
 
 | What | Path |
 |------|------|
-| Node-RED flows | `/srv/node-red/flows.json` |
+| Node-RED flows | `/srv/node-red/flows.json` (symlink into `payloads/<stamp>/`; copy with `cp -L`) |
 | SQLite database | `/data/db/farming.db` |
-| React GUI | `/usr/lib/node-red/gui/` |
+| React GUI | `/usr/lib/node-red/gui/` (symlink into `payloads/<stamp>/gui`) |
 | Node-RED settings | `/srv/node-red/settings.js` |
 | MQTT credentials | `/srv/node-red/flows_cred.json` |
 | UCI identity | `osi-server.cloud.*` (`uci show osi-server`) |
@@ -290,7 +290,7 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 **Provider weather store:** Provider weather (temperature, humidity, rain, wind, radiation, ET0) is stored per farm location and completed UTC hour in `weather_locations` / `weather_provider_hours` by the `weather-provider-fn` tick (30 min); the provider is UCI `osi-server.cloud.weather_provider_default` (`open_meteo` | `meteoswiss`) unless a zone's `weather_source` overrides it. The hourly tables do not sync and each side fetches for itself; a zone's `weather_source` travels in the zone events and snapshots, and after sub-project 4 the edge owns it. An already-provisioned gateway keeps its value because uci-defaults do not re-run; switch one with `uci set osi-server.cloud.weather_provider_default=meteoswiss && uci commit osi-server && /etc/init.d/node-red restart` (a new location key, so the store backfills again under the new provider). Chained off the same tick, `osi-agronomy-daily` writes one `zone_daily_agronomy` row per zone per completed local day, with ET0 from the first complete of three tiers (the hourly FAO-56 Penman-Monteith sum over a local station's complete hours, `et0_source = 'fao56_hourly'`; the stored provider hours summed; or Hargreaves-Samani from the station's daily min/max) and a Kc from the FAO-56 catalogue in `docs/contracts/agronomy/`, on the FAO-56 curve when the zone has a stage start date. The rows replicate to OSI Server as `ZONE_AGRONOMY_UPSERTED` (migration 0067) and in the bootstrap's `zoneAgronomy` list (the last 30 days of each zone). A SenseCAP S2120 assigned to a zone (`weather_station_zones`) is aggregated into `weather_station_hours` by `osi-station-hours` and gives the station tier its inputs, including radiation from `light_lux / luxPerWm2`.
 
-**Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/` — the parity check will fail CI otherwise.
+**Profile parity invariant:** `bcm2712 / DEVICE_rpi-5` is the canonical source-of-truth for all OSI runtime payload files (flows, codecs, DB, bootstrap, helpers). `bcm2709 / DEVICE_rpi-2` mirrors that payload byte-for-byte; `scripts/verify-profile-parity.js` enforces this for the paths in its `CANONICAL_PAYLOAD` list and is chained from `scripts/verify-sync-flow.js`. Any change to a file under `conf/full_raspberrypi_bcm27xx_bcm2712/files/` must also be propagated to `conf/full_raspberrypi_bcm27xx_bcm2709/files/`, listed or not.
 
 ---
 
@@ -304,7 +304,9 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 | DRAGINO_SDI12 | Sensors | OSI SDI-12 Soil Node | Probe-profile VWC, soil temp, soil EC, battery |
 | SENSECAP_S2120 | Sensors | S2120 | Wind, rain, pressure, UV, temp/humidity |
 | AQUASCOPE_LORAIN | Sensors | LoRain | Interval rain, ambient temp, battery |
-| STREGA_VALVE | Actuators | STREGA | Valve state, battery |
+| STREGA_VALVE | Actuators | OSI STREGA Valve / OSI STREGA Valve Gen2 | Valve state, battery |
+| MILESIGHT_UC512 | Actuators | OSI Milesight UC512 | Two valve states, pulse counts, pipe pressure |
+| RAK10701_FIELD_TESTER | Field Tester | OSI RAK Field Tester | Coverage probe (RSSI/SNR) |
 
 **SWT canonicalization:** `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes. Legacy `swt_wm1` / `swt_wm2` are read-only aliases. The shared hPa conversion is `pF = log10(abs(kPa)) + 1`, inverse magnitude `10 ** (pF - 1)`. Zero/non-finite input has no pF; finite negative pF is valid. Sensor adapters reject their own sentinels before conversion. Preserve calculated doubles without decimal rounding; round display strings only. Native Tensiomark pF tokens are retained in `tensiomark_observations.normalized_json` and mirrored to the cloud as observation provenance. Aggregate canonical kPa before deriving pF; the scheduler still uses kPa. Contract and cross-runtime vectors: [matric-potential/v1.md](docs/contracts/matric-potential/v1.md).
 
@@ -314,11 +316,11 @@ Full Raspberry Pi image workflow: [docs/build/rpi5-full-osi-image.md](docs/build
 
 **STREGA timed irrigation:** user-facing opens are `OPEN_FOR_DURATION`; normal close is the valve's own timed close, not a bare `CLOSE` command. Operator cancellation uses `POST /api/v1/valves/:deveui/cancel`, flushes the ChirpStack device queue, and marks the latest active `valve_actuation_expectations` row `CANCELLED`. Actuation expectations store `commanded_at`, duration, `expected_close_at`, observed open/close timestamps, `reconciliation_state`, and optional `estimated_gross_liters`. Active states are `PENDING_OBSERVATION` and `OBSERVED_RUNNING`. `zone_irrigation_calibration` stores per-zone flow-rate measurements used for estimates; if it is absent on an older Pi, actuation rows still insert with null estimated volume. `zone_daily_environment.flow_liters` remains measured flow-meter data only; estimated valve-time volume stays separate. The reconciliation monitor reads STREGA state from `devices.current_state` and recent uplink time from `device_data.recorded_at`.
 
-**Valve control (2026-08):** `ValveControlPanel` lists every STREGA valve across zones. Weekly schedules (`valve_schedules`, kind `WEEKLY`) are compiled by `osi-valve-control` into the valve's own scheduler (Gen1 FPort 14–20 one weekday per downlink, Gen2 FPort 25 day-mask; ≤ 4 windows per weekday) and pushed only on a user change or explicit re-send — never on a timer, so Bluetooth edits on an SV2 are not overwritten. Pushes leave through their own `mqtt out` node, kept separate from the STREGA manual-open builder, so a plan edit can never collide with a manual open in flight. Push delivery is tracked in `valve_schedule_pushes`; `valve-ack-fn` reads the uplink ACK behind the same STREGA-profile gate `strega-process-fn` uses. Gen1 weekday ACKs arrive via `Schl_Port` 14–20; Gen2 daymask ACKs arrive via `Ack_Port` 25 (or the raw-byte fallback); scheduler-status ACKs arrive via `Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive via `RTC_Port`/`Ack_Port` 12/13. One-time opens (kind `ONCE`) fire from a 60 s tick and are skipped, never fired late, once more than 10 min overdue; a second 60 s tick observes valve-fired runs. The gateway owns the valve clock (Gen1 FPort 12 local wall-clock), resynced by a 10-minute tick that covers the weekly cadence and DST transitions. Valve-fired opens land in `valve_actuation_expectations` with `trigger='on_valve_schedule'`. `valve_schedules` carries `schedule_uuid`/`sync_version`/`deleted_at` from day one, but its sync triggers and the cloud mirror ship with Phase B (lockstep merge) — today it is edge-only. The threshold scheduler is now labelled "Trigger-based irrigation" in the GUI; its behaviour is unchanged.
+**Valve control (2026-08):** `ValveControlPanel` lists every STREGA valve across zones. Weekly schedules (`valve_schedules`, kind `WEEKLY`) are compiled by `osi-valve-control` into the valve's own scheduler (Gen1 FPort 14–20 one weekday per downlink, Gen2 FPort 25 day-mask; ≤ 4 windows per weekday) and pushed only on a user change or explicit re-send — never on a timer, so Bluetooth edits on an SV2 are not overwritten. Pushes leave through their own `mqtt out` node, kept separate from the STREGA manual-open builder, so a plan edit can never collide with a manual open in flight. Push delivery is tracked in `valve_schedule_pushes`; `valve-ack-fn` reads the uplink ACK behind the same STREGA-profile gate `strega-process-fn` uses. Gen1 weekday ACKs arrive via `Schl_Port` 14–20; Gen2 daymask ACKs arrive via `Ack_Port` 25 (or the raw-byte fallback); scheduler-status ACKs arrive via `Schl_status_Port`/`Ack_Port` 21; clock ACKs arrive via `RTC_Port`/`Ack_Port` 12/13. One-time opens (kind `ONCE`) fire from a 60 s tick and are skipped, never fired late, once more than 10 min overdue; a second 60 s tick observes valve-fired runs. The gateway owns the valve clock (Gen1 FPort 12 local wall-clock), resynced by a 10-minute tick that covers the weekly cadence and DST transitions. Valve-fired opens land in `valve_actuation_expectations` with `trigger='on_valve_schedule'`. `valve_schedules` syncs as `VALVE_SCHEDULE_UPSERTED` (migration 0024; `deleted_at` rides in the upsert) and the cloud mirrors it. The threshold scheduler is now labelled "Trigger-based irrigation" in the GUI; its behaviour is unchanged.
 
 The future opt-in dendrometer controller architecture is maintained outside this public repository. It is recommendation-only, edge-authoritative, and not current shipped behavior.
 
-**MQTT IN topic rule:** all Node-RED MQTT IN nodes must subscribe to `application/+/device/+/event/up`. ChirpStack generates per-installation application UUIDs at bootstrap; hardcoded UUIDs break silently. Device-type discrimination is done downstream via `CHIRPSTACK_PROFILE_*` env vars and `deviceProfileName` fallback. Enforced by `scripts/check-mqtt-topics.sh`.
+**MQTT IN topic rule:** all Node-RED MQTT IN nodes must subscribe to `application/+/device/+/event/up`. ChirpStack generates per-installation application UUIDs at bootstrap; hardcoded UUIDs break silently. Device-type discrimination is done downstream via `CHIRPSTACK_PROFILE_*` env vars and `deviceProfileName` fallback. Check with `scripts/check-mqtt-topics.sh` (manual; no CI workflow runs it).
 
 ---
 
@@ -365,13 +367,13 @@ until the stack is rebased onto the current `origin/main`.
 
 > **Why this is still a manual checklist:** there is no plugin registry — see ADR [`docs/adr/2026-05-28-static-device-plugin-registry.md`](docs/adr/2026-05-28-static-device-plugin-registry.md) for the deferral rationale. Do not propose a plugin system without a concrete second-party candidate.
 
-1. Add an ordered migration `database/migrations/ordered/NNNN__<slug>.sql` and the matching `seed-blank.sql` change (load `osi-schema-change-control`); the bundled `database/farming.db` copies are regenerated in step 6, never edited by hand. A new `devices.type_id` member also needs the `REQUIRED_TYPES` set and `DEVICES_COLUMNS` (`scripts/gen-devices-columns.js`) in `sync-init-fn`, under the boot-node merge gate; use the existing `scripts/repair-pi-schema.js` rebuild path, not a second one.
+1. Add an ordered migration `database/migrations/ordered/NNNN__<slug>.sql` and the matching `seed-blank.sql` change (load `osi-schema-change-control`); step 6 regenerates the bundled `farming.db` copies. A new `devices.type_id` member also needs the `REQUIRED_TYPES` set and `DEVICES_COLUMNS` (`scripts/gen-devices-columns.js`) in `sync-init-fn`, under the boot-node merge gate; use the existing `scripts/repair-pi-schema.js` rebuild path, not a second one.
 2. Add TypeScript types (`web/react-gui/src/types/farming.ts`).
 3. Add Node-RED ingest flow in `flows.json` (use the `application/+/device/+/event/up` topic; guard the branch head with a `deviceProfileName` filter so other branches don't double-process the same message).
 4. Add catalog / merge logic.
 5. Add React card/component and render in dashboard.
 6. Regenerate the bundled DB copies with `node scripts/build-seed-db.js` (it replays the ordered migrations into a fresh image, so the shipped ledger advances with the schema); verify with `scripts/verify-db-schema-consistency.js` and `scripts/verify-seed-db-ledger.js`.
-7. Map ChirpStack app + profile; update `osi-bootstrap` if profile is new.
+7. Add the profile to `chirpstack-bootstrap.js` (both copies) and map its ChirpStack application; add its `CHIRPSTACK_PROFILE_*` key to `node-red.init`.
 8. For Data-view support, update the finite source policy in both payload
    profiles and run the source matrix, manifest parity, and deploy-file coverage
    checks documented in [docs/channel-manifest.md](docs/channel-manifest.md).
@@ -397,10 +399,10 @@ until the stack is rebased onto the current `origin/main`.
   (`COMMAND_LEDGER_*_SHA256`). A change to any of them updates its pin in the
   same commit; `node --test scripts/deploy-command-ledger-dependency.test.js`
   fails otherwise, and a deploy with a stale pin aborts before activation.
-- Before risky repair: timestamped backup under `/data/db/backups/osi-os-<timestamp>/` taken with `sqlite3 /data/db/farming.db ".backup '<dir>/farming.db'"` (online, WAL-consistent; never copy `farming.db`, `-wal` and `-shm` as separate files while Node-RED runs), plus `cp -aL` of `/srv/node-red/flows.json` (a symlink into `payloads/`), `settings.js`, `flows_cred.json` and `/usr/lib/node-red/gui/`. Procedure: `osi-live-ops-runbook`.
+- Before risky repair: timestamped backup under `/data/db/backups/osi-os-<timestamp>/` taken with `sqlite3 /data/db/farming.db ".backup '<dir>/farming.db'"` (online and WAL-consistent; never copy the DB and its `-wal`/`-shm` separately while Node-RED runs), plus `cp -aL` of `/srv/node-red/flows.json`, `settings.js`, `flows_cred.json` and `/usr/lib/node-red/gui/`. Procedure: `osi-live-ops-runbook`.
 - Schema changes go via migrations or idempotent SQL — never replace `farming.db`.
 - **Stale-stamp recovery:** if `applyPending`/`verifyHead` report fingerprint drift after a crash between a migration commit and its stamp, and the live schema is confirmed correct, re-baseline with `node scripts/restamp-fingerprints.js /data/db/farming.db`. This is the ONLY sanctioned way to overwrite the fingerprint baseline; do not hand-edit `schema_object_fingerprints`.
-- **Foreign-numbered ledger recovery:** a gateway that ran one of the two customer lines (one valve-focused, one not) has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer line, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever the ledger's checksum for the lowest applied version above 0021 disagrees with main's; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
+- **Foreign-numbered ledger recovery:** a gateway that ran one of the two customer lines (one valve-focused, one not) has `schema_migrations` rows numbered under that branch's own scheme, which can collide with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer line, `valve_control` on main) — `applyPending` correctly refuses on the checksum mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but the device is then wedged with no forward path. `node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply` plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row, that a foreign-numbered ledger entry's content is exactly what some main migration already delivers — either byte-identical, or identical after stripping the leading `-- NNNN:` header comment and structurally proving equal schema effect via `scripts/semantic-schema-compare.js` — before rewriting that row's `version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or ambiguous row and touches nothing when it refuses. `deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger inspection and `migrate-cli.js`) whenever any applied ledger row above version 21 has a checksum that disagrees with main's `CHECKSUMS.json`; a main-numbered gateway's checksums already agree there and never triggers it. `--clear-repair-required` is the narrower, separate recovery for a row already stuck `repair_required` whose checksum, at its own current version, already matches main (e.g. a prior reconcile run committed the remap but crashed before the status flip) — it never clears a row whose checksum still disagrees. Never hand-edit `schema_migrations` outside these two sanctioned tools.
 - **Rehearsing that cutover on a copy:** `node scripts/rehearse-ledger-cutover.js --db <pulled copy> --work <scratch directory>` runs, on a copy only, the same chain deploy.sh runs for such a gateway (reconcile `--report`, `--apply`, `migrate-cli.js`, `verify-head-cli.js`), then the devices-rebuild rehearsal twice, the shipped boot node with the gateway's EUI, `integrity_check`/`foreign_key_check`, a schema comparison against `seed-blank.sql`, and per-table row counts and content hashes before and after; a second pass on the result must change nothing. Row changes the migrations make by design are listed in its `EXPECTED_CHANGES`; any other change fails. It refuses paths under `/data/db` and a non-empty `--work` it did not create, and writes `<work>/rehearsal-report.json` with every step's result and duration.
 - Stale `/srv/node-red/.chirpstack.env` `DEVICE_EUI*` values are legacy
   artifacts. Current `node-red.init` does not read identity from that file, and
@@ -412,7 +414,7 @@ until the stack is rebased onto the current `origin/main`.
 
 - Gated hosts: the production OSI Server (`osicloud.ch`) and every customer-hosted cloud instance (listed in the private operations docs, never here).
 - Before any SSH session, file inspection, environment read, secret copy or command on a gated host, the user must name that host in the current turn. A loaded key, a local alias or a successful `ssh` probe is never consent.
-- Ambiguous requests such as "the other server" are not enough; clarify, or use the test host `server.opensmartirrigation.org` instead. The test host can carry production gateway data (noted 2026-10-22); treat data-changing operations there as production-affecting.
+- Ambiguous requests such as "the other server" are not enough; clarify, or use the test host instead. The test host can carry production gateway data (noted 2026-10-22); treat data-changing operations there as production-affecting.
 
 ---
 
@@ -420,9 +422,9 @@ until the stack is rebased onto the current `origin/main`.
 
 - Local auth tokens: HMAC-signed JWT.
 - Local passwords: bcrypt-hashed.
-- `/download/database`: gated.
-- Linked login uses a gateway-specific offline verifier (`bcrypt(password::DEVICE_EUI)`), **not** cloud password hash sync.
-- `osi-server.cloud.link_gateway_device_eui` can be preset by an operator to bypass the provisional-identity block on concentrator-less gateways during account-link. This is a test/demo path only; the production path is a configured concentrator that resolves an authoritative EUI. Using the override risks stranding cloud data and breaking offline login if the linked EUI later changes (see the verifier note above). See `osi-config-and-flags` for the resolution mechanism.
+- `/download/database`: disabled (always refused).
+- Linked login uses an offline verifier, **not** cloud password hash sync: v2 `bcrypt(password::installation_uuid)` for gateways reporting `installation_recovery_v1`, v1 `bcrypt(password::DEVICE_EUI)` otherwise.
+- `osi-server.cloud.link_gateway_device_eui` can be preset by an operator to bypass the provisional-identity block on concentrator-less gateways during account-link. This is a test/demo path only; the production path is a configured concentrator that resolves an authoritative EUI. Using the override risks stranding cloud data and breaking v1 offline login if the linked EUI later changes. See `osi-config-and-flags` for the resolution mechanism.
 - **Node-RED editor/admin API is disabled by default.** `feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js` sets `httpAdminRoot: false`, which closes the editor and the `/flows`, `/settings` (Node-RED admin route, distinct from the product `/api/system/settings`), and `/nodes` admin routes on the shared `:1880` listener. `httpStatic`/`httpStaticRoot` (`/gui`) and every HTTP-node product route are untouched — they share the listener but are a separate Express mount. `uiHost` stays unset: setting it would bind that whole listener to loopback and remove LAN access to `/gui` and `/api` for every farmer browser, not just the editor. `feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.nginx`'s `/apps/node-red` location returns 404 instead of redirecting to the now-closed editor. Static guard: `node --test scripts/test-node-red-admin-root-off.js`. Operator smoke check after a restart: `scripts/smoke-node-red-admin-off.sh` (loopback only; not run in CI, no live Node-RED runtime exists in this repo).
   - **Re-enabling the editor for field repair** is a deliberate operator action, not a config default: edit the deployed `/srv/node-red/settings.js` on the gateway (set `httpAdminRoot` back to its Node-RED default, or comment the line out) and restart Node-RED, then close it again before leaving the gateway. There is no in-repo toggle for this by design — it forces an operator to be at (or SSH'd into) the gateway rather than exposed on the network.
   - **Durable fix, not yet built:** per-device `adminAuth` with one bcrypt hash generated by `node-red.init` on first boot into a root-owned, mode-0600 credential file, distinct from `AUTH_TOKEN_SECRET`. Tracked as a follow-up; see the PR that introduced `httpAdminRoot: false` for the full design and the three-route regression it still needs (`/gui` succeeds unauthenticated, `GET /flows` returns 401, authenticated `GET /flows` succeeds).
@@ -435,7 +437,7 @@ until the stack is rebased onto the current `origin/main`.
 - BusyBox case conversion: use `tr 'abcdef' 'ABCDEF'`; `tr '[:lower:]' '[:upper:]'` is unreliable on the Pi image.
 - Treat `flows.json` as the main edge backend — most API and scheduler changes live there.
 - Empty `catch` blocks in `flows.json`: `scripts/verify-no-new-silent-catch.js` ratchets the maintained-profile baseline. When touching any function node, convert empty `catch(_){}` / `catch(e){}` / `catch {}` blocks in that node to a visible warning such as `catch (e) { node.warn('<node/context>: ' + (e && e.message ? e.message : e)); }`; new function code must not swallow errors silently. Load in-repo helper modules via `osiLib.require('<name>')` with `{"var": "osiLib", "module": "osi-lib"}` declared in the node's `libs` (bare `require()` of a non-builtin fails CI via the ratchet in `scripts/verify-sync-flow.js`); beyond such declared helpers, keep function-node `libs` minimal.
-- Error-counter heartbeat fields: maintained profiles now have catch nodes wired to `Record Error` (`global.error_counts`). Do not add heartbeat `errors_total` / `errors_last_at` fields until the flow has a `Gather Edge Health` node; that node is absent in the current maintained-profile baseline, so heartbeat surfacing is intentionally skipped.
+- Error-counter heartbeat fields: catch nodes feed `Record Error` (`global.error_counts`); `Gather Edge Health` copies them into `edge_health`, and the heartbeat carries `health.errors_total` / `health.errors_last_at`.
 - `MqttPublisherService` on the cloud is deprecated (kept for potential future use); all cloud→edge commands are REST.
 - **No deployment identities in public text.** Documents, guidance files,
   skills, commit messages, issues and pull requests do not name customers,
@@ -498,8 +500,8 @@ fix, not ours. Keep the single symlink; a second real copy to silence the
 warning would drift from the first.
 
 Process discipline comes from the superpowers skills where a harness has them
-installed (on the maintainer workstation: Claude Code via its plugin hook, and
-Codex via its superpowers plugin and `~/.agents/skills`). A harness without them
+installed (on the maintainer workstation: Claude Code, and Codex through its
+plugin and `~/.agents/skills`). A harness without them
 applies the same loop by hand from `docs/engineering-playbook.md`. The
 `osi-*` skills above cover the domain layer for every harness.
 
@@ -511,7 +513,7 @@ When the user says `finish the session`:
 2. Remove only clearly temporary files. List ambiguous files as cleanup candidates instead of deleting them.
 3. Review and update this `AGENTS.md` for durable repo-level changes.
 4. Record cross-session operational context in the memory store of the harness you are running in (Claude Code: its auto-memory for this repo). A harness without a memory store writes it to the run's `HANDOVER.md` under `.superpowers/sdd/<run>/` and says so in the closeout report. Never edit another harness's memory files. A rule every harness must follow goes into this file or a repo skill by PR, not into memory.
-5. Run `scripts/session-closeout.sh` (set `OSI_OS_MEMORY_FILE` to your harness's memory index if you want it checked) and report warnings.
+5. Run `scripts/session-closeout.sh` (`OSI_OS_MEMORY_FILE=<your memory index>` opts into a memory check) and report warnings.
 6. If no context files needed changes, say so explicitly.
 7. End with remaining risks, skipped verification, and the next recommended step.
 
