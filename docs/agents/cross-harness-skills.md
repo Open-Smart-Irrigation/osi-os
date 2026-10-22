@@ -32,3 +32,7 @@ or under 30,720 bytes and fails when a required section heading is missing or
 starts past that offset; the doc-hygiene workflow runs it with its test.
 When the check fails, move reference material into a doc or skill and leave a
 one-line pointer in `AGENTS.md`.
+
+Claude Code does not read `AGENTS.md` on its own. `CLAUDE.md` imports it with
+an `@AGENTS.md` line, so every Claude Code session in this repository loads
+the whole file.

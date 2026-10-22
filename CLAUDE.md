@@ -2,6 +2,10 @@
 
 > **Start here:** [AGENTS.md](AGENTS.md) — operational source of truth (architecture, sync, file locations, conventions).
 
+The next line imports AGENTS.md into every Claude Code session:
+
+@AGENTS.md
+
 This file exists so Claude Code picks up project context automatically. If you're a human, [README.md](README.md) is the better entry point.
 
 ---
