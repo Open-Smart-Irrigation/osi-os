@@ -13464,13 +13464,13 @@
     "id": "valve-clock-tick",
     "type": "inject",
     "z": "valve-control-tab",
-    "name": "Valve clock sync tick (10m)",
+    "name": "Valve tick: plan snapshots, clock sync, stale pushes (60s)",
     "props": [
       {
         "p": "payload"
       }
     ],
-    "repeat": "600",
+    "repeat": "60",
     "crontab": "",
     "once": true,
     "onceDelay": 90,
@@ -13490,7 +13490,7 @@
     "type": "function",
     "z": "valve-control-tab",
     "name": "Valve clock sync + stale pushes",
-    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nconst appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    const h = await VC.runHousekeeping({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });\n    const r = await VC.runClockTick({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); } });\n    const all = h.messages.concat(r.messages);\n    if (!appId && all.length) {\n      node.warn('valve-clock: CHIRPSTACK_APP_ACTUATORS missing; ' + all.length + ' downlink(s) not sent');\n      node.status({ fill: 'yellow', shape: 'ring', text: 'missing Actuators app ID' });\n    } else if (all.length) {\n      node.status({ fill: 'green', shape: 'dot', text: 'clock/housekeeping pushes ' + all.length });\n    }\n    return appId ? all.map(function(m) { return { topic: m.topic, payload: m.payload }; }) : [];\n  } catch (e) { node.error('valve-clock: ' + (e && e.message ? e.message : e)); return []; }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n})().then(function(msgs) { return msgs.length ? [msgs] : null; });",
+    "func": "const dbLoad = osiLib.require('osi-db-helper');\nconst vcLoad = osiLib.require('osi-valve-control');\nif (!dbLoad.ok || !vcLoad.ok) {\n  const detail = [dbLoad, vcLoad].filter(function(l) { return !l.ok; }).map(function(l) { return l.error; }).join('; ');\n  node.error('Valve control helpers unavailable: ' + detail, msg);\n  msg.statusCode = 503; msg.payload = { error: 'valve_control_unavailable', message: detail };\n  return null;\n}\nconst dbHelper = dbLoad.value; const VC = vcLoad.value;\nconst appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();\nreturn (async () => {\n  const db = new dbHelper.Database('/data/db/farming.db');\n  try {\n    // R13 M3/T1/T2: snapshots via a ChirpStack client the module creates only when needed and closes; an overlapping tick is skipped.\n    const t = await VC.runValveTick({ db: db, now: new Date(), appId: appId, warn: function(m) { node.warn(m); }, transportFactory: function() { return chirpstack.createProvisioningClientFromEnv(env); } });\n    const all = t.messages;\n    if (!appId && all.length) {\n      node.warn('valve-clock: CHIRPSTACK_APP_ACTUATORS missing; ' + all.length + ' downlink(s) not sent');\n      node.status({ fill: 'yellow', shape: 'ring', text: 'missing Actuators app ID' });\n    } else if (all.length) {\n      node.status({ fill: 'green', shape: 'dot', text: 'clock/housekeeping pushes ' + all.length });\n    }\n    return appId ? all.map(function(m) { return { topic: m.topic, payload: m.payload }; }) : [];\n  } catch (e) { node.error('valve-clock: ' + (e && e.message ? e.message : e)); return []; }\n  finally { await new Promise(function(res) { db.close(function() { res(); }); }); }\n})().then(function(msgs) { return msgs.length ? [msgs] : null; });",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -13500,6 +13500,10 @@
       {
         "var": "osiLib",
         "module": "osi-lib"
+      },
+      {
+        "var": "chirpstack",
+        "module": "osi-chirpstack-helper"
       }
     ],
     "x": 520,

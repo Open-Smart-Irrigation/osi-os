@@ -138,7 +138,7 @@ function shapeValve(row, schedules, now, tzFallback, pushes) {
     recent_stale_state: row.recent_stale_state || null,
     next_run: P.nextRun(schedules, now, row.zone_timezone || tzFallback),
     schedule_count: schedules.length,
-    push_state: { queued: Number(pushes.queued || 0), acked: Number(pushes.acked || 0), failed: Number(pushes.failed || 0), last_plan_queued_at: pushes.last_plan_queued_at || null, last_plan_acked_at: pushes.last_plan_acked_at || null },
+    push_state: { queued: Number(pushes.queued || 0), acked: Number(pushes.acked || 0), failed: Number(pushes.failed || 0), lost: Number(pushes.lost || 0), scheduler_status_lost: !!pushes.scheduler_status_lost, last_plan_queued_at: pushes.last_plan_queued_at || null, last_plan_acked_at: pushes.last_plan_acked_at || null },
     last_clock_sync_acked_at: row.last_clock_sync_acked_at || null,
   };
 }
@@ -259,10 +259,14 @@ async function handleHttpRequest(options) {
       const status = String((requestBody(msg) || {}).status || '').toUpperCase();
       const code = { ACTIVE: '0', SKIP_TODAY: '1', DEACTIVATED: '2' }[status];
       if (!code) return respond(422, { error: 'invalid_status', message: 'status must be ACTIVE, SKIP_TODAY or DEACTIVATED' });
-      const q = await push.queuePushes({ db, deviceEui: eui, appId: options.appId, pushes: [push.buildStatusPush(code)], flushQueue: options.flushQueue, warn });
+      // CMD-04 PR0 (C): a status change is a snapshot like any edit -- the flush it needs would
+      // otherwise drop the plan still queued for the valve.
+      // R5 M3: a pause never depends on plan validity. R5 N2: valve_settings is written inside the
+      // snapshot transaction, so a compile from another origin cannot carry the old status.
       const tz = device.zone_timezone || tzFallback;
       const lp = P.localParts(now, tz);
-      await store.upsertSettings(db, eui, { scheduler_status: status, skip_today_date: status === 'SKIP_TODAY' ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}` : null });
+      const settingsPatch = { scheduler_status: status, skip_today_date: status === 'SKIP_TODAY' ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}` : null };
+      const q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, now, flushQueue: options.flushQueue, warn, settingsPatch, statusOnlyOnConflict: true });
       assignPushMessages(msg, q);
       return respond(202, { ok: true, status });
     }

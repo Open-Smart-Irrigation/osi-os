@@ -184,6 +184,7 @@ same change; the test fails otherwise, so the two cannot drift apart.
 | Keys | Reason |
 |---|---|
 | `scheduleHelp`, `scheduleHelpLabel` (2 keys in `valves.json`) | The information button beside the valve panel heading and its tooltip ("Weekly schedules run on each valve."). They replace the retired `help` and `helpLabel`, whose English said "All zones." in front of the same sentence and named the button "About valve control". No human Luganda pass has seen the new wording, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+| `planLost`, `scheduleDialog.push.LOST` (2 keys in `valves.json`) | Added by the CMD-04 PR0 containment (owner decision Q02 c): a plan push the valve has not confirmed within 24 hours is no longer re-sent automatically, and the valve tile and the schedule badge say "Device may not hold this plan". The wording is shared with the conditional-scheduling branch and is not yet reviewed in any language, so every edge locale, `lg` included, ships the English source text (`PENDING_TRANSLATION` in the same test file). |
 
 Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still

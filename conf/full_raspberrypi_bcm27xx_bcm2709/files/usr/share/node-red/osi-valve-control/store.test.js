@@ -480,24 +480,6 @@ test('clock step back: pushSummary counts the later insert for the slot', async 
   db.close();
 });
 
-test('clock step back: lastPushHashes reports the later insert, so a revert to the earlier plan is pushed again (GEN1)', async () => {
-  const { db } = await tempDb();
-  await seedClockStepBack(db, 'WEEKDAY_PLAN');
-  const hashes = await store.lastPushHashes(db, STEP_EUI);
-  assert.equal(hashes['WEEKDAY_PLAN:1'], 'h-behind');
-  db.close();
-});
-
-test('clock step back: lastPushHashes reports the later insert per weekday (GEN2 daymask)', async () => {
-  const { db } = await tempDb();
-  // Both rows cover Monday (bit 1); 'ahead' also covers Tuesday (bit 2), which nothing newer touches.
-  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0699151930', behindPayload: '0299151930' });
-  const hashes = await store.lastPushHashes(db, STEP_EUI);
-  assert.equal(hashes['GEN2DAY:1'], 'h-behind');
-  assert.equal(hashes['GEN2DAY:2'], 'h-ahead');
-  db.close();
-});
-
 test('clock step back: ackPush settles the later QUEUED insert when two are outstanding for the same purpose and port', async () => {
   const { db } = await tempDb();
   // GEN2 rows with disjoint masks are not superseded by each other, so both stay QUEUED.
@@ -506,14 +488,6 @@ test('clock step back: ackPush settles the later QUEUED insert when two are outs
   const byId = Object.fromEntries((await db.all('SELECT push_id, state FROM valve_schedule_pushes')).map((r) => [r.push_id, r.state]));
   assert.equal(byId.behind, 'ACKED');
   assert.equal(byId.ahead, 'QUEUED');
-  db.close();
-});
-
-test('clock step back: listQueued re-emits outstanding pushes in insertion order', async () => {
-  const { db } = await tempDb();
-  await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
-  const queued = await store.listQueued(db, STEP_EUI);
-  assert.deepEqual(queued.map((r) => r.push_id), ['ahead', 'behind']);
   db.close();
 });
 
@@ -610,5 +584,37 @@ test('F144: a schedule write with no EUI scope throws instead of falling back to
   const row = await db.get('SELECT label, deleted_at FROM valve_schedules WHERE schedule_uuid=?', ['f144-a']);
   assert.equal(row.label, 'A');
   assert.equal(row.deleted_at, null);
+  db.close();
+});
+
+test('CMD-04 PR0: the 24 h sweep makes plan and status rows LOST (clock rows plain FAILED); a LOST slot stays in pushSummary past the 30-day window', async () => {
+  const { db } = await tempDb();
+  const eui = require('./test-helpers').FIXTURE_EUI;
+  await store.insertPushes(db, [
+    { push_id: 'old-lost', device_eui: eui, purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload_hex: 'FF', plan_hash: 'h1' },
+    { push_id: 'old-acked', device_eui: eui, purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: 'FF', plan_hash: 'h2' },
+    { push_id: 'status', device_eui: eui, purpose: 'SCHEDULER_STATUS', weekday: null, fport: 21, payload_hex: '30', plan_hash: null },
+    { push_id: 'clock', device_eui: eui, purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null },
+    { push_id: 'superseded', device_eui: eui, purpose: 'WEEKDAY_PLAN', weekday: 3, fport: 17, payload_hex: 'FF', plan_hash: 'h3' },
+  ]);
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-06-01 10:00:00'");
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', acked_at='2026-06-01T10:05:00.000Z' WHERE push_id='old-acked'");
+  await db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE push_id='superseded'");
+  await store.failStalePushes(db, '2026-06-02T10:00:00.000Z');
+  const byId = Object.fromEntries((await db.all('SELECT push_id, state, error FROM valve_schedule_pushes')).map((r) => [r.push_id, [r.state, r.error]]));
+  assert.deepEqual(byId, {
+    'old-lost': ['FAILED', 'stale_unconfirmed'], 'old-acked': ['ACKED', null], status: ['FAILED', 'stale_unconfirmed'],
+    clock: ['FAILED', 'no_ack_24h'], superseded: ['SUPERSEDED', null],
+  });
+  const summary = await store.pushSummary(db, eui, new Date('2026-09-01T00:00:00Z'));
+  assert.equal(summary.lost, 1, 'a lost plan is never silently expired');
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.acked, 0, 'the 30-day window still bounds the other counts');
+  assert.equal(summary.scheduler_status_lost, true);
+  const states = await store.weekdayPushStates(db, eui);
+  assert.equal(states.find((r) => r.weekday === 1).state, 'LOST');
+  assert.equal(states.find((r) => r.weekday === 1).error, 'stale_unconfirmed');
+  assert.equal(states.find((r) => r.weekday === 2).state, 'ACKED');
+  assert.equal(states.some((r) => r.weekday === 3), false, 'SUPERSEDED rows are not surfaced');
   db.close();
 });

@@ -56,109 +56,289 @@ function toRow(deviceEui, p) {
   return { push_id: crypto.randomUUID(), device_eui: deviceEui, purpose: p.purpose, weekday: p.weekday, fport: p.fport, payload_hex: p.payloadHex, plan_hash: p.planHash || null };
 }
 
-// Queue a list of built pushes: supersede older QUEUED of the same key, insert rows, build MQTT messages.
-// MINOR 7 (review round 1): the ChirpStack flush runs before the insert transaction below, so
-// a transaction failure after a successful flush would drop the previously-queued payloads
-// that were just flushed out. Accepted as a low-probability edge case rather than widening the
-// transaction to cover an external network call.
-async function queuePushes({ db, deviceEui, appId, pushes, generation, flushQueue, warn }) {
-  const purposes = new Set(pushes.map((p) => p.purpose));
-  // MAJOR-A fix (review round 2): the per-push supersede below only ever touches rows of
-  // the SAME purpose as what was just compiled. A Gen1->Gen2 self-correction compiles
-  // DAYMASK_PLAN pushes, so the 7 pre-switch WEEKDAY_PLAN rows are a different purpose and
-  // are never touched -- they stay QUEUED forever, and pushSummary buckets GEN1/GEN2 rows
-  // under separate keyspaces (WEEKDAY_PLAN:<d> vs GEN2DAY:<d>), so the abandoned rows are
-  // counted *in addition to* the new ones instead of being replaced by them. The farmer's
-  // GUI badge then reports a permanent phantom "queued", followed by "failed" 24h later, for
-  // a plan the valve already abandoned. Whenever this compile produced a push of one
-  // generation's purpose, also supersede any leftover QUEUED rows of the other generation's
-  // plan purpose for this device -- reusing the same supersedeQueued() helper the per-push
-  // loop below already calls, once per weekday (WEEKDAY_PLAN has no single "all weekdays"
-  // token) or once with the full 7-day mask (DAYMASK_PLAN intersects on mask overlap).
-  //
-  // M1 fix (post-deploy review): the flags above are also derived straight from the caller's
-  // `generation`, not only from the purposes actually compiled. compileAndQueue always knows
-  // the device's CURRENT (post-switch) generation, even on a compile that produces zero
-  // pushes -- e.g. a GEN2->GEN1 demotion whose GEN1 hashes still match the ACKED rows from
-  // before the promotion. Without this, `if (!pushes.length) return` below would exit before
-  // ever reaching this supersede, leaving the abandoned generation's plan row QUEUED forever
-  // (the same phantom-failure badge MAJOR-A fixed, mirrored in the demotion direction). A
-  // caller that doesn't know/pass `generation` (e.g. a bare SCHEDULER_STATUS or CLOCK_SYNC
-  // push queued outside a compile) leaves these exactly as purpose-derived, unchanged.
-  const supersedeWeekday = purposes.has('DAYMASK_PLAN') || generation === 'GEN2';
-  const supersedeDaymask = purposes.has('WEEKDAY_PLAN') || (generation != null && generation !== 'GEN2');
-  if (!pushes.length && !supersedeWeekday && !supersedeDaymask) return { rows: [], messages: [], flushed: false };
-  let flushed = false;
-  if (pushes.length) {
-    const pending = await store.hasPendingObservation(db, deviceEui);
-    if (!pending && typeof flushQueue === 'function') {
-      try { await flushQueue(deviceEui); flushed = true; } catch (e) { warn && warn('[valve-control] queue flush failed ' + deviceEui + ': ' + (e && e.message ? e.message : e)); }
-    }
-  }
+// Queue standalone pushes without touching the device queue: the clock tick's CLOCK_SYNC
+// (workers.runClockTick). Supersedes older QUEUED rows of the same purpose and returns the MQTT
+// messages to send now. Plan and scheduler-status changes never come through here: they are
+// whole-state snapshots (compileAndQueue / queueSnapshot below).
+async function queuePushes({ db, deviceEui, appId, pushes, warn }) {
   const rows = pushes.map((p) => toRow(deviceEui, p));
-  // ValveRuntime.push_state (queued/acked/failed/weekday_states) only reflects WEEKDAY_PLAN/
-  // DAYMASK_PLAN rows -- a queuePushes call that only carries a SCHEDULER_STATUS or CLOCK_SYNC
-  // push (no plan purpose, no cross-generation supersede) leaves that resource unchanged.
-  const affectsPushState = supersedeWeekday || supersedeDaymask || purposes.has('WEEKDAY_PLAN') || purposes.has('DAYMASK_PLAN');
+  if (!rows.length) return { rows, messages: [] };
   await db.transaction(async (tx) => {
-    for (const p of pushes) await store.supersedeQueued(tx, deviceEui, p.purpose, p.weekday == null ? (p.daymask == null ? null : p.daymask) : p.weekday);
-    if (supersedeWeekday) {
-      for (let d = 0; d < 7; d += 1) await store.supersedeQueued(tx, deviceEui, 'WEEKDAY_PLAN', d);
-    } else if (supersedeDaymask) {
-      await store.supersedeQueued(tx, deviceEui, 'DAYMASK_PLAN', 0x7F);
+    for (const purpose of new Set(pushes.map((p) => p.purpose))) await store.supersedeOutstanding(tx, deviceEui, [purpose]);
+    await store.insertPushes(tx, rows);
+  });
+  if (warn && pushes.some((p) => SNAPSHOT_PURPOSES.includes(p.purpose))) {
+    warn('[valve-control] queuePushes carried a plan/status push for ' + deviceEui + '; those belong in a snapshot');
+  }
+  return { rows, messages: rows.map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex })) };
+}
+
+// ---------------------------------------------------------------------------------------------
+// CMD-04 PR0, design (C): snapshot compile (owner decision Q02 = (c): no automatic configuration
+// re-send; a lost plan is surfaced, never silently expired).
+//
+// Every compile is a new intent and writes the COMPLETE desired state of every slot the valve
+// can hold, read fresh from the DB:
+//   GEN1  7 WEEKDAY_PLAN rows (FPort 14..20; an empty day is the all-FF plan) + SCHEDULER_STATUS.
+//   GEN2  DAYMASK_PLAN rows (FPort 25) whose masks together cover all 7 days: plan.gen2Groups
+//         puts every weekday into exactly one group, and the days without windows form a
+//         zero-window frame, the GEN2 clear primitive (one byte, the day bits; '80' clears
+//         every day). Whether STREGA SV2 firmware accepts that frame as a clear is hardware
+//         gate 4 of the valve-control design, still open; the conditional-scheduling branch
+//         relies on the same frame ('80').  + SCHEDULER_STATUS.
+//   CLOCK_SYNC is never part of a snapshot: the valve tick computes it fresh at send time.
+// The compile flushes the device queue (unless an open is still awaiting observation), marks
+// every outstanding plan/status row SUPERSEDED -- the new snapshot overwrites every slot they
+// covered -- and a flushed, unconfirmed CLOCK_SYNC too (clearing last_clock_sync_queued_at so
+// the next tick sends a fresh one). Nothing previously emitted is ever replayed.
+//
+// The snapshot is not sent by the edit itself. It stays pending (app_settings key
+// 'valve_snapshot_pending:<EUI>') and emitPendingSnapshots, run by the valve tick, sends it once
+// SNAPSHOT_DEBOUNCE_MS has passed since the last edit, so N edits in a short window cost the
+// airtime of one snapshot. The pending marker survives a Node-RED restart.
+//
+// A valve this gateway never programmed (no WEEKLY schedule and no plan push on record) gets a
+// status-only snapshot from a scheduler-status change, so a plan written over Bluetooth is not
+// wiped by a pause (the same guard api.js and unclaim.js apply to schedule deletes).
+// ---------------------------------------------------------------------------------------------
+const SNAPSHOT_PURPOSES = ['WEEKDAY_PLAN', 'DAYMASK_PLAN', 'SCHEDULER_STATUS'];
+const SNAPSHOT_DEBOUNCE_MS = 30 * 1000;
+// (R5 L3) Upper bound on the debounce: a snapshot is sent at the latest this long after the
+// first edit it carries, however often the plan keeps being edited.
+const SNAPSHOT_MAX_DELAY_MS = 5 * 60 * 1000;
+// (R5 G1) Interim GEN2 option, app_settings key, default off. When set ('1'/'true'/'yes'/'on'),
+// a GEN2 snapshot is: status, the whole-plan clear '80', then only the day groups that carry
+// windows -- instead of gen2Groups' zero-window frame for the empty days. Failure modes until
+// hardware gate 4 says which frames SV2 firmware accepts: without the prefix, an ignored
+// zero-window frame leaves a deleted day watering (fail-wet); with it, an accepted '80' plus
+// ignored plan frames leaves the valve without a plan (fail-dry).
+const GEN2_CLEAR_PREFIX_KEY = 'valve_gen2_snapshot_clear_prefix';
+const STATUS_CODES = { ACTIVE: '0', SKIP_TODAY: '1', DEACTIVATED: '2' };
+
+function statusCodeFor(status) {
+  const code = STATUS_CODES[String(status == null ? 'ACTIVE' : status).toUpperCase()];
+  if (!code) {
+    const err = new Error('invalid_status'); err.statusCode = 422; err.code = 'invalid_status'; throw err;
+  }
+  return code;
+}
+
+function planConflictError(details) {
+  const err = new Error('plan_conflict'); err.statusCode = 422; err.code = 'plan_conflict'; err.details = details; return err;
+}
+
+// (R5 M1) The scheduler status goes FIRST: a pause or skip reaches the valve on the next uplink,
+// not after seven plan writes. On a status change the plan rows equal what the valve already
+// holds (every earlier edit sent its own snapshot), so the status never runs ahead of an
+// unknown plan.
+function buildSnapshotPushes({ generation, days, schedulerStatus, includePlan, gen2ClearPrefix }) {
+  const status = buildStatusPush(statusCodeFor(schedulerStatus));
+  if (!includePlan) return [status];
+  if (generation === 'GEN2' && gen2ClearPrefix) {
+    const clear = { purpose: 'DAYMASK_PLAN', weekday: null, daymask: 0x80, fport: P.GEN2_SCHEDULER_FPORT, payloadHex: hexOf(P.encodeGen2(0x80, [])), planHash: P.planHash([]) };
+    const groups = P.gen2Groups(days).filter((g) => g.windows.length > 0)
+      .map((g) => ({ purpose: 'DAYMASK_PLAN', weekday: null, daymask: g.daymask, fport: P.GEN2_SCHEDULER_FPORT, payloadHex: hexOf(P.encodeGen2(g.daymask, g.windows)), planHash: P.planHash(g.windows) }));
+    return [status, clear].concat(groups);
+  }
+  return [status].concat(buildPlanPushes({ generation, days, lastHashes: {}, force: true }));
+}
+
+// Write one snapshot: flush, supersede, insert, and either leave it pending for the debounced
+// emitter (default) or return its messages now (emitNow: the decommission sweep, which already
+// runs inside the valve tick). The pushes come either ready-made (`pushes`) or from
+// `build(tx)`, which runs inside the write transaction (R5 M2: a compile reads the schedules
+// as they are when it writes, so a concurrent compile on another DB handle cannot leave an
+// older snapshot as the pending truth).
+async function queueSnapshot({ db, deviceEui, appId, pushes, build, flushQueue, warn, now, emitNow }) {
+  const eui = String(deviceEui).toUpperCase();
+  const nowDate = now || new Date();
+  let flushed = false;
+  const pending = await store.hasPendingObservation(db, eui);
+  if (!pending && typeof flushQueue === 'function') {
+    try { await flushQueue(eui); flushed = true; } catch (e) { warn && warn('[valve-control] queue flush failed ' + eui + ': ' + (e && e.message ? e.message : e)); }
+  }
+  let rows = [];
+  let superseded = 0;
+  await db.transaction(async (tx) => {
+    const built = typeof build === 'function' ? await build(tx) : pushes;
+    rows = built.map((p) => toRow(eui, p));
+    superseded = await store.supersedeOutstanding(tx, eui, SNAPSHOT_PURPOSES);
+    if (flushed && await store.supersedeOutstanding(tx, eui, ['CLOCK_SYNC'])) {
+      await store.upsertSettings(tx, eui, { last_clock_sync_queued_at: null });
     }
-    if (rows.length) await store.insertPushes(tx, rows);
+    await store.insertPushes(tx, rows);
+    if (emitNow) {
+      await store.clearSnapshotPending(tx, eui);
+    } else {
+      // (R5 L3) keep the first edit's time across re-edits, for the max-delay bound.
+      const previous = await store.getSnapshotPending(tx, eui);
+      const firstEditedAt = (previous && (previous.first_edited_at || previous.edited_at)) || nowDate.toISOString();
+      await store.setSnapshotPending(tx, eui, { edited_at: nowDate.toISOString(), first_edited_at: firstEditedAt, push_ids: rows.map((r) => r.push_id) });
+    }
     // P3-E1 review fix (IMPORTANT 4): best-effort -- an emit failure here must not roll back the
     // push-ledger writes this same transaction just made (matches the flows.json seams' shape).
-    if (affectsPushState) {
-      try { await runtime.emitRuntimeChanged(tx, deviceEui, warn); }
-      catch (e) { warn && warn('[valve-control] queuePushes: runtime emit failed: ' + (e && e.message ? e.message : e)); }
-    }
+    try { await runtime.emitRuntimeChanged(tx, eui, warn); }
+    catch (e) { warn && warn('[valve-control] queueSnapshot: runtime emit failed: ' + (e && e.message ? e.message : e)); }
   });
-  // The flush above wiped ChirpStack's queue for this device. Rows left QUEUED by an EARLIER
-  // compile that this one does not supersede (a different day-set) lost their downlink with it,
-  // while their ledger row stays QUEUED -- so that weekday's plan silently never reaches the
-  // valve, and the row sits untouched until failStalePushes marks it FAILED 24h later. Observed
-  // live on a bench Gen2 valve: three compiles inside 12s left a DAYMASK_PLAN for days 1+4
-  // QUEUED and undelivered across two hours of uplinks. Re-emit whatever the ledger still
-  // considers outstanding, oldest first, so the queue matches the ledger again.
-  let carried = [];
-  if (flushed) {
-    const fresh = new Set(rows.map((r) => r.push_id));
-    try {
-      carried = (await store.listQueued(db, deviceEui)).filter((r) => !fresh.has(r.push_id));
-    } catch (e) {
-      warn && warn('[valve-control] could not re-queue outstanding pushes for ' + deviceEui + ': ' + (e && e.message ? e.message : e));
+  const messages = emitNow ? rows.map((r) => buildDownlinkMessage({ appId, deviceEui: eui, fport: r.fport, payloadHex: r.payload_hex })) : [];
+  return { rows, messages, flushed, superseded, deferred: !emitNow };
+}
+
+// Run by the valve tick. Sends each pending snapshot exactly once -- the marker is deleted in
+// the same transaction that reads the rows, before anything is sent -- when its last edit is
+// at least debounceMs old, when its first edit is SNAPSHOT_MAX_DELAY_MS old (R5 L3), or when
+// the gateway clock stepped back past it. Only rows still QUEUED are sent.
+// (R5 M5) While an open awaits observation the compile could not flush, so the snapshot is
+// held: edit bursts during one unobserved open then append one snapshot behind the radio
+// queue, not one per burst.
+//
+// Transport (R13 M3; review of d3b0efb85 T1-T3). With `enqueue` (a function) or
+// `transportFactory` (returns a ChirpStack client with enqueueDownlink/close), rows go through
+// a transport that reports acceptance. The factory is called lazily, only once a due snapshot
+// is about to be sent, and the client is closed before returning (each client owns five gRPC
+// channels; the tick runs every 60 s). If the factory throws (the client cannot be built), the
+// rows fall back to MQTT messages, whose delivery the gateway cannot observe; that is warned
+// about once per runtime. The first row the transport does not accept (it threw -- e.g. its
+// deadline passed -- or answered { accepted: false }) stops the snapshot: that row and every
+// row after it are marked LOST ('not_resent_q02c') at once, without being tried, together
+// with a runtime emission, so the tile says "device may not hold this plan" now. A ChirpStack
+// that refused one row will not take the next within the same tick, and trying would stall
+// the tick for one deadline per row. Snapshots of other valves due in the same tick are left
+// pending (never emitted, so not a re-send) for the next tick. Nothing re-sends a lost row
+// (Q02 c).
+let mqttFallbackWarned = false;
+function _resetTransportWarningsForTests() { mqttFallbackWarned = false; }
+
+async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, enqueue, transportFactory }) {
+  const windowMs = debounceMs == null ? SNAPSHOT_DEBOUNCE_MS : debounceMs;
+  const nowMs = (now || new Date()).getTime();
+  const out = { messages: [], emitted: 0, transportFailures: 0, transportDown: false };
+  let pending = [];
+  try { pending = await store.listSnapshotPending(db); }
+  catch (e) { warn && warn('[valve-control] pending snapshots unreadable: ' + (e && e.message ? e.message : e)); return out; }
+  let send = typeof enqueue === 'function' ? enqueue : null;
+  let client = null;
+  let factoryTried = false;
+  try {
+    for (const p of pending) {
+      if (out.transportDown) break;
+      const editedMs = Date.parse(p.edited_at);
+      const firstMs = Date.parse(p.first_edited_at || p.edited_at);
+      const capReached = Number.isFinite(firstMs) && nowMs - firstMs >= SNAPSHOT_MAX_DELAY_MS;
+      const due = capReached || !Number.isFinite(editedMs) || nowMs - editedMs >= windowMs || editedMs - nowMs > windowMs;
+      if (!due) continue;
+      // (R5 re-review N1) The M5 hold never outlasts the 5-minute cap: a delete compiled during
+      // an unobserved open must not wait for the open (plus the 30-min reconciliation grace) to
+      // end. At the cap the snapshot is appended behind the unflushed queue, so the queue grows
+      // by at most one snapshot per 5 minutes per unobserved open. No separate bypass for
+      // snapshots that carry clears: the cap already bounds every snapshot, clears included, and
+      // telling "carries a clear" apart would need the previous snapshot's content.
+      if (!capReached && await store.hasPendingObservation(db, p.device_eui)) continue;
+      if (!send && !factoryTried && typeof transportFactory === 'function') {
+        factoryTried = true;
+        try {
+          client = transportFactory();
+          send = (item) => client.enqueueDownlink(item);
+        } catch (e) {
+          client = null;
+          if (!mqttFallbackWarned && warn) warn('[valve-control] ChirpStack client unavailable, plan snapshots go out over MQTT (delivery not observable): ' + (e && e.message ? e.message : e));
+          mqttFallbackWarned = true;
+        }
+      }
+      let rows = [];
+      await db.transaction(async (tx) => {
+        const current = await store.getSnapshotPending(tx, p.device_eui);
+        if (!current || current.raw !== p.raw) return; // re-edited since the read: the next tick decides
+        await store.clearSnapshotPending(tx, p.device_eui);
+        rows = await store.queuedPushesById(tx, p.device_eui, current.push_ids);
+        // (R5 re-review N3/N4) A cancel compares this marker's raw value before and after its
+        // flush to tell rows emitted during the flush (still on the air) from rows it removed.
+        if (rows.length) await store.setSnapshotEmitted(tx, p.device_eui, { emitted_at: new Date().toISOString(), push_ids: rows.map((r) => r.push_id) });
+      });
+      if (!rows.length) continue;
+      out.emitted += 1;
+      if (!send) {
+        for (const r of rows) out.messages.push(buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: r.fport, payloadHex: r.payload_hex }));
+        continue;
+      }
+      let failedAt = -1;
+      for (let i = 0; i < rows.length; i += 1) {
+        const msg = buildDownlinkMessage({ appId, deviceEui: p.device_eui, fport: rows[i].fport, payloadHex: rows[i].payload_hex });
+        let accepted = true;
+        try {
+          const result = await send({ devEui: msg.payload.devEui, fPort: msg.payload.fPort, data: msg.payload.data, confirmed: false });
+          if (result && result.accepted === false) accepted = false;
+        } catch (e) {
+          accepted = false;
+        }
+        if (!accepted) { failedAt = i; break; }
+      }
+      if (failedAt < 0) continue;
+      const notAccepted = rows.slice(failedAt);
+      out.transportFailures += notAccepted.length;
+      out.transportDown = true;
+      warn && warn('[valve-control] ' + p.device_eui + ': the transport stopped at snapshot row ' + (failedAt + 1) + ' of ' + rows.length + '; ' + notAccepted.length + ' row(s) not accepted, marked LOST, not re-sent (Q02c)');
+      await db.transaction(async (tx) => {
+        await store.markPushesLost(tx, notAccepted.map((r) => r.push_id), store.LOST_NOT_RESENT);
+        try { await runtime.emitRuntimeChanged(tx, p.device_eui, warn); }
+        catch (e) { warn && warn('[valve-control] emitPendingSnapshots: runtime emit failed: ' + (e && e.message ? e.message : e)); }
+      });
+    }
+  } finally {
+    if (client && typeof client.close === 'function') {
+      try {
+        const errors = client.close();
+        if (Array.isArray(errors) && errors.length && warn) warn('[valve-control] ChirpStack client close: ' + errors.map((e) => (e && e.message ? e.message : e)).join('; '));
+      } catch (e) {
+        warn && warn('[valve-control] ChirpStack client close failed: ' + (e && e.message ? e.message : e));
+      }
     }
   }
-  const messages = carried.concat(rows).map((r) => buildDownlinkMessage({ appId, deviceEui, fport: r.fport, payloadHex: r.payload_hex }));
-  return { rows, messages, flushed, requeued: carried.length };
+  return out;
 }
 
-async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, warn, timeZoneFallback }) {
-  const schedules = await store.listSchedules(db, deviceEui);
-  const settings = await store.getSettings(db, deviceEui);
-  const compiled = P.compileWindows(schedules);
-  if (compiled.errors.length) {
-    const err = new Error('plan_conflict'); err.statusCode = 422; err.code = 'plan_conflict'; err.details = compiled.errors; throw err;
-  }
-  const lastHashes = await store.lastPushHashes(db, deviceEui);
-  const pushes = buildPlanPushes({ generation: settings.strega_generation, days: compiled.days, lastHashes, force: !!force });
-  // MINOR 5 (review round 1): prefer the timezone of the first ENABLED WEEKLY schedule, since
-  // that's the timezone the compiled plan (compileWindows only reads WEEKLY rows) actually
-  // used. `listSchedules` orders by kind before start_time, and 'ONCE' < 'WEEKLY'
-  // lexicographically, so a plain `schedules.find(s => s.timezone)` could silently pick an
-  // unrelated ONCE schedule's timezone for the clock-sync payload.
-  const tzSchedule = schedules.find((s) => s.kind === 'WEEKLY' && Number(s.enabled) && s.timezone) || schedules.find((s) => s.timezone);
-  const tz = (tzSchedule && tzSchedule.timezone) || timeZoneFallback || 'UTC';
-  const needsClock = force || !settings.last_clock_sync_queued_at;
-  if (needsClock) pushes.push(buildClockPush(settings.strega_generation, now || new Date(), tz));
-  const queued = await queuePushes({ db, deviceEui, appId, pushes, generation: settings.strega_generation, flushQueue, warn });
-  // MINOR 8 (review round 1): deliberately outside the transaction that queuePushes ran —
-  // worst case on a crash between the two is a redundant clock sync queued next time, which
-  // is harmless, versus coupling an unrelated settings write into the push-insert transaction.
-  if (needsClock) await store.upsertSettings(db, deviceEui, { last_clock_sync_queued_at: (now || new Date()).toISOString() });
-  return Object.assign({ compiled }, queued);
+// `force` is accepted for the callers' sake ("Resend plan", the GEN2 profile swap) but no longer
+// changes anything: every compile is a full snapshot. `schedulerStatus` is the status a
+// scheduler-status route is about to store (it writes valve_settings after this succeeds);
+// otherwise the stored status is used. `statusOnlyOnConflict` (R5 M3, the status routes): a
+// stored plan that compileWindows rejects must not block pause/skip/resume, so the snapshot
+// falls back to the status alone. timeZoneFallback is unused since CLOCK_SYNC left the
+// compile; it stays in the signature for the callers.
+async function compileAndQueue({ db, deviceEui, appId, now, flushQueue, warn, schedulerStatus, statusOnlyOnConflict, settingsPatch }) {
+  const eui = String(deviceEui).toUpperCase();
+  const prefixSetting = await store.getGatewaySetting(db, GEN2_CLEAR_PREFIX_KEY, warn);
+  const gen2ClearPrefix = ['1', 'true', 'yes', 'on'].includes(String(prefixSetting == null ? '' : prefixSetting).trim().toLowerCase());
+  // (R5 re-review N2) `settingsPatch` (the status routes: scheduler_status, skip_today_date) is
+  // written inside the snapshot transaction, before the snapshot is built from the settings,
+  // so the stored status and the newest snapshot agree by construction: a compile from another
+  // origin that commits afterwards reads the new status. The pre-flush validation build uses
+  // the patch's status as an override, since nothing is written yet.
+  const patchedStatus = settingsPatch && settingsPatch.scheduler_status != null ? settingsPatch.scheduler_status : null;
+  const statusOverride = schedulerStatus != null ? schedulerStatus : patchedStatus;
+  const build = async (q, override) => {
+    const schedules = await store.listSchedules(q, eui);
+    const settings = await store.getSettings(q, eui);
+    const compiled = P.compileWindows(schedules);
+    // (R5 L1) Any WEEKLY row, tombstones included, is the intent to program the valve: a delete
+    // on a valve whose push history is missing (restored DB, replacement gateway) still clears.
+    let includePlan = (await store.hasWeeklyEver(q, eui)) || (await store.hasPlanHistory(q, eui));
+    if (compiled.errors.length) {
+      if (!statusOnlyOnConflict) throw planConflictError(compiled.errors);
+      includePlan = false;
+    }
+    const status = override != null ? override : settings.scheduler_status;
+    const pushes = buildSnapshotPushes({ generation: settings.strega_generation, days: compiled.days, schedulerStatus: status, includePlan, gen2ClearPrefix });
+    return { compiled, pushes };
+  };
+  // Validate before the flush: a refused compile must not touch the radio queue.
+  let built = await build(db, statusOverride);
+  if (built.compiled.errors.length && warn) warn('[valve-control] ' + eui + ': plan_conflict in the stored schedules; sending the scheduler status alone');
+  const queued = await queueSnapshot({ db, deviceEui: eui, appId, flushQueue, warn, now, build: async (tx) => {
+    if (settingsPatch) await store.upsertSettings(tx, eui, settingsPatch);
+    built = await build(tx, schedulerStatus);
+    return built.pushes;
+  } });
+  return Object.assign({ compiled: built.compiled }, queued);
 }
 
-module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, queuePushes, compileAndQueue };
+module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, buildSnapshotPushes, statusCodeFor, queuePushes, queueSnapshot, emitPendingSnapshots, _resetTransportWarningsForTests, compileAndQueue, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS, SNAPSHOT_PURPOSES, GEN2_CLEAR_PREFIX_KEY };

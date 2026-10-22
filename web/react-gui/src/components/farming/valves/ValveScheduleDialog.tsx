@@ -117,6 +117,7 @@ function pushBadgeLabel(row: ValveWeekdayPush | null, timeZone: string, t: Trans
   if (!row) return null;
   if (row.state === 'ACKED') return t('scheduleDialog.push.ACKED', { when: row.ackedAt ? formatClock(row.ackedAt, timeZone, language) : '' });
   if (row.state === 'FAILED') return t('scheduleDialog.push.FAILED');
+  if (row.state === 'LOST') return t('scheduleDialog.push.LOST');
   return t('scheduleDialog.push.QUEUED');
 }
 

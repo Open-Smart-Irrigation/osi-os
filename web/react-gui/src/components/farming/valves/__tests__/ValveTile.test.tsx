@@ -29,6 +29,7 @@ const { translateForTest } = vi.hoisted(() => {
     'state.closing': 'Closing',
     'state.failed': 'Failed',
     planIncomplete: 'Not yet confirmed on the valve for {{count}} day(s) — resend the plan',
+    planLost: 'Device may not hold this plan',
     enclosure: 'Valve enclosure',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
@@ -199,6 +200,23 @@ describe("ValveTile plan line", () => {
       pushState: { queued: 0, acked: 1, failed: 1, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     });
     expect(screen.getByText("Not yet confirmed on the valve for 1 day(s) — resend the plan")).toBeInTheDocument();
+  });
+
+  // CMD-04 PR0 (owner decision Q02 c): a plan the valve did not confirm within 24 h is LOST, not re-sent,
+  // and the tile says so instead of the generic not-yet-confirmed line.
+  it("says the device may not hold this plan when plan slots are LOST", () => {
+    renderTile({
+      pushState: { queued: 1, acked: 0, failed: 6, lost: 6, schedulerStatusLost: false, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("Device may not hold this plan")).toBeInTheDocument();
+    expect(screen.queryByText(/Not yet confirmed/)).not.toBeInTheDocument();
+  });
+
+  it("says the device may not hold this plan when the newest scheduler-status push is LOST", () => {
+    renderTile({
+      pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("Device may not hold this plan")).toBeInTheDocument();
   });
 
   it("shows no plan line at all when every downlink is acknowledged", () => {
