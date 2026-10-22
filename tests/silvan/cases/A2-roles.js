@@ -155,6 +155,15 @@ exports.run = async (ctx) => {
   const passwordFor = (u) => 'A2pass_' + u;
   const userB = 'osi_a2b_' + tag;
   const regB = await ctx.anonRest.post('/auth/register', { username: userB, password: passwordFor(userB) });
+  if (regB.status === 403) {
+    // osi-os#468: self-registration creates only a gateway's first account, so account B
+    // cannot be made through the API on a flag-off gateway any more.
+    const n = await ctx.ssh.sqlScalar("SELECT COUNT(*) AS n FROM users WHERE username = '" + userB + "'");
+    ctx.expect('registering a second account is refused and writes no row (osi-os#468)', Number(n) === 0, { rows: n });
+    ev.note('Cross-user isolation (section 4) needs a second account, and POST /auth/register no longer ' +
+      'creates one once the gateway has an account (osi-os#468). Section 4 was not run.');
+    return;
+  }
   ctx.expectStatus('a second throwaway account (B) registers', regB, 201);
   const loginB = await ctx.anonRest.post('/auth/login', { username: userB, password: passwordFor(userB) });
   ctx.expectStatus('account B logs in', loginB, 200);

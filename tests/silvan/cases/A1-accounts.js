@@ -1,8 +1,11 @@
 'use strict';
 // A1 — local account lifecycle: register, login, "logout", expired/tampered tokens.
 //
-// Preconditions: none. Works against an empty users table (fresh deploy) and
-// against a populated one -- every account it touches is created by this case.
+// Preconditions: none. Since osi-os#468, POST /auth/register only creates a
+// gateway's first account, and the runner has registered or reused one before
+// any case runs. So this case asserts the refusal (403, no row) and then runs the
+// login/session/token checks with the harness's own account when this run
+// registered it (its password is known); with --user it stops after the refusal.
 //
 // Routes under test (flows.json, Authentication tab):
 //   POST /auth/register  -> auth-register-func / auth-db-insert
@@ -16,14 +19,29 @@ const created = [];
 exports.run = async (ctx) => {
   const { rest, anonRest, ssh, ev } = ctx;
   const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  const username = 'osi_a1_' + suffix;
-  const password = 'A1pass_' + suffix;
+  let username = 'osi_a1_' + suffix;
+  let password = 'A1pass_' + suffix;
 
   // --- register -------------------------------------------------------------
   ev.step('register a fresh local account', { username });
   const reg = await anonRest.post('/auth/register', { username, password });
-  ctx.expectStatus('POST /auth/register returns 201', reg, 201);
-  if (reg.status === 201) created.push(username);
+  const closed = reg.status === 403;
+  if (closed) {
+    const n = await ssh.sqlScalar("SELECT COUNT(*) AS n FROM users WHERE username = '" + username + "'");
+    ctx.expect('registration on a gateway that already has an account is refused and writes no row (osi-os#468)',
+      Number(n) === 0, { status: reg.status, rows: n, body: reg.body });
+    if (!ctx.user || !ctx.user.password) {
+      ev.note('Registration is closed and the harness account was not registered by this run (--user), ' +
+        'so no account with a known password exists: the login, session and token checks were not run.');
+      return;
+    }
+    username = ctx.user.username;
+    password = ctx.user.password;
+    ev.note('Registration is closed (osi-os#468): the checks below use the harness account ' + username + '.');
+  } else {
+    ctx.expectStatus('POST /auth/register returns 201', reg, 201);
+    if (reg.status === 201) created.push(username);
+  }
 
   const row = await ssh.sqlOne(
     "SELECT id, username, password_hash, created_at, auth_mode, role FROM users WHERE username = '" + username + "'"
@@ -50,7 +68,7 @@ exports.run = async (ctx) => {
   const countAfterInvalid = await ssh.sqlScalar(
     "SELECT COUNT(*) AS n FROM users WHERE username LIKE 'osi_a1_" + suffix + "%'"
   );
-  ctx.expect('SQLite: rejected registrations created no rows', Number(countAfterInvalid) === 1, { rows: countAfterInvalid });
+  ctx.expect('SQLite: rejected registrations created no rows', Number(countAfterInvalid) === (closed ? 0 : 1), { rows: countAfterInvalid });
 
   // --- login ----------------------------------------------------------------
   const login = await anonRest.post('/auth/login', { username, password });

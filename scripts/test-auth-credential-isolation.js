@@ -525,3 +525,112 @@ test('placeholder-EUI linked login resolves with the password-hash fallback inst
   assert.equal(response.statusCode, 200);
   assert.ok(response.payload && response.payload.token, 'fallback login should issue a token');
 });
+
+// osi-os#468: with OSI_SCOPED_ACCESS off, POST /auth/register created an account for any
+// LAN client. Self-registration is now only the first-run bootstrap in both flag states:
+// flag off, it is open while the users table is empty; flag on keeps its admin rule.
+async function registerThroughChain(helper, env, username, password) {
+  const flows = readFlows();
+  const flowStore = new Map();
+  const steps = [
+    [findNode(flows, 'auth-register-func'), {}],
+    [findNode(flows, 'auth-db-query'), { osiDb: helper }],
+    [findNode(flows, 'auth-process-result'), { bcrypt: bcryptjs, crypto: cryptoModule, osiLib }],
+    [findNode(flows, 'auth-db-insert'), { osiDb: helper }],
+  ];
+  let msg = { payload: { username, password } };
+  for (const [flowNode, scope] of steps) {
+    const [next, response] = await executeFunctionNode(flowNode, msg, { flowStore, env, scope });
+    if (response) return { response, inserted: false };
+    msg = next;
+  }
+  return { response: null, inserted: true, msg };
+}
+
+function userRows(helper) {
+  return new Promise((resolve, reject) => {
+    const db = new helper.Database('/data/db/farming.db');
+    db.all('SELECT username, role FROM users ORDER BY id', [], (error, rows) => (error ? reject(error) : resolve(rows)));
+  });
+}
+
+test('#468 flag off: the first account on a fresh gateway can still self-register', async () => {
+  const { helper, cleanup } = freshSeededDb();
+  try {
+    const out = await registerThroughChain(helper, Object.assign({}, AUTH_ENV), 'first_owner', 'firstPassword1');
+    assert.equal(out.inserted, true, 'first-run bootstrap must keep working with the flag off');
+    const rows = await userRows(helper);
+    assert.deepEqual(rows.map((r) => r.username), ['first_owner']);
+    assert.equal(rows[0].role, 'researcher', 'flag-off role semantics are unchanged (D05)');
+  } finally {
+    cleanup();
+  }
+});
+
+test('#468 flag off: once an account exists, POST /auth/register answers 403 and inserts nothing', async () => {
+  const { helper, cleanup } = freshSeededDb((native) => {
+    native.prepare('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)')
+      .run('owner', bcryptjs.hashSync('ownerPassword1', 4), new Date().toISOString());
+  });
+  try {
+    const out = await registerThroughChain(helper, Object.assign({}, AUTH_ENV), 'lan_peer', 'peerPassword1');
+    assert.equal(out.inserted, false, 'UNAUTHENTICATED REGISTRATION: a LAN client must not create a second account');
+    assert.equal(out.response.statusCode, 403);
+    assert.match(String(out.response.payload && out.response.payload.message), /registration is closed/i);
+    assert.deepEqual((await userRows(helper)).map((r) => r.username), ['owner']);
+  } finally {
+    cleanup();
+  }
+});
+
+test('#468 flag off: a gateway holding only a cloud-linked account is closed too', async () => {
+  const { helper, cleanup } = freshSeededDb((native) => {
+    native.prepare("INSERT INTO users (username, password_hash, created_at, auth_mode, server_username) VALUES (?, ?, ?, 'server', ?)")
+      .run('linked_edge', 'x', new Date().toISOString(), 'linked_cloud');
+  });
+  try {
+    const out = await registerThroughChain(helper, Object.assign({}, AUTH_ENV), 'lan_peer', 'peerPassword1');
+    assert.equal(out.inserted, false);
+    assert.equal(out.response.statusCode, 403);
+    assert.equal((await userRows(helper)).length, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test('#468 flag off: two concurrent first registrations create exactly one account', async () => {
+  const { helper, cleanup } = freshSeededDb();
+  try {
+    const flows = readFlows();
+    const insertNode = findNode(flows, 'auth-db-insert');
+    const now = new Date().toISOString();
+    const [a, b] = await Promise.all(['racer_a', 'racer_b'].map((username) => executeFunctionNode(
+      insertNode,
+      { userInsert: { username, passwordHash: username + '-hash', createdAt: now } },
+      { flowStore: new Map(), env: Object.assign({}, AUTH_ENV), scope: { osiDb: helper } }
+    )));
+    const winners = [a, b].filter((r) => r[0]);
+    const losers = [a, b].filter((r) => r[1]);
+    assert.equal(winners.length, 1, 'exactly one bootstrap may win');
+    assert.equal(losers.length, 1);
+    assert.equal(losers[0][1].statusCode, 403);
+    assert.equal((await userRows(helper)).length, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test('#468 flag on: registration rules are unchanged (bootstrap admin, then closed)', async () => {
+  const { helper, cleanup } = freshSeededDb();
+  try {
+    const scopedEnv = Object.assign({ OSI_SCOPED_ACCESS: '1' }, AUTH_ENV);
+    const first = await registerThroughChain(helper, scopedEnv, 'scoped_admin', 'adminPassword1');
+    assert.equal(first.inserted, true);
+    const second = await registerThroughChain(helper, scopedEnv, 'scoped_peer', 'peerPassword1');
+    assert.equal(second.response.statusCode, 403);
+    assert.equal(second.response.payload.message, 'Public registration is closed. Ask an admin to create your account.');
+    assert.deepEqual((await userRows(helper)).map((r) => ({ username: r.username, role: r.role })), [{ username: 'scoped_admin', role: 'admin' }]);
+  } finally {
+    cleanup();
+  }
+});

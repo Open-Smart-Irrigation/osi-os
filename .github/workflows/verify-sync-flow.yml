@@ -69,6 +69,9 @@ jobs:
       # scoped-device-config-guard -> watermark-cal-fn), flag off and scoped,
       # plus the soil-depth PUT (-> put-soil-depth-fn) the depth form uses.
       - run: node scripts/test-watermark-calibration-routes.js
+      # AUTH-09 PR A: cloud UNCLAIM_DEVICE runs the valve plan cleanup before its ACK,
+      # and both unclaim origins report the real cleanup outcome.
+      - run: node scripts/test-unclaim-cleanup-flow.js
       # Standalone inventory: each command passed locally within the 60 s cap
       # and is not invoked by another workflow step or npm script.
       - name: Standalone script inventory pass set
