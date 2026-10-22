@@ -96,25 +96,30 @@ TS=$(date +%Y%m%d-%H%M%S)
 LABEL="pre-repair"          # e.g. "pre-eui-fix", "pre-fingerprint-restamp"
 BK="/data/db/backups/${LABEL}-${TS}"
 mkdir -p "$BK"
-# Primary DB: ONLINE backup via sqlite3 .backup (WAL-consistent while Node-RED
-# writes). The .backup output is one self-contained file: do not copy the live
-# -wal/-shm next to it.
-if ! sqlite3 -cmd ".timeout 5000" /data/db/farming.db ".backup '$BK/farming.db'"; then
-  # Raw-copy fallback, ONLY with the writer stopped. A raw copy of farming.db
-  # and its sidecars taken while Node-RED writes is not a consistent backup.
+# Raw copy, ONLY with the writer stopped: a raw copy of farming.db and its
+# sidecars taken while Node-RED writes is not a consistent backup.
+raw_copy_stopped() {
   /etc/init.d/node-red stop
-  i=0; while pgrep -f node-red >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
-  pgrep -f node-red >/dev/null 2>&1 && { echo "FATAL: Node-RED still running - no raw copy"; exit 1; }
+  trap '/etc/init.d/node-red start' EXIT  # remove if the repair needs it stopped
+  i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
+  pgrep -f '[n]ode-red' >/dev/null 2>&1 && { echo "FATAL: Node-RED still running - no raw copy"; exit 1; }
   cp -a /data/db/farming.db "$BK/farming.db" \
     || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
   for f in farming.db-wal farming.db-shm farming.db-journal; do
     [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
   done
-  # Start Node-RED again unless the repair itself needs it stopped.
+}
+if command -v sqlite3 >/dev/null 2>&1; then
+  # ONLINE backup via sqlite3 .backup (WAL-consistent while Node-RED writes). The
+  # output is one self-contained file: do not copy the live -wal/-shm next to it.
+  sqlite3 -cmd ".timeout 5000" /data/db/farming.db ".backup '$BK/farming.db'" || raw_copy_stopped
+  # Same check as scripts/pi/backup-pre-deploy.sh: the copy must pass integrity_check.
+  INTEG=$(sqlite3 "$BK/farming.db" "PRAGMA integrity_check" 2>&1) || true
+  [ "$INTEG" = "ok" ] || { echo "FATAL: backup integrity_check failed: $INTEG - do NOT proceed"; exit 1; }
+else
+  raw_copy_stopped
+  echo "WARN: no sqlite3 - integrity unchecked"
 fi
-# Same check as scripts/pi/backup-pre-deploy.sh: the copy must pass integrity_check.
-INTEG=$(sqlite3 "$BK/farming.db" "PRAGMA integrity_check" 2>&1) || true
-[ "$INTEG" = "ok" ] || { echo "FATAL: backup integrity_check failed: $INTEG - do NOT proceed"; exit 1; }
 # flows.json is a SYMLINK into /srv/node-red/payloads/<stamp>; -L copies the
 # active payload's contents, not a dangling link.
 cp -aL /srv/node-red/flows.json "$BK/flows.json"
