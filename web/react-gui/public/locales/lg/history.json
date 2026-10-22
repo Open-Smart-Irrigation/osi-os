@@ -529,7 +529,14 @@
     },
     "sourceFilter": {
       "label": "Ensibuko",
-      "all": "Byonna"
+      "all": "Byonna",
+      "chooseOne": "Londa ensibuko emu okulaba kalenda eno.",
+      "limitsTitle": "Okusaba kuno kwetaaga ebikwata ku bitono.",
+      "recoveryRaw": "Okusaba kuno kulimu ebipimo ebibisi bingi nnyo. Londa ensibuko emu oba kukuta ekiseera.",
+      "recoveryPoint": "Ebivaamu bino binene nnyo. Londa ensibuko emu oba kozesa ebikwata ebigazi.",
+      "shorterRange": "Kozesa ekiseera ekimpi",
+      "coarserAggregation": "Kozesa ebikwata ebigazi",
+      "availableSources": "Londa ensibuko"
     },
     "settings": {
       "open": "Ggulawo enteekateeka za kaadi",

@@ -22,9 +22,11 @@ import {
   desktopSourceOptions,
   selectableDesktopViews,
 } from '../../../history/desktopHistory';
+import { historyRecoveryCapabilities } from '../../../history/sourceSelection';
 import type { HistoryCardDataScope } from '../../../history/useHistoryCardData';
 import type {
   HistoryCardSummary,
+  HistoryAggregationLevel,
   HistoryRangeLabel,
   HistoryRangeSelection,
   HistoryViewMode,
@@ -49,6 +51,13 @@ const PRESET_LABELS: Array<{ key: HistoryRangeLabel; label: string }> = [
   { key: '30d', label: '30D' },
   { key: 'season', label: 'Season' },
 ];
+
+function coarserDesktopAggregation(value: HistoryAggregationLevel): HistoryAggregationLevel {
+  if (value === 'raw') return '15m';
+  if (value === '15m') return 'hourly';
+  if (value === 'hourly') return 'daily';
+  return value;
+}
 
 function defaultSpanMsForRange(range: HistoryRangeLabel): number {
   return PRESET_SPANS_MS[range] ?? 24 * HOUR_MS;
@@ -86,6 +95,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
   const [activePreset, setActivePreset] = useState<HistoryRangeLabel>(defaultRange as HistoryRangeLabel);
   const [selectedView, setSelectedView] = useState<HistoryViewMode>(() => defaultDesktopView(selectedCard));
   const [selectedSourceKey, setSelectedSourceKey] = useState<string | null>(null);
+  const [aggregationOverride, setAggregationOverride] = useState<HistoryAggregationLevel | null>(null);
   const [mode, setMode] = useState<DesktopMode>('focus');
   const viewOptions = useMemo(() => selectableDesktopViews(selectedCard), [selectedCard]);
   const sourceOptions = useMemo(() => desktopSourceOptions(selectedCard), [selectedCard]);
@@ -94,6 +104,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     return allowedViews.includes(selectedView) ? selectedView : defaultDesktopView(selectedCard);
   }, [selectedCard, selectedView, viewOptions]);
   const shouldRenderAdvanced = selectedViewForCard === 'advanced';
+  const requiresExplicitSource = (selectedViewForCard === 'calendar' || selectedViewForCard === 'soil-profile') && sourceOptions.length > 1 && selectedSourceKey === null;
 
   useEffect(() => {
     setSelectedView(defaultDesktopView(selectedCard));
@@ -101,6 +112,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
 
   useEffect(() => {
     setSelectedSourceKey(null);
+    setAggregationOverride(null);
   }, [selectedCard.cardId]);
 
   // Derive request range from viewport (shared between focus and compare modes)
@@ -119,10 +131,10 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     cardId: selectedCard.cardId,
     view: selectedViewForCard,
     range: rangeRequest,
-    aggregation: desktopAggregationForView(selectedViewForCard),
+    aggregation: aggregationOverride ?? desktopAggregationForView(selectedViewForCard),
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced),
+    enabled: Boolean(selectedCard.availability.available && !shouldRenderAdvanced && !requiresExplicitSource),
   });
 
   const advancedData = useHistoryCardAdvancedData({
@@ -130,11 +142,13 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     cardId: selectedCard.cardId,
     view: selectedViewForCard,
     range: rangeRequest,
-    aggregation: desktopAggregationForView(selectedViewForCard),
+    aggregation: aggregationOverride ?? desktopAggregationForView(selectedViewForCard),
     overlays: [],
     sourceKey: selectedSourceKey,
     enabled: Boolean(selectedCard.availability.available && shouldRenderAdvanced),
   });
+  const recovery = historyRecoveryCapabilities(cardData.data?.availability?.reasons);
+  const recoveryActive = Boolean(!requiresExplicitSource && cardData.data?.availability?.available === false && recovery.kind);
 
   // Derive bounds from loaded series timestamps (fall back to preset range)
   const derivedBounds = useMemo(() => {
@@ -183,6 +197,15 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
     setBounds(nextBounds);
     setViewport(resetViewport(nextBounds, spanMs));
     setActivePreset(rangeLabel);
+  }, []);
+
+  const handleShorterRange = useCallback(() => {
+    const toMs = Date.now();
+    const spanMs = 6 * HOUR_MS;
+    const nextBounds: ViewportBounds = { minMs: toMs - spanMs, maxMs: toMs };
+    setBounds(nextBounds);
+    setViewport(resetViewport(nextBounds, spanMs));
+    setActivePreset('24h');
   }, []);
 
   const handleZoomIn = useCallback(() => {
@@ -279,6 +302,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     type="button"
                     aria-pressed={selectedSourceKey === source.key}
                     onClick={() => setSelectedSourceKey(source.key)}
+                    disabled={requiresExplicitSource && source.key === null}
                     className={`px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedSourceKey === source.key
                         ? 'bg-[var(--primary)] text-[var(--on-primary)]'
@@ -329,7 +353,7 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
                     key={view}
                     type="button"
                     aria-pressed={selectedViewForCard === view}
-                    onClick={() => setSelectedView(view)}
+                    onClick={() => { setSelectedView(view); setAggregationOverride(null); }}
                     className={`px-2 py-1 text-xs font-semibold transition-colors ${
                       selectedViewForCard === view
                         ? 'bg-[var(--primary)] text-[var(--on-primary)]'
@@ -399,17 +423,35 @@ export const HistoryDesktopDetail: React.FC<HistoryDesktopDetailProps> = ({
               style={{ userSelect: 'none' }}
             >
               <div className="flex min-h-0 flex-1 flex-col">
-                <HistoryCardVisualization
-                  card={selectedCard}
-                  data={cardData.data}
-                  selectedView={selectedViewForCard}
-                  isLoading={cardData.isLoading}
-                  error={cardData.error}
-                  advancedData={advancedData.data}
-                  advancedIsLoading={advancedData.isLoading}
-                  advancedError={advancedData.error}
-                  window={chartWindow}
-                />
+                {requiresExplicitSource ? (
+                  <div data-testid="history-source-choice-required" className="m-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+                    {(() => { const label = t('history.sourceFilter.chooseOne', { defaultValue: 'Choose one source to view this history' }); return <p className="text-sm font-semibold text-[var(--text)]">{label === 'history.sourceFilter.chooseOne' ? 'Choose one source to view this history' : label}</p>; })()}
+                  </div>
+                ) : recoveryActive ? (
+                  <div data-testid="history-recovery-state" className="m-4 flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-amber-200 bg-amber-50 p-6 text-center">
+                    <div className="max-w-md space-y-3 text-sm text-amber-950">
+                      <p className="font-semibold">{t('history.sourceFilter.limitsTitle', { defaultValue: 'History response limited' })}</p>
+                      <p>{t(recovery.kind === 'raw' ? 'history.sourceFilter.recoveryRaw' : 'history.sourceFilter.recoveryPoint', { defaultValue: recovery.kind === 'raw' ? 'This request covers too many raw readings. Choose one source or shorten the range.' : 'This result is too large. Choose a source or use coarser data.' })}</p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {(cardData.data?.limits.availableSources ?? []).map((source) => <button key={source.sourceKey} type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setSelectedSourceKey(source.sourceKey)}>{source.label || source.sourceKey}</button>)}
+                        {recovery.canShortenRange && <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={handleShorterRange}>{t('history.sourceFilter.shorterRange', { defaultValue: 'Use a shorter range' })}</button>}
+                        {recovery.canCoarsenAggregation && coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) !== (aggregationOverride ?? desktopAggregationForView(selectedViewForCard)) && <button type="button" className="rounded border border-amber-300 bg-white px-2 py-1 font-semibold" onClick={() => setAggregationOverride(coarserDesktopAggregation(aggregationOverride ?? desktopAggregationForView(selectedViewForCard)))}>{t('history.sourceFilter.coarserAggregation', { defaultValue: 'Use coarser aggregation' })}</button>}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <HistoryCardVisualization
+                    card={selectedCard}
+                    data={cardData.data}
+                    selectedView={selectedViewForCard}
+                    isLoading={cardData.isLoading}
+                    error={cardData.error}
+                    advancedData={advancedData.data}
+                    advancedIsLoading={advancedData.isLoading}
+                    advancedError={advancedData.error}
+                    window={chartWindow}
+                  />
+                )}
               </div>
             </div>
 

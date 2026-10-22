@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "contract": "history-source-v2",
+  "files": [
+    "README.md",
+    "identity-vectors.json",
+    "synthetic-cases.json"
+  ]
+}

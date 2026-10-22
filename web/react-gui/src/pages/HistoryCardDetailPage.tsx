@@ -15,6 +15,7 @@ import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDeskt
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
 import { clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
+import { filterHistoryDataSources, historyRecoveryCapabilities, historySourceChoiceLabel } from '../history/sourceSelection';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
@@ -131,6 +132,13 @@ function formatAggregationLabel(t: HistoryTranslate, aggregation: string): strin
   return t(`history.metadata.aggregation.${aggregation}`);
 }
 
+function coarserAggregation(value: HistoryAggregationLevel): HistoryAggregationLevel {
+  if (value === 'raw') return '15m';
+  if (value === '15m') return 'hourly';
+  if (value === 'hourly') return 'daily';
+  return value;
+}
+
 function monthRangeFromViewport(range: HistoryRangeSelection, monthOffset: number): HistoryRangeSelection {
   const baseMs = Date.parse(range.to ?? range.from ?? '');
   const baseDate = Number.isFinite(baseMs) ? new Date(baseMs) : new Date();
@@ -204,10 +212,12 @@ function routeCardIdForCard(card: HistoryCardSummary): string {
 function sourceOptionsForCard(card: HistoryCardSummary | null): Array<{ key: string; name: string }> {
   if (!card || (card.sourceDeviceCount ?? card.sourceDevices?.length ?? 0) <= 1) return [];
   const seen = new Set<string>();
-  return (card.sourceDevices ?? []).reduce<Array<{ key: string; name: string }>>((options, device) => {
+  const devices = card.sourceDevices ?? [];
+  return devices.reduce<Array<{ key: string; name: string }>>((options, device) => {
     const key = typeof device.sourceKey === 'string' ? device.sourceKey.trim() : '';
-    const name = typeof device.name === 'string' ? device.name.trim() : '';
-    if (!key || !name || /\b[A-F0-9]{16}\b/i.test(name) || seen.has(key)) return options;
+    const duplicate = devices.filter((candidate) => candidate.name?.trim() === device.name?.trim()).length > 1;
+    const name = historySourceChoiceLabel(device.name, key, duplicate);
+    if (!key || seen.has(key)) return options;
     seen.add(key);
     options.push({ key, name });
     return options;
@@ -425,6 +435,7 @@ export const HistoryCardDetailPage: React.FC = () => {
   const selectedSourceKey = sourceOptions.length > 1 && enabledSourceKeys.length === 1
     ? enabledSourceKeys[0]
     : null;
+  const requiresCalendarSource = (selectedView === 'calendar' || selectedView === 'soil-profile') && sourceOptions.length > 1 && selectedSourceKey === null;
   const exportDefaultChannels = useMemo(() => {
     if (!displayCard) return [];
     const sourceContext = exportSourceContextForCard(displayCard, selectedSourceKey);
@@ -483,7 +494,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop),
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop && !requiresCalendarSource),
   });
   const advancedData = useHistoryCardAdvancedData({
     scope: resolvedScope,
@@ -495,6 +506,14 @@ export const HistoryCardDetailPage: React.FC = () => {
     sourceKey: selectedSourceKey,
     enabled: Boolean(displayCard?.availability.available && resolvedScope && shouldRenderAdvanced),
   });
+  const visibleCardData = useMemo(
+    () => selectedSourceKey || enabledSourceKeys.length === 0 || enabledSourceKeys.length === allSourceKeys.length
+      ? cardData.data
+      : filterHistoryDataSources(cardData.data, enabledSourceKeys),
+    [allSourceKeys.length, cardData.data, enabledSourceKeys, selectedSourceKey],
+  );
+  const recovery = historyRecoveryCapabilities(visibleCardData?.availability?.reasons);
+  const recoveryActive = Boolean(!requiresCalendarSource && visibleCardData?.availability?.available === false && recovery.kind);
   const [inspectorSelection, setInspectorSelection] = useState<HistoryInspectorSelection | null>(null);
   const calendarDaysByDate = useMemo(() => {
     const days = cardData.data?.calendar?.days;
@@ -504,6 +523,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     () => formatHistoryCalendarMonthLabel(cardData.data?.calendar),
     [cardData.data?.calendar],
   );
+  const sourceChoiceText = t('history.sourceFilter.chooseOne', { defaultValue: 'Choose one source' });
   const viewModeLabel = detailViewModeLabel(t, selectedView, visibleRangeLabel, calendarMonthLabel);
 
   const handleInspectTimestamp = useCallback((selection: { timestamp: string }) => {
@@ -806,19 +826,49 @@ export const HistoryCardDetailPage: React.FC = () => {
               {singleDeviceName}
             </div>
           )}
-          <HistoryCardVisualization
-            card={displayCard}
-            data={cardData.data}
-            selectedView={selectedView}
-            isLoading={cardData.isLoading}
-            error={cardData.error}
-            advancedData={advancedData.data}
-            advancedIsLoading={advancedData.isLoading}
-            advancedError={advancedData.error}
-            window={chartWindow}
-            onInspectDate={handleInspectDate}
-            selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
-          />
+          {requiresCalendarSource ? (
+            <div data-testid="history-source-choice-required" className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-6 text-center">
+              <p className="text-sm font-semibold text-[var(--text)]">{sourceChoiceText === 'history.sourceFilter.chooseOne' ? 'Choose one source' : sourceChoiceText}</p>
+            </div>
+          ) : recoveryActive ? (
+            <div data-testid="history-recovery-state" className="flex min-h-[240px] items-center justify-center rounded-lg border border-dashed border-[var(--warning-bg)] bg-[var(--warning-bg)] p-6 text-center">
+              <div className="max-w-md space-y-3 text-sm text-[var(--warning-text)]">
+                <p className="font-semibold">{t('history.sourceFilter.limitsTitle')}</p>
+                <p>{t(recovery.kind === 'raw' ? 'history.sourceFilter.recoveryRaw' : 'history.sourceFilter.recoveryPoint', { defaultValue: recovery.kind === 'raw' ? 'This request covers too many raw readings. Choose one source or shorten the range.' : 'This result is too large. Choose a source or use coarser data.' })}</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {recovery.canChooseSource && (visibleCardData?.limits.availableSources ?? []).map((source) => (
+                    <button key={source.sourceKey} type="button" className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-semibold" onClick={() => handleSourceKeysChange([source.sourceKey])}>
+                      {source.label || source.sourceKey}
+                    </button>
+                  ))}
+                  {recovery.canShortenRange && (
+                    <button type="button" className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-semibold" onClick={() => timeViewport.setViewport(setTimeViewportRange('12h', new Date(), timeViewport.viewport.range.timezone))}>
+                      {t('history.sourceFilter.shorterRange')}
+                    </button>
+                  )}
+                  {recovery.canCoarsenAggregation && coarserAggregation(timeViewport.viewport.aggregation) !== timeViewport.viewport.aggregation && (
+                    <button type="button" className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-semibold" onClick={() => timeViewport.setViewport({ ...timeViewport.viewport, aggregation: coarserAggregation(timeViewport.viewport.aggregation) })}>
+                      {t('history.sourceFilter.coarserAggregation')}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <HistoryCardVisualization
+              card={displayCard}
+              data={visibleCardData}
+              selectedView={selectedView}
+              isLoading={cardData.isLoading}
+              error={cardData.error}
+              advancedData={advancedData.data}
+              advancedIsLoading={advancedData.isLoading}
+              advancedError={advancedData.error}
+              window={chartWindow}
+              onInspectDate={handleInspectDate}
+              selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
+            />
+          )}
         </HistoryVisualizationSurface>
       </main>
       <HistoryInspectorSheet

@@ -203,9 +203,23 @@ export interface HistoryAggregationMetadata {
 
 export interface HistoryResponseLimits {
   maxPointsPerSeries: number;
+  maxPointsTotal?: number | null;
   maxEvents: number;
   maxInterpretations: number;
   truncated: boolean;
+  reason?: string | null;
+  availableSources?: HistorySourceChoice[];
+}
+
+export interface HistoryCardDataAvailability {
+  available: boolean;
+  reasons: string[];
+}
+
+export interface HistorySourceChoice {
+  sourceKey: string;
+  label: string;
+  deviceSourceId?: string | null;
 }
 
 export interface HistorySeriesPoint {
@@ -225,18 +239,29 @@ export interface HistorySeriesPoint {
   count?: number;
   unit?: string | null;
   quality?: 'ok' | 'partial' | 'gap' | 'estimated' | 'unknown';
+  statisticAvailability?: Record<string, string>;
+  coverageAvailability?: string | null;
 }
 
 export interface HistorySeries {
   id: string;
+  deviceSourceId?: string | null;
+  sourceKey?: string | null;
+  channelKey?: string;
+  sourceLabel?: string | null;
   label: string;
   unit: string | null;
   depthCm?: number | null;
+  metadataBasis?: 'current_configuration' | string;
   points: HistorySeriesPoint[];
 }
 
 export interface HistoryProfilePoint {
   id: string;
+  deviceSourceId?: string | null;
+  sourceKey?: string | null;
+  channelKey?: string | null;
+  sourceLabel?: string | null;
   label: string;
   depthCm?: number | null;
   value: number | null;
@@ -330,6 +355,8 @@ export interface HistoryAdvancedPlaceholder {
 }
 
 export interface HistoryCardDataResponse<TCardType extends HistoryCardType = HistoryCardType> {
+  availability?: HistoryCardDataAvailability;
+  seriesIdentityVersion?: number;
   cardId: string;
   cardType: TCardType;
   view: HistoryViewModeByCardType[TCardType];

@@ -605,6 +605,21 @@ test('calendarRowsFromSeries groups by time', function() {
   assert.ok(Object.keys(rows).length >= 2);
 });
 
+test('calendarRowsFromSeries keeps equal-time sources separate and omits gaps', function() {
+  var rows = HR.calendarRowsFromSeries([
+    { id: 'soil-src-a:swt_1', deviceSourceId: 'soil-src-a', channelKey: 'swt_1', points: [
+      { t: '2026-07-01T00:00:00Z', value: 15 },
+      { t: '2026-07-02T00:00:00Z', value: null, quality: 'gap' }
+    ] },
+    { id: 'soil-src-b:swt_1', deviceSourceId: 'soil-src-b', channelKey: 'swt_1', points: [
+      { t: '2026-07-01T00:00:00Z', value: 25 }
+    ] }
+  ]);
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map(function(row) { return row.swt_1; }).sort(), [15, 25]);
+  assert.ok(rows.every(function(row) { return !Object.keys(row).some(function(key) { return key.indexOf(':swt_1') >= 0; }); }));
+});
+
 test('calendarRowsFromSeries empty', function() {
   assert.deepStrictEqual(HR.calendarRowsFromSeries([]), []);
   assert.deepStrictEqual(HR.calendarRowsFromSeries(null), []);

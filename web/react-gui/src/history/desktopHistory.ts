@@ -1,6 +1,7 @@
 import { historyCardDefinitionsByType } from './cardDefinitions';
 import type { ViewportBounds } from './historyViewport';
 import type { HistoryAggregationLevel, HistoryCardSummary, HistoryViewMode } from './types';
+import { historySourceChoiceLabel } from './sourceSelection';
 
 export interface DesktopSourceOption {
   key: string | null;
@@ -27,6 +28,10 @@ export function safeHistoryLabel(value: string | null | undefined): string | nul
   const text = cleanText(value);
   if (!text || isRawHistoryIdentifier(text)) return null;
   return text;
+}
+
+export function historySourceLabel(name: string | null | undefined, sourceKey: string): string {
+  return historySourceChoiceLabel(name, sourceKey);
 }
 
 function sourceCount(card: HistoryCardSummary): number {
@@ -71,9 +76,11 @@ export function desktopSourceOptions(card: HistoryCardSummary): DesktopSourceOpt
     || (card.sourceLabels?.length ?? 0) > 1;
   if (!hasMultipleSources) return [];
 
-  const sources = (card.sourceDevices ?? []).reduce<DesktopSourceOption[]>((options, device) => {
+  const devices = card.sourceDevices ?? [];
+  const sources = devices.reduce<DesktopSourceOption[]>((options, device) => {
     const key = cleanText(device.sourceKey);
-    const label = safeHistoryLabel(device.name);
+    const duplicate = devices.filter((candidate) => cleanText(candidate.name) === cleanText(device.name)).length > 1;
+    const label = key ? historySourceChoiceLabel(device.name, key, duplicate) : null;
     if (!key || !label || options.some((option) => option.key === key)) {
       return options;
     }

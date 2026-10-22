@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 2,
+  "fiveObservationCase": {
+    "date": "2026-10-03",
+    "channelKey": "swt_1",
+    "unit": "kPa",
+    "request": {
+      "from": "2026-10-03T02:45:00.000Z",
+      "to": "2026-10-03T03:30:00.000Z",
+      "aggregation": "15m",
+      "timezone": "UTC"
+    },
+    "devices": [
+      {
+        "deveui": "A8404100000000A1",
+        "name": "Synthetic A",
+        "depthCm": 20,
+        "observations": [
+          {"recordedAt": "2026-10-03T02:57:47.000Z", "value": 2.296696},
+          {"recordedAt": "2026-10-03T03:27:47.000Z", "value": 2.322412}
+        ],
+        "expected15m": [2.296696, null, 2.322412]
+      },
+      {
+        "deveui": "A8404100000000B1",
+        "name": "Synthetic B",
+        "depthCm": 20,
+        "observations": [
+          {"recordedAt": "2026-10-03T02:55:04.000Z", "value": 9.507932},
+          {"recordedAt": "2026-10-03T03:10:04.000Z", "value": 9.507932},
+          {"recordedAt": "2026-10-03T03:25:04.000Z", "value": 9.507932}
+        ],
+        "expected15m": [9.507932, 9.507932, 9.507932]
+      }
+    ],
+    "expectedSeries": [
+      {"deviceSourceId": "device-537a49c74508", "sourceKey": {"edge": "soil-src-537a49c74508", "cloud": "soil-src-537a49c74508"}, "channelKey": "swt_1", "values": [2.296696, null, 2.322412]},
+      {"deviceSourceId": "device-2b53ef351e8a", "sourceKey": {"edge": "soil-src-2b53ef351e8a", "cloud": "soil-src-2b53ef351e8a"}, "channelKey": "swt_1", "values": [9.507932, 9.507932, 9.507932]}
+    ],
+    "edgeAggregateToleranceKpa": 0.0005,
+    "rawValuesExact": true,
+    "expectedResponses": {
+      "edge": {
+        "seriesIdentityVersion": 2,
+        "aggregation": {"level": "15m", "bucketSizeSeconds": 900, "bucketTimezone": "UTC", "bucketAlignment": "request_anchored", "coveredFrom": "2026-10-03T02:45:00.000Z", "coveredTo": "2026-10-03T03:30:00.000Z"},
+        "series": [
+          {"id": "device-537a49c74508:swt_1", "deviceSourceId": "device-537a49c74508", "sourceKey": "soil-src-537a49c74508", "channelKey": "swt_1", "sourceLabel": "Synthetic A", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 2.296696},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": null},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 2.322412}
+          ]},
+          {"id": "device-2b53ef351e8a:swt_1", "deviceSourceId": "device-2b53ef351e8a", "sourceKey": "soil-src-2b53ef351e8a", "channelKey": "swt_1", "sourceLabel": "Synthetic B", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 9.507932}
+          ]}
+        ]
+      },
+      "cloud": {
+        "seriesIdentityVersion": 2,
+        "aggregation": {"level": "15m", "bucketSizeSeconds": 900, "bucketTimezone": "UTC", "bucketAlignment": "epoch_utc", "coveredFrom": "2026-10-03T02:45:00.000Z", "coveredTo": "2026-10-03T03:30:00.000Z"},
+        "series": [
+          {"id": "device-537a49c74508:swt_1", "deviceSourceId": "device-537a49c74508", "sourceKey": "soil-src-537a49c74508", "channelKey": "swt_1", "sourceLabel": "Synthetic A", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 2.296696},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": null},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 2.322412}
+          ]},
+          {"id": "device-2b53ef351e8a:swt_1", "deviceSourceId": "device-2b53ef351e8a", "sourceKey": "soil-src-2b53ef351e8a", "channelKey": "swt_1", "sourceLabel": "Synthetic B", "label": "Soil tension 1", "unit": "kPa", "depthCm": 20, "metadataBasis": "current_configuration", "points": [
+            {"t": "2026-10-03T02:45:00.000Z", "bucketStart": "2026-10-03T02:45:00.000Z", "bucketEnd": "2026-10-03T03:00:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:00:00.000Z", "bucketStart": "2026-10-03T03:00:00.000Z", "bucketEnd": "2026-10-03T03:15:00.000Z", "value": 9.507932},
+            {"t": "2026-10-03T03:15:00.000Z", "bucketStart": "2026-10-03T03:15:00.000Z", "bucketEnd": "2026-10-03T03:30:00.000Z", "value": 9.507932}
+          ]}
+        ]
+      }
+    }
+  },
+  "acceptanceCases": [
+    {"id": "same-time-cross-device", "expectation": "same timestamps remain in separate physical source series"},
+    {"id": "edge-newer-invalid-duplicate", "expectation": "highest device_data.id wins before validity filtering; raw evidence retains both rows"},
+    {"id": "zero-and-high", "expectation": "0 and finite high values remain valid measurements"},
+    {"id": "all-empty-source", "expectation": "each selected source has null buckets and no invented values"},
+    {"id": "source-channel-eligibility", "expectation": "unsupported channels and ineligible source/device combinations are excluded"},
+    {"id": "equal-name-and-depth", "expectation": "same labels and depth do not merge source identities"},
+    {"id": "unauthorized-scope", "expectation": "a device outside the authorized account/gateway/zone never appears"},
+    {"id": "resolution-matrix", "levels": ["raw", "15m", "hourly", "daily", "weekly"], "expectation": "every level preserves source identity"},
+    {"id": "missing-15m-in-hour", "expectation": "one missing 15m report is a null 15m bucket, not an empty hour"},
+    {"id": "retained-only-daily", "expectation": "a per-device daily rollup can render without a retained raw row"},
+    {"id": "season-request", "expectation": "season requests preserve source identity through weekly reduction"},
+    {"id": "moved-source", "expectation": "current authorized metadata labels history without rewriting physical identity"},
+    {"id": "unaligned-boundary", "expectation": "partial request boundaries retain the host's actual covered intervals"},
+    {"id": "local-dst-day", "expectation": "edge daily buckets follow the farm timezone across a 23/25-hour day"},
+    {"id": "slow-reporter", "expectation": "sparse reports keep null gaps; smooth visual bridging is deferred"}
+  ]
+}

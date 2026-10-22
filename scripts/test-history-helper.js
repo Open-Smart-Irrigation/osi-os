@@ -1893,9 +1893,11 @@ test('legacySensorHistory returns raw 24h points and aggregated long-range point
       hours: 720,
       nowMs: Date.parse('2026-06-02T12:00:00.000Z'),
     });
-    assert.deepStrictEqual(aggregate.map((point) => point.value), [33, 42]);
+    // Legacy device history follows the requested physical source. A pooled
+    // rollup row is not relabelled as this device's measurement; only the
+    // source-keyed/live evidence remains available here.
+    assert.deepStrictEqual(aggregate.map((point) => point.value), [42]);
     assert.deepStrictEqual(aggregate.map((point) => point.t), [
-      '2026-06-01T00:00:00.000Z',
       '2026-06-02T00:00:00.000Z',
     ]);
 

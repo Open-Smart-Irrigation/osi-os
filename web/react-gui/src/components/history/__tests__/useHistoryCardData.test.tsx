@@ -207,7 +207,7 @@ describe('useHistoryCardData', () => {
     expect(historyAPI.getGatewayCardData).not.toHaveBeenCalled();
   });
 
-  it('keeps previous data visible while a changed range refetches', async () => {
+  it('hides previous data while a changed range refetches', async () => {
     const nextRange: HistoryRangeSelection = {
       label: 'custom',
       from: '2026-05-30T00:00:00.000Z',
@@ -241,7 +241,7 @@ describe('useHistoryCardData', () => {
     rerender({ selectedRange: nextRange });
 
     await waitFor(() => expect(historyAPI.getZoneCardData).toHaveBeenCalledTimes(2));
-    expect(result.current.data?.aggregation.pointCount).toBe(42);
+    expect(result.current.data).toBeUndefined();
 
     pendingSecondFetch.resolve(makeResponse(nextRange, 7));
     await waitFor(() => expect(result.current.data?.aggregation.pointCount).toBe(7));

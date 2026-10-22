@@ -3,6 +3,11 @@
 const crypto = require('crypto');
 const historyHelper = require('../osi-history-helper');
 
+function sourceCardType(value) {
+  const cardType = String(value || '').trim().toLowerCase();
+  return cardType === 'env' ? 'environment' : cardType;
+}
+
 const LIMITS = {
   maxPointsPerSeries: 2000,
   maxEvents: 200,
@@ -92,6 +97,13 @@ const CARD_CONFIG = {
 function safeFilenamePart(value, fallback) {
   const text = String(value || '').trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return text || fallback;
+}
+
+function displaySafeSourceKey(cardType, device) {
+  const normalized = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+  if (!normalized) return null;
+  const prefix = sourceCardType(cardType) || 'source';
+  return prefix + '-src-' + crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12);
 }
 
 function httpError(statusCode, message, detail) {
@@ -331,10 +343,101 @@ function seriesWithDepth(series, depths, channelId) {
   return depthCm === null || depthCm === undefined ? series : Object.assign({}, series, { depthCm: depthCm });
 }
 
+function sourceSeriesLabel(cardType, channel) {
+  if (cardType === 'soil' && /^swt_\d+$/.test(String(channel && channel.id || ''))) {
+    return 'Soil tension ' + String(channel.id).slice(4);
+  }
+  return channel && channel.label ? channel.label : String(channel && channel.id || '');
+}
+
+function sourceSeriesFromAggregate(card, aggregate, sourceDevices, channels, opts) {
+  const statusForCardValue = opts && opts.statusForCardValue || function() { return null; };
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  const sourceAggregates = Array.isArray(aggregate && aggregate.sourceAggregates)
+    ? aggregate.sourceAggregates
+    : [];
+  const sourceByEui = new Map(devices.map((device) => [
+    normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)),
+    device,
+  ]).filter(([eui]) => eui));
+  const result = [];
+  const ids = new Set();
+
+  for (const sourceAggregate of sourceAggregates) {
+    const channel = channels.find((candidate) => candidate.id === sourceAggregate.channelKey);
+    if (!channel) continue;
+    const eui = normalizeDeveui(sourceAggregate.sourceKey);
+    const device = sourceByEui.get(eui);
+    if (!device) continue;
+    const deviceSourceId = historyHelper.deviceSourceId(device);
+    const id = deviceSourceId + ':' + channel.id;
+    if (ids.has(id)) throw new Error('ambiguous history series identity: ' + id);
+    ids.add(id);
+    const points = [];
+    if (sourceAggregate.aggregation === 'raw') {
+      const channelData = sourceAggregate.series && sourceAggregate.series[channel.id];
+      for (const point of channelData && Array.isArray(channelData.points) ? channelData.points : []) {
+        points.push({
+          t: point.recordedAt,
+          value: point.value,
+          unit: channel.unit || null,
+          dominantStatus: statusForCardValue(card.cardType, channel.id, point.value),
+          dominantStatusMethod: CARD_CONFIG[card.cardType].dominantStatusMethod,
+          quality: 'ok',
+        });
+      }
+    } else {
+      for (const bucket of Array.isArray(sourceAggregate.buckets) ? sourceAggregate.buckets : []) {
+        const stats = bucket.series && bucket.series[channel.id];
+        if (!stats) continue;
+        const value = stats.latest !== null && stats.latest !== undefined
+          ? stats.latest
+          : (stats.mean !== null && stats.mean !== undefined ? stats.mean : null);
+        const hasData = Number(stats.sampleCount || 0) > 0 || value !== null;
+        points.push({
+          t: bucket.bucketStart,
+          bucketStart: bucket.bucketStart,
+          bucketEnd: bucket.bucketEnd,
+          value,
+          min: stats.min,
+          max: stats.max,
+          mean: stats.mean,
+          median: stats.median,
+          latest: stats.latest,
+          dominantStatus: stats.dominantStatus || statusForCardValue(card.cardType, channel.id, value),
+          dominantStatusMethod: CARD_CONFIG[card.cardType].dominantStatusMethod,
+          coveragePct: bucket.coveragePct,
+          coverageConfidence: bucket.coverageConfidence || 'unknown',
+          count: Number(stats.sampleCount || 0),
+          unit: stats.unit || channel.unit || null,
+          quality: hasData ? pointQuality(bucket.coveragePct) : 'gap',
+        });
+      }
+    }
+    const depthCm = card.cardType === 'soil' ? historyHelper.soilDepthCm(device, channel.id) : null;
+    result.push({
+      id,
+      deviceSourceId,
+      sourceKey: displaySafeSourceKey(card.cardType, device),
+      channelKey: channel.id,
+      sourceLabel: displayDeviceName(device, devices.indexOf(device)),
+      label: sourceSeriesLabel(card.cardType, channel),
+      unit: channel.unit || null,
+      depthCm,
+      metadataBasis: 'current_configuration',
+      points,
+    });
+  }
+  return result;
+}
+
 function buildSeriesFromAggregate(card, aggregate, sourceDevices, opts) {
   var _statusForCardValue = opts && opts.statusForCardValue || function() { return null; };
   const configuredChannels = CARD_CONFIG[card.cardType].channels;
   const channels = card.cardType === 'soil' ? filterSoilChannelsForSources(configuredChannels, sourceDevices) : configuredChannels;
+  if (Array.isArray(aggregate && aggregate.sourceAggregates)) {
+    return sourceSeriesFromAggregate(card, aggregate, sourceDevices, channels, opts);
+  }
   const soilDepths = card.cardType === 'soil' ? soilDepthsForAggregate(aggregate, sourceDevices) : null;
   if (!channels.length) return [];
   const result = [];
@@ -389,6 +492,44 @@ function buildSeriesFromAggregate(card, aggregate, sourceDevices, opts) {
     }
     if (!points.length) continue;
     result.push(seriesWithDepth({ id: channel.id, label: channel.label, unit: channel.unit || null, points: points }, soilDepths, channel.id));
+  }
+  return result;
+}
+
+function buildSoilProfiles(latestRows, sourceDevices, series) {
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  const rows = Array.isArray(latestRows) ? latestRows : [];
+  const result = [];
+  for (const device of devices) {
+    const eui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    if (!eui) continue;
+    const sourceId = historyHelper.deviceSourceId(device);
+    const channels = filterSoilChannelsForSources(CARD_CONFIG.soil.channels, [device]);
+    const row = rows
+      .filter((candidate) => normalizeDeveui(candidate && (candidate.deveui || candidate.device_eui || candidate.deviceEui)) === eui)
+      .sort((left, right) => Date.parse(right && right.recorded_at || 0) - Date.parse(left && left.recorded_at || 0))[0] || null;
+    for (let index = 0; index < channels.length; index += 1) {
+      const channel = channels[index];
+      const value = numberOrNull(row && row[channel.id]);
+      const seriesId = sourceId + ':' + channel.id;
+      const fallback = latestSeriesPoint(series, seriesId);
+      const fallbackValue = numberOrNull(fallback && (fallback.value !== undefined ? fallback.value : (fallback.latest !== undefined ? fallback.latest : fallback.mean)));
+      const resolved = value === null ? fallbackValue : value;
+      if (resolved === null) continue;
+      result.push({
+        id: channel.id,
+        deviceSourceId: sourceId,
+        sourceKey: displaySafeSourceKey('soil', device),
+        channelKey: channel.id,
+        label: 'Soil ' + String(index + 1),
+        sourceLabel: displayDeviceName(device, devices.indexOf(device)),
+        depthCm: historyHelper.soilDepthCm(device, channel.id),
+        value: resolved,
+        unit: channel.unit || 'kPa',
+        metadataBasis: 'current_configuration',
+        status: historyHelper.classifySoilStatus({ swtKpa: resolved }).status,
+      });
+    }
   }
   return result;
 }
@@ -496,7 +637,11 @@ function shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested)
 // a merged bucket cannot be separated again, so a soil card with such a source
 // reads raw device_data. Every other card, and every soil card without such a
 // source, follows the range/aggregation rule above.
-function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested) {
+function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested, options = {}) {
+  // An explicit merged-card source selection has source-keyed rollups, so it
+  // is safe to use them even when another selected source is a plain LSN50.
+  // The pooled compatibility path keeps the historical plain-LSN guard.
+  if (options && options.sourceAware) return shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested);
   if (card && card.cardType === 'soil' && (sourceDevices || []).some(function(device) {
     return !isLsn50Swt3Eligible(device);
   })) return false;
@@ -530,15 +675,23 @@ function pointValueForCalendar(point) {
 function calendarRowsFromSeries(series) {
   const rowsByTime = {};
   for (const entry of series || []) {
-    const channelId = String(entry && entry.id || '').trim();
+    const channelId = String(entry && (entry.channelKey || entry.id) || '').trim();
+    const sourceId = String(entry && (entry.deviceSourceId || entry.sourceKey || '') || '').trim();
+    const sourceAware = Boolean(entry && (entry.channelKey || entry.deviceSourceId || entry.sourceKey));
     if (!channelId || !Array.isArray(entry.points)) continue;
     for (const point of entry.points) {
       const t = point && (point.t || point.bucketStart || point.bucket_start);
       if (!t) continue;
-      if (!rowsByTime[t]) rowsByTime[t] = { recorded_at: t };
-      rowsByTime[t][channelId] = pointValueForCalendar(point);
-      if (point.coveragePct !== undefined) rowsByTime[t].coveragePct = point.coveragePct;
-      if (point.coverage_pct !== undefined) rowsByTime[t].coverage_pct = point.coverage_pct;
+      const value = pointValueForCalendar(point);
+      // Null gap points describe missing coverage and must not become a
+      // measurement row or inflate calendar sample counts.
+      if (value === null || value === undefined) continue;
+      const rowKey = sourceAware ? `${t}|${sourceId || 'source'}` : t;
+      if (!rowsByTime[rowKey]) rowsByTime[rowKey] = { recorded_at: t };
+      const row = rowsByTime[rowKey];
+      row[channelId] = value;
+      if (point.coveragePct !== undefined) row.coveragePct = point.coveragePct;
+      if (point.coverage_pct !== undefined) row.coverage_pct = point.coverage_pct;
     }
   }
   return Object.keys(rowsByTime).sort().map(function(key) { return rowsByTime[key]; });
@@ -823,6 +976,7 @@ module.exports = {
   soilChannelDepths,
   seriesWithDepth,
   buildSeriesFromAggregate,
+  buildSoilProfiles,
   truncateSeries,
   latestPointTimestamp,
   latestValueBySeries,

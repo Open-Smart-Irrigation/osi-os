@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "algorithm": "uppercase canonical DevEUI, SHA-256, first 12 lowercase hex characters, prefixed device-",
+  "vectors": [
+    {
+      "deveui": "a8:40:41:00:00:00:00:a1",
+      "canonicalDeveui": "A8404100000000A1",
+      "deviceSourceId": "device-537a49c74508",
+      "sourceKeys": {
+        "soil": {
+          "edge": "soil-src-537a49c74508",
+          "cloud": "soil-src-537a49c74508"
+        },
+        "environment": {
+          "edge": "environment-src-537a49c74508",
+          "cloud": "env-src-537a49c74508"
+        }
+      },
+      "seriesIds": [
+        "device-537a49c74508:swt_1",
+        "device-537a49c74508:ambient_temperature"
+      ]
+    },
+    {
+      "deveui": "A8404100000000B1",
+      "canonicalDeveui": "A8404100000000B1",
+      "deviceSourceId": "device-2b53ef351e8a",
+      "sourceKeys": {
+        "soil": {
+          "edge": "soil-src-2b53ef351e8a",
+          "cloud": "soil-src-2b53ef351e8a"
+        },
+        "environment": {
+          "edge": "environment-src-2b53ef351e8a",
+          "cloud": "env-src-2b53ef351e8a"
+        }
+      },
+      "seriesIds": [
+        "device-2b53ef351e8a:swt_1",
+        "device-2b53ef351e8a:ambient_temperature"
+      ]
+    },
+    {
+      "deveui": "00-16-C0-01-F1-17-00-01",
+      "canonicalDeveui": "0016C001F1170001",
+      "deviceSourceId": "device-441e30789ef0",
+      "sourceKeys": {
+        "soil": {
+          "edge": "soil-src-441e30789ef0",
+          "cloud": "soil-src-441e30789ef0"
+        },
+        "environment": {
+          "edge": "environment-src-441e30789ef0",
+          "cloud": "env-src-441e30789ef0"
+        }
+      },
+      "seriesIds": ["device-441e30789ef0:swt_1"]
+    }
+  ],
+  "collisionPolicy": "If two authorized sources resolve to one series ID, refuse the response as ambiguous."
+}
