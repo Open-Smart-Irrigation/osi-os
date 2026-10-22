@@ -45,7 +45,7 @@ Do NOT use this skill for (route instead):
 | `SENSECAP_S2120` | Sensors | Yes — `sensecap_s2120_decoder.js` | `ambient_temperature`, `relative_humidity`, `light_lux`, `barometric_pressure_hpa`, wind speed/direction/gust, `uv_index`, `rain_mm_per_hour` (4113 intensity), `rain_gauge_cumulative_mm` (4213 counter) → `rain_mm_delta`/`rain_mm_today`, `bat_pct` | °C, %RH, hPa, m/s, deg, mm/h, mm |
 | `AQUASCOPE_LORAIN` | Sensors | Yes — `aquascope_lorain_decoder.js` | `rain_mm_delta` (from raw 0.5 mm steps), `ambient_temperature`, `bat_v` | mm, °C, V |
 | `STREGA_VALVE` | Actuators | Yes — `strega_gen1_decoder.js` | `devices.current_state` (not a `device_data` column), `bat_pct`/`bat_v`, plus Gen1-only `ambient_temperature`/`relative_humidity` (enclosure climate, see below) | °C, %RH |
-| `MILESIGHT_UC512` | Sensors | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
+| `MILESIGHT_UC512` | Actuators | Yes — `milesight_uc512_decoder.js` | `valve_1_state`/`valve_2_state` (text), `valve_1_pulse`/`valve_2_pulse` (integer), `pipe_pressure_kpa` (real) | —, counts, kPa |
 
 File locations for all OSI-authored decoders:
 `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/` (list with `ls` there; as of 2026-09-14: aquascope_lorain, dragino_lsn50, milesight_uc512, sensecap_s2120, strega_gen1, strega_gen2).
@@ -436,8 +436,10 @@ UUID (those are generated per-installation at bootstrap). It's done via
 exact env semantics belong to **osi-config-and-flags**, not here. All MQTT
 uplink subscriptions use the wildcard topic `application/+/device/+/event/up`
 (`scripts/check-mqtt-topics.sh` enforces this). ChirpStack apps are split
-`Sensors` (all sensor device types) vs `Actuators` (`STREGA_VALVE`) — device
-catalog (edge reference) above.
+`Sensors` (all sensor device types), `Actuators` (`STREGA_VALVE`,
+`MILESIGHT_UC512`) and `Field Tester` (`RAK10701_FIELD_TESTER`), per
+`post-devices-insert` / `cs-reg-cloud-fn` in flows.json — device catalog
+(edge reference) above.
 
 ## STREGA valve semantics
 

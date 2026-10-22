@@ -29,7 +29,8 @@ an optional companion that adds convenience and heavier analytics on top.
 - **Field devices**: third-party LoRaWAN hardware (sensors and valves). They
   wake up, transmit a few bytes, and sleep; batteries last years. Catalog and
   payload details: chapter [03](03-edge-backend-flows.md) and
-  [AGENTS.md § Device catalog](../../../AGENTS.md).
+  [AGENTS.md § Device catalog](../../../AGENTS.md) and `osi-agronomy-sensors-reference`
+  "Device catalog (edge reference)".
 - **The gateway**: one Raspberry Pi 5 per farm running the custom **OSI OS**
   firmware built from this repo. It hears the radio traffic, stores readings,
   runs schedules, opens valves, and serves the farmer a dashboard on the local

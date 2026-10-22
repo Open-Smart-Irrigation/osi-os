@@ -1,7 +1,7 @@
 # WATERMARK cloud parity (edge side)
 
-Edge-side detail for the WATERMARK calibration resource and the three protected
-device commands that ship with it. It moved out of `AGENTS.md` on 2026-10-22;
+Edge-side detail for the WATERMARK calibration resource and the four protected
+exact-base commands that ship with it. It moved out of `AGENTS.md` on 2026-10-22;
 `AGENTS.md` keeps the binding rule lines (pending until acknowledgement and
 mirror convergence, cloud-before-edge deploy order, the scheduler interlock)
 and this page carries the same authority. Contract:

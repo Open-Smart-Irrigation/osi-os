@@ -125,7 +125,7 @@ rehearsal.
 
 ### SWT history repairs
 
-Chameleon SWT analysis reads canonical kPa values from `device_data.swt_1`, `swt_2`, and `swt_3`. `chameleon_readings` is the raw/diagnostic mirror. If historical SWT values are repaired from `chameleon_readings` plus `chameleon_calibrations`, update `device_data` too. Historical repairs that UPDATE `device_data` rows are carried by the `trg_sync_device_data_dirty_au` trigger → `sync_history_dirty_keys` → history correction phase. Do not enqueue explicit `DEVICE_DATA_APPENDED` events for them: every such event has `sync_version` 0, and the cloud rejects a changed payload at an equal version as `equal_version_payload_conflict`. Update by row `id`: `device_data` has no UNIQUE(deveui, recorded_at).
+Chameleon SWT analysis reads canonical kPa values from `device_data.swt_1`, `swt_2`, and `swt_3`. `chameleon_readings` is the raw/diagnostic mirror. If historical SWT values are repaired from `chameleon_readings` plus `chameleon_calibrations`, update `device_data` too. Historical repairs that UPDATE `device_data` rows are carried by the `trg_sync_device_data_dirty_au` trigger → `sync_history_dirty_keys` → history correction phase. Do not enqueue explicit `DEVICE_DATA_APPENDED` events for them: every such event has `sync_version` 0, and the cloud rejects a changed payload at an equal version as `equal_version_payload_conflict`. Update by row `id`: `device_data` has no UNIQUE(deveui, recorded_at). Historical clipped WATERMARK nulls use the explicit backed-up correction tool ([unified soil tension](docs/operations/unified-soil-tension.md)), never replacement append events.
 
 ---
 
@@ -143,7 +143,9 @@ Chameleon SWT analysis reads canonical kPa values from `device_data.swt_1`, `swt
   convergence. The cloud never updates the confirmed edge-owned value when it
   queues a command. Deploy the cloud contract, appliers, pending-command
   support, and read-only UI before an edge that advertises the three
-  WATERMARK-related capabilities. Effect keys and base rules:
+  WATERMARK-related capabilities. Effect keys, base rules, post-deploy
+  capability gating, the edge-only diagnostics boundary and the Data-view
+  soil-source rule (`isSoilSource`):
   [docs/sync/watermark-cloud-parity.md](docs/sync/watermark-cloud-parity.md).
 - **WATERMARK scheduler interlock:** the scheduler still rejects every
   `device_data` row linked to `watermark_readings`, regardless of legacy device
@@ -152,10 +154,15 @@ Chameleon SWT analysis reads canonical kPa values from `device_data.swt_1`, `swt
   only for a gateway that reported `zone_config_weather_source_v1` (and
   `stageStartedOn` only with `zone_config_stage_started_on_v1`); the edge sends
   `weather_source` only when the stored value is not `auto` or (update event
-  only) changed in that update, never as an unconditional default.
+  only) changed in that update, never as an unconditional default. Detail:
+  [docs/api/sync-endpoints.md](docs/api/sync-endpoints.md) ("Sync
+  capabilities the edge reports") and "Zone weather_source" in
+  `docs/contracts/sync-schema/README.md`.
 - **Live gateway identity:** `osi-identityd` owns it after boot. During a live
   identity transition, link and sync builders read only the restart sentinel
-  and fail closed. Do not route identity transitions through the GUI
+  and fail closed; they never substitute the cache's candidate EUI. Bootstrap,
+  link and unlink publish restart requests instead of restarting Node-RED
+  directly. Do not route identity transitions through the GUI
   `/api/system/reboot` route, and do not edit `sync-init-fn` or any
   `runGatewayMigrationPreflight` body as part of this path. Detail:
   [docs/sync/gateway-identity-convergence.md](docs/sync/gateway-identity-convergence.md).
@@ -324,9 +331,9 @@ Long form: `osi-verification-commands`, "Base ref for a stacked branch".
 
 ## Device catalog
 
-Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (ChirpStack app `Sensors`); `STREGA_VALVE`, `MILESIGHT_UC512` (`Actuators`); `RAK10701_FIELD_TESTER` (`Field Tester`). Profiles, sensors, SWT canonicalization, LoRain onboarding, STREGA timed irrigation and valve control: `osi-agronomy-sensors-reference`, "Device catalog (edge reference)". Rules that bind every change:
+Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (ChirpStack app `Sensors`); `STREGA_VALVE`, `MILESIGHT_UC512` (`Actuators`); `RAK10701_FIELD_TESTER` (`Field Tester`). Profiles, sensors, SWT canonicalization, unified SWT estimates, LoRain onboarding and interval-rain aggregation, STREGA timed irrigation and valve control (schedules pushed only on user change or explicit re-send, never on a timer): `osi-agronomy-sensors-reference`, "Device catalog (edge reference)". Rules that bind every change:
 
-- `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes; derive pF at display through the shared conversion in [matric-potential/v1.md](docs/contracts/matric-potential/v1.md), and aggregate kPa before deriving pF.
+- `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes; derive pF only for display or export through the shared conversion in [matric-potential/v1.md](docs/contracts/matric-potential/v1.md); aggregate kPa before deriving pF; preserve calculated doubles and round display strings only.
 - STREGA user-facing opens are `OPEN_FOR_DURATION`; normal close is the valve's own timed close, not a bare `CLOSE` command. Operator cancellation uses `POST /api/v1/valves/:deveui/cancel`.
 - The LoRain AppKey is retrieved from Aqua-Scope and must not be stored in this repo.
 

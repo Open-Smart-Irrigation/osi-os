@@ -2,7 +2,8 @@
 
 How the project skills reach each supported agent harness. This moved out of
 `AGENTS.md` on 2026-10-22; `AGENTS.md` keeps a short summary and the rule to
-read this page before changing the skill layout.
+read this page before changing the skill layout. This page carries the same
+authority as `AGENTS.md`.
 
 The 14 project skills listed in `AGENTS.md` ("Agent skills") load in all three
 supported harnesses from one source. Claude Code reads `.claude/skills/`
