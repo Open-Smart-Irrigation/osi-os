@@ -54,8 +54,7 @@ commands with expected output, and the commit sequence. "Add appropriate error
 handling" is a planning failure. Plans live in `docs/superpowers/plans/` and get
 committed with the work; while it is in progress they are its reviewable design
 record. A finished plan moves to the maintainers' archive under the rules in
-`docs/superpowers/README.md` unless another file still refers to it. Plans are
-moved, never deleted.
+`docs/superpowers/README.md`.
 
 **Adversarial review before execution.** A second mind (a fresh agent or colleague,
 never the author) reads the plan with the mandate *hunt for flaws*, verifying every
@@ -253,8 +252,8 @@ down where the next person will trip.
 
 A change is done when: the issue's claim was re-verified against reality; the plan
 and its review live in the repo while the work is in progress or another file
-refers to them (finished records move to the maintainers' archive and are never
-deleted, see `docs/superpowers/README.md`);
+refers to them (a finished plan moves to the maintainers' archive under the
+rules in `docs/superpowers/README.md`);
 tests exist that fail without the change; every
 gate is green *as re-run by a non-author*; **a user can actually reach the
 behaviour** — a fully-tested component that nothing mounts is zero delivered
