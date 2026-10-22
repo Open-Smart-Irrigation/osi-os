@@ -77,10 +77,24 @@ exports.run = async (ctx) => {
   // A dedicated GUI account, so the smoke exercises the real login form rather
   // than a token injected into storage.
   const suffix = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  const username = 'osi_u1_' + suffix;
-  const password = 'U1pass_' + suffix;
+  let username = 'osi_u1_' + suffix;
+  let password = 'U1pass_' + suffix;
   const reg = await ctx.anonRest.post('/auth/register', { username, password });
-  ctx.expectStatus('a GUI test account can be registered', reg, 201);
+  const registered = reg.status === 201;
+  if (reg.status === 403) {
+    // osi-os#468: only a gateway's first account self-registers. Use the harness account
+    // when this run registered it (its password is known); otherwise U1 cannot log in.
+    if (!ctx.user || !ctx.user.password) {
+      throw new Error('U1 needs an account with a known password, and POST /auth/register only creates ' +
+        'a gateway\'s first account (osi-os#468). Run U1 against a gateway with no account, so the ' +
+        'harness registers its own; with --user the password is unknown.');
+    }
+    username = ctx.user.username;
+    password = ctx.user.password;
+    ev.note('Registration is closed (osi-os#468): the GUI smoke logs in as the harness account ' + username + '.');
+  } else {
+    ctx.expectStatus('a GUI test account can be registered', reg, 201);
+  }
 
   // --- locale bundles, straight off the gateway ----------------------------
   const en = {};
@@ -336,7 +350,7 @@ exports.run = async (ctx) => {
   }), null, 2) + '\n');
   ev.artifact('French i18n scan', path.relative(ctx.runDir, reportPath));
   for (const s of shots) ev.artifact('screenshot', s);
-  ev.note('GUI account "' + username + '" was registered for this smoke and cannot be removed through the API.');
+  if (registered) ev.note('GUI account "' + username + '" was registered for this smoke and cannot be removed through the API.');
   ctx.expect('the browser request guard was armed against the GUI origin', !!guiOrigin, { guiOrigin });
   if (blockedRequests.length) {
     // Not a failure: an offline-first GUI should not need a third-party origin,

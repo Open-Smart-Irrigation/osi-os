@@ -7,6 +7,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A valve unclaimed from the cloud now gets the same plan-clearing push as
+  a local delete.** A cloud `UNCLAIM_DEVICE` cleared the device owner and
+  zone and acknowledged success, but never ran the valve plan cleanup the
+  local device delete runs, so an unclaimed STREGA valve kept executing the
+  weekly plan stored in its firmware. The cloud path now runs the same
+  cleanup after the detach: it cancels an in-flight actuation without sending
+  a CLOSE, tombstones the schedules and queues the plan that clears the
+  valve. Like the local path, it flushes the device's whole ChirpStack queue,
+  and reports that. The valve may still hold its plan until it receives the
+  clearing push; nothing confirms that it did.
+- **A replayed cloud unclaim no longer detaches a re-claimed device.** The
+  detach is now fenced on `sync_version`, like zone assignment and removal: a
+  command older than the device's current version changes nothing and is
+  acknowledged `REJECTED_PERMANENT` with `stale_sync_version`, which the
+  cloud shows as a failed removal. A valve's open/close transitions also
+  raise its version, so an unclaim issued while the cloud mirror is behind
+  can be refused; retry once the gateway has synced.
+- **Unclaim reports what happened to the valve plan.** Both unclaim paths now
+  report one cleanup outcome: `not_applicable`, `not_attempted` (for example
+  a missing helper module), `failed`, `clearing_not_sent` (no
+  `CHIRPSTACK_APP_ACTUATORS`), `clearing_sent` or `no_plan_to_clear`, with
+  `may_still_hold_plan` and `plan_clear_confirmed: false`. The valve has no
+  read-back, so a sent clearing plan is not reported as a cleared plan. The
+  local `DELETE /api/devices/:deveui` still answers 200 when the device was
+  removed and adds `valve_cleanup` to the body. The cloud ACK keeps
+  `result: SUCCESS` for the detach and adds `valveCleanup` and, for a valve,
+  `reason`. OSI Server stores both in the command's ACK payload and detail
+  but does not display them yet, so the cloud shows a removal with an
+  unconfirmed or failed cleanup as a plain removal; no cloud change is needed
+  to accept the fields.
+
+### Security
+- **Self-registration only creates the first account (#468).** With
+  `OSI_SCOPED_ACCESS` off, `POST /auth/register` created an account for any
+  client that could reach port 1880. It now creates an account only while
+  the gateway has none, in one conditional write, and answers 403 with
+  "Registration is closed: this gateway already has an account. Sign in with
+  an existing account." afterwards; the register screen shows that message.
+  A fresh image still sets up its first account the same way, and login is
+  unchanged. With the flag on, registration behaves as before. With the flag
+  off there is no route for a second local account: the account recovery
+  runbook (`docs/operations/account-recovery-runbook.md`) describes how an
+  operator adds one on the gateway, and turning scoped access on gives admins
+  account management. The live test harness now needs `--user NAME` on a
+  gateway that already has an account.
+
 ---
 
 ## [0.8.1] — 2026-10-10

@@ -39,7 +39,9 @@ Locations are `tab → node name`.
 ### Authentication (7 function nodes)
 
 Local account registry, independent of the cloud. `POST /auth/register`
-(nodes "Register User", "Insert User") stores bcrypt hashes; `POST
+(nodes "Register User", "Insert User") stores bcrypt hashes and creates an
+account only while the gateway has none (with scoped access on: while it has
+no admin), answering 403 afterwards; `POST
 /auth/login` ("Login User", "Lookup Auth User", "Process Result") issues
 HMAC-signed JWTs. "Set Download Headers" gates `GET /download/database`.
 

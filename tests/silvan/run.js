@@ -66,7 +66,8 @@ function usage() {
     '  --cases   comma-separated case ids (default: all)',
     '  --out     run directory for evidence (default: ./<gateway>-run-<timestamp>)',
     '  --user    reuse an existing gateway account (token is minted on the Pi)',
-    '            instead of registering a throwaway harness account',
+    '            instead of registering a throwaway harness account; required on',
+    '            any gateway that already has an account (osi-os#468)',
     '  --keep    leave created resources on the gateway (debugging only)',
     '  --list    print the case list and exit',
   ].join('\n'));
@@ -98,9 +99,10 @@ async function mintIdentityProbeToken(ssh) {
   });
 }
 
-// Authenticates the run. Assumes NOTHING about existing gateway state: a freshly
-// deployed gateway has an empty users table, so the default path registers its
-// own throwaway account through the real /auth/register + /auth/login routes.
+// Authenticates the run. The default path registers a throwaway account through the
+// real /auth/register + /auth/login routes, which only works on a gateway with an
+// empty users table: since osi-os#468 self-registration creates only the first
+// account. On any other gateway pass --user NAME (token minted on the Pi).
 async function bootstrapAuth(rest, ssh, ev, opts) {
   if (opts.user) {
     const row = await ssh.sqlOne(
@@ -116,6 +118,11 @@ async function bootstrapAuth(rest, ssh, ev, opts) {
   const password = 'Hx' + require('node:crypto').randomBytes(12).toString('base64url');
 
   let reg = await rest.post('/auth/register', { username, password });
+  if (reg.status === 403) {
+    throw new Error('this gateway already has an account, and POST /auth/register only creates ' +
+      'the first one (osi-os#468). Re-run with --user NAME to authenticate as an existing account ' +
+      '(its token is minted on the Pi; nothing is registered).');
+  }
   if (reg.status !== 201) {
     throw new Error('harness account registration failed: ' + reg.status + ' ' + JSON.stringify(reg.body));
   }
