@@ -23,3 +23,12 @@ installed (on the maintainer workstation: Claude Code, and Codex through its
 plugin and `~/.agents/skills`). A harness without them
 applies the same loop by hand from `docs/engineering-playbook.md`. The
 `osi-*` skills cover the domain layer for every harness.
+
+## How each harness loads AGENTS.md
+
+Codex injects only the first 32,768 bytes of `AGENTS.md` (observed across
+the October 2026 sessions). `scripts/verify-agents-size.js` keeps the file at
+or under 30,720 bytes and fails when a required section heading is missing or
+starts past that offset; the doc-hygiene workflow runs it with its test.
+When the check fails, move reference material into a doc or skill and leave a
+one-line pointer in `AGENTS.md`.

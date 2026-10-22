@@ -6,7 +6,7 @@ Sister repo: [`osi-server`](../osi-server/AGENTS.md).
 
 > **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (verify reality → written plan → adversarial review → exact execution → independent verification), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
 
-Binding rules come first in this file; reference detail lives in the docs and skills each section links. Some harnesses read only the first 32 KiB of this file, so move reference material out instead of letting the file grow.
+Binding rules come first in this file; reference detail lives in the docs and skills each section links. Some harnesses read only the first 32 KiB of this file, so move reference material out instead of letting the file grow (`node scripts/verify-agents-size.js`).
 
 ---
 
@@ -290,6 +290,7 @@ node scripts/verify-communication-contract.js # contract preflight
 scripts/check-mqtt-topics.sh                  # MQTT IN topic compliance
 node --test scripts/test-gateway-health-persistence.js  # gateway health persistence guard
 node scripts/verify-doc-hygiene.js            # no deployment identities in docs, guidance, skills
+node scripts/verify-agents-size.js            # AGENTS.md size and required-heading offsets
 
 cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
