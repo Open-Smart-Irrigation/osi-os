@@ -66,6 +66,15 @@ The actual guard, in `seed_db_if_missing()`:
    `sqlite3` if available), re-check the target is still absent (race guard), then
    `mv` the seed into place.
 
+**Why the seed ships stamped** (moved from `AGENTS.md` on 2026-10-22; same
+authority): the bundled seed ships already stamped at the migration head (a full
+`schema_migrations` ledger plus `schema_object_fingerprints`, built by
+`scripts/build-seed-db.js` via `bootstrapFresh`), so the `run_schema_migration()`
+that follows the seed has nothing pending and finishes in seconds. A seed without
+that ledger sends every fresh install into `baseline-existing-db.js`'s 1..head
+reference-chain rebuild instead, which takes over ten minutes on a 16-core
+workstation and is not a viable deploy step on a Pi.
+
 Rationale (from `docs/engineering-playbook.md` §1): **a wrong chart annoys someone;
 a wiped `farming.db` destroys months of irreplaceable field data.** The asymmetry is
 absolute — treat every farming.db as one-way-destructible.
@@ -533,6 +542,53 @@ hand-edit rows in `schema_object_fingerprints` directly. After running it, run
 `verifyHead` again and confirm `ok:true` before considering the drift resolved. The
 migration model this fingerprint mechanism belongs to (what a "commit" vs "stamp"
 step is, what drift means structurally) is `osi-schema-change-control`'s territory.
+
+---
+
+## Foreign-numbered ledger recovery
+
+`AGENTS.md` ("Live-deploy safety rules") keeps the rule lines; this section holds
+the long form that moved out of it on 2026-10-22 and carries the same authority.
+
+A gateway that ran one of the two customer lines (one valve-focused, one not) has
+`schema_migrations` rows numbered under that branch's own scheme, which can collide
+with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer
+line, `valve_control` on main) — `applyPending` correctly refuses on the checksum
+mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but
+the device is then wedged with no forward path.
+
+`node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply`
+plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row,
+that a foreign-numbered ledger entry's content is exactly what some main migration
+already delivers — either byte-identical, or identical after stripping the leading
+`-- NNNN:` header comment and structurally proving equal schema effect via
+`scripts/semantic-schema-compare.js` — before rewriting that row's
+`version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or
+ambiguous row and touches nothing when it refuses.
+
+`deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger
+inspection and `migrate-cli.js`) whenever any applied ledger row above version 21
+has a checksum that disagrees with main's `CHECKSUMS.json`; a main-numbered
+gateway's checksums already agree there and never triggers it.
+
+`--clear-repair-required` is the narrower, separate recovery for a row already
+stuck `repair_required` whose checksum, at its own current version, already matches
+main (e.g. a prior reconcile run committed the remap but crashed before the status
+flip) — it never clears a row whose checksum still disagrees. Never hand-edit
+`schema_migrations` outside these two sanctioned tools.
+
+### Rehearsing that cutover on a copy
+
+`node scripts/rehearse-ledger-cutover.js --db <pulled copy> --work <scratch directory>`
+runs, on a copy only, the same chain deploy.sh runs for such a gateway (reconcile
+`--report`, `--apply`, `migrate-cli.js`, `verify-head-cli.js`), then the
+devices-rebuild rehearsal twice, the shipped boot node with the gateway's EUI,
+`integrity_check`/`foreign_key_check`, a schema comparison against `seed-blank.sql`,
+and per-table row counts and content hashes before and after; a second pass on the
+result must change nothing. Row changes the migrations make by design are listed in
+its `EXPECTED_CHANGES`; any other change fails. It refuses paths under `/data/db`
+and a non-empty `--work` it did not create, and writes
+`<work>/rehearsal-report.json` with every step's result and duration.
 
 ---
 

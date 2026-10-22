@@ -130,7 +130,7 @@ Node groups and cadences:
 
 `GET /api/system/stats` ("System Stats": CPU, memory, load, temperature, fan),
 `POST /api/system/reboot`, `POST /api/system/fan` ("Fan Control", writes PWM
-sysfs under `/sys/class/pwm/pwmchip2/pwm3`; see AGENTS.md for the `pwm-fan`
+sysfs under `/sys/class/pwm/pwmchip2/pwm3`; see `docs/api/sync-endpoints.md` for the `pwm-fan`
 driver caveat), "Command Type Registry" (startup-loaded command catalog),
 "STREGA Reconciliation Monitor" (60 s expectation-vs-observed check), and
 "Improvement Requests API Router" (`/api/improvement-requests*`).

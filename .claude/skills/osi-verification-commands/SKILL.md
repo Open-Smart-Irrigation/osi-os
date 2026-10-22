@@ -81,6 +81,29 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Sync contract docs or payload schemas | `verify-communication-contract.js` plus the edge/server tests named by the contract change. |
 | Server/backend companion work | Use the sister `osi-server` repo gates for backend changes. OSI OS edge verifiers do not prove cloud Java/Postgres behavior. |
 
+## Base ref for a stacked branch
+
+`AGENTS.md` keeps the one-line rule; this section holds the long form that
+moved out of it on 2026-10-22 and carries the same authority.
+
+`scripts/verify-flows-size-ratchet.js`, `scripts/verify-no-stray-ddl.js`, and
+`scripts/verify-migrations.js` each compare HEAD against a base ref that
+defaults to `origin/main`, overridable with `OSI_FLOWS_SIZE_BASE_REF`,
+`OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively.
+`scripts/verify-live-gateway-identity.js` carries no `git show` call of its
+own; it cross-checks the same size pins by reading
+`scripts/verify-flows-size-ratchet-allowances.json`, and names its own base
+with `OSI_IDENTITY_BASE_REF` (also defaulting to `origin/main`) for its
+messages.
+
+A branch built as a multi-commit stack can sit unmerged through several
+unrelated merges into `origin/main`. Each merge moves the default base out
+from under the stack's own committed size/DDL/migration pins without the
+stack itself changing, so a pin correct at write time later reads as false
+growth. When that happens, pin the stack against the commit it actually
+branched from and set all four env vars to that commit for every verifier run
+until the stack is rebased onto the current `origin/main`.
+
 ## Common Mistakes
 
 - Requiring `verify-migrations.js` to print an exact OK string; use exit 0
