@@ -573,5 +573,15 @@
       "button": "Quellen",
       "menuLabel": "Kartenquellen"
     }
+  },
+  "mobileUplot": {
+    "ranges": {"day": "24 Stunden", "week": "7 Tage", "month": "30 Tage", "ninetyDays": "90 Tage"},
+    "back": "Zurück", "forward": "Vorwärts", "latest": "Aktuell", "sensors": "Sensoren",
+    "unitNotReported": "Einheit nicht gemeldet", "loading": "Verlauf wird geladen…", "updating": "Verlauf wird aktualisiert…",
+    "noData": "Keine Daten in diesem Intervall.", "allHidden": "Alle Reihen ausgeblendet.", "unavailable": "Kein Messwert zu diesem Zeitpunkt",
+    "pinnedReading": "Angehefteter Messwert", "close": "Schliessen", "aggregation": "Zusammenfassung", "points": "Punkte",
+    "loadedRange": "Geladener Zeitraum", "truncated": "Auf dieser Detailstufe sind einige Daten nicht verfügbar.", "showDay": "24 Stunden anzeigen",
+    "retry": "Erneut versuchen", "failure": "Verlauf nicht verfügbar", "coverage": "Abdeckung", "freshness": "Aktualität", "notLoaded": "Nicht geladen",
+    "seriesLegend": {"legend": "Legende", "showAll": "Alle anzeigen", "plottedSeries": "Angezeigte Reihen", "seriesCount": "Reihen: {{count}}", "focusAnnouncement": "Hervorgehoben: {{label}}", "allSeriesAnnouncement": "Alle Reihen angezeigt"}
   }
 }

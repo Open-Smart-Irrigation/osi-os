@@ -1,0 +1,76 @@
+import { expect, test } from '@playwright/test';
+import { historyDataRequests, installHistoryHost, type HostPlatform } from './history-host-fixtures';
+
+for (const count of [8, 12]) {
+  test(`${count} soil channels: focus preserves data, viewport and inspection`, async ({ page }, testInfo) => {
+    const platform: HostPlatform = testInfo.project.name === 'cloud' ? 'cloud' : 'edge';
+    await page.setViewportSize({ width: count === 8 ? 320 : 448, height: 844 });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const harness = await installHistoryHost(page, platform, false, false, count);
+    try {
+      await page.goto(platform === 'edge' ? '/gui/previews/mobile-soil/#/history/zones/7/cards/soil-card' : '/prototypes/mobile-soil/history/zones/7');
+      const surface = page.getByTestId('mobile-soil-history');
+      const canvas = surface.locator('canvas').first();
+      await expect(canvas).toBeVisible();
+      await page.waitForLoadState('networkidle');
+      const settledRequests = historyDataRequests(harness).length;
+      expect(settledRequests).toBeGreaterThan(0);
+      await canvas.evaluate(element => element.setAttribute('data-retained', 'yes'));
+      const readout = page.getByLabel('Visible time window');
+      const initialReadout = await readout.textContent();
+      const disclosure = surface.locator('.mobile-history-sensors-disclosure');
+      await expect(disclosure.locator('summary')).toHaveText(`Sensors (${count})`);
+      const toggle = surface.getByRole('button', { name: 'Legend', exact: true });
+      await toggle.click();
+      const panel = surface.locator('.mobile-series-legend-panel');
+      await expect(panel).toBeVisible();
+      expect(await panel.getByRole('button').count()).toBe(count);
+      expect((await panel.boundingBox())!.height).toBeLessThanOrEqual(260);
+      expect(await panel.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+      await surface.locator('.history-chart-wrapper').screenshot({ path: testInfo.outputPath('legend-expanded.png') });
+      const legendBox = await surface.locator('.mobile-series-legend').boundingBox();
+      const readoutBox = await readout.boundingBox();
+      expect(legendBox!.y).toBeGreaterThanOrEqual(readoutBox!.y + readoutBox!.height);
+      const chart = surface.getByTestId('chart-host');
+      const chartBox = await chart.boundingBox();
+      await chart.click({ position: { x: chartBox!.width / 2, y: chartBox!.height / 2 } });
+      const inspector = surface.getByTestId('inspector');
+      await expect(inspector).toBeVisible();
+      const pin = await inspector.textContent();
+      const longName = 'Long soil channel 1 with a descriptive name';
+      await panel.getByRole('button', { name: longName, exact: true }).click();
+      await expect(surface.locator('.mobile-series-legend-focused-label')).toHaveText(longName);
+      await expect(toggle).toBeFocused();
+      await expect(canvas).toHaveAttribute('data-retained', 'yes');
+      expect(await readout.textContent()).toBe(initialReadout);
+      expect(await inspector.textContent()).toBe(pin);
+      expect((await inspector.boundingBox())!.height).toBeLessThanOrEqual(chartBox!.height);
+      await surface.locator('.history-chart-wrapper').screenshot({ path: testInfo.outputPath('legend-focused-with-pin.png') });
+      await surface.getByTestId('inspector-close').click();
+      await surface.locator('.history-chart-wrapper').screenshot({ path: testInfo.outputPath('legend-focused.png') });
+      await surface.getByRole('button', { name: 'Show all', exact: true }).click();
+      await toggle.click();
+      await page.keyboard.press('Escape');
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(toggle).toBeFocused();
+      await page.waitForLoadState('networkidle');
+      expect(historyDataRequests(harness).length).toBe(settledRequests);
+      await disclosure.locator('summary').click();
+      const checkboxes = disclosure.getByRole('checkbox');
+      const deepColor = await disclosure.locator('label').nth(1).locator('svg line').getAttribute('stroke');
+      for (let index = count - 1; index >= 3; index--) await checkboxes.nth(index).uncheck();
+      await expect(toggle).toHaveCount(0);
+      expect(await surface.locator('.mobile-series-legend-row').count()).toBe(3);
+      expect(await surface.getByRole('button', { name: 'Deep tension', exact: true }).locator('svg line').getAttribute('stroke')).toBe(deepColor);
+      for (let index = 2; index >= 0; index--) await checkboxes.nth(index).uncheck();
+      await expect(surface.getByText('All series hidden.')).toBeVisible();
+      await checkboxes.nth(0).check();
+      await expect(surface.getByText('All series hidden.')).toHaveCount(0);
+      await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+      await expect(surface.getByRole('button', { name: 'Soil tension', exact: true })).toBeVisible();
+      expect(await surface.locator('.mobile-series-legend').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(errors).toEqual([]);
+    } finally { await harness.dispose(); }
+  });
+}

@@ -11,7 +11,8 @@ export function manualChunksForVendor(id) {
 
 export default defineConfig({
   plugins: [react()],
-  base: '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
+  base: process.env.VITE_BASE_PATH || '/gui/',  // Must match httpStaticRoot in Node-RED settings.js
+  resolve: { dedupe: ['react', 'react-dom'] },
   server: {
     port: 3000,
     host: true,
