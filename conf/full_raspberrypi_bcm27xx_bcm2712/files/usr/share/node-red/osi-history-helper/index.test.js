@@ -753,3 +753,116 @@ test('buildAdvancedDiagnostics reports structure and availability for a soil car
     ['source-devices', 'radio-diagnostics', 'raw-payloads']
   );
 });
+
+// VWC/VIC CSV parity with the cloud export (docs/contracts/vwc-display/):
+// a Sentek layout depth fills depth_cm when the depth map lacks it, and the
+// series label names the depth the way ChannelRegistry.displayName does.
+// The EUI below is the synthetic fixture id the other export tests use.
+const VWC_EXPORT_EUI = 'AA00000000000001';
+const SENTEK_LAYOUT_CH2 = '{"version":1,"address":"0","sensors":[{"channel":2,"response_position":2,"depth_cm":20,"type":"TRISCAN"}]}';
+
+function vwcExport(device, dataRow, { channels = 'vwc_1,vwc_2,soil_vic_2', granularity = 'raw' } = {}) {
+  const db = {
+    all: async (sql) => {
+      if (sql.includes('FROM irrigation_zones')) return [{ id: 12, name: 'Zone B', zone_uuid: 'zb', timezone: 'UTC' }];
+      if (sql.includes('FROM devices')) {
+        return [{ deveui: VWC_EXPORT_EUI, name: 'Probe', type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'SENTEK_ENVIROSCAN', irrigation_zone_id: 12, ...device }];
+      }
+      if (sql.includes('FROM device_data')) return [{ deveui: VWC_EXPORT_EUI, recorded_at: '2026-06-01T06:00:00.000Z', ...dataRow }];
+      return [];
+    },
+  };
+  return hh.buildZoneExportCsv(db, {
+    zoneId: 12,
+    from: '2026-06-01',
+    to: '2026-06-01',
+    granularity,
+    channels,
+    nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+  });
+}
+
+function rowFor(result, channelKey) {
+  return result.rows.find((row) => row.channel_key === channelKey && row.value !== '' && row.value != null);
+}
+
+test('exports a Sentek VWC depth from the channel layout when the depth map lacks it', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5, soil_vic_2: 0.12 },
+  );
+  assert.equal(rowFor(result, 'vwc_2').depth_cm, 20);
+  assert.equal(rowFor(result, 'soil_vic_2').depth_cm, 20);
+});
+
+test('keeps the depth map ahead of the layout', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_2":25}', sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(result, 'vwc_2').depth_cm, 25);
+});
+
+test('ignores a Tensiomark layout for VWC depth', async () => {
+  const result = await vwcExport(
+    {
+      soil_moisture_probe_depths_json: null,
+      sdi12_channel_layout_json: '{"kind":"tensiomark","version":1,"address":"0","sensors":[{"channel":1,"response_position":1,"depth_cm":10}]}',
+    },
+    { vwc_1: 30 },
+  );
+  assert.equal(rowFor(result, 'vwc_1').depth_cm, null);
+});
+
+test('names the depth in a VWC series label', async () => {
+  const atLayoutDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5, soil_vic_2: 0.12 },
+  );
+  assert.equal(rowFor(atLayoutDepth, 'vwc_2').series_label, 'Probe - VWC 20cm');
+  assert.equal(rowFor(atLayoutDepth, 'soil_vic_2').series_label, 'Probe - VIC 20cm');
+
+  const atFractionalDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_2":12.5}', sdi12_channel_layout_json: null },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(atFractionalDepth, 'vwc_2').series_label, 'Probe - VWC 12.5cm');
+
+  const withoutDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: null },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(withoutDepth, 'vwc_2').series_label, 'Probe - VWC 2');
+
+  const daily = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5 },
+    { granularity: 'daily' },
+  );
+  const dailyRow = rowFor(daily, 'vwc_2');
+  assert.equal(dailyRow.series_label, 'Probe - VWC 20cm');
+  assert.equal(dailyRow.depth_cm, 20);
+});
+
+test('exports a stored zero VWC', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_1":10}', sdi12_channel_layout_json: null },
+    { vwc_1: 0 },
+  );
+  const row = result.rows.find((candidate) => candidate.channel_key === 'vwc_1');
+  assert.ok(row, 'a vwc_1 row');
+  assert.equal(row.value, 0);
+});
+
+// A zero or negative depth is not a depth (docs/contracts/vwc-display/):
+// the label keeps the channel name instead of printing "VWC 0cm".
+test('never names a zero or negative depth in a VWC series label', async () => {
+  for (const depth of [0, -10]) {
+    const result = await vwcExport(
+      { soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: depth }), sdi12_channel_layout_json: null },
+      { vwc_1: 30 },
+      { channels: 'vwc_1' },
+    );
+    assert.equal(rowFor(result, 'vwc_1').series_label, 'Probe - VWC 1', `depth ${depth}`);
+  }
+});

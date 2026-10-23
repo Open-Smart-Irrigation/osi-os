@@ -2446,17 +2446,28 @@ async function resolveZoneExportScope(db, options = {}) {
   return { zone, timezone, from, to, start, end, devices, cards, site, requestedChannelKeys: normalizeExportChannels(options.channels), granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
 }
 
-function seriesLabel(sourceName, channel) {
-  return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
+// VWC and VIC rows name their depth the way the cloud export does
+// (osi-server ChannelRegistry.displayName: "VWC 20cm", "VIC 12.5cm").
+const DEPTH_LABEL_FAMILIES = Object.freeze({ vwc: 'VWC', soil_vic: 'VIC' });
+
+function soilChannelLabel(channel, depthCm) {
+  const match = /^(vwc|soil_vic)_\d+$/.exec(String(channel.id || ''));
+  // A zero or negative depth is not a depth: keep the channel name rather than print "VWC 0cm".
+  if (match && typeof depthCm === 'number' && depthCm > 0) return `${DEPTH_LABEL_FAMILIES[match[1]]} ${depthCm}cm`;
+  return channel.label || channel.id;
+}
+
+function seriesLabel(sourceName, channel, depthCm = null) {
+  return [sourceName, channel && soilChannelLabel(channel, depthCm)].filter(Boolean).join(' - ');
 }
 
 // A raw rain row is what one report collected; a bucket is a summed amount
 // (channel label "Rainfall amount"). The GUI's rainfallLabel() uses the same words.
 const RAW_SERIES_LABELS = Object.freeze({ rain_mm_delta: 'Rainfall this interval' });
 
-function rawSeriesLabel(sourceName, channel) {
+function rawSeriesLabel(sourceName, channel, depthCm = null) {
   const rawLabel = channel && RAW_SERIES_LABELS[channel.id];
-  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel);
+  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel, depthCm);
 }
 
 function sourceKeyForCsv(card, device) {
@@ -2541,15 +2552,16 @@ async function rawZoneExportRows(db, scope) {
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
+          const depthCm = soilDepthCm(device, channel.id);
           const csvRow = {
             timestamp,
             site: scope.site,
             zone: zoneName,
-            series_label: rawSeriesLabel(sourceName, channel),
+            series_label: rawSeriesLabel(sourceName, channel, depthCm),
             card_type: card.cardType,
             source_key: sourceKeyForCsv(card, device),
             channel_key: channel.id,
-            depth_cm: soilDepthCm(device, channel.id),
+            depth_cm: depthCm,
             array_id: arrayId,
             unit: channel.unit || null,
             value: isSwtKpaChannel(channel) ? value : roundTo(value),
@@ -2901,9 +2913,25 @@ function soilDepthCm(device, channelId) {
     return index === undefined ? null : toFiniteNumber(configured[index]);
   }
   if (configured && typeof configured === 'object') {
-    return toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
+    const mapped = toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
+    if (mapped !== null) return mapped;
   }
-  return null;
+  return sdi12LayoutDepthCm(device, channelId);
+}
+
+// A Sentek channel layout records each VWC/VIC channel's depth; the depth map
+// wins when it has one. Mirrors vwcChannelDepthCm in the GUI (contract
+// docs/contracts/vwc-display/): DRAGINO_SDI12 only, no Tensiomark layout
+// (it carries a "kind"), positive finite depth only.
+function sdi12LayoutDepthCm(device, channelId) {
+  if (deviceTypeId(device) !== 'DRAGINO_SDI12') return null;
+  const match = /^(?:vwc|soil_vic)_(\d+)$/.exec(String(channelId || ''));
+  const layout = parseDepthJson(device && device.sdi12_channel_layout_json);
+  if (!match || !layout || Array.isArray(layout) || layout.kind !== undefined || !Array.isArray(layout.sensors)) return null;
+  const channel = Number(match[1]);
+  const sensor = layout.sensors.find((entry) => entry && Number(entry.channel) === channel);
+  const depth = toFiniteNumber(sensor && sensor.depth_cm);
+  return depth !== null && depth > 0 ? depth : null;
 }
 
 async function resolveDeviceArrayIds(db, deveuis, start, end) {
@@ -2938,15 +2966,16 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,
         site: context.site || '',
         zone: context.zone || '',
-        series_label: seriesLabel(sourceName, channel),
+        series_label: seriesLabel(sourceName, channel, depthCm),
         card_type: card.cardType,
         source_key: sourceKeyForCsv(card, device),
         channel_key: channel.id,
-        depth_cm: soilDepthCm(device, channel.id),
+        depth_cm: depthCm,
         array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
         value: valueForChannel(stats, channel),
