@@ -80,7 +80,7 @@ try {
     INSERT INTO sync_link_state(
       peer_node, linked, gateway_device_eui, updated_at
     ) VALUES(
-      'cloud', 1, '0016C001F11715E2', '2026-07-25T10:00:00.000Z'
+      'cloud', 1, 'AABBCCDDEEFF0003', '2026-07-25T10:00:00.000Z'
     ) ON CONFLICT(peer_node) DO UPDATE SET
       linked=excluded.linked,
       gateway_device_eui=excluded.gateway_device_eui,
@@ -91,7 +91,7 @@ try {
   assertSchema(upgraded, 'upgrade', true);
   assert.equal(
     scalar(upgraded, 'SELECT current_gateway_device_eui FROM installation_identity WHERE singleton_id=1'),
-    '0016C001F11715E2'
+    'AABBCCDDEEFF0003'
   );
   assert.equal(
     scalar(upgraded, "SELECT installation_uuid=(SELECT installation_uuid FROM installation_identity WHERE singleton_id=1) FROM sync_link_state WHERE peer_node='cloud'"),

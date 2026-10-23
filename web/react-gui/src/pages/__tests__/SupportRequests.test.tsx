@@ -66,7 +66,7 @@ const diagnosticsPreview = {
   generated_at: '2026-07-08T10:00:00Z',
   diagnostics: {
     gateway_identity: {
-      gateway_device_eui: '0016C001F11715E2',
+      gateway_device_eui: 'AABBCCDDEEFF0003',
       gateway_device_eui_redacted: '0016...15E2',
       source: 'uci',
     },
@@ -172,8 +172,8 @@ describe('SupportRequests', () => {
 
     expect(await screen.findByText('Diagnostics preview')).toBeInTheDocument();
     expect(screen.getByText('0016...15E2')).toBeInTheDocument();
-    expect(screen.queryByText('0016C001F11715E2')).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent('0016C001F11715E2');
+    expect(screen.queryByText('AABBCCDDEEFF0003')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('AABBCCDDEEFF0003');
     expect(document.body).not.toHaveTextContent('farmer@example.com');
     expect(document.body).not.toHaveTextContent('Bearer edge-access-token-secret');
     expect(document.body).not.toHaveTextContent('00112233445566778899AABBCCDDEEFF');

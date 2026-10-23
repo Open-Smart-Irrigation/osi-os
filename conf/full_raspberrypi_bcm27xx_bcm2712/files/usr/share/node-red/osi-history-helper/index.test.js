@@ -6,15 +6,15 @@ const crypto = require('crypto');
 const hh = require('./index.js');
 
 test('normalizeDeveui accepts valid hex EUIs and cleans separators', () => {
-  assert.equal(hh.normalizeDeveui('0016c001f11715e2'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('00-16-C0-01-F1-17-15-E2'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('00:16:C0:01:F1:17:15:E2'), '0016C001F11715E2');
+  assert.equal(hh.normalizeDeveui('aabbccddeeff0003'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AA-BB-CC-DD-EE-FF-00-03'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AA:BB:CC:DD:EE:FF:00:03'), 'AABBCCDDEEFF0003');
   assert.equal(hh.normalizeDeveui('not-a-valid-eui'), null);
   assert.equal(hh.normalizeDeveui('ABCD'), null);
   assert.equal(hh.normalizeDeveui(null), null);
   assert.equal(hh.normalizeDeveui(undefined), null);
-  assert.equal(hh.normalizeDeveui('zz0016C001F11715E2zz'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('0016C001F11715E20016C001F11715E2'), null);
+  assert.equal(hh.normalizeDeveui('zzAABBCCDDEEFF0003zz'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AABBCCDDEEFF0003AABBCCDDEEFF0003'), null);
   assert.equal(hh.normalizeDeveui(12345), null);
 });
 
@@ -192,13 +192,13 @@ test('deriveCardId builds zone-scoped, gateway, and dendro card ids', () => {
   assert.equal(hh.deriveCardId({ zoneUuid: 'zone-1', cardType: 'irrigation' }), 'zone-1:irrigation:zone-valves');
   assert.equal(hh.deriveCardId('zone-1', 'irrigation'), 'zone-1:irrigation:zone-valves');
 
-  const deveui = '0016C001F11715E2';
+  const deveui = 'AABBCCDDEEFF0003';
   const expectedDendroKey = `dendro-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
   assert.equal(hh.deriveCardId({ zoneUuid: 'zone-1', cardType: 'dendro', deveui }), `zone-1:dendro:${expectedDendroKey}`);
 
   assert.equal(
-    hh.deriveCardId({ zoneUuid: 'GW1', cardType: 'gateway', gatewayEui: '0016c001f11715e2' }),
-    '0016C001F11715E2:gateway:hub'
+    hh.deriveCardId({ zoneUuid: 'GW1', cardType: 'gateway', gatewayEui: 'aabbccddeeff0003' }),
+    'AABBCCDDEEFF0003:gateway:hub'
   );
 
   assert.equal(hh.deriveCardId({}), null);
@@ -206,11 +206,11 @@ test('deriveCardId builds zone-scoped, gateway, and dendro card ids', () => {
 });
 
 test('deriveGatewayCard builds a card for a valid EUI and null for invalid input', () => {
-  assert.deepEqual(hh.deriveGatewayCard('0016c001f11715e2'), {
-    id: '0016C001F11715E2:gateway:hub',
+  assert.deepEqual(hh.deriveGatewayCard('aabbccddeeff0003'), {
+    id: 'AABBCCDDEEFF0003:gateway:hub',
     cardType: 'gateway',
     logicalSourceKey: 'hub',
-    gatewayEui: '0016C001F11715E2',
+    gatewayEui: 'AABBCCDDEEFF0003',
   });
   assert.equal(hh.deriveGatewayCard('not-valid'), null);
 });

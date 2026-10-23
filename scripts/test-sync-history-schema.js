@@ -100,7 +100,7 @@ function assertHistorySchemaAndTriggers(label) {
   for (const name of ['sync_link_state', 'sync_history_cursors', 'sync_history_dirty_keys', 'sync_history_segments', 'sync_history_quarantine']) {
     if (!names.has(name)) throw new Error(`${label}: missing ${name}`);
   }
-  if (label.includes('history migration') && scalar("SELECT COUNT(*) FROM sync_link_state WHERE peer_node='cloud' AND linked=1 AND server_url='https://server.example' AND gateway_device_eui='0016C001F11715E2';") !== 1) {
+  if (label.includes('history migration') && scalar("SELECT COUNT(*) FROM sync_link_state WHERE peer_node='cloud' AND linked=1 AND server_url='https://server.example' AND gateway_device_eui='AABBCCDDEEFF0003';") !== 1) {
     throw new Error(`${label}: existing linked user did not seed sync_link_state`);
   }
   const seededLinkedState = scalar("SELECT COUNT(*) FROM sync_link_state WHERE peer_node='cloud' AND linked=1;") === 1;
@@ -120,12 +120,12 @@ function assertHistorySchemaAndTriggers(label) {
   if (!indexNames.has('idx_irrigation_events_event_uuid')) throw new Error(`${label}: missing idx_irrigation_events_event_uuid`);
 
   exec("INSERT INTO users(id, username, password_hash, created_at, user_uuid) VALUES(1, 'local', 'x', '2026-06-28T10:00:00.000Z', 'user-1')");
-  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(1, 1, 'Zone 1', 'zone-1', '0016C001F11715E2', 1)");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(1, 1, 'Zone 1', 'zone-1', 'AABBCCDDEEFF0003', 1)");
   if (scalar('SELECT COUNT(*) FROM sync_outbox;') !== 0) {
     throw new Error(`${label}: unlinked structural insert created outbox row`);
   }
 
-  exec("INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at, gateway_device_eui) VALUES('A84041CAFECAFE01', 'LSN50', 'DRAGINO_LSN50', 1, 1, '2026-06-28T10:00:00.000Z', '2026-06-28T10:00:00.000Z', '0016C001F11715E2')");
+  exec("INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at, gateway_device_eui) VALUES('A84041CAFECAFE01', 'LSN50', 'DRAGINO_LSN50', 1, 1, '2026-06-28T10:00:00.000Z', '2026-06-28T10:00:00.000Z', 'AABBCCDDEEFF0003')");
   exec("INSERT INTO device_data(id, deveui, recorded_at, swt_1) VALUES(99, 'A84041CAFECAFE01', '2026-06-28T09:00:00.000Z', 9.0)");
   if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DEVICE_DATA';") !== 0) {
     throw new Error(`${label}: never-linked raw device_data insert created outbox row`);
@@ -144,7 +144,7 @@ function assertHistorySchemaAndTriggers(label) {
     throw new Error(`${label}: unlinked derived or irrigation insert created outbox row`);
   }
 
-  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, '0016C001F11715E2', '2026-06-28T10:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1, gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at");
+  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, 'AABBCCDDEEFF0003', '2026-06-28T10:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1, gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at");
   exec("UPDATE irrigation_zones SET name='Zone linked', sync_version=2 WHERE id=1");
   if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='ZONE';") !== 1) {
     throw new Error(`${label}: linked structural update did not create outbox row`);
@@ -163,18 +163,18 @@ function assertHistorySchemaAndTriggers(label) {
     throw new Error(`${label}: chameleon outbox payload omitted new validity flags`);
   }
   exec("UPDATE devices SET gateway_device_eui=NULL WHERE deveui='A84041CAFECAFE01'");
-  exec("UPDATE sync_link_state SET gateway_device_eui='0016C001F11715E3' WHERE peer_node='cloud'");
+  exec("UPDATE sync_link_state SET gateway_device_eui='AABBCCDDEEFF0102' WHERE peer_node='cloud'");
   exec("INSERT INTO dendrometer_readings(id, deveui, position_um, recorded_at) VALUES(12, 'A84041CAFECAFE01', 1200.0, '2026-06-28T10:02:00.000Z')");
   if (scalar("SELECT COUNT(*) FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== 1) {
     throw new Error(`${label}: linked dendrometer_readings insert lost legacy durable outbox coverage`);
   }
-  if (text("SELECT json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== '0016C001F11715E3|0016C001F11715E3') {
+  if (text("SELECT json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='DENDRO_READING';") !== 'AABBCCDDEEFF0102|AABBCCDDEEFF0102') {
     throw new Error(`${label}: dendrometer reading outbox did not use resolved sync_link_state gateway EUI`);
   }
-  exec("UPDATE devices SET gateway_device_eui='0016C001F11715E2' WHERE deveui='A84041CAFECAFE01'");
-  exec("UPDATE sync_link_state SET gateway_device_eui='0016C001F11715E2' WHERE peer_node='cloud'");
+  exec("UPDATE devices SET gateway_device_eui='AABBCCDDEEFF0003' WHERE deveui='A84041CAFECAFE01'");
+  exec("UPDATE sync_link_state SET gateway_device_eui='AABBCCDDEEFF0003' WHERE peer_node='cloud'");
   exec("UPDATE device_data SET swt_1=11.0 WHERE id=101");
-  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='device_data' AND row_key='DEVICE_DATA|0016C001F11715E2|101';") !== 1) {
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='device_data' AND row_key='DEVICE_DATA|AABBCCDDEEFF0003|101';") !== 1) {
     throw new Error(`${label}: linked raw correction did not create dirty key`);
   }
 
@@ -188,8 +188,8 @@ function assertHistorySchemaAndTriggers(label) {
   if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='zone_daily_environment' AND row_key='ZONE_ENVIRONMENT|zone-1|2026-06-28';") !== 1) {
     throw new Error(`${label}: zone environment dirty key did not use zone_uuid`);
   }
-  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(3, 1, 'No UUID A', NULL, '0016C001F11715E2', 1)");
-  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(4, 1, 'No UUID B', NULL, '0016C001F11715E2', 1)");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(3, 1, 'No UUID A', NULL, 'AABBCCDDEEFF0003', 1)");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(4, 1, 'No UUID B', NULL, 'AABBCCDDEEFF0003', 1)");
   exec("UPDATE irrigation_zones SET deleted_at='2026-06-29T09:00:00.000Z' WHERE id IN (3,4)");
   exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(3, '2026-06-29', 1.0, '2026-06-29T10:00:00.000Z')");
   exec("INSERT INTO zone_daily_environment(zone_id, date, rainfall_mm, computed_at) VALUES(4, '2026-06-29', 2.0, '2026-06-29T10:00:00.000Z')");
@@ -203,14 +203,14 @@ function assertHistorySchemaAndTriggers(label) {
   }
 
   exec('DELETE FROM sync_outbox');
-  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(1, 1, 1, 'OPEN', '{}', 'irrig-0016C001F11715E2-000000000001')");
-  if (text('SELECT event_uuid FROM irrigation_events WHERE id=1;') !== 'irrig-0016C001F11715E2-000000000001') {
+  exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(1, 1, 1, 'OPEN', '{}', 'irrig-AABBCCDDEEFF0003-000000000001')");
+  if (text('SELECT event_uuid FROM irrigation_events WHERE id=1;') !== 'irrig-AABBCCDDEEFF0003-000000000001') {
     throw new Error(`${label}: irrigation event uuid mismatch`);
   }
   exec('PRAGMA recursive_triggers=OFF');
   exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json) VALUES(2, 1, 1, 'CLOSE', '{}')");
   const eventUuid = text('SELECT event_uuid FROM irrigation_events WHERE id=2;');
-  if (!/^irrig-0016C001F11715E2-000000000000002$/.test(eventUuid)) {
+  if (!/^irrig-AABBCCDDEEFF0003-000000000000002$/.test(eventUuid)) {
     throw new Error(`${label}: irrigation event uuid trigger did not use zone gateway EUI`);
   }
   if (text("SELECT json_extract(payload_json, '$.event_uuid') FROM sync_outbox WHERE aggregate_type='IRRIGATION_EVENT' AND json_extract(payload_json, '$.event_id') = 2;") !== eventUuid) {
@@ -218,7 +218,7 @@ function assertHistorySchemaAndTriggers(label) {
   }
   exec('DELETE FROM sync_outbox');
   exec("INSERT INTO gateway_locations(gateway_device_eui, latitude, longitude, status, source, updated_at) VALUES('', 47.1001, 8.1002, 'fix', 'gpsd', '2026-06-28T10:03:00.000Z')");
-  if (text("SELECT aggregate_key || '|' || json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='GATEWAY_LOCATION';") !== '0016C001F11715E2|0016C001F11715E2|0016C001F11715E2') {
+  if (text("SELECT aggregate_key || '|' || json_extract(payload_json, '$.gateway_device_eui') || '|' || gateway_device_eui FROM sync_outbox WHERE aggregate_type='GATEWAY_LOCATION';") !== 'AABBCCDDEEFF0003|AABBCCDDEEFF0003|AABBCCDDEEFF0003') {
     throw new Error(`${label}: gateway location outbox did not use resolved sync_link_state gateway EUI`);
   }
   exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(2, 1, 'No Gateway', 'zone-2', NULL, 1)");
@@ -253,19 +253,19 @@ function assertDurableHistorySchema(label) {
   }
 
   exec("INSERT INTO users(id, username, password_hash, created_at, user_uuid) VALUES(801, 'durable', 'x', '2026-07-25T10:00:00.000Z', 'user-durable')");
-  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(801, 801, 'Durable Zone', 'zone-durable', '0016C001F11715E2', 1)");
-  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, '0016C001F11715E2', '2026-07-25T10:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1, gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at");
+  exec("INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(801, 801, 'Durable Zone', 'zone-durable', 'AABBCCDDEEFF0003', 1)");
+  exec("INSERT INTO sync_link_state(peer_node, linked, gateway_device_eui, updated_at) VALUES('cloud', 1, 'AABBCCDDEEFF0003', '2026-07-25T10:00:00.000Z') ON CONFLICT(peer_node) DO UPDATE SET linked=1, gateway_device_eui=excluded.gateway_device_eui, updated_at=excluded.updated_at");
   exec("INSERT INTO irrigation_events(id, user_id, irrigation_zone_id, action, payload_json, event_uuid) VALUES(801, 801, 801, 'OPEN', '{}', 'irrig-durable-801')");
   exec("INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES('expectation-durable-1', 'A84041VALVE0001', 801, '2026-07-25T10:00:00.000Z', 900, '2026-07-25T10:15:00.000Z', 'zone_calibration', 'PENDING_OBSERVATION', '2026-07-25T10:00:00.000Z')");
   if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='irrigation_events' AND row_key='IRRIGATION_EVENT|irrig-durable-801|801';") !== 1) {
     throw new Error(`${label}: irrigation event insert did not create durable dirty key`);
   }
-  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|0016C001F11715E2|expectation-durable-1';") !== 1) {
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|AABBCCDDEEFF0003|expectation-durable-1';") !== 1) {
     throw new Error(`${label}: valve actuation insert did not create durable dirty key`);
   }
   exec("UPDATE irrigation_events SET reason='corrected' WHERE id=801");
   exec("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING' WHERE expectation_id='expectation-durable-1'");
-  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE status='pending' AND ((table_name='irrigation_events' AND row_key='IRRIGATION_EVENT|irrig-durable-801|801') OR (table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|0016C001F11715E2|expectation-durable-1'));") !== 2) {
+  if (scalar("SELECT COUNT(*) FROM sync_history_dirty_keys WHERE status='pending' AND ((table_name='irrigation_events' AND row_key='IRRIGATION_EVENT|irrig-durable-801|801') OR (table_name='valve_actuation_expectations' AND row_key='VALVE_ACTUATION|AABBCCDDEEFF0003|expectation-durable-1'));") !== 2) {
     throw new Error(`${label}: durable history updates did not refresh dirty keys`);
   }
   exec("INSERT INTO sync_history_segments(peer_node, table_name, segment_key, hash_version, canonical_row_count, syncable_row_count, syncable_payload_hash, quarantined_count, covered_max_id, computed_at) VALUES('cloud', 'device_data', 'DEV|2026-07-25', 1, 0, 0, '', 0, 0, '2026-07-25T10:00:00.000Z')");
@@ -289,7 +289,7 @@ try {
     createDb('upgrade', [
       mainSchema,
       "INSERT INTO users(id, username, password_hash, created_at, auth_mode, user_uuid, cloud_user_id, server_url, server_sync_token, server_linked_at) VALUES(90, 'linked', 'x', '2026-06-28T08:00:00.000Z', 'server', 'user-linked', 42, 'https://server.example', 'sync-token', '2026-06-28T08:00:00.000Z')",
-      "INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(90, 90, 'Linked Zone', 'zone-linked', '0016C001F11715E2', 1)",
+      "INSERT INTO irrigation_zones(id, user_id, name, zone_uuid, gateway_device_eui, sync_version) VALUES(90, 90, 'Linked Zone', 'zone-linked', 'AABBCCDDEEFF0003', 1)",
       migrationSql
     ]);
     assertHistorySchemaAndTriggers('base seed + history migration');

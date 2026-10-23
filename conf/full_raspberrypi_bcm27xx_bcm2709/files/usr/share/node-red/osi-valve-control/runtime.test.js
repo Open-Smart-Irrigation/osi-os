@@ -171,7 +171,7 @@ test('emitRuntimeChanged: linked but no resolvable gateway_device_eui anywhere i
 
 test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync_outbox row whose payload matches buildRuntimePayload', async () => {
   const { db } = await tempDb();
-  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
   await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
 
   const now = new Date('2026-08-25T10:01:00.000Z');
@@ -185,7 +185,7 @@ test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync
   assert.equal(row.aggregate_type, 'VALVE_RUNTIME');
   assert.equal(row.aggregate_key, EUI);
   assert.equal(row.op, 'VALVE_RUNTIME_CHANGED');
-  assert.equal(row.gateway_device_eui, '0016C001F11715E2');
+  assert.equal(row.gateway_device_eui, 'AABBCCDDEEFF0003');
   assert.equal(row.occurred_at, '2026-08-25T10:01:00.000Z');
 
   const payload = JSON.parse(row.payload_json);
@@ -197,7 +197,7 @@ test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync
 
 test('emitRuntimeChanged: a device-level gateway_device_eui override wins over sync_link_state.gateway_device_eui, matching the 0024/0025 trigger COALESCE order', async () => {
   const { db } = await tempDb();
-  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
   await db.run('UPDATE devices SET gateway_device_eui=? WHERE UPPER(deveui)=?', ['0016C001F1999999', EUI]);
   await emitRuntimeChanged(db, EUI);
   const row = await db.get('SELECT gateway_device_eui FROM sync_outbox');
@@ -400,7 +400,7 @@ test('emitActuationArchived: a non-terminal expectation is a no-op even when lin
 
 test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVED sync_outbox row whose payload matches buildActuationPayload', async () => {
   const { db } = await tempDb();
-  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
   const zone = await insertZone(db);
   await insertExpectation(db, { id: 'e1', state: 'OBSERVED_COMPLETE', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z', observedOpenAt: '2026-08-25T10:00:05.000Z', observedCloseAt: '2026-08-25T10:15:03.000Z' });
   await db.run('UPDATE valve_actuation_expectations SET zone_id=? WHERE expectation_id=?', [zone.id, 'e1']);
@@ -414,7 +414,7 @@ test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVE
   assert.equal(row.aggregate_type, 'VALVE_ACTUATION');
   assert.equal(row.aggregate_key, 'e1');
   assert.equal(row.op, 'VALVE_ACTUATION_ARCHIVED');
-  assert.equal(row.gateway_device_eui, '0016C001F11715E2');
+  assert.equal(row.gateway_device_eui, 'AABBCCDDEEFF0003');
   assert.equal(row.sync_version, 0);
 
   const payload = JSON.parse(row.payload_json);
@@ -425,7 +425,7 @@ test('emitActuationArchived: a linked gateway enqueues a VALVE_ACTUATION_ARCHIVE
 
 test('emitActuationArchived: repeated identical archive is stable and deduped after outbox pruning', async () => {
   const { db } = await tempDb();
-  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
   const zone = await insertZone(db);
   await db.run('UPDATE devices SET irrigation_zone_id=? WHERE UPPER(deveui)=?', [zone.id, EUI]);
   await insertExpectation(db, { id: 'e-repeat', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
@@ -444,7 +444,7 @@ test('emitActuationArchived: repeated identical archive is stable and deduped af
 
 test('emitActuationArchived: corrected payload gets a distinct deterministic event ID', async () => {
   const { db } = await tempDb();
-  await linkCloud(db, { gatewayDeviceEui: '0016C001F11715E2' });
+  await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
   const zone = await insertZone(db);
   await db.run('UPDATE devices SET irrigation_zone_id=? WHERE UPPER(deveui)=?', [zone.id, EUI]);
   await insertExpectation(db, { id: 'e-correct', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });

@@ -39,7 +39,7 @@ const LOCATION_BINDINGS = {
   auth: { userId: 7 },
   msg: { _scopedZoneWriteAuthorized: false, _scopedZoneOwnerId: null },
 };
-const GATEWAY = '0016C001F11715E2';
+const GATEWAY = 'AABBCCDDEEFF0003';
 
 function flowsFor(profile) {
   return JSON.parse(fs.readFileSync(path.join(REPO, profile, 'files/usr/share/flows.json'), 'utf8'));

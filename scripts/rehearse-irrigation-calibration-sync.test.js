@@ -26,7 +26,7 @@ const DATA_MIGRATION = path.join(
   REPO,
   'database/migrations/ordered/0048__zone_irrigation_calibration_backfill.sql'
 );
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 const USER_UUID = '11111111-1111-4111-8111-111111111111';
 const ZONE_UUID = '22222222-2222-4222-8222-222222222222';
 const MEASURED_AT = '2026-07-24T10:00:00.000Z';
