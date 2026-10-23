@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
@@ -10,6 +10,8 @@ import {
 } from '../components/history/mobile/HistoryInspectorSheet';
 import { HistoryExportSheet } from '../components/history/mobile/HistoryExportSheet';
 import { HistoryVisualizationSurface } from '../components/history/mobile/HistoryVisualizationSurface';
+import type { VisibleInterval } from '../components/history/mobile/MobileSoilUplotHistory';
+const MobileSoilUplotHistory = lazy(() => import('../components/history/mobile/MobileSoilUplotHistory').then((module) => ({ default: module.MobileSoilUplotHistory })));
 import { cardChannels, cardChannelsForSource, type ChannelSourceContext } from '../channels/registry';
 import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDesktopDetail';
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
@@ -20,6 +22,7 @@ import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedDat
 import { useHistoryCardData } from '../history/useHistoryCardData';
 import { orderHistoryCards, useHistoryCards } from '../history/useHistoryCards';
 import { useIsDesktop } from '../history/useIsDesktop';
+import { isMobileSoilUplotEnabled } from '../history/mobileSoilUplot';
 import { useOrientation } from '../history/useOrientation';
 import {
   setTimeViewportRange,
@@ -267,6 +270,30 @@ function exportRangeFromViewport(range: HistoryTimeViewport['range'], todayIso: 
   return { from, to };
 }
 
+/**
+ * Export dates when the export sheet opens. With the mobile uPlot chart active
+ * the export starts on the interval the chart shows (its end is exclusive);
+ * otherwise, or when no valid interval can be read, it keeps the page range.
+ * Dates use the same UTC calendar day as exportRangeFromViewport.
+ */
+export function exportRangeForOpen({
+  uplotActive,
+  readVisibleInterval,
+  legacyRange,
+}: {
+  uplotActive: boolean;
+  readVisibleInterval: (() => VisibleInterval) | null;
+  legacyRange: RangeValue;
+}): RangeValue {
+  if (!uplotActive || !readVisibleInterval) return legacyRange;
+  const { from, to } = readVisibleInterval();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return legacyRange;
+  return {
+    from: new Date(from).toISOString().slice(0, 10),
+    to: new Date(to - 1).toISOString().slice(0, 10),
+  };
+}
+
 function formatViewLabel(t: HistoryTranslate, view: HistoryViewMode): string {
   return t(`history.viewMode.${view}`);
 }
@@ -397,6 +424,8 @@ export const HistoryCardDetailPage: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   useEffect(() => { setSettingsOpen(false); }, [displayCard?.cardId]);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportRangeAtOpen, setExportRangeAtOpen] = useState<RangeValue | null>(null);
+  const mobileVisibleIntervalRef = useRef<(() => VisibleInterval) | null>(null);
   const defaultRange = displayCard?.defaultRange ?? '24h';
   const timeViewport = useTimeViewport(
     defaultRange,
@@ -404,6 +433,11 @@ export const HistoryCardDetailPage: React.FC = () => {
   );
   const selectedView = useMemo(() => {
     const selectableViews = selectableViewsForCard(displayCard);
+    const canStartMobileSoilChart = import.meta.env.VITE_HISTORY_UPLOT_SOIL_ENABLED === 'true'
+      && featureFlags.isReady
+      && featureFlags.historyEnabled
+      && !isDesktop
+      && displayCard?.cardType === 'soil';
     if (
       displayCard
       && userSelectedView?.cardId === displayCard.cardId
@@ -411,8 +445,8 @@ export const HistoryCardDetailPage: React.FC = () => {
     ) {
       return userSelectedView.view;
     }
-    return defaultPrimaryViewForCard(displayCard);
-  }, [displayCard, userSelectedView]);
+    return canStartMobileSoilChart ? 'line-chart' : defaultPrimaryViewForCard(displayCard);
+  }, [displayCard, featureFlags.historyEnabled, featureFlags.isReady, isDesktop, userSelectedView]);
   const shouldRenderAdvanced = selectedView === 'advanced';
   const sourceOptions = useMemo(() => sourceOptionsForCard(displayCard), [displayCard]);
   const allSourceKeys = useMemo(() => sourceOptions.map((source) => source.key), [sourceOptions]);
@@ -425,6 +459,15 @@ export const HistoryCardDetailPage: React.FC = () => {
   const selectedSourceKey = sourceOptions.length > 1 && enabledSourceKeys.length === 1
     ? enabledSourceKeys[0]
     : null;
+  const mobileSourceKey = selectedSourceKey ?? (sourceOptions.length === 0 && displayCard?.sourceDevices?.length === 1
+    ? (typeof displayCard.sourceDevices[0]?.sourceKey === 'string' && displayCard.sourceDevices[0].sourceKey.trim() ? displayCard.sourceDevices[0].sourceKey.trim() : null)
+    : null);
+  const useMobileSoilUplot = isMobileSoilUplotEnabled({
+    historyUxReady: featureFlags.isReady,
+    historyUxEnabled: featureFlags.historyEnabled,
+    isMobile: !isDesktop,
+    cardType: displayCard?.cardType,
+  }) && selectedView === 'line-chart' && displayCard?.availability.available === true;
   const exportDefaultChannels = useMemo(() => {
     if (!displayCard) return [];
     const sourceContext = exportSourceContextForCard(displayCard, selectedSourceKey);
@@ -438,6 +481,14 @@ export const HistoryCardDetailPage: React.FC = () => {
     () => exportRangeFromViewport(timeViewport.viewport.range, todayIso),
     [timeViewport.viewport.range, todayIso],
   );
+  const handleOpenExport = useCallback(() => {
+    setExportRangeAtOpen(exportRangeForOpen({
+      uplotActive: useMobileSoilUplot,
+      readVisibleInterval: mobileVisibleIntervalRef.current,
+      legacyRange: exportInitialRange,
+    }));
+    setExportOpen(true);
+  }, [exportInitialRange, useMobileSoilUplot]);
   const requestAggregation: HistoryAggregationLevel = selectedView === 'daily-min-max'
     ? 'daily'
     : timeViewport.viewport.aggregation;
@@ -483,7 +534,7 @@ export const HistoryCardDetailPage: React.FC = () => {
     aggregation: requestAggregation,
     overlays: [],
     sourceKey: selectedSourceKey,
-    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop),
+    enabled: Boolean(displayCard?.availability.available && resolvedScope && !shouldRenderAdvanced && !isDesktop && !useMobileSoilUplot),
   });
   const advancedData = useHistoryCardAdvancedData({
     scope: resolvedScope,
@@ -751,10 +802,10 @@ export const HistoryCardDetailPage: React.FC = () => {
         canExport={canExport}
         canOpenAdvanced={selectableViewsForCard(displayCard).includes('advanced')}
         onSettingsToggle={() => setSettingsOpen((open) => !open)}
-        onExport={() => setExportOpen(true)}
+        onExport={handleOpenExport}
         onAdvancedView={handleAdvancedView}
-        onResetRange={handleResetRange}
-        onRefresh={handleRefresh}
+        onResetRange={useMobileSoilUplot ? undefined : handleResetRange}
+        onRefresh={useMobileSoilUplot ? undefined : handleRefresh}
         sources={sourceOptions}
         enabledSourceKeys={enabledSourceKeys}
         onSourceKeysChange={handleSourceKeysChange}
@@ -789,14 +840,16 @@ export const HistoryCardDetailPage: React.FC = () => {
           onMonthSwipe={handleMonthSwipe}
           rangeLabel={visibleRangeLabel}
           aggregationLabel={formatAggregationLabel(t, timeViewport.viewport.aggregation)}
+          disableGestures={useMobileSoilUplot}
+          hideLegacyChrome={useMobileSoilUplot}
         >
-          <div
+          {!useMobileSoilUplot && <div
             data-testid="view-mode-label"
             className="pointer-events-none absolute left-1 top-1 z-10 rounded px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-tertiary)]"
             style={{ backgroundColor: 'color-mix(in srgb, var(--bg) 82%, transparent)' }}
           >
             {viewModeLabel}
-          </div>
+          </div>}
           {singleDeviceName && (
             <div
               data-testid="single-device-label"
@@ -806,19 +859,25 @@ export const HistoryCardDetailPage: React.FC = () => {
               {singleDeviceName}
             </div>
           )}
-          <HistoryCardVisualization
-            card={displayCard}
-            data={cardData.data}
-            selectedView={selectedView}
-            isLoading={cardData.isLoading}
-            error={cardData.error}
-            advancedData={advancedData.data}
-            advancedIsLoading={advancedData.isLoading}
-            advancedError={advancedData.error}
-            window={chartWindow}
-            onInspectDate={handleInspectDate}
-            selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
-          />
+          {useMobileSoilUplot && resolvedScope && displayCard ? (
+            <Suspense fallback={<div className="min-h-[420px]" role="status" aria-label={t('mobileUplot.loading')} />}>
+              <MobileSoilUplotHistory scope={resolvedScope} cardId={displayCard.cardId} sourceKey={mobileSourceKey} visibleIntervalReaderRef={mobileVisibleIntervalRef} />
+            </Suspense>
+          ) : (
+            <HistoryCardVisualization
+              card={displayCard}
+              data={cardData.data}
+              selectedView={selectedView}
+              isLoading={cardData.isLoading}
+              error={cardData.error}
+              advancedData={advancedData.data}
+              advancedIsLoading={advancedData.isLoading}
+              advancedError={advancedData.error}
+              window={chartWindow}
+              onInspectDate={handleInspectDate}
+              selectedCalendarDate={inspectorSelection?.kind === 'date' ? inspectorSelection.date : null}
+            />
+          )}
         </HistoryVisualizationSurface>
       </main>
       <HistoryInspectorSheet
@@ -835,7 +894,7 @@ export const HistoryCardDetailPage: React.FC = () => {
           zoneId={resolvedScope.zoneId}
           todayIso={todayIso}
           defaultChannels={exportDefaultChannels}
-          initialRange={exportInitialRange}
+          initialRange={exportRangeAtOpen ?? exportInitialRange}
         />
       )}
     </div>

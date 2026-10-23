@@ -573,5 +573,15 @@
       "button": "Fontes",
       "menuLabel": "Fontes do cartão"
     }
+  },
+  "mobileUplot": {
+    "ranges": {"day": "24 horas", "week": "7 dias", "month": "30 dias", "ninetyDays": "90 dias"},
+    "back": "Voltar", "forward": "Avançar", "latest": "Mais recente", "sensors": "Sensores",
+    "unitNotReported": "Unidade não indicada", "loading": "A carregar histórico…", "updating": "A atualizar histórico…",
+    "noData": "Sem dados neste intervalo.", "allHidden": "Todas as séries estão ocultas.", "unavailable": "Sem valor neste momento",
+    "pinnedReading": "Leitura fixada", "close": "Fechar", "aggregation": "Agregação", "points": "Pontos",
+    "loadedRange": "Intervalo carregado", "truncated": "Alguns dados não estão disponíveis neste nível de detalhe.", "showDay": "Mostrar 24 horas",
+    "retry": "Tentar novamente", "failure": "Histórico indisponível", "coverage": "Cobertura", "freshness": "Atualidade", "notLoaded": "Não carregado",
+    "seriesLegend": {"legend": "Legenda", "showAll": "Mostrar tudo", "plottedSeries": "Séries apresentadas", "seriesCount": "Séries: {{count}}", "focusAnnouncement": "Em destaque: {{label}}", "allSeriesAnnouncement": "Todas as séries apresentadas"}
   }
 }

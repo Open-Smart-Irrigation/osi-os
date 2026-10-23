@@ -573,5 +573,15 @@
       "button": "Fuentes",
       "menuLabel": "Fuentes de la tarjeta"
     }
+  },
+  "mobileUplot": {
+    "ranges": {"day": "24 horas", "week": "7 días", "month": "30 días", "ninetyDays": "90 días"},
+    "back": "Atrás", "forward": "Adelante", "latest": "Último", "sensors": "Sensores",
+    "unitNotReported": "Unidad no indicada", "loading": "Cargando historial…", "updating": "Actualizando historial…",
+    "noData": "No hay datos en este intervalo.", "allHidden": "Todas las series están ocultas.", "unavailable": "No hay ningún valor en este momento",
+    "pinnedReading": "Lectura fijada", "close": "Cerrar", "aggregation": "Agregación", "points": "Puntos",
+    "loadedRange": "Intervalo cargado", "truncated": "Algunos datos no están disponibles con este nivel de detalle.", "showDay": "Mostrar 24 horas",
+    "retry": "Reintentar", "failure": "Historial no disponible", "coverage": "Cobertura", "freshness": "Actualización", "notLoaded": "No cargado",
+    "seriesLegend": {"legend": "Leyenda", "showAll": "Mostrar todo", "plottedSeries": "Series mostradas", "seriesCount": "Series: {{count}}", "focusAnnouncement": "En destaque: {{label}}", "allSeriesAnnouncement": "Todas las series visibles"}
   }
 }
