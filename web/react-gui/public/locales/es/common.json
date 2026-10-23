@@ -85,6 +85,10 @@
       "overlaid": "Superpuesto",
       "smallMultiples": "Múltiplos pequeños"
     },
+    "autoStack": {
+      "note": "Se muestra apilado: con este ancho, los ejes de las unidades dejan muy poco espacio al gráfico.",
+      "showOverlaid": "Mostrar superpuesto de todos modos"
+    },
     "toggle": {
       "normalize": "Normalizar"
     },

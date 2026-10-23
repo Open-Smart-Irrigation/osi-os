@@ -261,7 +261,10 @@ describe('axisNameSpec via buildSmallMultiplesOption', () => {
     const opt = buildSmallMultiplesOption(s, false, resolve);
     const y = (opt.yAxis as any[])[0];
     expect(y.name).toBe('Q:swt_1 (kPa)');
-    expect(y.nameRotate).toBe(90);
+    // Cells are narrow: the title sits horizontally above the plot, not rotated
+    // beside it, where it overlapped the neighbouring cell.
+    expect(y.nameRotate).toBe(0);
+    expect(y.nameLocation).toBe('end');
     expect(y.id).toBe('swt_1#0');
     expect(y.triggerEvent).toBe(true);
   });

@@ -48,4 +48,15 @@ describe('AnalysisChartLegend', () => {
     fireEvent.keyDown(screen.getByDisplayValue('Chameleon 1: SWT 5cm'), { key: 'Escape' });
     expect(onRename).not.toHaveBeenCalled();
   });
+
+  it('truncates a long label inside the legend and keeps the full name in the title', () => {
+    const long = 'Chameleon soil probe north-east corner: soil water tension at 30 cm';
+    render(<AnalysisChartLegend series={[{ seriesId: 'a', label: long }]} onRename={vi.fn()} />);
+    const text = screen.getByText(long);
+    expect(text).toHaveClass('truncate');
+    const button = text.closest('button');
+    expect(button).toHaveClass('min-w-0', 'max-w-full');
+    expect(button?.getAttribute('title')).toContain(long);
+    expect(text.closest('li')).toHaveClass('min-w-0', 'max-w-full');
+  });
 });

@@ -8,8 +8,10 @@ const setOption = vi.fn();
 const resize = vi.fn();
 const dispose = vi.fn();
 const getDataURL = vi.fn(() => 'data:image/png;base64,AAAA');
+const handlers = new Map<string, (params: unknown) => void>();
+const on = vi.fn((event: string, handler: (params: unknown) => void) => { handlers.set(event, handler); });
 vi.mock('echarts/core', () => ({
-  init: vi.fn(() => ({ setOption, resize, dispose, getDataURL, on: vi.fn() })),
+  init: vi.fn(() => ({ setOption, resize, dispose, getDataURL, on })),
   use: vi.fn(),
 }));
 vi.mock('echarts/charts', () => ({ LineChart: {}, ScatterChart: {} }));
@@ -26,7 +28,7 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); handlers.clear(); });
 
 describe('EChart', () => {
   it('initializes echarts and applies the option', () => {
@@ -57,5 +59,23 @@ describe('EChart', () => {
     expect(setOption).toHaveBeenCalledWith(expect.objectContaining({ a: 2, animation: false }));
     expect(setOption).not.toHaveBeenCalledWith({ a: 2 }, true); // live chart never swapped
     expect(dispose).toHaveBeenCalled(); // offscreen disposed
+  });
+
+  it('keeps the legend selection the user made when a new option arrives (resize rebuilds)', () => {
+    const option = { legend: { type: 'scroll' }, series: [{ name: 'Zone 1' }, { name: 'Zone 2' }] };
+    const { rerender } = render(<EChart option={option} />);
+    handlers.get('legendselectchanged')?.({ selected: { 'Zone 1': true, 'Zone 2': false } });
+    rerender(<EChart option={{ ...option, grid: [{ left: 40 }] }} />);
+    expect(setOption).toHaveBeenLastCalledWith(
+      expect.objectContaining({ legend: { type: 'scroll', selected: { 'Zone 1': true, 'Zone 2': false } }, grid: [{ left: 40 }] }),
+      true,
+    );
+  });
+
+  it('passes an option without a legend through unchanged', () => {
+    const { rerender } = render(<EChart option={{ series: [] }} />);
+    handlers.get('legendselectchanged')?.({ selected: { A: false } });
+    rerender(<EChart option={{ series: [1] }} />);
+    expect(setOption).toHaveBeenLastCalledWith({ series: [1] }, true);
   });
 });

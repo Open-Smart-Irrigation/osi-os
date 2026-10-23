@@ -85,6 +85,10 @@
       "overlaid": "Superposé",
       "smallMultiples": "Petits multiples"
     },
+    "autoStack": {
+      "note": "Affiché empilé : à cette largeur, les axes des unités laissent trop peu de place au graphique.",
+      "showOverlaid": "Afficher superposé quand même"
+    },
     "toggle": {
       "normalize": "Normaliser"
     },
