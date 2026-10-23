@@ -611,3 +611,65 @@ describe('canonical soil tension across sources', () => {
     expect(result.sensorCount).toBe(2);
   });
 });
+
+// Owner decision 2026-10-21: current probes win over a stale trigger probe, the
+// stale trigger probe is reported on its own, and the figure names its depth or,
+// when no depth is recorded, the probe it came from.
+describe('summarizeZoneSoil stale trigger probe and probe naming', () => {
+  it('lets a current probe win over a stale probe that alone carries the trigger channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', name: 'South probe', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.value).toBe(18);
+    expect(status.channel).toBe('swt_1');
+    expect(status.stale).toBe(false);
+    expect(status.staleTrigger).toEqual({ channel: 'swt_2', observedAt: STALE });
+  });
+
+  it('reports no stale trigger probe when the trigger channel itself is current', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_2: 30 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_2');
+    expect(status.value).toBe(30);
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('reports no separate stale trigger probe when every probe is stale', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 18, swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.stale).toBe(true);
+    expect(status.channel).toBe('swt_2');
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('reports no stale trigger probe for a mean trigger or no schedule', () => {
+    const zone = [
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ];
+    expect(summarizeZoneSoil(zone, NOW, 'mean').staleTrigger).toBeNull();
+    expect(summarizeZoneSoil(zone, NOW, null).staleTrigger).toBeNull();
+  });
+
+  it('names the probes behind a single-channel figure, current contributors only', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'A', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 20 } }),
+      device({ deveui: 'B', name: 'South probe', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'C', name: 'Old probe', last_seen: STALE, latest_data: { swt_1: 90 } }),
+    ], NOW);
+    expect(status.probeNames).toEqual(['North probe', 'South probe']);
+  });
+
+  it('names no probe for a pooled mean or a blank name', () => {
+    expect(summarizeZoneSoil([
+      device({ name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 20, swt_2: 30 } }),
+    ], NOW, 'mean').probeNames).toEqual([]);
+    expect(summarizeZoneSoil([
+      device({ name: '  ', last_seen: FRESH, latest_data: { swt_1: 20 } }),
+    ], NOW).probeNames).toEqual([]);
+  });
+});

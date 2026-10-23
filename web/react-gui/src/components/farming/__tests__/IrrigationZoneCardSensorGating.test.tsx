@@ -154,7 +154,7 @@ describe('water card sensor gating', () => {
       const tile = screen.getByTestId('water-soil-tile');
       expect(tile).toHaveTextContent('No reading yet');
       expect(tile).not.toHaveTextContent('Invalid reading');
-      expect(tile).not.toHaveTextContent('No reading since');
+      expect(tile).not.toHaveTextContent('Last reading');
       expect(tile).not.toHaveTextContent('Last valid');
       expect(tile).not.toHaveTextContent('90.0 kPa');
       expect(tile.querySelector('[data-swt-status]')).toBeNull();
@@ -168,10 +168,10 @@ describe('water card sensor gating', () => {
       sensor({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 30 } }),
     ]);
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('No reading since 4 hours ago');
-    expect(tile).toHaveTextContent('Last valid 30.0 kPa');
+    expect(tile).toHaveTextContent('Last reading 4 hours ago');
+    expect(tile).toHaveTextContent('30.0 kPa');
     expect(tile).not.toHaveTextContent('Invalid reading');
-    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+    expect(tile.querySelector('[data-swt-status="moist"]')).not.toBeNull();
   });
 
   it('hides the soil tile when the zone has no soil sensor', async () => {
@@ -185,22 +185,56 @@ describe('water card sensor gating', () => {
     await openCard([sensor({ last_seen: FRESH, latest_data: { swt_1: 45.2, swt_2: 44.8 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    // The channel it came from, not the 45.0 kPa mean of two burial depths.
-    expect(tile).toHaveTextContent('Soil now · Sensor 1');
+    // The channel it came from, not the 45.0 kPa mean of two burial depths;
+    // with no depth recorded, the figure names the probe it came from.
     expect(tile).toHaveTextContent('45.2 kPa');
     expect(tile).toHaveTextContent('Moist');
-    expect(tile).not.toHaveTextContent('No reading since');
+    expect(tile.textContent).toMatch(/45\.2 kPaMoist\(Soil 1\)/);
+    expect(tile).not.toHaveTextContent('Soil now ·');
+    expect(tile).not.toHaveTextContent('Last reading');
   });
 
   it('keeps the tile and names the gap when the sensor has gone quiet', async () => {
     await openCard([sensor({ last_seen: STALE, latest_data: { swt_1: 72 } })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('No reading since 4 hours ago');
-    // The last value the sensor did report stays on screen with its timestamp,
-    // so a silent sensor never reads as a fresh measurement.
-    expect(tile.textContent).toMatch(/Last valid 72\.0 kPa · /);
-    expect(tile).not.toHaveTextContent('Dry');
+    // Owner ruling 2026-10-18 (#500): the latest stored reading keeps its value
+    // and pill; the "Last reading" line carries its age, so a silent
+    // sensor never reads as a fresh measurement.
+    expect(tile).toHaveTextContent('72.0 kPa');
+    expect(tile).toHaveTextContent('Dry');
+    expect(tile.querySelector('[data-swt-status="dry"]')).not.toBeNull();
+    expect(tile).toHaveTextContent('Last reading 4 hours ago');
+    expect(tile).not.toHaveTextContent('Last valid');
+  });
+
+  it('shows no value and no pill for an invalid reading', async () => {
+    await openCard([sensor({ last_seen: STALE, latest_data: { swt_1: 1_000_001 } })]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('Invalid reading');
+    expect(tile).not.toHaveTextContent('1000001');
+    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+  });
+
+  it('keeps the trigger comparison off a stale reading', async () => {
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard
+          zone={{ ...zone, schedule: { irrigation_zone_id: 12, trigger_metric: 'SWT_1', threshold_kpa: 30, enabled: true } } as IrrigationZone}
+          devices={[sensor({ last_seen: STALE, latest_data: { swt_1: 72 } })]}
+          unassignedDevices={[]}
+          onUpdate={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+    await screen.findByTestId('water-today-card');
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile.querySelector('[data-swt-status="dry"]')).not.toBeNull();
+    expect(tile).not.toHaveTextContent('At or past the trigger');
   });
 
   it('says so when a configured sensor has never reported', async () => {
@@ -615,10 +649,13 @@ describe('soil tile channel and verdict', () => {
       sensor({ deveui: 'FUTURE', last_seen: '2027-07-08T12:00:00.000Z', latest_data: { swt_1: 90 } }),
     ]);
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Last valid 10.0 kPa');
+    expect(tile).toHaveTextContent('10.0 kPa');
+    expect(tile).toHaveTextContent('Last reading 4 hours ago');
     expect(tile).not.toHaveTextContent('50.0 kPa');
+    expect(tile).not.toHaveTextContent('90.0 kPa');
     expect(tile).not.toHaveTextContent('2027');
-    expect(tile.querySelector('[data-swt-status]')).toBeNull();
+    expect(tile.querySelectorAll('[data-swt-status]')).toHaveLength(1);
+    expect(tile.querySelector('[data-swt-status="wet"]')).not.toBeNull();
   });
 
   const scheduledZone = {
@@ -645,8 +682,72 @@ describe('soil tile channel and verdict', () => {
     })]);
 
     const tile = screen.getByTestId('water-soil-tile');
-    expect(tile).toHaveTextContent('Soil now · 20 cm');
-    expect(tile).toHaveTextContent('56.5 kPa');
+    // Owner decision 2026-10-21: value, pill, then the depth in brackets.
+    expect(tile.textContent).toMatch(/^Soil now56\.5 kPaDry\(20 cm\)/);
+    expect(tile).not.toHaveTextContent('Soil now ·');
+  });
+
+  it('lets a current probe win over a stale trigger probe and names the stale one separately', async () => {
+    await openScheduled([
+      sensor({ deveui: 'CURRENT', name: 'North probe', last_seen: FRESH, latest_data: { swt_2: 15 } }),
+      sensor({ deveui: 'OLD', name: 'South probe', last_seen: STALE, latest_data: { swt_1: 70 } }),
+    ]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile.textContent).toMatch(/15\.0 kPaWet\(North probe\)/);
+    expect(tile).toHaveTextContent('Trigger probe: last reading 4 hours ago');
+    expect(tile).not.toHaveTextContent('70.0 kPa');
+    // The figure is not on the trigger channel, so it makes no trigger claim.
+    expect(tile).not.toHaveTextContent('trigger');
+    expect(tile).not.toHaveTextContent('Last reading');
+  });
+
+  // Cloud parity rule (2026-10-21): without a tension trigger channel the tile
+  // leads with the shallowest current channel and its depth; only SWT_AVG
+  // shows a mean.
+  it.each([null, 'DENDRO', 'VWC'])('leads with the shallowest current channel for trigger metric %s', async (metric) => {
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard
+          zone={(metric === null ? zone : { ...zone, schedule: { irrigation_zone_id: 12, trigger_metric: metric, threshold_kpa: 3, enabled: true } }) as IrrigationZone}
+          devices={[
+            sensor({ deveui: 'CURRENT', last_seen: FRESH, soilMoistureProbeDepths: { swt_1: 60, swt_2: 20 }, latest_data: { swt_1: 60, swt_2: 15 } }),
+            sensor({ deveui: 'OLD', last_seen: STALE, soilMoistureProbeDepths: { swt_1: 10 }, latest_data: { swt_1: 80 } }),
+          ]}
+          unassignedDevices={[]}
+          onUpdate={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+    await screen.findByTestId('water-today-card');
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile.textContent).toMatch(/15\.0 kPaWet\(20 cm\)/);
+    expect(tile).not.toHaveTextContent('37.5 kPa');
+    expect(tile).not.toHaveTextContent('80.0 kPa');
+    expect(tile).not.toHaveTextContent('Trigger probe');
+  });
+
+  it('names nothing after a pooled mean', async () => {
+    render(
+      <MemoryRouter>
+        <IrrigationZoneCard
+          zone={{ ...zone, schedule: { irrigation_zone_id: 12, trigger_metric: 'SWT_AVG', threshold_kpa: 30, enabled: true } } as IrrigationZone}
+          devices={[sensor({ last_seen: FRESH, soilMoistureProbeDepths: { swt_1: 20, swt_2: 60 }, latest_data: { swt_1: 20, swt_2: 40 } })]}
+          unassignedDevices={[]}
+          onUpdate={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+    await screen.findByTestId('water-today-card');
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile).toHaveTextContent('30.0 kPa');
+    expect(tile).not.toHaveTextContent('(');
   });
 
   it('shows fixed status alongside the zone trigger comparison', async () => {
