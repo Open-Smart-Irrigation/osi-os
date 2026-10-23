@@ -11,9 +11,9 @@ function seededDb() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'sentek-schema-')), 'farming.db');
   const db = new DatabaseSync(file);
   db.exec(fs.readFileSync(path.join(repo, 'database/seed-blank.sql'), 'utf8'));
-  db.exec(`INSERT OR REPLACE INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES ('cloud',1,'0016C001F11715E2','2026-01-01');
+  db.exec(`INSERT OR REPLACE INTO sync_link_state(peer_node,linked,gateway_device_eui,updated_at) VALUES ('cloud',1,'AABBCCDDEEFF0003','2026-01-01');
     INSERT INTO devices(deveui,name,type_id,created_at,updated_at,gateway_device_eui)
-    VALUES ('A840410000000120','Sentek','DRAGINO_SDI12','2026-01-01','2026-01-01','0016C001F11715E2');`);
+    VALUES ('A840410000000120','Sentek','DRAGINO_SDI12','2026-01-01','2026-01-01','AABBCCDDEEFF0003');`);
   db.exec('DELETE FROM sync_outbox');
   return db;
 }

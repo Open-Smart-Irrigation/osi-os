@@ -17,7 +17,7 @@ const { facadeDb } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROFILES = ['bcm2712', 'bcm2709'];
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 const DEVICE_EUI = 'AABBCCDDEEFF0011';
 const ZONE_UUID = '11111111-1111-4111-8111-111111111111';
 const REAL_ENTITY_NAME_MODULE = path.join(

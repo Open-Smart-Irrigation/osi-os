@@ -82,10 +82,10 @@ describe('AnalysisSeriesTray', () => {
 
   it('does not render the hub EUI / site line above the zone', () => {
     const withHub: AnalysisCatalogEntry[] = [
-      { seriesId: 'x', hubEui: '0016C001F11766E7', zoneId: 9, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
+      { seriesId: 'x', hubEui: 'AABBCCDDEEFF0004', zoneId: 9, zoneName: 'North', cardType: 'soil', sourceKey: 'root-zone', channelKey: 'swt_1', displayName: 'SWT 1', unit: 'kPa', availability: 'available', deviceName: null, depthCm: null, sourceKind: 'device' },
     ];
     render(<AnalysisSeriesTray channels={withHub} selectedIds={[]} onAdd={vi.fn()} onRemove={vi.fn()} />);
-    expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+    expect(screen.queryByText('AABBCCDDEEFF0004')).not.toBeInTheDocument();
     expect(screen.queryByText('Unknown site')).not.toBeInTheDocument();
     expect(screen.getByText('North')).toBeInTheDocument();
   });

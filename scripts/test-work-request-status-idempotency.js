@@ -48,7 +48,7 @@ function seedRequest(db, requestUuid) {
        consent_public, consent_diagnostics, diagnostics_json, gateway_device_eui,
        status_secret_hash, contact_email, submitted_at)
       VALUES (?, 1, 'bug', 'title', 'description', 'dashboard', 'annoying',
-              1, 1, '{}', '0016C001F11715E2', 'sha256:fixture', 'field@example.test', '2026-01-01T00:00:00.000Z')`)
+              1, 1, '{}', 'AABBCCDDEEFF0003', 'sha256:fixture', 'field@example.test', '2026-01-01T00:00:00.000Z')`)
     .run(requestUuid);
 }
 
@@ -106,7 +106,7 @@ async function runApplyFunc(func, payload, db, envValues) {
   return fn({ payload }, nodeApi, flowApi, envApi);
 }
 
-const ENV = { DEVICE_EUI: '0016C001F11715E2' };
+const ENV = { DEVICE_EUI: 'AABBCCDDEEFF0003' };
 
 test('work-request-status-apply and applied_commands exist with the expected shape', () => {
   const node = nodeById(FLOW_PATHS[0], 'work-request-status-apply');

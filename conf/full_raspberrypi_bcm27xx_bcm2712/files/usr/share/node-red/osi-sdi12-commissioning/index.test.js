@@ -265,7 +265,7 @@ function seedProductionRollbackReady(db) {
     'INSERT OR REPLACE INTO sync_link_state ' +
       '(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) ' +
       'VALUES (?, ?, ?, ?, ?, ?)'
-  ).run('cloud', 1, 'https://example.invalid', '7', '0016C001F11715E2', NOW);
+  ).run('cloud', 1, 'https://example.invalid', '7', 'AABBCCDDEEFF0003', NOW);
   db.native.prepare(
     'INSERT INTO devices (' +
       'deveui, name, type_id, created_at, updated_at, gateway_device_eui, ' +
@@ -276,7 +276,7 @@ function seedProductionRollbackReady(db) {
   ).run(
     DEVEUI, 'Production-trigger fixture', 'DRAGINO_SDI12',
     '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z',
-    '0016C001F11715E2', 'SENTEK_ENVIROSCAN', 'identified', null,
+    'AABBCCDDEEFF0003', 'SENTEK_ENVIROSCAN', 'identified', null,
     JSON.stringify(desired.layout), JSON.stringify(desired.depths), 1, 7
   );
   seedDeployment(db, {

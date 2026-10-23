@@ -156,7 +156,7 @@ async function analysisFixtureDb() {
     INSERT INTO users(id, username, password_hash, created_at, updated_at, user_uuid)
     VALUES (1, 'analysis-user', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-uuid');
     INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
-    VALUES (12, 'Analysis Zone', 1, 'analysis-zone', 'UTC', '0016C001F11766E7');
+    VALUES (12, 'Analysis Zone', 1, 'analysis-zone', 'UTC', 'AABBCCDDEEFF0004');
     INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, chameleon_swt1_depth_cm, created_at, updated_at)
     VALUES ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, 15, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z');
     INSERT INTO device_data(deveui, recorded_at, swt_1)
@@ -178,8 +178,8 @@ async function multiUserAnalysisFixtureDb() {
       (2, 'analysis-user-two', 'x', '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z', 'user-two-uuid');
     INSERT INTO irrigation_zones(id, name, user_id, zone_uuid, timezone, gateway_device_eui)
     VALUES
-      (12, 'User One Zone', 1, 'analysis-zone-one', 'UTC', '0016C001F11766E7'),
-      (22, 'User Two Zone', 2, 'analysis-zone-two', 'UTC', '0016C001F11766E7');
+      (12, 'User One Zone', 1, 'analysis-zone-one', 'UTC', 'AABBCCDDEEFF0004'),
+      (22, 'User Two Zone', 2, 'analysis-zone-two', 'UTC', 'AABBCCDDEEFF0004');
     INSERT INTO devices(deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
     VALUES
       ('AA00000000000001', 'Kiwi One', 'KIWI_SENSOR', 1, 12, '2026-06-01T00:00:00.000Z', '2026-06-01T00:00:00.000Z'),
@@ -219,10 +219,10 @@ test('analysisSeriesId is a stable 16-hex hash of the tuple', () => {
 test('buildAnalysisCatalog enumerates metadata-only per-source-device channels with availability', async () => {
   const db = await analysisFixtureDb();
   try {
-    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
+    const { channels, entriesById } = await helper.buildAnalysisCatalog(db, { deviceEui: 'AABBCCDDEEFF0004', userId: 1 });
     const swt1 = channels.find((entry) => entry.channelKey === 'swt_1');
     assert.ok(swt1, 'has a swt_1 series');
-    assert.strictEqual(swt1.hubEui, '0016C001F11766E7');
+    assert.strictEqual(swt1.hubEui, 'AABBCCDDEEFF0004');
     assert.strictEqual(swt1.zoneId, 12);
     assert.strictEqual(swt1.zoneName, 'Analysis Zone');
     assert.strictEqual(swt1.cardType, 'soil');
@@ -243,7 +243,7 @@ test('buildAnalysisCatalog enumerates metadata-only per-source-device channels w
 test('buildAnalysisCatalog scopes zones and devices to the authenticated user', async () => {
   const db = await multiUserAnalysisFixtureDb();
   try {
-    const { channels } = await helper.buildAnalysisCatalog(db, { deviceEui: '0016C001F11766E7', userId: 1 });
+    const { channels } = await helper.buildAnalysisCatalog(db, { deviceEui: 'AABBCCDDEEFF0004', userId: 1 });
     const zoneNames = Array.from(new Set(channels.map((entry) => entry.zoneName))).sort();
     const deviceNames = Array.from(new Set(channels.filter((entry) => entry.sourceKind === 'device').map((entry) => entry.deviceName))).sort();
     assert.deepStrictEqual(zoneNames, ['User One Zone']);

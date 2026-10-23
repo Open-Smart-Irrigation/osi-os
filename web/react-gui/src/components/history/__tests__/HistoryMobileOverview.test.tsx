@@ -291,7 +291,7 @@ describe('History mobile overview', () => {
       <HistoryOverviewCard
         zoneId={12}
         card={card({
-          cardId: '0016C001F11766E7:gateway:hub',
+          cardId: 'AABBCCDDEEFF0004:gateway:hub',
           cardType: 'gateway',
           scope: 'gateway',
           title: 'Gateway',
@@ -302,7 +302,7 @@ describe('History mobile overview', () => {
           metadata: {
             coveragePct: 100,
             coverageConfidence: 'unknown',
-            gatewayDeviceEui: '0016C001F11766E7',
+            gatewayDeviceEui: 'AABBCCDDEEFF0004',
             syncState: 'synced',
           },
         })}
@@ -314,7 +314,7 @@ describe('History mobile overview', () => {
       'href',
       '/history/zones/12/cards/gateway-hub',
     );
-    expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+    expect(screen.queryByText('AABBCCDDEEFF0004')).not.toBeInTheDocument();
   });
 
   it('keeps the overview card pin button from navigating', () => {

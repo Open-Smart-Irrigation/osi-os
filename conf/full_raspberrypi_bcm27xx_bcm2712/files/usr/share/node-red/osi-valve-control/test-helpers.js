@@ -82,7 +82,7 @@ async function linkCloud(db, opts) {
   await db.run(
     "INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) " +
     "VALUES ('cloud', 1, ?, ?, ?, datetime('now'))",
-    [o.serverUrl || 'https://sync.test.invalid', o.cloudUserId || 'cloud-user-1', o.gatewayDeviceEui || '0016C001F11715E2']
+    [o.serverUrl || 'https://sync.test.invalid', o.cloudUserId || 'cloud-user-1', o.gatewayDeviceEui || 'AABBCCDDEEFF0003']
   );
 }
 

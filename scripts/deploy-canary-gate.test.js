@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { evaluatePoll, runGate } = require('./deploy-canary-gate');
 
-const EUI = '0016C001F11715E2';
+const EUI = 'AABBCCDDEEFF0003';
 const SINCE = '2026-07-07T12:00:00.000Z';
 
 function gatewayRow(overrides = {}) {

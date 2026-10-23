@@ -24,7 +24,7 @@ const osiLib = {
   },
 };
 const PROFILES = ['bcm2712', 'bcm2709'];
-const GATEWAY_EUI = '0016C001F11715E2';
+const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 const CATALOG_HASH = 'a'.repeat(64);
 const HISTORY_AUTH_SECRET = 'fixture-history-auth-secret';
 const EXPECTED_CAPABILITIES = [

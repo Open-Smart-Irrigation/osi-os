@@ -71,7 +71,7 @@ test('exports the pure durable Journal V2 surface', () => {
 
 test('legacy authority preserves the V1 journal outbox path', async (t) => {
   const { database, db } = fixture(t);
-  const source = customSource('0016C001F11715E2');
+  const source = customSource('AABBCCDDEEFF0003');
   const result = await lifecycle.emitJournalOutbox(db, source, 'JOURNAL_VOCAB_UPSERTED');
   assert.equal(result.replication_mode, 'v1');
   assert.equal(database.prepare('SELECT COUNT(*) AS count FROM sync_outbox').get().count, 1);
@@ -81,7 +81,7 @@ test('legacy authority preserves the V1 journal outbox path', async (t) => {
 test('barrier-recorded authority queues one V2 mutation and emits no V1 event', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000001';
-  const gatewayDeviceEui = '0016C001F11715E2';
+  const gatewayDeviceEui = 'AABBCCDDEEFF0003';
   database.prepare(
     'INSERT INTO journal_authority_state(' +
       'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
@@ -104,7 +104,7 @@ test('barrier-recorded authority queues one V2 mutation and emits no V1 event', 
 test('blocked authority remains on the V1 path until a barrier is recorded', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000002';
-  const gatewayDeviceEui = '0016C001F11715E2';
+  const gatewayDeviceEui = 'AABBCCDDEEFF0003';
   database.prepare(
     'INSERT INTO journal_authority_state(' +
       'workspace_uuid,gateway_device_eui,authority_state,state,updated_at' +
@@ -122,7 +122,7 @@ test('blocked authority remains on the V1 path until a barrier is recorded', asy
 test('blocked authority stays on V2 when its barrier was already recorded', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000004';
-  const gatewayDeviceEui = '0016C001F11715E2';
+  const gatewayDeviceEui = 'AABBCCDDEEFF0003';
   database.prepare(
     'INSERT INTO journal_authority_state(' +
       'workspace_uuid,gateway_device_eui,authority_state,state,barrier_uuid,updated_at' +
@@ -145,7 +145,7 @@ test('blocked authority stays on V2 when its barrier was already recorded', asyn
 test('barrier-recorded local entry queues a validated V2 create without a V1 event', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000001';
-  const gatewayDeviceEui = '0016C001F11715E2';
+  const gatewayDeviceEui = 'AABBCCDDEEFF0003';
   const sourceEntry = JSON.parse(JSON.stringify(golden.mutation_vectors.find(function(vector) {
     return vector.input.operation === 'ENTRY_CREATE';
   }).input.candidate.entry));
@@ -190,7 +190,7 @@ test('barrier-recorded local entry queues a validated V2 create without a V1 eve
 test('barrier-recorded correction preserves a cloud-origin entry origin in V2', async (t) => {
   const { database, db } = fixture(t);
   const workspaceUuid = '20000000-0000-4000-8000-000000000003';
-  const gatewayDeviceEui = '0016C001F11715E2';
+  const gatewayDeviceEui = 'AABBCCDDEEFF0003';
   const sourceEntry = JSON.parse(JSON.stringify(golden.mutation_vectors.find(function(vector) {
     return vector.input.operation === 'ENTRY_CORRECT';
   }).input.candidate.entry));
@@ -256,7 +256,7 @@ function workerConfig(t) {
   const mediaRoot = fs.realpathSync(fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-journal-media-')));
   t.after(() => fs.rmSync(mediaRoot, { recursive: true, force: true }));
   return {
-    gateway_device_eui: '0016C001F11715E2',
+    gateway_device_eui: 'AABBCCDDEEFF0003',
     server_url: 'https://cloud.example.org',
     sync_token: 'token-abc',
     release_id: '0.7.0',

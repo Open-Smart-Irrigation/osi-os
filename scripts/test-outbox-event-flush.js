@@ -351,7 +351,7 @@ function buildHarness(store, nowMs, outboxRows = OUTBOX_ROWS) {
     queries,
     sandbox: {
       osiDb: { Database },
-      env: { get: (key) => ({ DEVICE_EUI: '0016C001F11715E2', DEVICE_EUI_CONFIDENCE: 'authoritative' }[key]) },
+      env: { get: (key) => ({ DEVICE_EUI: 'AABBCCDDEEFF0003', DEVICE_EUI_CONFIDENCE: 'authoritative' }[key]) },
       flow: { get: (k) => store.get(k), set: (k, v) => { store.set(k, v); } },
       global: { get: (k) => (k === 'fs' ? { existsSync: () => false, readFileSync: () => '{}' } : undefined) },
       node: { warn: (m) => warnings.push(String(m)), error: (m) => warnings.push(String(m)), log: () => {} },
