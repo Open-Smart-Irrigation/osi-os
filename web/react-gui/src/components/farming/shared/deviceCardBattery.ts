@@ -51,15 +51,3 @@ export function getBatteryPercentFromVoltage(value: unknown): number | null {
 export function isDerivedBatteryPercent(input: { batPct: unknown; batV?: unknown }): boolean {
   return getValidBatteryPercent(input.batPct) == null && getBatteryPercentFromVoltage(input.batV) != null;
 }
-
-export function buildDeviceFooterMeta(input: {
-  batPct: unknown;
-  batV?: unknown;
-  lastSeenLabel: string;
-}): string {
-  const reported = getValidBatteryPercent(input.batPct);
-  const batteryPercent = reported ?? getBatteryPercentFromVoltage(input.batV);
-  if (batteryPercent == null) return input.lastSeenLabel;
-  const approximately = reported == null ? '≈ ' : '';
-  return `🔋 ${approximately}${batteryPercent}% · ${input.lastSeenLabel}`;
-}

@@ -734,11 +734,6 @@
       "title": "Interprétation Tensiomark",
       "qualification": "Les mesures sont en pF, la température étant transmise en premier. La plage d'étalonnage n'est pas vérifiée.",
       "calibrationRange": "Plage d'étalonnage : non vérifiée",
-      "addressDepth": "Adresse {{address}} · {{depth}}",
-      "depthUnknown": "Profondeur inconnue",
-      "depthCm": "{{depth}} cm",
-      "swt": "SWT",
-      "soilTemperature": "Température du sol",
       "addSensor": "Ajouter un capteur",
       "confirmation": "Je confirme que le capteur transmet d'abord la température, puis le pF.",
       "confirmRequired": "Avant d'enregistrer, confirmez que le capteur transmet d'abord la température, puis le pF.",
@@ -772,7 +767,18 @@
     "removeSubtitle": "L'appareil sera dissocié de votre compte.",
     "yesRemove": "Oui, supprimer",
     "removing": "Suppression en cours...",
-    "failedToRemove": "Impossible de supprimer l'appareil"
+    "failedToRemove": "Impossible de supprimer l'appareil",
+    "badge": "SDI-12",
+    "noProfile": "Aucun profil de sonde",
+    "detecting": "Détection de la sonde (en attente)",
+    "invalidLayout": "La configuration des canaux Sentek enregistrée n'est pas valide. Ouvrez les paramètres de l'appareil et enregistrez une configuration valide avant de vous fier aux mesures du sol.",
+    "status": {
+      "pending_identify": "Identification en cours",
+      "identified": "Identifiée",
+      "unmatched": "Non reconnue",
+      "manual": "Définie manuellement",
+      "unknown": "État inconnu"
+    }
   },
   "deviceRemoval": {
     "titleZone": "Retirer de cette zone ?",
@@ -914,15 +920,11 @@
     "chameleonNeedsMod3": "Chameleon SWT ne peut être activé qu'une fois MOD3 actif."
   },
   "watermark": {
-    "sectionTitle": "Tension de l'eau du sol WATERMARK",
-    "probe": "Sonde {{n}}",
-    "depthUnset": "Profondeur non définie",
     "wet": "Humide",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Résistance {{value}}",
     "resistanceUpTo": "Résistance ≤ {{value}}",
     "offset": "Décalage {{value}} mV",
-    "soilTemp": "Sol {{value}} °C",
     "soilTempNotMeasured": "Température du sol non mesurée",
     "dieTemp": "Carte {{value}} °C",
     "supply": "Alimentation {{value}} V",
@@ -997,5 +999,31 @@
     "onlyCandidate": "Le seul pluviomètre de cette zone est utilisé.",
     "loadFailed": "Les pluviomètres de cette zone n'ont pas pu être chargés.",
     "banner": "Deux pluviomètres transmettent pour cette zone. Choisissez-en un dans les paramètres de la zone."
+  },
+  "soilTension": {
+    "sectionTitle": "Tension de l'eau du sol",
+    "channel": "Tension du sol {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Sol {{value}} °C",
+    "soilTempSeries": "Température du sol {{channel}}",
+    "invalidReading": "Mesure invalide",
+    "noReadings": "Aucune mesure du sol disponible.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Vu à l'instant",
+      "lastSeenMinutes": "Vu il y a {{count}} min",
+      "lastSeenHours": "Vu il y a {{count}} h",
+      "lastSeenAt": "Vu le {{date}}",
+      "neverSeen": "Jamais vu",
+      "battery": "Batterie",
+      "batteryLow": "Batterie faible"
+    },
+    "settings": "Paramètres de l'appareil",
+    "closeSettings": "Fermer les paramètres de l'appareil"
   }
 }

@@ -28,7 +28,7 @@ const EN = block('en');
 const PENDING_HUMAN_LUGANDA = new Set(EN.keys());
 
 test('Tensiomark strings exist in every locale with the English key set and placeholders', () => {
-  assert.ok(EN.size >= 30, 'English Tensiomark block is unexpectedly small');
+  assert.ok(EN.size >= 25, 'English Tensiomark block is unexpectedly small');
   for (const locale of [...EUROPEAN, 'lg']) {
     const values = block(locale);
     assert.deepEqual([...values.keys()].sort(), [...EN.keys()].sort(), `${locale} key set`);

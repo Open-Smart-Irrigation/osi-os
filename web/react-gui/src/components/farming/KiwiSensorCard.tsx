@@ -329,11 +329,6 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   const { light_lux, ambient_temperature, relative_humidity } = device.latest_data;
   const [swt1, swt2] = canonicalSwtChannels(device.latest_data);
   const { swtUnit } = useDisplayPreferences();
-  const lastSeenStr = device.last_seen ?? null;
-  const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
-  const minutesAgo = lastSeen
-    ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60))
-    : null;
   const [showConfig, setShowConfig] = useState(false);
   const [monitor, setMonitor] = useState<SensorDef | null>(null);
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
@@ -356,7 +351,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
   };
 
   return (
-    <div className="rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl p-4 border shadow-sm transition-colors bg-[var(--surface)] border-[var(--border)] hover:border-[var(--focus)]">
       <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
@@ -469,12 +464,7 @@ export const KiwiSensorCard: React.FC<KiwiSensorCardProps> = ({
         </div>
       </div>
 
-      <DeviceCardFooter
-        lastSeenLabel={minutesAgo !== null
-          ? t('kiwiSensor.lastSeen', { minutes: minutesAgo })
-          : t('kiwiSensor.neverSeen', { defaultValue: 'Never seen' })}
-        batteryPercent={device.latest_data?.bat_pct}
-      />
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={device.latest_data?.bat_pct} rawBatteryVoltage={device.latest_data?.bat_v} />
 
       {monitor && (
         <SensorMonitor

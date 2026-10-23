@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Device } from '../../../types/farming';
@@ -11,11 +11,17 @@ const STATUS_LABELS: Record<string, string> = {
   'history.soil.state.wet': 'Wet',
   'history.soil.state.moist': 'Moist',
   'history.soil.state.dry': 'Dry',
-  'sdi12.tensiomark.addressDepth': 'Address {{address}} · {{depth}}',
-  'sdi12.tensiomark.depthUnknown': 'Depth unknown',
-  'sdi12.tensiomark.depthCm': '{{depth}} cm',
-  'sdi12.tensiomark.swt': 'SWT',
-  'sdi12.tensiomark.soilTemperature': 'Soil temperature',
+  'soilTension.sectionTitle': 'Soil tension',
+  'soilTension.channel': 'Soil tension {{channel}}',
+  'soilTension.depthCm': '({{depth}} cm)',
+  'soilTension.soilTemp': 'Soil {{value}} °C',
+  'soilTension.soilTempSeries': 'Soil temperature {{channel}}',
+  'soilTension.invalidReading': 'Invalid reading',
+  'soilTension.noReadings': 'No soil readings available.',
+  'sdi12Soil.detecting': 'Detecting probe (pending)',
+  'sdi12Soil.invalidLayout': 'The saved Sentek channel layout is invalid. Open device settings and save a valid layout before relying on soil readings.',
+  'sdi12Soil.status.unmatched': 'Not recognised',
+  'sdi12Soil.status.pending_identify': 'Identifying',
 };
 
 vi.mock('react-i18next', () => ({
@@ -124,7 +130,8 @@ describe('Sdi12SoilCard', () => {
       latest: { bat_v: 3.3 },
     })} />);
 
-    expect(screen.getByText(/detecting probe|pending/i)).toBeInTheDocument();
+    expect(screen.getByText('Detecting probe (pending)')).toBeInTheDocument();
+    expect(screen.getByText('Identifying')).toBeInTheDocument();
   });
 
   it('renders the status chip from the device status field', () => {
@@ -132,7 +139,8 @@ describe('Sdi12SoilCard', () => {
       sdi12_probe_status: 'unmatched',
     })} />);
 
-    expect(screen.getByText('unmatched')).toBeInTheDocument();
+    expect(screen.getByText('Not recognised')).toBeInTheDocument();
+    expect(screen.queryByText('unmatched')).not.toBeInTheDocument();
   });
 
   it('shows the client-derived no-response state once pending_identify has aged past the timeout', () => {
@@ -190,10 +198,10 @@ describe('Sdi12SoilCard', () => {
     })} />);
     expect(screen.getByText('30.2 kPa')).toBeInTheDocument();
     expect(screen.getByText('Moist')).toBeInTheDocument();
-    expect(screen.getAllByText(/Soil temperature/)).toHaveLength(1);
+    expect(screen.getAllByText('Soil 21.5 °C')).toHaveLength(1);
   });
 
-  it('renders strict Tensiomark address-mapped SWT and temperature pairs with honest null depth', () => {
+  it('renders each Tensiomark probe as a soil tension tile with its temperature and honest null depth', () => {
     render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       deveui: 'A840410000000207',
       sdi12_probe_profile: 'TENSIOMARK',
@@ -208,12 +216,13 @@ describe('Sdi12SoilCard', () => {
       latest: { swt_1: 1000, soil_temp_1: 16.1, swt_2: 0.1, soil_temp_2: 18.25, bat_v: 3.606 },
     })} />);
 
-    expect(screen.getByText('Address 1 · Depth unknown')).toBeInTheDocument();
-    expect(screen.getByText('Address 4 · 40 cm')).toBeInTheDocument();
-    expect(screen.getByText('1000.0 kPa')).toBeInTheDocument();
-    expect(screen.getByText('0.1 kPa')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Soil temperature, Address 4 · 40 cm: 18.3 °C' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'SWT, Address 1 · Depth unknown: 1000.0 kPa' })).toBeInTheDocument();
+    // The probe of known depth comes first; the unknown depth goes last.
+    expect(screen.getAllByTestId('soil-tension-tile').map((tile) => tile.querySelector('p')?.textContent))
+      .toEqual(['Soil tension 2 (40 cm)', 'Soil tension 1']);
+    expect(within(screen.getByRole('group', { name: 'Soil tension 1' })).getByRole('button', { name: '1000.0 kPa' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Soil tension 2 (40 cm)' })).getByRole('button', { name: '0.1 kPa' })).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Soil tension 2 (40 cm)' })).getByRole('button', { name: 'Soil 18.3 °C' })).toBeInTheDocument();
+    expect(screen.queryByText(/Address/)).not.toBeInTheDocument();
   });
 
   it('uses the common water-state badge for an explicit Tensiomark layout', () => {
@@ -249,7 +258,9 @@ describe('Sdi12SoilCard', () => {
     })} />);
 
     expect(screen.queryByText('sdi12.tensiomark.calibrationRange')).not.toBeInTheDocument();
-    expect(screen.getAllByText('—')).toHaveLength(4);
+    // One dash per probe; a missing soil temperature leaves no line.
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByText(/°C/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Wet|Moist|Dry/)).not.toBeInTheDocument();
   });
 
@@ -363,9 +374,10 @@ describe('Sdi12SoilCard', () => {
 
     expect(screen.getByText('1.29 pF')).toBeInTheDocument();
     expect(screen.getByText('0.00 pF')).toBeInTheDocument();
-    expect(screen.getByText('14.0 °C')).toBeInTheDocument();
-    expect(screen.getByText('14.9 °C')).toBeInTheDocument();
-    expect(screen.getAllByText(/Depth unknown/)).toHaveLength(2);
+    expect(screen.getByText('Soil 14.0 °C')).toBeInTheDocument();
+    expect(screen.getByText('Soil 14.9 °C')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Soil tension 1' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Soil tension 2' })).toBeInTheDocument();
   });
 
 });
@@ -430,7 +442,8 @@ describe('Sdi12SoilCard history', () => {
     const getHistory = await historyMock();
     render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
       deveui: 'A840410000000001',
-      sdi12_probe_profile: 'TENSIOMARK',
+      // No identified profile: the generic SDI-12 rows (a Tensiomark reports no EC).
+      sdi12_probe_profile: null,
       soil_moisture_probe_depths_json: { swt_2: 30 },
       latest: { swt_2: 30.2, soil_temp_2: 21.5, soil_ec_2: 410 },
     })} />);
@@ -444,7 +457,7 @@ describe('Sdi12SoilCard history', () => {
 
   it('offers no history for a key the gateway does not serve', () => {
     render(<Sdi12SoilCard removeContext="farm" device={makeDevice({
-      sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_probe_profile: null,
       latest: { soil_temp_9: 18.5, vwc_9: 20.1 } as Device['latest_data'],
     })} />);
     expect(screen.getByText('18.5 °C').closest('button')).toBeNull();
@@ -460,11 +473,11 @@ describe('Sdi12SoilCard history', () => {
       sdi12_probe_profile: 'TENSIOMARK',
       latest: { swt_1: 1.97 },
     })} />);
-    fireEvent.click(screen.getByRole('button', { name: 'SWT, #1: 1.29 pF' }));
-    expect(await screen.findByRole('heading', { name: 'SWT · #1 (pF)' })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Soil tension 1' })).getByRole('button', { name: '1.29 pF' }));
+    expect(await screen.findByRole('heading', { name: 'Soil tension 1 (pF)' })).toBeInTheDocument();
     expect(screen.getAllByText('1.29 pF').length).toBeGreaterThan(1);
     act(() => writeDisplayPreferences({ swtUnit: 'kPa' }));
-    expect(await screen.findByRole('heading', { name: 'SWT · #1 (kPa)' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Soil tension 1 (kPa)' })).toBeInTheDocument();
     expect(screen.getAllByText('2.0 kPa').length).toBeGreaterThan(1);
     expect(getHistory).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
