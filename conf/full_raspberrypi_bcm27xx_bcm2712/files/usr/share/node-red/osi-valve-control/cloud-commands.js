@@ -206,15 +206,18 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
   const device = await getDevice(db, eui);
   if (!device) return { ok: false, error: 'not_found' };
   if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
-  const q = await push.queuePushes({ db, deviceEui: eui, appId, pushes: [push.buildStatusPush(code)], flushQueue, warn });
+  // CMD-04 PR0 (C): a snapshot carrying the new status, as the REST route does.
+  // R5 M3: a pause never depends on plan validity. R5 N2: the settings are written inside the
+  // snapshot transaction.
   const tz = device.zone_timezone || tzFallback;
   const lp = P.localParts(now, tz);
-  await store.upsertSettings(db, eui, {
+  const settingsPatch = {
     scheduler_status: status,
     skip_today_date: status === 'SKIP_TODAY'
       ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}`
       : null,
-  });
+  };
+  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, now, flushQueue, warn, settingsPatch, statusOnlyOnConflict: true });
   return { ok: true, downlinks: q.messages || [] };
 }
 

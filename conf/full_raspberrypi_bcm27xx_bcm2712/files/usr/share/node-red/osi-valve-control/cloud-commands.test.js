@@ -10,6 +10,15 @@ const EUI = '0016C001F1000001';
 const noopFlush = async () => {};
 const noopWarn = () => {};
 
+// CMD-04 PR0 (C): a plan or status command writes a snapshot the valve tick sends after the
+// debounce window, so the command itself returns no downlinks. The pending snapshot is the
+// still-QUEUED plan/status rows named by the pending marker.
+async function pendingSnapshot(db, eui) {
+  const marker = await store.getSnapshotPending(db, eui || EUI);
+  if (!marker) return [];
+  return store.queuedPushesById(db, eui || EUI, marker.push_ids);
+}
+
 async function apply(db, cmd, extra) {
   return applyCloudCommand(Object.assign({ db, cmd, appId: 'app', flushQueue: noopFlush, warn: noopWarn, now: new Date() }, extra || {}));
 }
@@ -57,7 +66,8 @@ test('UPSERT_VALVE_SCHEDULE inserts a new WEEKLY schedule and compiles a plan pu
     kind: 'WEEKLY', weekdays_mask: 0x7F, start_time: '06:00', duration_minutes: 15, enabled: true,
   });
   assert.equal(out.ok, true);
-  assert.ok(out.downlinks.length >= 1, 'a WEEKLY upsert must compile and queue at least one downlink');
+  assert.deepEqual(out.downlinks, [], 'the snapshot leaves with the valve tick, not with the command');
+  assert.equal((await pendingSnapshot(db)).length, 8, 'a WEEKLY upsert must compile a full snapshot (7 weekdays + status)');
   const row = await db.get('SELECT * FROM valve_schedules WHERE schedule_uuid=?', ['a1111111-0000-0000-0000-000000000001']);
   assert.equal(row.device_eui, EUI);
   assert.equal(row.duration_minutes, 15);
@@ -130,7 +140,7 @@ test('UPSERT_VALVE_SCHEDULE revives a same-valve tombstone and advances its sync
 
   const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: uuid, kind: 'WEEKLY', weekdays_mask: 1, start_time: '07:30', duration_minutes: 20, enabled: true });
   assert.equal(out.ok, true);
-  assert.ok(out.downlinks.length >= 1, 'a revived WEEKLY schedule must compile and queue a plan push');
+  assert.equal((await pendingSnapshot(db)).length, 8, 'a revived WEEKLY schedule must compile a snapshot');
   const revived = await db.get('SELECT deleted_at, start_time, duration_minutes, sync_version FROM valve_schedules WHERE schedule_uuid=?', [uuid]);
   assert.equal(revived.deleted_at, null);
   assert.equal(revived.start_time, '07:30');
@@ -455,9 +465,12 @@ test('terminal intent replacement rolls back with the tombstone and old intent i
 test('RESEND_VALVE_PLAN force-recompiles even when nothing changed', async () => {
   const { db } = await tempDb();
   await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: 'a1111111-0000-0000-0000-000000000008', kind: 'WEEKLY', weekdays_mask: 1, start_time: '06:00', duration_minutes: 15, enabled: true });
+  const before = await pendingSnapshot(db);
   const out = await apply(db, { commandType: 'RESEND_VALVE_PLAN', device_eui: EUI });
   assert.equal(out.ok, true);
-  assert.ok(out.downlinks.length >= 1);
+  const after = await pendingSnapshot(db);
+  assert.equal(after.length, 8);
+  assert.notDeepEqual(after.map((r) => r.push_id), before.map((r) => r.push_id), 'a fresh snapshot, not the old rows');
 });
 
 test('RESEND_VALVE_PLAN on a non-valve device is rejected', async () => {
@@ -472,7 +485,8 @@ test('SET_VALVE_SCHEDULER_STATUS persists status and queues a status push', asyn
   const { db } = await tempDb();
   const out = await apply(db, { commandType: 'SET_VALVE_SCHEDULER_STATUS', device_eui: EUI, status: 'SKIP_TODAY' });
   assert.equal(out.ok, true);
-  assert.equal(out.downlinks.length, 1);
+  const snap = await pendingSnapshot(db);
+  assert.deepEqual(snap.map((r) => [r.fport, r.payload_hex]), [[21, '31']], 'never-programmed valve: the status alone');
   const row = await db.get('SELECT scheduler_status, skip_today_date FROM valve_settings WHERE device_eui=?', [EUI]);
   assert.equal(row.scheduler_status, 'SKIP_TODAY');
   assert.ok(row.skip_today_date);
@@ -841,4 +855,12 @@ test('F144: every schedule-mutating rejection stays well inside the cloud mirror
     assert.equal(typeof r.error, 'string');
     assert.ok(r.error.length > 0 && r.error.length <= 255, 'the bridge ships out.error verbatim as the command_ack error field: ' + r.error.length + ' chars');
   }
+});
+
+test('R5 M3: SET_VALVE_SCHEDULER_STATUS is not refused by a plan_conflict in the stored schedules', async () => {
+  const { db } = await tempDb();
+  for (let i = 1; i <= 5; i += 1) await store.insertSchedule(db, { schedule_uuid: 'x' + i, device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: 4, start_time: '0' + i + ':00', duration_minutes: 10, timezone: 'UTC', enabled: 1 });
+  const out = await apply(db, { commandType: 'SET_VALVE_SCHEDULER_STATUS', device_eui: EUI, status: 'DEACTIVATED' });
+  assert.equal(out.ok, true);
+  assert.deepEqual((await pendingSnapshot(db)).map((r) => [r.fport, r.payload_hex]), [[21, '32']]);
 });

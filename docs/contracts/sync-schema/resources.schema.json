@@ -750,6 +750,8 @@
                         "queued": {"type": "integer", "minimum": 0},
                         "acked": {"type": "integer", "minimum": 0},
                         "failed": {"type": "integer", "minimum": 0},
+                        "lost": {"type": "integer", "minimum": 0, "description": "CMD-04 PR0 (owner decision Q02 c), optional and additive: plan slots whose newest push (a row of the latest plan snapshot) stayed unacknowledged past the 24 h sweep and is not re-sent automatically (stored edge-side as state FAILED, error stale_unconfirmed; not_resent_q02c is read the same way). A subset of `failed`, so a consumer that ignores this key still counts them as failed. Rendered as \"device may not hold this plan\"."},
+                        "scheduler_status_lost": {"type": "boolean", "description": "CMD-04 PR0, optional and additive: the newest SCHEDULER_STATUS push (pause, skip today, resume) stayed unacknowledged past the 24 h sweep and is not re-sent automatically, so the valve may still run the previous scheduler state."},
                         "last_plan_acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
                         "weekday_states": {
                             "type": "array",
@@ -760,7 +762,8 @@
                                 "properties": {
                                     "weekday": {"type": "integer", "minimum": 0, "maximum": 6},
                                     "state": {"type": "string", "enum": ["QUEUED", "ACKED", "FAILED"]},
-                                    "acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+                                    "acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                                    "lost": {"type": "boolean", "description": "CMD-04 PR0, optional: present and true when this weekday's newest push stayed unacknowledged past the 24 h sweep and is LOST (state is then FAILED, which keeps the enum an older cloud renders)."}
                                 }
                             }
                         }

@@ -8,10 +8,15 @@ test('demo-only machine Luganda fills valve fallback strings and preserves inter
   const overrides=read('demo/locales/lg-valves.json') as Record<string,string>;
   const copy={...flatten(read('public/locales/lg/valves.json')),...overrides};
   const shared=new Set(['openDialog.liters','scheduleDialog.noWindows','scheduleDialog.preview','scheduleDialog.previewLiters','settingsDialog.gen1','settingsDialog.gen2','format.temperature']);
+  // CMD-04 valve text waits for a human Luganda pass (docs/i18n/pending-luganda-translations.md).
+  // The demo shows the English source text for it, never machine Luganda; a human pass drops
+  // the key from this list.
+  const pendingKeys=new Set(['planLost','scheduleDialog.push.LOST']);
   assert.deepEqual(Object.keys(copy).sort(),Object.keys(english).sort());
   for(const [key,value] of Object.entries(english)) {
     assert.deepEqual((copy[key].match(/\{\{[^}]+\}\}/g)??[]).sort(),(value.match(/\{\{[^}]+\}\}/g)??[]).sort(),key);
-    if(!shared.has(key))assert.notEqual(copy[key],value,key);
+    if(pendingKeys.has(key)){assert.equal(copy[key],value,key);assert.equal(Object.hasOwn(overrides,key),false,key);}
+    else if(!shared.has(key))assert.notEqual(copy[key],value,key);
   }
   assert.equal(read('public/locales/lg/valves.json').title,'Valve control');
 });

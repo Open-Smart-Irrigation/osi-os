@@ -28,7 +28,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Unclaim reports what happened to the valve plan.** Both unclaim paths now
   report one cleanup outcome: `not_applicable`, `not_attempted` (for example
   a missing helper module), `failed`, `clearing_not_sent` (no
-  `CHIRPSTACK_APP_ACTUATORS`), `clearing_sent` or `no_plan_to_clear`, with
+  `CHIRPSTACK_APP_ACTUATORS`), `clearing_scheduled` (the valve tick sends the
+  clearing snapshot 30-90 s later), `clearing_sent` or `no_plan_to_clear`, with
   `may_still_hold_plan` and `plan_clear_confirmed: false`. The valve has no
   read-back, so a sent clearing plan is not reported as a cleared plan. The
   local `DELETE /api/devices/:deveui` still answers 200 when the device was

@@ -106,6 +106,9 @@ async function clearUnclaimedValve(db, eui, o, now, warn) {
     pushes_queued: queued.rows.length,
     messages: Array.isArray(queued.messages) ? queued.messages : [],
     cancelled,
+    // CMD-04 PR0 (design C): the clearing snapshot is not handed to ChirpStack here; the valve
+    // tick sends it once the debounce window has passed (30-90 s later).
+    clearing_deferred: !!queued.deferred,
     // Both flushes drop every downlink queued for this device, not only the unclaim's own
     // (owner decision D19(a)): the caller reports that collateral instead of hiding it.
     whole_queue_flushed: !!((cancelled && cancelled.ok && cancelled.queueScope === 'full_flush') || queued.flushed),
@@ -183,7 +186,9 @@ async function runUnclaimCleanup(options) {
   let outcome = 'no_plan_to_clear';
   let reason = null;
   if (result.pushes_queued > 0 && !appId) { outcome = 'clearing_not_sent'; reason = 'actuator_application_unset'; }
-  else if (result.pushes_queued > 0) outcome = 'clearing_sent';
+  // Rehearsal merge W1+W9: after PR0 the clearing leaves with the valve tick, so the outcome
+  // must not say "sent" while clearing_downlinks_sent is 0.
+  else if (result.pushes_queued > 0) outcome = result.clearing_deferred ? 'clearing_scheduled' : 'clearing_sent';
   if (cancel.state === 'failed') reason = (reason ? reason + '; ' : '') + 'in_flight_cancel_failed: ' + cancel.error;
   return {
     cleanup: cleanupOutcome({
