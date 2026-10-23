@@ -1711,10 +1711,15 @@ expectIncludes('Build History Manifest', 'SELECT table_name, segment_key, hash_v
 expectIncludes('Build History Manifest', "].join('\\n')", 'uses a real newline separator for history manifest SQL');
 expectExcludes('Build History Manifest', "].join('\\\\n')", 'does not use a literal backslash-n separator for history manifest SQL');
 expectIncludes('Build History Manifest', '/api/v1/sync/edge/history/manifests', 'posts history manifests to the v1 manifest endpoint');
+expectIncludes('Build History Manifest', "SELECT value FROM app_settings WHERE key = 'history_manifest_cursor'", 'pages history manifests with a cursor that survives a restart');
+expectIncludes('Build History Manifest', "WHERE peer_node = 'cloud' AND hash_version = 1", 'sends only hash v1 segments in a protocol-1 manifest');
+expectExcludes('Build History Manifest', "'LIMIT 500'", 'does not cap history manifests at the first 500 segments');
 expectIncludes('Build History Manifest', 'if (!syncToken)', 'history manifest fails closed without sync token');
 expectIncludes('Build History Manifest', 'lastHistoryManifestIdleAt', 'history manifest builder skips empty manifest posts');
 expectIncludes('Build History Manifest', 'return null', 'history manifest stops before unauthenticated post');
 expectIncludes('Mark History Manifest ACK', 'repairRequested', 'turns manifest mismatches into repair work');
+expectIncludes('Mark History Manifest ACK', 'const REPAIR_CAP = 2000;', 'bounds the repair keys one manifest answer may queue');
+expectIncludes('Build History Batch', "flow.get('history_repair_turns')", 'lets new tail rows go out between repair batches');
 expectIncludes('Mark History Manifest ACK', "change_kind='repair'", 'persists requested history repairs');
 expectExcludes('Mark History Manifest ACK', 'DELETE FROM', 'never treats manifests as deletion instructions');
 expectFileIncludes('seed-blank.sql', seedSqlSource, 'trg_sync_device_data_dirty_au', 'raw correction dirty-key trigger exists before raw trigger removal');
