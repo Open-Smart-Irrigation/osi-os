@@ -12,7 +12,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string, options?: { value?: string }) => key === 'watermark.soilTemp'
+  useTranslation: () => ({ t: (key: string, options?: { value?: string }) => key === 'soilTension.soilTemp'
     ? `Soil ${options?.value} °C`
     : STATUS_LABELS[key] ?? key }),
 }));
@@ -151,7 +151,7 @@ describe('DraginoTempCard WATERMARK probe section', () => {
 
   it('renders the WATERMARK section and its values when latest_data.watermark is present', () => {
     render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
-    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+    expect(screen.getByText('soilTension.sectionTitle')).toBeInTheDocument();
     expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
     expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
     expect(screen.getByText(/16\.8/)).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe('DraginoTempCard WATERMARK probe section', () => {
 
   it('renders no WATERMARK section when latest_data.watermark is absent', () => {
     render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
-    expect(screen.queryByText('watermark.sectionTitle')).not.toBeInTheDocument();
+    expect(screen.queryByText('soilTension.sectionTitle')).not.toBeInTheDocument();
   });
 
   it('hides the Chameleon SWT block on a board reflashed to WATERMARK that still has chameleon_enabled set', () => {
@@ -172,7 +172,7 @@ describe('DraginoTempCard WATERMARK probe section', () => {
       chameleon_swt3_depth_cm: 30,
     }} />);
     expect(screen.queryByText('Chameleon SWT')).not.toBeInTheDocument();
-    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+    expect(screen.getByText('soilTension.sectionTitle')).toBeInTheDocument();
   });
 
   it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {

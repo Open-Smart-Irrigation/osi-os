@@ -38,31 +38,6 @@ function formatNumber(value: number | null | undefined, decimals: number, unit: 
   return `${numeric.toFixed(decimals)} ${unit}`;
 }
 
-function lastSeenLabel(lastSeen: string | null | undefined): string {
-  if (!lastSeen) return 'Never seen';
-  const timestamp = new Date(lastSeen).getTime();
-  if (!Number.isFinite(timestamp)) return 'Never seen';
-  const diff = Math.floor((Date.now() - timestamp) / 60000);
-  if (diff < 1) return 'Last seen: just now';
-  if (diff < 60) return `Last seen: ${diff} minutes ago`;
-  return `Last seen: ${Math.floor(diff / 60)} hours ago`;
-}
-
-/**
- * Reception time of the last report in the farm's timezone (the gateway's `rain_day_timezone`),
- * with the zone named ("UTC" when the gateway gave none), so a UTC time is not read as farm time.
- */
-function formatReportTime(lastSeen: string | null | undefined, timeZone: unknown, locale: string | undefined): string {
-  const timestamp = lastSeen ? new Date(lastSeen).getTime() : NaN;
-  if (!Number.isFinite(timestamp)) return '—';
-  const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' };
-  try {
-    return new Date(timestamp).toLocaleString(locale, { ...options, timeZone: typeof timeZone === 'string' && timeZone ? timeZone : 'UTC' });
-  } catch {
-    return new Date(timestamp).toLocaleString(locale, { ...options, timeZone: 'UTC' });
-  }
-}
-
 function formatCounterStatus(status: string | null | undefined): string | null {
   switch (status) {
     case 'duplicate_or_out_of_order':
@@ -83,7 +58,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   readOnly = false,
   removeContext,
 }) => {
-  const { t, i18n } = useTranslation('devices');
+  const { t } = useTranslation('devices');
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -115,7 +90,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   });
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="mb-0.5 flex items-center justify-between gap-2">
         <EditableName
           name={device.name}
@@ -171,6 +146,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             {formatNumber(data.rain_mm_delta, 1, 'mm')}
           </button>
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">{tipsLine}</p>
+          {statusLabel && <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel}</p>}
         </div>
 
         <RainTodayTile
@@ -178,16 +154,6 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           onOpenHistory={() => openRainHistory('rain_mm_today')}
           valueClassName={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
         />
-
-        <div data-testid="lorain-last-report" className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-            {t('loRain.lastReport', { defaultValue: 'Last report' })}
-          </p>
-          <p data-testid="lorain-last-report-time" className="text-xl font-bold tabular-nums text-[var(--text)]">
-            {formatReportTime(device.last_seen, data.rain_day_timezone, i18n?.language)}
-          </p>
-          {statusLabel && <p className="mt-1 text-xs text-[var(--text-tertiary)]">{statusLabel}</p>}
-        </div>
 
         <div className="rounded-lg bg-[var(--card)] p-3">
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Temperature</p>
@@ -203,16 +169,11 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
           ) : (
             <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
           )}
-          <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-            Battery {formatNumber(data.bat_v, 1, 'V')}
-          </p>
         </div>
       </div>
 
-      <DeviceCardFooter
-        lastSeenLabel={lastSeenLabel(device.last_seen)}
-        batteryVoltage={data.bat_v}
-      />
+      {/* The LoRain reports a voltage only and the LSN50 curve does not fit its cell: the footer shows the volts. */}
+      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} rawBatteryVoltage={data.bat_v} />
 
       {sensorMonitor && (
         <SensorMonitor

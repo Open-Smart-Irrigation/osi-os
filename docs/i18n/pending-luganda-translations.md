@@ -12,6 +12,40 @@ for finished translation work. Each entry must be removed once a human
 Luganda pass supplies correct text, and the corresponding test allowlist
 entry (see below) removed in the same change.
 
+
+## Release gate: Luganda before a Luganda-language release
+
+Most pending keys above are new surfaces that never had Luganda. The keys in
+this section are different: they replaced text that **was** human Luganda on
+screen. Before the shared device card footer, the Kiwi and STREGA cards
+rendered their whole last-seen line in Luganda (`kiwiSensor.lastSeen`,
+`kiwiSensor.neverSeen`, `stregaValve.lastSeen`). The footer keeps that human
+text for the minutes age and "never seen", but the tiers below are English in
+`lg`, and a quiet device spends most of its time in them (every age of six
+hours or more is the date line). Shipping them to a gateway whose interface
+runs in Luganda is a visible regression.
+
+**Gate:** an edge release that contains the shared footer is not deployed to
+any gateway whose interface runs in Luganda until a human Luganda pass has
+supplied these keys, or the owner has accepted the English in writing for
+that release. The release checklist (`docs/versioning-workflow.md`,
+Pre-flight) points here. Never fill them by machine translation.
+
+| `devices.json` key | English source | Replaces human Luganda for |
+|---|---|---|
+| `deviceCard.footer.lastSeenJustNow` | "Last seen just now" | an age under one minute |
+| `deviceCard.footer.lastSeenHours` | "Last seen {{count}} h ago" | ages from 1 to 6 hours |
+| `deviceCard.footer.lastSeenAt` | "Last seen {{date}}" | every age of 6 hours or more |
+| `deviceCard.footer.battery` | "Battery" | (spoken label of the battery slot) |
+| `deviceCard.footer.batteryLow` | "Battery low" | (spoken label below 20 %) |
+| `common.batteryEstimated` | "Estimated from battery voltage" | (now also spoken on an estimated percentage) |
+
+When the pass lands, drop the key from `PENDING_HUMAN_LUGANDA` in
+`web/react-gui/tests/soilTensionCardLocales.test.ts` (or `waterCardLocales.test.ts`
+for `common.batteryEstimated`), remove its row here, and delete the old
+`kiwiSensor.lastSeen`, `kiwiSensor.neverSeen` and `stregaValve.lastSeen` keys
+once the reviewer confirms the move.
+
 ## `accountLink.json`
 
 | Key | Reason |
@@ -122,7 +156,7 @@ here.
 
 | Keys | Reason |
 |---|---|
-| `watermark.*` (48 keys in `devices.json`: section title, probe labels, resistance/offset/temperature/supply readouts, the thirteen status codes, the probe-depth editor and the calibration form) | New keys added for the IRROMETER WATERMARK 200SS soil-tension probes on the LSN50 card — the probe section, the depth editor and the calibration form (`WatermarkProbeSection.tsx`, `WatermarkDepthSection.tsx`, `WatermarkCalibrationSection.tsx`, `DraginoTempCard.tsx`, `DraginoSettingsModal.tsx`). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; "WATERMARK" stays untranslated as the product name, and `status.ok`, `wetUpTo`, and the two Ω-suffixed calibration field labels that are established electronics loanwords (`pullup`, `pulldown`) may legitimately match English since they are units, symbols, or "OK". `seriesFwd`/`seriesRev` ("Series, forward"/"Series, reverse") are plain English prose rather than loanwords and are translated in all five European locales, not exempted. |
+| `watermark.*` (44 keys in `devices.json`: resistance/offset/temperature/supply readouts, the thirteen status codes, the probe-depth editor and the calibration form) | New keys added for the IRROMETER WATERMARK 200SS soil-tension probes on the LSN50 card — the probe status lines, the depth editor and the calibration form (`WatermarkProbeSection.tsx`, `WatermarkDepthSection.tsx`, `WatermarkCalibrationSection.tsx`, `DraginoTempCard.tsx`, `DraginoSettingsModal.tsx`). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; "WATERMARK" stays untranslated as the product name, and `status.ok`, `wetUpTo`, and the two Ω-suffixed calibration field labels that are established electronics loanwords (`pullup`, `pulldown`) may legitimately match English since they are units, symbols, or "OK". `seriesFwd`/`seriesRev` ("Series, forward"/"Series, reverse") are plain English prose rather than loanwords and are translated in all five European locales, not exempted. |
 
 Tracked in code at `web/react-gui/tests/watermarkLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which collects every leaf key under `devices.json`
@@ -247,9 +281,35 @@ in the same change.
 
 | Keys | Reason |
 |---|---|
-| `sdi12.tensiomark.*` (all 32 keys in `devices.json`: `title`, `qualification`, `calibrationRange`, `addressDepth`, `depthUnknown`, `depthCm`, `swt`, `soilTemperature`, `addSensor`, `confirmation`, `confirmRequired`, `saved`, `address`, `channel`, `identity`, `depthCmLabel`, `addressAria`, `channelAria`, `identityAria`, `depthAria`, `identityExample`, `removeSensor`, `removeSensorAria`, and `errors.sensorCount`, `errors.addressInvalid`, `errors.channelInvalid`, `errors.identityInvalid`, `errors.depthInvalid`, `errors.calibrationInvalid`, `errors.duplicateAddress`, `errors.duplicateIdentity`, `errors.duplicateChannel`) | Added for the Tensiomark layout editor in the SDI-12 settings modal (labels, screen-reader labels, row removal, per-field validation errors and the pF/temperature-order confirmation) and the address and depth labels on the SDI-12 soil card. de-CH/es/fr/it/pt carry translations. The confirmation sentence and the error texts carry operational meaning, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
+| `sdi12.tensiomark.*` (all 27 keys in `devices.json`: `title`, `qualification`, `calibrationRange`, `addSensor`, `confirmation`, `confirmRequired`, `saved`, `address`, `channel`, `identity`, `depthCmLabel`, `addressAria`, `channelAria`, `identityAria`, `depthAria`, `identityExample`, `removeSensor`, `removeSensorAria`, and `errors.sensorCount`, `errors.addressInvalid`, `errors.channelInvalid`, `errors.identityInvalid`, `errors.depthInvalid`, `errors.calibrationInvalid`, `errors.duplicateAddress`, `errors.duplicateIdentity`, `errors.duplicateChannel`) | Added for the Tensiomark layout editor in the SDI-12 settings modal (labels, screen-reader labels, row removal, per-field validation errors and the pF/temperature-order confirmation). The card's address, depth and value labels moved to the shared soil tension keys below. de-CH/es/fr/it/pt carry translations. The confirmation sentence and the error texts carry operational meaning, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
 
 Tracked in code at `web/react-gui/tests/tensiomarkLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
+
+## `devices.json` — shared soil tension card, device card footer, SDI-12 card header
+
+| Keys | Reason |
+|---|---|
+| `soilTension.*` (9 keys: `sectionTitle`, `channel`, `depthCm`, `soilTemp`, `soilTempSeries`, `invalidReading`, `noReadings`, `family.watermark`, `family.tensiomark`), `deviceCard.*` (7 keys pending: `footer.lastSeenJustNow`, `footer.lastSeenHours`, `footer.lastSeenAt`, `footer.battery`, `footer.batteryLow`, `settings`, `closeSettings`), `sdi12Soil.badge`, `sdi12Soil.noProfile`, `sdi12Soil.detecting`, `sdi12Soil.invalidLayout`, `sdi12Soil.status.*` (5 keys) | Added when the WATERMARK card (`DraginoTempCard.tsx`, `WatermarkProbeSection.tsx`) and the Tensiomark card (`Sdi12SoilCard.tsx`) moved onto one shared soil tension layout (`SoilTensionReadings.tsx`), the same layout and text as the OSI Cloud cards, and their footers and headers lost their English literals. They replace `watermark.sectionTitle`, `watermark.probe`, `watermark.soilTemp`, `watermark.depthUnset` and `sdi12.tensiomark.addressDepth`/`depthUnknown`/`depthCm`/`swt`/`soilTemperature`, whose `lg` values were English too, so no human Luganda was dropped. de-CH/es/fr/it/pt carry the cloud's translations for the shared keys; the new strings (`soilTempSeries`, `invalidReading`, `deviceCard.settings`/`closeSettings`, the `sdi12Soil` header, notice and status texts) were drafted without a native speaker and need a review. `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/soilTensionCardLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
+
+The shared device card footer (owner decision 2026-10-21: battery and last
+seen on every card) kept the human Luganda that already existed for the same
+English meaning instead of adding English:
+
+| `lg` key | State |
+|---|---|
+| `deviceCard.footer.lastSeenMinutes` | Human text kept: the Kiwi card's `kiwiSensor.lastSeen` ("Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"; English "Last seen: N minutes ago", now "Last seen N min ago", the same meaning), with `{{minutes}}` renamed to `{{count}}`. |
+| `deviceCard.footer.neverSeen` | Human text kept: `kiwiSensor.neverSeen` ("Tekalabikangako"). |
+| `deviceCard.footer.lastSeenJustNow`, `lastSeenHours`, `lastSeenAt` ("Last seen {{date}}", from six hours on), `battery`, `batteryLow` | English placeholders, pending (rows above). Key names and the other locales' text are the cloud's (osi-server `6296119e5`). |
+| `kiwiSensor.lastSeen`, `kiwiSensor.neverSeen`, `stregaValve.lastSeen` | Human text left in place, untouched. No card reads them any more; delete them only after the Luganda reviewer confirms the move. |
+| `valves.lastSeen.*`, `valves.battery`, `loRain.lastReport` | English in `lg`; no card reads them any more (the valve tile and the LoRain card use the shared footer). |
+
+`soilTensionCardLocales.test.ts` (`HUMAN_LUGANDA_REUSED`) asserts the two
+kept keys still equal their human source strings.

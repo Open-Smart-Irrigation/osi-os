@@ -59,6 +59,11 @@ function formatStemChangeUm(value: number | null | undefined): string | null {
   return `${rounded > 0 ? '+' : ''}${rounded} µm`;
 }
 
+function probeDepthCm(value: number | null | undefined): number | null {
+  const numeric = Number(value);
+  return value != null && Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
 function formatDepthLabel(value: number | null | undefined): string | null {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
@@ -91,10 +96,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
     onUpdate?.();
   };
   const data = device.latest_data;
-  const lastSeenStr = device.last_seen ?? null;
   const { swtUnit } = useDisplayPreferences();
-  const lastSeen = lastSeenStr ? new Date(lastSeenStr) : null;
-  const minutesAgo = lastSeen ? Math.floor((Date.now() - lastSeen.getTime()) / (1000 * 60)) : null;
   const dendroEnabled = device.dendro_enabled === 1;
   const tempEnabled = device.temp_enabled === 1;
   const rainEnabled = device.rain_gauge_enabled === 1;
@@ -145,6 +147,13 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
   ] as const;
   const watermark = data?.watermark ?? null;
   const watermarkDepths = device.soil_moisture_probe_depths_json ?? {};
+  const watermarkSeries = ([1, 2] as const).map((channel) => ({
+    field: `swt_${channel}`,
+    label: t('soilTension.channel', { channel }),
+    unit: 'kPa',
+    color: channel === 1 ? '#0f766e' : '#2563eb',
+    decimals: 1,
+  }));
 
   const [showConfig, setShowConfig] = useState(false);
   const [showMonitor, setShowMonitor] = useState(false);
@@ -159,14 +168,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
   } | null>(null);
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
 
-  const batColour =
-    data?.bat_v === undefined ? 'var(--text-tertiary)' :
-    data.bat_v >= 3.2 ? '#22c55e' :
-    data.bat_v >= 2.9 ? '#f59e0b' :
-    '#ef4444';
-
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
@@ -183,8 +186,8 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
           {!readOnly && <button
             type="button"
             onClick={() => setShowConfig((value) => !value)}
-            aria-label={showConfig ? 'Close device settings' : 'Device settings'}
-            title={showConfig ? 'Close device settings' : 'Device settings'}
+            aria-label={showConfig ? t('deviceCard.closeSettings') : t('deviceCard.settings')}
+            title={showConfig ? t('deviceCard.closeSettings') : t('deviceCard.settings')}
             className={`touch-target p-1.5 rounded-md transition-colors ${
               showConfig
                 ? 'bg-[var(--primary)] text-[var(--on-primary)]'
@@ -224,6 +227,24 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
       )}
 
       <div className="grid grid-cols-1 gap-3">
+        {watermark && (
+          <WatermarkProbeSection
+            soilTempC={data?.ext_temperature_c ?? null}
+            probes={([1, 2] as const).map((channel) => ({
+              channel,
+              depthCm: probeDepthCm(watermarkDepths[`swt_${channel}`]),
+              reading: watermark.channels[channel - 1] ?? null,
+            }))}
+            onOpenHistory={(field) => setSensorMonitor(field === 'ext_temperature_c' ? {
+              field, label: t('environment.soil.temperature'), unit: '°C', color: '#f97316', decimals: 1,
+            } : {
+              ...watermarkSeries[field === 'swt_2' ? 1 : 0],
+              initialField: field,
+              seriesOptions: watermarkSeries,
+            })}
+          />
+        )}
+
         {tempEnabled && !watermark && (
           <div className="rounded-lg bg-[var(--card)] p-3">
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">TEMPERATURE</p>
@@ -238,20 +259,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
             ) : (
               <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
             )}
-          </div>
-        )}
-
-        {data?.bat_v != null && (
-          <div className="rounded-lg bg-[var(--card)] p-3">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">BATTERY</p>
-            <button
-              onClick={() => setSensorMonitor({ field: 'bat_v', label: 'Battery Voltage', unit: 'V', color: '#22c55e', decimals: 2 })}
-              className={`cursor-pointer text-left text-2xl font-bold tabular-nums underline decoration-dotted underline-offset-4 transition-opacity hover:opacity-75 ${FOCUS_VISIBLE_RING}`}
-              style={{ color: batColour }}
-              title={t('common.viewHistory', { defaultValue: 'View history' })}
-            >
-              {data.bat_v.toFixed(2)} V
-            </button>
           </div>
         )}
 
@@ -302,31 +309,6 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
                 ))}
               </div>
             )}
-          </div>
-        )}
-
-        {watermark && (
-          <div className="rounded-lg bg-[var(--card)] p-3">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('watermark.sectionTitle')}</p>
-            <WatermarkProbeSection
-              swtUnit={swtUnit}
-              soilTempC={data?.ext_temperature_c ?? null}
-              dieTempC={watermark.die_temp_c}
-              supplyMv={watermark.supply_mv}
-              probes={[1, 2].map((n) => ({
-                key: `swt_${n}`,
-                label: t('watermark.probe', { n }),
-                depthLabel: formatDepthLabel(watermarkDepths[`swt_${n}`]),
-                channel: watermark.channels[n - 1] ?? null,
-              }))}
-              onOpenHistory={(field) => setSensorMonitor(field === 'ext_temperature_c' ? {
-                field, label: t('environment.soil.temperature'), unit: '°C', color: '#f97316', decimals: 1,
-              } : {
-                field, initialField: field, label: t('watermark.probe', { n: field === 'swt_1' ? 1 : 2 }),
-                unit: 'kPa', color: field === 'swt_1' ? '#0f766e' : '#2563eb', decimals: 1,
-                seriesOptions: [1, 2].map((n) => ({ field: `swt_${n}`, label: t('watermark.probe', { n }), unit: 'kPa', color: n === 1 ? '#0f766e' : '#2563eb', decimals: 1 })),
-              })}
-            />
           </div>
         )}
 
@@ -467,7 +449,7 @@ export const DraginoTempCard: React.FC<DraginoTempCardProps> = ({
       </div>
 
       <DeviceCardFooter
-        lastSeenLabel={minutesAgo !== null ? `Last seen: ${minutesAgo} minutes ago` : 'Never seen'}
+        lastSeen={device.last_seen}
         batteryPercent={device.latest_data?.bat_pct}
         batteryVoltage={device.latest_data?.bat_v}
       />

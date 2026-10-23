@@ -734,11 +734,6 @@
       "title": "Tensiomark-Interpretation",
       "qualification": "Messwerte sind pF, die Temperatur wird zuerst gemeldet. Der Kalibrierbereich ist nicht verifiziert.",
       "calibrationRange": "Kalibrierbereich: nicht verifiziert",
-      "addressDepth": "Adresse {{address}} · {{depth}}",
-      "depthUnknown": "Tiefe unbekannt",
-      "depthCm": "{{depth}} cm",
-      "swt": "SWT",
-      "soilTemperature": "Bodentemperatur",
       "addSensor": "Sensor hinzufügen",
       "confirmation": "Ich bestätige, dass der Sensor zuerst die Temperatur und dann pF meldet.",
       "confirmRequired": "Bestätigen Sie vor dem Speichern, dass der Sensor zuerst die Temperatur und dann pF meldet.",
@@ -772,7 +767,18 @@
     "removeSubtitle": "Das Gerät wird von Ihrem Konto getrennt.",
     "yesRemove": "Ja, entfernen",
     "removing": "Wird entfernt...",
-    "failedToRemove": "Gerät konnte nicht entfernt werden"
+    "failedToRemove": "Gerät konnte nicht entfernt werden",
+    "badge": "SDI-12",
+    "noProfile": "Kein Sondenprofil",
+    "detecting": "Sonde wird erkannt (ausstehend)",
+    "invalidLayout": "Das gespeicherte Sentek-Kanallayout ist ungültig. Öffnen Sie die Geräteeinstellungen und speichern Sie ein gültiges Layout, bevor Sie sich auf die Bodenmesswerte verlassen.",
+    "status": {
+      "pending_identify": "Wird identifiziert",
+      "identified": "Identifiziert",
+      "unmatched": "Nicht erkannt",
+      "manual": "Manuell festgelegt",
+      "unknown": "Status unbekannt"
+    }
   },
   "deviceRemoval": {
     "titleZone": "Aus dieser Zone entfernen?",
@@ -914,15 +920,11 @@
     "chameleonNeedsMod3": "Chameleon SWT kann erst aktiviert werden, wenn MOD3 aktiv ist."
   },
   "watermark": {
-    "sectionTitle": "WATERMARK-Bodenwasserspannung",
-    "probe": "Sonde {{n}}",
-    "depthUnset": "Tiefe nicht festgelegt",
     "wet": "Feucht",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Widerstand {{value}}",
     "resistanceUpTo": "Widerstand ≤ {{value}}",
     "offset": "Sensor-Offset {{value}} mV",
-    "soilTemp": "Boden {{value}} °C",
     "soilTempNotMeasured": "Bodentemperatur nicht gemessen",
     "dieTemp": "Platine {{value}} °C",
     "supply": "Versorgung {{value}} V",
@@ -997,5 +999,31 @@
     "onlyCandidate": "Der einzige Regenmesser dieser Zone wird verwendet.",
     "loadFailed": "Die Regenmesser dieser Zone konnten nicht geladen werden.",
     "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen."
+  },
+  "soilTension": {
+    "sectionTitle": "Bodenwasserspannung",
+    "channel": "Bodenspannung {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Boden {{value}} °C",
+    "soilTempSeries": "Bodentemperatur {{channel}}",
+    "invalidReading": "Ungültiger Messwert",
+    "noReadings": "Keine Bodenmesswerte verfügbar.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Zuletzt gesehen: gerade eben",
+      "lastSeenMinutes": "Zuletzt gesehen: vor {{count}} Min.",
+      "lastSeenHours": "Zuletzt gesehen: vor {{count}} Std.",
+      "lastSeenAt": "Zuletzt gesehen: {{date}}",
+      "neverSeen": "Noch nie gesehen",
+      "battery": "Batterie",
+      "batteryLow": "Batterie schwach"
+    },
+    "settings": "Geräteeinstellungen",
+    "closeSettings": "Geräteeinstellungen schliessen"
   }
 }

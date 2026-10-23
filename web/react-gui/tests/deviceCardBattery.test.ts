@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  buildDeviceFooterMeta,
   isDerivedBatteryPercent,
   getBatteryPercentFromVoltage,
   getValidBatteryPercent,
 } from '../src/components/farming/shared/deviceCardBattery.ts';
+import { footerBattery } from '../src/components/farming/shared/deviceCardFooterModel.ts';
 
 test('accepts finite battery percentages from 0 to 100', () => {
   assert.equal(getValidBatteryPercent(84), 84);
@@ -34,9 +34,15 @@ test('rejects out-of-range percentages', () => {
   assert.equal(getValidBatteryPercent(101), null);
 });
 
-test('formats footer copy without a fake battery prefix', () => {
-  assert.equal(buildDeviceFooterMeta({ batPct: null, lastSeenLabel: '5 min ago' }), '5 min ago');
-  assert.equal(buildDeviceFooterMeta({ batPct: 84, lastSeenLabel: '5 min ago' }), '🔋 84% · 5 min ago');
+test('shows no footer battery rather than a fake one', () => {
+  assert.equal(footerBattery(null), null);
+  assert.deepEqual(footerBattery(84), { percent: 84, low: false, derived: false });
+});
+
+test('marks a footer battery below 20 % as low', () => {
+  assert.equal(footerBattery(20)?.low, false);
+  assert.equal(footerBattery(19)?.low, true);
+  assert.equal(footerBattery(0)?.low, true);
 });
 
 test('derives LSN50 battery percent from the usable voltage range', () => {
@@ -56,11 +62,11 @@ test('clamps and rejects invalid LSN50 voltage-derived battery percent', () => {
 });
 
 test('uses explicit battery percent before voltage-derived LSN50 percent', () => {
-  assert.equal(buildDeviceFooterMeta({ batPct: 55, batV: 3.6, lastSeenLabel: '5 min ago' }), '🔋 55% · 5 min ago');
+  assert.deepEqual(footerBattery(55, 3.6), { percent: 55, low: false, derived: false });
   // Derived from voltage, so it is marked as an estimate: an LSN50's LiSOCl2
   // cell holds ~3.6 V across most of its life and then falls off a cliff, so a
   // flat "100%" beside a real bat_pct two rows below reads as a measurement.
-  assert.equal(buildDeviceFooterMeta({ batPct: null, batV: 3.5, lastSeenLabel: '5 min ago' }), '🔋 ≈ 93% · 5 min ago');
+  assert.deepEqual(footerBattery(null, 3.5), { percent: 93, low: false, derived: true });
   assert.equal(isDerivedBatteryPercent({ batPct: null, batV: 3.5 }), true);
   assert.equal(isDerivedBatteryPercent({ batPct: 55, batV: 3.6 }), false);
   assert.equal(isDerivedBatteryPercent({ batPct: null, batV: null }), false);

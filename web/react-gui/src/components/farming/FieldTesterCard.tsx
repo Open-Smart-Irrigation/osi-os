@@ -63,7 +63,7 @@ export const FieldTesterCard: React.FC<FieldTesterCardProps> = ({
   const removal = useDeviceRemoval({ deveui: device.deveui, removeContext, onRemove });
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex items-center justify-between gap-2 mb-0.5">
         <EditableName
           name={device.name}
@@ -124,7 +124,7 @@ export const FieldTesterCard: React.FC<FieldTesterCardProps> = ({
           `last_seen` (its uplinks land in the radio store, not `device_data`).
           The footer states that plainly instead of claiming a recency this
           card cannot know. */}
-      <DeviceCardFooter lastSeenLabel={t('fieldTester.readingsOnMap')} />
+      <DeviceCardFooter lastSeen={null} lastSeenText={t('fieldTester.readingsOnMap')} />
     </div>
   );
 };

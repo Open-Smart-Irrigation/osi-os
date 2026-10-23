@@ -734,11 +734,6 @@
       "title": "Interpretación Tensiomark",
       "qualification": "Las lecturas están en pF y la temperatura se informa primero. El rango de calibración no está verificado.",
       "calibrationRange": "Rango de calibración: no verificado",
-      "addressDepth": "Dirección {{address}} · {{depth}}",
-      "depthUnknown": "Profundidad desconocida",
-      "depthCm": "{{depth}} cm",
-      "swt": "SWT",
-      "soilTemperature": "Temperatura del suelo",
       "addSensor": "Añadir sensor",
       "confirmation": "Confirmo que el sensor informa primero la temperatura y después el pF.",
       "confirmRequired": "Antes de guardar, confirme que el sensor informa primero la temperatura y después el pF.",
@@ -772,7 +767,18 @@
     "removeSubtitle": "El dispositivo se desvinculará de tu cuenta.",
     "yesRemove": "Sí, eliminar",
     "removing": "Eliminando...",
-    "failedToRemove": "Error al eliminar el dispositivo"
+    "failedToRemove": "Error al eliminar el dispositivo",
+    "badge": "SDI-12",
+    "noProfile": "Sin perfil de sonda",
+    "detecting": "Detectando la sonda (pendiente)",
+    "invalidLayout": "La configuración de canales Sentek guardada no es válida. Abra la configuración del dispositivo y guarde una configuración válida antes de confiar en las lecturas del suelo.",
+    "status": {
+      "pending_identify": "Identificando",
+      "identified": "Identificada",
+      "unmatched": "No reconocida",
+      "manual": "Definida manualmente",
+      "unknown": "Estado desconocido"
+    }
   },
   "deviceRemoval": {
     "titleZone": "¿Retirar de esta zona?",
@@ -914,15 +920,11 @@
     "chameleonNeedsMod3": "Chameleon SWT solo puede activarse cuando MOD3 esté activo."
   },
   "watermark": {
-    "sectionTitle": "Tensión hídrica del suelo WATERMARK",
-    "probe": "Sonda {{n}}",
-    "depthUnset": "Profundidad no definida",
     "wet": "Húmedo",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Resistencia {{value}}",
     "resistanceUpTo": "Resistencia ≤ {{value}}",
     "offset": "Desplazamiento {{value}} mV",
-    "soilTemp": "Suelo {{value}} °C",
     "soilTempNotMeasured": "Temperatura del suelo no medida",
     "dieTemp": "Placa {{value}} °C",
     "supply": "Alimentación {{value}} V",
@@ -997,5 +999,31 @@
     "onlyCandidate": "Se usa el único pluviómetro de esta zona.",
     "loadFailed": "No se pudieron cargar los pluviómetros de esta zona.",
     "banner": "Dos pluviómetros informan para esta zona. Elija uno en la configuración de la zona."
+  },
+  "soilTension": {
+    "sectionTitle": "Tensión hídrica del suelo",
+    "channel": "Tensión del suelo {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Suelo {{value}} °C",
+    "soilTempSeries": "Temperatura del suelo {{channel}}",
+    "invalidReading": "Lectura no válida",
+    "noReadings": "No hay lecturas del suelo disponibles.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Visto ahora mismo",
+      "lastSeenMinutes": "Visto hace {{count}} min",
+      "lastSeenHours": "Visto hace {{count}} h",
+      "lastSeenAt": "Visto el {{date}}",
+      "neverSeen": "Nunca visto",
+      "battery": "Batería",
+      "batteryLow": "Batería baja"
+    },
+    "settings": "Configuración del dispositivo",
+    "closeSettings": "Cerrar configuración del dispositivo"
   }
 }
