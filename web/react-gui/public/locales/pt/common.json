@@ -85,6 +85,10 @@
       "overlaid": "Sobreposto",
       "smallMultiples": "Múltiplos pequenos"
     },
+    "autoStack": {
+      "note": "Mostrado empilhado: nesta largura, os eixos das unidades deixam pouco espaço para o gráfico.",
+      "showOverlaid": "Mostrar sobreposto mesmo assim"
+    },
     "toggle": {
       "normalize": "Normalizar"
     },
