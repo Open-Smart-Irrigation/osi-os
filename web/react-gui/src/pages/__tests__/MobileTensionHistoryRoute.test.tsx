@@ -12,6 +12,7 @@ const useMobileTensionCatalog = vi.fn();
 const analysisLoad = vi.fn();
 const createMobileAnalysisLoader = vi.fn(() => analysisLoad);
 const logout = vi.fn();
+const serializeSessionIdentity = vi.hoisted(() => vi.fn((identity: { serverInstance: string; principalId: string | null; sessionEpoch: number }) => JSON.stringify([identity.serverInstance, identity.principalId, identity.sessionEpoch])));
 let shellProps: Record<string, unknown> | null = null;
 const diagnosticsOwner = { source: 'edge-test-owner' };
 
@@ -39,7 +40,7 @@ vi.mock('../../services/api', () => ({ irrigationZonesAPI: { getAll } }));
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ sessionIdentity: { serverInstance: 'edge', principalId: null, sessionEpoch: 3 }, logout }),
 }));
-vi.mock('../../services/authSession', () => ({ serializeSessionIdentity: (identity: unknown) => JSON.stringify(identity) }));
+vi.mock('../../services/authSession', () => ({ serializeSessionIdentity }));
 vi.mock('../../history/mobileAnalysisHistoryAdapter', () => ({ createMobileAnalysisLoader }));
 vi.mock('../../history/useMobileTensionCatalog', () => ({ useMobileTensionCatalog }));
 vi.mock('../../history/mobileTensionLabels', () => ({ mobileTensionLabels: () => ({}) }));
@@ -118,7 +119,7 @@ describe('mobile tension history route', () => {
     await waitFor(() => expect(screen.getByTestId('mobile-shell')).toHaveTextContent('North block'));
     expect(useMobileTensionCatalog).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, zoneId: '7' }));
     expect(shellProps?.context).toEqual({
-      sessionKey: '{"serverInstance":"edge","principalId":null,"sessionEpoch":3}',
+      sessionKey: '["edge",null,3]',
       scopeKey: 'zone:7',
       cardId: 'mobile-water-tension',
     });
@@ -231,6 +232,14 @@ describe('mobile tension history route', () => {
     window.__osiMobileHistoryDiagnostics = replacement;
     view.unmount();
     expect(window.__osiMobileHistoryDiagnostics).toBe(replacement);
+  });
+
+  it('deletes the diagnostics global when the unmounted route still owns it', async () => {
+    getAll.mockResolvedValue([{ id: 7, name: 'North block', timezone: 'UTC' }]);
+    const view = renderRoute('/internal/mobile-history/zones/7');
+    await waitFor(() => expect(window.__osiMobileHistoryDiagnostics).toBe(diagnosticsOwner));
+    view.unmount();
+    expect(window.__osiMobileHistoryDiagnostics).toBeUndefined();
   });
 
   it('uses the existing session-expiry path for a catalog 401', async () => {
