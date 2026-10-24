@@ -94,6 +94,27 @@ describe("pilot whole-response history loader", () => {
     await expect(handle.result).rejects.toMatchObject({ name: 'AbortError', reason: 'superseded' });
     pending.resolve(data());
   });
+  test('does not admit an ignored-abort response after selection eviction', async () => {
+    const loader = createHistoryLoader();
+    const pending = deferred<HistoryAcceptedData>();
+    const handle = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => pending.promise);
+    loader.evictSeries(['a']);
+    await expect(handle.result).rejects.toMatchObject({ name: 'AbortError' });
+    pending.resolve(data({ series: [{ ...data().series[0], id: 'a' }] }));
+    await Promise.resolve();
+    const next = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => Promise.resolve(data({ series: [{ ...data().series[0], id: 'a' }] })));
+    expect(next.source).toBe('network');
+  });
+
+  test('passes ordered selection context to the transport', async () => {
+    const loader = createHistoryLoader();
+    const seen: unknown[] = [];
+    const load = vi.fn(async (_signal: AbortSignal) => data({ series: [{ ...data().series[0], id: 'a' }, { ...data().series[0], id: 'b' }] }));
+    const selected = ['b', 'a'];
+    await loader.foreground(demand({ selectedIds: selected, selectionKey: '["a","b"]', request: { ...request, selectionKey: '["a","b"]' }, requestRevision: 3 }), (signal) => { seen.push(signal.aborted); return load(signal); }).result;
+    expect(seen).toEqual([false]);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
   test("returns a covering cache hit while preserving original response age", async () => {
     let clock = 1_000;
     const loader = createHistoryLoader({ now: () => clock });

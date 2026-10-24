@@ -23,12 +23,68 @@ function deferred<T>() {
 }
 
 describe('useHistoryWindow', () => {
+  test('removing a source during the initial load aborts it and requests the reduced selection', async () => {
+    const first = deferred<HistoryWindowResponse>();
+    const second = deferred<HistoryWindowResponse>();
+    const load = vi.fn().mockImplementationOnce(() => first.promise).mockImplementationOnce((request: HistoryWindowRequest) => second.promise.then(() => response(request)));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['swt-1', 'swt-2'], now: () => 10 * 86_400_000, load }));
+    act(() => result.current.selectSources?.(['swt-1']));
+    expect(load).toHaveBeenCalledTimes(2);
+    await act(async () => { second.resolve(response(load.mock.calls[1][0])); await second.promise; });
+    expect(result.current.accepted?.series.map((item) => item.id)).toEqual(['swt-1']);
+    first.resolve(response(load.mock.calls[0][0]));
+  });
+
+  test('retains oversized backing data through 8 to 7 to 8 selection changes', async () => {
+    const ids = Array.from({ length: 8 }, (_, index) => `swt-${index + 1}`);
+    const load = vi.fn(async (request: HistoryWindowRequest) => response(request, { series: ids.map((id) => ({ id, label: id, unit: 'kPa', points: [{ t: request.from, value: 1 }] })) }));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ids, now: () => 10 * 86_400_000, load }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const calls = load.mock.calls.length;
+    act(() => result.current.selectSources?.(ids.slice(0, 7)));
+    act(() => result.current.selectSources?.(ids));
+    expect(load).toHaveBeenCalledTimes(calls);
+    expect(result.current.accepted?.series).toHaveLength(8);
+  });
+  test('marks denied sources unavailable and does not resurrect them on re-selection', async () => {
+    const load = vi.fn(async (request: HistoryWindowRequest) => response(request, { series: [
+      { id: 'swt-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: 1 }] },
+      { id: 'swt-2', label: 'Probe 2', unit: 'kPa', points: [{ t: request.from, value: 2 }] },
+    ] }));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['swt-1', 'swt-2'], now: () => 10 * 86_400_000, load }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    act(() => result.current.evictSeries?.(['swt-2']));
+    act(() => result.current.selectSources?.(['swt-1', 'swt-2']));
+    expect(result.current.selectedIds).toEqual(['swt-1']);
+    expect(result.current.displayedIds).toEqual(['swt-1']);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  test('replaces accepted backing data instead of unioning a later response', async () => {
+    const first = deferred<HistoryWindowResponse>();
+    const second = deferred<HistoryWindowResponse>();
+    const load = vi.fn()
+      .mockImplementationOnce((request: HistoryWindowRequest) => first.promise.then(() => response(request, { series: [{ id: 'swt-1', label: 'one', unit: 'kPa', points: [{ t: request.from, value: 1 }] }] })))
+      .mockImplementationOnce((request: HistoryWindowRequest) => second.promise.then(() => response(request, { series: [{ id: 'swt-2', label: 'two', unit: 'kPa', points: [{ t: request.from, value: 2 }] }] })));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, now: () => 10 * 86_400_000, load }));
+    await act(async () => { first.resolve(response(load.mock.calls[0][0])); await first.promise; });
+    act(() => result.current.moveWindow('back'));
+    await act(async () => { second.resolve(response(load.mock.calls[1][0])); await second.promise; });
+    expect(result.current.accepted?.series.map((item) => item.id)).toEqual(['swt-2']);
+  });
   test('treats intentional empty selection as a no-request state', async () => {
     const load = vi.fn();
     const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: [], now: () => 10 * 86_400_000, load }));
     await act(async () => { await Promise.resolve(); });
     expect(result.current.status).toBe('empty');
     expect(load).not.toHaveBeenCalled();
+  });
+  test('reports no-finite-data only after complete all-null coverage', async () => {
+    const load = vi.fn(async (request: HistoryWindowRequest) => response(request, { series: [{ id: 'swt-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: null }, { t: request.to, value: null }] }] }));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['swt-1'], now: () => 10 * 86_400_000, load }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(result.current.status).toBe('empty');
+    expect(result.current.emptyReason).toBe('no-finite-data');
   });
   test('clamps the initial analysis viewport to the supplied seven-day maximum', () => {
     const { result } = renderHook(() => useHistoryWindow({ enabled: false, context, maxSpanMs: 7 * 86_400_000, now: () => 10 * 86_400_000, load: vi.fn() }));

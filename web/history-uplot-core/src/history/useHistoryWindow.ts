@@ -9,7 +9,8 @@ import {
 import { bufferedRequest, coverageContains, HISTORY_MAX_VIEWPORT_SPAN_MS, HISTORY_NAVIGATION_START_MS, minuteViewport, neighborRequest } from './range';
 import { cardHistoryRangeStrategy, type HistoryRangeStrategy } from './rangeStrategy';
 import { HistoryAbortError, HistoryAuthError, type HistoryAcceptedData, type HistoryDemand, type HistoryLoader, type HistoryRangeRequest } from './types';
-import { DAY_MS, HOUR_MS, MINUTE_MS, type HistoryWindowOptions, type HistoryWindowReason, type Viewport } from '../shared/types';
+import { DAY_MS, HOUR_MS, MINUTE_MS, type HistoryLoadContext, type HistoryWindowOptions, type HistoryWindowReason, type Viewport, type HistoryEmptyReason } from '../shared/types';
+import { historyResponseSatisfiesDemand } from './historyLoader';
 import { createViewportStore, type ViewportStore } from '../shared/viewport';
 
 export interface HistoryWindowResult {
@@ -30,6 +31,7 @@ export interface HistoryWindowResult {
   displayedIds?: readonly string[] | undefined;
   selectSources?(ids: readonly string[]): void;
   evictSeries?(ids: readonly string[]): void;
+  emptyReason?: HistoryEmptyReason;
 }
 
 function filterAccepted(data: HistoryAcceptedData | null, ids: readonly string[] | undefined): HistoryAcceptedData | null {
@@ -38,14 +40,10 @@ function filterAccepted(data: HistoryAcceptedData | null, ids: readonly string[]
   return { ...data, series: data.series.filter((item) => allowed.has(item.id)), unitGroups: data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => allowed.has(id)) })).filter((group) => group.seriesIds.length > 0) };
 }
 
-function mergeAccepted(previous: HistoryAcceptedData | null, next: HistoryAcceptedData): HistoryAcceptedData {
-  if (!previous || previous.request.from !== next.request.from || previous.request.to !== next.request.to || previous.request.aggregation !== next.request.aggregation) return next;
-  const series = [...previous.series];
-  for (const item of next.series) {
-    const index = series.findIndex((candidate) => candidate.id === item.id);
-    if (index >= 0) series[index] = item; else series.push(item);
-  }
-  return { ...next, series, unitGroups: next.unitGroups.length ? next.unitGroups : previous.unitGroups };
+function hasFiniteVisibleData(data: HistoryAcceptedData, visible: Viewport): boolean {
+  return data.series.some((series) => series.buckets
+    ? series.buckets.some((bucket) => bucket.to > visible.from && bucket.from < visible.to && bucket.value !== null)
+    : series.points.some((point) => point.t >= visible.from && point.t < visible.to && point.value !== null));
 }
 
 const identityOf = (context: HistoryWindowOptions['context']): string => context
@@ -67,6 +65,11 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const selectionMode = options.selectedIds !== undefined;
   const [selection, setSelection] = useState<readonly string[] | undefined>(() => options.selectedIds?.slice());
   const [selectionRevision, setSelectionRevision] = useState(0);
+  const deniedIdsRef = useRef(new Set<string>());
+  const authScopeRef = useRef(`${context?.sessionKey ?? ''}|${context?.scopeKey ?? ''}`);
+  const lastControlledSelectionKeyRef = useRef<string | undefined>(undefined);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
   const selectionRef = useRef<readonly string[] | undefined>(selection);
   selectionRef.current = selection;
   const selectionRevisionRef = useRef(0);
@@ -79,6 +82,7 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const [failedRequest, setFailedRequest] = useState<HistoryRangeRequest | null>(null);
   const [error, setError] = useState<unknown | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [emptyReason, setEmptyReason] = useState<HistoryEmptyReason>(null);
   const loader = useMemo<HistoryLoader>(() => options.loader ?? createHistoryLoader({ now }), [options.loader, now]);
   const horizon = useMemo(() => ({ from: options.navigationStartMs ?? HISTORY_NAVIGATION_START_MS, to: horizonEnd }), [options.navigationStartMs, horizonEnd]);
   const visibleSpan = useRef(DAY_MS);
@@ -138,7 +142,8 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
       const selected = selectionRef.current;
       const selectionKey = selected === undefined ? undefined : JSON.stringify([...selected].sort());
       const demand: HistoryDemand = { context, visible, request: { ...request, readPolicy: policy, selectionKey }, horizon, reason: 'prefetch', forceFresh: false, direction: direction.current, neighbor: request, readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
-      void loader.prefetch(demand, (signal) => options.load(request, signal)).catch((cause: unknown) => {
+      const loadContext: HistoryLoadContext = { selectedIds: selected, selectionKey, requestRevision: selectionRevisionRef.current, readPolicy: policy };
+      void loader.prefetch(demand, (signal) => optionsRef.current.load(demand.request, signal, loadContext)).catch((cause: unknown) => {
         if (cause instanceof HistoryAuthError && identityRef.current === identityAtSchedule && lifetime.current === lifetimeAtSchedule) options.onAuthError?.(cause);
       });
     }, immediate ? 0 : HISTORY_PREFETCH_IDLE_MS);
@@ -156,7 +161,8 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     const identityAtStart = identity;
     const lifetimeAtStart = lifetime.current;
     const demand: HistoryDemand = { context, visible, request, horizon, reason, direction: direction.current, neighbor: rangeStrategy.neighborRequest(visible, direction.current, horizon), forceFresh: extra.forceFresh ?? (reason === 'latest' || reason === 'retry'), readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
-    const handle = loader.foreground(demand, (signal) => options.load(request, signal));
+    const loadContext: HistoryLoadContext = { selectedIds: selected, selectionKey, requestRevision: selectionRevisionRef.current, readPolicy: policy };
+    const handle = loader.foreground(demand, (signal) => optionsRef.current.load(request, signal, loadContext));
     options.onDiagnostics?.({ reason, ...loader.diagnostics() });
     const sessionCurrent = () => lifetime.current === lifetimeAtStart && identityRef.current === identityAtStart;
     const current = () => lifetime.current === lifetimeAtStart && identityRef.current === identityAtStart && generation === intent.current;
@@ -173,14 +179,16 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
       if (!current()) return;
       const visibleNow = rangeStrategy === cardHistoryRangeStrategy ? minuteViewport(viewportStore.get()) : viewportStore.get();
       const direct = visibleNow.from === visible.from && visibleNow.to === visible.to;
-      const reusable = !value.data.limits.truncated && value.data.aggregation.level === request.aggregation && coverageContains(value.data, visibleNow, request.aggregation);
+      const reusable = historyResponseSatisfiesDemand(value.data, { ...demand, visible: visibleNow });
       if (!direct && !reusable) return;
-      setAcceptedState({ identity: identityAtStart, data: mergeAccepted(acceptedRef.current, value.data) });
+      setAcceptedState({ identity: identityAtStart, data: value.data });
       acceptedReceivedAt.current = value.receivedAt;
       setLoadingRequest(null);
       setRefreshing(false);
       setError(null);
-      setStatus(value.data.series.length ? 'ready' : 'empty');
+      const finite = hasFiniteVisibleData(value.data, visibleNow);
+      setEmptyReason(finite ? null : (selection !== undefined ? 'no-finite-data' : null));
+      setStatus(value.data.series.length && finite ? 'ready' : 'empty');
       schedulePrefetch(visibleNow);
     }).catch((cause: unknown) => {
       if (cause instanceof HistoryAuthError) {
@@ -199,6 +207,9 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
 
   useEffect(() => {
     lifetime.current += 1;
+    const authScope = `${context?.sessionKey ?? ''}|${context?.scopeKey ?? ''}`;
+    if (authScope !== authScopeRef.current) { deniedIdsRef.current.clear(); authScopeRef.current = authScope; }
+    lastControlledSelectionKeyRef.current = undefined;
     resetAccepted();
     if (!options.enabled || !context) {
       setStatus('idle');
@@ -206,7 +217,12 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     }
     if (selection !== undefined && selection.length === 0) {
       setStatus('empty');
+      setEmptyReason('no-selection');
       return;
+    }
+    if (selection !== undefined && context) {
+      selectionRevisionRef.current = loader.advanceSelectionRevision(context);
+      setSelectionRevision(selectionRevisionRef.current);
     }
     setStatus('loading');
     schedule(viewportStore.get(), 'initial');
@@ -307,27 +323,39 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     schedule(next, 'latest', { forceFresh: true });
   }, [horizon.to, viewportStore]);
   const retry = () => schedule(viewportStore.get(), 'retry', { forceFresh: true, failedRequest: failedRequest ?? loadingRequest ?? undefined });
-  const selectSources = (ids: readonly string[]) => {
+  const applySelection = (ids: readonly string[]) => {
     if (!selectionMode) return;
-    const next = [...ids];
-    const previous = selection ?? [];
+    const next = [...new Set(ids)].filter((id) => !deniedIdsRef.current.has(id));
+    const previous = selectionRef.current ?? [];
+    if (JSON.stringify(next) === JSON.stringify(previous)) return;
+    const revision = context ? loader.advanceSelectionRevision(context) : selectionRevisionRef.current + 1;
     setSelection(next);
     selectionRef.current = next;
-    selectionRevisionRef.current += 1;
-    setSelectionRevision(selectionRevisionRef.current);
+    selectionRevisionRef.current = revision;
+    setSelectionRevision(revision);
     clear(timer.current);
     timer.current = null;
     intent.current += 1;
     const adding = next.some((id) => !previous.includes(id));
-    if (next.length === 0) setStatus('empty');
+    if (next.length === 0) { setStatus('empty'); setEmptyReason('no-selection'); }
     else if (adding) timer.current = window.setTimeout(() => schedule(viewportStore.get(), 'gesture'), HISTORY_SETTLE_MS);
+    else if (acceptedRef.current && next.every((id) => acceptedRef.current?.series.some((series) => series.id === id))) {
+      setEmptyReason(null);
+      setStatus('ready');
+    } else schedule(viewportStore.get(), 'gesture');
   };
   const evictSeries = (ids: readonly string[]) => {
+    ids.forEach((id) => deniedIdsRef.current.add(id));
     loader.evictSeries(ids);
-    const denied = new Set(ids);
-    setSelection((current) => current?.filter((id) => !denied.has(id)));
-    setAcceptedState((current) => current ? { ...current, data: { ...current.data, series: current.data.series.filter((item) => !denied.has(item.id)), unitGroups: current.data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => !denied.has(id)) })).filter((group) => group.seriesIds.length > 0) } } : current);
-    intent.current += 1;
+    applySelection((selectionRef.current ?? []).filter((id) => !ids.includes(id)));
   };
-  return { status, accepted, loadingRequest, failedRequest, error, refreshing, viewportStore, store: viewportStore, horizon, selectPreset, moveWindow, showLatest, retry, selectedIds: selection, displayedIds: selection, selectSources, evictSeries };
+  useEffect(() => {
+    const controlled = options.selectedIds;
+    if (controlled === undefined) return;
+    const key = JSON.stringify(controlled);
+    if (key === lastControlledSelectionKeyRef.current) return;
+    lastControlledSelectionKeyRef.current = key;
+    applySelection(controlled);
+  }, [options.selectedIds]);
+  return { status, accepted, loadingRequest, failedRequest, error, refreshing, viewportStore, store: viewportStore, horizon, selectPreset, moveWindow, showLatest, retry, selectedIds: selection, displayedIds: accepted?.series.map((item) => item.id), selectSources: applySelection, evictSeries, emptyReason };
 }

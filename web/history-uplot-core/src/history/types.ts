@@ -4,6 +4,7 @@ import type {
   HistoryWindowRequest,
   HistoryWindowResponse,
   HistoryReadPolicy,
+  HistoryEmptyReason,
   SensorSeries,
   Viewport,
 } from '../shared/types';
@@ -57,6 +58,7 @@ export interface HistoryLoader {
   abortPrefetch(): void;
   clear(): void;
   evictSeries(ids: readonly string[]): void;
+  advanceSelectionRevision(context: HistoryContext): number;
   destroy(): void;
   diagnostics(): {
     entries: number;
@@ -65,6 +67,8 @@ export interface HistoryLoader {
     prefetchActive: boolean;
   };
 }
+
+export type { HistoryEmptyReason };
 
 export class HistoryAuthError extends Error {
   readonly status: 401 | 403;

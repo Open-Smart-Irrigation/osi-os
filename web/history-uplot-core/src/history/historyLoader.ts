@@ -75,6 +75,15 @@ const cacheEligible = (data: HistoryAcceptedData, request: HistoryRangeRequest) 
   (data.readPolicy === undefined || data.readPolicy === (request.readPolicy ?? 'card-default')) &&
   Number.isFinite(pointCost(data));
 
+export function historyResponseSatisfiesDemand(data: HistoryAcceptedData, demand: HistoryDemand): boolean {
+  const policy = policyOf(demand);
+  const ids = idsOf(demand);
+  return !data.limits.truncated && data.aggregation.level === demand.request.aggregation &&
+    data.coverage.from <= demand.visible.from && data.coverage.to >= demand.visible.to &&
+    (data.readPolicy === policy || (policy === 'card-default' && data.readPolicy === undefined)) &&
+    ids.every((id) => data.series.some((series) => series.id === id));
+}
+
 export function createHistoryLoader(
   options: { now?: () => number } = {},
 ): HistoryLoader {
@@ -86,6 +95,8 @@ export function createHistoryLoader(
   let destroyed = false;
   let startOrdinal = 0;
   let accessOrdinal = 0;
+  const selectionRevisions = new Map<string, number>();
+  const contextKey = (context: HistoryContext) => `${context.sessionKey}|${context.scopeKey}|${context.cardId}|${context.sourceKey ?? ''}`;
 
   const cacheKey = (context: HistoryContext, request: HistoryRangeRequest) =>
     `${context.sessionKey}|${context.scopeKey}|${context.cardId}|${context.sourceKey ?? ''}|${request.from}|${request.to}|${request.aggregation}|${request.rangeLabel}|${request.readPolicy ?? 'card-default'}|${request.selectionKey ?? ''}`;
@@ -102,6 +113,7 @@ export function createHistoryLoader(
         entry.readPolicy === policyOf(demand) &&
         containsIds(entry.selectedIds, idsOf(demand)) &&
         entry.request.aggregation === demand.request.aggregation &&
+        historyResponseSatisfiesDemand(entry.data, demand) &&
         !entry.data.limits.truncated &&
         entry.data.aggregation.level === demand.request.aggregation &&
         coverageContains(
@@ -204,7 +216,8 @@ export function createHistoryLoader(
       void load(controller.signal)
         .then((data) => {
           const value = { data, receivedAt: now() };
-          if (!controller.signal.aborted) admit(demand, value);
+          const floor = demand.requestRevision === undefined ? undefined : selectionRevisions.get(contextKey(demand.context));
+          if (!controller.signal.aborted && (floor === undefined || demand.requestRevision === floor) && historyResponseSatisfiesDemand(value.data, demand)) admit(demand, value);
           resolve(value);
         })
         .catch((error) => reject(error));
@@ -349,6 +362,15 @@ export function createHistoryLoader(
       }
       if (foreground?.settled) foreground = null;
       if (prefetch?.settled) prefetch = null;
+    },
+    advanceSelectionRevision(context) {
+      const key = contextKey(context);
+      const revision = (selectionRevisions.get(key) ?? 0) + 1;
+      selectionRevisions.set(key, revision);
+      for (const slot of [foreground, prefetch]) {
+        if (slot && sameContext(slot.demand.context, context) && slot.demand.requestRevision !== undefined && slot.demand.requestRevision < revision) abortSlot(slot, 'superseded');
+      }
+      return revision;
     },
     clear() {
       for (const slot of [foreground, prefetch]) abortSlot(slot, "cleared");
