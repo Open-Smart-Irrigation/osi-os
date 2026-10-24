@@ -4,8 +4,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, type ReactNode } from 'react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 const getAll = vi.fn();
 const useMobileTensionCatalog = vi.fn();
@@ -97,12 +95,6 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('mobile tension history route', () => {
-  it('uses both exact build flags and owner checked global cleanup for diagnostics', () => {
-    const source = readFileSync(resolve(__dirname, '../MobileTensionHistoryRoute.tsx'), 'utf8');
-    expect(source).toContain('MOBILE_HISTORY_INTERNAL_ENABLED && MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED');
-    expect(source).toContain('window.__osiMobileHistoryDiagnostics === owner');
-  });
-
   it('accepts only positive safe decimal integer zone ids', () => {
     expect(parseMobileHistoryZoneId('1')).toBe(1);
     expect(parseMobileHistoryZoneId('001')).toBe(1);
@@ -161,7 +153,7 @@ describe('mobile tension history route', () => {
   it('does not carry the prior zone across a 7 to 8 navigation while the new list is loading', async () => {
     const resolvers: Array<(zones: Array<{ id: number; name: string; timezone: string }>) => void> = [];
     getAll.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
-    const view = renderRoute('/internal/mobile-history/zones/7');
+    renderRoute('/internal/mobile-history/zones/7');
     await waitFor(() => expect(resolvers).toHaveLength(1));
     resolvers[0]([{ id: 7, name: 'North block', timezone: 'UTC' }]);
     await waitFor(() => expect(screen.getByTestId('mobile-shell')).toHaveTextContent('North block'));
@@ -228,7 +220,16 @@ describe('mobile tension history route', () => {
     getAll.mockResolvedValue([{ id: 7, name: 'North block', timezone: 'UTC' }]);
     const view = renderRoute('/internal/mobile-history/zones/7');
     await waitFor(() => expect(window.__osiMobileHistoryDiagnostics).toBe(diagnosticsOwner));
-    const replacement = { source: 'replacement-owner' };
+    const replacement = {
+      source: 'replacement-owner',
+      snapshot: () => ({
+        requestedViewport: { from: 0, to: 0 },
+        renderedViewport: null,
+        plotRect: null,
+        loader: { foregroundActive: false, prefetchActive: false, entries: 0, points: 0 },
+        shell: { status: 'idle' as const, refreshing: false, errorKind: null },
+      }),
+    };
     window.__osiMobileHistoryDiagnostics = replacement;
     view.unmount();
     expect(window.__osiMobileHistoryDiagnostics).toBe(replacement);

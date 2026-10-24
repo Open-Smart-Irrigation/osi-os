@@ -4,8 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { HashRouter } from 'react-router-dom';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import appSource from '../App.tsx?raw';
 
 vi.mock('../AppProviders', () => ({
   AppProviders: ({ children }: { children: ReactNode }) => {
@@ -29,8 +28,6 @@ vi.mock('../pages/admin/GrantsPage', () => ({ GrantsPage: () => <div>GRANTS</div
 vi.mock('../pages/NetworkPage', () => ({ NetworkPage: () => <div>NETWORK</div> }));
 vi.mock('../pages/AnalysisRoute', () => ({ AnalysisRoute: () => <div>ANALYSIS</div> }));
 
-const source = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8');
-
 import App from '../App';
 
 afterEach(() => {
@@ -40,10 +37,10 @@ afterEach(() => {
 
 describe('mobile tension history app route', () => {
   it('keeps the lazy import inside the exact build gate and redirects when disabled', () => {
-    expect(source).toContain("import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'");
-    expect(source).toContain("lazy(() => import('./pages/MobileTensionHistoryRoute')");
-    expect(source).toContain('<Navigate to="/history" replace />');
-    expect(source).toContain('path="/internal/mobile-history/zones/:zoneId"');
+    expect(appSource).toContain("import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'");
+    expect(appSource).toContain("lazy(() => import('./pages/MobileTensionHistoryRoute')");
+    expect(appSource).toContain('<Navigate to="/history" replace />');
+    expect(appSource).toContain('path="/internal/mobile-history/zones/:zoneId"');
   });
 
   it('redirects the disabled route through the existing private route boundary', async () => {

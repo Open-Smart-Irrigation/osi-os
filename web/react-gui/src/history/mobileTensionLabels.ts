@@ -1,8 +1,19 @@
 import type { TFunction } from 'i18next';
 import type { MobileTensionHistoryLabels } from '@osi/history-uplot';
 
+type MobileTensionLabelKey =
+  | 'title' | 'chart' | 'waterTension' | 'controls' | 'time' | 'timeRange' | 'range24h' | 'range7d'
+  | 'latest' | 'hourlyAverages' | 'hourlyAverage' | 'loading' | 'refreshing' | 'emptyInterval' | 'showLatest24h'
+  | 'unavailableValue' | 'notLoaded' | 'chooseSources' | 'historicalUnverified' | 'sources' | 'chartSources'
+  | 'openSources' | 'sourceDiscoveryIncomplete' | 'catalogFailed' | 'unavailableSources' | 'requestTooLarge'
+  | 'fewerSourcesOrShorterWindow' | 'accessDenied' | 'incompleteResponse' | 'transientFailure' | 'retry'
+  | 'details' | 'close' | 'sourceCap' | 'sourceCount' | 'invalidHourlyAverages' | 'removedSources'
+  | 'removeSource' | 'transportCoverage' | 'bucketInterval' | 'latestBucket' | 'pinnedReading' | 'visibleWindow'
+  | 'seriesLegend.legend' | 'seriesLegend.showAll' | 'seriesLegend.plottedSeries' | 'seriesLegend.seriesCount'
+  | 'seriesLegend.focusAnnouncement' | 'seriesLegend.allSeriesAnnouncement';
+
 export function mobileTensionLabels(t: TFunction<'history'>): MobileTensionHistoryLabels {
-  const label = (key: string, options?: Record<string, unknown>): string =>
+  const label = (key: MobileTensionLabelKey, options?: Record<string, unknown>): string =>
     t(`history.mobileTension.${key}`, options);
 
   return {

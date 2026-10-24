@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 vi.hoisted(() => { if (typeof window !== 'undefined' && !window.matchMedia) window.matchMedia = (() => ({ matches: false, media: '', onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } })) as typeof window.matchMedia; });
 import axios from 'axios';
-import { MobileAnalysisValidationError, MobileHistoryError, HistoryAuthError, type HistoryLoadContext } from '@osi/history-uplot';
+import { MobileAnalysisValidationError, HistoryAuthError, type HistoryLoadContext } from '@osi/history-uplot';
 import type { AnalysisSeriesResponse } from '../../analysis/types';
 import { adaptMobileAnalysisResponse, buildMobileAnalysisRequest, createMobileAnalysisLoader, toMobileFailureInput } from '../mobileAnalysisHistoryAdapter';
 import { analysisAPI } from '../../services/api';
