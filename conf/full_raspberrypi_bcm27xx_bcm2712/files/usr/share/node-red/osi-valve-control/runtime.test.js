@@ -198,10 +198,10 @@ test('emitRuntimeChanged: a linked gateway enqueues a VALVE_RUNTIME_CHANGED sync
 test('emitRuntimeChanged: a device-level gateway_device_eui override wins over sync_link_state.gateway_device_eui, matching the 0024/0025 trigger COALESCE order', async () => {
   const { db } = await tempDb();
   await linkCloud(db, { gatewayDeviceEui: 'AABBCCDDEEFF0003' });
-  await db.run('UPDATE devices SET gateway_device_eui=? WHERE UPPER(deveui)=?', ['0016C001F1999999', EUI]);
+  await db.run('UPDATE devices SET gateway_device_eui=? WHERE UPPER(deveui)=?', ['AABBCCDDEEFF0099', EUI]);
   await emitRuntimeChanged(db, EUI);
   const row = await db.get('SELECT gateway_device_eui FROM sync_outbox');
-  assert.equal(row.gateway_device_eui, '0016C001F1999999');
+  assert.equal(row.gateway_device_eui, 'AABBCCDDEEFF0099');
 });
 
 test('emitRuntimeChanged: multiple emits for the same device are not deduplicated/debounced -- each call enqueues its own row (design: coalescing is fine, cloud applier is last-write-wins on as_of)', async () => {
