@@ -1,0 +1,33 @@
+.mobile-tension-history { position: relative; width: 100%; }
+.mobile-tension-history button,
+.mobile-tension-history input { font: inherit; }
+.mobile-tension-history button { min-height: 2.75rem; }
+.mobile-tension-eyebrow { color: var(--text-secondary, #64748b); font-size: .8rem; margin-bottom: .25rem; }
+.mobile-tension-title-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: .5rem .75rem; }
+.mobile-tension-title-row h1 { flex: 1 1 12rem; min-width: 0; margin: 0; font-size: clamp(1.25rem, 4vw, 1.65rem); }
+.mobile-tension-title-row button,
+.mobile-tension-controls button { min-height: 2.75rem; padding: .5rem .75rem; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; background: var(--secondary-bg, #fff); color: inherit; }
+.mobile-tension-date-summary { flex: 1 1 100%; color: var(--text-secondary, #64748b); font-size: .75rem; overflow-wrap: anywhere; }
+.mobile-tension-controls { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
+.mobile-tension-chart-title { margin: .75rem 0 .25rem; font-size: 1rem; }
+/* uPlot's numeric tick ends 10px before the tick plus a 5px axis gap; the 1px host border leaves 14px to offset. */
+.mobile-tension-unit-row { display: flex; width: 52px; min-height: 1rem; align-items: flex-end; justify-content: flex-end; transform: translateX(-14px); font-size: .7rem; line-height: 1.4; font-weight: 700; pointer-events: none; }
+.mobile-tension-unit-row span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.mobile-tension-chart-frame { min-height: 22rem; height: clamp(22rem, 58vh, 38rem); }
+.mobile-tension-chart-frame .chart-host { min-height: 22rem; height: 100%; }
+.mobile-tension-details { margin: .75rem 0; }
+.mobile-tension-details summary { min-height: 2.75rem; padding: .65rem .75rem; border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; cursor: pointer; }
+.mobile-tension-details-body { padding: .5rem .75rem; color: var(--text-secondary, #475569); font-size: .8rem; }
+.mobile-tension-source-failure { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .75rem 0; }
+.mobile-tension-sheet-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; background: rgb(0 0 0 / 35%); }
+.mobile-tension-sheet { box-sizing: border-box; width: min(480px, 100%); max-height: min(90vh, 42rem); overflow: hidden; padding: .75rem; border-radius: .75rem .75rem 0 0; background: var(--secondary-bg, #fff); color: var(--text, #172033); }
+.mobile-tension-sheet-heading { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.mobile-tension-sheet-heading h2 { margin: 0; font-size: 1rem; }
+.mobile-tension-sheet-content { max-height: calc(min(90vh, 42rem) - 4rem); overflow: auto; padding-top: .5rem; }
+.mobile-tension-sheet-content > button { display: block; width: 100%; margin: .25rem 0; }
+.mobile-tension-sheet fieldset { display: grid; grid-template-columns: 1fr; gap: .4rem; margin: 0; padding: .5rem; }
+.mobile-tension-sheet fieldset label { display: flex; min-height: 2.75rem; align-items: center; gap: .5rem; padding: .35rem .5rem; }
+.mobile-tension-sheet fieldset label.is-disabled { opacity: .55; }
+.mobile-tension-sheet fieldset input { width: 1.15rem; height: 1.15rem; }
+.mobile-tension-sheet fieldset small { color: var(--text-secondary, #64748b); }
+@media (min-width: 30rem) { .mobile-tension-date-summary { flex: 0 1 auto; } }

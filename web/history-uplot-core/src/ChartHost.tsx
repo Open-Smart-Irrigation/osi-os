@@ -16,6 +16,7 @@ interface ChartHostBaseProps {
   notLoadedLabel?: string;
   labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string; hourlyAverage?: string; bucketInterval?: (from: number, to: number) => string };
   focusedSeriesId?: string | null;
+  registerInternalDiagnostics?: (reader: ChartHostInternalDiagnosticsReader | null) => void;
 }
 export type ChartHostProps = ChartHostBaseProps & (
   | { inspectionMode?: 'nearest-point'; locale?: never; timeZone?: never }
@@ -24,9 +25,14 @@ export type ChartHostProps = ChartHostBaseProps & (
 
 interface Pin { targetTime: number; rows: readonly (Inspection | ReturnType<typeof inspectBucketAtTime>)[]; }
 
+export type ChartHostInternalDiagnosticsReader = () => {
+  renderedViewport: Viewport;
+  plotRect: { left: number; top: number; width: number; height: number };
+};
+
 const DEFAULT_LABELS = { pinnedReading: 'Pinned reading', close: 'Close', unavailable: 'Unavailable at this sample', visibleWindow: 'Visible time window' };
 
-export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null, locale, timeZone, inspectionMode = 'nearest-point' }: ChartHostProps) {
+export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null, locale, timeZone, inspectionMode = 'nearest-point', registerInternalDiagnostics }: ChartHostProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -70,6 +76,10 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     };
     const adapter = mountAdapter(renderer, store.get(), onViewportChange, { extent, minSpanMs, maxSpanMs, yRange, ...(inspectionMode === 'containing-bucket' ? { locale, timeZone } : {}) });
     adapterRef.current = adapter;
+    registerInternalDiagnostics?.(() => {
+      const plot = adapter.getPlotRect();
+      return { renderedViewport: adapter.getViewport(), plotRect: { left: plot.left, top: plot.top, width: plot.width, height: plot.height } };
+    });
     adapter.setData(series);
     adapter.setViewport(store.get());
     adapter.resize();
@@ -90,10 +100,11 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
       window.removeEventListener('resize', resize);
       controllerRef.current?.destroy();
       controllerRef.current = null;
+      registerInternalDiagnostics?.(null);
       adapter.destroy();
       adapterRef.current = null;
     };
-  }, [mountAdapter, store, minSpanMs, maxSpanMs, yRange, inspectionMode, locale, timeZone]);
+  }, [mountAdapter, store, minSpanMs, maxSpanMs, yRange, inspectionMode, locale, timeZone, registerInternalDiagnostics]);
 
   useEffect(() => {
     controllerRef.current?.updateExtent?.(extent);

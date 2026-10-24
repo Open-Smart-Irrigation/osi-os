@@ -14,4 +14,5 @@ export * from './adapters/uplot';
 export * from './adapters/uplot-data';
 export * from './ChartHost';
 export * from './mobile/MobileSoilHistory';
+export * from './mobile/MobileTensionHistory';
 export * from './mobile/SeriesLegend';

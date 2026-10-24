@@ -11,6 +11,18 @@ vi.mock('../src/shared/gestures', () => ({
 const series = [{ id: 'soil', label: 'Soil', unit: 'kPa', points: [{ t: 1_000, value: 4 }] }] as const;
 
 describe('packaged ChartHost', () => {
+  test('registers the live adapter diagnostics reader and unregisters before destroy', () => {
+    const destroy = vi.fn();
+    const register = vi.fn();
+    const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 123, to: 456 }), getPlotRect: () => new DOMRect(7, 8, 90, 100), resize: vi.fn(), destroy }));
+    const view = render(<ChartHost mountAdapter={mountAdapter} series={series} store={createViewportStore({ from: 0, to: 10_000 }, { from: 0, to: 10_000 }, 1_000, 10_000)} extent={{ from: 0, to: 10_000 }} registerInternalDiagnostics={register} />);
+    const reader = register.mock.calls[0]?.[0];
+    expect(reader()).toEqual({ renderedViewport: { from: 123, to: 456 }, plotRect: { left: 7, top: 8, width: 90, height: 100 } });
+    view.unmount();
+    expect(register).toHaveBeenLastCalledWith(null);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(register.mock.invocationCallOrder[register.mock.calls.length - 1]).toBeLessThan(destroy.mock.invocationCallOrder[0]);
+  });
   test('inspects the containing half-open bucket with explicit locale inputs', () => {
     const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
     const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 7_200_000 }, 1_000, 7_200_000);
