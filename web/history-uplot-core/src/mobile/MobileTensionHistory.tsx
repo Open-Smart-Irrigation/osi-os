@@ -319,6 +319,8 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
   const sourceFailure = model.error instanceof MobileHistoryError && model.error.failure.kind === 'sources' ? model.error.failure : null;
   const accepted = model.accepted;
   const noSelection = activeSelectedIds.length === 0;
+  const selectionStarting = !noSelection && model.status === 'empty' && model.emptyReason === 'no-selection';
+  const hasCompletedEmptyInterval = !noSelection && model.status === 'empty' && model.emptyReason === 'no-finite-data' && accepted !== null;
   const hideChart = authError !== null || catalogError instanceof HistoryAuthError;
 
   return <section className="mobile-soil-history mobile-tension-history" data-testid="mobile-tension-history" aria-labelledby="mobile-tension-history-title">
@@ -332,7 +334,7 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <button type="button" aria-label={labels.openSources} onClick={(event) => openSheet('sources', event)}>{labels.sources}: {labels.sourceCount(activeSelectedIds.length, catalog.length)}</button>
     </div>
     {catalogLoading && <p role="status">{labels.loading}</p>}
-    {model.status === 'loading' && !accepted && <p role="status">{labels.loading}</p>}
+    {((model.status === 'loading' && !accepted) || selectionStarting) && <p role="status">{labels.loading}</p>}
     {model.refreshing && <p role="status" aria-live="polite">{labels.refreshing}</p>}
     {statusMessage(model, catalogError, authError, labels)}
     {removedSourceNames.length > 0 && <p role="alert">{labels.removedSources(removedSourceNames.join(', '))}</p>}
@@ -342,7 +344,7 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <h2 className="mobile-tension-chart-title">{labels.hourlyAverages}</h2>
       <div className="mobile-tension-unit-row"><span>{labels.waterTension}</span><strong>kPa</strong></div>
       {noSelection && <p role="status">{labels.chooseSources}</p>}
-      {!catalogLoading && model.status === 'empty' && !noSelection && <><p role="status">{labels.emptyInterval}</p><button type="button" onClick={() => model.showLatest('24h')}>{labels.showLatest24h}</button></>}
+      {!catalogLoading && hasCompletedEmptyInterval && <><p role="status">{labels.emptyInterval}</p><button type="button" onClick={() => model.showLatest('24h')}>{labels.showLatest24h}</button></>}
       <div className="mobile-tension-chart-frame" aria-label={labels.chart}>
         <ChartHost mountAdapter={mountAdapter} series={chartSeries} store={model.viewportStore} extent={model.horizon} minSpanMs={HOUR_MS} maxSpanMs={7 * DAY_MS} inspectionMode="containing-bucket" locale={locale} timeZone={timeZone} focusedSeriesId={focusedSeriesId} coverage={accepted?.coverage} notLoadedLabel={labels.notLoaded} registerInternalDiagnostics={setChartReader} labels={{ pinnedReading: labels.pinnedReading, close: labels.close, unavailable: labels.unavailableValue, visibleWindow: labels.visibleWindow, hourlyAverage: labels.hourlyAverage, bucketInterval: (from, to) => labels.bucketInterval(dateText(from, locale, timeZone), dateText(to, locale, timeZone)) }} />
       </div>

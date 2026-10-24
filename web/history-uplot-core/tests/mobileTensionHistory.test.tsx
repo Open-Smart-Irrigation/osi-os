@@ -193,6 +193,31 @@ describe('MobileTensionHistory', () => {
     expect(screen.getByRole('button', { name: labels.showLatest24h })).toBeTruthy();
   });
 
+  test('shows loading while the default selection is starting before the first response', async () => {
+    let resolveLoad!: (response: HistoryWindowResponse) => void;
+    const deferredLoad = vi.fn((request: Parameters<typeof load>[0]): Promise<HistoryWindowResponse> => new Promise((resolve) => { resolveLoad = resolve; }));
+    render(<MobileTensionHistory {...props({ load: deferredLoad })} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText(labels.loading)).toBeTruthy();
+    expect(screen.queryByText(labels.emptyInterval)).toBeNull();
+    expect(screen.queryByRole('button', { name: labels.showLatest24h })).toBeNull();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+    expect(deferredLoad).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(labels.loading)).toBeTruthy();
+    expect(screen.queryByText(labels.emptyInterval)).toBeNull();
+    expect(screen.queryByRole('button', { name: labels.showLatest24h })).toBeNull();
+    const request = deferredLoad.mock.calls[0][0];
+    resolveLoad({
+      request,
+      coverage: { from: request.from, to: request.to },
+      series: [{ id: 'series-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: null }], buckets: [{ from: request.from, to: request.to, value: null, count: 0, quality: 'partial' }] }],
+      unitGroups: [], aggregation: { level: 'hourly', pointCount: 1 }, limits: { maxPointsPerSeries: 2_000, truncated: false }, readPolicy: 'edge-hourly',
+    });
+    await waitFor(() => expect(screen.queryByText(labels.loading)).toBeNull());
+    expect(screen.getByText(labels.emptyInterval)).toBeTruthy();
+    expect(screen.getByRole('button', { name: labels.showLatest24h })).toBeTruthy();
+  });
+
   test('empty seven-day view recovers with one exact latest 24-hour request', async () => {
     const emptyLoad = vi.fn(async (request = { from: 0, to: 86_400_000, rangeLabel: '24h' as const, aggregation: 'hourly' as const }): Promise<HistoryWindowResponse> => ({
       request, coverage: { from: request.from, to: request.to }, series: [{ id: 'series-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: null }], buckets: [{ from: request.from, to: request.to, value: null, count: 0, quality: 'partial' }] }], unitGroups: [], aggregation: { level: 'hourly', pointCount: 1 }, limits: { maxPointsPerSeries: 2000, truncated: false }, readPolicy: 'edge-hourly',
