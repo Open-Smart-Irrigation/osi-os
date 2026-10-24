@@ -1392,3 +1392,37 @@ test('NTP removal: a due conditional occurrence opens without an NTP marker', as
     value.cleanup();
   }
 });
+
+// R19 finding 9 (low): a RESERVED occurrence resumed after a crash re-runs the dispatch gates
+// (pause, skip today, readiness, VWC gate, incidents) instead of sending straight away. A failed
+// gate expires the reservation and releases the valve; nothing is sent.
+test('R19-9: a resumed RESERVED occurrence is not sent when the valve was paused in between', async () => {
+  const value = await fixture();
+  let clockCalls = 0;
+  let sends = 0;
+  const options = workerOptions(value, {
+    qualificationProvider: () => ({ qualified: true, identity: 'fixture-gen1', margin_seconds: 0 }),
+    clock: () => {
+      clockCalls += 1;
+      return clockCalls === 3 ? { trusted: false, reason: 'clock_untrusted_lower_bound' } : { trusted: true, reason: 'trusted' };
+    },
+    transport: { async enqueueDownlink() { sends += 1; return { id: 'resumed-after-pause' }; } },
+  });
+  try {
+    await worker.runDue(options);
+    const reserved = await value.db.get('SELECT state, command_id FROM irrigation_occurrences WHERE schedule_uuid=?', ['schedule-1']);
+    assert.equal(reserved.state, 'RESERVED');
+    reopenValue(value);
+    await value.db.run("UPDATE valve_settings SET scheduler_status='DEACTIVATED' WHERE device_eui=?", [DEVICE]);
+    await worker.runDue({ ...options, db: value.db, clock: () => ({ trusted: true, reason: 'trusted' }) });
+    assert.equal(sends, 0, 'nothing is sent after the pause');
+    const after = await value.db.get('SELECT state, decision_reason FROM irrigation_occurrences WHERE schedule_uuid=?', ['schedule-1']);
+    assert.equal(after.state, 'EXPIRED');
+    const expectation = await value.db.get('SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE command_id=?', [reserved.command_id]);
+    assert.equal(expectation.reconciliation_state, 'CANCELLED', 'the reservation no longer fences the valve');
+    assert.equal(expectation.cancel_reason, 'scheduler_paused');
+  } finally {
+    try { value.raw.close(); } catch (_) { /* already closed */ }
+    value.cleanup();
+  }
+});

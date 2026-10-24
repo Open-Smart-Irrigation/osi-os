@@ -381,6 +381,22 @@ function staleEvidence(candidate, current, reason, now) {
   };
 }
 
+// R19 finding 9: the gates a fresh dispatch checks after the evaluation window, re-run for a
+// resumed reservation. Returns the skip reason, or null when the open may still go out.
+async function resumeGateReason(tx, current, occurrence) {
+  const eui = current.schedule.device_eui;
+  const readiness = await push.conditionalReadinessTx(tx, eui);
+  if (!readiness.ready) return 'plan_update_pending';
+  const settings = await valveStore.getSettings(tx, eui);
+  const status = String(settings.scheduler_status || '').toUpperCase();
+  if (status === 'SKIP_TODAY' && String(settings.skip_today_date || '') === String(occurrence.local_date)) return 'skip_today';
+  if (status === 'DEACTIVATED') return 'scheduler_paused';
+  if (policyStore.isVwcCondition(current.policy.condition) && !(await policyStore.vwcConditionEnabled(tx))) return 'vwc_condition_disabled';
+  const control = await valveStore.conditionalControl(tx, eui);
+  if (control.incident && control.incident.state !== 'RECONCILED') return 'unexpected_watering';
+  return null;
+}
+
 async function decideSkippedTx(tx, occurrence, { decision, reason, evidence, dueAt, now }) {
   const transitioned = await policyStore.transitionOccurrenceTx(tx, occurrence, {
     state: 'SKIPPED', decision, decision_reason: reason,
@@ -504,6 +520,18 @@ async function prepareCandidate(options, candidate) {
         const expectation = existing.command_id && await tx.get('SELECT * FROM valve_actuation_expectations WHERE command_id=? AND UPPER(device_eui)=UPPER(?) ORDER BY rowid DESC LIMIT 1', [existing.command_id, current.schedule.device_eui]);
         const transportState = jsonObject(expectation && expectation.transport_json, {});
         if (!expectation || !transportState.effect_snapshot) return { kind: 'dispatch_unknown', occurrence: existing, reason: 'effect_snapshot_missing' };
+        // R19 finding 9: a reservation resumed after a crash re-runs the dispatch gates. A gate
+        // that now fails expires the never-attempted reservation (the store allows only
+        // command_expired for RESERVED) and releases the valve with that reason; nothing is sent.
+        if (!transportState.phase) {
+          const blocked = await resumeGateReason(tx, current, existing);
+          if (blocked) {
+            await policyStore.transitionOccurrenceTx(tx, existing, { state: 'EXPIRED', decision_reason: 'command_expired', updated_at: writerNow }, { now: writerNow });
+            await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: expectation.expectation_id }, { phase: 'enqueue_failed_before_acceptance', cancelled_before_send_at: writerNow });
+            await tx.run("UPDATE valve_actuation_expectations SET reconciliation_state='CANCELLED', cancel_reason=? WHERE expectation_id=? AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING')", [blocked, expectation.expectation_id]);
+            return { kind: 'skipped', reason: blocked, occurrence: existing };
+          }
+        }
         return {
           kind: 'resume', occurrence: existing, owner: { type: 'expectation', id: expectation.expectation_id },
           device_eui: current.schedule.device_eui,
