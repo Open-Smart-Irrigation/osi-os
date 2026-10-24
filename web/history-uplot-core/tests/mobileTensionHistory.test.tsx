@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { MobileTensionHistory, type MobileTensionHistoryLabels } from '../src/mobile/MobileTensionHistory';
-import type { HistoryWindowResponse, MobileTensionSource } from '../src/shared/types';
+import type { HistoryLoadContext, HistoryWindowResponse, MobileTensionSource } from '../src/shared/types';
 import { HistoryAuthError } from '../src/history/types';
 import { MobileHistoryError } from '../src/mobile/mobileHistoryError';
 
@@ -23,7 +23,7 @@ const labels: MobileTensionHistoryLabels = {
 
 const source = (index: number): MobileTensionSource => ({ seriesId: `series-${index}`, sourceKey: `source-${index}`, channelKey: 'swt_1', label: `Probe ${index}`, unit: 'kPa', zoneId: '1', available: true, status: 'current', measurementKind: 'soil' });
 
-const load = vi.fn(async (request = { from: 0, to: 86_400_000, rangeLabel: '24h' as const, aggregation: 'hourly' as const }): Promise<HistoryWindowResponse> => {
+const load = vi.fn(async (request = { from: 0, to: 86_400_000, rangeLabel: '24h' as const, aggregation: 'hourly' as const }, _signal?: AbortSignal, _context?: HistoryLoadContext): Promise<HistoryWindowResponse> => {
   return ({
   request, coverage: { from: request.from, to: request.to }, series: (request.selectionKey ? JSON.parse(request.selectionKey) : ['series-1']).map((id: string) => ({ id, label: id, unit: 'kPa', points: [{ t: request.from, value: 4 }], buckets: [{ from: request.from, to: request.to, value: 4, count: 1, quality: 'ok' }] })),
   unitGroups: [], aggregation: { level: 'hourly', pointCount: 0 }, limits: { maxPointsPerSeries: 2000, truncated: false }, readPolicy: 'edge-hourly',
@@ -129,6 +129,16 @@ describe('MobileTensionHistory', () => {
     await waitFor(() => expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ status: 401 })));
   });
 
+  test('shows access denied and hides the chart for a series 403', async () => {
+    const onAuthError = vi.fn();
+    const deniedLoad = vi.fn(async () => { throw new HistoryAuthError(403, 'denied'); });
+    render(<MobileTensionHistory {...props({ load: deniedLoad, onAuthError })} />);
+    await waitFor(() => expect(onAuthError).toHaveBeenCalledWith(expect.objectContaining({ status: 403 })));
+    expect(screen.getByText(labels.accessDenied)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: labels.retry })).toBeNull();
+    expect(screen.queryByTestId('chart-host')).toBeNull();
+  });
+
   test('traps source-sheet focus, closes on Escape, and restores the opener', () => {
     render(<MobileTensionHistory {...props()} />);
     const opener = screen.getByRole('button', { name: labels.openSources });
@@ -196,5 +206,24 @@ describe('MobileTensionHistory', () => {
     const error = new MobileHistoryError({ kind: 'size', status: 413, reason: 'too large' });
     render(<MobileTensionHistory {...props({ catalogError: error })} />);
     expect(screen.queryByRole('button', { name: labels.retry })).toBeNull();
+  });
+
+  test('initializes a completed empty catalog once and does not apply later defaults', async () => {
+    const view = render(<MobileTensionHistory {...props({ sources: [], defaultSelectedIds: [], catalogLoading: false })} />);
+    expect(screen.getByText(labels.chooseSources)).toBeTruthy();
+    view.rerender(<MobileTensionHistory {...props()} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText(labels.chooseSources)).toBeTruthy();
+    expect(screen.queryByText(/Selected 1/)).toBeNull();
+  });
+
+  test('never sends old selected IDs while a new context initializes', async () => {
+    const view = render(<MobileTensionHistory {...props({ context: { sessionKey: 'session-a', scopeKey: 'zone:1', cardId: 'mobile-water-tension' }, sources: [source(1)], defaultSelectedIds: ['series-1'] })} />);
+    await waitFor(() => expect(load.mock.calls.some(([, , context]) => context?.selectedIds?.includes('series-1'))).toBe(true));
+    const oldCallCount = load.mock.calls.length;
+    view.rerender(<MobileTensionHistory {...props({ context: { sessionKey: 'session-b', scopeKey: 'zone:2', cardId: 'mobile-water-tension' }, sources: [source(2)], defaultSelectedIds: ['series-2'] })} />);
+    await waitFor(() => expect(load.mock.calls.slice(oldCallCount).some(([, , context]) => context?.selectedIds?.includes('series-2'))).toBe(true));
+    const newContextCalls = load.mock.calls.slice(oldCallCount);
+    expect(newContextCalls.every(([, , context]) => context?.selectedIds?.every((id: string) => id === 'series-2'))).toBe(true);
   });
 });

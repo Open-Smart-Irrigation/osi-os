@@ -147,8 +147,9 @@ function BottomSheet({ title, open, triggerRef, onClose, children, closeLabel }:
   </div>;
 }
 
-function statusMessage(model: HistoryWindowResult, catalogError: MobileTensionHistoryProps['catalogError'], labels: MobileTensionHistoryLabels): ReactNode {
+function statusMessage(model: HistoryWindowResult, catalogError: MobileTensionHistoryProps['catalogError'], authError: HistoryAuthError | null, labels: MobileTensionHistoryLabels): ReactNode {
   if (catalogError instanceof HistoryAuthError) return <p role="alert">{labels.accessDenied}</p>;
+  if (authError?.status === 403) return <p role="alert">{labels.accessDenied}</p>;
   if (catalogError instanceof MobileHistoryError) {
     if (catalogError.failure.kind === 'transient') return <p role="alert">{labels.sourceDiscoveryIncomplete}</p>;
     return <p role="alert">{labels.catalogFailed}</p>;
@@ -169,6 +170,7 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
   const loader = loaderRef.current;
   const contextIdentity = `${context.sessionKey}|${context.scopeKey}`;
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
+  const [selectionContext, setSelectionContext] = useState(contextIdentity);
   const initializedContext = useRef<string | null>(null);
   const selectionInitialized = useRef<string | null>(null);
   const deliberateEmpty = useRef(false);
@@ -187,13 +189,12 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
   const sourceById = useMemo(() => new Map(catalog.map((item) => [item.seriesId, item])), [catalog]);
   const selectableIds = useMemo(() => new Set(catalog.filter((item) => item.available && item.legacy !== true && item.measurementKind === 'soil' && /^swt_[123]$/.test(item.channelKey)).map((item) => item.seriesId)), [catalog]);
   const defaultEligibleIds = useMemo(() => new Set(catalog.filter((item) => selectableIds.has(item.seriesId) && item.status !== 'other_supported').map((item) => item.seriesId)), [catalog, selectableIds]);
-  const catalogLoadingSeen = useRef(false);
 
   useEffect(() => {
     if (initializedContext.current === contextIdentity) return;
     initializedContext.current = contextIdentity;
+    setSelectionContext(contextIdentity);
     selectionInitialized.current = null;
-    catalogLoadingSeen.current = false;
     deliberateEmpty.current = false;
     deniedIds.current = new Set();
     setSelectedIds([]);
@@ -202,18 +203,13 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
   }, [contextIdentity]);
 
   useEffect(() => {
-    if (catalogLoading) catalogLoadingSeen.current = true;
-  }, [catalogLoading]);
-
-  useEffect(() => {
     if (catalogLoading || initializedContext.current !== contextIdentity || deliberateEmpty.current || (catalogError && selectionInitialized.current !== contextIdentity)) return;
-    if (catalog.length === 0 && !catalogLoadingSeen.current) return;
     if (selectionInitialized.current === contextIdentity) {
       setSelectedIds((current) => current.filter((id) => selectableIds.has(id) && !deniedIds.current.has(id)));
       return;
     }
     selectionInitialized.current = contextIdentity;
-    setSelectedIds((current) => {
+    setSelectedIds(() => {
       return [...new Set(defaultSelectedIds)].filter((id) => defaultEligibleIds.has(id) && !deniedIds.current.has(id)).slice(0, MAX_SOURCES);
     });
   }, [catalog, catalogError, catalogLoading, contextIdentity, defaultEligibleIds, defaultSelectedIds, selectableIds]);
@@ -229,12 +225,14 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
     setAuthError(error);
     onAuthError(error);
   }, [onAuthError]);
+  const selectionReady = selectionContext === contextIdentity;
+  const activeSelectedIds = selectionReady ? selectedIds : [];
   const model = useHistoryWindow({
     enabled: !authError && !(catalogError instanceof HistoryAuthError),
     context,
     load,
     loader,
-    selectedIds,
+    selectedIds: activeSelectedIds,
     onAuthError: onAuth,
     rangeStrategy: analysisHourlyRangeStrategy,
     maxSpanMs: 7 * DAY_MS,
@@ -296,14 +294,14 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
     const accepted = model.accepted;
     if (!accepted) return [];
     const acceptedById = new Map(accepted.series.map((item) => [item.id, item]));
-    return catalog.filter((item) => selectedIds.includes(item.seriesId)).map((item) => {
+    return catalog.filter((item) => activeSelectedIds.includes(item.seriesId)).map((item) => {
       const itemData = acceptedById.get(item.seriesId);
       if (!itemData) return null;
       return { ...itemData, id: item.seriesId, label: item.label || itemData.label, unit: 'kPa', appearance: appearanceById.get(item.seriesId)! };
     }).filter((item): item is LegendSeries => item !== null);
-  }, [catalog, selectedIds, model.accepted, appearanceById]);
+  }, [catalog, activeSelectedIds, model.accepted, appearanceById]);
   const [focusedSeriesId, setFocusedSeriesId] = useState<string | null>(null);
-  useEffect(() => { if (focusedSeriesId && !selectedIds.includes(focusedSeriesId)) setFocusedSeriesId(null); }, [focusedSeriesId, selectedIds]);
+  useEffect(() => { if (focusedSeriesId && !activeSelectedIds.includes(focusedSeriesId)) setFocusedSeriesId(null); }, [focusedSeriesId, activeSelectedIds]);
 
   const toggleSource = (id: string) => {
     if (deniedIds.current.has(id) || !selectableIds.has(id)) return;
@@ -320,7 +318,7 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
 
   const sourceFailure = model.error instanceof MobileHistoryError && model.error.failure.kind === 'sources' ? model.error.failure : null;
   const accepted = model.accepted;
-  const noSelection = selectedIds.length === 0;
+  const noSelection = activeSelectedIds.length === 0;
   const hideChart = authError !== null || catalogError instanceof HistoryAuthError;
 
   return <section className="mobile-soil-history mobile-tension-history" data-testid="mobile-tension-history" aria-labelledby="mobile-tension-history-title">
@@ -331,12 +329,12 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <ViewportDateSummary store={model.viewportStore} locale={locale} timeZone={timeZone} />
     </div>
     <div className="mobile-tension-controls" role="group" aria-label={labels.controls}>
-      <button type="button" aria-label={labels.openSources} onClick={(event) => openSheet('sources', event)}>{labels.sources}: {labels.sourceCount(selectedIds.length, catalog.length)}</button>
+      <button type="button" aria-label={labels.openSources} onClick={(event) => openSheet('sources', event)}>{labels.sources}: {labels.sourceCount(activeSelectedIds.length, catalog.length)}</button>
     </div>
     {catalogLoading && <p role="status">{labels.loading}</p>}
     {model.status === 'loading' && !accepted && <p role="status">{labels.loading}</p>}
     {model.refreshing && <p role="status" aria-live="polite">{labels.refreshing}</p>}
-    {statusMessage(model, catalogError, labels)}
+    {statusMessage(model, catalogError, authError, labels)}
     {removedSourceNames.length > 0 && <p role="alert">{labels.removedSources(removedSourceNames.join(', '))}</p>}
     {catalogError instanceof MobileHistoryError && catalogError.failure.kind === 'transient' && <button type="button" onClick={retryCatalog}>{labels.retry}</button>}
     {model.error instanceof MobileHistoryError && model.error.failure.kind === 'transient' && <button type="button" onClick={model.retry}>{labels.retry}</button>}
@@ -348,14 +346,15 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <div className="mobile-tension-chart-frame" aria-label={labels.chart}>
         <ChartHost mountAdapter={mountAdapter} series={chartSeries} store={model.viewportStore} extent={model.horizon} minSpanMs={HOUR_MS} maxSpanMs={7 * DAY_MS} inspectionMode="containing-bucket" locale={locale} timeZone={timeZone} focusedSeriesId={focusedSeriesId} coverage={accepted?.coverage} notLoadedLabel={labels.notLoaded} registerInternalDiagnostics={setChartReader} labels={{ pinnedReading: labels.pinnedReading, close: labels.close, unavailable: labels.unavailableValue, visibleWindow: labels.visibleWindow, hourlyAverage: labels.hourlyAverage, bucketInterval: (from, to) => labels.bucketInterval(dateText(from, locale, timeZone), dateText(to, locale, timeZone)) }} />
       </div>
-      <SeriesLegend series={chartSeries} focusedSeriesId={focusedSeriesId} onFocus={(id) => setFocusedSeriesId((current) => current === id ? null : id)} onShowAll={() => setFocusedSeriesId(null)} labels={labels.seriesLegend} resetKey={`${contextIdentity}:${selectedIds.join(',')}`} />
+      <SeriesLegend series={chartSeries} focusedSeriesId={focusedSeriesId} onFocus={(id) => setFocusedSeriesId((current) => current === id ? null : id)} onShowAll={() => setFocusedSeriesId(null)} labels={labels.seriesLegend} resetKey={`${contextIdentity}:${activeSelectedIds.join(',')}`} />
       <p className="mobile-series-legend-announcement" role="status" aria-live="polite">{focusedSeriesId ? labels.seriesLegend.focusAnnouncement(sourceById.get(focusedSeriesId)?.label ?? focusedSeriesId) : labels.seriesLegend.allSeriesAnnouncement}</p>
       {accepted && <details className="mobile-tension-details"><summary>{labels.details}</summary><div className="mobile-tension-details-body">
         {model.accepted && <p>{labels.invalidHourlyAverages(accepted.series.reduce((count, item) => count + (item.buckets?.filter((bucket) => bucket.quality === 'invalid').length ?? 0), 0))}</p>}
         <p>{labels.transportCoverage(dateText(accepted.coverage.from, locale, timeZone), dateText(accepted.coverage.to, locale, timeZone))}</p>
-        {selectedIds.map((id) => {
+        {activeSelectedIds.map((id) => {
           const item = chartSeries.find((candidate) => candidate.id === id);
-          const latest = item?.buckets?.filter((bucket) => bucket.value !== null).at(-1)?.from;
+          const finiteBuckets = item?.buckets?.filter((bucket) => bucket.value !== null) ?? [];
+          const latest = finiteBuckets[finiteBuckets.length - 1]?.from;
           return <p key={id}>{sourceById.get(id)?.label ?? id}: {labels.latestBucket(latest == null ? labels.unavailableValue : dateText(latest, locale, timeZone))}</p>;
         })}
       </div></details>}
@@ -370,11 +369,11 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <button type="button" onClick={() => { model.showLatest(); closeSheet(); }}>{labels.latest}</button>
     </BottomSheet>
     <BottomSheet title={labels.chartSources} open={activeSheet === 'sources'} triggerRef={sheetTrigger} onClose={closeSheet} closeLabel={labels.close}>
-      <p>{labels.sourceCount(selectedIds.length, catalog.length)}</p>
-      {selectedIds.length >= MAX_SOURCES && <p>{labels.sourceCap(MAX_SOURCES)}</p>}
+      <p>{labels.sourceCount(activeSelectedIds.length, catalog.length)}</p>
+      {activeSelectedIds.length >= MAX_SOURCES && <p>{labels.sourceCap(MAX_SOURCES)}</p>}
       <fieldset><legend>{labels.sources}</legend>{catalog.map((item) => {
-        const checked = selectedIds.includes(item.seriesId);
-        const disabled = deniedIds.current.has(item.seriesId) || (!checked && selectedIds.length >= MAX_SOURCES) || !selectableIds.has(item.seriesId);
+        const checked = activeSelectedIds.includes(item.seriesId);
+        const disabled = deniedIds.current.has(item.seriesId) || (!checked && activeSelectedIds.length >= MAX_SOURCES) || !selectableIds.has(item.seriesId);
         return <label key={item.seriesId} className={disabled ? 'is-disabled' : ''}><input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleSource(item.seriesId)} /><span>{item.label}</span>{item.depthCm != null && <small>{item.depthCm} cm</small>}{item.status === 'other_supported' && <small>{labels.historicalUnverified}</small>}</label>;
       })}</fieldset>
     </BottomSheet>
