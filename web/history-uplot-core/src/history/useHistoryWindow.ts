@@ -351,7 +351,7 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     clear(timer.current);
     timer.current = null;
     intent.current += 1;
-    if (next.length === 0) { setStatus('empty'); setEmptyReason('no-selection'); setLoadingRequest(null); setRefreshing(false); setError(null); return; }
+    if (next.length === 0) { setStatus('empty'); setEmptyReason('no-selection'); setLoadingRequest(null); setRefreshing(false); setError(null); setFailedRequest(null); return; }
     const visible = rangeStrategy === cardHistoryRangeStrategy ? minuteViewport(viewportStore.get()) : viewportStore.get();
     const baseRequest = rangeStrategy.bufferedRequest(visible, horizon);
     const policy = optionsRef.current.readPolicy?.(baseRequest) ?? baseRequest.readPolicy ?? 'card-default';

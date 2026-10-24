@@ -87,5 +87,20 @@ describe('root correction verification', () => {
     expect(result.current.error).toBeNull();
     expect(result.current.failedRequest).toBeNull();
   });
+  test('zero selection clears a failed addition state', async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(async (r: HistoryWindowRequest, _s: AbortSignal, c?: HistoryLoadContext) => data(r, c!.selectedIds!));
+    const { result } = renderHook(() => useHistoryWindow({ ...base, selectedIds: ['a'], load }));
+    await flush();
+    load.mockRejectedValueOnce(new Error('source b unavailable'));
+    act(() => result.current.selectSources?.(['a', 'b']));
+    await act(async () => { await vi.advanceTimersByTimeAsync(151); });
+    expect(result.current.failedRequest).not.toBeNull();
+    act(() => result.current.selectSources?.([]));
+    expect(result.current.status).toBe('empty');
+    expect(result.current.emptyReason).toBe('no-selection');
+    expect(result.current.error).toBeNull();
+    expect(result.current.failedRequest).toBeNull();
+  });
 
 });
