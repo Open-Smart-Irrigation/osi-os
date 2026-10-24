@@ -100,22 +100,22 @@ export function MobileTensionHistoryRoute() {
   }, [catalog.error, logout]);
 
   if (!MOBILE_HISTORY_INTERNAL_ENABLED || zoneId === null) return <Navigate to="/history" replace />;
-  if (zoneState.loading) return routeMessage(t('mobileTension.route.zoneLoading'));
+  if (zoneState.loading) return routeMessage(t('history.mobileTension.route.zoneLoading'));
   if (zoneState.failed) {
     return (
       <div className="min-h-[12rem] p-6 text-[var(--text)]">
-        <p>{t('mobileTension.route.zonesFailed')}</p>
-        <button type="button" onClick={() => setRetry((value) => value + 1)}>{t('mobileTension.retry')}</button>
+        <p>{t('history.mobileTension.route.zonesFailed')}</p>
+        <button type="button" onClick={() => setRetry((value) => value + 1)}>{t('history.mobileTension.retry')}</button>
       </div>
     );
   }
   if (!zoneReady) return <Navigate to="/history" replace />;
-  if (timeZone === null) return routeMessage(t('mobileTension.route.timeZoneUnavailable'));
+  if (timeZone === null) return routeMessage(t('history.mobileTension.route.timeZoneUnavailable'));
   if (catalog.error instanceof HistoryAuthError && catalog.error.status === 401) return null;
-  if (catalog.error instanceof HistoryAuthError && catalog.error.status === 403) return routeMessage(t('mobileTension.accessDenied'));
+  if (catalog.error instanceof HistoryAuthError && catalog.error.status === 403) return routeMessage(t('history.mobileTension.accessDenied'));
 
   return (
-    <Suspense fallback={routeMessage(t('mobileTension.route.zoneLoading'))}>
+    <Suspense fallback={routeMessage(t('history.mobileTension.route.zoneLoading'))}>
       <MobileTensionHistory
         sources={catalog.sources}
         defaultSelectedIds={catalog.defaultSelectedIds}

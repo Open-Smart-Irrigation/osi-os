@@ -96,15 +96,15 @@ describe('mobile tension history route', () => {
   it('does not enable the catalog when the zone timezone is absent or invalid', async () => {
     getAll.mockResolvedValue([{ id: 7, name: 'North block', timezone: 'Not/AZone' }]);
     renderRoute('/internal/mobile-history/zones/7');
-    await waitFor(() => expect(screen.getByText('mobileTension.route.timeZoneUnavailable')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('history.mobileTension.route.timeZoneUnavailable')).toBeInTheDocument());
     expect(useMobileTensionCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
   });
 
   it('offers retry for a zone-list transport failure', async () => {
     getAll.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([{ id: 7, name: 'North block', timezone: 'UTC' }]);
     renderRoute('/internal/mobile-history/zones/7');
-    await waitFor(() => expect(screen.getByText('mobileTension.route.zonesFailed')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'mobileTension.retry' }));
+    await waitFor(() => expect(screen.getByText('history.mobileTension.route.zonesFailed')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'history.mobileTension.retry' }));
     await waitFor(() => expect(screen.getByTestId('mobile-shell')).toHaveTextContent('North block'));
     expect(getAll).toHaveBeenCalledTimes(2);
   });
@@ -128,7 +128,7 @@ describe('mobile tension history route', () => {
       sources: [], defaultSelectedIds: [], error: new TestHistoryAuthError(403), isLoading: false, refreshForGeneration: vi.fn(),
     });
     renderRoute('/internal/mobile-history/zones/7');
-    await waitFor(() => expect(screen.getByText('mobileTension.accessDenied')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('history.mobileTension.accessDenied')).toBeInTheDocument());
     expect(logout).not.toHaveBeenCalled();
   });
 
