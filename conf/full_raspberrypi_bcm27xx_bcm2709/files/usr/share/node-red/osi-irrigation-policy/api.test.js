@@ -973,3 +973,30 @@ test('R17-M1: a paused (disabled) VWC policy may still be saved while the gate i
     assert.notEqual(saved && saved.code, 'vwc_condition_disabled');
   } finally { closeFixture(f); }
 });
+
+// R19 finding 2: an edit of a fixed ("always") row through the policy API must reach the valve
+// exactly like the valve schedule route: the valve stays FIXED, so it gets a forced compile.
+test('R19-2: disabling a fixed row through the policy API compiles and queues the fixed plan', async () => {
+  const f = fixture();
+  try {
+    for (const [id, time] of [['11111111-1111-4111-8111-111111111111', '06:00'], ['22222222-2222-4222-8222-222222222222', '18:00']]) {
+      await f.db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,?,30,'UTC',1,1)", [id, VALVE, time]);
+    }
+    const compiled = [];
+    const result = await api.applyPolicyEdit({
+      db: f.db, actor: { user_id: 1 },
+      transport: { enqueueDownlink: async () => ({ id: 'q1' }), flushDeviceQueue: async () => ({}), getDeviceQueue: async () => [] },
+      compileAndQueue: async (args) => { compiled.push(args); return { rows: [], messages: [] }; },
+      runtimeClockStatus: () => ({ trusted: true }),
+      request: { zone_uuid: 'zone-policy-test', expected_policy_version: null, condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }, timezone: 'UTC', enabled: false,
+        schedules: [{ schedule_uuid: '11111111-1111-4111-8111-111111111111', expected_sync_version: 1, execution: 'always', enabled: false }] },
+    });
+    assert.equal(result.mode, 'FIXED');
+    assert.deepEqual(result.fixed_conversions, [VALVE], 'the edited fixed valve is compiled');
+    assert.equal(compiled.length, 1, 'one forced compile');
+    assert.equal(compiled[0].deviceEui, VALVE);
+    assert.equal(compiled[0].force, true);
+  } finally {
+    closeFixture(f);
+  }
+});

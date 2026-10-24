@@ -829,10 +829,15 @@ async function applyPolicyEdit(options = {}) {
           const existingModes = new Map();
           for (const [eui, grouped] of scheduleRowsByDevice(state.schedules)) existingModes.set(eui, modeForValve(grouped, policy.policy_uuid).mode);
           const fixedConversions = [];
+          const previewByValve = scheduleRowsByDevice(previewRows.rows);
           for (const eui of requiredKeys) {
             const prior = existingModes.get(eui);
-            const resulting = modeForValve((scheduleRowsByDevice(previewRows.rows).get(eui) || []), policy.policy_uuid).mode;
-            if (prior === 'CONDITIONAL' && resulting === 'FIXED') fixedConversions.push(eui);
+            const valveRows = previewByValve.get(eui) || [];
+            const resulting = modeForValve(valveRows, policy.policy_uuid).mode;
+            // R19 finding 2: a valve that stays FIXED but whose fixed rows this edit touched is
+            // compiled and pushed exactly like a valve schedule route edit.
+            const touchedFixed = valveRows.some((row) => previewRows.touched.has(row.schedule_uuid) && !row.condition_policy_uuid);
+            if (resulting === 'FIXED' && (prior === 'CONDITIONAL' || touchedFixed)) fixedConversions.push(eui);
           }
           const resultingEnabled = policy.enabled;
           const policyEffective = resultingEnabled ? activationIso : (before && before.effective_from || null);
