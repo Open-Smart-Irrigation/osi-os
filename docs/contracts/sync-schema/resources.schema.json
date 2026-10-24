@@ -931,6 +931,18 @@
                 }
             }
         },
+        "IrrigationPolicy": {
+            "$ref": "conditional-irrigation-v1.schema.json#/definitions/Policy"
+        },
+        "IrrigationPolicyRuntime": {
+            "$ref": "conditional-irrigation-v1.schema.json#/definitions/Runtime"
+        },
+        "IrrigationPolicyValveRuntime": {
+            "$ref": "conditional-irrigation-v1.schema.json#/definitions/ValveRuntime"
+        },
+        "IrrigationPolicyDecision": {
+            "$ref": "conditional-irrigation-v1.schema.json#/definitions/Decision"
+        },
         "DeviceRadioConfigurationRevision": {
             "type": "object",
             "additionalProperties": false,

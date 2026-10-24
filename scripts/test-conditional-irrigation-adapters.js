@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+'use strict';
+
+// Executes the shipped pending-command adapter against SQLite for both Pi
+// profiles.  The fixture uses valid wire UUIDs so the ledger's effect-key
+// grammar, the policy service, and the durable ACK path are exercised together.
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { executeFunction, loadNode, profilePaths, seedScopedDb } = require('./lib/scoped-access-harness');
+
+const PROFILES = ['bcm2712', 'bcm2709'];
+const GATEWAY = '0016C001F1000002';
+const VALVE = '0016C001F1000001';
+const ZONE = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const POLICY = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const SCHEDULE = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const ACTOR = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const AT = '2026-10-20T10:00:00.000Z';
+
+function uuid(number) {
+  return `11111111-1111-4111-8111-${String(number).padStart(12, '0')}`;
+}
+
+function policyFixture(db) {
+  // The cloud command creator is a delegated edge user. Keep the zone owned
+  // by another user so deleting this assignment below proves fresh scope
+  // enforcement rather than falling back to owner access.
+  db.prepare('UPDATE users SET user_uuid=? WHERE id=2').run(ACTOR);
+  db.prepare('UPDATE user_zone_assignments SET user_uuid=? WHERE user_uuid=?').run(ACTOR, 'u-res1');
+  db.prepare('UPDATE irrigation_zones SET user_id=1 WHERE id=1').run();
+  db.prepare('UPDATE irrigation_zones SET zone_uuid=?, gateway_device_eui=? WHERE id=1').run(ZONE, GATEWAY);
+  db.prepare('UPDATE user_zone_assignments SET zone_uuid=? WHERE user_uuid=? AND zone_uuid=?').run(ZONE, ACTOR, 'z-1');
+  db.prepare('UPDATE devices SET gateway_device_eui=? WHERE UPPER(deveui)=UPPER(?)').run(GATEWAY, VALVE);
+  db.prepare(`INSERT INTO irrigation_policies(
+    policy_uuid,zone_uuid,condition_json,timezone,enabled,observation_window_minutes,
+    min_interval_minutes,max_daily_minutes,delivery_settings_json,effective_from,sync_version,created_at,updated_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    POLICY, ZONE, JSON.stringify({ kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }),
+    'UTC', 1, 60, 60, 240, '{}', AT, 4, AT, AT,
+  );
+  db.prepare(`INSERT INTO valve_schedules(
+    schedule_uuid,device_eui,kind,label,weekdays_mask,start_time,duration_minutes,timezone,
+    enabled,sync_version,condition_policy_uuid,effective_from,created_at,updated_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    SCHEDULE, VALVE, 'WEEKLY', 'Conditional adapter fixture', 127, '06:00', 10, 'UTC',
+    1, 7, POLICY, AT, AT, AT,
+  );
+}
+
+function envelope(commandId, commandType, requestId, payload = {}) {
+  const effectKey = `irrigation_policy:${commandType.toLowerCase()}:${ACTOR}:${GATEWAY}:${ZONE}:${requestId}`;
+  const appliedSyncVersion = commandType === 'UPSERT_IRRIGATION_POLICY'
+    ? 5
+    : commandType === 'PAUSE_IRRIGATION_POLICY' ? 6 : null;
+  return {
+    commandId,
+    commandType,
+    eventUuid: uuid(commandId),
+    aggregateType: 'IRRIGATION_POLICY',
+    aggregateKey: ZONE,
+    effectKey,
+    appliedSyncVersion,
+    actorUserUuid: ACTOR,
+    payload: {
+      ...payload,
+      commandType,
+      effect_key: effectKey,
+      request_id: requestId,
+      gateway_device_eui: GATEWAY,
+      zone_uuid: ZONE,
+    },
+  };
+}
+
+function transportRecorder() {
+  const calls = [];
+  return {
+    calls,
+    async getDeviceQueue() { calls.push('get'); return []; },
+    async flushDeviceQueue() { calls.push('flush'); return { ok: true }; },
+    async enqueueDownlink() { calls.push('enqueue'); return { id: `adapter-${calls.length}` }; },
+  };
+}
+
+async function runCommand(profile, db, command, transport) {
+  const paths = profilePaths(profile);
+  return executeFunction(loadNode('conditional-lifecycle-command-adapter', paths.flowsPath), {
+    msg: { payload: { _pendingCommandEnvelope: command }, _commandTypeRecognized: true },
+    env: { DEVICE_EUI: GATEWAY },
+    db,
+    libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } },
+  });
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: all conditional policy commands use the protected ledger and replay safely`, async () => {
+    const db = seedScopedDb(VALVE);
+    const transport = transportRecorder();
+    try {
+      policyFixture(db);
+      const upsertRequest = {
+        policy_uuid: POLICY,
+        expected_policy_version: 4,
+        condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' },
+        timezone: 'UTC',
+        enabled: false,
+        observation_window_minutes: 60,
+        min_interval_minutes: 60,
+        max_daily_minutes: 240,
+        delivery_settings: {},
+        schedules: [{
+          schedule_uuid: SCHEDULE,
+          device_eui: VALVE,
+          expected_sync_version: 7,
+          weekdays_mask: 127,
+          start_time: '06:00',
+          duration_minutes: 10,
+          enabled: true,
+          execution: 'conditional',
+        }],
+      };
+      const upsert = envelope(701, 'UPSERT_IRRIGATION_POLICY', uuid(701), upsertRequest);
+      const applied = await runCommand(profile, db, upsert, transport);
+      const appliedAck = applied.result[1].payload;
+      assert.equal(appliedAck.result, 'APPLIED');
+      assert.equal(appliedAck.appliedSyncVersion, 5, 'ACK must preserve the trusted envelope target version');
+      assert.equal(db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).enabled, 0);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?').get('701').n, 1);
+
+      const replay = await runCommand(profile, db, { ...upsert, commandId: 702, eventUuid: uuid(702) }, transport);
+      assert.equal(replay.result[1].payload.result, 'APPLIED');
+      assert.equal(replay.result[1].payload.duplicate, true);
+      assert.equal(replay.result[1].payload.appliedSyncVersion, 5, 'replay ACK must retain the terminal target version');
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE effect_key=?').get(upsert.effectKey).n, 1);
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox').get().n, 2);
+      assert.equal(db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).sync_version, 5);
+
+      const pause = envelope(703, 'PAUSE_IRRIGATION_POLICY', uuid(703), { expected_policy_version: 5 });
+      const paused = await runCommand(profile, db, pause, transport);
+      assert.equal(paused.result[1].payload.result, 'APPLIED');
+      assert.equal(db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).sync_version, 6);
+
+      const stalePause = envelope(704, 'PAUSE_IRRIGATION_POLICY', uuid(704), { expected_policy_version: 5 });
+      const rejected = await runCommand(profile, db, stalePause, transport);
+      assert.equal(rejected.result[1].payload.result, 'REJECTED_PERMANENT');
+      // The command ledger intentionally exposes the service error text in
+      // both reason/detail for a durable wire ACK.  The service code remains
+      // available on the in-process error; this is the shipped ACK contract.
+      assert.equal(rejected.result[1].payload.reason, 'policy version conflict');
+      assert.equal(db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).sync_version, 6);
+
+      const retry = envelope(705, 'RETRY_IRRIGATION_VALVE', uuid(705), { device_eui: VALVE });
+      const retried = await runCommand(profile, db, retry, transport);
+      assert.equal(retried.result[1].payload.result, 'APPLIED');
+      assert.ok(transport.calls.includes('enqueue'), 'retry must use the post-commit valve transport');
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM applied_commands WHERE command_id=?').get('705').n, 1);
+      assert.ok(db.prepare('SELECT COUNT(*) AS n FROM conditional_irrigation_sync_projections').get().n >= 1, 'post-commit key notification must publish a projection');
+
+      db.prepare('DELETE FROM user_zone_assignments WHERE user_uuid=? AND zone_uuid=?').run(ACTOR, ZONE);
+      for (const [commandType, commandId, request, expectedReason] of [
+        ['UPSERT_IRRIGATION_POLICY', 706, { ...upsertRequest, enabled: true, expected_policy_version: 6 }, 'zone not found'],
+        ['PAUSE_IRRIGATION_POLICY', 707, { expected_policy_version: 6 }, 'zone not found'],
+        ['RETRY_IRRIGATION_VALVE', 708, { device_eui: VALVE }, 'zone not found'],
+      ]) {
+        const revoked = await runCommand(profile, db, envelope(commandId, commandType, uuid(commandId), request), transport);
+        assert.equal(revoked.result[1].payload.result, 'REJECTED_PERMANENT', commandType + ' must recheck revoked scope');
+        assert.equal(revoked.result[1].payload.reason, expectedReason, commandType + ' rejection reason');
+      }
+      assert.equal(db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).sync_version, 6);
+    } finally {
+      db.close();
+    }
+  });
+}

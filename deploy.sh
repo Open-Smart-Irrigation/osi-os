@@ -82,7 +82,7 @@ COMMAND_LEDGER_STAGE_ROOT="/srv/node-red"
 COMMAND_LEDGER_STAGE="$COMMAND_LEDGER_STAGE_ROOT/.osi-command-ledger-stage.$$"
 COMMAND_LEDGER_HELPER_SHA256="48ae6cd244908c614d2e0f8d78a60e8a119b64853e2e49cefe5dca1f1bc0f5d8"
 COMMAND_LEDGER_PACKAGE_SHA256="3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
-COMMAND_LEDGER_INDEX_SHA256="d3845533da5a60f9134c485a77840996d3de67643ade89e52765a60e83bc797f"
+COMMAND_LEDGER_INDEX_SHA256="c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
 COMMAND_LEDGER_BINDING_SHA256="3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
 export SWAP_ROOT
 
@@ -112,6 +112,89 @@ fetch_required() {
         return "$fetch_rc"
     }
     echo "OK"
+}
+
+# The hotplug hook is intentionally a passive observer: installing it cannot
+# manufacture the same-boot marker.  A newly executable hook needs a real
+# sysntpd restart so BusyBox starts at stratum 16 and emits an authentic
+# callback on its next accepted reply.  Existing executable hooks are left
+# running without a disruptive restart on every software deploy.
+IRRIGATION_CLOCK_HOOK="${IRRIGATION_CLOCK_HOOK:-/etc/hotplug.d/ntp/70-osi-irrigation-clock}"
+IRRIGATION_SYSNTPD_INIT="${IRRIGATION_SYSNTPD_INIT:-/etc/init.d/sysntpd}"
+IRRIGATION_NTPD_HOTPLUG="${IRRIGATION_NTPD_HOTPLUG:-/usr/sbin/ntpd-hotplug}"
+IRRIGATION_UCI="${IRRIGATION_UCI:-uci}"
+
+install_irrigation_clock_hook() {
+    echo "--- Conditional irrigation NTP clock hook ---"
+    hook_existed=0
+    hook_prior_mode=""
+    hook_was_active=0
+    if [ -e "$IRRIGATION_CLOCK_HOOK" ]; then
+        hook_existed=1
+        hook_prior_mode="$(stat -c '%a' "$IRRIGATION_CLOCK_HOOK" 2>/dev/null || true)"
+        [ -n "$hook_prior_mode" ] || {
+            echo "ERROR: could not record existing clock hook mode" >&2
+            return 1
+        }
+        if [ -x "$IRRIGATION_CLOCK_HOOK" ]; then hook_was_active=1; fi
+    fi
+
+    restore_inactive_clock_hook() {
+        if [ "$hook_existed" = "1" ]; then
+            chmod "$hook_prior_mode" "$IRRIGATION_CLOCK_HOOK" 2>/dev/null || true
+        else
+            rm -f "$IRRIGATION_CLOCK_HOOK"
+        fi
+    }
+
+    if [ "$hook_was_active" != "1" ]; then
+        [ -x "$IRRIGATION_SYSNTPD_INIT" ] || {
+            echo "ERROR: conditional irrigation clock hook requires executable $IRRIGATION_SYSNTPD_INIT" >&2
+            restore_inactive_clock_hook
+            return 1
+        }
+        [ -x "$IRRIGATION_NTPD_HOTPLUG" ] || {
+            echo "ERROR: conditional irrigation clock hook requires executable $IRRIGATION_NTPD_HOTPLUG" >&2
+            restore_inactive_clock_hook
+            return 1
+        }
+        "$IRRIGATION_SYSNTPD_INIT" enabled >/dev/null 2>&1 || {
+            echo "ERROR: sysntpd is not enabled; refusing to enable it implicitly" >&2
+            restore_inactive_clock_hook
+            return 1
+        }
+        ntp_enabled="$("$IRRIGATION_UCI" -q get system.ntp.enabled 2>/dev/null || true)"
+        case "$ntp_enabled" in
+            0|false|False|FALSE|off|OFF|no|NO)
+                echo "ERROR: system.ntp.enabled is explicitly false" >&2
+                restore_inactive_clock_hook
+                return 1
+                ;;
+        esac
+    fi
+
+    mkdir -p "$(dirname "$IRRIGATION_CLOCK_HOOK")" || return 1
+    if ! fetch_required "conditional irrigation NTP clock hook" \
+        "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/hotplug.d/ntp/70-osi-irrigation-clock" \
+        "/etc/hotplug.d/ntp/70-osi-irrigation-clock"; then
+        restore_inactive_clock_hook
+        return 1
+    fi
+    if ! chmod 0755 "$IRRIGATION_CLOCK_HOOK"; then
+        echo "ERROR: could not activate conditional irrigation NTP clock hook" >&2
+        restore_inactive_clock_hook
+        return 1
+    fi
+    if [ "$hook_was_active" = "1" ]; then
+        echo "OK: existing executable clock hook refreshed without sysntpd restart"
+        return 0
+    fi
+    if ! "$IRRIGATION_SYSNTPD_INIT" restart; then
+        echo "ERROR: sysntpd restart failed; restoring inactive clock hook for retry" >&2
+        restore_inactive_clock_hook
+        return 1
+    fi
+    echo "OK: clock hook activated; waiting for an authentic NTP stratum callback"
 }
 
 # The command ledger has a top-level require() on the WATERMARK binding. Keep
@@ -2411,6 +2494,66 @@ fetch_required "osi-sdi12-reassemble index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.js" \
     "/srv/node-red/osi-sdi12-reassemble/index.js"
 
+fetch_required "osi-irrigation-policy package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/package.json" \
+    "/srv/node-red/osi-irrigation-policy/package.json"
+
+fetch_required "osi-irrigation-policy index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/index.js" \
+    "/srv/node-red/osi-irrigation-policy/index.js"
+
+fetch_required "osi-irrigation-policy api.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.js" \
+    "/srv/node-red/osi-irrigation-policy/api.js"
+
+fetch_required "osi-irrigation-policy lifecycle.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js" \
+    "/srv/node-red/osi-irrigation-policy/lifecycle.js"
+
+fetch_required "osi-irrigation-policy routes.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/routes.js" \
+    "/srv/node-red/osi-irrigation-policy/routes.js"
+
+fetch_required "osi-irrigation-policy worker.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/worker.js" \
+    "/srv/node-red/osi-irrigation-policy/worker.js"
+
+fetch_required "osi-irrigation-policy clock.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock.js" \
+    "/srv/node-red/osi-irrigation-policy/clock.js"
+
+fetch_required "osi-irrigation-policy clock-bounds.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js" \
+    "/srv/node-red/osi-irrigation-policy/clock-bounds.js"
+
+fetch_required "osi-irrigation-policy evaluate.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/evaluate.js" \
+    "/srv/node-red/osi-irrigation-policy/evaluate.js"
+
+fetch_required "osi-irrigation-policy model.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/model.js" \
+    "/srv/node-red/osi-irrigation-policy/model.js"
+
+fetch_required "osi-irrigation-policy observations.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/observations.js" \
+    "/srv/node-red/osi-irrigation-policy/observations.js"
+
+fetch_required "osi-irrigation-policy occurrences.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/occurrences.js" \
+    "/srv/node-red/osi-irrigation-policy/occurrences.js"
+
+fetch_required "osi-irrigation-policy replication.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js" \
+    "/srv/node-red/osi-irrigation-policy/replication.js"
+
+fetch_required "osi-irrigation-policy store.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/store.js" \
+    "/srv/node-red/osi-irrigation-policy/store.js"
+
+fetch_required "osi-irrigation-policy timestamps.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/timestamps.js" \
+    "/srv/node-red/osi-irrigation-policy/timestamps.js"
+
 fetch_required "osi-valve-control package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json" \
     "/srv/node-red/osi-valve-control/package.json"
@@ -2472,6 +2615,37 @@ fetch_required "osi-valve-control runtime.js" \
 fetch_required "osi-valve-control unclaim.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.js" \
     "/srv/node-red/osi-valve-control/unclaim.js"
+
+fetch_required "osi-valve-control dispatch.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/dispatch.js" \
+    "/srv/node-red/osi-valve-control/dispatch.js"
+
+# index.js exposes the shared STREGA claim transaction seam used by both local
+# and cloud REGISTER_DEVICE adapters. Without this module the helper package
+# fails to load at startup, leaving both registration paths unavailable.
+fetch_required "osi-valve-control claim.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/claim.js" \
+    "/srv/node-red/osi-valve-control/claim.js"
+
+fetch_required "osi-valve-control effects.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects.js" \
+    "/srv/node-red/osi-valve-control/effects.js"
+
+fetch_required "osi-valve-control live-authorize.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-authorize.js" \
+    "/srv/node-red/osi-valve-control/live-authorize.js"
+
+fetch_required "osi-valve-control live-telemetry.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-telemetry.js" \
+    "/srv/node-red/osi-valve-control/live-telemetry.js"
+
+fetch_required "osi-valve-control live-transport.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-transport.js" \
+    "/srv/node-red/osi-valve-control/live-transport.js"
+
+fetch_required "osi-valve-control live-wrappers.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js" \
+    "/srv/node-red/osi-valve-control/live-wrappers.js"
 
 fetch_required "osi-system-settings package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/package.json" \
@@ -2607,6 +2781,8 @@ else
 fi
 
 verify_native_sqlite3_after_npm || exit 1
+
+install_irrigation_clock_hook || exit 1
 
 install_deploy_exit_trap
 quiesce_identityd_for_deploy || exit 1

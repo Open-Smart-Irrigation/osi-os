@@ -780,7 +780,7 @@ function enqueueClient() {
   client.deviceClient = {
     enqueue: (request, metadata, options, callback) => {
       calls.enqueue.push(request);
-      callback(null, { getId: () => 'q1' });
+      callback(null, { getId: () => '4ec1d2e8-5e79-4c5e-92af-5e9343f8adf4' });
     }
   };
   return { client, calls };
@@ -788,7 +788,7 @@ function enqueueClient() {
 
 test('enqueueDownlink sets expiresAt when given', async () => {
   const { client, calls } = enqueueClient();
-  const at = new Date('2026-10-05T10:00:01.000Z');
+  const at = new Date(Math.ceil((Date.now() + 60_000) / 1000) * 1000);
   await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', confirmed: false, expiresAt: at });
   const item = calls.enqueue[0].getQueueItem();
   assert.equal(item.getExpiresAt().toDate().toISOString(), at.toISOString());
@@ -798,7 +798,10 @@ test('enqueueDownlink rejects an invalid expiresAt', async () => {
   const { client } = enqueueClient();
   await assert.rejects(
     client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: new Date('x') }),
-    /expiresAt must be a valid Date/
+    (error) => error.code === 'enqueue_failed_before_acceptance'
+      && error.classification === 'enqueue_failed_before_acceptance'
+      && error.provenance === 'local_preflight'
+      && /valid Date or strict ISO/.test(error.message)
   );
 });
 
@@ -810,10 +813,46 @@ test('enqueueDownlink without expiresAt leaves it unset', async () => {
 
 test('enqueueDownlink accepts a Date created in another vm realm (Node-RED function nodes)', async () => {
   const { client, calls } = enqueueClient();
-  const at = require('node:vm').runInNewContext('new Date(1790000000000)');
+  const expectedMs = Math.ceil((Date.now() + 60_000) / 1000) * 1000;
+  const at = require('node:vm').runInNewContext(`new Date(${expectedMs})`);
   assert.equal(at instanceof Date, false);
   await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: at });
-  assert.equal(calls.enqueue[0].getQueueItem().getExpiresAt().toDate().getTime(), 1790000000000);
+  assert.equal(calls.enqueue[0].getQueueItem().getExpiresAt().toDate().getTime(), expectedMs);
+});
+
+test('enqueueDownlink rejects an object branded as Date without a Date internal slot', async () => {
+  const { client, calls } = enqueueClient();
+  let spoofCalled = false;
+  const spoof = {
+    [Symbol.toStringTag]: 'Date',
+    getTime() {
+      spoofCalled = true;
+      return Date.now() + 60_000;
+    },
+  };
+  await assert.rejects(
+    client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: spoof }),
+    (error) => error.classification === 'enqueue_failed_before_acceptance'
+      && error.provenance === 'local_preflight'
+      && /valid Date or strict ISO/.test(error.message)
+  );
+  assert.equal(spoofCalled, false, 'expiry validation must use the intrinsic Date brand check');
+  assert.equal(calls.enqueue.length, 0, 'a branded non-Date must not reach the RPC');
+});
+
+test('enqueueDownlink accepts strict conditional ISO and rejects loose ISO strings before the RPC', async () => {
+  const { client, calls } = enqueueClient();
+  const at = new Date(Math.ceil((Date.now() + 60_000) / 1000) * 1000);
+  await client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: at.toISOString() });
+  assert.equal(calls.enqueue.length, 1);
+  assert.equal(calls.enqueue[0].getQueueItem().getExpiresAt().toDate().getTime(), at.getTime());
+  for (const value of [at.toISOString().replace('.000Z', 'Z'), at.toISOString().replace('T', ' '), '2026-02-30T00:00:00.000Z']) {
+    await assert.rejects(
+      client.enqueueDownlink({ devEui: 'A840410000000001', fPort: 2, data: 'AQID', expiresAt: value }),
+      (error) => error.classification === 'enqueue_failed_before_acceptance' && error.provenance === 'local_preflight'
+    );
+  }
+  assert.equal(calls.enqueue.length, 1, 'invalid expiry values must not reach the RPC');
 });
 
 // Each ChirpStackClient owns five gRPC service clients, and grpc-js gives each
@@ -895,4 +934,99 @@ test('getDeviceQueue lists the queue oldest first with base64 data, through Devi
     { id: 'q-2', fPort: 10, data: Buffer.from([0x01, 0x02]).toString('base64'), confirmed: false, isPending: true, isEncrypted: false },
   ]);
   await assert.rejects(client.getDeviceQueue(''), /DevEUI is required/);
+});
+
+test('getDeviceQueue preserves an item expiry timestamp when ChirpStack provides one', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  client.deviceClient = {
+    getQueue: (request, metadata, options, callback) => {
+      const item = new devicePb.DeviceQueueItem();
+      item.setId('q-expiry');
+      item.setFPort(14);
+      item.setData(Uint8Array.from([0x01]));
+      const { Timestamp } = require('google-protobuf/google/protobuf/timestamp_pb');
+      item.setExpiresAt(Timestamp.fromDate(new Date('2026-10-17T10:11:12.000Z')));
+      const response = new devicePb.GetDeviceQueueItemsResponse();
+      response.setResultList([item]);
+      callback(null, response);
+    },
+  };
+  const queue = await client.getDeviceQueue('00dec0de00000001');
+  assert.equal(queue[0].expiresAt, '2026-10-17T10:11:12.000Z');
+});
+
+test('enqueueDownlink attaches a protobuf expiry and pre-serializes the complete request', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  let captured;
+  client.deviceClient = {
+    enqueue: (request, metadata, options, callback) => {
+      captured = request;
+      const response = new devicePb.EnqueueDeviceQueueItemResponse();
+      response.setId('4ec1d2e8-5e79-4c5e-92af-5e9343f8adf4');
+      callback(null, response);
+    },
+  };
+  const result = await client.enqueueDownlink({
+    devEui: '00dec0de00000001', fPort: 14, data: 'AQI=', confirmed: false,
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(result.id, '4ec1d2e8-5e79-4c5e-92af-5e9343f8adf4');
+  assert.ok(captured.getQueueItem().getExpiresAt(), 'expiry must be attached to the queue item');
+  assert.deepEqual(Buffer.from(captured.serializeBinary()), Buffer.from(captured.serializeBinary()));
+});
+
+test('enqueueDownlink refuses expired input before invoking the RPC', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  let calls = 0;
+  client.deviceClient = { enqueue: () => { calls += 1; } };
+  await assert.rejects(
+    client.enqueueDownlink({ devEui: '00dec0de00000001', fPort: 14, data: 'AQI=', expiresAt: new Date(Date.now() - 1).toISOString() }),
+    (error) => error.code === 'enqueue_failed_before_acceptance' && error.classification === 'enqueue_failed_before_acceptance'
+  );
+  assert.equal(calls, 0);
+});
+
+test('enqueueDownlink rejects malformed local input and malformed base64 before the RPC', async () => {
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  let calls = 0;
+  client.deviceClient = { enqueue: () => { calls += 1; } };
+  for (const input of [
+    { devEui: 'not-an-eui', fPort: 14, data: 'AQI=' },
+    { devEui: '00dec0de00000001', fPort: 0, data: 'AQI=' },
+    { devEui: '00dec0de00000001', fPort: 14, data: '!!!' },
+  ]) {
+    await assert.rejects(client.enqueueDownlink(input), (error) => error.code === 'enqueue_failed_before_acceptance');
+  }
+  assert.equal(calls, 0);
+});
+
+test('enqueueDownlink classifies only numeric INVALID_ARGUMENT and UNAUTHENTICATED as rejection', async (t) => {
+  for (const code of [grpc.status.INVALID_ARGUMENT, grpc.status.UNAUTHENTICATED]) {
+    const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+    client.deviceClient = { enqueue: (request, metadata, options, callback) => callback(Object.assign(new Error('message is deliberately unhelpful'), { code })) };
+    await assert.rejects(
+      client.enqueueDownlink({ devEui: '00dec0de00000001', fPort: 14, data: 'AQI=' }),
+      (error) => error.code === 'enqueue_rejected' && error.classification === 'enqueue_rejected' && error.grpcCode === code
+    );
+  }
+  const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+  client.deviceClient = { enqueue: (request, metadata, options, callback) => callback(Object.assign(new Error('same text'), { code: grpc.status.UNAVAILABLE })) };
+  await assert.rejects(
+    client.enqueueDownlink({ devEui: '00dec0de00000001', fPort: 14, data: 'AQI=' }),
+    (error) => error.code === 'enqueue_unknown' && error.classification === 'UNKNOWN'
+  );
+});
+
+test('post-start enqueue errors and malformed success responses remain UNKNOWN', async () => {
+  const codes = [grpc.status.CANCELLED, grpc.status.UNKNOWN, grpc.status.DEADLINE_EXCEEDED, grpc.status.NOT_FOUND, grpc.status.ALREADY_EXISTS, grpc.status.PERMISSION_DENIED, grpc.status.RESOURCE_EXHAUSTED, grpc.status.FAILED_PRECONDITION, grpc.status.ABORTED, grpc.status.OUT_OF_RANGE, grpc.status.UNIMPLEMENTED, grpc.status.INTERNAL, grpc.status.UNAVAILABLE, grpc.status.DATA_LOSS, null];
+  for (const code of codes) {
+    const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+    client.deviceClient = { enqueue: (request, metadata, options, callback) => callback(Object.assign(new Error('post-start'), code == null ? {} : { code })) };
+    await assert.rejects(client.enqueueDownlink({ devEui: '00dec0de00000001', fPort: 14, data: 'AQI=' }), (error) => error.classification === 'UNKNOWN');
+  }
+  for (const response of [null, {}, { getId: () => '' }, { getId: () => 'not-a-uuid' }, { getId: () => { throw new Error('bad response'); } }]) {
+    const client = createClient({ apiUrl: 'http://localhost:8080', apiKey: 'test-key' });
+    client.deviceClient = { enqueue: (request, metadata, options, callback) => callback(null, response) };
+    await assert.rejects(client.enqueueDownlink({ devEui: '00dec0de00000001', fPort: 14, data: 'AQI=' }), (error) => error.classification === 'UNKNOWN');
+  }
 });

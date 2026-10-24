@@ -158,6 +158,7 @@ const { hashRow } = require('./lib/history-hash-v1');
 const ROOT = path.resolve(__dirname, '..');
 const NODE_RED = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red');
 const historySync = require(path.join(NODE_RED, 'osi-history-sync-helper/index.js'));
+const OSI_LIB_PATHS = require(path.join(NODE_RED, 'osi-lib/index.js')).NAME_TO_PATH;
 const R = require(path.join(NODE_RED, 'osi-rain/index.js'));
 const HASH_COLUMNS = ['zone_uuid', 'date', 'rainfall_mm', 'flow_liters', 'rain_source', 'computed_at'];
 
@@ -340,6 +341,11 @@ test('snapshots: bootstrap and force-sync zoneEnvironments carry the five fields
   const osiLib = { require(name) {
     if (name === 'installation') return { ok: true, value: installation };
     if (name === 'rejection-recovery') return { ok: true, value: rejection };
+    // The builders also load the conditional replication, history-sync and valve projection
+    // helpers through osi-lib; resolve those from the shipped registry.
+    if (['osi-irrigation-policy', 'history-sync', 'osi-valve-control'].includes(name)) {
+      return { ok: true, value: require(path.join(NODE_RED, OSI_LIB_PATHS[name] || name)) };
+    }
     return { ok: false, error: 'unexpected helper ' + name };
   } };
   const calls = [];
@@ -352,8 +358,9 @@ test('snapshots: bootstrap and force-sync zoneEnvironments carry the five fields
     throw new Error('unexpected request ' + request.url);
   } };
   try {
-    const bootstrap = new Function('msg', 'node', 'env', 'flow', 'osiDb', 'osiLib', byId['sync-bootstrap-build'].func);
-    const built = await bootstrap({}, node, env, flow, { Database }, osiLib);
+    // sync-bootstrap-build binds crypto (libs) for the journal advertisement digest.
+    const bootstrap = new Function('msg', 'node', 'env', 'flow', 'crypto', 'osiDb', 'osiLib', byId['sync-bootstrap-build'].func);
+    const built = await bootstrap({}, node, env, flow, require('node:crypto'), { Database }, osiLib);
     assert.ok(built && built.payload, 'bootstrap built a payload: ' + warnings.join(' | '));
     assertZoneEnvironments(built.payload.zoneEnvironments, warnings);
 

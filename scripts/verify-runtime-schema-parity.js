@@ -18,10 +18,12 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's
   // additive migration repair. Do not add it to the frozen sync-init-fn boot DDL.
   ['trg_improvement_requests_outbox_ai', '0005__field_work_requests.sql'],
-  // 0024__valve_schedule_sync_triggers.sql — same story: seed DB + deploy-time
-  // migration runner delivery, not the frozen sync-init-fn boot DDL.
-  ['trg_sync_valve_schedules_outbox_ai', '0024__valve_schedule_sync_triggers.sql'],
-  ['trg_sync_valve_schedules_outbox_au', '0024__valve_schedule_sync_triggers.sql'],
+  // 0077 replaces the legacy schedule definitions while preserving 0024's
+  // historical bytes and adds the guarded policy pair.
+  ['trg_sync_valve_schedules_outbox_ai', '0077__conditional_irrigation_sync.sql'],
+  ['trg_sync_valve_schedules_outbox_au', '0077__conditional_irrigation_sync.sql'],
+  ['trg_sync_irrigation_policies_outbox_ai', '0077__conditional_irrigation_sync.sql'],
+  ['trg_sync_irrigation_policies_outbox_au', '0077__conditional_irrigation_sync.sql'],
   // 0025__valve_settings_sync_triggers.sql (cloud full-parity Task P2-E1) —
   // same story again: seed DB + deploy-time migration runner delivery.
   ['trg_sync_valve_settings_outbox_ai', '0025__valve_settings_sync_triggers.sql'],

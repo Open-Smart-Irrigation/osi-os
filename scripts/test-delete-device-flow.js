@@ -36,6 +36,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
+const { facadeDb, moduleByName } = require('./lib/scoped-access-harness');
 
 const root = path.resolve(__dirname, '..');
 const flowsPath = path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -94,6 +95,32 @@ function execSqliteTopicNode(native, msg) {
   return msg;
 }
 
+// The route nodes now delegate to the conditional lifecycle service
+// (osi-irrigation-policy routes.*), which needs the osi-db-helper and osi-lib
+// function-node libs. Supply both against the same harness database: the
+// osiDb facade shares the DatabaseSync handle, osiLib resolves through the
+// osi-lib registry exactly as the gateway does.
+function lifecycleLibs(native) {
+  const database = facadeDb(native);
+  const osiDb = { Database: function Database() { return database; } };
+  const osiLib = {
+    require(name) {
+      const value = name === 'osi-db-helper' ? osiDb : moduleByName(name);
+      return value ? { ok: true, value } : { ok: false, error: `unregistered in harness: ${name}` };
+    },
+  };
+  // Node-RED binds every declared lib; no ChirpStack here, so the unclaim reports its
+  // in-flight cancel as not attempted.
+  return { osiDb, osiLib, crypto, chirpstack: null };
+}
+
+// The message a chain answers with is whatever reaches the http response node
+// (device-response), on whichever output the node under test wires to it.
+function respondingOutput(node, outputs) {
+  const index = (node.wires || []).findIndex((targets, i) => outputs[i] && targets.includes('device-response'));
+  return index >= 0 ? outputs[index] : null;
+}
+
 function freshDbCopy() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-delete-device-harness-'));
   const dbPath = path.join(tempDir, 'farming.db');
@@ -129,7 +156,11 @@ async function runDeleteDeviceChain(flows, native, { userId, username, deveui })
   execSqliteTopicNode(native, afterAuth); // delete-device-lookup
 
   const unlinkNode = findNode(flows, 'delete-device-unlink');
-  const unlinkOut = routeOutputs(unlinkNode, await executeFunctionNode(unlinkNode, afterAuth, { flowStore, env }));
+  const unlinkOut = routeOutputs(unlinkNode, await executeFunctionNode(unlinkNode, afterAuth, { flowStore, env, scope: lifecycleLibs(native) }));
+  // The lifecycle-owned unclaim answers the request itself: its result goes
+  // straight to the http response node, so that is the chain's response.
+  const answered = respondingOutput(unlinkNode, unlinkOut);
+  if (answered) return { stage: 'response', msg: answered, respondedBy: unlinkNode.id };
   if (unlinkOut[1]) return { stage: 'unlink', msg: unlinkOut[1] };
   const afterUnlink = unlinkOut[0];
 
@@ -138,7 +169,7 @@ async function runDeleteDeviceChain(flows, native, { userId, username, deveui })
   const responseNode = findNode(flows, 'delete-device-response');
   // delete-device-response returns a bare msg, not an [out0, out1] array.
   const finalMsg = await executeFunctionNode(responseNode, afterUnlink, { flowStore, env });
-  return { stage: 'response', msg: finalMsg };
+  return { stage: 'response', msg: finalMsg, respondedBy: responseNode.id };
 }
 
 function seedUser(native) {
@@ -187,6 +218,7 @@ test('F33: DELETE /api/devices/:deveui for a device owned by someone else answer
 
     assert.equal(result.stage, 'response', JSON.stringify(result));
     assert.equal(result.msg.statusCode, 404, JSON.stringify(result.msg.payload));
+    assert.equal(result.msg.payload.message, 'Device not found or access denied', 'a foreign device answers like an unknown one');
 
     const row = native.prepare("SELECT user_id FROM devices WHERE deveui = '70B3D57ED0099999'").get();
     assert.equal(row.user_id, 2, 'a device owned by a different user must not be unclaimed');

@@ -7,6 +7,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Conditional irrigation: the lifecycle service owns device unclaim.** A
+  local `DELETE /api/devices/:deveui` and a cloud `UNCLAIM_DEVICE` now both
+  run in the conditional lifecycle service, which detaches the device under
+  its `sync_version` fence, cancels queued opens without a CLOSE, and queues
+  the plan-clearing snapshot on the valve writer. The cleanup outcome keeps
+  the vocabulary below (`valve_cleanup` on the HTTP body, `valveCleanup` on
+  the ACK, now with `final`), but the cloud ACK result is `APPLIED`, the
+  clearing outcome is `clearing_scheduled`, and a cleanup that finishes after
+  the ACK is sent as a second, final ACK row. The earlier cloud cleanup node
+  and its route are removed.
+- **A cancelled open that was handed to ChirpStack keeps the valve reserved.**
+  The cancel still flushes the device queue and never sends a CLOSE, but a
+  queue read taken before the flush no longer counts as proof that the open
+  was not delivered: ChirpStack can deliver it between the read and the flush.
+  Such a cancel is answered `handed_off` (HTTP 409 with the cancel help text),
+  the actuation stays observed, and a new open of that valve is refused
+  `valve_busy` until the first open's bounded duration has passed. Only an open
+  that never reached ChirpStack is cancelled outright. An unclaim reports the
+  same outcome in `in_flight_cancel`.
+- **Valve plan snapshots go out through the ChirpStack transport only.** The
+  CMD-04 snapshot path no longer falls back to MQTT downlinks: without a
+  transport, snapshots stay pending and STREGA writes fail closed.
+
 ### Fixed
 - **A valve unclaimed from the cloud now gets the same plan-clearing push as
   a local delete.** A cloud `UNCLAIM_DEVICE` cleared the device owner and

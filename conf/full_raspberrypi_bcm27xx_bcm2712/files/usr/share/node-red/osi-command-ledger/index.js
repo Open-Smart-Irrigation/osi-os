@@ -147,6 +147,7 @@ function replayStatus(result) {
   if (result === 'APPLIED') return 'ACKED';
   if (result === 'CONFLICT') return 'CONFLICT';
   if (result === 'FAILED_RETRYABLE') return 'FAILED_RETRYABLE';
+  if (result === 'UNKNOWN') return 'UNKNOWN';
   return 'NACKED';
 }
 
@@ -210,6 +211,59 @@ async function persistReplayAck(tx, row, deliveryId, exactDelivery) {
     [String(deliveryId), JSON.stringify(ack), createdAt]
   );
   return ack;
+}
+
+// The STREGA writer records a durable pending owner before the encoder can
+// call ChirpStack.  That row is deliberately not a terminal command result,
+// but older/current writers use applied_commands as the crash marker.  Never
+// replay its unsupported IN_PROGRESS detail to cloud: the expectation row is
+// the transport owner. A durable pre-acceptance rejection keeps the encoder's
+// terminal REJECTED_PERMANENT/NACKED result; every unresolved or acceptance-
+// marked owner becomes FAILED_RETRYABLE with UNKNOWN and is never re-enqueued.
+async function recoverPendingTransportReplay(tx, row, deliveryId) {
+  let expectation = null;
+  try {
+    expectation = await tx.get(
+      'SELECT expectation_id,device_eui,transport_json FROM valve_actuation_expectations WHERE command_id=? ORDER BY rowid DESC LIMIT 1',
+      [String(row.command_id)]
+    );
+  } catch (error) {
+    if (!/no such table/i.test(String(error && error.message || error))) throw error;
+  }
+  if (!expectation) return null;
+  let transport = {};
+  try { transport = expectation.transport_json ? JSON.parse(expectation.transport_json) : {}; } catch (_) { transport = {}; }
+  const phase = String(transport.phase || '').trim().toUpperCase();
+  const acceptanceMarker = transport.accepted === true || transport.queue_id != null || transport.accepted_at != null;
+  const preAcceptanceRejection = !acceptanceMarker &&
+    (phase === 'ENQUEUE_REJECTED' || phase === 'ENQUEUE_FAILED_BEFORE_ACCEPTANCE');
+  const result = preAcceptanceRejection ? 'REJECTED_PERMANENT' : 'FAILED_RETRYABLE';
+  const transportPhase = preAcceptanceRejection
+    ? (phase === 'ENQUEUE_REJECTED' ? 'enqueue_rejected' : 'enqueue_failed_before_acceptance')
+    : 'UNKNOWN';
+  const appliedAt = row.applied_at || new Date().toISOString();
+  const ack = {
+    commandId: deliveryId,
+    eventUuid: null,
+    aggregateType: null,
+    aggregateKey: null,
+    commandType: row.command_type,
+    effectKey: row.effect_key == null ? null : row.effect_key,
+    status: replayStatus(result),
+    result,
+    appliedAt,
+    appliedSyncVersion: null,
+    duplicate: false,
+    reason: 'transport_pending',
+    detail: 'STREGA transport owner is unresolved',
+    transportPhase,
+  };
+  const resultDetail = JSON.stringify(ack);
+  await tx.run(
+    'UPDATE applied_commands SET result=?, result_detail=?, last_error=? WHERE command_id=?',
+    [result, resultDetail, 'transport_pending', String(row.command_id)]
+  );
+  return persistReplayAck(tx, Object.assign({}, row, { result, result_detail: resultDetail }), deliveryId, true);
 }
 
 function canonicalIntentHash(value) {
@@ -337,6 +391,24 @@ function validNonJournalEffectBinding(envelope, runtime) {
     } catch (_) {
       return false;
     }
+  }
+  const policyMatch = /^irrigation_policy:(upsert_irrigation_policy|pause_irrigation_policy|retry_irrigation_valve):([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}):([0-9A-F]{16}):([0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/.exec(effectKey);
+  if (policyMatch) {
+    const expectedType = policyMatch[1].toUpperCase();
+    const runtimeGateway = String(
+      runtime.gateway_device_eui || runtime.gatewayDeviceEui || ''
+    ).trim().toUpperCase();
+    const payloadGateway = String(payload.gateway_device_eui || payload.gatewayDeviceEui || '').trim().toUpperCase();
+    const payloadZone = String(payload.zone_uuid || payload.zoneUuid || '').trim().toLowerCase();
+    const payloadRequest = String(payload.request_id || payload.requestId || '').trim().toLowerCase();
+    const actorUserUuid = String(payload.actor_user_uuid || payload.actorUserUuid || '').trim().toLowerCase();
+    return type === expectedType
+      && /^[0-9A-F]{16}$/.test(runtimeGateway)
+      && runtimeGateway === policyMatch[3]
+      && payloadGateway === policyMatch[3]
+      && payloadZone === policyMatch[4].toLowerCase()
+      && payloadRequest === policyMatch[5].toLowerCase()
+      && actorUserUuid === policyMatch[2].toLowerCase();
   }
   let match = /^irrigation:scheduler:(0|[1-9]\d*):(0|[1-9]\d*):(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)$/.exec(effectKey);
   if (match) {
@@ -579,6 +651,10 @@ async function deduplicatePendingCommandInTransaction(tx, envelope, runtime) {
           !protectedBindingMatches(row, trusted))) {
         throw commandError('protected_command_conflict', 'WATERMARK command replay binding conflicts with the terminal ledger');
       }
+      if (row.result === 'IN_PROGRESS') {
+        const recovered = await recoverPendingTransportReplay(tx, row, deliveryId);
+        if (recovered) return { handled: true, ack: recovered };
+      }
       return { handled: true, ack: await persistReplayAck(tx, row, deliveryId, true) };
     }
     // The expiry check answers in place of every dispatch below, after both
@@ -718,6 +794,38 @@ async function withProtectedCommandTransaction(db, envelope, runtime, mutation) 
   });
 }
 
+// Lifecycle adapters run the canonical membership/policy mutation and the
+// terminal cloud ACK under one SQLite transaction.  Dedupe remains the first
+// operation in the transaction; an adapter may therefore return a replay
+// without reacquiring a writer or touching the resource.
+async function withLifecycleCommandTransaction(db, envelope, runtime, mutation) {
+  if (typeof mutation !== 'function') throw commandError('malformed_command', 'lifecycle command mutation callback is required');
+  return db.transaction(async (tx) => {
+    const duplicate = await deduplicatePendingCommandInTransaction(tx, envelope, runtime || {});
+    if (duplicate.handled) return duplicate;
+    const commandTypeValue = commandType(envelope);
+    const payload = envelope.payload && typeof envelope.payload === 'object' ? envelope.payload : {};
+    const scoped = {
+      tx,
+      get: tx.get && tx.get.bind(tx),
+      all: tx.all && tx.all.bind(tx),
+      run: tx.run && tx.run.bind(tx),
+      exec: tx.exec && tx.exec.bind(tx),
+      terminalAck: (ack) => queueCommandAckInTransaction(tx, Object.assign({
+        commandId: envelope.commandId,
+        eventUuid: envelope.eventUuid == null ? null : envelope.eventUuid,
+        aggregateType: envelope.aggregateType == null ? null : envelope.aggregateType,
+        aggregateKey: envelope.aggregateKey == null ? null : envelope.aggregateKey,
+        commandType: commandTypeValue,
+        effectKey: payload.effect_key || payload.effectKey || envelope.effectKey || null,
+        deviceEui: payload.device_eui || payload.deviceEui || payload.devEui || runtime && runtime.gateway_device_eui || 'UNKNOWN',
+        gatewayDeviceEui: runtime && runtime.gateway_device_eui || null,
+      }, ack || {}), runtime || {}),
+    };
+    return mutation(scoped);
+  });
+}
+
 // CONFLICT is a terminal wire result only for the four protected exact-base
 // commands. Every other command type keeps main's mapping to
 // FAILED_RETRYABLE, which the cloud treats as retryable.
@@ -828,6 +936,9 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
     reason: errorText || ack.reason || null,
     detail: errorText || ack.reason || null,
   };
+  // S6: an UNCLAIM_DEVICE ACK carries the AUTH-09 valve cleanup outcome (osi-irrigation-policy
+  // unclaimValveCleanup). Stored with the terminal result, so a replay reports it too.
+  if (ack.valveCleanup != null && typeof ack.valveCleanup === 'object') initial.valveCleanup = ack.valveCleanup;
   if (terminal) {
     const existing = await tx.get(
       'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
@@ -910,6 +1021,36 @@ async function queueCommandAckInTransaction(tx, rawAck, runtime) {
       [commandId.stored, JSON.stringify(initial), new Date().toISOString()]
     );
   return initial;
+}
+
+// S6 follow-up: a terminal ACK whose facts are only known after the commit (the unclaim's
+// in-flight cancel runs after the detach commits, under the valve writer) is amended: the stored
+// result_detail, and the outbox row that has not been delivered yet. When the commit-time row was
+// already delivered, the amended ACK is queued as a new row for the same cloud command, which
+// the cloud accepts as a more final unclaim cleanup (osi-server c215e2a3c). Only fact fields
+// change; the result, identity and replay fields are fixed at the commit.
+const AMENDABLE_ACK_FIELDS = new Set(['reason', 'detail', 'valveCleanup']);
+
+async function amendTerminalAck(db, rawCommandId, patch) {
+  const fields = Object.keys(patch || {});
+  const refused = fields.filter((field) => !AMENDABLE_ACK_FIELDS.has(field));
+  if (refused.length) throw commandError('invalid_ack_amendment', 'cannot amend ACK fields: ' + refused.join(', '));
+  const commandId = queueCommandId({ commandId: rawCommandId });
+  return db.transaction(async (tx) => {
+    const row = await tx.get('SELECT result_detail FROM applied_commands WHERE command_id=? LIMIT 1', [commandId.stored]);
+    if (!row) return null;
+    const next = Object.assign({}, parsedResultDetail(row), patch);
+    const json = JSON.stringify(next);
+    await tx.run('UPDATE applied_commands SET result_detail=? WHERE command_id=?', [json, commandId.stored]);
+    const pending = await tx.get('SELECT id FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL LIMIT 1', [commandId.stored]);
+    if (pending) {
+      await tx.run('UPDATE command_ack_outbox SET payload_json=? WHERE command_id=? AND delivered_at IS NULL', [json, commandId.stored]);
+    } else if (isCloudOriginatedCommandId(commandId)) {
+      const delivered = await tx.get('SELECT id FROM command_ack_outbox WHERE command_id=? LIMIT 1', [commandId.stored]);
+      if (delivered) await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)', [commandId.stored, json, new Date().toISOString()]);
+    }
+    return next;
+  });
 }
 
 async function queueCommandAck(db, rawAck, runtime) {
@@ -1111,7 +1252,9 @@ async function recordProtectedDecision(db, envelope, result, reason) {
 module.exports = {
   deduplicatePendingCommand,
   withProtectedCommandTransaction,
+  withLifecycleCommandTransaction,
   queueCommandAck,
+  amendTerminalAck,
   recordProtectedDecision,
   isExactLegacySoilDepthsPayload,
   withLegacySoilDepthsTransaction,

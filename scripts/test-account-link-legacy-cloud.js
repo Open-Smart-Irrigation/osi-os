@@ -43,6 +43,10 @@ const installationHelperPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
 );
+const replicationHelperPath = path.join(
+  root,
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js'
+);
 const bcryptjsPath = path.join(
   root,
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs'
@@ -50,9 +54,11 @@ const bcryptjsPath = path.join(
 
 const bcryptjs = require(bcryptjsPath);
 const installationHelper = require(installationHelperPath);
+const replicationHelper = require(replicationHelperPath);
 const osiLib = {
   require(name) {
     if (name === 'installation') return { ok: true, value: installationHelper };
+    if (name === 'osi-irrigation-policy') return { ok: true, value: replicationHelper };
     return { ok: false, error: `unexpected helper ${name}` };
   },
 };
@@ -84,7 +90,13 @@ const USERS_TABLE_SQL = `CREATE TABLE users (
 , role TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin','researcher','viewer')), disabled_at TEXT, sync_version INTEGER NOT NULL DEFAULT 1)`;
 const INSTALLATION_TABLE_SQL = `CREATE TABLE installation_identity (
   singleton_id INTEGER PRIMARY KEY,
-  installation_uuid TEXT NOT NULL
+  installation_uuid TEXT NOT NULL,
+  current_gateway_device_eui TEXT,
+  previous_gateway_device_euis_json TEXT DEFAULT '[]',
+  recovery_state TEXT DEFAULT 'ACTIVE',
+  recovery_operation_uuid TEXT,
+  created_at TEXT,
+  updated_at TEXT
 )`;
 const SYNC_LINK_STATE_SQL = `CREATE TABLE sync_link_state (
   peer_node TEXT PRIMARY KEY,
@@ -93,7 +105,15 @@ const SYNC_LINK_STATE_SQL = `CREATE TABLE sync_link_state (
   cloud_user_id TEXT,
   gateway_device_eui TEXT,
   updated_at TEXT NOT NULL,
-  installation_uuid TEXT
+  installation_uuid TEXT,
+  peer_capabilities_json TEXT,
+  peer_capabilities_context_json TEXT,
+  peer_capabilities_request_id TEXT,
+  link_attempt_json TEXT
+)`;
+const IRRIGATION_POLICIES_TABLE_SQL = `CREATE TABLE irrigation_policies (
+  id INTEGER PRIMARY KEY,
+  deleted_at TEXT
 )`;
 // The finalizer backfills the gateway identity on these two tables inside the
 // same transaction as the account/link writes.  Keep only the columns touched
@@ -101,6 +121,8 @@ const SYNC_LINK_STATE_SQL = `CREATE TABLE sync_link_state (
 // full seed schema.
 const IDENTITY_BACKFILL_TABLES_SQL = `CREATE TABLE devices (
   id INTEGER PRIMARY KEY,
+  deveui TEXT,
+  user_id INTEGER,
   gateway_device_eui TEXT
 );
 CREATE TABLE irrigation_zones (
@@ -113,8 +135,11 @@ CREATE TABLE irrigation_events (
   event_uuid TEXT
 )`;
 
-function readFlows() {
-  return JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
+function readFlows(profile = 'bcm2712') {
+  const file = profile === 'bcm2712'
+    ? flowsPath
+    : path.join(root, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
 function findNode(flows, id) {
@@ -208,6 +233,7 @@ function freshSeededDb(seedFn, installationUuid) {
   native.exec(USERS_TABLE_SQL + ';');
   native.exec(INSTALLATION_TABLE_SQL + ';');
   native.exec(SYNC_LINK_STATE_SQL + ';');
+  native.exec(IRRIGATION_POLICIES_TABLE_SQL + ';');
   native.exec(IDENTITY_BACKFILL_TABLES_SQL + ';');
   native
     .prepare('INSERT INTO installation_identity(singleton_id, installation_uuid) VALUES(1, ?)')
@@ -280,6 +306,24 @@ async function executeFunctionNode(node, msg, { flowStore, env = {}, scope = {},
   return fn(msg, nodeApi, flowApi, envApi, noopStore, globalApi, () => undefined, () => {});
 }
 
+async function buildLinkAttempt(flows, flowStore, helper, expectedRoute = 'legacy') {
+  const buildNode = findNode(flows, 'al-link-build-req');
+  const [continueMsg, rejectMsg] = await executeFunctionNode(buildNode, {
+    authUserId: 1,
+    authUsername: flowStore.get('al_local_username'),
+  }, {
+    flowStore,
+    scope: { osiDb: helper, osiLib },
+  });
+  assert.equal(rejectMsg, null, `link build must succeed: ${JSON.stringify(rejectMsg && rejectMsg.payload)}`);
+  assert.ok(continueMsg, 'link build must produce the cloud request');
+  const expectedPath = expectedRoute === 'conditional'
+    ? '/auth/local-sync/conditional-irrigation-v1'
+    : '/auth/local-sync';
+  assert.equal(continueMsg.url, `${flowStore.get('al_server_url')}${expectedPath}`);
+  return continueMsg;
+}
+
 test('legacy cloud (no installationUuid) is tolerated: link succeeds, warns once, keeps the local installation identity, and stores offlineVerifierVersion as returned', async () => {
   const flows = readFlows();
   const handleAuthNode = findNode(flows, 'al-link-handle-auth');
@@ -288,6 +332,12 @@ test('legacy cloud (no installationUuid) is tolerated: link succeeds, warns once
   flowStore.set('al_installation_uuid', localInstallationUuid);
   flowStore.set('al_local_username', 'edgeuser');
   flowStore.set('al_server_url', 'https://legacy-cloud.example.org');
+  flowStore.set('al_action', 'link');
+  flowStore.set('al_server_username', 'edgeuser');
+  flowStore.set('al_server_email', 'edgeuser@example.org');
+  flowStore.set('al_server_password', 'password');
+  flowStore.set('al_gateway_device_eui', 'AABBCCDDEEFF0011');
+  flowStore.set('al_gateway_device_eui_confidence', 'authoritative');
 
   const warnings = [];
   // Exact shape of osi-server customer/bovey's pre-installation-identity
@@ -308,47 +358,49 @@ test('legacy cloud (no installationUuid) is tolerated: link succeeds, warns once
     },
   };
 
-  const [continueMsg, rejectMsg] = await executeFunctionNode(handleAuthNode, legacyResponseMsg, {
-    flowStore,
-    scope: { osiLib },
-    warnings,
-  });
-
-  assert.equal(
-    rejectMsg,
-    null,
-    'legacy cloud response must not be rejected: ' + JSON.stringify(rejectMsg && rejectMsg.payload)
-  );
-  assert.ok(continueMsg, 'legacy cloud response must continue to the success output');
-  assert.equal(
-    warnings.length,
-    1,
-    'exactly one node.warn should fire for a legacy cloud (got: ' + JSON.stringify(warnings) + ')'
-  );
-  assert.match(warnings[0], /legacy cloud/i);
-  assert.match(warnings[0], /installation identity/i);
-
-  assert.equal(
-    flowStore.get('al_installation_uuid'),
-    localInstallationUuid,
-    'no remote installation identity must be persisted for a legacy cloud; the local uuid must be kept'
-  );
-  assert.equal(
-    flowStore.get('al_offline_verifier_version'),
-    1,
-    'offlineVerifierVersion must be stored as returned by the cloud (1), not forced/rejected'
-  );
-
-  // --- 'Finalize linked account state' must also accept this v1 / no-remote-identity state ---
-  const finalizeNode = findNode(flows, 'al-link-finalize');
-  flowStore.set('al_gateway_device_eui', 'AABBCCDDEEFF0011');
+  const flowsForAttempt = flows;
   const { helper, cleanup } = freshSeededDb((native) => {
     native
-      .prepare('INSERT INTO users (username, password_hash, created_at, role) VALUES (?, ?, ?, ?)')
-      .run('edgeuser', 'irrelevant-local-hash', new Date().toISOString(), 'admin');
+      .prepare('INSERT INTO users (username, password_hash, created_at, user_uuid, role) VALUES (?, ?, ?, ?, ?)')
+      .run('edgeuser', 'irrelevant-local-hash', new Date().toISOString(), '123e4567-e89b-42d3-a456-426614174111', 'admin');
   }, localInstallationUuid);
   try {
-    const [finalizeContinue, finalizeReject] = await executeFunctionNode(finalizeNode, {}, {
+    const requestMsg = await buildLinkAttempt(flowsForAttempt, flowStore, helper);
+    const responseMsg = Object.assign(requestMsg, legacyResponseMsg);
+    const [continueMsg, rejectMsg] = await executeFunctionNode(handleAuthNode, responseMsg, {
+      flowStore,
+      scope: { osiDb: helper, osiLib },
+      warnings,
+    });
+
+    assert.equal(
+      rejectMsg,
+      null,
+      'legacy cloud response must not be rejected: ' + JSON.stringify(rejectMsg && rejectMsg.payload)
+    );
+    assert.ok(continueMsg, 'legacy cloud response must continue to the success output');
+    assert.equal(
+      warnings.length,
+      1,
+      'exactly one node.warn should fire for a legacy cloud (got: ' + JSON.stringify(warnings) + ')'
+    );
+    assert.match(warnings[0], /legacy cloud/i);
+    assert.match(warnings[0], /installation identity/i);
+
+    assert.equal(
+      flowStore.get('al_installation_uuid'),
+      localInstallationUuid,
+      'no remote installation identity must be persisted for a legacy cloud; the local uuid must be kept'
+    );
+    assert.equal(
+      flowStore.get('al_offline_verifier_version'),
+      1,
+      'offlineVerifierVersion must be stored as returned by the cloud (1), not forced/rejected'
+    );
+
+    // --- 'Finalize linked account state' must also accept this v1 / no-remote-identity state ---
+    const finalizeNode = findNode(flows, 'al-link-finalize');
+    const [finalizeContinue, finalizeReject] = await executeFunctionNode(finalizeNode, continueMsg, {
       flowStore,
       scope: { osiDb: helper, osiLib },
       env: { DEVICE_EUI: 'AABBCCDDEEFF0011' },
@@ -404,6 +456,12 @@ test('a cloud-reported installationUuid that differs from the local one is still
   flowStore.set('al_installation_uuid', localInstallationUuid);
   flowStore.set('al_local_username', 'edgeuser');
   flowStore.set('al_server_url', 'https://modern-cloud.example.org');
+  flowStore.set('al_action', 'link');
+  flowStore.set('al_server_username', 'edgeuser');
+  flowStore.set('al_server_email', 'edgeuser@example.org');
+  flowStore.set('al_server_password', 'password');
+  flowStore.set('al_gateway_device_eui', 'AABBCCDDEEFF0011');
+  flowStore.set('al_gateway_device_eui_confidence', 'authoritative');
 
   const warnings = [];
   const mismatchedResponseMsg = {
@@ -423,22 +481,33 @@ test('a cloud-reported installationUuid that differs from the local one is still
     },
   };
 
-  const [continueMsg, rejectMsg] = await executeFunctionNode(handleAuthNode, mismatchedResponseMsg, {
-    flowStore,
-    scope: { osiLib },
-    warnings,
-  });
+  const { helper, cleanup } = freshSeededDb((native) => {
+    native
+      .prepare('INSERT INTO users (username, password_hash, created_at, user_uuid, role) VALUES (?, ?, ?, ?, ?)')
+      .run('edgeuser', 'irrelevant-local-hash', new Date().toISOString(), '123e4567-e89b-42d3-a456-426614174112', 'admin');
+  }, localInstallationUuid);
+  try {
+    const requestMsg = await buildLinkAttempt(flows, flowStore, helper);
+    const responseMsg = Object.assign(requestMsg, mismatchedResponseMsg);
+    const [continueMsg, rejectMsg] = await executeFunctionNode(handleAuthNode, responseMsg, {
+      flowStore,
+      scope: { osiDb: helper, osiLib },
+      warnings,
+    });
 
-  assert.equal(continueMsg, null, 'a real installation identity mismatch must still be rejected');
-  assert.ok(rejectMsg, 'mismatch must produce a rejection response');
-  assert.equal(rejectMsg.statusCode, 502);
-  assert.equal(rejectMsg.payload.message, 'Server authentication returned an installation identity mismatch');
-  assert.equal(warnings.length, 0, 'a real mismatch is a rejection, not a legacy-cloud warning');
-  assert.equal(
-    flowStore.get('al_installation_uuid'),
-    localInstallationUuid,
-    'a rejected mismatch must not overwrite the local installation identity'
-  );
+    assert.equal(continueMsg, null, 'a real installation identity mismatch must still be rejected');
+    assert.ok(rejectMsg, 'mismatch must produce a rejection response');
+    assert.equal(rejectMsg.statusCode, 502);
+    assert.equal(rejectMsg.payload.message, 'Server authentication returned an installation identity mismatch');
+    assert.equal(warnings.length, 0, 'a real mismatch is a rejection, not a legacy-cloud warning');
+    assert.equal(
+      flowStore.get('al_installation_uuid'),
+      localInstallationUuid,
+      'a rejected mismatch must not overwrite the local installation identity'
+    );
+  } finally {
+    cleanup();
+  }
 });
 
 test('verifier v1 offline login still works end to end (Login User -> Lookup Auth User -> Process Result)', async () => {
@@ -511,5 +580,290 @@ test('verifier v1 offline login still works end to end (Login User -> Lookup Aut
     cleanup();
   }
 });
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  for (const statusCode of [404, 503]) {
+    test(`${profile}: guarded link ${statusCode} makes one request and clears the current attempt without fallback`, async () => {
+      const flows = readFlows(profile);
+      const buildNode = findNode(flows, 'al-link-build-req');
+      const serverAuthNode = findNode(flows, 'al-link-server-auth');
+      const handleAuthNode = findNode(flows, 'al-link-handle-auth');
+      const clearStateNode = findNode(flows, 'al-link-clear-state');
+      const localInstallationUuid = installationHelper.newInstallationUuid();
+      const flowStore = new Map([
+        ['al_local_username', 'edgeuser'],
+        ['al_server_url', 'https://guarded-cloud.example.org'],
+        ['al_action', 'link'],
+        ['al_server_username', 'edgeuser'],
+        ['al_server_email', 'edgeuser@example.org'],
+        ['al_server_password', 'password'],
+        ['al_gateway_device_eui', 'AABBCCDDEEFF0011'],
+        ['al_gateway_device_eui_confidence', 'authoritative'],
+        ['al_local_user_id', 1],
+        ['al_installation_uuid', localInstallationUuid],
+      ]);
+      const { helper, cleanup } = freshSeededDb((native) => {
+        native.prepare('INSERT INTO users (id, username, password_hash, created_at, user_uuid, role) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(1, 'edgeuser', 'local-hash', new Date().toISOString(), '123e4567-e89b-42d3-a456-426614174111', 'admin');
+        native.prepare('INSERT INTO irrigation_policies(id, deleted_at) VALUES (?, NULL)').run(1);
+        // Seed a previously accepted capability for the same gateway context.
+        // A guarded link failure must revoke this support when its own current
+        // attempt fails; otherwise the next outbox tick would keep sending
+        // conditional rows to a cloud that just rejected the route.
+        const context = {
+          server_url: 'https://guarded-cloud.example.org',
+          cloud_user_id: '77',
+          gateway_device_eui: 'AABBCCDDEEFF0011',
+          installation_uuid: localInstallationUuid,
+        };
+        native.prepare(`
+          INSERT INTO sync_link_state(
+            peer_node, linked, server_url, cloud_user_id, gateway_device_eui,
+            updated_at, installation_uuid, peer_capabilities_json,
+            peer_capabilities_context_json, peer_capabilities_request_id
+          ) VALUES ('cloud', 1, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          context.server_url,
+          context.cloud_user_id,
+          context.gateway_device_eui,
+          new Date().toISOString(),
+          context.installation_uuid,
+          JSON.stringify(['conditional_irrigation_v1']),
+          JSON.stringify(context),
+          'prior-support-request'
+        );
+      }, localInstallationUuid);
+      try {
+        const requestMsg = await buildLinkAttempt(flows, flowStore, helper, 'conditional');
+        const requestLog = [];
+        const afterHttp = await executeFunctionNode(serverAuthNode, requestMsg, {
+          flowStore,
+          env: { OSI_CLOUD_REST_TIMEOUT_MS: '1000' },
+          scope: {
+            osiCloudHttp: {
+              async requestJsonIpv4(request) {
+                requestLog.push(request);
+                return { statusCode, payload: { code: 'CONDITIONAL_IRRIGATION_UNSUPPORTED' } };
+              },
+            },
+          },
+        });
+        assert.equal(requestLog.length, 1);
+        assert.match(requestLog[0].url, /\/auth\/local-sync\/conditional-irrigation-v1$/);
+        assert.doesNotMatch(requestLog[0].url, /\/auth\/local-sync$/);
+        assert.equal(afterHttp.statusCode, statusCode);
+        const [continued, rejected] = await executeFunctionNode(handleAuthNode, afterHttp, {
+          flowStore,
+          scope: { osiDb: helper, osiLib },
+        });
+        assert.equal(continued, null);
+        assert.ok(rejected);
+        const afterFailure = await readLinkState(helper);
+        assert.equal(afterFailure.linked, 1, 'guarded failure does not unlink the basic peer context');
+        assert.deepEqual(JSON.parse(afterFailure.peer_capabilities_json), ['conditional_irrigation_v1'], 'support remains until current failure cleanup');
+        assert.ok(afterFailure.link_attempt_json, 'the attempt remains fenced until the failure cleanup node');
+        await executeFunctionNode(clearStateNode, rejected, {
+          flowStore,
+          scope: { osiDb: helper, osiLib },
+        });
+        const afterClear = await readLinkState(helper);
+        assert.equal(afterClear.link_attempt_json, null);
+        assert.equal(afterClear.peer_capabilities_json, null, 'current guarded failure invalidates prior support');
+        assert.equal(afterClear.peer_capabilities_context_json, null, 'current guarded failure clears support context');
+        assert.equal(afterClear.peer_capabilities_request_id, null);
+      } finally {
+        cleanup();
+      }
+    });
+  }
+
+  for (const statusCode of [404, 503]) {
+    test(`${profile}: stale guarded link ${statusCode} cannot clear a newer same-context linked attempt`, async () => {
+      const flows = readFlows(profile);
+      const serverAuthNode = findNode(flows, 'al-link-server-auth');
+      const handleAuthNode = findNode(flows, 'al-link-handle-auth');
+      const clearStateNode = findNode(flows, 'al-link-clear-state');
+      const localInstallationUuid = installationHelper.newInstallationUuid();
+      const flowStore = new Map([
+        ['al_local_username', 'edgeuser'],
+        ['al_server_url', 'https://guarded-cloud.example.org'],
+        ['al_action', 'link'],
+        ['al_server_username', 'edgeuser'],
+        ['al_server_email', 'edgeuser@example.org'],
+        ['al_server_password', 'password'],
+        ['al_gateway_device_eui', 'AABBCCDDEEFF0011'],
+        ['al_gateway_device_eui_confidence', 'authoritative'],
+        ['al_local_user_id', 1],
+        ['al_installation_uuid', localInstallationUuid],
+      ]);
+      const { helper, cleanup } = freshSeededDb((native) => {
+        native.prepare('INSERT INTO users (id, username, password_hash, created_at, user_uuid, role) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(1, 'edgeuser', 'local-hash', new Date().toISOString(), '123e4567-e89b-42d3-a456-426614174111', 'admin');
+        native.prepare('INSERT INTO irrigation_policies(id, deleted_at) VALUES (?, NULL)').run(1);
+        native.prepare('UPDATE installation_identity SET current_gateway_device_eui=? WHERE singleton_id=1')
+          .run('AABBCCDDEEFF0011');
+        const context = {
+          server_url: 'https://guarded-cloud.example.org',
+          cloud_user_id: '77',
+          gateway_device_eui: 'AABBCCDDEEFF0011',
+          installation_uuid: localInstallationUuid,
+        };
+        native.prepare(`
+          INSERT INTO sync_link_state(
+            peer_node, linked, server_url, cloud_user_id, gateway_device_eui,
+            updated_at, installation_uuid, peer_capabilities_json,
+            peer_capabilities_context_json, peer_capabilities_request_id
+          ) VALUES ('cloud', 1, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          context.server_url,
+          context.cloud_user_id,
+          context.gateway_device_eui,
+          new Date().toISOString(),
+          context.installation_uuid,
+          JSON.stringify(['conditional_irrigation_v1']),
+          JSON.stringify(context),
+          'prior-support-request'
+        );
+      }, localInstallationUuid);
+      try {
+        const requestMsg = await buildLinkAttempt(flows, flowStore, helper, 'conditional');
+        const newerDb = new helper.Database('/data/db/farming.db');
+        const newer = await replicationHelper.beginLinkAttempt({
+          db: newerDb,
+          context: {
+            server_url: 'https://guarded-cloud.example.org',
+            gateway_device_eui: 'AABBCCDDEEFF0011',
+            installation_uuid: localInstallationUuid,
+          },
+          nonce: 'newer-link-attempt',
+          supersede: true,
+        });
+        await new Promise((resolve) => newerDb.close(() => resolve()));
+        assert.notEqual(newer.nonce, requestMsg._alLinkAttemptNonce);
+        const requestLog = [];
+        const afterHttp = await executeFunctionNode(serverAuthNode, requestMsg, {
+          flowStore,
+          scope: {
+            osiCloudHttp: {
+              async requestJsonIpv4(request) {
+                requestLog.push(request);
+                return { statusCode, payload: { code: 'CONDITIONAL_IRRIGATION_UNSUPPORTED' } };
+              },
+            },
+          },
+        });
+        assert.equal(requestLog.length, 1);
+        assert.match(requestLog[0].url, /\/auth\/local-sync\/conditional-irrigation-v1$/);
+        const [, rejected] = await executeFunctionNode(handleAuthNode, afterHttp, {
+          flowStore,
+          scope: { osiDb: helper, osiLib },
+        });
+        await executeFunctionNode(clearStateNode, rejected, {
+          flowStore,
+          scope: { osiDb: helper, osiLib },
+        });
+        const afterClear = await readLinkState(helper);
+        assert.match(afterClear.link_attempt_json, /newer-link-attempt/);
+        assert.deepEqual(JSON.parse(afterClear.peer_capabilities_json), ['conditional_irrigation_v1']);
+        assert.equal(afterClear.peer_capabilities_request_id, 'prior-support-request');
+      } finally {
+        cleanup();
+      }
+    });
+  }
+}
+
+async function readLinkState(helper) {
+  const db = new helper.Database('/data/db/farming.db');
+  try {
+    return await new Promise((resolve, reject) => db.all(
+      'SELECT linked, peer_capabilities_json, peer_capabilities_context_json, peer_capabilities_request_id, link_attempt_json FROM sync_link_state WHERE peer_node=?',
+      ['cloud'],
+      (error, rows) => error ? reject(error) : resolve(rows[0] || {})
+    ));
+  } finally {
+    await new Promise((resolve) => db.close(() => resolve()));
+  }
+}
+
+// F4 (owner decision 2026-10-22): account linking must not depend on the conditional
+// irrigation helper. Without it the gateway links on the legacy route and simply does not
+// advertise conditional_irrigation_v1; with it, it advertises the capability as before.
+const osiLibWithoutConditional = {
+  require(name) {
+    if (name === 'installation') return { ok: true, value: installationHelper };
+    return { ok: false, error: `module not installed: ${name}` };
+  },
+};
+
+async function linkEndToEnd(profile, lib) {
+  const flows = readFlows(profile);
+  const localInstallationUuid = installationHelper.newInstallationUuid();
+  const flowStore = new Map([
+    ['al_installation_uuid', localInstallationUuid], ['al_local_username', 'edgeuser'],
+    ['al_server_url', 'https://cloud.example.org'], ['al_action', 'link'], ['al_server_username', 'edgeuser'],
+    ['al_server_email', 'edgeuser@example.org'], ['al_server_password', 'password'],
+    ['al_gateway_device_eui', 'AABBCCDDEEFF0011'], ['al_gateway_device_eui_confidence', 'authoritative'],
+  ]);
+  const { helper, cleanup } = freshSeededDb((native) => {
+    native.prepare('INSERT INTO users (username, password_hash, created_at, user_uuid, role) VALUES (?, ?, ?, ?, ?)')
+      .run('edgeuser', 'irrelevant-local-hash', new Date().toISOString(), '123e4567-e89b-42d3-a456-426614174111', 'admin');
+  }, localInstallationUuid);
+  const scope = { osiDb: helper, osiLib: lib };
+  const warnings = [];
+  const [requestMsg, buildReject] = await executeFunctionNode(findNode(flows, 'al-link-build-req'), {
+    authUserId: 1, authUsername: 'edgeuser',
+  }, { flowStore, scope, warnings });
+  assert.equal(buildReject, null, 'link build must succeed: ' + JSON.stringify(buildReject && buildReject.payload));
+  const request = { url: requestMsg.url, capabilities: requestMsg.payload.syncCapabilities.slice() };
+  Object.assign(requestMsg, {
+    statusCode: 200,
+    payload: {
+      username: 'edgeuser', token: 'sync-jwt-token-value', offlineVerifier: 'offline-verifier-hash', offlineVerifierVersion: 2,
+      syncTokenExpiresAt: Date.now() + 3600000, mqttPassword: 'mqtt-secret', mqttBrokerUrl: 'mqtts://cloud.example.org:8883',
+      userId: 77, claimed: [], skipped: [], installationUuid: localInstallationUuid,
+      supportedSyncCapabilities: request.capabilities,
+    },
+  });
+  const [handled, handleReject] = await executeFunctionNode(findNode(flows, 'al-link-handle-auth'), requestMsg, { flowStore, scope, warnings });
+  assert.equal(handleReject, null, 'the auth response must be accepted: ' + JSON.stringify(handleReject && handleReject.payload));
+  const [finalized, finalizeReject] = await executeFunctionNode(findNode(flows, 'al-link-finalize'), handled, {
+    flowStore, scope, env: { DEVICE_EUI: 'AABBCCDDEEFF0011' },
+  });
+  assert.equal(finalizeReject, null, 'finalize must succeed: ' + JSON.stringify(finalizeReject && finalizeReject.payload));
+  assert.ok(finalized);
+  const db = new helper.Database('/data/db/farming.db');
+  const rows = (sql) => new Promise((resolve, reject) => db.all(sql, [], (error, result) => (error ? reject(error) : resolve(result))));
+  const link = (await rows("SELECT linked, server_url, cloud_user_id, gateway_device_eui, installation_uuid FROM sync_link_state WHERE peer_node='cloud'"))[0];
+  const user = (await rows("SELECT auth_mode, server_url, cloud_user_id FROM users WHERE username='edgeuser'"))[0];
+  await new Promise((resolve) => db.close(() => resolve()));
+  cleanup();
+  return { request, link, user, localInstallationUuid, warnings };
+}
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  test(`${profile}: linking succeeds without the conditional irrigation helper and does not advertise conditional_irrigation_v1`, async () => {
+    const out = await linkEndToEnd(profile, osiLibWithoutConditional);
+    assert.equal(out.request.url, 'https://cloud.example.org/auth/local-sync');
+    assert.equal(out.request.capabilities.includes('conditional_irrigation_v1'), false);
+    assert.ok(out.request.capabilities.includes('linked_auth_sync_v1'));
+    assert.ok(out.request.capabilities.includes('device_soil_depth_commands_v1'));
+    assert.equal(out.link.linked, 1);
+    assert.equal(out.link.server_url, 'https://cloud.example.org');
+    assert.equal(String(out.link.cloud_user_id), '77');
+    assert.equal(out.link.gateway_device_eui, 'AABBCCDDEEFF0011');
+    assert.equal(out.link.installation_uuid, out.localInstallationUuid);
+    assert.equal(out.user.auth_mode, 'server');
+    assert.equal(Number(out.user.cloud_user_id), 77);
+    assert.ok(out.warnings.some((message) => /conditional irrigation/i.test(message)), 'the missing helper is logged');
+  });
+
+  test(`${profile}: linking with the conditional irrigation helper advertises conditional_irrigation_v1`, async () => {
+    const out = await linkEndToEnd(profile, osiLib);
+    assert.ok(out.request.capabilities.includes('conditional_irrigation_v1'));
+    assert.equal(out.link.linked, 1);
+    assert.equal(out.link.gateway_device_eui, 'AABBCCDDEEFF0011');
+  });
+}
 
 console.log('account-link legacy-cloud tolerance behavioral tests defined; run with `node --test` to execute.');

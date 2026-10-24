@@ -17,6 +17,13 @@ const RELINK_EUI = '1122334455667788';
 const INSTALLATION_UUID = '00000000-0000-4000-8000-000000000099';
 const FINALIZE_NODE = loadNode('al-link-finalize');
 const installation = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper');
+// Account linking captures a durable link attempt (Task 7b2): the request builder begins it, the
+// auth-response handler validates the server's context and capabilities, and finalization accepts
+// only that attempt. The harness runs the real replication helper for the first step and hands
+// finalization the validated context, as al-link-handle-auth does.
+const replication = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication');
+const SERVER_URL = 'https://sync.example.test';
+let attemptCounter = 0;
 
 function freshDb() {
   const db = new DatabaseSync(':memory:');
@@ -37,6 +44,19 @@ function setLink(db, linked, eui) {
 
 async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
   const base = facadeDb(db);
+  const context = { server_url: SERVER_URL, cloud_user_id: '42', gateway_device_eui: eui, installation_uuid: INSTALLATION_UUID };
+  attemptCounter += 1;
+  // The gateway's installation identity (installation_identity) is what a link attempt binds to.
+  const stamp = new Date().toISOString();
+  db.prepare("INSERT INTO installation_identity(singleton_id, installation_uuid, current_gateway_device_eui, created_at, updated_at) VALUES (1, ?, ?, ?, ?) ON CONFLICT(singleton_id) DO UPDATE SET current_gateway_device_eui=excluded.current_gateway_device_eui, updated_at=excluded.updated_at")
+    .run(INSTALLATION_UUID, eui, stamp, stamp);
+  const attempt = await replication.beginLinkAttempt(base, { context: { server_url: SERVER_URL, gateway_device_eui: eui, installation_uuid: INSTALLATION_UUID }, now: new Date().toISOString(), supersede: true });
+  const msg = {
+    _alLinkAttemptNonce: attempt.nonce,
+    _alLinkRequestId: attempt.request_id || null,
+    _alLinkValidatedContext: context,
+    _alLinkCapabilities: ['conditional_irrigation_v1'],
+  };
   const failAfter = typeof failAfterWrites === 'number' ? failAfterWrites : (failAfterWrites ? 4 : 0);
   const database = {
     Database: function Database() {
@@ -60,16 +80,17 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
       };
     },
   };
-  return executeFunction(FINALIZE_NODE, {
+  const sent = JSON.parse(JSON.stringify(msg));
+  const execution = await executeFunction(FINALIZE_NODE, {
     db,
-    msg: {},
+    msg,
     env: { DEVICE_EUI: 'FFEEDDCCBBAA0099' },
     flowState: {
       al_local_username: 'identity-test',
       al_verified_server_username: 'server-user',
       al_offline_verifier: 'offline-verifier',
       al_offline_verifier_version: 2,
-      al_server_url: 'https://sync.example.test',
+      al_server_url: SERVER_URL,
       al_server_sync_token: 'sync-token',
       al_server_sync_token_expires_at: Date.now() + 3600000,
       al_cloud_user_id: 42,
@@ -80,13 +101,14 @@ async function executeFinalize(db, eui, { failAfterWrites = false } = {}) {
       osiDb: database,
       osiLib: {
         require(name) {
-          return name === 'installation'
-            ? { ok: true, value: installation }
-            : { ok: false, error: `unregistered test helper: ${name}` };
+          if (name === 'installation') return { ok: true, value: installation };
+          if (name === 'osi-irrigation-policy') return { ok: true, value: replication };
+          return { ok: false, error: `unregistered test helper: ${name}` };
         },
       },
     },
   });
+  return Object.assign(execution, { msg: sent });
 }
 
 test('pre-link blank device and zone are attributed during finalization with one zone event', async () => {
@@ -96,7 +118,7 @@ test('pre-link blank device and zone are attributed during finalization with one
     assert.equal(db.prepare('SELECT gateway_device_eui FROM devices').get().gateway_device_eui, null);
     assert.equal(db.prepare('SELECT gateway_device_eui FROM irrigation_zones').get().gateway_device_eui, null);
     const execution = await executeFinalize(db, LINK_EUI);
-    assert.deepEqual(execution.result, [{}, null]);
+    assert.deepEqual(execution.result, [execution.msg, null]);
     assert.equal(execution.flowState.account_linked, true);
     assert.equal(db.prepare('SELECT gateway_device_eui FROM devices').get().gateway_device_eui, LINK_EUI);
     assert.equal(db.prepare('SELECT gateway_device_eui FROM irrigation_zones').get().gateway_device_eui, LINK_EUI);
@@ -118,9 +140,9 @@ test('unlinked irrigation events receive identity and outbox delivery during fin
     assert.equal(db.prepare("SELECT count(*) AS n FROM sync_outbox WHERE aggregate_type = 'IRRIGATION_EVENT'").get().n, 0);
 
     const execution = await executeFinalize(db, LINK_EUI);
-    assert.deepEqual(execution.result, [{}, null]);
+    assert.deepEqual(execution.result, [execution.msg, null]);
     const repeat = await executeFinalize(db, LINK_EUI);
-    assert.deepEqual(repeat.result, [{}, null], 'repeated finalization must succeed');
+    assert.deepEqual(repeat.result, [repeat.msg, null], 'repeated finalization (a new link attempt) must succeed');
     const after = db.prepare('SELECT event_uuid FROM irrigation_events').get();
     assert.match(after.event_uuid, new RegExp(`^irrig-${LINK_EUI}-\\d+$`), 'finalization must mint the canonical key');
     const outbox = db.prepare("SELECT aggregate_key, gateway_device_eui FROM sync_outbox WHERE aggregate_type = 'IRRIGATION_EVENT'").all();
@@ -175,7 +197,7 @@ test('unlink, insert, and relink before reboot attributes the new link identity'
     insertBlankRows(db, '03');
     assert.equal(db.prepare("SELECT count(*) AS n FROM devices WHERE gateway_device_eui IS NULL").get().n, 1);
     const execution = await executeFinalize(db, RELINK_EUI);
-    assert.deepEqual(execution.result, [{}, null]);
+    assert.deepEqual(execution.result, [execution.msg, null]);
     assert.equal(db.prepare("SELECT count(*) AS n FROM devices WHERE gateway_device_eui = ?").get(RELINK_EUI).n, 1);
     assert.equal(db.prepare("SELECT count(*) AS n FROM irrigation_zones WHERE gateway_device_eui = ?").get(RELINK_EUI).n, 1);
   } finally { db.close(); }
@@ -187,7 +209,7 @@ test('finalization backfill preserves existing nonblank identities', async () =>
     db.prepare("INSERT INTO irrigation_zones(name, user_id, zone_uuid, gateway_device_eui) VALUES ('zone-kept', 1, '00000000-0000-4000-8000-000000000004', 'OLDZONE000000001')").run();
     db.prepare("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at, gateway_device_eui) VALUES ('0011223344556604', 'device-kept', 'KIWI_SENSOR', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'OLDDEVICE0000001')").run();
     const execution = await executeFinalize(db, LINK_EUI);
-    assert.deepEqual(execution.result, [{}, null]);
+    assert.deepEqual(execution.result, [execution.msg, null]);
     assert.equal(db.prepare("SELECT gateway_device_eui FROM devices WHERE deveui = '0011223344556604'").get().gateway_device_eui, 'OLDDEVICE0000001');
     assert.equal(db.prepare("SELECT gateway_device_eui FROM irrigation_zones WHERE name = 'zone-kept'").get().gateway_device_eui, 'OLDZONE000000001');
   } finally { db.close(); }

@@ -21,6 +21,7 @@ import { RainGaugeAmbiguityBanner } from './environment/RainGaugeAmbiguityBanner
 import { rainCoverageNote } from './environment/WaterTab';
 import { ZoneConfigModal } from './ZoneConfigModal';
 import { AdvancedScheduleDrawer } from './AdvancedScheduleDrawer';
+import { IrrigationPolicyEditor } from './IrrigationPolicyEditor';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDisplayPreferences } from '../../utils/displayPreferences';
@@ -239,6 +240,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [showAdvancedDrawer, setShowAdvancedDrawer] = useState(false);
+  const [scheduleOpenRequest, setScheduleOpenRequest] = useState(0);
+  const [showPolicyEditor, setShowPolicyEditor] = useState(false);
+  const [policyEditorDeviceEui, setPolicyEditorDeviceEui] = useState<string | null>(null);
   const [sdi12SettingsDevice, setSdi12SettingsDevice] = useState<Device | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removingDevice, setRemovingDevice] = useState<string | null>(null);
@@ -786,6 +790,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           zoneId={zone.id}
           zoneName={zone.name}
           onAdvancedOpen={() => setShowAdvancedDrawer(true)}
+          onOpenPolicyEditor={() => { setPolicyEditorDeviceEui(null); setShowPolicyEditor(true); }}
+          openRequest={scheduleOpenRequest}
         />
       )}
 
@@ -1043,6 +1049,17 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
         isOpen={canWrite && showAdvancedDrawer}
         zone={zone}
         onClose={() => setShowAdvancedDrawer(false)}
+        onSaved={onUpdate}
+        onEditSchedule={() => { setShowAdvancedDrawer(false); setScheduleOpenRequest(value => value + 1); }}
+        onEditPolicy={() => { setShowAdvancedDrawer(false); setPolicyEditorDeviceEui(null); setShowPolicyEditor(true); }}
+      />
+
+      <IrrigationPolicyEditor
+        zone={zone}
+        devices={devices}
+        open={canWrite && showPolicyEditor}
+        initialDeviceEui={policyEditorDeviceEui}
+        onClose={() => setShowPolicyEditor(false)}
         onSaved={onUpdate}
       />
 

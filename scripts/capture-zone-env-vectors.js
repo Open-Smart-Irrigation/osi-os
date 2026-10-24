@@ -392,6 +392,11 @@ async function runCase(caseName, seedRows) {
       if (name === 'zone-env') {
         return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-zone-env')) };
       }
+      // The scheduling integration's zone-env-fn skips report-only valve expectations
+      // through osi-valve-control and returns no summary without it.
+      if (name === 'osi-valve-control') {
+        return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control')) };
+      }
       if (name === 'rain') {
         return { ok: true, value: require(path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain')) };
       }

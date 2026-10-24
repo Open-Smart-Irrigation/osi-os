@@ -221,6 +221,10 @@ same change; the test fails otherwise, so the two cannot drift apart.
 | `scheduleHelp`, `scheduleHelpLabel` (2 keys in `valves.json`) | The information button beside the valve panel heading and its tooltip ("Weekly schedules run on each valve."). They replace the retired `help` and `helpLabel`, whose English said "All zones." in front of the same sentence and named the button "About valve control". No human Luganda pass has seen the new wording, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
 | `planLost`, `scheduleDialog.push.LOST` (2 keys in `valves.json`) | Added by the CMD-04 PR0 containment (owner decision Q02 c): a plan push the valve has not confirmed within 24 hours is no longer re-sent automatically, and the valve tile and the schedule badge say "Device may not hold this plan". The wording is shared with the conditional-scheduling branch and is not yet reviewed in any language, so every edge locale, `lg` included, ships the English source text (`PENDING_TRANSLATION` in the same test file). |
 | `schedulerStatusLost` (1 key in `valves.json`) | Added after the CMD-04 PR0 review: a LOST scheduler-status push (pause, skip today, resume) gets its own tile line, "Device may not hold the latest pause, skip or resume", instead of the plan line. Same status as `planLost`: not yet reviewed in any language, so every edge locale, `lg` included, ships the English source text (`PENDING_TRANSLATION` in the same test file). |
+| `cancelHelp`, `cancelHelpLabel`, `cancelOutcome.*` (4), `cancelCollateral.*` (8) (14 keys in `valves.json`) | The cancel control's help text (owner decision D04, verbatim: "Cancel deletes the pending command. It does not close a valve that is already open."), its help-button label, and the panel lines that report a cancel's outcome and the other queued items its queue flush removed (D19/Q01 = (a)), added in the night run 2026-10-19. Every locale ships the English source text until a translation pass; `lg` waits for a human Luganda pass. |
+| `resumeRefusedClearPending` (1 key in `valves.json`) | The valve panel's explanation when Resume is refused on a conditional valve whose conditional clear is not confirmed yet (scheduling integration W29, 2026-10-21). de-CH, fr, it, es and pt are translated; `lg` ships the English source text until a human Luganda pass. |
+| `irrigationPolicy.vwcDisabled` (1 key in `valves.json`) | The policy editor's notice that VWC conditions are turned off on this gateway (edge gate `conditional_irrigation_vwc_enabled`, default off; plan decision D18, R17 M1), so a VWC policy does not irrigate. Added by the scheduling integration W29, 2026-10-21. de-CH, fr, it, es and pt are translated; `lg` ships the English source text until a human Luganda pass. |
+| `irrigationPolicy.*` (the other 83 keys) and `irrigationPreference.*` (16 keys) in `valves.json` | The conditional irrigation policy editor, its runtime status and conversion preview, and the wet/moist/dry irrigation preference picker, added by the conditional irrigation branch. de-CH, fr, it, es and pt carry translations. The texts decide when a valve opens, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
 
 Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
@@ -285,11 +289,13 @@ same change.
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.
-The CMD-04 valve keys listed under `valves.json` above (`planLost`,
-`schedulerStatusLost`, `scheduleDialog.push.LOST`) get no demo override: the simulator shows their
-English source text too. `web/react-gui/demo/tests/valve-locale.test.ts`
-enforces this, and a human Luganda pass removes the key from its pending list
-in the same change.
+The conditional irrigation and CMD-04 valve keys listed under `valves.json`
+above (`irrigationPolicy.*`, `irrigationPreference.*`, `planLost`,
+`schedulerStatusLost`, `scheduleDialog.push.LOST`, `resumeRefusedClearPending`, `cancelHelp`,
+`cancelHelpLabel`, `cancelOutcome.*`, `cancelCollateral.*`) get no demo
+override: the simulator shows their English source text too.
+`web/react-gui/demo/tests/valve-locale.test.ts` enforces this, and a human
+Luganda pass removes the key from its pending list in the same change.
 
 ## `devices.json` — Tensiomark settings and SDI-12 card
 

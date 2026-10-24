@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
@@ -7,6 +7,7 @@ import { DeviceCardFooter } from '../shared/DeviceCardFooter';
 import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown';
 import { formatTime } from '../../../utils/datetime';
 import { EditableName } from '../shared/EditableName';
+import { ValveControlHelp } from '../shared/ValveControlHelp';
 
 export interface ValveTileProps {
   valve: ValveSummary;
@@ -164,6 +165,10 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const primaryAction = isPendingCommand
     ? { label: t('cancelQueuedOpen'), onClick: onCancel }
     : { label: t('open'), onClick: onOpen };
+  // D04 (owner decision 2026-10-18): the cancel control carries the verbatim help text. It is
+  // the button's accessible description and also sits in a help button beside it, which a tap
+  // pins open and keyboard focus or hover shows.
+  const cancelHelpId = useId();
 
   return (
     <div className="flex h-full flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -220,15 +225,24 @@ export const ValveTile: React.FC<ValveTileProps> = ({
       </div>
 
       <div data-testid="valve-actions" className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={primaryAction.onClick}
-          disabled={busy}
-          className="flex flex-1 basis-[100px] min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {busy && <Spinner />}
-          {primaryAction.label}
-        </button>
+        <div className="flex flex-1 basis-[100px] items-center gap-1">
+          <button
+            type="button"
+            onClick={primaryAction.onClick}
+            disabled={busy}
+            aria-describedby={isPendingCommand ? cancelHelpId : undefined}
+            className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy && <Spinner />}
+            {primaryAction.label}
+          </button>
+          {isPendingCommand && (
+            <>
+              <span id={cancelHelpId} className="sr-only">{t('cancelHelp')}</span>
+              <ValveControlHelp label={t('cancelHelpLabel')}>{t('cancelHelp')}</ValveControlHelp>
+            </>
+          )}
+        </div>
         <div className="flex flex-1 basis-[180px] items-center gap-2">
           <button
             type="button"

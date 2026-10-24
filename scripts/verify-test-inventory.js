@@ -543,6 +543,19 @@ function npmCollection(ctx, pkgDir, scriptName, where, add, stack = []) {
         if (!hits.length) errors.push(`${here}: ${g} matches no tracked file`);
         hits.forEach((f) => add(f, `${here} ${TSX_RUNNER}`));
       }
+    } else if (w[0] === 'playwright' || (w[0] === 'npx' && w[1] === 'playwright')) {
+      const args = w.slice(w[0] === 'npx' ? 2 : 1);
+      if (args[0] !== 'test') continue;
+      const configIndex = args.findIndex((arg) => arg === '--config' || arg.startsWith('--config='));
+      if (configIndex < 0) continue;
+      const configName = args[configIndex] === '--config' ? args[configIndex + 1] : args[configIndex].slice('--config='.length);
+      if (!configName || configName.startsWith('-')) {
+        errors.push(`${here}: playwright --config needs a config path`);
+        continue;
+      }
+      const configPath = fromPkg(configName.replace(/^\.\//, ''));
+      if (!tracked.has(configPath)) errors.push(`${here}: ${configPath} is not a tracked file`);
+      else add(configPath, `${here} playwright config`);
     } else if (w[0] === 'tsx' || (w[0] === 'node' && w.includes('--test'))) {
       errors.push(`${here}: ${w[0]} --test: collect tests through ${TSX_RUNNER}, which fails on a pattern that matches nothing`);
     }

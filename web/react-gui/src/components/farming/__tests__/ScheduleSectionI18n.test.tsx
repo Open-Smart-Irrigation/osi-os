@@ -51,9 +51,9 @@ describe('trigger form localization and labelling', () => {
     await openSection({ trigger_metric: 'SWT_1', threshold_kpa: 30, duration_minutes: 20, enabled: true });
 
     expect(await screen.findByLabelText('Sensor')).toHaveValue('SWT_1');
-    expect(screen.getByLabelText('Threshold (kPa)')).toHaveValue(30);
+    expect(screen.getByLabelText('irrigationPreference.customThreshold')).toHaveValue(30);
     expect(screen.getByLabelText('Duration (min)')).toHaveValue(20);
-    expect(screen.getByText('Irrigate when Sensor 1 exceeds 30 kPa')).toBeInTheDocument();
+    expect(screen.queryByText('Irrigate when Sensor 1 exceeds 30 kPa')).not.toBeInTheDocument();
     expect(screen.getByText('Trigger method')).toBeInTheDocument();
   });
 

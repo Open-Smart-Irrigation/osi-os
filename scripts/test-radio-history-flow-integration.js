@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
 const helper = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper');
+const valveControl = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control');
 const flows = JSON.parse(fs.readFileSync('conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'));
 const gateway = '0011223344556677';
 const installation = '00000000-0000-4000-8000-000000000001';
@@ -33,7 +34,11 @@ function fixture(t) {
   const source = { all:async(sql,params=[])=>{ reads++; return radio.prepare(sql).all(...params); },bridgeDirty:async()=>{} };
   const env = { get:n=>({OSI_RADIO_CAPTURE_ENABLED:'1',DEVICE_EUI:gateway})[n] };
   async function invoke(id,msg) {
-    const context={msg,env,osiDb:{Database},osiLib:{require:n=>({ok:true,value:n==='history-sync'?helper:{getSharedStore:async()=>source}})},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)}};
+    const context={msg,env,osiDb:{Database},osiLib:{require:n=>{
+      if (n === 'history-sync') return {ok:true,value:helper};
+      if (n === 'osi-valve-control') return {ok:true,value:valveControl};
+      return {ok:true,value:{getSharedStore:async()=>source}};
+    }},flow:{get:k=>memory.get(k),set:(k,v)=>memory.set(k,v)},node:{warn:x=>warnings.push(x),error:x=>warnings.push(x)}};
     return vm.runInNewContext('(async function(){'+flows.find(n=>n.id===id).func+'})',context)();
   }
   return {farming,radio,memory,warnings,invoke,reads:()=>reads};

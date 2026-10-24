@@ -46,6 +46,7 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.push.QUEUED': 'waiting for valve',
     'scheduleDialog.push.ACKED': 'acknowledged {{when}}',
     'scheduleDialog.push.FAILED': 'failed',
+    'irrigationPolicy.openEditor': 'Edit conditional policy',
     'scheduleDialog.push.LOST': 'device may not hold this plan',
     bluetoothNote: 'Changes made on the valve over Bluetooth are not visible here.',
     noSchedule: 'No schedule',
@@ -255,6 +256,26 @@ describe('ValveScheduleDialog', () => {
     schedulesMock.mockResolvedValueOnce(responseWithTuesdayWindows());
     renderDialog(makeValve());
     expect(await screen.findByText('Morning soak')).toBeInTheDocument();
+  });
+
+  it('delegates conditional weekly rows to the policy editor instead of exposing ordinary CRUD', async () => {
+    const onOpenPolicyEditor = vi.fn();
+    schedulesMock.mockResolvedValueOnce({
+      ...emptyResponse(),
+      schedules: [{
+        scheduleUuid: 'conditional-1', deviceEui: '0016C001F1000001', kind: 'WEEKLY', label: 'Conditional',
+        weekdaysMask: 127, startTime: '06:00', fireAt: null, durationMinutes: 20, timezone: 'Europe/Zurich',
+        enabled: true, onceState: null, conditionPolicyUuid: 'policy-1', execution: 'conditional', syncVersion: 3,
+      }],
+    });
+    render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0, shouldRetryOnError: false }}>
+        <ValveScheduleDialog valve={makeValve()} open onClose={vi.fn()} onChanged={vi.fn()} onOpenPolicyEditor={onOpenPolicyEditor} />
+      </SWRConfig>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit conditional policy' }));
+    expect(onOpenPolicyEditor).toHaveBeenCalledWith(expect.objectContaining({ scheduleUuid: 'conditional-1' }));
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 
   it('shows an unknown one-time dispatch outcome in the schedule row', async () => {

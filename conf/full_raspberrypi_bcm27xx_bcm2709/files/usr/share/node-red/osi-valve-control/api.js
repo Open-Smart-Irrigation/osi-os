@@ -4,10 +4,25 @@ const fs = require('node:fs');
 const P = require('./plan');
 const store = require('./store');
 const push = require('./push');
+const dispatch = require('./dispatch');
 
 // --- copied verbatim from osi-journal/api.js (apiError, unauthorized, verifyBearer, resolveAuthSecret, requestBody, closeFacade) ---
 
 const MAX_BODY_BYTES = 256 * 1024;
+
+// A valve runs either fixed weekly rows or rows of one live conditional policy, never both
+// (plan.validateScheduleModes). compileWindows() skips conditional rows, so the plan check
+// before a write cannot see the mix; check the stored result inside the write transaction,
+// so a refused request rolls back instead of leaving a mixed program that blocks every
+// later compile (Pause included).
+async function assertScheduleModeTx(tx, eui) {
+  const live = await store.listSchedules(tx, eui);
+  const mode = P.validateScheduleModes(live, await store.listPoliciesForSchedules(tx, live));
+  if (!mode.ok) {
+    const code = mode.code || 'mixed_schedule_mode';
+    throw apiError(mode.status || 409, code, code, mode);
+  }
+}
 
 function apiError(statusCode, code, message, details) {
   const error = new Error(message);
@@ -113,6 +128,25 @@ function assignPushMessages(msg, q) {
   if (q && Array.isArray(q.messages) && q.messages.length) msg.valvePushMessages = q.messages;
 }
 
+const SCHEDULE_BINDING_FIELDS = ['kind', 'label', 'weekdays_mask', 'start_time', 'fire_at', 'duration_minutes', 'timezone', 'enabled', 'once_state', 'once_fired_at', 'condition_policy_uuid', 'effective_from'];
+
+function scheduleBindingChanged(before, patch) {
+  return SCHEDULE_BINDING_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(patch || {}, field)
+    && (before && before[field] == null ? null : before && before[field]) !== (patch[field] == null ? null : patch[field]));
+}
+
+// (R13-M4 follow-up) A conversion back to fixed mode behind an active open is pending, not
+// silent: the reply names the open the snapshot waits for.
+function waitsFor(q) {
+  return q && q.conversion_waits_for ? { conversion_waits_for: q.conversion_waits_for } : {};
+}
+
+function throwTransportFailure(q) {
+  const failure = push.transportFailure(q);
+  if (!failure) return;
+  throw apiError(503, failure.error, 'Valve transport did not confirm the write', failure.detail);
+}
+
 function shapeValve(row, schedules, now, tzFallback, pushes) {
   const flowRate = row.flow_rate_lpm != null ? Number(row.flow_rate_lpm) : (row.zone_flow_rate_lpm != null ? Number(row.zone_flow_rate_lpm) : null);
   return {
@@ -206,10 +240,17 @@ async function handleHttpRequest(options) {
         const trial = P.compileWindows(trialSchedules);
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
       }
-      await store.insertSchedule(db, row);
-      const q = row.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
+      await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+        const freshDevice = await ownedValve(tx, eui, auth.userId);
+        row.timezone = freshDevice.zone_timezone || tzFallback;
+        await store.insertSchedule(tx, row);
+        await assertScheduleModeTx(tx, eui);
+        await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
+      }));
+      const q = row.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
+      throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(201, { schedule: row, pushes_queued: q.rows.length });
+      return respond(201, Object.assign({ schedule: row, pushes_queued: q.rows.length }, waitsFor(q)));
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/schedules\/([0-9a-fA-F-]{36})$/)) && (method === 'PUT' || method === 'DELETE')) {
@@ -223,7 +264,16 @@ async function handleHttpRequest(options) {
         // (F144) The EUI from the path is passed through to the store as the write's scope:
         // the lookup above already proved this uuid belongs to that valve, and the store-level
         // (schedule_uuid, device_eui) match keeps that true at the SQL statement itself.
-        await store.softDeleteSchedule(db, uuid, eui);
+        let deletedKind;
+        await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+          await ownedValve(tx, eui, auth.userId);
+          const fresh = await tx.get('SELECT kind, deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=UPPER(?)', [uuid, eui]);
+          if (!fresh || fresh.deleted_at !== null) throw apiError(404, 'not_found', 'Schedule not found');
+          deletedKind = fresh.kind;
+          await store.softDeleteSchedule(tx, uuid, eui);
+          await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_deleted', now });
+        }));
+        current.kind = deletedKind;
       } else {
         const body = requestBody(msg);
         const v = P.validateScheduleInput(Object.assign({}, current, body, { kind: current.kind }));
@@ -231,42 +281,65 @@ async function handleHttpRequest(options) {
         const trialSchedules = existing.map((s) => (s.schedule_uuid === uuid ? Object.assign({}, s, v.value) : s));
         const trial = P.compileWindows(trialSchedules);
         if (trial.errors.length) return respond(422, { error: 'plan_conflict', details: labelizeDetails(trial.errors, trialSchedules) });
-        await store.updateSchedule(db, uuid, v.value, eui); // (F144) scoped to the path's valve, see the DELETE branch
+        let changed = false;
+        await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+          await ownedValve(tx, eui, auth.userId);
+          const fresh = await tx.get('SELECT * FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=UPPER(?) AND deleted_at IS NULL', [uuid, eui]);
+          if (!fresh) throw apiError(404, 'not_found', 'Schedule not found');
+          changed = scheduleBindingChanged(fresh, v.value);
+          await store.updateSchedule(tx, uuid, v.value, eui); // (F144) scoped to the path's valve, see the DELETE branch
+          await assertScheduleModeTx(tx, eui);
+          if (changed) await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
+        }));
       }
       // Only a WEEKLY schedule feeds compileWindows()/the on-valve plan; compiling and pushing
       // after a ONCE mutation would otherwise send an empty all-FF weekday plan (silently
       // wiping any Bluetooth-configured on-valve schedule) as a side effect of editing a
       // one-time open. Spec §5.1: compile only on WEEKLY create/update/delete/enable-toggle or
       // explicit re-send.
-      const q = current.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
+      const q = current.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
+      throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(200, { ok: true, pushes_queued: q.rows.length });
+      return respond(200, Object.assign({ ok: true, pushes_queued: q.rows.length }, waitsFor(q)));
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/plan\/resend$/)) && method === 'POST') {
       const eui = match[1].toUpperCase();
       currentEui = eui;
       await ownedValve(db, eui, auth.userId);
-      const q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, warn, timeZoneFallback: tzFallback });
+      let q;
+      await dispatch.withValveWriter(eui, async () => {
+        await ownedValve(db, eui, auth.userId);
+        q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback, resendPurpose: push.LIFECYCLE_CLEAR_RESEND_PURPOSE });
+      });
+      throwTransportFailure(q);
       assignPushMessages(msg, q);
-      return respond(202, { ok: true, pushes_queued: q.rows.length });
+      return respond(202, Object.assign({ ok: true, pushes_queued: q.rows.length }, waitsFor(q)));
     }
 
     if ((match = m(/^\/api\/valves\/([0-9A-Fa-f]{16})\/scheduler-status$/)) && method === 'POST') {
       const eui = match[1].toUpperCase();
       currentEui = eui;
-      const device = await ownedValve(db, eui, auth.userId);
       const status = String((requestBody(msg) || {}).status || '').toUpperCase();
       const code = { ACTIVE: '0', SKIP_TODAY: '1', DEACTIVATED: '2' }[status];
       if (!code) return respond(422, { error: 'invalid_status', message: 'status must be ACTIVE, SKIP_TODAY or DEACTIVATED' });
-      // CMD-04 PR0 (C): a status change is a snapshot like any edit -- the flush it needs would
-      // otherwise drop the plan still queued for the valve.
-      // R5 M3: a pause never depends on plan validity. R5 N2: valve_settings is written inside the
-      // snapshot transaction, so a compile from another origin cannot carry the old status.
+      // CMD-04 PR0 (C) + R11 probe 2: never a lone status push behind a flush. In fixed mode the
+      // status rides first in a full snapshot (R5 M1), so a plan snapshot still outstanding is
+      // replaced, never dropped; R5 M3: a pause never depends on plan validity; R5 N2: the
+      // settings are written inside the snapshot transaction. In conditional mode the status is
+      // appended with no flush (push.setSchedulerStatus).
+      const device = await ownedValve(db, eui, auth.userId);
       const tz = device.zone_timezone || tzFallback;
       const lp = P.localParts(now, tz);
       const settingsPatch = { scheduler_status: status, skip_today_date: status === 'SKIP_TODAY' ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}` : null };
-      const q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, now, flushQueue: options.flushQueue, warn, settingsPatch, statusOnlyOnConflict: true });
+      let q;
+      try {
+        q = await push.setSchedulerStatus({ db, deviceEui: eui, appId: options.appId, status, settingsPatch, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
+      } catch (e) {
+        if (e && e.code === 'conditional_readiness_pending') throw apiError(409, 'conditional_readiness_pending', 'ACTIVE cannot resume a valve-resident schedule while conditional mode is active');
+        throw e;
+      }
+      throwTransportFailure(q);
       assignPushMessages(msg, q);
       return respond(202, { ok: true, status });
     }
@@ -283,8 +356,23 @@ async function handleHttpRequest(options) {
         else { const n = Number(b.flow_rate_lpm); if (!Number.isFinite(n) || n <= 0 || n > 10000) return respond(422, { error: 'invalid_flow_rate' }); patch.flow_rate_lpm = n; patch.flow_rate_source = b.flow_rate_source === 'measured' ? 'measured' : 'estimated'; patch.flow_rate_updated_at = now.toISOString(); }
       }
       if (b.default_open_minutes !== undefined) { const n = Number(b.default_open_minutes); if (!Number.isInteger(n) || n < 1 || n > 255) return respond(422, { error: 'invalid_default_open_minutes' }); patch.default_open_minutes = n; }
-      await store.upsertSettings(db, eui, patch);
-      return respond(200, { ok: true, settings: await store.getSettings(db, eui) });
+      let generationChanged = false;
+      await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+        await ownedValve(tx, eui, auth.userId);
+        const before = await store.getSettings(tx, eui);
+        await store.upsertSettings(tx, eui, patch);
+        generationChanged = Boolean(patch.strega_generation && patch.strega_generation !== before.strega_generation);
+        if (generationChanged) {
+          await push.invalidateLifecycleClearTx(tx, eui, { reason: 'generation_changed', now });
+        }
+      }));
+      let q = { rows: [], messages: [] };
+      if (generationChanged) {
+        q = await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: true, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback });
+        throwTransportFailure(q);
+        assignPushMessages(msg, q);
+      }
+      return respond(200, { ok: true, settings: await store.getSettings(db, eui), pushes_queued: q.rows.length });
     }
 
     return respond(404, { error: 'not_found', message: 'Unknown valve-control route' });

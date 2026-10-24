@@ -30,9 +30,17 @@ const SCOPED_ACCESS_COMMANDS = [
     'UPSERT_USER_PLOT_ASSIGNMENT',
     'DELETE_USER_PLOT_ASSIGNMENT',
 ];
-// UPSERT_ZONE_NAME joins the journal and scoped-access commands as a device_eui
-// exemption: it names its target with zone_uuid, and no device is involved.
-const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS, 'UPSERT_ZONE_NAME'];
+// Conditional command schemas are active on the edge; they remain in this list
+// for device-EUI exemption checks, separately from the empty staging axis below.
+const CONDITIONAL_COMMANDS = [
+    'PAUSE_IRRIGATION_POLICY',
+    'RETRY_IRRIGATION_VALVE',
+    'UPSERT_IRRIGATION_POLICY',
+];
+const EDGE_DEFERRED_COMMANDS = [];
+// UPSERT_ZONE_NAME and conditional policy commands join the journal and scoped-access
+// commands as device_eui exemptions: their typed zone/schedule/valve targets carry identity.
+const DEVICE_EUI_EXEMPT_COMMANDS = [...JOURNAL_COMMANDS, ...SCOPED_ACCESS_COMMANDS, 'UPSERT_ZONE_NAME', ...CONDITIONAL_COMMANDS];
 // Scoped-access outbox events, cloud-deferred pending osi-server PR #83 (see the long-form
 // rationale in scripts/verify-sync-op-parity.js next to EXACT_SCOPED_ACCESS_EVENT_OPS).
 const SCOPED_ACCESS_EVENT_OPS = [
@@ -99,6 +107,15 @@ const EXPECTED_COMMAND_SEMANTIC_BINDINGS = {
     SET_CHAMELEON_CONFIG: {
         effect_key: { prefix: 'chameleon_config:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
     },
+    UPSERT_IRRIGATION_POLICY: {
+        effect_key: { prefix: 'irrigation_policy:upsert', gateway_path: 'gateway_device_eui', version_path: 'expected_policy_version' },
+    },
+    PAUSE_IRRIGATION_POLICY: {
+        effect_key: { prefix: 'irrigation_policy:pause', gateway_path: 'gateway_device_eui', version_path: 'expected_policy_version' },
+    },
+    RETRY_IRRIGATION_VALVE: {
+        effect_key: { prefix: 'irrigation_policy:retry', gateway_path: 'gateway_device_eui', device_path: 'device_eui' },
+    },
 };
 const SCOPED_ACCESS_EVENT_KEY_FIELDS = {
     USER_UPSERTED: 'user_uuid',
@@ -135,6 +152,10 @@ const EXPECTED_EVENT_SEMANTIC_BINDINGS = {
     // The key is the composite zone_uuid|date, which no single payload path
     // holds, so only the version is bound (spec 2026-09-27-daily-agronomy-parity B6).
     ZONE_AGRONOMY_UPSERTED: {sync_version_path: 'payload.sync_version'},
+    IRRIGATION_POLICY_UPSERTED: {aggregate_key_path: 'payload.policy_uuid', sync_version_path: 'payload.sync_version'},
+    IRRIGATION_POLICY_RUNTIME_CHANGED: {aggregate_key_path: 'payload.zone_uuid', sync_version_path: 'payload.projection_revision'},
+    IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.projection_revision'},
+    IRRIGATION_POLICY_DECISION_UPSERTED: {aggregate_key_path: 'payload.decision_key', sync_version_path: 'payload.projection_revision'},
     WATERMARK_CALIBRATION_UPSERTED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
     WATERMARK_CALIBRATION_DELETED: {aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version'},
 };
@@ -1155,7 +1176,7 @@ if (!fs.existsSync(STAGING_MANIFEST)) {
     // WATERMARK parity is active now; only the still-deferred journal and
     // scoped-access sets belong in this staging oracle.
     const exactStaging = staging && staging.version === 1 &&
-        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify([]) &&
+        JSON.stringify(staging.commands && staging.commands.edgeDeferred) === JSON.stringify(EDGE_DEFERRED_COMMANDS) &&
         JSON.stringify(staging.commands && staging.commands.cloudDeferred) === JSON.stringify(JOURNAL_COMMANDS.concat([...SCOPED_ACCESS_COMMANDS].sort())) &&
         JSON.stringify(staging.eventOps && staging.eventOps.edgeModuleOwned) === JSON.stringify([
             'JOURNAL_ENTRY_UPSERTED',

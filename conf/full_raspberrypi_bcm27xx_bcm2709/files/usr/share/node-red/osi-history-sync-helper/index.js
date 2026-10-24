@@ -185,6 +185,106 @@ function cursorKind(tableName) {
   return definition(tableName).cursor;
 }
 
+function edgeV1WireInstantSql(valueSql) {
+  const value = `(${valueSql})`;
+  const digits = `replace(replace(replace(replace(replace(${value},'-',''),'T',''),':',''),'.',''),'Z','')`;
+  const year = `CAST(substr(${value},1,4) AS INTEGER)`;
+  const month = `CAST(substr(${value},6,2) AS INTEGER)`;
+  const day = `CAST(substr(${value},9,2) AS INTEGER)`;
+  const maxDay = `CASE ${month}
+    WHEN 1 THEN 31
+    WHEN 2 THEN 28 + CASE WHEN (${year}%400=0 OR (${year}%4=0 AND ${year}%100<>0)) THEN 1 ELSE 0 END
+    WHEN 3 THEN 31 WHEN 4 THEN 30 WHEN 5 THEN 31 WHEN 6 THEN 30
+    WHEN 7 THEN 31 WHEN 8 THEN 31 WHEN 9 THEN 30 WHEN 10 THEN 31
+    WHEN 11 THEN 30 WHEN 12 THEN 31 ELSE 0 END`;
+  return `typeof(${value})='text'
+    AND (length(${value})=20 OR (length(${value}) BETWEEN 22 AND 30 AND substr(${value},20,1)='.'))
+    AND substr(${value},5,1)='-'
+    AND substr(${value},8,1)='-'
+    AND substr(${value},11,1)='T'
+    AND substr(${value},14,1)=':'
+    AND substr(${value},17,1)=':'
+    AND substr(${value},-1,1)='Z'
+    AND ${digits} NOT GLOB '*[^0-9]*'
+    AND ${month} BETWEEN 1 AND 12
+    AND ${day} BETWEEN 1 AND (${maxDay})
+    AND CAST(substr(${value},12,2) AS INTEGER) BETWEEN 0 AND 23
+    AND CAST(substr(${value},15,2) AS INTEGER) BETWEEN 0 AND 59
+    AND CAST(substr(${value},18,2) AS INTEGER) BETWEEN 0 AND 59`;
+}
+
+function v1LegacyCompatibilitySql(alias = 'vae') {
+  const transport = `${alias}.transport_json`;
+  const markerType = `json_type(${transport}, '$.physical_run')`;
+  const compatType = `json_type(${transport}, '$.physical_run.legacy_v1_compatibility')`;
+  const bound = (path, column) => `(
+    (json_type(${transport}, '${path}') = 'null')
+    OR (json_type(${transport}, '${path}') = 'text' AND ${edgeV1WireInstantSql(`json_extract(${transport}, '${path}')`)})
+  )`;
+  const terms = `(
+    ${alias}.command_id IS NULL
+    AND ${alias}.trigger = 'on_valve_schedule'
+    AND typeof(${alias}.commanded_duration_seconds) = 'integer'
+    AND ${alias}.commanded_duration_seconds > 0
+    AND ${alias}.commanded_duration_seconds <= 9007199254740991
+    AND ${edgeV1WireInstantSql(`${alias}.commanded_at`)}
+    AND ${edgeV1WireInstantSql(`${alias}.expected_close_at`)}
+    AND json_valid(${transport}) = 1
+    AND json_type(${transport}) = 'object'
+    AND ${markerType} = 'object'
+    AND json_extract(${transport}, '$.physical_run.version') = 1
+    AND json_type(${transport}, '$.physical_run.version') = 'integer'
+    AND json_extract(${transport}, '$.physical_run.source') = 'explicit_report'
+    AND json_type(${transport}, '$.physical_run.source') = 'text'
+    AND ${bound('$.physical_run.earliest_possible_start_at', `${alias}.commanded_at`)}
+    AND ${bound('$.physical_run.latest_possible_end_at', `${alias}.expected_close_at`)}
+    AND ${compatType} = 'object'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.version') = 1
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.version') = 'integer'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.source') = 'preexisting_on_valve_schedule'
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.source') = 'text'
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.expectation_id') = 'text'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.expectation_id') = ${alias}.expectation_id
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.commanded_at') = 'text'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.commanded_at') = ${alias}.commanded_at
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.commanded_duration_seconds') = 'integer'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.commanded_duration_seconds') = ${alias}.commanded_duration_seconds
+    AND json_type(${transport}, '$.physical_run.legacy_v1_compatibility.expected_close_at') = 'text'
+    AND json_extract(${transport}, '$.physical_run.legacy_v1_compatibility.expected_close_at') = ${alias}.expected_close_at
+  )`;
+  return `(CASE WHEN json_valid(${transport}) = 0 THEN 0 WHEN json_type(${transport}) <> 'object' THEN 0 ELSE COALESCE(${terms}, 0) END = 1)`;
+}
+
+function v1LocalOnlyPredicate(alias = 'vae') {
+  const transport = `${alias}.transport_json`;
+  const safetyReportOnly = `CASE
+    WHEN ${transport} IS NULL OR ${transport} = '' THEN 0
+    WHEN json_valid(${transport}) = 0 THEN 1
+    WHEN json_type(${transport}) <> 'object' THEN 1
+    WHEN COALESCE(json_type(${transport}, '$.physical_run'), 'null') <> 'null' THEN 1
+    ELSE 0 END`;
+  const compatibility = v1LegacyCompatibilitySql(alias);
+  return `(${alias}.command_id IS NULL AND (
+    (${alias}.commanded_duration_seconds = -1 AND ${alias}.expected_close_at = '')
+    OR (${safetyReportOnly} = 1 AND NOT ${compatibility})
+  ))`;
+}
+
+function v1ReplicationPredicate(alias = 'vae') {
+  return `NOT ${v1LocalOnlyPredicate(alias)}`;
+}
+
+function appendConditions(select, conditions) {
+  const list = (Array.isArray(conditions) ? conditions : [conditions]).filter(Boolean);
+  return select + (list.length ? ' WHERE ' + list.join(' AND ') : '');
+}
+
+function filteredSelect(tableName, conditions = []) {
+  const spec = definition(tableName);
+  const predicate = tableName === 'valve_actuation_expectations' ? v1ReplicationPredicate('vae') : null;
+  return appendConditions(spec.select, [predicate, ...(Array.isArray(conditions) ? conditions : [conditions])]);
+}
+
 function snapshotHighQuery(tableName) {
   const spec = definition(tableName);
   const alias = spec.cursor === 'id' ? 'snapshot_high_id' : 'snapshot_high_key';
@@ -197,14 +297,14 @@ function snapshotHighQuery(tableName) {
   if (tableName === 'valve_actuation_expectations') {
     projectedCursorExpression = 'expectation_id';
   }
-  return `SELECT COALESCE(MAX(${projectedCursorExpression}), ${fallback}) AS ${alias} FROM (${spec.select}) history_source`;
+  return `SELECT COALESCE(MAX(${projectedCursorExpression}), ${fallback}) AS ${alias} FROM (${filteredSelect(tableName)}) history_source`;
 }
 
 function batchQuery(tableName, phase) {
   const spec = definition(tableName);
   const bounded = phase === 'shadow' || phase === 'backfill';
   const upperBound = bounded ? ` AND ${spec.cursorExpression} <= ?` : '';
-  return `${spec.select} WHERE ${spec.cursorExpression} > ?${upperBound} ORDER BY ${spec.cursorExpression} ASC LIMIT ?`;
+  return `${filteredSelect(tableName, [`${spec.cursorExpression} > ?${upperBound}`])} ORDER BY ${spec.cursorExpression} ASC LIMIT ?`;
 }
 
 function batchQueryParams(tableName, phase, after, snapshotHigh, limit) {
@@ -333,14 +433,55 @@ function nextRawQuery(tableName) {
   return `${definition(tableName).select} WHERE id > ? ORDER BY id ASC LIMIT ?`;
 }
 
-function cursorPatchFromResponse(response) {
+function normalizeValveAckKey(value, gatewayEui) {
+  if (value == null) return null;
+  const raw = String(value);
+  if (!raw) return null;
+  if (!raw.startsWith('VALVE_ACTUATION|')) return raw;
+  const gateway = String(gatewayEui || '').trim().toUpperCase();
+  const prefix = `VALVE_ACTUATION|${gateway}|`;
+  if (!gateway || !raw.startsWith(prefix)) return null;
+  const suffix = raw.slice(prefix.length);
+  return suffix ? suffix : null;
+}
+
+function normalizeCursor(tableName, cursor, gatewayEui) {
+  const value = Object.assign({}, cursor || {});
+  if (tableName !== 'valve_actuation_expectations') return value;
+  for (const field of ['last_shadow_acked_key', 'last_acked_key']) {
+    if (value[field] != null) value[field] = normalizeValveAckKey(value[field], gatewayEui);
+  }
+  return value;
+}
+
+function normalizedValveCursorSql(column = 'last_acked_key') {
+  return `CASE WHEN ${column} GLOB 'VALVE_ACTUATION|*' THEN CASE WHEN ${column} GLOB 'VALVE_ACTUATION|'||?||'|*' THEN substr(${column},length('VALVE_ACTUATION|'||?||'|')+1) ELSE '' END ELSE ${column} END`;
+}
+
+// Compare a valid incoming raw suffix against the durable cursor atomically.
+// Exact current-gateway prefixes canonicalize to their raw suffix even when
+// the incoming ACK is equal or older. Invalid loaded prefixes normalize to the
+// empty replay boundary and never hide progress from the exact validator.
+function monotonicValveCursorSql(column = 'last_acked_key') {
+  const normalized = normalizedValveCursorSql(column);
+  return `CASE WHEN ${column} IS NULL OR ?>(${normalized}) THEN ? WHEN ${column} GLOB 'VALVE_ACTUATION|'||?||'|*' THEN (${normalized}) ELSE ${column} END`;
+}
+
+function cursorPatchFromResponse(response, options = {}) {
   const results = Array.isArray(response.results) ? response.results : [];
   const permanent = results.find((result) => result && result.status === 'REJECTED_PERMANENT');
   const patch = {};
   if (response.ackedThroughId != null) {
     patch.last_acked_id = encodeInteger(response.ackedThroughId);
   } else if (response.ackedThroughKey != null) {
-    patch.last_acked_key = String(response.ackedThroughKey);
+    const ackedKey = options.tableName === 'valve_actuation_expectations'
+      ? normalizeValveAckKey(response.ackedThroughKey, options.gatewayEui)
+      : String(response.ackedThroughKey);
+    if (ackedKey == null) {
+      patch.last_error = 'invalid ACK boundary';
+      return patch;
+    }
+    patch.last_acked_key = ackedKey;
   }
   if (permanent) {
     patch.last_error = `permanent: ${permanent.reason || 'rejected'}`;
@@ -430,6 +571,15 @@ function quarantineHash(tableName, historyKeyValue, error) {
 }
 
 function prepareRow(tableName, gatewayEui, row) {
+  if (tableName === 'valve_actuation_expectations') {
+    const valveControl = require('../osi-valve-control');
+    if (typeof valveControl.isV1LocalOnlyExpectation !== 'function') {
+      throw new Error('ValveActuation v1 classifier unavailable');
+    }
+    if (valveControl.isV1LocalOnlyExpectation(row)) {
+      throw new Error('ValveActuation v1 local-only row reached durable history canonicalizer');
+    }
+  }
   const key = historyKey(tableName, gatewayEui, row);
   try {
     return {
@@ -504,7 +654,7 @@ function segmentQuery(tableName, key) {
   }
   if (tableName === 'valve_actuation_expectations') {
     return {
-      sql: `${definition(tableName).select} WHERE upper(vae.device_eui) = ? AND substr(vae.commanded_at, 1, 10) = ? ORDER BY vae.expectation_id ASC`,
+      sql: `${filteredSelect(tableName, ["upper(vae.device_eui) = ?", "substr(vae.commanded_at, 1, 10) = ?"])} ORDER BY vae.expectation_id ASC`,
       params: [owner.toUpperCase(), segmentDay]
     };
   }
@@ -576,6 +726,10 @@ module.exports = {
   tableNames,
   nextTable,
   cursorKind,
+  edgeV1WireInstantSql,
+  v1LegacyCompatibilitySql,
+  v1LocalOnlyPredicate,
+  v1ReplicationPredicate,
   snapshotHighQuery,
   batchQuery,
   batchQueryParams,
@@ -586,6 +740,10 @@ module.exports = {
   cursorValue,
   nextRawQuery,
   cursorPatchFromResponse,
+  normalizeValveAckKey,
+  normalizeCursor,
+  normalizedValveCursorSql,
+  monotonicValveCursorSql,
   rowRejection,
   isBackfillComplete,
   isCursorComplete,

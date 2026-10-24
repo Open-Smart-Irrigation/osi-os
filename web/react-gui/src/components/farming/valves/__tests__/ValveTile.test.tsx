@@ -12,6 +12,8 @@ const { translateForTest } = vi.hoisted(() => {
     schedule: 'Schedule',
     cancel: 'Cancel',
     cancelQueuedOpen: 'Cancel queued open',
+    cancelHelp: 'Cancel deletes the pending command. It does not close a valve that is already open.',
+    cancelHelpLabel: 'About cancel',
     more: 'More',
     skipToday: 'Skip today',
     pauseSchedules: 'Pause schedules',
@@ -424,5 +426,45 @@ describe('ValveTile pending-cancel label (M-2)', () => {
     const primary = screen.getByRole('button', { name: 'Cancel queued open' });
     fireEvent.click(primary);
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// D04 (owner decision 2026-10-18): the cancel control carries the verbatim help text, reachable
+// on touch (tap the help button), keyboard (focus) and assistive technology (the button's
+// accessible description).
+describe('ValveTile cancel help (D04)', () => {
+  const pending = {
+    activeActuation: {
+      expectationId: 'exp-1',
+      reconciliationState: 'PENDING_OBSERVATION',
+      commandedAt: new Date().toISOString(),
+      expectedCloseAt: new Date(Date.now() + 300_000).toISOString(),
+      durationSeconds: 300,
+      trigger: 'manual',
+    },
+  };
+  const D04 = 'Cancel deletes the pending command. It does not close a valve that is already open.';
+
+  it('describes the cancel button with the verbatim D04 text for assistive technology', () => {
+    renderTile(pending);
+    expect(screen.getByRole('button', { name: 'Cancel queued open' })).toHaveAccessibleDescription(D04);
+  });
+
+  it('offers a help button that shows the D04 text on tap and on keyboard focus', () => {
+    renderTile(pending);
+    const help = screen.getByRole('button', { name: 'About cancel' });
+    const panel = document.getElementById(help.getAttribute('aria-controls')!);
+    expect(panel).toHaveTextContent(D04);
+    expect(panel).not.toBeVisible();
+    fireEvent.click(help);
+    expect(panel).toBeVisible();
+    fireEvent.click(help);
+    fireEvent.focus(help);
+    expect(panel).toBeVisible();
+  });
+
+  it('shows no cancel help while nothing is pending', () => {
+    renderTile();
+    expect(screen.queryByRole('button', { name: 'About cancel' })).not.toBeInTheDocument();
   });
 });

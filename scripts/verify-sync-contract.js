@@ -51,6 +51,8 @@ const EXACT_CLOUD_DEFERRED_JOURNAL_COMMANDS = [
 // this port, so the cloud side is not required to issue them yet.
 // UPSERT_JOURNAL_ENTRY_BATCH: the edge applier (atomic batch apply in
 // osi-journal) is wired into the command registry, so nothing is edge-deferred.
+// Task 7b's conditional command registry/appliers are now active as well. The closed
+// staging axis remains explicit so a newly added command cannot silently become deferred.
 const EXACT_EDGE_DEFERRED_JOURNAL_COMMANDS = [];
 const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     UPSERT_JOURNAL_ENTRY: {
@@ -101,6 +103,15 @@ const EXACT_COMMAND_SEMANTIC_BINDINGS = {
     SET_CHAMELEON_CONFIG: {
         effect_key: { prefix: 'chameleon_config:set', gateway_path: 'gateway_device_eui', device_path: 'device_eui', version_path: 'base_sync_version' },
     },
+    UPSERT_IRRIGATION_POLICY: {
+        effect_key: { prefix: 'irrigation_policy:upsert', gateway_path: 'gateway_device_eui', version_path: 'expected_policy_version' },
+    },
+    PAUSE_IRRIGATION_POLICY: {
+        effect_key: { prefix: 'irrigation_policy:pause', gateway_path: 'gateway_device_eui', version_path: 'expected_policy_version' },
+    },
+    RETRY_IRRIGATION_VALVE: {
+        effect_key: { prefix: 'irrigation_policy:retry', gateway_path: 'gateway_device_eui', device_path: 'device_eui' },
+    },
 };
 const EXACT_EVENT_SEMANTIC_BINDINGS = {
     DEVICE_INSTALLATION_LOCATION_REVISED: {aggregate_key_path: 'payload.revision_uuid', sync_version_path: 'payload.sync_version'},
@@ -122,6 +133,10 @@ const EXACT_EVENT_SEMANTIC_BINDINGS = {
     ZONE_AGRONOMY_UPSERTED: { sync_version_path: 'payload.sync_version' },
     WATERMARK_CALIBRATION_UPSERTED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
     WATERMARK_CALIBRATION_DELETED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.sync_version' },
+    IRRIGATION_POLICY_UPSERTED: { aggregate_key_path: 'payload.policy_uuid', sync_version_path: 'payload.sync_version' },
+    IRRIGATION_POLICY_RUNTIME_CHANGED: { aggregate_key_path: 'payload.zone_uuid', sync_version_path: 'payload.projection_revision' },
+    IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED: { aggregate_key_path: 'payload.device_eui', sync_version_path: 'payload.projection_revision' },
+    IRRIGATION_POLICY_DECISION_UPSERTED: { aggregate_key_path: 'payload.decision_key', sync_version_path: 'payload.projection_revision' },
 };
 
 function loadSchema(name) {

@@ -20,7 +20,6 @@ const VERIFY = 'command-postcondition-verify-db';
 const ACK = 'command-postcondition-ack';
 const ACK_QUEUE = 'command-ack-queue-rest';
 const LEGACY_ACK = 'e2e139678c3ddded';
-const UNCLAIM_CLEANUP = 'unclaim-cloud-valve-cleanup-fn';
 
 function fail(message) {
   throw new Error('verify-command-ack-postconditions: ' + message);
@@ -196,10 +195,7 @@ function expectSuccess(result, expected) {
 function verifyWiring() {
   wires(UPDATE, [[APPLY]]);
   wires(APPLY, [[ROUTER]]);
-  // AUTH-09 PR A: UNCLAIM_DEVICE leaves the direct ACK path for the valve cleanup node, which
-  // forwards the ACK (with the cleanup outcome) to the same Build Schedule ACK.
-  wires(ROUTER, [[POSTCONDITION], [LEGACY_ACK], [UNCLAIM_CLEANUP]]);
-  wires(UNCLAIM_CLEANUP, [[LEGACY_ACK], ['9fae49d9ba22b793']]);
+  wires(ROUTER, [[POSTCONDITION], [LEGACY_ACK]]);
   wires(POSTCONDITION, [[VERIFY]]);
   wires(VERIFY, [[ACK]]);
   wires(ACK, [[ACK_QUEUE]]);
@@ -219,7 +215,7 @@ function verifyRoutingMatrix() {
   ];
   const directTypes = [
     'UPSERT_ZONE', 'DELETE_ZONE', 'UPSERT_ZONE_CONFIG', 'UPSERT_ZONE_LOCATION', 'UPSERT_DEVICE_FLAGS',
-    'SET_STREGA_MODEL'
+    'UNCLAIM_DEVICE', 'SET_STREGA_MODEL'
   ];
   for (const type of verifiedTypes) {
     const output = runFunction(node(ROUTER), { syncAck: { commandType: type } });
@@ -234,8 +230,6 @@ function verifyRoutingMatrix() {
     const output = runFunction(node(ROUTER), { syncAck: { commandType: type, commandId: type + '-command' } });
     assert(!output[0] && output[1], `${type} must retain the direct ACK path`);
   }
-  const unclaimOutput = runFunction(node(ROUTER), { syncAck: { commandType: 'UNCLAIM_DEVICE', commandId: 'unclaim-command' } });
-  assert(!unclaimOutput[0] && !unclaimOutput[1] && unclaimOutput[2], 'UNCLAIM_DEVICE must reach the valve cleanup before its ACK');
   const legacyMessage = runFunction(node(LEGACY_ACK), { syncAck: { commandType: 'UPSERT_ZONE', commandId: 'zone-command' } });
   assert.strictEqual(legacyMessage.topic, 'devices/AABBCCDDEEFF0011/command_ack');
   assert.strictEqual(JSON.parse(legacyMessage.payload).result, 'SUCCESS');

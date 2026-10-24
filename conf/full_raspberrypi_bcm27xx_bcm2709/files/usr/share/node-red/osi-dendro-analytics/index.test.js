@@ -179,6 +179,35 @@ test('irrigation decision helpers preserve schedule gating and rain suppression 
   assert.deepEqual(logs, ['Zone: rain suppression exited — TWD responded']);
 });
 
+test('raw local decision evidence is captured before legacy DENDRO filtering', () => {
+  const raw = { action: 'decrease_10', reasoning: 'No stress ≥2 of 3 days' };
+  const captured = da.buildRawDecisionEvidence(raw, {
+    computedAt: '2026-10-16T06:00:00.000Z', zoneStress: 'none', usableTreeCount: 2,
+    rainSuppressionActive: false, recoveryVerificationActive: false,
+  });
+  assert.equal(captured.version, 1);
+  assert.deepEqual(captured.decision, {
+    version: 1, action: 'decrease_10', reasoning: 'No stress ≥2 of 3 days', computed_at: '2026-10-16T06:00:00.000Z',
+  });
+  assert.equal(captured.evidence.analysis.action, 'decrease_10');
+  assert.equal(captured.evidence.analysis.usable_tree_count, 2);
+  assert.deepEqual(
+    da.applyDendroSchedulePolicy({ action: 'increase_10', reasoning: 'Moderate stress' }, ['moderate'], { enabled: 1, trigger_metric: 'DENDRO', threshold_kpa: 3 }),
+    { action: 'maintain', reasoning: 'Moderate stress Blocked by DENDRO threshold: requires significant stress or higher.' },
+  );
+  assert.deepEqual(da.applyDendroSchedulePolicy(raw, ['none'], { enabled: 1, trigger_metric: 'DENDRO', threshold_kpa: 3 }), raw);
+  assert.deepEqual(da.applyDendroSchedulePolicy(raw, ['none'], { enabled: 0, trigger_metric: 'DENDRO', threshold_kpa: 3 }), raw);
+});
+
+test('raw local evidence keeps malformed usable-tree counts fail-closed', () => {
+  assert.equal(da.buildRawDecisionEvidence({ action: 'maintain', reasoning: 'x' }, {
+    computedAt: '2026-10-16T06:00:00.000Z', zoneStress: 'moderate', usableTreeCount: '2',
+  }).evidence.analysis.usable_tree_count, null);
+  assert.equal(da.buildRawDecisionEvidence({ action: 'maintain', reasoning: 'x' }, {
+    computedAt: '2026-10-16T06:00:00.000Z', zoneStress: 'moderate', usableTreeCount: true,
+  }).evidence.analysis.usable_tree_count, null);
+});
+
 test('PHENO_MOD: FAO-56 stage keys, legacy keys through normalizeStage, and 1.0 for unset or unknown', () => {
   const DA = require('./index');
   const fao = { initial: 0.8, development: 0.8, mid_season: 1.0, late_season: 1.3, dormancy: 1.5 };

@@ -242,6 +242,13 @@ const PROBE_GROUP_SQL =
 const PROBE_VALVE_SQL = "UPDATE devices SET type_id = 'STREGA_VALVE' WHERE deveui = '" + PROBE_DEVEUI + "';";
 const PROBE_MOTORIZED_VALVE_SQL = PROBE_VALVE_SQL +
   "UPDATE devices SET strega_model = 'MOTORIZED' WHERE deveui = '" + PROBE_DEVEUI + "';";
+const PROBE_POLICY_UUID = '00000000-0000-4000-8000-00000000c010';
+const PROBE_POLICY_SCHEDULE_UUID = '00000000-0000-4000-8000-00000000c011';
+const PROBE_POLICY_SETUP_SQL = PROBE_VALVE_SQL +
+  "INSERT INTO irrigation_policies (policy_uuid, zone_uuid, condition_json, timezone, enabled, observation_window_minutes, min_interval_minutes, max_daily_minutes, delivery_settings_json, effective_from, sync_version) " +
+  "VALUES ('" + PROBE_POLICY_UUID + "', '" + PROBE_ZONE_UUID + "', '{\"kind\":\"DENDRO\",\"minimum_stress\":\"moderate\",\"response_mode\":\"fixed\"}', 'UTC', 1, 60, 60, 240, '{}', '2026-01-01T00:00:00.000Z', 1);" +
+  "INSERT INTO valve_schedules (schedule_uuid, device_eui, kind, weekdays_mask, start_time, duration_minutes, timezone, enabled, sync_version, condition_policy_uuid, effective_from) " +
+  "VALUES ('" + PROBE_POLICY_SCHEDULE_UUID + "', '" + PROBE_DEVEUI + "', 'WEEKLY', 127, '06:00', 10, 'UTC', 1, 0, '" + PROBE_POLICY_UUID + "', '2026-01-01T00:00:00.000Z');";
 // A running actuation on the probe valve, for the cancel routes.
 const PROBE_ACTUATION_SQL =
   'INSERT INTO valve_actuation_expectations (expectation_id, device_eui, commanded_at, ' +
@@ -287,6 +294,26 @@ const REQUEST_FIXTURES = {
   // after the write, shows up as a write.
   'zone-rename-http': { body: { name: 'Probe renamed' } },
   'device-rename-http': { body: { name: 'Probe renamed' } },
+  'conditional-policy-put-http': {
+    body: {
+      expected_policy_version: null,
+      condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' },
+      timezone: 'UTC', enabled: false, observation_window_minutes: 60,
+      min_interval_minutes: 60, max_daily_minutes: 240,
+      schedules: [{ device_eui: PROBE_DEVEUI, expected_sync_version: null,
+        weekdays_mask: 127, start_time: '06:00', duration_minutes: 10,
+        enabled: true, execution: 'conditional' }],
+    },
+    setupSql: PROBE_VALVE_SQL,
+  },
+  'conditional-policy-pause-http': {
+    body: { expected_policy_version: 1 },
+    setupSql: PROBE_POLICY_SETUP_SQL,
+  },
+  'conditional-policy-retry-http': {
+    body: { device_eui: PROBE_DEVEUI },
+    setupSql: PROBE_POLICY_SETUP_SQL,
+  },
   'dendro-tz-http': { body: { timezone: 'Europe/Zurich' } },
   'e970d93ded4679af': {
     body: { trigger_metric: 'SWT_1', threshold_kpa: 30, duration_minutes: 10, enabled: true },
@@ -851,6 +878,11 @@ const OUTSIDE_SCOPE_TABLES = new Map([
 // that a decision ignored before it shows.
 const UNREACHED_WRITES = new Map([
   ['analysis-series-http', 'a read sent as POST: there is no write to reach'],
+  [
+    'assign-device-http',
+    'the maintained same-zone idempotent assignment fixture returns 202 before any SQL write; '
+      + 'unassigned and conflicting assignment writes are covered by the actual route suite',
+  ],
   ['sys-fan-in', 'the write is a PWM value through sysfs, which the probe serves as absent; the admin decision comes first'],
   [
     '7aa47f3149614bb1',

@@ -28,6 +28,8 @@ const capabilityBase = [
   'watermark_v1',
   'chameleon_config_commands_v1',
   'device_soil_depth_commands_v1',
+  // Appended by the conditional irrigation replication contract.
+  'conditional_irrigation_v1',
 ];
 const registry = byId['cmd-type-registry'];
 const route = byId['934bf2bc19a8ce22'];

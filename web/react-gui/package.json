@@ -29,7 +29,8 @@
     "demo:serve": "node demo/serve.mjs",
     "demo:start": "npm run demo:build && npm run demo:serve",
     "demo:test": "node scripts/run-tsx-tests.mjs 'demo/tests/*.test.ts'",
-    "demo:test:browser": "playwright test --config demo/playwright.config.ts"
+    "demo:test:browser": "playwright test --config demo/playwright.config.ts",
+    "test:browser:conditional": "playwright test --config playwright.conditional.config.ts"
   },
   "dependencies": {
     "@osi/history-uplot": "file:../history-uplot-core",
@@ -49,10 +50,11 @@
     "swr": "^2.3.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4.1.18",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.2.0",

@@ -60,7 +60,7 @@ function createFakeCloud(helper, options = {}) {
   const batches = [];
   const manifests = [];
   function apply(request) {
-    const record = { tableName: request.tableName, phase: request.phase, keys: request.rows.map((r) => r.historyKey), rejected: null, at: options.now ? options.now() : null };
+    const record = { tableName: request.tableName, phase: request.phase, keys: request.rows.map((r) => r.historyKey), rejected: null, results: [], at: options.now ? options.now() : null };
     batches.push(record);
     const answer = (ackedThroughId, ackedThroughKey, results) => ({
       batchId: request.batchId,
@@ -121,6 +121,7 @@ function createFakeCloud(helper, options = {}) {
       if (id !== null) ackedThroughId = id;
       ackedThroughKey = row.historyKey;
     }
+    record.results = results;
     return answer(ackedThroughId, ackedThroughKey, results);
   }
   // Port of HistoryManifestIngestService.applyManifest over the fake row index.
@@ -228,6 +229,11 @@ function createHarness(options) {
   } : null;
   function libraryFor(name) {
     if (name === 'history-sync') return { ok: true, value: helper };
+    if (name === 'osi-valve-control') {
+      const valvePath = path.join(root, 'conf', profile, 'files/usr/share/node-red/osi-valve-control/index.js');
+      delete require.cache[require.resolve(valvePath)];
+      return { ok: true, value: require(valvePath) };
+    }
     if (name === 'radio' && radioStore) return { ok: true, value: { getSharedStore: () => radioStore } };
     return { ok: false, error: 'unknown ' + name };
   }

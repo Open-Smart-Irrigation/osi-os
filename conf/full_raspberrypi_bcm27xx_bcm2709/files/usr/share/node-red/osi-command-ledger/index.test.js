@@ -24,6 +24,7 @@ const seedSql = fs.readFileSync(path.join(repoRoot, 'database/seed-blank.sql'), 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-command-ledger-test-'));
 const GATEWAY_EUI = 'AABBCCDDEEFF0003';
 const ZONE_UUID = '22222222-2222-4222-8222-222222222222';
+const POLICY_ACTOR = '33333333-3333-4333-8333-333333333333';
 
 function canonicalHash(value) {
   function canonical(item) {
@@ -1675,6 +1676,51 @@ test('expiry fence rolls back the ledger row when the ACK cannot be queued', asy
   assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox')).n, 0);
 });
 
+test('crash replay preserves proven pre-acceptance rejection and quarantines unresolved transport phases', async () => {
+  const cases = [
+    { name: 'absent', transport: null, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+    { name: 'INTENT', transport: { phase: 'INTENT' }, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+    { name: 'ATTEMPTED', transport: { phase: 'ATTEMPTED' }, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+    { name: 'UNKNOWN', transport: { phase: 'UNKNOWN' }, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+    { name: 'enqueue_rejected', transport: { phase: 'enqueue_rejected' }, result: 'REJECTED_PERMANENT', phase: 'enqueue_rejected' },
+    { name: 'enqueue_failed_before_acceptance', transport: { phase: 'enqueue_failed_before_acceptance' }, result: 'REJECTED_PERMANENT', phase: 'enqueue_failed_before_acceptance' },
+    { name: 'ACCEPTED', transport: { phase: 'ACCEPTED' }, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+    { name: 'rejection with acceptance marker', transport: { phase: 'enqueue_rejected', queue_id: 'conflicting-queue' }, result: 'FAILED_RETRYABLE', phase: 'UNKNOWN' },
+  ];
+
+  for (const [index, fixture] of cases.entries()) {
+    const db = new TestDb();
+    const commandId = String(1100 + index);
+    insertAppliedCommand(db, {
+      commandId,
+      deviceEui: FENCE_VALVE_EUI,
+      commandType: 'VALVE_COMMAND',
+      effectKey: null,
+      appliedAt: '2026-10-17T10:00:00.000Z',
+      result: 'IN_PROGRESS',
+      resultDetail: { commandId: Number(commandId), commandType: 'VALVE_COMMAND', status: 'PENDING', result: 'IN_PROGRESS', duplicate: false },
+    });
+    await db.run(
+      'INSERT INTO valve_actuation_expectations(expectation_id,device_eui,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,created_at,transport_json) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      ['recovery-' + commandId, FENCE_VALVE_EUI, commandId, '2026-10-17T10:00:00.000Z', 300, '2026-10-17T10:05:00.000Z', 'unknown', 'PENDING_OBSERVATION', '2026-10-17T10:00:00.000Z', fixture.transport && JSON.stringify(fixture.transport)]
+    );
+
+    const envelope = { commandId: Number(commandId), commandType: 'VALVE_COMMAND', payload: { device_eui: FENCE_VALVE_EUI } };
+    const first = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
+    assert.equal(first.handled, true, fixture.name);
+    assert.equal(first.ack.result, fixture.result, fixture.name + ' result');
+    assert.equal(first.ack.status, fixture.result === 'REJECTED_PERMANENT' ? 'NACKED' : 'FAILED_RETRYABLE', fixture.name + ' status');
+    assert.equal(first.ack.transportPhase, fixture.phase, fixture.name + ' phase');
+    assert.equal((await db.get('SELECT result FROM applied_commands WHERE command_id=?', [commandId])).result, fixture.result, fixture.name + ' ledger result');
+    const stored = (await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', [commandId])).result_detail;
+
+    const second = await ledger.deduplicatePendingCommand(db, envelope, fenceRuntime());
+    assert.deepEqual(second.ack, first.ack, fixture.name + ' exact replay must be immutable');
+    assert.equal((await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', [commandId])).result_detail, stored, fixture.name + ' detail must remain immutable');
+    assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', [commandId])).n, 1, fixture.name + ' must keep one pending ACK');
+  }
+});
+
 // A command whose only effect is to stop water must never be refused by the
 // fence: with a gateway clock that runs ahead, an EXPIRED answer would leave a
 // valve open. The cloud gives CLOSE and CANCEL_VALVE_ACTUATION the same
@@ -1792,4 +1838,71 @@ test('an action: effect key binds only its own device and its own action', async
   });
   const result = await ledger.deduplicatePendingCommand(db, otherDevice, fenceRuntime());
   assert.equal(result.handled, false, 'a key that names another valve is not this valve\'s replay');
+});
+
+test('conditional policy effect keys bind to command type, gateway, zone, and request', async () => {
+  const gateway = FENCE_GATEWAY_EUI;
+  const zone = '12345678-1234-4234-8234-123456789abc';
+  const requestId = '44444444-4444-4444-8444-000000000970';
+  for (const type of ['UPSERT_IRRIGATION_POLICY', 'PAUSE_IRRIGATION_POLICY', 'RETRY_IRRIGATION_VALVE']) {
+    const key = `irrigation_policy:${type.toLowerCase()}:${POLICY_ACTOR}:${gateway}:${zone}:${requestId}`;
+    const envelope = {
+      commandId: 970,
+      commandType: type,
+      effectKey: key,
+      payload: {
+        effect_key: key,
+        gateway_device_eui: gateway,
+        zone_uuid: zone,
+        request_id: requestId,
+        actor_user_uuid: POLICY_ACTOR,
+      },
+    };
+    assert.equal(await ledger.validEffectBinding(envelope, fenceRuntime()), true, type);
+    const wrongGateway = { ...envelope, payload: { ...envelope.payload, gateway_device_eui: 'AABBCCDDEEFF0011' } };
+    assert.equal(await ledger.validEffectBinding(wrongGateway, fenceRuntime()), false, type + ' gateway');
+    assert.equal(
+      await ledger.validEffectBinding(
+        envelope,
+        Object.assign({}, fenceRuntime(), { gateway_device_eui: 'AABBCCDDEEFF0011' })
+      ),
+      false,
+      type + ' trusted runtime gateway'
+    );
+  }
+});
+
+test('amendTerminalAck adds post-commit facts to the stored ACK and its undelivered outbox row', async () => {
+  const db = new TestDb();
+  const queued = await ledger.queueCommandAck(db, {
+    commandId: 9301, commandType: 'UNCLAIM_DEVICE', result: 'APPLIED', deviceEui: 'AABBCCDDEEFF0001',
+    reason: 'valve_cleanup_clearing_scheduled', valveCleanup: { outcome: 'clearing_scheduled', in_flight_cancel: null },
+  }, { gateway_device_eui: 'AABBCCDDEEFF0002' });
+  assert.equal(queued.valveCleanup.in_flight_cancel, null);
+  const amended = await ledger.amendTerminalAck(db, 9301, {
+    reason: 'valve_cleanup_clearing_scheduled; open_running', detail: 'valve_cleanup_clearing_scheduled; open_running',
+    valveCleanup: { outcome: 'clearing_scheduled', in_flight_cancel: 'already_running' },
+  });
+  assert.equal(amended.result, 'APPLIED');
+  assert.equal(amended.commandId, 9301);
+  assert.equal(amended.valveCleanup.in_flight_cancel, 'already_running');
+  const stored = JSON.parse((await db.get('SELECT result_detail FROM applied_commands WHERE command_id=?', ['9301'])).result_detail);
+  const outbox = JSON.parse((await db.get('SELECT payload_json FROM command_ack_outbox WHERE command_id=?', ['9301'])).payload_json);
+  assert.deepEqual(stored, amended);
+  assert.deepEqual(outbox, amended);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?', ['9301'])).n, 1, 'an undelivered row is amended in place');
+  // A delivered ACK is history: it is not rewritten; the amendment is queued as a new ACK row for
+  // the same command, so the cloud receives the final outcome after a flush (W13 c215e2a3c).
+  await db.run("UPDATE command_ack_outbox SET delivered_at='2026-10-22T00:00:00.000Z' WHERE command_id='9301'");
+  const late = await ledger.amendTerminalAck(db, 9301, { reason: 'later', detail: 'later', valveCleanup: { outcome: 'clearing_scheduled', in_flight_cancel: 'cancelled', final: true } });
+  const rows = await db.all('SELECT payload_json, delivered_at FROM command_ack_outbox WHERE command_id=? ORDER BY id', ['9301']);
+  assert.equal(rows.length, 2, 'the amendment is queued as a second row');
+  assert.equal(JSON.parse(rows[0].payload_json).reason, amended.reason, 'the delivered row is not rewritten');
+  assert.equal(rows[1].delivered_at, null);
+  assert.deepEqual(JSON.parse(rows[1].payload_json), late);
+  assert.equal(late.valveCleanup.final, true);
+  assert.equal(late.duplicate, false);
+  // Result, identity and status are never amended.
+  await assert.rejects(ledger.amendTerminalAck(db, 9301, { result: 'REJECTED_PERMANENT' }), /amend/);
+  assert.equal(await ledger.amendTerminalAck(db, 9999, { reason: 'x' }), null);
 });
