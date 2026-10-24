@@ -4,6 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const getAll = vi.fn();
 const useMobileTensionCatalog = vi.fn();
@@ -68,6 +70,12 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('mobile tension history route', () => {
+  it('uses both exact build flags and owner checked global cleanup for diagnostics', () => {
+    const source = readFileSync(resolve(__dirname, '../MobileTensionHistoryRoute.tsx'), 'utf8');
+    expect(source).toContain('MOBILE_HISTORY_INTERNAL_ENABLED && MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED');
+    expect(source).toContain('window.__osiMobileHistoryDiagnostics === owner');
+  });
+
   it('accepts only positive safe decimal integer zone ids', () => {
     expect(parseMobileHistoryZoneId('1')).toBe(1);
     expect(parseMobileHistoryZoneId('001')).toBe(1);
