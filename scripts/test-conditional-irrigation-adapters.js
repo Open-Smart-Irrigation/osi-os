@@ -208,3 +208,27 @@ for (const profile of PROFILES) {
     }
   });
 }
+
+// R19 finding 8 (low): a malformed cloud policy command that carries a command id is answered
+// REJECTED_PERMANENT (durably) instead of being dropped and re-delivered until it expires.
+for (const profile of PROFILES) {
+  test(`${profile}: R19-8 a cloud policy command without an actor is ACKed REJECTED_PERMANENT`, async () => {
+    const db = seedScopedDb(VALVE);
+    try {
+      policyFixture(db);
+      const command = envelope(731, 'PAUSE_IRRIGATION_POLICY', uuid(731), { expected_policy_version: 4 });
+      delete command.actorUserUuid;
+      const out = await runCommand(profile, db, command, transportRecorder());
+      const ack = out.result[1] && out.result[1].payload;
+      assert.ok(ack, 'an ACK is emitted');
+      assert.equal(ack.result, 'REJECTED_PERMANENT');
+      assert.equal(ack.commandId, 731);
+      const rows = db.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').all('731');
+      assert.equal(rows.length, 1, 'one durable ACK row');
+      assert.equal(JSON.parse(rows[0].payload_json).result, 'REJECTED_PERMANENT');
+      assert.equal(db.prepare('SELECT sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).sync_version, 4, 'nothing applied');
+    } finally {
+      db.close();
+    }
+  });
+}

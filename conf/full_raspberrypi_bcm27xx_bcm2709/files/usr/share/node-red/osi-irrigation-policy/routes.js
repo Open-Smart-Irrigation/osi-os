@@ -815,14 +815,40 @@ async function conditionalPolicyCommand(context) {
     node.error('conditional policy command has no trusted gateway or command id', msg);
     return [null, null];
   }
+  // R19 finding 8: a malformed command that carries a command id is answered
+  // REJECTED_PERMANENT (durable ACK) instead of being dropped and re-delivered until it expires.
+  const rejectMalformed = async (reason) => {
+    node.error('conditional policy command refused: ' + reason, msg);
+    let rejectDb;
+    try {
+      rejectDb = new dbLoad.value.Database('/data/db/farming.db');
+      const ack = await ledgerLoad.value.queueCommandAck(rejectDb, {
+        commandId: envelope.commandId,
+        eventUuid: envelope.eventUuid == null ? null : envelope.eventUuid,
+        aggregateType: envelope.aggregateType == null ? null : envelope.aggregateType,
+        aggregateKey: envelope.aggregateKey == null ? null : envelope.aggregateKey,
+        commandType,
+        status: 'NACKED',
+        result: 'REJECTED_PERMANENT',
+        reason,
+        appliedSyncVersion: null,
+        duplicate: false,
+      }, { gateway_device_eui: gateway });
+      return [null, { topic: 'devices/' + gateway + '/command_ack', payload: ack, qos: 1 }];
+    } catch (ackError) {
+      node.error('conditional policy command rejection ACK failed: ' + String(ackError && ackError.message || ackError), msg);
+      return [null, null];
+    } finally {
+      if (rejectDb) { try { await new Promise((resolve) => rejectDb.close(() => resolve())); } catch (closeError) { node.warn('conditional policy command DB close failed: ' + String(closeError && closeError.message || closeError)); } }
+    }
+  };
   const rawPayload = envelope.payload && typeof envelope.payload === 'object' && !Array.isArray(envelope.payload)
     ? envelope.payload
     : command;
   const actorUserUuid = String(envelope.actorUserUuid || envelope.actor_user_uuid || '').trim().toLowerCase();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(actorUserUuid)
       && !/^[0-9a-f]{32}$/.test(actorUserUuid)) {
-    node.error('conditional policy command has no trusted actor identity', msg);
-    return [null, null];
+    return rejectMalformed('no trusted actor identity');
   }
   // The actor comes from the authenticated cloud command creator, carried in
   // the trusted pending-command envelope. Add it to the internal ledger
@@ -831,8 +857,7 @@ async function conditionalPolicyCommand(context) {
   const payload = Object.assign({}, rawPayload, { actor_user_uuid: actorUserUuid });
   const payloadGateway = String(payload.gateway_device_eui || payload.gatewayDeviceEui || '').trim().toUpperCase();
   if (payloadGateway !== gateway) {
-    node.error('conditional policy command gateway does not match the trusted gateway', msg);
-    return [null, null];
+    return rejectMalformed('gateway does not match this gateway');
   }
   const value = (key, alternate) => {
     if (payload[key] !== undefined) return payload[key];
@@ -857,8 +882,7 @@ async function conditionalPolicyCommand(context) {
     copy('device_eui', 'deviceEui');
   }
   if (!request.zone_uuid) {
-    node.error('conditional policy command has no zone scope', msg);
-    return [null, null];
+    return rejectMalformed('no zone scope');
   }
   const envelopeSyncVersion = envelope.appliedSyncVersion == null
     ? envelope.applied_sync_version
@@ -869,8 +893,7 @@ async function conditionalPolicyCommand(context) {
   const requiredSyncVersion = commandType === 'UPSERT_IRRIGATION_POLICY'
     || commandType === 'PAUSE_IRRIGATION_POLICY';
   if (!validSyncVersion || (requiredSyncVersion && requestedSyncVersion <= 0)) {
-    node.error('conditional policy command has no trusted applied sync version', msg);
-    return [null, null];
+    return rejectMalformed('no trusted applied sync version');
   }
   const runtime = {
     gateway_device_eui: gateway,
