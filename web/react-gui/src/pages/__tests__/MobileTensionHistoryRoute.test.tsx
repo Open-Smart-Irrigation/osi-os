@@ -12,7 +12,7 @@ const useMobileTensionCatalog = vi.fn();
 const analysisLoad = vi.fn();
 const createMobileAnalysisLoader = vi.fn(() => analysisLoad);
 const logout = vi.fn();
-const serializeSessionIdentity = vi.hoisted(() => vi.fn((identity: { serverInstance: string; principalId: string | null; sessionEpoch: number }) => JSON.stringify([identity.serverInstance, identity.principalId, identity.sessionEpoch])));
+const serializeSessionIdentity = vi.hoisted(() => vi.fn(() => 'test-session-key'));
 let shellProps: Record<string, unknown> | null = null;
 const diagnosticsOwner = { source: 'edge-test-owner' };
 
@@ -117,9 +117,9 @@ describe('mobile tension history route', () => {
     getAll.mockResolvedValue([{ id: 7, name: 'North block', timezone: 'UTC' }]);
     renderRoute('/internal/mobile-history/zones/7');
     await waitFor(() => expect(screen.getByTestId('mobile-shell')).toHaveTextContent('North block'));
-    expect(useMobileTensionCatalog).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, zoneId: '7' }));
+    expect(useMobileTensionCatalog).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, zoneId: '7', sessionKey: 'test-session-key' }));
     expect(shellProps?.context).toEqual({
-      sessionKey: '["edge",null,3]',
+      sessionKey: 'test-session-key',
       scopeKey: 'zone:7',
       cardId: 'mobile-water-tension',
     });
