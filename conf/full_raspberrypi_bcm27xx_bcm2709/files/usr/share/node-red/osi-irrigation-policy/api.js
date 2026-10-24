@@ -264,6 +264,20 @@ async function assertZoneAccessTx(tx, row, actor, { write = false } = {}) {
   if (userId != null && Number(row.user_id) !== Number(userId)) throw apiError(403, 'forbidden', 'zone is owned by another user');
 }
 
+// R19 finding 6 (spec section 9, "linked activation requires known support"): while the gateway
+// is linked to a cloud that has not confirmed conditional_irrigation_v1, the 0077 triggers
+// withhold conditional rows from it, so it would keep stale fixed copies. A save that creates or
+// keeps conditional rows is refused until support is known; an unlinked gateway is unaffected.
+async function assertLinkedPeerSupportsConditional(tx, rows) {
+  const conditional = (rows || []).some((row) => row && row.condition_policy_uuid && row.deleted_at == null);
+  if (!conditional) return;
+  const link = await tx.get("SELECT linked FROM sync_link_state WHERE peer_node='cloud'");
+  if (!link || Number(link.linked) !== 1) return;
+  const replication = require('./replication');
+  if (await replication.peerSupportsConditional(tx)) return;
+  throw apiError(503, 'conditional_irrigation_unsupported', 'the linked cloud has not confirmed conditional irrigation support');
+}
+
 async function linkFence(tx) {
   // Task 7 installs link_attempt_json.  Older images simply have the column
   // absent; those remain compatible.  A present non-empty value is fail-closed.
@@ -811,6 +825,7 @@ async function applyPolicyEdit(options = {}) {
           }
           const targetInfo = await validateScheduleTargets(tx, previewRows.rows, state.zone.id, { ...policy, policy_uuid: policy.policy_uuid });
           const policyRows = activeWeekly(previewRows.rows);
+          await assertLinkedPeerSupportsConditional(tx, previewRows.rows);
           // Conversion/attachment is a complete valve operation.  A live or
           // unresolved owner wins over the edit and causes the entire policy,
           // schedule, legacy-disable and prepared-revision transaction to roll

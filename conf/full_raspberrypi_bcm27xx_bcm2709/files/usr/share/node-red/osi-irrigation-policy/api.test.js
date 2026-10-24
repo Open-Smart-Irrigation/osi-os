@@ -1041,3 +1041,25 @@ test('R19-4: a rejected GEN2 clear causes no flush per uplink and is retried by 
     closeFixture(f);
   }
 });
+
+// R19 finding 6: on a gateway linked to a cloud that has not confirmed conditional_irrigation_v1,
+// a policy save that creates or keeps conditional rows is refused (the 0077 triggers would
+// withhold those rows from the cloud, which would keep stale fixed copies).
+test('R19-6: a linked gateway without known cloud support refuses a conditional conversion', async () => {
+  const f = fixture();
+  try {
+    await f.db.run("INSERT INTO sync_link_state(peer_node,linked,updated_at) VALUES ('cloud',1,datetime('now'))");
+    await f.db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,'06:00',30,'UTC',1,1)", ['11111111-1111-4111-8111-111111111111', VALVE]);
+    const req = request(false);
+    req.schedules = [{ schedule_uuid: '11111111-1111-4111-8111-111111111111', expected_sync_version: 1, execution: 'conditional', enabled: true }];
+    await assert.rejects(
+      api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: req, now: '2026-10-24T10:00:00Z', runtimeClockStatus: () => ({ trusted: true }) }),
+      (error) => error.code === 'conditional_irrigation_unsupported' && error.statusCode === 503);
+    const row = await f.db.get("SELECT condition_policy_uuid, sync_version FROM valve_schedules WHERE schedule_uuid='11111111-1111-4111-8111-111111111111'");
+    assert.equal(row.condition_policy_uuid, null, 'nothing was converted');
+    assert.equal(row.sync_version, 1);
+    assert.equal(await f.db.get('SELECT 1 AS x FROM irrigation_policies'), null, 'no policy was stored');
+  } finally {
+    closeFixture(f);
+  }
+});
