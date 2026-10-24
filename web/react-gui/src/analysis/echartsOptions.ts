@@ -200,7 +200,14 @@ function axisNameOptions(
   }
   if (fitted.shortened) {
     const full = escapeHtml(fitted.full);
-    base.tooltip = { show: true, formatter: () => full };
+    // ECharts 5.6 hands this axis tooltip to the name and to every tick label; only a tick
+    // label's params carry `tickIndex`, and it keeps its own text.
+    base.tooltip = {
+      show: true,
+      formatter: (params?: { name?: unknown; tickIndex?: unknown }) => (
+        params && params.tickIndex != null ? escapeHtml(String(params.name ?? '')) : full
+      ),
+    };
   }
   return base;
 }

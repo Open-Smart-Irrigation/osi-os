@@ -581,7 +581,7 @@
     "noData": "Aucune donnée dans cet intervalle.", "allHidden": "Toutes les séries sont masquées.", "unavailable": "Aucune valeur à cet instant",
     "pinnedReading": "Valeur épinglée", "close": "Fermer", "aggregation": "Agrégation", "points": "Nombre de points",
     "loadedRange": "Intervalle chargé", "truncated": "Certaines données ne sont pas disponibles à ce niveau de détail.", "showDay": "Afficher 24 heures",
-    "retry": "Réessayer", "failure": "Historique indisponible", "coverage": "Couverture", "freshness": "Actualité", "notLoaded": "Non chargé",
+    "retry": "Réessayer", "failure": "Historique indisponible", "coverage": "Couverture", "freshness": "Actualité", "notLoaded": "Non chargé", "rangesGroup": "Périodes de l'historique", "visibleWindow": "Période visible",
     "seriesLegend": {"legend": "Légende", "showAll": "Tout afficher", "plottedSeries": "Séries affichées", "seriesCount": "Séries : {{count}}", "focusAnnouncement": "En surbrillance : {{label}}", "allSeriesAnnouncement": "Toutes les séries sont affichées"}
   }
 }

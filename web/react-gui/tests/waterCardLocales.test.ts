@@ -99,10 +99,12 @@ const DEVICES_KEYS = [
   'zone.water.soil.lastValid',
   // Owner decision 2026-10-21: the figure's depth after its pill, the age
   // line ("Last reading 5 days ago"; "No reading since 5 days ago" was
-  // ungrammatical), and the stale trigger probe on its own line.
+  // ungrammatical), and the stale trigger probe on its own line; a current
+  // fault on the trigger channel replaces that line.
   'zone.water.soil.depthSuffix',
   'zone.water.soil.lastReading',
   'zone.water.soil.triggerProbeLastReading',
+  'zone.water.soil.triggerProbeInvalid',
   'common.viewHistory',
   'common.batteryEstimated',
   // Zone environment card, Water tab (WaterTab.tsx). These ten were called

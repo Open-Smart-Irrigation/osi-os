@@ -290,7 +290,8 @@
         "lastValid": "Letzte gültige {{value}} · {{time}}",
         "depthSuffix": "({{depth}} cm)",
         "lastReading": "Letzte Messung {{since}}",
-        "triggerProbeLastReading": "Auslösesonde: letzte Messung {{since}}"
+        "triggerProbeLastReading": "Auslösesonde: letzte Messung {{since}}",
+        "triggerProbeInvalid": "Auslösesonde: ungültige Messung"
       },
       "rainFromStation": "Gemessen an der MeteoSchweiz-Station {{station}} ({{distance}} km entfernt)",
       "rainFromWeather": "Aus Wetterdaten (nicht gemessen)",
@@ -1024,6 +1025,8 @@
       "batteryLow": "Batterie schwach"
     },
     "settings": "Geräteeinstellungen",
-    "closeSettings": "Geräteeinstellungen schliessen"
+    "closeSettings": "Geräteeinstellungen schliessen",
+    "zones": "Zonen:",
+    "noZones": "Keine Zonen zugewiesen"
   }
 }

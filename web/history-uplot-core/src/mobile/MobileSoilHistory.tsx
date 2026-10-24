@@ -31,6 +31,10 @@ export interface MobileSoilHistoryLabels {
   coverage: string;
   freshness: string;
   notLoaded: string;
+  /** Accessible name of the range button group. */
+  rangesGroup: string;
+  /** Accessible name of the chart's visible-window readout. */
+  visibleWindow: string;
   seriesLegend: SeriesLegendLabels;
 }
 
@@ -116,7 +120,7 @@ export function MobileSoilHistory({ model, contextKey, mountAdapter = mountUplot
   }, [available, focusedSeriesId]);
 
   return <section className="mobile-soil-history" data-testid="mobile-soil-history">
-    <div className="history-ranges" aria-label="History ranges">
+    <div className="history-ranges" role="group" aria-label={labels.rangesGroup}>
       <button type="button" onClick={() => model.selectPreset('24h')}>{labels.ranges.day}</button>
       <button type="button" onClick={() => model.selectPreset('7d')}>{labels.ranges.week}</button>
       <button type="button" onClick={() => model.selectPreset('30d')}>{labels.ranges.month}</button>
@@ -133,7 +137,7 @@ export function MobileSoilHistory({ model, contextKey, mountAdapter = mountUplot
       <label className="mobile-history-unit">{labels.sensors}<select value={unit} onChange={(event) => changeUnit(event.target.value)} disabled={!groups.length}>{groups.map((group) => <option key={group.unit} value={group.unit}>{group.label}</option>)}</select></label>
       {available.length > 3 ? <details open={sensorsOpen || (!empty && visibleSeries.length === 0)} className="mobile-history-sensors-disclosure"><summary onClick={(event) => { event.preventDefault(); setSensorsOpen((value) => !value); }}>{labels.sensors} ({available.length})</summary><fieldset><legend>{labels.sensors} ({groups.find((group) => group.unit === unit)?.label ?? labels.unitNotReported})</legend>{styledAvailable.map((item) => <label key={item.id}><input type="checkbox" checked={enabled.has(item.id)} onChange={() => toggle(item.id)} /><SeriesSwatch appearance={item.appearance} /><span>{item.label}</span><small>{item.unit || labels.unitNotReported}</small></label>)}</fieldset></details> : <fieldset><legend>{labels.sensors} ({groups.find((group) => group.unit === unit)?.label ?? labels.unitNotReported})</legend>{styledAvailable.map((item) => <label key={item.id}><input type="checkbox" checked={enabled.has(item.id)} onChange={() => toggle(item.id)} /><SeriesSwatch appearance={item.appearance} /><span>{item.label}</span><small>{item.unit || labels.unitNotReported}</small></label>)}</fieldset>}
       <div className="history-chart-wrapper">
-        <ChartHost mountAdapter={mountAdapter} series={visibleSeries} focusedSeriesId={focusedSeriesId} store={model.viewportStore} extent={model.horizon} coverage={accepted.coverage} notLoadedLabel={labels.notLoaded} maxSpanMs={90 * 24 * 60 * 60 * 1_000} minSpanMs={60 * 60 * 1_000} yRange="auto" labels={{ pinnedReading: labels.pinnedReading, close: labels.close, unavailable: labels.unavailable }} />
+        <ChartHost mountAdapter={mountAdapter} series={visibleSeries} focusedSeriesId={focusedSeriesId} store={model.viewportStore} extent={model.horizon} coverage={accepted.coverage} notLoadedLabel={labels.notLoaded} maxSpanMs={90 * 24 * 60 * 60 * 1_000} minSpanMs={60 * 60 * 1_000} yRange="auto" labels={{ pinnedReading: labels.pinnedReading, close: labels.close, unavailable: labels.unavailable, visibleWindow: labels.visibleWindow }} />
         <SeriesLegend series={styledAvailable.filter((item) => enabled.has(item.id))} focusedSeriesId={focusedSeriesId} onFocus={focusSeries} onShowAll={() => setFocusedSeriesId(null)} labels={labels.seriesLegend} resetKey={panelResetKey} />
         <p className="mobile-series-legend-announcement" role="status" aria-live="polite">{focusedSeriesId ? labels.seriesLegend.focusAnnouncement(styledAvailable.find((item) => item.id === focusedSeriesId)?.label ?? '') : labels.seriesLegend.allSeriesAnnouncement}</p>
         {empty && <p className="history-empty" role="status">{labels.noData}</p>}

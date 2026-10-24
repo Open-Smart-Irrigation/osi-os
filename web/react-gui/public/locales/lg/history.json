@@ -581,7 +581,7 @@
     "noData": "No data in this interval.", "allHidden": "All series hidden.", "unavailable": "Unavailable at this sample",
     "pinnedReading": "Pinned reading", "close": "Close", "aggregation": "Aggregation", "points": "Points",
     "loadedRange": "Loaded interval", "truncated": "Some data is unavailable at this detail level.", "showDay": "Show 24 hours",
-    "retry": "Retry", "failure": "History unavailable", "coverage": "Coverage", "freshness": "Freshness", "notLoaded": "Not loaded",
+    "retry": "Retry", "failure": "History unavailable", "coverage": "Coverage", "freshness": "Freshness", "notLoaded": "Not loaded", "rangesGroup": "History ranges", "visibleWindow": "Visible time window",
     "seriesLegend": {"legend": "Legend", "showAll": "Show all", "plottedSeries": "Plotted series", "seriesCount": "{{count}} series", "focusAnnouncement": "{{label}} focused", "allSeriesAnnouncement": "All series shown"}
   }
 }

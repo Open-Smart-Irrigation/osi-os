@@ -14,13 +14,13 @@ export interface ChartHostProps {
   yRange?: ChartRenderOptions['yRange'];
   coverage?: CoverageWindow;
   notLoadedLabel?: string;
-  labels?: { pinnedReading: string; close: string; unavailable: string };
+  labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string };
   focusedSeriesId?: string | null;
 }
 
 interface Pin { targetTime: number; rows: readonly Inspection[]; }
 
-const DEFAULT_LABELS = { pinnedReading: 'Pinned reading', close: 'Close', unavailable: 'Unavailable at this sample' };
+const DEFAULT_LABELS = { pinnedReading: 'Pinned reading', close: 'Close', unavailable: 'Unavailable at this sample', visibleWindow: 'Visible time window' };
 
 export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null }: ChartHostProps) {
   const frameRef = useRef<HTMLDivElement>(null);
@@ -161,7 +161,7 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     <div className="renderer-host" ref={rendererRef} />
     <div className="gesture-layer" ref={overlayRef} aria-hidden="true" />
     <div className="inspector-guide" ref={guideRef} aria-hidden="true" hidden />
-    <span className="window-readout" aria-label="Visible time window" ref={readoutRef}>{formatDate(store.get().from)} – {formatDate(store.get().to)}</span>
+    <span className="window-readout" role="group" aria-label={labels.visibleWindow ?? DEFAULT_LABELS.visibleWindow} ref={readoutRef}>{formatDate(store.get().from)} – {formatDate(store.get().to)}</span>
     {coverage && leftCoverage > 0 && <div className="not-loaded not-loaded-left" style={{ width: `${leftCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
     {coverage && rightCoverage > 0 && <div className="not-loaded not-loaded-right" style={{ width: `${rightCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
     {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>

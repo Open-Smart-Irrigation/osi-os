@@ -866,3 +866,26 @@ test('never names a zero or negative depth in a VWC series label', async () => {
     assert.equal(rowFor(result, 'vwc_1').series_label, 'Probe - VWC 1', `depth ${depth}`);
   }
 });
+
+// Only a positive mapped depth wins; a zero or negative one falls back to the
+// Sentek layout depth, or to no depth at all (docs/contracts/vwc-display/).
+test('falls back from a zero or negative mapped VWC depth to the layout depth', async () => {
+  for (const granularity of ['raw', 'daily']) {
+    for (const depth of [0, -10]) {
+      const result = await vwcExport(
+        { soil_moisture_probe_depths_json: JSON.stringify({ vwc_2: depth, soil_vic_2: depth }), sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+        { vwc_2: 24.5, soil_vic_2: 0.12 },
+        { granularity },
+      );
+      assert.equal(rowFor(result, 'vwc_2').depth_cm, 20, `${granularity} depth ${depth}`);
+      assert.equal(rowFor(result, 'vwc_2').series_label, 'Probe - VWC 20cm', `${granularity} depth ${depth}`);
+      assert.equal(rowFor(result, 'soil_vic_2').depth_cm, 20, `${granularity} VIC depth ${depth}`);
+    }
+  }
+  const withoutLayout = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_1":0}', sdi12_channel_layout_json: null },
+    { vwc_1: 30 },
+    { channels: 'vwc_1' },
+  );
+  assert.equal(rowFor(withoutLayout, 'vwc_1').depth_cm, null);
+});

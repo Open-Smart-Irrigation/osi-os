@@ -27,6 +27,7 @@
   "nextRunOnce": "Prossima: {{when}} · {{minutes}} min (una tantum, inviata dal gateway)",
   "noSchedule": "Nessun programma",
   "schedulerPaused": "Programmi sospesi",
+  "schedulerStatusLost": "Device may not hold the latest pause, skip or resume",
   "skippedToday": "Saltato oggi",
   "planIncomplete": "{{count}} aggiornamento/i del programma non ancora confermato/i dalla valvola — reinvia il programma",
   "planLost": "Device may not hold this plan",

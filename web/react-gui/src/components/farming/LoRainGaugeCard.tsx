@@ -172,8 +172,14 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
         </div>
       </div>
 
-      {/* The LoRain reports a voltage only and the LSN50 curve does not fit its cell: the footer shows the volts. */}
-      <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} rawBatteryVoltage={data.bat_v} />
+      {/* The LoRain reports a voltage only and the LSN50 curve does not fit its cell: the footer shows the volts.
+          Its date is in the farm timezone, the one the farm-day rain total uses. */}
+      <DeviceCardFooter
+        lastSeen={device.last_seen}
+        batteryPercent={data.bat_pct}
+        rawBatteryVoltage={data.bat_v}
+        timeZone={typeof data.rain_day_timezone === 'string' ? data.rain_day_timezone : null}
+      />
 
       {sensorMonitor && (
         <SensorMonitor

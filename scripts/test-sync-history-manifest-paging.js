@@ -201,6 +201,31 @@ for (const profile of PROFILES) {
     assert.equal(pending(), first, 'nothing more is queued while the table holds a full backlog');
   });
 
+  // A segment that does not fit the remaining budget waits for a later pass
+  // instead of overshooting the cap (150-row days: 13 fit, the 14th would make 2100).
+  test(`${profile}: an answer never queues more than the repair cap`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    const h = harness(t, profile, db);
+    const big = bigMismatch(db, h.helper, { rowsPerDay: 150, days: 20 });
+    assert.ok(await h.manifest());
+    const queued = db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='device_data' AND change_kind='repair' AND status='pending'").get().n;
+    assert.equal(queued, 13 * big.rowsPerDay, `whole segments up to ${REPAIR_CAP} keys, never more (queued ${queued})`);
+    assert.ok(h.memory.get('sync_state').lastHistoryManifestRepairSkipped > 0, 'the segment that did not fit is counted as skipped');
+  });
+
+  // A single segment larger than the cap still makes progress: it is queued on
+  // its own once nothing else is pending, and waits while a backlog exists.
+  test(`${profile}: a segment larger than the cap is queued alone`, async (t) => {
+    const db = new DatabaseSync(':memory:');
+    const h = harness(t, profile, db);
+    const big = bigMismatch(db, h.helper, { rowsPerDay: REPAIR_CAP + 500, days: 2 });
+    const pending = () => db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='device_data' AND change_kind='repair' AND status='pending'").get().n;
+    assert.ok(await h.manifest());
+    assert.equal(pending(), big.rowsPerDay, 'one oversized segment, alone');
+    assert.ok(await h.manifest());
+    assert.equal(pending(), big.rowsPerDay, 'the second waits while the first is pending');
+  });
+
   test(`${profile}: a repair backlog does not hold back new history, and repair completes`, async (t) => {
     const db = new DatabaseSync(':memory:');
     t.after(() => db.close());
@@ -229,19 +254,19 @@ for (const profile of PROFILES) {
   });
 }
 
-// 50 device_data days of 100 rows each that the cloud never received, every
+// By default 50 device_data days of 100 rows each that the cloud never received, every
 // history table in tail state with nothing new: the first full pass after the
 // paging fix meets this shape on a gateway whose later segments were never
 // compared before.
-function bigMismatch(db, helper) {
+function bigMismatch(db, helper, { rowsPerDay = 100, days = 50 } = {}) {
   seedBase(db);
-  const rowsPerDay = 100;
   const insert = db.prepare('INSERT INTO device_data(id,deveui,recorded_at,swt_1,dendro_valid) VALUES(?,?,?,?,1)');
   const ids = [];
   let id = 1;
-  for (let day = 0; day < 50; day += 1) {
+  const stepMs = Math.floor(86400000 / rowsPerDay);
+  for (let day = 0; day < days; day += 1) {
     for (let k = 0; k < rowsPerDay; k += 1) {
-      insert.run(id, SENSOR, new Date(Date.UTC(2026, 6, 1 + day) + k * 840000).toISOString(), 20 + (k % 7));
+      insert.run(id, SENSOR, new Date(Date.UTC(2026, 6, 1 + day) + k * stepMs).toISOString(), 20 + (k % 7));
       ids.push(id);
       id += 1;
     }

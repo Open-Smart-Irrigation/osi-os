@@ -13,6 +13,7 @@ const labels: MobileSoilHistoryLabels = {
   points: 'Points', loadedRange: 'Loaded range', truncated: 'Truncated',
   showDay: 'Show day', retry: 'Retry', failure: 'Failed', coverage: 'Coverage',
   freshness: 'Freshness', notLoaded: 'Not loaded',
+  rangesGroup: 'Zeiträume', visibleWindow: 'Sichtbarer Zeitraum',
   seriesLegend: {
     legend: 'Legend', showAll: 'Show all', plottedSeries: 'Plotted series',
     seriesCount: (count) => `${count} series`, focusAnnouncement: (label) => `Focused ${label}`,
@@ -49,6 +50,16 @@ describe('packaged MobileSoilHistory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(retry).toHaveBeenCalled();
     expect(screen.getByText('Coverage: 50%')).toBeTruthy();
+  });
+
+  // Screen readers hear the host's language: the range group and the visible-window readout
+  // take their names from the labels, never from English literals in the package.
+  test('names the range group and the visible-window readout from the labels', () => {
+    const view = render(<MobileSoilHistory model={model()} contextKey="account/card" labels={labels} mountAdapter={adapter} />);
+    // A generic div or span cannot carry an accessible name: both are named groups.
+    expect(screen.getByRole('group', { name: 'Zeiträume' }).className).toBe('history-ranges');
+    expect(screen.getByRole('group', { name: 'Sichtbarer Zeitraum' }).className).toBe('window-readout');
+    expect(view.container.innerHTML).not.toMatch(/History ranges|Visible time window/);
   });
 
   test('keeps the chart mounted for empty data and preserves the all-hidden choice', () => {

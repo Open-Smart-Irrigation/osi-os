@@ -30,6 +30,7 @@ const { translateForTest } = vi.hoisted(() => {
     'state.failed': 'Failed',
     planIncomplete: 'Not yet confirmed on the valve for {{count}} day(s) — resend the plan',
     planLost: 'Device may not hold this plan',
+    schedulerStatusLost: 'Device may not hold the latest pause, skip or resume',
     enclosure: 'Valve enclosure',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
@@ -212,11 +213,45 @@ describe("ValveTile plan line", () => {
     expect(screen.queryByText(/Not yet confirmed/)).not.toBeInTheDocument();
   });
 
-  it("says the device may not hold this plan when the newest scheduler-status push is LOST", () => {
+  // A LOST scheduler-status push is not a lost plan: the tile names the pause, skip or resume
+  // the valve may not hold, under the status line it qualifies.
+  it("says the device may not hold the latest pause, skip or resume when only that push is LOST", () => {
     renderTile({
+      schedulerStatus: 'DEACTIVATED',
       pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null },
     });
+    expect(screen.getByText("Device may not hold the latest pause, skip or resume")).toBeInTheDocument();
+    expect(screen.queryByText("Device may not hold this plan")).not.toBeInTheDocument();
+  });
+
+  // The warning lands in a polite live region that is mounted before it appears, so a screen
+  // reader announces it when a poll turns the push LOST.
+  it("announces a newly lost scheduler-status push through a mounted status region", () => {
+    const view = renderTile({
+      pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: false, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    const region = view.getByTestId('valve-scheduler-status-lost');
+    expect(region).toHaveAttribute('role', 'status');
+    expect(region).toBeEmptyDOMElement();
+    view.rerender(
+      <ValveTile
+        valve={makeValve({ pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null } })}
+        nowMs={Date.now()}
+        onOpen={vi.fn()} onSchedule={vi.fn()} onCancel={vi.fn()} onSkipToday={vi.fn()} onPause={vi.fn()}
+        onResume={vi.fn()} onResend={vi.fn()} onSettings={vi.fn()} onService={vi.fn()} onDelete={vi.fn()}
+        canEdit onRename={vi.fn()} busy={false}
+      />,
+    );
+    expect(view.getByTestId('valve-scheduler-status-lost')).toBe(region);
+    expect(region).toHaveTextContent('Device may not hold the latest pause, skip or resume');
+  });
+
+  it("keeps both warnings when plan slots and the scheduler status are LOST", () => {
+    renderTile({
+      pushState: { queued: 0, acked: 1, failed: 6, lost: 6, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
     expect(screen.getByText("Device may not hold this plan")).toBeInTheDocument();
+    expect(screen.getByText("Device may not hold the latest pause, skip or resume")).toBeInTheDocument();
   });
 
   it("shows no plan line at all when every downlink is acknowledged", () => {

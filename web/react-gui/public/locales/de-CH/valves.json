@@ -27,6 +27,7 @@
   "nextRunOnce": "Nächste Öffnung: {{when}} · {{minutes}} Min. (einmalig, gateway-gesteuert)",
   "noSchedule": "Kein Zeitplan",
   "schedulerPaused": "Zeitpläne pausiert",
+  "schedulerStatusLost": "Device may not hold the latest pause, skip or resume",
   "skippedToday": "Heute übersprungen",
   "planIncomplete": "{{count}} Planaktualisierung(en) vom Ventil noch nicht bestätigt — Plan erneut senden",
   "planLost": "Device may not hold this plan",

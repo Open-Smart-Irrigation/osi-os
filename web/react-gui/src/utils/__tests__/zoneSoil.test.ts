@@ -655,6 +655,48 @@ describe('summarizeZoneSoil stale trigger probe and probe naming', () => {
     expect(summarizeZoneSoil(zone, NOW, null).staleTrigger).toBeNull();
   });
 
+  // A current fault on the trigger channel outranks an older valid reading of it:
+  // the card reports the fault, not the historical reading's age.
+  it('reports a current trigger-channel fault instead of stale history for that channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1, last_seen: FRESH,
+        latest_data: { swt_1: 18, swt_2: 0, chameleon_ch2_open: 1 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.value).toBe(18);
+    expect(status.channel).toBe('swt_1');
+    expect(status.invalid).toBe(false);
+    expect(status.staleTrigger).toBeNull();
+    expect(status.invalidTrigger).toEqual({ channel: 'swt_2', observedAt: FRESH });
+  });
+
+  it('reports a current trigger-channel fault when no other probe ever carried that channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18, swt_2: -5 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_1');
+    expect(status.invalidTrigger).toEqual({ channel: 'swt_2', observedAt: FRESH });
+  });
+
+  it('reports no trigger fault when the trigger channel also has a current usable reading', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'GOOD', last_seen: FRESH, latest_data: { swt_2: 30 } }),
+      device({ deveui: 'BAD', last_seen: FRESH, latest_data: { swt_2: -5 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_2');
+    expect(status.invalidTrigger).toBeNull();
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('keeps reporting stale history when the trigger channel has no current fault', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.invalidTrigger).toBeNull();
+    expect(status.staleTrigger).toEqual({ channel: 'swt_2', observedAt: STALE });
+  });
+
   it('names the probes behind a single-channel figure, current contributors only', () => {
     const status = summarizeZoneSoil([
       device({ deveui: 'A', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 20 } }),

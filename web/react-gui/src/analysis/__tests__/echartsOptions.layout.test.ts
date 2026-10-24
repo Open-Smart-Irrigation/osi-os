@@ -12,7 +12,7 @@ type Axis = {
   nameLocation?: string;
   offset?: number;
   position?: string;
-  tooltip?: { show: boolean; formatter: () => string };
+  tooltip?: { show: boolean; formatter: (params?: { name?: string; tickIndex?: number }) => string };
   nameTextStyle?: { fontSize: number; align?: string };
 };
 type Grid = { left: number; right?: number; top: number; height: number; width?: number };
@@ -93,6 +93,17 @@ describe('time-series axis bands', () => {
     expect(axes[0].name).toBe('kPa');
     expect(axes[0].tooltip?.show).toBe(true);
     expect(axes[0].tooltip?.formatter()).toBe('Soil water tension at the deepest probe (kPa)');
+  });
+
+  // ECharts 5.6 gives the axis tooltip to the name and to every tick label (AxisBuilder
+  // setTooltipConfig); a tick label keeps its own text, only the name shows the full title.
+  it('shows the full title only on the axis name, a tick label keeps its own value', () => {
+    const s = [mk('a', 'swt_1', 'kPa', [1])];
+    const opt = buildTimeSeriesOption({ panels: groupByUnit(s), series: s, normalize: false, multiAxis: false, resolveAxisLabel: longTitle, viewport: { width: 390, height: 200 } });
+    const formatter = (opt.yAxis as Axis[])[0].tooltip?.formatter;
+    expect(formatter?.({ name: 'kPa' })).toBe('Soil water tension at the deepest probe (kPa)');
+    expect(formatter?.({ name: '40', tickIndex: 2 })).toBe('40');
+    expect(formatter?.({ name: '<b>', tickIndex: 0 })).toBe('&lt;b&gt;');
   });
 
   it('keeps a title that fits and adds no tooltip', () => {

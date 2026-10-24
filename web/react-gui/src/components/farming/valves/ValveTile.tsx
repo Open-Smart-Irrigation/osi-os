@@ -143,12 +143,15 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
   // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not
   // an alarm: see deriveValveGlyphState.
-  // CMD-04 PR0 (owner decision Q02 c): a plan or scheduler-status push the valve did not
-  // confirm within 24 hours is LOST and is not re-sent automatically. Say plainly that the valve may not hold it; this
-  // outranks the generic not-yet-confirmed line, whose count already includes the lost slots.
+  // CMD-04 PR0 (owner decision Q02 c): a plan or scheduler-status push that is LOST (refused
+  // by the transport, flushed, or not confirmed within 24 hours) is not re-sent automatically.
+  // Say plainly that the valve may not hold it; this outranks the generic not-yet-confirmed
+  // line, whose count already includes the lost slots. A lost scheduler-status push has its
+  // own line, so a pause, skip or resume shown above is not read as confirmed.
   const planLine: string | null =
-    (valve.pushState.lost ?? 0) > 0 || valve.pushState.schedulerStatusLost ? t('planLost')
+    (valve.pushState.lost ?? 0) > 0 ? t('planLost')
     : valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
+  const schedulerStatusLine: string | null = valve.pushState.schedulerStatusLost ? t('schedulerStatusLost') : null;
 
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';
@@ -200,6 +203,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             )}
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
+          {/* Mounted before its text appears, so a poll that turns the push LOST is announced. */}
+          <p
+            role="status"
+            data-testid="valve-scheduler-status-lost"
+            className={schedulerStatusLine ? 'mt-0.5 text-xs text-[var(--text-tertiary)]' : undefined}
+          >
+            {schedulerStatusLine}
+          </p>
           {planLine && (
             <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
               {planLine}

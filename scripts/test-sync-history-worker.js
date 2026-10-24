@@ -235,7 +235,7 @@ function runHelperAssertions(helper, label) {
 
   for (const [tableName, sourceRow] of Object.entries(advertisedTableRows)) {
     assert.doesNotThrow(() => helper.buildCanonicalColumns(tableName, sourceRow), `${label} ${tableName}`);
-    assert.strictEqual(typeof helper.hashHistoryRow(tableName, helper.historyKey(tableName, '0016C001F11715E2', sourceRow), sourceRow), 'string', `${label} ${tableName}`);
+    assert.strictEqual(typeof helper.hashHistoryRow(tableName, helper.historyKey(tableName, 'AABBCCDDEEFF0003', sourceRow), sourceRow), 'string', `${label} ${tableName}`);
   }
 
   assert.deepStrictEqual(helper.buildCanonicalColumns('irrigation_events', advertisedTableRows.irrigation_events).at(-1), [

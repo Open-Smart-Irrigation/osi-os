@@ -11,7 +11,7 @@ test('demo-only machine Luganda fills valve fallback strings and preserves inter
   // CMD-04 valve text waits for a human Luganda pass (docs/i18n/pending-luganda-translations.md).
   // The demo shows the English source text for it, never machine Luganda; a human pass drops
   // the key from this list.
-  const pendingKeys=new Set(['planLost','scheduleDialog.push.LOST']);
+  const pendingKeys=new Set(['planLost','schedulerStatusLost','scheduleDialog.push.LOST']);
   assert.deepEqual(Object.keys(copy).sort(),Object.keys(english).sort());
   for(const [key,value] of Object.entries(english)) {
     assert.deepEqual((copy[key].match(/\{\{[^}]+\}\}/g)??[]).sort(),(value.match(/\{\{[^}]+\}\}/g)??[]).sort(),key);

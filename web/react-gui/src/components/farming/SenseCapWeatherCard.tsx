@@ -186,7 +186,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
 
   const zoneLabel = device.zone_names?.length
     ? device.zone_names.join(' · ')
-    : 'No zones assigned';
+    : t('deviceCard.noZones');
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
@@ -355,7 +355,7 @@ export const SenseCapWeatherCard: React.FC<Props> = ({
       </div>
 
       <p className="mt-3 truncate text-xs text-[var(--text-tertiary)]">
-        Zones: <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
+        {t('deviceCard.zones')} <span className="font-medium text-[var(--text)]">{zoneLabel}</span>
       </p>
 
       <DeviceCardFooter lastSeen={device.last_seen} batteryPercent={data.bat_pct} rawBatteryVoltage={data.bat_v} />

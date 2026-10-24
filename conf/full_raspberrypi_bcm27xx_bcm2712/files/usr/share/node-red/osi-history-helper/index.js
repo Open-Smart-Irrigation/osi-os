@@ -2896,6 +2896,9 @@ function parseDepthJson(value) {
   return null;
 }
 
+// VWC/VIC channel keys, which take a mapped depth only when it is positive.
+const VWC_DEPTH_CHANNEL = /^(?:vwc|soil_vic)_\d+$/;
+
 function soilDepthCm(device, channelId) {
   if (channelId === 'swt_3' && !isLsn50Swt3Eligible(device)) {
     return null;
@@ -2914,7 +2917,9 @@ function soilDepthCm(device, channelId) {
   }
   if (configured && typeof configured === 'object') {
     const mapped = toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
-    if (mapped !== null) return mapped;
+    // A zero or negative VWC/VIC depth is no depth: the Sentek layout supplies
+    // it instead (docs/contracts/vwc-display/).
+    if (mapped !== null && (mapped > 0 || !VWC_DEPTH_CHANNEL.test(String(channelId)))) return mapped;
   }
   return sdi12LayoutDepthCm(device, channelId);
 }

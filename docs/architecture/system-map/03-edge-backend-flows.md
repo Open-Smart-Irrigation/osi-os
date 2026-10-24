@@ -160,11 +160,12 @@ Everything that talks to the cloud lives here; chapter
   stored in `app_settings` (key `history_manifest_cursor`) moves through all
   segments in `(table_name, segment_key)` order, survives a Node-RED restart
   and starts again after a short page, so a full pass takes one 5-minute turn
-  per 500 segments. A mismatch queues its rows as repair keys, at most 2 000
-  per manifest answer and none while the table already holds 2 000 pending
-  repair keys (the segment is compared again next pass). After a repair
-  batch, the table's next turn sends waiting tail rows first, so a repair
-  backlog cannot hold back new history.
+  per 500 segments. A mismatch queues its rows as repair keys, a whole
+  segment at a time and only when it fits: at most 2 000 per manifest answer
+  and 2 000 pending per table (a segment that does not fit is compared again
+  next pass; one larger than 2 000 is queued alone once nothing is pending).
+  After a repair batch, the table's next turn sends waiting tail rows first,
+  so a repair backlog cannot hold back new history.
 - **Command intake**: **Build Pending Command Pull** / **GET Pending Commands
   IPv4** (every 30 s) fetch cloud-originated commands; **Deduplicate Pending
   Command** consults the `sync_inbox` so a re-delivered command is never applied

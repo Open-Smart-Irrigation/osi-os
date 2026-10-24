@@ -956,9 +956,11 @@ export interface ValvePushState {
   acked: number;
   failed: number;
   /**
-   * CMD-04 PR0 (owner decision Q02 c): plan slots of the latest snapshot the valve did not
-   * confirm within 24 hours, never re-sent automatically (a subset of `failed`). The valve may not hold this plan. The service
-   * normaliser always sets it; optional only so fixtures from older gateways stay valid.
+   * CMD-04 PR0 (owner decision Q02 c): plan slots of the latest snapshot that are LOST, never
+   * re-sent automatically (a subset of `failed`): refused by the transport or removed by a
+   * whole-queue flush (at once), or not confirmed by the valve within 24 hours. The valve may
+   * not hold this plan. The service normaliser always sets it; optional only so fixtures from
+   * older gateways stay valid.
    */
   lost?: number;
   /** The newest scheduler-status push (pause / skip today / resume) is LOST the same way. */
@@ -1031,7 +1033,7 @@ export interface ValvePlanError {
 export interface ValveWeekdayPush {
   purpose: string;
   weekday: number | null;
-  /** 'LOST' (CMD-04 PR0): unconfirmed after 24 hours; not re-sent automatically. */
+  /** 'LOST' (CMD-04 PR0): refused by the transport or flushed (at once), or unconfirmed after 24 hours; not re-sent automatically. */
   state: 'QUEUED' | 'ACKED' | 'FAILED' | 'LOST';
   queuedAt: string;
   ackedAt: string | null;
