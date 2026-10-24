@@ -400,12 +400,15 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
   const staleTriggerSince = soilNow.staleTrigger
     ? dateFormat.relativeToNow(soilNow.staleTrigger.observedAt)
     : null;
-  const soilTriggerProbeLine = staleTriggerSince
-    ? t('zone.water.soil.triggerProbeLastReading', {
-        since: staleTriggerSince,
-        defaultValue: 'Trigger probe: last reading {{since}}',
-      })
-    : null;
+  // A current fault on the trigger channel outranks an older reading of it.
+  const soilTriggerProbeLine = soilNow.invalidTrigger
+    ? t('zone.water.soil.triggerProbeInvalid', { defaultValue: 'Trigger probe: invalid reading' })
+    : staleTriggerSince
+      ? t('zone.water.soil.triggerProbeLastReading', {
+          since: staleTriggerSince,
+          defaultValue: 'Trigger probe: last reading {{since}}',
+        })
+      : null;
 
   useEffect(() => {
     let cancelled = false;

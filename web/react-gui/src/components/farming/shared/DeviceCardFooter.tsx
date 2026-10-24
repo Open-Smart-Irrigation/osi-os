@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { formatDateTime } from '../../../utils/datetime';
+import { formatDateTime, type DateInput } from '../../../utils/datetime';
 import { footerBattery, footerLastSeen, footerRawVoltage } from './deviceCardFooterModel';
 
 export interface DeviceCardFooterProps {
@@ -24,6 +24,12 @@ export interface DeviceCardFooterProps {
    * not claim "Never seen" for a device that is reporting.
    */
   lastSeenText?: string;
+  /**
+   * Edge only: IANA timezone for the absolute last-seen date and its hover time, named in the
+   * text (the LoRain, whose farm-day rain total uses the farm timezone). Omitted, or unknown to
+   * the runtime: the viewer's timezone, unnamed.
+   */
+  timeZone?: string | null;
 }
 
 function formatVolts(volts: number, locale: string | undefined): string {
@@ -33,6 +39,16 @@ function formatVolts(volts: number, locale: string | undefined): string {
   } catch {
     return `${volts.toFixed(2)} V`;
   }
+}
+
+const ZONED_DATE_TIME: Intl.DateTimeFormatOptions = {
+  dateStyle: undefined, timeStyle: undefined,
+  year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+};
+
+function formatSeenAt(value: DateInput, locale: string | undefined, timeZone: string | null | undefined): string | null {
+  const zoned = timeZone ? formatDateTime(value, locale, { ...ZONED_DATE_TIME, timeZone }) : null;
+  return zoned ?? formatDateTime(value, locale);
 }
 
 function formatPercent(percent: number, locale: string | undefined): string {
@@ -62,7 +78,7 @@ const BatteryGlyph: React.FC = () => (
  * volts of a cell no curve fits, and `lastSeenText` serves the field tester.
  */
 export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
-  lastSeen, batteryPercent, batteryVoltage, rawBatteryVoltage, nowMs, lastSeenText,
+  lastSeen, batteryPercent, batteryVoltage, rawBatteryVoltage, nowMs, lastSeenText, timeZone,
 }) => {
   const { t, i18n } = useTranslation('devices');
   const locale = i18n?.language;
@@ -86,10 +102,10 @@ export const DeviceCardFooter: React.FC<DeviceCardFooterProps> = ({
       seenText = t('deviceCard.footer.lastSeenHours', { count: seen.count });
       break;
     case 'absolute':
-      seenText = t('deviceCard.footer.lastSeenAt', { date: formatDateTime(seen.at, locale) ?? '' });
+      seenText = t('deviceCard.footer.lastSeenAt', { date: formatSeenAt(seen.at, locale, timeZone) ?? '' });
       break;
   }
-  const exactTime = lastSeen && seen.kind !== 'never' && !lastSeenText ? formatDateTime(lastSeen, locale) ?? undefined : undefined;
+  const exactTime = lastSeen && seen.kind !== 'never' && !lastSeenText ? formatSeenAt(lastSeen, locale, timeZone) ?? undefined : undefined;
 
   return (
     <footer data-testid="device-card-footer" className="mt-auto pt-3">

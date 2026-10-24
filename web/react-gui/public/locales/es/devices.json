@@ -290,7 +290,8 @@
         "lastValid": "Última válida {{value}} · {{time}}",
         "depthSuffix": "({{depth}} cm)",
         "lastReading": "Última lectura {{since}}",
-        "triggerProbeLastReading": "Sonda de activación: última lectura {{since}}"
+        "triggerProbeLastReading": "Sonda de activación: última lectura {{since}}",
+        "triggerProbeInvalid": "Sonda de activación: lectura no válida"
       },
       "rainFromStation": "Medida en la estación MeteoSwiss {{station}} (a {{distance}} km)",
       "rainFromWeather": "De los datos meteorológicos (no medida)",
@@ -1024,6 +1025,8 @@
       "batteryLow": "Batería baja"
     },
     "settings": "Configuración del dispositivo",
-    "closeSettings": "Cerrar configuración del dispositivo"
+    "closeSettings": "Cerrar configuración del dispositivo",
+    "zones": "Zonas:",
+    "noZones": "Sin zonas asignadas"
   }
 }

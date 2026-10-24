@@ -93,6 +93,13 @@ describe('LoRainGaugeCard', () => {
     expect(lastSeen).toHaveTextContent('30 deviceCard.footer.lastSeenMinutes');
   });
 
+  // The removed "Last report" tile dated the report in the farm timezone; the footer keeps that.
+  it('dates a quiet gauge\'s last report in the farm timezone', () => {
+    const quiet = { ...lorainDevice, last_seen: '2026-05-15T23:30:00Z', latest_data: { ...lorainDevice.latest_data, rain_day_timezone: 'Pacific/Auckland' } } as unknown as Device;
+    render(<LoRainGaugeCard device={quiet} removeContext="farm" />);
+    expect(screen.getByTestId('device-card-last-seen').getAttribute('title')).toMatch(/May 16, 2026.*11:30.*(GMT\+12|NZST)/);
+  });
+
   it('the interval tile says when the tip count is unavailable; the footer says never seen without a report', () => {
     const noTips = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, rain_tips_delta: null } } as Device;
     const view = render(<LoRainGaugeCard device={noTips} removeContext="farm" />);

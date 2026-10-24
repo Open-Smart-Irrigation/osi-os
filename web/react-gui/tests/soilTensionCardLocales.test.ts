@@ -111,5 +111,8 @@ test('every footer key still English in lg is on the Luganda release gate (R16 M
   const english = [...PENDING_HUMAN_LUGANDA].filter((key) => key.startsWith('deviceCard.footer.'));
   assert.ok(english.length > 0);
   for (const key of english) assert.ok(gate.includes(`\`${key}\``), `${key} missing from the release gate`);
-  assert.ok(gate.includes('`common.batteryEstimated`'), 'common.batteryEstimated missing from the release gate');
+  // Gated only while it is still English in lg: a human pass removes its row (the ledger says so).
+  if (lookup(read('lg'), 'common.batteryEstimated') === lookup(read('en'), 'common.batteryEstimated')) {
+    assert.ok(gate.includes('`common.batteryEstimated`'), 'common.batteryEstimated missing from the release gate');
+  }
 });

@@ -154,6 +154,19 @@ describe('DeviceCardFooter last seen', () => {
     expect(lastSeen()).toHaveTextContent('Never seen');
   });
 
+  // The LoRain's farm-day rain total is dated in the farm's timezone, so its footer is too,
+  // with the zone named; a timezone the runtime does not know falls back to the plain format.
+  it('dates an absolute last-seen in the given farm timezone and names it', () => {
+    const at = '2026-10-20T23:30:00.000Z';
+    renderFooter({ lastSeen: at, timeZone: 'Pacific/Auckland' });
+    expect(lastSeen()).toHaveTextContent(/Oct 21, 2026.*12:30/);
+    expect(lastSeen()).toHaveTextContent(/GMT\+13|NZDT/);
+    expect(lastSeen().getAttribute('title')).toMatch(/Oct 21, 2026.*12:30/);
+    cleanup();
+    renderFooter({ lastSeen: at, timeZone: 'Not/AZone' });
+    expect(lastSeen()).toHaveTextContent(`Last seen ${formatDateTime(at, 'en')}`);
+  });
+
   it('formats the date for the interface language (French)', () => {
     const at = ago(2 * 24 * HOUR);
     renderFooter({ lastSeen: at }, 'fr');

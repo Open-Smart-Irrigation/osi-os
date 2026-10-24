@@ -702,6 +702,18 @@ describe('soil tile channel and verdict', () => {
     expect(tile).not.toHaveTextContent('Last reading');
   });
 
+  it('reports a current fault on the trigger channel instead of an older reading of it', async () => {
+    await openScheduled([
+      sensor({ deveui: 'CURRENT', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: -5, swt_2: 15 } }),
+      sensor({ deveui: 'OLD', name: 'South probe', last_seen: STALE, latest_data: { swt_1: 70 } }),
+    ]);
+
+    const tile = screen.getByTestId('water-soil-tile');
+    expect(tile.textContent).toMatch(/15\.0 kPaWet\(North probe\)/);
+    expect(tile).toHaveTextContent('Trigger probe: invalid reading');
+    expect(tile).not.toHaveTextContent('Trigger probe: last reading');
+  });
+
   // Cloud parity rule (2026-10-21): without a tension trigger channel the tile
   // leads with the shallowest current channel and its depth; only SWT_AVG
   // shows a mean.

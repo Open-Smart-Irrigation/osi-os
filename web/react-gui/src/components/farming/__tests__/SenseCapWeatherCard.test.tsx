@@ -132,3 +132,19 @@ describe('SenseCapWeatherCard rain today (rain review finding 10)', () => {
     expect(screen.getByTestId('rain-monitor')).toBeInTheDocument();
   });
 });
+
+// The zones line is translated (post-merge review of #510): label and empty state both.
+describe('SenseCapWeatherCard zones line', () => {
+  it('labels the assigned zones with a translation key', () => {
+    render(<SenseCapWeatherCard device={{ ...s2120Device, zone_names: ['North', 'South'] } as unknown as Device} removeContext="farm" />);
+    const line = screen.getByText('North · South').parentElement as HTMLElement;
+    expect(line).toHaveTextContent('deviceCard.zones');
+    expect(line).not.toHaveTextContent('Zones:');
+  });
+
+  it('says no zones are assigned with a translation key', () => {
+    render(<SenseCapWeatherCard device={s2120Device} removeContext="farm" />);
+    expect(screen.getByText('deviceCard.noZones')).toBeInTheDocument();
+    expect(screen.queryByText('No zones assigned')).not.toBeInTheDocument();
+  });
+});

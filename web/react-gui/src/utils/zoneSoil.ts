@@ -73,6 +73,13 @@ export interface ZoneSoilStatus {
    * current probes win; the stale trigger probe is reported on its own).
    */
   staleTrigger: { channel: SoilChannel; observedAt: string | null } | null;
+  /**
+   * The scheduler's trigger channel when current probes supplied the figure
+   * while a current probe reports that channel faulted or out of range. It
+   * outranks `staleTrigger`: a current fault is news, an older valid reading of
+   * the same channel is not.
+   */
+  invalidTrigger: { channel: SoilChannel; observedAt: string | null } | null;
 }
 
 const ABSENT: ZoneSoilStatus = {
@@ -87,6 +94,7 @@ const ABSENT: ZoneSoilStatus = {
   invalid: false,
   probeNames: [],
   staleTrigger: null,
+  invalidTrigger: null,
 };
 
 const TENSION_CHANNELS: readonly SoilChannel[] = ['swt_1', 'swt_2', 'swt_3'];
@@ -229,6 +237,7 @@ function summarizeVolumetric(devices: Device[], nowMs: number): ZoneSoilStatus {
     invalid: reportedCount > 0 && usableValues.length === 0,
     probeNames: [],
     staleTrigger: null,
+    invalidTrigger: null,
   };
 }
 
@@ -317,6 +326,8 @@ function summarizeTension(
   const historical = emptyTensionBucket();
   let hasInvalidReading = false;
   let anyObservedAt: string | null = null;
+  // Newest current (fresh) uplink per channel whose reading is faulted or out of range.
+  const currentInvalidAt = new Map<SoilChannel, string | null>();
 
   for (const device of devices) {
     const row = device.latest_data as Record<string, unknown> | null | undefined;
@@ -334,6 +345,7 @@ function summarizeTension(
       if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {
         hasInvalidReading = true;
+        if (fresh) currentInvalidAt.set(channel, newerInstant(currentInvalidAt.get(channel) ?? null, device.last_seen));
         continue;
       }
       if (!fresh && !isHistorical) continue;
@@ -356,11 +368,11 @@ function summarizeTension(
       ? bucket.observedAt.get(channel) ?? null
       : anyObservedAt;
   const resolvedObservedAt = observedAt ?? anyObservedAt;
-  const staleTrigger = usingCurrent
-    && requested !== null
-    && requested !== 'mean'
-    && channel !== requested
-    && historicalAvailable.includes(requested)
+  const triggerElsewhere = usingCurrent && requested !== null && requested !== 'mean' && channel !== requested;
+  const invalidTrigger = triggerElsewhere && currentInvalidAt.has(requested)
+    ? { channel: requested, observedAt: currentInvalidAt.get(requested) ?? null }
+    : null;
+  const staleTrigger = triggerElsewhere && !invalidTrigger && historicalAvailable.includes(requested)
     ? { channel: requested, observedAt: historical.observedAt.get(requested) ?? null }
     : null;
 
@@ -376,6 +388,7 @@ function summarizeTension(
     invalid: hasInvalidReading && currentAvailable.length === 0 && historicalAvailable.length === 0,
     probeNames: channel && channel !== 'mean' ? bucket.names.get(channel) ?? [] : [],
     staleTrigger,
+    invalidTrigger,
   };
 }
 
