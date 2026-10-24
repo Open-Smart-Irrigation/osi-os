@@ -342,7 +342,7 @@ export function MobileTensionHistory({ sources, defaultSelectedIds, catalogError
       <h2 className="mobile-tension-chart-title">{labels.hourlyAverages}</h2>
       <div className="mobile-tension-unit-row"><span>{labels.waterTension}</span><strong>kPa</strong></div>
       {noSelection && <p role="status">{labels.chooseSources}</p>}
-      {!catalogLoading && model.status === 'empty' && !noSelection && <><p role="status">{labels.emptyInterval}</p><button type="button" onClick={model.showLatest}>{labels.showLatest24h}</button></>}
+      {!catalogLoading && model.status === 'empty' && !noSelection && <><p role="status">{labels.emptyInterval}</p><button type="button" onClick={() => model.showLatest('24h')}>{labels.showLatest24h}</button></>}
       <div className="mobile-tension-chart-frame" aria-label={labels.chart}>
         <ChartHost mountAdapter={mountAdapter} series={chartSeries} store={model.viewportStore} extent={model.horizon} minSpanMs={HOUR_MS} maxSpanMs={7 * DAY_MS} inspectionMode="containing-bucket" locale={locale} timeZone={timeZone} focusedSeriesId={focusedSeriesId} coverage={accepted?.coverage} notLoadedLabel={labels.notLoaded} registerInternalDiagnostics={setChartReader} labels={{ pinnedReading: labels.pinnedReading, close: labels.close, unavailable: labels.unavailableValue, visibleWindow: labels.visibleWindow, hourlyAverage: labels.hourlyAverage, bucketInterval: (from, to) => labels.bucketInterval(dateText(from, locale, timeZone), dateText(to, locale, timeZone)) }} />
       </div>

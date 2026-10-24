@@ -25,7 +25,7 @@ export interface HistoryWindowResult {
   horizon: Viewport;
   selectPreset(span: '24h' | '7d' | '30d' | '90d'): void;
   moveWindow(direction: 'back' | 'forward'): void;
-  showLatest(): void;
+  showLatest(spanOverride?: '24h' | '7d' | '30d' | '90d'): void;
   retry(): void;
   selectedIds?: readonly string[] | undefined;
   displayedIds?: readonly string[] | undefined;
@@ -54,6 +54,7 @@ const browserNow = () => Date.now();
 const clear = (timer: number | null) => {
   if (timer !== null && typeof window !== 'undefined') window.clearTimeout(timer);
 };
+const PRESET_DURATIONS = { '24h': DAY_MS, '7d': 7 * DAY_MS, '30d': 30 * DAY_MS, '90d': 90 * DAY_MS } as const;
 
 export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowResult {
   const now = options.now ?? browserNow;
@@ -294,9 +295,8 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   }, [viewportStore, horizon.to, identity]);
 
   const selectPreset = (span: '24h' | '7d' | '30d' | '90d') => {
-    const durations = { '24h': DAY_MS, '7d': 7 * DAY_MS, '30d': 30 * DAY_MS, '90d': 90 * DAY_MS };
     const to = viewportStore.get().to;
-    const selectedSpan = Math.min(durations[span], maxSpanMs);
+    const selectedSpan = Math.min(PRESET_DURATIONS[span], maxSpanMs);
     const next = { from: Math.max(horizon.from, to - selectedSpan), to };
     visibleSpan.current = selectedSpan;
     cancelTimers();
@@ -314,10 +314,11 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     viewportStore.set(next, 'external');
     schedule(next, way);
   };
-  const showLatest = () => {
+  const showLatest = (spanOverride?: '24h' | '7d' | '30d' | '90d') => {
     cancelTimers();
     const to = Math.floor(now() / MINUTE_MS) * MINUTE_MS;
-    const span = viewportStore.get().to - viewportStore.get().from;
+    const span = spanOverride ? Math.min(PRESET_DURATIONS[spanOverride], maxSpanMs) : viewportStore.get().to - viewportStore.get().from;
+    visibleSpan.current = span;
     if (to === horizon.to) {
       const next = { from: to - span, to };
       viewportStore.set(next, 'external');

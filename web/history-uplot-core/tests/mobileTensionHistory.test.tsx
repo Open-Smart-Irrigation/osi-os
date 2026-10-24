@@ -193,6 +193,23 @@ describe('MobileTensionHistory', () => {
     expect(screen.getByRole('button', { name: labels.showLatest24h })).toBeTruthy();
   });
 
+  test('empty seven-day view recovers with one exact latest 24-hour request', async () => {
+    const emptyLoad = vi.fn(async (request = { from: 0, to: 86_400_000, rangeLabel: '24h' as const, aggregation: 'hourly' as const }): Promise<HistoryWindowResponse> => ({
+      request, coverage: { from: request.from, to: request.to }, series: [{ id: 'series-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: null }], buckets: [{ from: request.from, to: request.to, value: null, count: 0, quality: 'partial' }] }], unitGroups: [], aggregation: { level: 'hourly', pointCount: 1 }, limits: { maxPointsPerSeries: 2000, truncated: false }, readPolicy: 'edge-hourly',
+    }));
+    render(<MobileTensionHistory {...props({ load: emptyLoad })} />);
+    await waitFor(() => expect(emptyLoad).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: labels.time }));
+    fireEvent.click(screen.getByRole('button', { name: labels.range7d }));
+    await waitFor(() => expect(emptyLoad).toHaveBeenCalledTimes(2));
+    emptyLoad.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: labels.showLatest24h }));
+    await waitFor(() => expect(emptyLoad).toHaveBeenCalledTimes(1));
+    const request = emptyLoad.mock.calls[0][0];
+    expect(request.rangeLabel).toBe('24h');
+    expect(request.to - request.from).toBe(86_400_000);
+  });
+
   test('hides chart and calls the typed auth path for catalog 403 without retry', async () => {
     const onAuthError = vi.fn();
     render(<MobileTensionHistory {...props({ catalogError: new HistoryAuthError(403, 'denied'), onAuthError })} />);

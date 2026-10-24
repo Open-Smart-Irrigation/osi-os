@@ -1,6 +1,7 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { useHistoryWindow } from '../src/history/useHistoryWindow';
+import { analysisHourlyRangeStrategy } from '../src/history/rangeStrategy';
 import { HistoryAuthError } from '../src/history/types';
 import type { HistoryWindowContext, HistoryWindowRequest, HistoryWindowResponse } from '../src/shared/types';
 
@@ -225,7 +226,29 @@ describe('useHistoryWindow', () => {
     act(() => result.current.showLatest());
     expect(result.current.accepted).not.toBeNull();
     expect(result.current.refreshing).toBe(true);
+    expect(load.mock.calls[1][0].to - load.mock.calls[1][0].from).toBe(86_400_000);
     await act(async () => { latest.resolve(response(load.mock.calls[1][0])); await latest.promise; });
     expect(result.current.accepted).not.toBeNull();
+  });
+
+  test('showLatest 24h overrides a seven-day empty viewport with one latest request', async () => {
+    let clock = 10 * 86_400_000;
+    const load = vi.fn(async (request: HistoryWindowRequest) => response(request));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['swt-1'], now: () => clock, rangeStrategy: analysisHourlyRangeStrategy, maxSpanMs: 7 * 86_400_000, load }));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    await act(async () => { await Promise.resolve(); });
+    act(() => result.current.selectPreset('7d'));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await act(async () => { await Promise.resolve(); });
+    clock += 60 * 60_000;
+    load.mockClear();
+    act(() => result.current.showLatest('24h'));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    const request = load.mock.calls[0][0];
+    const expectedTo = Math.floor(clock / 60_000) * 60_000;
+    expect(request.rangeLabel).toBe('24h');
+    expect(request.to).toBe(expectedTo);
+    expect(request.to - request.from).toBe(86_400_000);
+    expect(result.current.viewportStore.get()).toEqual({ from: expectedTo - 86_400_000, to: expectedTo });
   });
 });
