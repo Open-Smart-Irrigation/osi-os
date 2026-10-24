@@ -137,6 +137,7 @@ class JournalFixtureDb {
     this.tablesPresent = settings.tables !== false;
     this.peerState = settings.peerState || null;
     this.forceOutbox = settings.forceOutbox === true;
+    this.policyRows = Array.isArray(settings.policyRows) ? settings.policyRows.map((row) => ({ ...row })) : null;
     this.outboxAggregate = settings.outboxAggregate || 'IRRIGATION_POLICY_RUNTIME';
     this.forceOutboxRows = Array.isArray(settings.forceOutboxRows)
       ? settings.forceOutboxRows.map((row) => ({ ...row }))
@@ -266,6 +267,8 @@ class JournalFixtureDb {
           recovery_state: 'ACTIVE',
           recovery_operation_uuid: null,
         }];
+      } else if (this.policyRows && /FROM irrigation_policies p/.test(sql)) {
+        rows = this.policyRows.map((row) => ({ ...row }));
       } else if (this.peerState && /FROM sync_link_state/.test(sql)
           && !/FROM watermark_calibrations|FROM irrigation_policies|FROM conditional_irrigation_sync_projections/.test(sql)) {
         const supported = this.peerState === 'supported';
@@ -1096,4 +1099,26 @@ for (const profile of PROFILES) {
     );
     assert.deepEqual(occurrences.map((node) => node.id), ['history-api-router-fn']);
   });
+}
+
+// R19 finding 7 (low): the bootstrap copy of a policy must match the event copy the 0077
+// trigger emits, and conform to conditional-irrigation-v1.schema.json#/definitions/Policy
+// (additionalProperties:false): no gateway_device_eui on the policy object.
+const R19_POLICY_ROW = {
+  policy_uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', zone_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  condition_json: JSON.stringify({ kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }), timezone: 'UTC', enabled: 0,
+  observation_window_minutes: 60, min_interval_minutes: 60, max_daily_minutes: 240, delivery_settings_json: '{}',
+  effective_from: null, sync_version: 3, updated_at: '2026-10-20T10:00:00.000Z', deleted_at: null, gateway_device_eui: GATEWAY_EUI,
+};
+for (const profile of ['bcm2712', 'bcm2709']) {
+  for (const [label, nodeId, run] of [['normal', 'sync-bootstrap-build', runNormalBootstrap], ['forced', 'sync-force-build', runForcedBootstrap]]) {
+    test(profile + ' R19-7 ' + label + ' bootstrap policy items carry no gateway_device_eui', async () => {
+      const node = loadFlows(profile).find((candidate) => candidate.id === nodeId);
+      const result = await run(node, { peerState: 'supported', policyRows: [R19_POLICY_ROW] });
+      assert.equal(result.payload.irrigationPolicies.length, 1, JSON.stringify(result.errors));
+      const policy = result.payload.irrigationPolicies[0];
+      assert.equal(Object.prototype.hasOwnProperty.call(policy, 'gateway_device_eui'), false);
+      assert.equal(policy.policy_uuid, R19_POLICY_ROW.policy_uuid);
+    });
+  }
 }
