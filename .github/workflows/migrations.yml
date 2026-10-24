@@ -48,6 +48,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'  # node:sqlite (used by rehearse-devices-rebuild) requires Node >=22.5
+      # The conditional irrigation replication tests validate payloads against the
+      # sync contract schema with the pinned AJV in scripts/package.json.
+      - name: Install scripts AJV dependencies
+        run: npm ci --ignore-scripts --prefix scripts
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
       - name: Fetch migration base ref
