@@ -69,7 +69,7 @@ export interface HistoryWindowResponse {
 export interface HistoryWindowOptions {
   enabled: boolean;
   context: HistoryWindowContext | null;
-  load(request: HistoryWindowRequest, signal: AbortSignal): Promise<HistoryWindowResponse>;
+  load(request: HistoryWindowRequest, signal: AbortSignal, context?: HistoryLoadContext): Promise<HistoryWindowResponse>;
   now?: () => number;
   navigationStartMs?: number;
   initialViewport?: Viewport;
@@ -91,6 +91,7 @@ export interface HistoryDiagnostics {
   entries: number;
   points: number;
 }
+export type HistoryEmptyReason = 'no-selection' | 'no-finite-data' | null;
 
 export interface MobileSelectionState {
   selectedIds: readonly string[];
@@ -106,6 +107,7 @@ export interface MobileTensionSource {
   unit: 'kPa';
   zoneId: string;
   deviceId?: string;
+  deviceName?: string;
   depthCm?: number | null;
   available: boolean;
   legacy?: boolean;
@@ -134,17 +136,57 @@ export interface MobileAnalysisWindow {
   invalidHourlyAverageCount: number;
 }
 
+export interface MobileAnalysisDtoPoint {
+  at: number;
+  value: number | null;
+  count: number;
+  quality: string | null;
+}
+export interface MobileAnalysisDtoSeries {
+  seriesId: string;
+  label: string;
+  unit: string;
+  truncated: boolean;
+  points: readonly MobileAnalysisDtoPoint[];
+}
+export interface MobileAnalysisDroppedSeries { seriesId: string; reason: string; }
+export type MobileAnalysisGrid =
+  | { platform: 'cloud'; from: number; to: number; stepSeconds: number; bucketCount: number }
+  | { platform: 'edge'; from: number; to: number };
+export interface MobileAnalysisResponseDto {
+  readPolicy: Exclude<HistoryReadPolicy, 'card-default'>;
+  coverage: { from: number; to: number };
+  appliedAggregation: string;
+  truncated: boolean;
+  dropped: readonly MobileAnalysisDroppedSeries[];
+  grid: MobileAnalysisGrid;
+  series: readonly MobileAnalysisDtoSeries[];
+}
+export interface HistoryLoadContext {
+  selectedIds: readonly string[] | undefined;
+  selectionKey: string | undefined;
+  requestRevision: number | undefined;
+  readPolicy: HistoryReadPolicy;
+}
+
 export interface MobileNormalizedResponse {
   response: HistoryWindowResponse;
   window: MobileAnalysisWindow;
 }
 
-export type MobileHistoryFailureKind = 'auth' | 'size' | 'missing' | 'protocol' | 'transient';
-export interface MobileHistoryFailure {
-  kind: MobileHistoryFailureKind;
-  status?: number;
-  missingIds?: readonly string[];
-  reason: string;
+export type MobileProtocolFailureCode = 'invalid-selection-count' | 'unexpected-read-policy' | 'invalid-coverage' | 'invalid-aggregation' | 'response-truncated' | 'duplicate-series' | 'unrequested-series' | 'missing-series' | 'invalid-unit' | 'invalid-timestamp' | 'invalid-cloud-grid' | 'invalid-edge-grid' | 'http-error';
+export type MobileAnalysisFailureInput =
+  | { kind: 'network'; message: string }
+  | { kind: 'http'; status: number; code: string | null; message: string };
+export type MobileHistoryFailure =
+  | { kind: 'auth'; status: 401 | 403; reason: string }
+  | { kind: 'size'; status: 400 | 413; reason: string }
+  | { kind: 'sources'; missingIds: readonly string[]; dropped: readonly MobileAnalysisDroppedSeries[]; accessDeniedIds: readonly string[]; reason: string }
+  | { kind: 'protocol'; code: MobileProtocolFailureCode; reason: string }
+  | { kind: 'transient'; status: number | null; reason: string };
+export class MobileAnalysisValidationError extends Error {
+  readonly name = 'MobileAnalysisValidationError';
+  constructor(readonly failure: Extract<MobileHistoryFailure, { kind: 'sources' | 'protocol' }>) { super(failure.reason); }
 }
 
 export type HistoryWindowReason =
