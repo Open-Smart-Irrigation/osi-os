@@ -22,6 +22,14 @@ describe('packaged ChartHost', () => {
     fireEvent.click(view.getByTestId('chart-host'), { clientX: 75, clientY: 50 });
     expect(view.getByTestId('inspector').textContent).toContain('Unavailable');
   });
+  test('uses rerendered locale for subscribed window updates', () => {
+    const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
+    const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 86_400_000 }, 1_000, 86_400_000);
+    const view = render(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets: [{ from: 0, to: 3_600_000, value: 1, count: 1, quality: 'ok' }] }]} store={store} extent={{ from: 0, to: 86_400_000 }} inspectionMode="containing-bucket" locale="en-US" timeZone="UTC" />);
+    view.rerender(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets: [{ from: 0, to: 3_600_000, value: 1, count: 1, quality: 'ok' }] }]} store={store} extent={{ from: 0, to: 86_400_000 }} inspectionMode="containing-bucket" locale="fr-FR" timeZone="UTC" />);
+    act(() => { store.set({ from: 3_600_000, to: 10_800_000 }, 'external'); });
+    expect(view.getByRole('group', { name: 'Visible time window' }).textContent).toContain('janv.');
+  });
   test('applies external viewport writes and element resize geometry', () => {
     let resizeCallback: (() => void) | undefined;
     class Observer {

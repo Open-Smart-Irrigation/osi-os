@@ -126,7 +126,7 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
       void source;
     });
     return unsubscribe;
-  }, [store]);
+  }, [store, locale, timeZone, inspectionMode]);
 
   useEffect(() => {
     return () => { pinRef.current = null; };
