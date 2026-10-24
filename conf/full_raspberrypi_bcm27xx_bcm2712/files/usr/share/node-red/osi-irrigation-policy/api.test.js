@@ -96,10 +96,12 @@ test('paused draft mutation is allowed with an untrusted runtime clock and mater
   } finally { closeFixture(f); }
 });
 
-test('enabled mutation fails atomically when the runtime clock is untrusted', async () => {
+// Owner decision 2026-10-24: no NTP-since-boot requirement. The injected status models the one
+// clock refusal left: a clock behind data the gateway already holds (lower bound).
+test('enabled mutation fails atomically when the runtime clock is behind stored data', async () => {
   const f = fixture();
   try {
-    await assert.rejects(api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: request(true), now: '2026-10-18T10:00:00Z', runtimeClockStatus: () => ({ trusted: false, reason: 'clock_untrusted_missing_marker' }), qualificationProvider: () => ({ qualified: true, identity: 'fixture', margin_seconds: 0 }) }), (error) => error.code === 'clock_untrusted' && error.statusCode === 503);
+    await assert.rejects(api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: request(true), now: '2026-10-18T10:00:00Z', runtimeClockStatus: () => ({ trusted: false, reason: 'clock_untrusted_lower_bound' }), qualificationProvider: () => ({ qualified: true, identity: 'fixture', margin_seconds: 0 }) }), (error) => error.code === 'clock_untrusted' && error.statusCode === 503);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM irrigation_policies').get().n, 0);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM valve_schedules').get().n, 0);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM valve_schedule_pushes').get().n, 0);
@@ -1062,4 +1064,16 @@ test('R19-6: a linked gateway without known cloud support refuses a conditional 
   } finally {
     closeFixture(f);
   }
+});
+
+// Owner decision 2026-10-24: enabling a conditional policy no longer needs an NTP sync since boot.
+test('NTP removal: the default clock gate enables a policy without an NTP marker', async () => {
+  const f = fixture();
+  const missing = (path) => { throw Object.assign(new Error('missing ' + path), { code: 'ENOENT' }); };
+  try {
+    const result = await api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: request(true), now: '2026-10-18T10:00:00Z',
+      clockOptions: { fs: { readFileSync: missing, writeFileSync() {}, renameSync() {}, mkdirSync() {}, unlinkSync() {} }, markerPath: '/nonexistent/marker.json', rejectionPath: '/nonexistent/rejection.json', fallbackPath: '/nonexistent/fallback.json' },
+      qualificationProvider: () => ({ qualified: true, identity: 'fixture', margin_seconds: 0 }) });
+    assert.equal(result.policy.enabled, true);
+  } finally { closeFixture(f); }
 });

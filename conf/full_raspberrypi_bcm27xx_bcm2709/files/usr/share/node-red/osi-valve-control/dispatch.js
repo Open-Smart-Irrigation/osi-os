@@ -911,7 +911,6 @@ async function claimOwnerAttemptTx(tx, owner, deviceEui, now, item, effectContex
         throw errorWithCode('close_receipt_unproven', 'safe CLOSE attempt receipt is missing or out of order');
       }
     } else {
-      if (!effectContext.clock || effectContext.clock.trusted !== true) throw errorWithCode('clock_untrusted', 'runtime clock is not trusted at the final attempt');
       const cutoff = instantMs(snapshot.queue_expires_at);
       if (cutoff != null && instantMs(now) >= cutoff) throw errorWithCode('command_expired', 'immutable queue cutoff has elapsed');
       if (snapshot.qualification && snapshot.qualification.qualified === true) {
@@ -1079,9 +1078,8 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
     const reservationNow = firstContext.now;
     const explicitExpiry = normalizedCommand.expires_at != null || normalizedCommand.expiresAt != null;
     const unboundedClose = effectClass === effects.EFFECTS.CLOSE_ONLY && !explicitExpiry && firstContext.clock.trusted !== true;
-    if (effectClass === effects.EFFECTS.SELF_CLOSING_OPEN && firstContext.clock.trusted !== true) {
-      throw errorWithCode('clock_untrusted', 'runtime clock must be synchronized before timed OPEN reservation');
-    }
+    // Owner decision 2026-10-24: a timed OPEN no longer requires an NTP sync since boot; the
+    // runtime clock status stays diagnostic (attempt_trusted_at) and decides only the CLOSE variant.
     if (effectClass === effects.EFFECTS.CLOSE_ONLY && unboundedClose && !firstContext.receipt) {
       throw errorWithCode('clock_untrusted', 'safe CLOSE requires an internal runtime receipt');
     }
@@ -1156,9 +1154,6 @@ async function executeValveAttempt({ db, deviceEui, command, frame, transport, n
     // Recheck clock and qualification after the snapshot commit, still under the
     // same writer. Provider I/O happens here, never with SQLite open.
     const finalContext = runtimeAttemptContext(trustedContext, now);
-    if (effectClass === effects.EFFECTS.SELF_CLOSING_OPEN && finalContext.clock.trusted !== true) {
-      throw errorWithCode('clock_untrusted', 'runtime clock became untrusted before the final attempt');
-    }
     const snapshot = prepared.transport.effect_snapshot;
     let currentQualification = null;
     if (snapshot.qualification && snapshot.qualification.qualified === true) {

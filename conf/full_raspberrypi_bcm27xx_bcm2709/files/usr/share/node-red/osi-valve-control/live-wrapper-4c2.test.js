@@ -125,7 +125,8 @@ test('shipped encoder restores an actual timed OPEN and accepted replay emits no
   fixture.cleanup();
 });
 
-test('shipped encoder refuses an ordinary timed OPEN before creating a reservation when the clock is untrusted', async () => {
+// Owner decision 2026-10-24: no NTP-since-boot requirement for a timed OPEN.
+test('shipped encoder sends an ordinary timed OPEN without an NTP marker', async () => {
   const fixture = await tempDb();
   let calls = 0;
   const events = [];
@@ -134,11 +135,10 @@ test('shipped encoder refuses an ordinary timed OPEN before creating a reservati
       payload: { type: 'actuator_command', device: { devEui: EUI }, data: { action: 'OPEN_FOR_DURATION', duration_minutes: 2, commandId: 'live-clock-open-1' } },
       _stregaDispatchCommand: { device_eui: EUI, command_id: 'live-clock-open-1', action: 'OPEN_FOR_DURATION', duration_minutes: 2 },
     }, events);
-    assert.equal(result[0], null);
   });
-  assert.equal(calls, 0);
+  assert.equal(calls, 1, 'the open is handed to ChirpStack');
   const row = await fixture.db.get('SELECT COUNT(*) AS count FROM valve_actuation_expectations WHERE command_id=?', ['live-clock-open-1']);
-  assert.equal(row.count, 0);
+  assert.equal(row.count, 1, 'the open is reserved and tracked');
   fixture.cleanup();
 });
 

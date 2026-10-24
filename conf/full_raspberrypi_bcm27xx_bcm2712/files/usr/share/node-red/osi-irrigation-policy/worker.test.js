@@ -1366,3 +1366,29 @@ test('R17-M1: a VWC policy does not open while the VWC gate is off; turning the 
     }
   }
 });
+
+// Owner decision 2026-10-24: a conditional open no longer needs an NTP sync since boot. With the
+// production clock gate (no injected clock) and no NTP marker, a due occurrence still opens.
+test('NTP removal: a due conditional occurrence opens without an NTP marker', async () => {
+  const value = await fixture();
+  let sends = 0;
+  try {
+    const options = workerOptions(value, {
+      qualificationProvider: () => ({ qualified: true, identity: 'fixture-gen1', margin_seconds: 0 }),
+      transport: { async getDeviceQueue() { return []; }, async flushDeviceQueue() {}, async enqueueDownlink() { sends += 1; return { id: 'no-ntp-' + sends }; } },
+    });
+    delete options.clock;
+    const clockOptions = options.clockOptions;
+    const read = clockOptions.fs.readFileSync.bind(clockOptions.fs);
+    clockOptions.fs.readFileSync = (path) => {
+      if (path === clockOptions.markerPath) throw Object.assign(new Error('no NTP marker'), { code: 'ENOENT' });
+      return read(path);
+    };
+    await worker.runDue(options);
+    const row = await value.db.get('SELECT state FROM irrigation_occurrences WHERE schedule_uuid=?', ['schedule-1']);
+    assert.equal(row && row.state, 'SENT', JSON.stringify(row));
+    assert.equal(sends, 1);
+  } finally {
+    value.cleanup();
+  }
+});

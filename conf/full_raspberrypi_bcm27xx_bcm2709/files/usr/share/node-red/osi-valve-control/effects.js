@@ -5,7 +5,7 @@
 // whether that downlink can still affect watering.  The two facts must never be
 // collapsed into one ACK or action label.
 
-const { runtimeClockStatus } = require('../osi-irrigation-policy/clock');
+const { openClockStatus } = require('../osi-irrigation-policy/clock');
 const { parseInstant } = require('../osi-irrigation-policy/timestamps');
 
 const EFFECTS = Object.freeze({
@@ -242,7 +242,8 @@ function runtimeClockOptions(snapshot, options = {}) {
 }
 function trustedClock(snapshot, options) {
   const clockOptions = runtimeClockOptions(snapshot, options);
-  try { return { trusted: runtimeClockStatus(clockOptions).trusted === true, now: clockOptions.now }; } catch (_) { return { trusted: false, now: clockOptions.now }; }
+  // Owner decision 2026-10-24: no NTP-since-boot requirement; only a clock behind the given bounds is refused.
+  try { return { trusted: openClockStatus(clockOptions).trusted === true, now: clockOptions.now }; } catch (_) { return { trusted: false, now: clockOptions.now }; }
 }
 
 function canReleaseByHorizon(snapshot, { now, clockOptions, qualificationProvider, attempt_at, observed_open_at, observed_close_at, current_state_at, currentStateAt } = {}) {

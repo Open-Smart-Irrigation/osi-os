@@ -83,7 +83,8 @@ test('production qualification defaults false and release requires current valid
     qualificationProvider: () => ({ qualified: true, identity: 'x', margin_seconds: 5 }) });
   const provider = () => ({ qualified: true, identity: 'x', margin_seconds: 5 });
   assert.equal(effects.canReleaseByHorizon(qualified, { now: '2026-10-18T10:32:00.000Z', clockOptions, qualificationProvider: provider }), true);
-  assert.equal(effects.canReleaseByHorizon(qualified, { now: '2026-10-18T10:32:00.000Z', clockOptions: { ...clockOptions, bootId: 'boot-b' }, qualificationProvider: provider }), false);
+  // Owner decision 2026-10-24: the NTP marker (here from another boot) no longer gates release.
+  assert.equal(effects.canReleaseByHorizon(qualified, { now: '2026-10-18T10:32:00.000Z', clockOptions: { ...clockOptions, bootId: 'boot-b' }, qualificationProvider: provider }), true);
   assert.equal(effects.canReleaseByHorizon(qualified, { now: '2026-10-18T10:32:00.000Z', clockOptions, qualificationProvider: () => ({ qualified: true, identity: 'other', margin_seconds: 5 }) }), false);
 });
 

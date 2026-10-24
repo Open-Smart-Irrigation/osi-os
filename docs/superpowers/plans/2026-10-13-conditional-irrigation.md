@@ -211,6 +211,8 @@ Files: create `database/migrations/ordered/0076__conditional_irrigation.sql`,
 `$IRRIGATION_MODULE/{store,occurrences,clock}.js` and adjacent tests,
 `scripts/test-conditional-irrigation-schema.js`,
 `scripts/test-conditional-irrigation-clock.js`.
+> **Owner decision 2026-10-24 (supersedes the NTP requirement for opens and policy activation):** gateway-originated opens (fixed schedules, manual, conditional and ONCE) no longer require an NTP synchronization since boot, and enabling a policy no longer requires it either. The boot-scoped marker stays as a display and diagnostics value. The only clock refusal left on these paths is a clock behind data the gateway already holds (the last decided dueAt or the newest relevant sample), reported as `clock_untrusted_lower_bound`.
+
 Create runtime payload `files/etc/hotplug.d/ntp/70-osi-irrigation-clock` under both
 profiles. Existing OpenWrt `openwrt/package/utils/busybox/files/sysntpd` already
 passes `-S ntpd-hotplug`, which forwards NTP events; do not modify upstream BusyBox.

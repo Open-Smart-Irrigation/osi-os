@@ -162,4 +162,20 @@ function runtimeClockStatus(options = {}) {
   return status;
 }
 
-module.exports = { clockStatus, runtimeClockStatus, readRuntimeClock };
+// Owner decision 2026-10-24: gateway-originated opens (schedules, manual, conditional, ONCE) no
+// longer require an NTP sync since boot. The open paths use this status: the marker-based
+// runtimeClockStatus is computed for display and diagnostics only (diagnostic), and the only
+// refusal left is a clock behind data the gateway already holds (lower bound: the last decided
+// due time or the newest sample), which would re-decide the past.
+function openClockStatus(options = {}) {
+  let diagnostic;
+  try { diagnostic = runtimeClockStatus(options); } catch (error) { diagnostic = { trusted: false, reason: 'clock_untrusted_runtime' }; }
+  const now = options.now instanceof Date ? options.now.getTime() : (options.now == null ? Date.now() : options.now);
+  const due = parseBound(options.lastDue);
+  const sample = parseBound(options.latestSample);
+  if (!Number.isFinite(now) || Number.isNaN(due) || Number.isNaN(sample)) return { trusted: false, reason: 'clock_untrusted_lower_bound', diagnostic };
+  if ((due != null && now < due) || (sample != null && now < sample)) return { trusted: false, reason: 'clock_untrusted_lower_bound', diagnostic };
+  return { trusted: true, reason: diagnostic && diagnostic.trusted === true ? 'trusted' : 'ntp_not_required', diagnostic };
+}
+
+module.exports = { clockStatus, runtimeClockStatus, openClockStatus, readRuntimeClock };

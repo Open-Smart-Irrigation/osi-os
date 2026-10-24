@@ -118,43 +118,19 @@ test('final timed OPEN check uses a fresh runtime instant after the writer wait'
   fixture.cleanup();
 });
 
-test('a final-check failure leaves a resumable snapshot owner', async () => {
+// Owner decision 2026-10-24: gateway-originated opens no longer require an NTP sync since boot.
+// The marker-based clock status is diagnostic only; neither the reservation nor the final
+// check before the RPC refuses a timed OPEN on it.
+test('a timed open proceeds without an NTP marker at reservation and at the final check', async () => {
   const fixture = await tempDb();
   const start = Date.parse('2026-10-18T10:00:00.000Z');
-  let clockReads = 0;
-  const runtime = controlledRuntime([start, start + 1000, start + 2000, start + 3000], {
-    markerTrusted: () => clockReads !== 2,
-    onRuntimeNow: () => { clockReads += 1; },
-  });
-  const command = { device_eui: EUI, command_id: 'resumable-snapshot-owner', action: 'OPEN_FOR_DURATION', duration_minutes: 2, expires_at: '2026-10-18T10:10:00.000Z' };
+  const runtime = controlledRuntime([start, start + 1000, start + 2000, start + 3000], { markerTrusted: () => false });
+  const command = { device_eui: EUI, command_id: 'no-ntp-open', action: 'OPEN_FOR_DURATION', duration_minutes: 2, expires_at: '2026-10-18T10:10:00.000Z' };
   const frame = { fPort: 2, data: Buffer.from([0x41, 2]).toString('base64'), confirmed: false, encrypted: false, provenance: { source: 'local_encoder', encoder: 'strega-v1' } };
-  await assert.rejects(dispatch.executeValveAttempt({ db: fixture.db, deviceEui: EUI, command, frame, transport: { async enqueueDownlink() { throw new Error('first final check must fail'); } }, now: new Date(start), trustedContext: runtime }), (error) => error && error.code === 'clock_untrusted');
-  const pending = await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [command.command_id]);
-  const pendingState = JSON.parse(pending.transport_json);
-  assert.equal(pendingState.phase, undefined);
-  assert.ok(pendingState.effect_snapshot);
-  const second = await dispatch.executeValveAttempt({ db: fixture.db, deviceEui: EUI, command, frame, transport: { async enqueueDownlink() { return { id: 'resumable-q1' }; } }, now: new Date(start), trustedContext: runtime });
-  assert.equal(second.phase, 'ACCEPTED');
-  fixture.cleanup();
-});
-
-test('ordinary timed open refuses before reservation when runtime clock is untrusted', async () => {
-  const fixture = await tempDb();
-  await assert.rejects(
-    dispatch.executeValveAttempt({
-      db: fixture.db,
-      deviceEui: EUI,
-      command: { device_eui: EUI, command_id: 'composition-clock-1', action: 'OPEN_FOR_DURATION', duration_minutes: 2 },
-      frame: { fPort: 2, data: Buffer.from([0x41, 2]).toString('base64'), confirmed: false, encrypted: false,
-        provenance: { source: 'local_encoder', encoder: 'strega-v1' } },
-      transport: { async enqueueDownlink() { throw new Error('must not call RPC'); } },
-      now: '2026-10-18T10:00:00.000Z',
-      trustedContext: controlledRuntime([Date.parse('2026-10-18T10:00:00.000Z')], { markerTrusted: () => false }),
-    }),
-    (error) => error && error.code === 'clock_untrusted'
-  );
-  const row = await fixture.db.get('SELECT COUNT(*) AS count FROM valve_actuation_expectations WHERE command_id=?', ['composition-clock-1']);
-  assert.equal(row.count, 0);
+  let sent = 0;
+  const out = await dispatch.executeValveAttempt({ db: fixture.db, deviceEui: EUI, command, frame, transport: { async enqueueDownlink() { sent += 1; return { id: 'no-ntp-q1' }; } }, now: new Date(start), trustedContext: runtime });
+  assert.equal(out.phase, 'ACCEPTED', JSON.stringify(out));
+  assert.equal(sent, 1);
   fixture.cleanup();
 });
 

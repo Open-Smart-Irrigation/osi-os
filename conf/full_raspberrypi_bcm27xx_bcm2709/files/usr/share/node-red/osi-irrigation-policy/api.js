@@ -775,7 +775,8 @@ async function applyPolicyEdit(options = {}) {
         const activationIso = isoNow(activationMs);
         let clockStatus = null;
         let requestedCondition = null;
-        const gate = options.runtimeClockStatus || clock.runtimeClockStatus;
+        // Owner decision 2026-10-24: no NTP-since-boot requirement (clock.openClockStatus).
+        const gate = options.runtimeClockStatus || clock.openClockStatus;
         const peek = await db.get('SELECT * FROM irrigation_policies WHERE zone_uuid=? AND deleted_at IS NULL', [zone.zone_uuid]);
         const requestedEnabled = normalizeEnabled(gateFields.enabled, peek ? Number(peek.enabled) === 1 : true);
         if (requestedEnabled) {

@@ -215,16 +215,23 @@ test('runOnceTick leaves an attempted intent UNKNOWN after a handoff crash', asy
   assert.equal((await db.get("SELECT state FROM valve_once_dispatch_intents WHERE schedule_uuid='intent-handoff-crash'")).state, 'UNKNOWN');
 });
 
-test('runOnceTick retries a pre-claim clock failure with the same command, fire_at, and cutoff', async () => {
+// Owner decision 2026-10-24: an untrusted (NTP) clock no longer stops a ONCE open, so the
+// pre-claim failure these resume tests need is a crash at the final runtime sample instead.
+function crashAtSample(base, sample) {
+  let calls = 0;
+  return { ...base, runtimeNow() { calls += 1; if (calls === sample) throw Object.assign(new Error('pre-claim crash'), { code: 'pre_claim_crash' }); return base.runtimeNow(); } };
+}
+
+test('runOnceTick retries a pre-claim failure with the same command, fire_at, and cutoff', async () => {
   const { db } = await tempDb();
   await assignZone(db);
   await store.insertSchedule(db, { schedule_uuid: 'fix2-preclaim-retry', device_eui: '0016C001F1000001', kind: 'ONCE', label: null, weekdays_mask: null, start_time: null, fire_at: '2026-08-19T10:00:00.000Z', duration_minutes: 2, timezone: 'UTC', enabled: 1 });
   let rpcCalls = 0;
   const transport = { async enqueueDownlink() { rpcCalls += 1; return { id: 'fix2-retry-q1' }; } };
   const failed = await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), transport,
-    trustedContext: controlledRuntime([Date.parse('2026-08-19T10:03:00Z'), Date.parse('2026-08-19T10:03:00Z')], { untrustedSample: (sample) => sample === 2 }), warn: () => {} });
+    trustedContext: crashAtSample(controlledRuntime([Date.parse('2026-08-19T10:03:00Z'), Date.parse('2026-08-19T10:03:00Z')]), 2), warn: () => {} }).catch((error) => ({ fired: [], error }));
   assert.equal(failed.fired.length, 0);
-  assert.equal(rpcCalls, 0, 'pre-claim clock failure must not hand off');
+  assert.equal(rpcCalls, 0, 'a pre-claim failure must not hand off');
   const before = await db.get("SELECT i.command_id, i.state, vs.fire_at, vae.transport_json FROM valve_once_dispatch_intents i JOIN valve_schedules vs ON vs.schedule_uuid=i.schedule_uuid LEFT JOIN valve_actuation_expectations vae ON vae.command_id=i.command_id WHERE i.schedule_uuid='fix2-preclaim-retry'");
   assert.equal(before.state, 'UNKNOWN');
   const beforeState = JSON.parse(before.transport_json);
@@ -252,7 +259,7 @@ test('runOnceTick skips an unclaimed snapshot after its stricter immutable cutof
   let rpcCalls = 0;
   const transport = { async enqueueDownlink() { rpcCalls += 1; throw new Error('expired unclaimed must not enqueue'); } };
   await W.runOnceTick({ db, now: new Date('2026-08-19T10:03:00Z'), transport,
-    trustedContext: controlledRuntime([Date.parse('2026-08-19T10:03:00Z'), Date.parse('2026-08-19T10:03:00Z')], { untrustedSample: (sample) => sample === 2 }), warn: () => {} });
+    trustedContext: crashAtSample(controlledRuntime([Date.parse('2026-08-19T10:03:00Z'), Date.parse('2026-08-19T10:03:00Z')]), 2), warn: () => {} }).catch(() => null);
   const before = await db.get("SELECT transport_json FROM valve_actuation_expectations WHERE command_id=(SELECT command_id FROM valve_once_dispatch_intents WHERE schedule_uuid='fix2-expired-unclaimed')");
   const cutoff = JSON.parse(before.transport_json).effect_snapshot.queue_expires_at;
   assert.equal(cutoff, '2026-08-19T10:31:00.000Z');
@@ -760,6 +767,7 @@ test('runOnceTick exposes an UNKNOWN transport result without counting the comma
   const out = await W.runOnceTick({
     db, now: new Date('2026-08-19T10:03:00Z'),
     transport: { async enqueueDownlink() { throw new Error('delayed gateway timeout'); } },
+    trustedContext: controlledRuntime([Date.parse('2026-08-19T10:03:00Z')]),
     onError: (error) => errors.push(error), warn: () => {},
   });
   assert.equal(out.fired.length, 0);

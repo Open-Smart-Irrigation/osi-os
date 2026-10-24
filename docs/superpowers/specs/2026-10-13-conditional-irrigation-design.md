@@ -208,6 +208,8 @@ primary key `(schedule_uuid, local_date, local_time)`, independent of revisions.
 New/edited/enabled schedules apply only to future instants. A missed-start audit
 looks back to the last trusted tick, capped at 24 hours; it does not replay an outage.
 
+> **Owner decision 2026-10-24 (supersedes the NTP requirement in this section):** gateway-originated opens (fixed schedules, manual, conditional and ONCE) no longer require an NTP synchronization since boot, and enabling a policy no longer requires it either. The boot-scoped marker stays as a display and diagnostics value. The only clock refusal left on these paths is a clock behind data the gateway already holds (the last decided dueAt or the newest relevant sample), reported as `clock_untrusted_lower_bound`.
+
 Require a trusted clock before deciding, marking skipped slots, or dispatching.
 Add a boot-scoped NTP synchronization marker using OpenWrt's existing ntpd hotplug
 path. Only exact ACTION=stratum with lowercase stratum parsed as decimal 1–15
@@ -691,6 +693,8 @@ approval cannot rewrite the captured bound. An old unqualified reservation never
 retroactively. With qualification false, new ordinary commands still get the logical
 queue cutoff at their start deadline, but time alone cannot settle them. Conditional
 activation remains unavailable.
+
+> **Owner decision 2026-10-24 (supersedes the NTP requirement in this section):** gateway-originated opens (fixed schedules, manual, conditional and ONCE) no longer require an NTP synchronization since boot, and enabling a policy no longer requires it either. The boot-scoped marker stays as a display and diagnostics value. The only clock refusal left on these paths is a clock behind data the gateway already holds (the last decided dueAt or the newest relevant sample), reported as `clock_untrusted_lower_bound`.
 
 All timed OPEN paths require a trusted clock before reservation and again at the
 sole attempt claim. This includes ordinary manual, legacy, simulation and ONCE

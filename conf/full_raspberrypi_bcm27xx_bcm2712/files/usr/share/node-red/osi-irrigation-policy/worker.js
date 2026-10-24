@@ -184,7 +184,7 @@ async function clockStatus(options, bounds = {}) {
     if (typeof options.clock === 'function') result = await options.clock(context);
     else if (options.clock && typeof options.clock.runtimeClockStatus === 'function') result = await options.clock.runtimeClockStatus(context);
     else if (options.clock && typeof options.clock === 'object' && Object.prototype.hasOwnProperty.call(options.clock, 'trusted')) result = options.clock;
-    else result = clock.runtimeClockStatus({ ...(options.clockOptions || {}), now: nowMs, lastDue: bounds.lastDue || null, latestSample: bounds.latestSample || null });
+    else result = clock.openClockStatus({ ...(options.clockOptions || {}), now: nowMs, lastDue: bounds.lastDue || null, latestSample: bounds.latestSample || null });
   } catch (error) {
     return { trusted: false, reason: 'clock_untrusted_error', error: String(error && error.message || error) };
   }
