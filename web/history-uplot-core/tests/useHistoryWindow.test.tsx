@@ -193,7 +193,7 @@ describe('useHistoryWindow', () => {
     second.resolve(response(load.mock.calls[1][0]));
   });
 
-  test('passes ordered selection context to foreground and prefetch lanes', async () => {
+  test('passes ordered selection context to the foreground lane', async () => {
     vi.useFakeTimers();
     try {
       Object.defineProperty(document, 'hidden', { value: false, configurable: true });
