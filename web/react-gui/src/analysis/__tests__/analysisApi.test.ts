@@ -61,7 +61,7 @@ describe('analysisAPI', () => {
         to: '2026-06-26T12:00:00.000Z',
       },
       aggregation: 'auto',
-    });
+    }, { signal: undefined });
   });
 
   it('deletes saved analysis views through the owner-scoped edge route', async () => {

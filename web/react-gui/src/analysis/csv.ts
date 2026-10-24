@@ -100,7 +100,7 @@ export function toTidyCsv(
       && (entry?.sourceKind ?? 'device') === 'device';
     item.points.forEach((point, index) => {
       const row = [
-        item.cadence === 'daily' ? localDate(point.t, item.timezone) : point.t,
+        item.cadence === 'daily' ? localDate(point.t, item.timezone ?? null) : point.t,
         site,
         zone,
         label,

@@ -1287,6 +1287,29 @@ test('the 30 000-row cap counts provider, station and device rows together', asy
   }
 });
 
+test('accepts 25 distinct available selectors and rejects 26 before reading rows', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const selected = result.channels.filter((channel) => channel.availability === 'available').slice(0, 25);
+    assert.equal(selected.length, 25, 'fixture must provide 25 available analysis sources');
+    const oneHour = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
+    const output = await series(raw, selected, oneHour, 'hourly');
+    assert.deepEqual(output.series.map((item) => item.seriesId), selected.map((item) => item.seriesId));
+    assert.deepEqual(output.dropped, []);
+    assert.equal(output.aggregation.applied, 'hourly');
+    const noReads = {
+      all() { throw new Error('row read should not occur for an oversized selector list'); },
+    };
+    await assert.rejects(
+      seriesWithFacade(noReads, selected.concat(selected[0]), oneHour, 'hourly'),
+      (error) => error && error.statusCode === 413
+    );
+  } finally {
+    raw.close();
+  }
+});
+
 test('a failing zoneLocations makes the catalogue reject with its error', async () => {
   const analysis = analysisModule.createAnalysis({
     aggregateRows: () => ({ series: {}, buckets: [] }),
