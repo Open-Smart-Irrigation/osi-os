@@ -29,7 +29,7 @@ export function parseMobileHistoryZoneId(value: string | undefined): number | nu
 function usableTimeZone(value: unknown): string | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   try {
-    new Intl.DateTimeFormat(undefined, { timeZone: value });
+    new Intl.DateTimeFormat('en', { timeZone: value });
     return value;
   } catch {
     return null;
