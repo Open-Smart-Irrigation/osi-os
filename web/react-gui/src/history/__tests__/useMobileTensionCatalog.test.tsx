@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.hoisted(() => { if (typeof window !== 'undefined' && !window.matchMedia) window.matchMedia = (() => ({ matches: false, media: '', onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } })) as typeof window.matchMedia; });
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import { useMobileTensionCatalog } from '../useMobileTensionCatalog';
 import { analysisAPI } from '../../services/api';
@@ -80,13 +80,17 @@ describe('edge mobile tension catalog hook', () => {
     hook.rerender({ sessionKey: 'new' });
     current.resolve(sourceResponse('current'));
     await waitFor(() => expect(hook.result.current.sources[0]?.seriesId).toBe('current'));
-    old.resolve(sourceResponse('old'));
-    await Promise.resolve();
-    expect(hook.result.current.sources[0]?.seriesId).toBe('current');
+    await act(async () => {
+      old.resolve(sourceResponse('old'));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(hook.result.current.sources[0]?.seriesId).toBe('current'));
 
+    const callsBeforeDisabled = vi.mocked(analysisAPI.getChannels).mock.calls.length;
     const disabled = renderHook(() => useMobileTensionCatalog({ enabled: false, zoneId: '7', sessionKey: 'disabled' }), { wrapper });
     expect(disabled.result.current.isLoading).toBe(false);
     expect(disabled.result.current.sources).toEqual([]);
+    expect(vi.mocked(analysisAPI.getChannels)).toHaveBeenCalledTimes(callsBeforeDisabled);
   });
 
   it('resets generation refresh state when the session key changes', async () => {

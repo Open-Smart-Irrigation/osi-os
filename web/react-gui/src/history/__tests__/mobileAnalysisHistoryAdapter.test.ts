@@ -93,7 +93,10 @@ describe('edge mobile analysis adapter', () => {
     await expect(loader(logical, new AbortController().signal, context)).rejects.toBe(cancellation);
 
     vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(new Error('unexpected'));
-    await expect(loader(logical, new AbortController().signal, context)).rejects.toBeInstanceOf(MobileHistoryError);
+    await expect(loader(logical, new AbortController().signal, context)).rejects.toMatchObject({ failure: { kind: 'protocol', code: 'http-error', reason: 'unexpected' } });
+
+    vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(Object.assign(new Error('offline'), { isAxiosError: true }));
+    await expect(loader(logical, new AbortController().signal, context)).rejects.toMatchObject({ failure: { kind: 'transient', status: null } });
 
     vi.mocked(analysisAPI.getSeries).mockClear();
     await expect(loader(logical, new AbortController().signal, { ...context, selectedIds: [] })).rejects.toMatchObject({ failure: { kind: 'protocol', code: 'invalid-selection-count' } });
