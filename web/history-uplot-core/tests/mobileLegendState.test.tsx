@@ -10,7 +10,7 @@ const labels: MobileSoilHistoryLabels = {
   back: 'Back', forward: 'Forward', latest: 'Latest', sensors: 'Sensors', unitNotReported: 'Unit not reported',
   loading: 'Loading', updating: 'Updating', noData: 'No data', allHidden: 'All hidden', unavailable: 'Unavailable',
   pinnedReading: 'Pinned reading', close: 'Close', aggregation: 'Aggregation', points: 'Points', loadedRange: 'Loaded range',
-  truncated: 'Truncated', showDay: 'Show day', retry: 'Retry', failure: 'Failed', coverage: 'Coverage', freshness: 'Freshness', notLoaded: 'Not loaded',
+  truncated: 'Truncated', showDay: 'Show day', retry: 'Retry', failure: 'Failed', coverage: 'Coverage', freshness: 'Freshness', notLoaded: 'Not loaded', rangesGroup: 'History ranges', visibleWindow: 'Visible time window',
   seriesLegend: { legend: 'Legend', showAll: 'Show all', plottedSeries: 'Plotted series', seriesCount: (count) => `${count} series`, focusAnnouncement: (label) => `Focused ${label}`, allSeriesAnnouncement: 'All series shown' },
 };
 

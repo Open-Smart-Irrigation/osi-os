@@ -154,7 +154,7 @@ const PENDING_HUMAN_LUGANDA: ReadonlySet<string> = new Set([
   'mobileUplot.close', 'mobileUplot.aggregation', 'mobileUplot.points',
   'mobileUplot.loadedRange', 'mobileUplot.truncated', 'mobileUplot.showDay',
   'mobileUplot.retry', 'mobileUplot.failure', 'mobileUplot.coverage',
-  'mobileUplot.freshness', 'mobileUplot.notLoaded',
+  'mobileUplot.freshness', 'mobileUplot.notLoaded', 'mobileUplot.rangesGroup', 'mobileUplot.visibleWindow',
   'mobileUplot.seriesLegend.legend', 'mobileUplot.seriesLegend.showAll',
   'mobileUplot.seriesLegend.plottedSeries', 'mobileUplot.seriesLegend.seriesCount',
   'mobileUplot.seriesLegend.focusAnnouncement', 'mobileUplot.seriesLegend.allSeriesAnnouncement',
@@ -167,13 +167,14 @@ function isAllowedIdentical(locale: Locale, key: string): boolean {
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    // 451, including six series-legend labels: main carries the mobile uPlot
+    // 453 (two accessible names of the mobile uPlot range group and window
+    // readout added after the #512 review), including six series-legend labels: main carries the mobile uPlot
     // irrigationTimeline.eventLabel keys from the valve-control work
     // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
     // history.nav.admin key added for the scoped-access admin nav entry
     // point. All are already present in every shipped locale, so only the
     // count moves.
-    expect(Object.keys(english)).toHaveLength(451);
+    expect(Object.keys(english)).toHaveLength(453);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);
