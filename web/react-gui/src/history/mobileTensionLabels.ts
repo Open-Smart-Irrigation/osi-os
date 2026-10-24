@@ -3,7 +3,7 @@ import type { MobileTensionHistoryLabels } from '@osi/history-uplot';
 
 export function mobileTensionLabels(t: TFunction<'history'>): MobileTensionHistoryLabels {
   const label = (key: string, options?: Record<string, unknown>): string =>
-    t(`mobileTension.${key}`, options);
+    t(`history.mobileTension.${key}`, options);
 
   return {
     title: label('title'),

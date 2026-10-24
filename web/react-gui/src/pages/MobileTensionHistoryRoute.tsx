@@ -115,7 +115,7 @@ export function MobileTensionHistoryRoute() {
   if (catalog.error instanceof HistoryAuthError && catalog.error.status === 403) return routeMessage(t('mobileTension.accessDenied'));
 
   return (
-    <Suspense fallback={routeMessage(t('mobileTension.loading'))}>
+    <Suspense fallback={routeMessage(t('mobileTension.route.zoneLoading'))}>
       <MobileTensionHistory
         sources={catalog.sources}
         defaultSelectedIds={catalog.defaultSelectedIds}
