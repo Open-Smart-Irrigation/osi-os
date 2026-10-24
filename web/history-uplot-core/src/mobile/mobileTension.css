@@ -1,4 +1,4 @@
-.mobile-tension-history { position: relative; width: 100%; }
+.mobile-tension-history { position: relative; width: min(100% - 2rem, 480px); margin: 0 auto; padding: 1rem 0 4rem; }
 .mobile-tension-history button,
 .mobile-tension-history input { font: inherit; }
 .mobile-tension-history button { min-height: 2.75rem; }
