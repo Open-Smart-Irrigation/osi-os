@@ -24,12 +24,15 @@ export const EXPECTED_SERIES = [
 
 export type FixtureScenario =
   | 'normal'
+  | 'pending-addition'
   | 'missing-source'
   | 'access-denied-source'
   | 'range-too-large'
   | 'transient'
   | 'stale'
   | 'invalid-average'
+  | 'empty-range'
+  | 'finite-outside-viewport'
   | 'auth-401'
   | 'auth-403';
 
@@ -57,7 +60,9 @@ export interface MobileHistoryFixtureOptions {
 export interface MobileHistoryFixture {
   requests: MobileHistoryRequestRecord[];
   unexpectedApiRequests: string[];
+  contractErrors: string[];
   failedRequests: string[];
+  abortedRequests: string[];
   pageErrors: string[];
   consoleErrors: string[];
   setScenario(scenario: FixtureScenario): void;
@@ -143,7 +148,40 @@ function matchingSeriesRows(rows: readonly Record<string, unknown>[], selectors:
   return selectors.map((id) => byId.get(id)).filter((row): row is Record<string, unknown> => row !== undefined);
 }
 
-function seriesResponse(rows: readonly Record<string, unknown>[], body: Record<string, unknown>, scenario: FixtureScenario) {
+const DROPPED_SERIES_ID = EXPECTED_SERIES[EXPECTED_SERIES.length - 1][2];
+
+function validateSeriesRequest(rows: readonly Record<string, unknown>[], body: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const selectors = body.selectors;
+  if (!Array.isArray(selectors) || selectors.length === 0 || selectors.length > 25) {
+    errors.push(`selectors must contain 1..25 entries; got ${Array.isArray(selectors) ? selectors.length : 'non-array'}`);
+  }
+  const ids = Array.isArray(selectors) ? selectors.map((selector) => (selector && typeof selector === 'object' ? String((selector as Record<string, unknown>).seriesId) : '')) : [];
+  if (new Set(ids).size !== ids.length) errors.push('selectors must be unique');
+  const knownIds = new Set(rows.map((row) => String(row.seriesId)));
+  for (const id of ids) if (!knownIds.has(id)) errors.push(`selector ${id} is not in the active catalog`);
+  if (body.aggregation !== 'hourly') errors.push(`aggregation must be hourly; got ${String(body.aggregation)}`);
+  const range = body.range;
+  if (!range || typeof range !== 'object') {
+    errors.push('range must be an object');
+    return errors;
+  }
+  const rangeRecord = range as Record<string, unknown>;
+  if (rangeRecord.mode !== 'custom') errors.push(`range mode must be custom; got ${String(rangeRecord.mode)}`);
+  const from = Date.parse(String(rangeRecord.from));
+  const to = Date.parse(String(rangeRecord.to));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+    errors.push('range bounds must be an increasing ISO interval');
+  } else {
+    if (from % 3_600_000 !== 0 || to % 3_600_000 !== 0) errors.push('edge range bounds must align to UTC hours');
+    const bucketCount = (to - from) / 3_600_000;
+    const expectedLabel = bucketCount <= 25 ? '24h' : bucketCount === 169 ? '7d' : null;
+    if (expectedLabel !== null && rangeRecord.label !== expectedLabel) errors.push(`range label must be ${expectedLabel} for ${bucketCount} hourly transport buckets`);
+  }
+  return errors;
+}
+
+function seriesResponse(rows: readonly Record<string, unknown>[], body: Record<string, unknown>, scenario: FixtureScenario, dropNamedSource: boolean) {
   const range = (body.range ?? {}) as Record<string, unknown>;
   const from = String(range.from);
   const to = String(range.to);
@@ -164,22 +202,22 @@ function seriesResponse(rows: readonly Record<string, unknown>[], body: Record<s
     truncated: false,
     points: Array.from({ length: pointCount }, (_, bucketIndex) => ({
       t: new Date(fromMs + bucketIndex * 3_600_000).toISOString(),
-      value: scenario === 'invalid-average' && bucketIndex === 2 ? -1 : 18 + seriesIndex * 2 + Math.sin(bucketIndex / 6),
+      value: scenario === 'empty-range' || (scenario === 'finite-outside-viewport' && fromMs + (bucketIndex + 1) * 3_600_000 > FIXTURE_NOW - 24 * 3_600_000)
+        ? null
+        : scenario === 'invalid-average' && bucketIndex === 2 ? -1 : 18 + seriesIndex * 2 + Math.sin(bucketIndex / 6),
       count: 1,
       quality: 'ok',
     })),
   });
   let selectedRows = requestedRows;
   let dropped: Array<{ seriesId: string | null; reason: string }> = [];
-  if (scenario === 'missing-source' && selectedRows.length > 0) {
-    const missing = selectedRows[selectedRows.length - 1];
-    selectedRows = selectedRows.slice(0, -1);
-    dropped = [{ seriesId: String(missing.seriesId), reason: 'source_missing' }];
+  if (scenario === 'missing-source' && dropNamedSource && selectedRows.some((row) => String(row.seriesId) === DROPPED_SERIES_ID)) {
+    selectedRows = selectedRows.filter((row) => String(row.seriesId) !== DROPPED_SERIES_ID);
+    dropped = [{ seriesId: DROPPED_SERIES_ID, reason: 'source_missing' }];
   }
-  if (scenario === 'access-denied-source' && selectedRows.length > 0) {
-    const denied = selectedRows[selectedRows.length - 1];
-    selectedRows = selectedRows.slice(0, -1);
-    dropped = [{ seriesId: String(denied.seriesId), reason: 'access_denied' }];
+  if (scenario === 'access-denied-source' && dropNamedSource && selectedRows.some((row) => String(row.seriesId) === DROPPED_SERIES_ID)) {
+    selectedRows = selectedRows.filter((row) => String(row.seriesId) !== DROPPED_SERIES_ID);
+    dropped = [{ seriesId: DROPPED_SERIES_ID, reason: 'access_denied' }];
   }
   return {
     generatedAt: new Date(FIXTURE_NOW).toISOString(),
@@ -199,11 +237,16 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
   const rows = sourceRows(Math.max(0, (options.catalogRows ?? 8) - 8));
   const requests: MobileHistoryRequestRecord[] = [];
   const unexpectedApiRequests: string[] = [];
+  const contractErrors: string[] = [];
   const failedRequests: string[] = [];
+  const abortedRequests: string[] = [];
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   let scenario = options.scenario ?? 'normal';
+  let scenarioFailureConsumed = false;
+  let delayedSeriesRequestNumber: number | null = scenario === 'stale' ? 1 : null;
   let disposed = false;
+  const recordsByRequest = new WeakMap<Request, MobileHistoryRequestRecord>();
 
   await page.addInitScript(({ now, token }) => {
     localStorage.setItem('auth_token', token);
@@ -214,7 +257,18 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('requestfailed', (request) => {
-    if (isApiPath(new URL(request.url()).pathname)) failedRequests.push(`${request.method()} ${new URL(request.url()).pathname}: ${request.failure()?.errorText ?? 'failed'}`);
+    if (!isApiPath(new URL(request.url()).pathname)) return;
+    const matching = recordsByRequest.get(request);
+    const detail = request.failure()?.errorText ?? 'failed';
+    const entry = `${request.method()} ${new URL(request.url()).pathname}: ${detail}`;
+    if (ABORTED.test(detail)) {
+      abortedRequests.push(entry);
+      if (matching) {
+        matching.releasedAt = Date.now();
+        matching.outcome = 'aborted';
+      }
+    }
+    else failedRequests.push(entry);
   });
 
   const record = (route: Route, role: string, body: unknown): MobileHistoryRequestRecord => {
@@ -225,6 +279,7 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
       status: null, bytes: 0, delayMs: 0, role, outcome: null,
     };
     requests.push(value);
+    recordsByRequest.set(request, value);
     return value;
   };
 
@@ -235,9 +290,11 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
     if (delayed && recordValue.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, recordValue.delayMs));
     try {
       await route.fulfill({ status, contentType: 'application/json; charset=utf-8', body: payload });
-      recordValue.status = status;
-      recordValue.releasedAt = Date.now();
-      recordValue.outcome = 'fulfilled';
+      if (recordValue.outcome !== 'aborted') {
+        recordValue.status = status;
+        recordValue.releasedAt = Date.now();
+        recordValue.outcome = 'fulfilled';
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       recordValue.releasedAt = Date.now();
@@ -280,12 +337,19 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
       await fulfillJson(route, item, status, status === 200 ? { generatedAt: new Date(FIXTURE_NOW).toISOString(), channels: rows } : { code: status === 500 ? 'temporary_failure' : 'access_denied', detail: status === 500 ? 'temporary fixture failure' : 'fixture authorization response' }, true);
     } else {
       const item = record(route, `series-${requests.filter((entry) => entry.pathname === path).length + 1}`, body);
+      const requestErrors = validateSeriesRequest(rows, body ?? {});
+      if (requestErrors.length > 0) {
+        contractErrors.push(...requestErrors.map((error) => `${item.role}: ${error}`));
+      }
       const status = scenario === 'auth-401' ? 401 : scenario === 'auth-403' ? 403 : scenario === 'range-too-large' ? 413 : scenario === 'transient' ? 500 : 200;
       if (status !== 200) {
         await fulfillJson(route, item, status, { code: status === 413 ? 'range_too_large' : status === 500 ? 'temporary_failure' : 'access_denied', detail: 'fixture response' }, false);
       } else {
-        const delay = scenario === 'stale' && requests.filter((entry) => entry.pathname === path).length === 1 ? 1_800 : true;
-        await fulfillJson(route, item, status, seriesResponse(rows, body ?? {}, scenario), delay);
+        const seriesRequestNumber = requests.filter((entry) => entry.pathname === path).length;
+        const delay = (scenario === 'stale' || scenario === 'pending-addition') && seriesRequestNumber === delayedSeriesRequestNumber ? 5_000 : true;
+        const dropNamedSource = !scenarioFailureConsumed;
+        await fulfillJson(route, item, status, seriesResponse(rows, body ?? {}, scenario, dropNamedSource), delay);
+        if (scenario === 'missing-source' || scenario === 'access-denied-source') scenarioFailureConsumed = true;
       }
     }
   };
@@ -294,16 +358,29 @@ export async function installMobileHistoryFixtures(page: Page, options: MobileHi
 
   const dispose = async () => {
     disposed = true;
-    await page.unroute('**/*', routeHandler);
+    try {
+      await page.unroute('**/*', routeHandler);
+    } catch (error) {
+      if (!/Target page, context or browser has been closed/i.test(String(error))) throw error;
+    }
   };
 
   return {
     requests,
     unexpectedApiRequests,
+    contractErrors,
     failedRequests,
+    abortedRequests,
     pageErrors,
     consoleErrors,
-    setScenario(next) { scenario = next; },
+    setScenario(next) {
+      scenario = next;
+      scenarioFailureConsumed = false;
+      delayedSeriesRequestNumber = next === 'stale'
+        || next === 'pending-addition'
+        ? requests.filter((entry) => entry.pathname === '/api/analysis/series').length + 1
+        : null;
+    },
     seriesRequests: () => requests.filter((request) => request.pathname === '/api/analysis/series'),
     catalogRequests: () => requests.filter((request) => request.pathname === '/api/analysis/channels'),
     async waitForSeries(count = 1) {
