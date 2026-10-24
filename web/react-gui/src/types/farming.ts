@@ -382,6 +382,159 @@ export interface UpdateIrrigationScheduleRequest {
   response_mode?: string;
 }
 
+// ---- Conditional irrigation policy types -----------------------------------
+// These are the GUI's normalized shapes.  The edge and cloud send snake_case
+// wire fields; services/api.ts owns that boundary so components do not branch
+// on transport spelling.
+export type IrrigationPolicyKind = 'SWT' | 'VWC' | 'DENDRO';
+export type IrrigationPolicyExecution = 'conditional' | 'always';
+
+export interface IrrigationPolicySourceRef {
+  deviceEui: string;
+  channel: string;
+}
+
+export interface IrrigationPolicySourceChoiceBase {
+  kind: IrrigationPolicyKind;
+  eligible: boolean;
+  reason?: string | null;
+  name?: string | null;
+  depthCm?: number | null;
+}
+
+export interface IrrigationPolicySensorSourceChoice extends IrrigationPolicySourceChoiceBase, IrrigationPolicySourceRef {
+  kind: 'SWT' | 'VWC';
+  typeId?: DeviceType | string | null;
+}
+
+export interface IrrigationPolicyDendroAvailability extends IrrigationPolicySourceChoiceBase {
+  kind: 'DENDRO';
+  state?: string | null;
+  sources: IrrigationPolicySourceRef[];
+}
+
+export type IrrigationPolicySourceChoice = IrrigationPolicySensorSourceChoice | IrrigationPolicyDendroAvailability;
+
+export interface SwtPolicyCondition {
+  kind: 'SWT';
+  thresholdKpa: number | null;
+  sources: IrrigationPolicySourceRef[];
+}
+
+export interface VwcPolicyCondition {
+  kind: 'VWC';
+  thresholdPercent: number | null;
+  sources: IrrigationPolicySourceRef[];
+}
+
+export interface DendroPolicyCondition {
+  kind: 'DENDRO';
+  minimumStress: DendroStressThreshold | string | null;
+  responseMode: 'fixed' | 'proportional' | string | null;
+}
+
+export type IrrigationPolicyCondition = SwtPolicyCondition | VwcPolicyCondition | DendroPolicyCondition;
+
+export interface IrrigationPolicyDeliverySetting {
+  deliveryIntervalMinutes: number;
+}
+
+export interface IrrigationPolicy {
+  policyUuid: string;
+  zoneUuid: string;
+  condition: IrrigationPolicyCondition;
+  timezone: string | null;
+  enabled: boolean;
+  observationWindowMinutes: number;
+  minIntervalMinutes: number;
+  maxDailyMinutes: number;
+  deliverySettings: Record<string, IrrigationPolicyDeliverySetting>;
+  effectiveFrom?: string | null;
+  syncVersion: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface IrrigationPolicySchedule {
+  scheduleUuid: string;
+  expectedSyncVersion?: number | null;
+  syncVersion?: number | null;
+  deviceEui: string;
+  kind: 'WEEKLY' | 'ONCE';
+  weekdaysMask?: number | null;
+  startTime?: string | null;
+  fireAt?: string | null;
+  durationMinutes: number;
+  timezone?: string | null;
+  enabled: boolean;
+  execution?: IrrigationPolicyExecution | null;
+  label?: string | null;
+  conditionPolicyUuid?: string | null;
+  effectiveFrom?: string | null;
+  deletedAt?: string | null;
+}
+
+export type IrrigationPolicyAvailability = 'unavailable' | 'clock_untrusted' | 'stale' | 'fresh' | string;
+
+export interface IrrigationPolicyRuntimeValve {
+  deviceEui: string;
+  availability?: IrrigationPolicyAvailability | null;
+  update?: { state: string; ready: boolean; reason?: string | null } | null;
+  incident?: Record<string, unknown> | null;
+  clock?: Record<string, unknown> | null;
+  [key: string]: unknown;
+}
+
+export interface IrrigationPolicyRuntime {
+  availability: IrrigationPolicyAvailability;
+  projectionRevision?: number | string | null;
+  asOf?: string | null;
+  validUntil?: string | null;
+  clock?: { trusted?: boolean | null; reason?: string | null; [key: string]: unknown } | null;
+  eligibleSources: IrrigationPolicySourceChoice[];
+  sourceChoices: Record<IrrigationPolicyKind, IrrigationPolicySourceChoice[]>;
+  qualification?: Record<string, unknown> | null;
+  valves: IrrigationPolicyRuntimeValve[];
+  nextCheck?: string | null;
+  lastResult?: Record<string, unknown> | null;
+  legacyProcessTimezone?: string | null;
+  /** R17-M1 / D18: the edge VWC gate (app_settings conditional_irrigation_vwc_enabled); absent = off. */
+  vwcConditionEnabled?: boolean;
+  /** Why the current policy is inactive, e.g. 'vwc_condition_disabled'. */
+  inactiveReason?: string | null;
+  [key: string]: unknown;
+}
+
+export interface IrrigationPolicyPending {
+  policyEdit?: Record<string, unknown> | null;
+  actions: Array<Record<string, unknown>>;
+}
+
+export interface IrrigationPolicyView {
+  zone: { id?: number | null; zoneUuid: string | null; name: string; timezone: string | null };
+  policy: IrrigationPolicy | null;
+  schedules: IrrigationPolicySchedule[];
+  pending: IrrigationPolicyPending;
+  runtime: IrrigationPolicyRuntime;
+  /** HTTP result for the most recent edge mutation; 202 means work is queued. */
+  httpStatus?: number;
+}
+
+export interface IrrigationPolicyPauseAction {
+  status: number;
+  policy: Record<string, unknown> | null;
+  cancellations: Array<Record<string, unknown>>;
+  activeExpectations: Array<Record<string, unknown>>;
+  httpStatus?: number;
+}
+
+export interface IrrigationPolicyRetryAction {
+  status: number;
+  deviceEui: string;
+  result: Record<string, unknown>;
+  httpStatus?: number;
+}
+
 // ---- Irrigation zone types ----
 export interface IrrigationZone {
   id: number;
@@ -1012,6 +1165,10 @@ export interface ValveSchedule {
   dispatchCommandId?: string | null;
   dispatchCreatedAt?: string | null;
   dispatchAttemptedAt?: string | null;
+  syncVersion?: number | null;
+  conditionPolicyUuid?: string | null;
+  effectiveFrom?: string | null;
+  execution?: IrrigationPolicyExecution | null;
 }
 
 export interface ValveCompiledWindow {

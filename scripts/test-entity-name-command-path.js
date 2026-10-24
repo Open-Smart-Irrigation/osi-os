@@ -533,6 +533,8 @@ test('both command types are in the registry and in the fallback table, on both 
   }
 });
 
+// The scheduling branch appends conditional_irrigation_v1 (the conditional irrigation replication
+// contract) to the same static list in all three builders.
 test('all three capability builders advertise entity_name_commands_v1 and both zone capabilities, on both profiles', () => {
   for (const profile of PROFILES) {
     const flows = loadFlows(profile);
@@ -540,7 +542,7 @@ test('all three capability builders advertise entity_name_commands_v1 and both z
       const node = flows.find((n) => n.id === id);
       assert.match(
         node.func,
-        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1'\];/,
+        /const syncCapabilities = \['linked_auth_sync_v1', 'force_edge_sync_v1', 'installation_recovery_v1', 'installation_locations_v1', 'entity_name_commands_v1', 'zone_config_weather_source_v1', 'zone_config_stage_started_on_v1', 'watermark_v1', 'chameleon_config_commands_v1', 'device_soil_depth_commands_v1', 'conditional_irrigation_v1'\];/,
         profile + ' ' + id
       );
     }

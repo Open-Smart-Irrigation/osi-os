@@ -34,7 +34,29 @@ function idOf(name) {
   assert.equal(matches.length, 1, 'one node named ' + name);
   return matches[0].id;
 }
-const valveControl = require(path.join(NODE_RED, 'osi-valve-control'));
+const rawValveControl = require(path.join(NODE_RED, 'osi-valve-control'));
+
+// Every STREGA write on this branch leaves through the ChirpStack transport (dispatch owners);
+// the MQTT downlink node is no longer a STREGA output. A timed open is only attempted with a
+// trusted runtime clock, so the harness supplies a fixture clock marker (the technique of
+// test-conditional-irrigation-writer-wrappers.js and test-scoped-access-writes.js).
+function trustedRuntime() {
+  const anchor = Date.now();
+  const bootId = 'valve-safety-path-boot';
+  const fsFixture = { readFileSync(file) {
+    if (file === '/proc/sys/kernel/random/boot_id') return bootId + '\n';
+    if (file === '/proc/uptime') return `${(Date.now() - anchor) / 1000} 0\n`;
+    if (file === '/var/run/osi-irrigation-clock.json') return JSON.stringify({ boot_id: bootId, epoch_ms: anchor, uptime_ms: 0, stratum: 1 });
+    throw Object.assign(new Error('missing test clock path'), { code: 'ENOENT' });
+  } };
+  return { clockOptions: { fs: fsFixture, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime',
+    markerPath: '/var/run/osi-irrigation-clock.json', rejectionPath: '/tmp/valve-safety-path-rejection.json',
+    fallbackPath: '/tmp/valve-safety-path-rejection-fallback.json' } };
+}
+const valveControl = { ...rawValveControl, executeValveAttempt(args) {
+  return rawValveControl.executeValveAttempt({ ...args, trustedContext: trustedRuntime() });
+} };
+const TRANSPORT = 'chirpstack-transport';
 
 const GATEWAY = '0016C001F1000001';
 const VALVE = 'A840410000000001';
@@ -99,7 +121,7 @@ function fakeChirpstack(queue) {
       return { id: 'q-' + calls.enqueued.length };
     },
   };
-  return { calls, lib: { createProvisioningClientFromEnv: () => client } };
+  return { calls, lib: { calls, createProvisioningClientFromEnv: () => client } };
 }
 
 // Runs one node, then follows its wires. Returns every message that left the
@@ -107,6 +129,9 @@ function fakeChirpstack(queue) {
 async function drive(db, startId, msg, options = {}) {
   const outputs = [];
   const warnings = [];
+  // A ChirpStack fake is always present (production always has a transport or fails closed).
+  const chirpstack = options.chirpstack || fakeChirpstack([]).lib;
+  const transportCalls = chirpstack.calls || null;
   const queue = [{ nodeId: startId, msg }];
   while (queue.length) {
     const { nodeId, msg: current } = queue.shift();
@@ -122,7 +147,7 @@ async function drive(db, startId, msg, options = {}) {
       db,
       flowState: options.flowState || {},
       osiLibModules: { 'osi-valve-control': valveControl },
-      libOverrides: options.chirpstack ? { chirpstack: options.chirpstack } : {},
+      libOverrides: { chirpstack },
     });
     warnings.push(...run.warnings);
     if (run.errors.length) warnings.push(...run.errors.map((e) => 'ERROR ' + e));
@@ -146,6 +171,8 @@ async function drive(db, startId, msg, options = {}) {
       }
     });
   }
+  // Every downlink the transport accepted is an output too (TRANSPORT), so stregaDownlinks sees it.
+  for (const item of (transportCalls ? transportCalls.enqueued : [])) outputs.push({ nodeId: TRANSPORT, msg: { payload: item } });
   return { outputs, warnings };
 }
 
@@ -165,16 +192,27 @@ async function deliver(db, commands, options = {}) {
   return drive(db, 'sync-pending-split', { statusCode: 200, payload: commands }, Object.assign({}, options, { flowState }));
 }
 
+// The downlinks a valve would receive: everything the ChirpStack transport accepted. A STREGA
+// frame on the MQTT downlink node would bypass the dispatch owners, so none may appear there.
 function stregaDownlinks(outputs) {
+  const mqtt = outputs.filter((o) => o.nodeId === DOWNLINK_OUT);
+  assert.deepEqual(mqtt, [], 'no STREGA downlink leaves over MQTT on the transport path');
   return outputs
-    .filter((o) => o.nodeId === DOWNLINK_OUT)
-    .map((o) => ({ fPort: o.msg.payload.fPort, bytes: [...Buffer.from(o.msg.payload.data, 'base64')] }));
+    .filter((o) => o.nodeId === TRANSPORT)
+    .map((o) => ({ fPort: Number(o.msg.payload.fPort), bytes: [...Buffer.from(o.msg.payload.data, 'base64')] }));
 }
 
 function ackRows(db, commandId) {
   return db.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id = ?')
     .all(String(commandId))
     .map((row) => JSON.parse(row.payload_json));
+}
+
+// Transport evidence for a fixture open: handed to ChirpStack as `queueId` (W8 B-1: a cancel only
+// marks CANCELLED what the pre-flush queue snapshot proves unsent).
+function handedOff(db, expectationId, queueId) {
+  db.prepare('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?')
+    .run(JSON.stringify({ phase: 'ACCEPTED', queue_id: queueId, attempted_at: '2026-10-01T10:00:00.100Z' }), expectationId);
 }
 
 function soon(ms) {
@@ -333,6 +371,10 @@ test('stop commands execute with the gateway clock ten minutes ahead of their ex
       "INSERT INTO valve_actuation_expectations (expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) " +
       "VALUES ('901', ?, '901', '2026-10-01T10:00:00.000Z', 600, '2026-10-01T10:12:00.000Z', 'unknown', 'PENDING_OBSERVATION', '2026-10-01T10:00:00.000Z')"
     ).run(VALVE);
+    // The open was handed to ChirpStack as queue item q-a (transport evidence), so the cancel's
+    // pre-flush queue snapshot can prove it unsent and mark it CANCELLED (W8 B-1).
+    db.prepare('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?')
+      .run(JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-a', attempted_at: '2026-10-01T10:00:00.100Z' }), '901');
     const queue = [{ id: 'q-a', fPort: 2, data: Buffer.from([0x41, 10]).toString('base64'), confirmed: false, isPending: false, isEncrypted: false }];
     const fake = fakeChirpstack(queue);
     await deliver(db, [pendingCommand(572, 'CANCEL_VALVE_ACTUATION', {
@@ -472,6 +514,8 @@ test('a cancel for actuation A leaves actuation B pending, never queues B\'s ope
     );
     insert.run('701', VALVE, '701', '2026-10-01T10:00:00.000Z', '2026-10-01T10:12:00.000Z', '2026-10-01T10:00:00.000Z');
     insert.run('702', VALVE, '702', '2026-10-01T10:01:00.000Z', '2026-10-01T10:13:00.000Z', '2026-10-01T10:01:00.000Z');
+    handedOff(db, '701', 'q-a');
+    handedOff(db, '702', 'q-b');
     const open = Buffer.from([0x41, 10]).toString('base64');
     const plan = Buffer.from([0x01, 0x02, 0x03]).toString('base64');
     const queue = [
@@ -487,11 +531,16 @@ test('a cancel for actuation A leaves actuation B pending, never queues B\'s ope
     const states = Object.fromEntries(db.prepare('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations').all()
       .map((r) => [r.expectation_id, r.reconciliation_state]));
     assert.deepEqual(states, { 701: 'CANCELLED', 702: 'PENDING_OBSERVATION' });
-    assert.deepEqual(queue.map((item) => [item.fPort, item.data]), [[10, plan]],
-      'the plan push is queued again; B\'s open, which may already have been sent, is never queued again');
+    // Owner decision D19/Q01 = (a): with the ChirpStack transport a cancel is a whole-queue flush
+    // and nothing is rebuilt or replayed, so the plan item is not queued again either (it is
+    // reported as collateral instead; a lost plan is surfaced, never re-sent: Q02 c).
+    // B's open, which may already have been sent, is never queued again.
+    assert.deepEqual(queue, [], 'nothing is queued again after the flush');
+    assert.equal(fake.calls.enqueued.length, 0, 'the cancel never transmits, not even B\'s open');
     const ack = ackRows(db, 703)[0];
     assert.equal(ack.result, 'APPLIED');
-    assert.equal(ack.reason, 'dropped_opens=1 expectation_ids=702', 'the cloud ACK names the actuation whose open was taken out');
+    assert.match(String(ack.reason), /outcome=cancelled/);
+    assert.match(String(ack.reason), /expectation:702/, 'the cloud ACK names the actuation whose open was taken out');
   } finally {
     db.close();
   }
@@ -541,6 +590,8 @@ test('the local cancel route reports the other open it took out of the queue', a
     );
     insert.run('731', VALVE, '731', '2026-10-01T10:00:00.000Z', '2026-10-01T10:12:00.000Z', '2026-10-01T10:00:00.000Z');
     insert.run('732', VALVE, '732', '2026-10-01T10:01:00.000Z', '2026-10-01T10:13:00.000Z', '2026-10-01T10:01:00.000Z');
+    handedOff(db, '731', 'q-a');
+    handedOff(db, '732', 'q-b');
     const open = Buffer.from([0x41, 10]).toString('base64');
     const queue = [
       { id: 'q-a', fPort: 2, data: open, confirmed: false, isPending: false, isEncrypted: false },

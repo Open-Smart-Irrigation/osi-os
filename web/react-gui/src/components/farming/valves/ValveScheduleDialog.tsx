@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
 import { valvesAPI, ValvePlanConflictError } from '../../../services/api';
 import { formatDateTime as formatDateTimeIn, formatTime } from '../../../utils/datetime';
+import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 import { estimateLiters, maskFromWeekdays, sortWeekdaysForDisplay, weekdaysFromMask, WEEKDAY_DISPLAY_ORDER, windowEnd } from './valveState';
 
 export interface ValveScheduleDialogProps {
@@ -11,6 +12,7 @@ export interface ValveScheduleDialogProps {
   open: boolean;
   onClose: () => void;
   onChanged: () => void;
+  onOpenPolicyEditor?: (schedule: ValveSchedule) => void;
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -138,7 +140,7 @@ interface OnceFormState {
 const EMPTY_WEEKLY: WeeklyFormState = { days: [], startTime: '06:00', duration: '30', label: '' };
 const EMPTY_ONCE: OnceFormState = { date: '', time: '06:00', duration: '15', label: '' };
 
-export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve, open, onClose, onChanged }) => {
+export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve, open, onClose, onChanged, onOpenPolicyEditor }) => {
   const { t, i18n } = useTranslation('valves');
   const { t: tc } = useTranslation('common');
   // i18next's typed `t` only accepts the literal key union derived from valves.json, so any
@@ -472,32 +474,45 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                           )}
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
-                          <label className="flex min-h-[44px] items-center gap-1.5 px-1.5 text-xs text-[var(--text-secondary)] sm:min-h-0 sm:px-0">
-                            <input
-                              type="checkbox"
-                              checked={schedule.enabled}
-                              disabled={rowBusyUuid === schedule.scheduleUuid}
-                              onChange={() => void toggleEnabled(schedule)}
-                              className="h-4 w-4"
-                            />
-                            {t('scheduleDialog.enabled')}
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => startEdit(schedule)}
-                            disabled={rowBusyUuid === schedule.scheduleUuid}
-                            className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--text-secondary)] underline transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
-                          >
-                            {t('scheduleDialog.edit')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void deleteRow(schedule)}
-                            disabled={rowBusyUuid === schedule.scheduleUuid}
-                            className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
-                          >
-                            {t('scheduleDialog.delete')}
-                          </button>
+                          {isConditionalSchedule(schedule) ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenPolicyEditor?.(schedule)}
+                              disabled={!onOpenPolicyEditor}
+                              className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--primary)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
+                            >
+                              {t('irrigationPolicy.openEditor', { defaultValue: 'Edit conditional policy' })}
+                            </button>
+                          ) : (
+                            <>
+                              <label className="flex min-h-[44px] items-center gap-1.5 px-1.5 text-xs text-[var(--text-secondary)] sm:min-h-0 sm:px-0">
+                                <input
+                                  type="checkbox"
+                                  checked={schedule.enabled}
+                                  disabled={rowBusyUuid === schedule.scheduleUuid}
+                                  onChange={() => void toggleEnabled(schedule)}
+                                  className="h-4 w-4"
+                                />
+                                {t('scheduleDialog.enabled')}
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => startEdit(schedule)}
+                                disabled={rowBusyUuid === schedule.scheduleUuid}
+                                className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--text-secondary)] underline transition-colors hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
+                              >
+                                {t('scheduleDialog.edit')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void deleteRow(schedule)}
+                                disabled={rowBusyUuid === schedule.scheduleUuid}
+                                className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
+                              >
+                                {t('scheduleDialog.delete')}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </li>
                     ))}

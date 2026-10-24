@@ -4,10 +4,12 @@ import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary } from '../../../types/farming';
 import { valvesAPI } from '../../../services/api';
 import { sortWeekdaysForDisplay, weekdaysFromMask, windowEnd } from './valveState';
+import { isConditionalSchedule } from '../../../utils/irrigationPolicy';
 
 export interface ValveScheduleOverviewProps {
   valves: ValveSummary[];
   onOpenValve: (valve: ValveSummary) => void;
+  onOpenPolicyEditor?: (valve: ValveSummary, schedule: ValveSchedule) => void;
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -23,7 +25,7 @@ type Translate = (key: string, options?: Record<string, unknown>) => string;
  * (device_eui) index and measured ~3 ms at 100-device scale, so the request count is the only
  * cost, and it is paid once per valve on one screen.
  */
-const ValveScheduleRow: React.FC<{ valve: ValveSummary; onOpen: () => void }> = ({ valve, onOpen }) => {
+const ValveScheduleRow: React.FC<{ valve: ValveSummary; onOpen: () => void; onOpenPolicyEditor?: (schedule: ValveSchedule) => void }> = ({ valve, onOpen, onOpenPolicyEditor }) => {
   const { t } = useTranslation('valves');
   const td = t as Translate;
   const { data, error } = useSWR(
@@ -76,6 +78,11 @@ const ValveScheduleRow: React.FC<{ valve: ValveSummary; onOpen: () => void }> = 
               <span className="font-mono">{describe(s)}</span>
               {s.label && <span className="text-[var(--text-tertiary)]"> · {s.label}</span>}
               {!s.enabled && <span className="text-[var(--text-tertiary)]"> · {t('overview.off')}</span>}
+              {isConditionalSchedule(s) && onOpenPolicyEditor && (
+                <button type="button" onClick={() => onOpenPolicyEditor(s)} className="ml-2 min-h-11 font-semibold text-[var(--primary)] underline sm:min-h-0">
+                  {t('irrigationPolicy.openEditor', { defaultValue: 'Edit conditional policy' })}
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -84,7 +91,7 @@ const ValveScheduleRow: React.FC<{ valve: ValveSummary; onOpen: () => void }> = 
   );
 };
 
-export const ValveScheduleOverview: React.FC<ValveScheduleOverviewProps> = ({ valves, onOpenValve }) => {
+export const ValveScheduleOverview: React.FC<ValveScheduleOverviewProps> = ({ valves, onOpenValve, onOpenPolicyEditor }) => {
   const { t } = useTranslation('valves');
   if (valves.length === 0) return null;
 
@@ -93,7 +100,7 @@ export const ValveScheduleOverview: React.FC<ValveScheduleOverviewProps> = ({ va
       <h3 className="text-sm font-semibold text-[var(--text)]">{t('overview.title')}</h3>
       <ul className="mt-2">
         {valves.map((valve) => (
-          <ValveScheduleRow key={valve.deviceEui} valve={valve} onOpen={() => onOpenValve(valve)} />
+          <ValveScheduleRow key={valve.deviceEui} valve={valve} onOpen={() => onOpenValve(valve)} onOpenPolicyEditor={onOpenPolicyEditor ? schedule => onOpenPolicyEditor(valve, schedule) : undefined} />
         ))}
       </ul>
     </section>

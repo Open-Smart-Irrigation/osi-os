@@ -37,6 +37,11 @@ const VALVE_CANCEL_BUTTON = path.join(REPO, 'web/react-gui/src/components/farmin
 const FARMING_TYPES = path.join(REPO, 'web/react-gui/src/types/farming.ts');
 const CHIRPSTACK_HELPER = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js');
 const CANCEL_JS = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js');
+const VALVE_CONTROL_ROOT = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control');
+const STREGA_AUTHORIZE_JS = path.join(VALVE_CONTROL_ROOT, 'live-authorize.js');
+const STREGA_TRANSPORT_JS = path.join(VALVE_CONTROL_ROOT, 'live-transport.js');
+const STREGA_DISPATCH_JS = path.join(VALVE_CONTROL_ROOT, 'dispatch.js');
+const STREGA_CLOUD_COMMANDS_JS = path.join(VALVE_CONTROL_ROOT, 'cloud-commands.js');
 
 function readFlows() {
     return JSON.parse(fs.readFileSync(FLOWS, 'utf8'));
@@ -177,22 +182,42 @@ function assertRouteHandlesSafeValveCommands() {
 
 function assertWriteExpectation() {
     const node = assertFunctionNode('Write STREGA Expectation');
-    assertAsyncOsiDb(node);
-    const required = [
-        'valve_actuation_expectations',
-        'isTimedOpen',
-        'commanded_duration_seconds',
-        'expected_close_at',
-        'estimated_gross_liters',
-        'volume_source',
-        'effect_key',
-        'measured_flow_meter',
-        'estimated_duration_flow_rate',
-    ];
-    for (const k of required) {
-        if (!node.func.includes(k)) throw new Error(`"Write STREGA Expectation" missing reference to ${k}`);
+    assertNodeLib(node, 'osiDb', 'osi-db-helper');
+    assertNodeLib(node, 'osiLib', 'osi-lib');
+    const wrapper = node.func || '';
+    if (!/osiLib\.require\('osi-valve-control'\)/.test(wrapper) ||
+        !/live\.value\.liveWriteExpectation\(\{msg,node,env,flow,osiDb,crypto,osiLib\}\)/.test(wrapper)) {
+        throw new Error('"Write STREGA Expectation" must delegate authorization to the shipped osi-valve-control liveWriteExpectation module');
     }
-    console.log('  ok Write-expectation node present and references required fields');
+
+    // The Node-RED node is an adapter. Authorization and calibration live in
+    // live-authorize.js, while the sole expectation owner and DB transaction
+    // live in dispatch.js behind live-transport.js. Check each seam directly
+    // so an old inline SQL assertion cannot pass after the owner moved.
+    const authorize = fs.readFileSync(STREGA_AUTHORIZE_JS, 'utf8');
+    const transport = fs.readFileSync(STREGA_TRANSPORT_JS, 'utf8');
+    const dispatch = fs.readFileSync(STREGA_DISPATCH_JS, 'utf8');
+    for (const required of [
+        'new osiDb.Database', 'isTimedOpen', 'estimated_gross_liters', 'volume_source',
+        'effect_key', 'measured_flow_meter', 'estimated_duration_flow_rate',
+        'msg._stregaDispatchCommand',
+    ]) {
+        if (!authorize.includes(required)) throw new Error(`live-authorize.js missing STREGA authorization contract ${required}`);
+    }
+    for (const required of [
+        "VC.executeValveAttempt({", "db: db", 'msg._stregaDispatchCommand',
+        "new dbLoad.value.Database('/data/db/farming.db')",
+    ]) {
+        if (!transport.includes(required)) throw new Error(`live-transport.js missing downstream owner handoff ${required}`);
+    }
+    for (const required of [
+        'function executeValveAttempt', 'withValveWriter', 'INSERT INTO valve_actuation_expectations',
+        'commanded_duration_seconds', 'expected_close_at', 'estimated_gross_liters',
+        'volume_source', 'effect_key', 'flow_rate_source', 'reconciliation_state',
+    ]) {
+        if (!dispatch.includes(required)) throw new Error(`dispatch.js missing expectation owner contract ${required}`);
+    }
+    console.log('  ok Write-expectation adapter delegates authorization to the live module and the actual DB/owner path persists the required fields');
 }
 
 function assertReconciliationMonitor() {
@@ -209,9 +234,13 @@ function assertReconciliationMonitor() {
     );
     if (!monitor) throw new Error('Missing function node "STREGA Reconciliation Monitor"');
     assertAsyncOsiDb(monitor);
+    if (!/runReconciliationTick/.test(monitor.func || '') || !/osiLib\.require\('osi-valve-control'\)/.test(monitor.func || '')) {
+        throw new Error('Reconciliation monitor must delegate state transitions to osi-valve-control.runReconciliationTick');
+    }
+    const workerSource = fs.readFileSync(path.join(VALVE_CONTROL_ROOT, 'workers.js'), 'utf8');
     for (const state of ['OBSERVED_RUNNING', 'OBSERVED_COMPLETE', 'STALE_NO_OBSERVATION']) {
-        if (!monitor.func.includes(state)) {
-            throw new Error(`Reconciliation monitor missing state transition: ${state}`);
+        if (!workerSource.includes(state)) {
+            throw new Error(`osi-valve-control/workers.js missing state transition: ${state}`);
         }
     }
     if (monitor.func.match(/issue.*CLOSE/i) || monitor.func.match(/send.*close.*downlink/i)) {
@@ -249,15 +278,37 @@ function assertCancelPath() {
     // CLOSE) against cancel.js directly rather than against this node's source text.
     // #428: a cancel names its actuation and keeps every other queued downlink, so both
     // entry points hand cancel.js the queue reader and writer next to the flush.
-    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'dropped_opens: result.droppedOpens']) {
+    // Night run (W8 B-1): the reply mapping moved into cancel.js cancelHttpResponse(), which carries
+    // dropped_opens and the flush collateral; the node pins the delegation, cancel.js pins the field.
+    for (const required of ['expectationId: body.expectation_id', 'getDeviceQueue(deveui)', 'enqueueDownlink(item)', 'VC.cancelHttpResponse(result, deveui)']) {
         if (!fn.func.includes(required)) {
             throw new Error(`Cancel function must pass the named actuation and the queue reader/writer to cancel.js (${required})`);
         }
     }
     const bridge = assertFunctionNode('Valve Cloud Command Bridge');
-    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'", 'out.detail']) {
+    for (const required of [
+        "osiLib.require('osi-valve-control')",
+        'live.value.liveCloudCommand({msg,node,env,chirpstack,osiLib})',
+    ]) {
         if (!bridge.func.includes(required)) {
-            throw new Error(`Valve Cloud Command Bridge must pass the queue reader/writer and answer permanent refusals (${required})`);
+            throw new Error(`Valve Cloud Command Bridge must delegate to the live valve module (${required})`);
+        }
+    }
+    const wrappers = fs.readFileSync(STREGA_TRANSPORT_JS, 'utf8');
+    for (const required of ['queueClient = client', 'queueClient: queueClient', "'REJECTED_PERMANENT'", 'out.detail', 'VC.applyCloudCommand']) {
+        if (!wrappers.includes(required)) {
+            throw new Error(`live-transport.js must pass the queue client and answer permanent refusals (${required})`);
+        }
+    }
+    const cloudCommands = fs.readFileSync(STREGA_CLOUD_COMMANDS_JS, 'utf8');
+    for (const required of [
+        'readQueue: q &&',
+        'enqueue: q &&',
+        'permanent: !!result.permanent',
+        'dropped_opens=',
+    ]) {
+        if (!cloudCommands.includes(required)) {
+            throw new Error(`cloud-commands.js must preserve cancel queue ownership and permanent refusal details (${required})`);
         }
     }
     if (!fn.func.includes('VC.cancelActuation(')) {
@@ -269,7 +320,7 @@ function assertCancelPath() {
     }
     // Fix rounds: another actuation's open is never queued again (it may already have been
     // sent), and the cancel reports it.
-    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item) && !isUnboundedMoveItem(item)', 'droppedOpens: queue.dropped']) {
+    for (const required of ["'ambiguous_actuation'", "'actuation_not_active'", 'targetQueueIndex', 'WHERE expectation_id = ? AND reconciliation_state IN', '!item.isPending && !isOpenItem(item) && !isUnboundedMoveItem(item)', 'droppedOpens: queue.dropped', 'dropped_opens: r.droppedOpens']) {
         if (!cancelJsSrc.includes(required)) {
             throw new Error(`cancel.js must cancel only the named (or the single active) actuation (${required})`);
         }
@@ -400,7 +451,8 @@ function assertFrontendValveControls() {
     // Cancel result reporting: the top-level panel must surface both outcomes -- a
     // successful cancel updates the shared valve state, a failed one sets a visible error --
     // never a silent fire-and-forget.
-    if (!/catch\s*\{[^}]*setActionError/.test(controlPanel) && !/catch\s*\(\s*\)\s*\{[^}]*setActionError/.test(controlPanel)) {
+    // W29: the catch may bind the error (a refused Resume gets its own message via actionErrorKey).
+    if (!/catch\s*\{[^}]*setActionError/.test(controlPanel) && !/catch\s*\(\s*\w*\s*\)\s*\{[^}]*setActionError/.test(controlPanel)) {
         throw new Error('ValveControlPanel must set a visible error on a failed cancel/action (setActionError in its catch)');
     }
     if (!(controlPanel.includes('onUpdate()') || controlPanel.includes('refresh()'))) {
@@ -443,6 +495,10 @@ const ACTUATOR_PATTERN_FALSE_POSITIVES = [
     // default_open_minutes) via store.upsertSettings() -- the same call the REST PUT
     // /settings route uses, which never sends a downlink. Correctly actuator=false.
     'UPSERT_VALVE_SETTINGS',
+    // Conditional policy retry only clears and re-sends the current fixed schedule
+    // revision after an incident. It does not create a timed OPEN_FOR_DURATION command;
+    // assertConditionalRetryIsProtected below keeps this exemption tied to that seam.
+    'RETRY_IRRIGATION_VALVE',
 ];
 
 function extractRegistryObject(nodeFunc, constName) {
@@ -538,6 +594,28 @@ function assertActuatorsDurationBound(registry) {
     console.log('  ok All actuator commands are duration-bounded or in the close allowlist');
 }
 
+function assertConditionalRetryIsProtected(registry) {
+    const entry = registry.RETRY_IRRIGATION_VALVE;
+    if (!entry || entry.dispatch !== 'conditional_policy_retry' || entry.actuator !== false || entry.requires_duration !== false) {
+        throw new Error('RETRY_IRRIGATION_VALVE must remain a non-actuating conditional_policy_retry with no duration requirement');
+    }
+    const apiPath = path.join(REPO, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.js');
+    const source = fs.readFileSync(apiPath, 'utf8');
+    const start = source.indexOf('async function retryValve');
+    const end = source.indexOf('\nfunction encodeDecisionCursor', start);
+    if (start === -1 || end === -1) throw new Error('retryValve API seam is missing');
+    const retrySource = source.slice(start, end);
+    for (const required of ['prepareClearRevisionTx', "reason: 'retry'", 'sendPreparedRevision']) {
+        if (!retrySource.includes(required)) {
+            throw new Error(`RETRY_IRRIGATION_VALVE must use the protected clear-retry seam (${required})`);
+        }
+    }
+    if (retrySource.includes('OPEN_FOR_DURATION')) {
+        throw new Error('RETRY_IRRIGATION_VALVE must not construct a timed OPEN_FOR_DURATION command');
+    }
+    console.log('  ok conditional policy retry is a protected schedule-clear retry, not a timed valve open');
+}
+
 function assertBareOpenNotInRegistry(registry) {
     if ('OPEN' in registry) {
         throw new Error('Bare "OPEN" must not appear in the command-type registry (use OPEN_FOR_DURATION)');
@@ -557,6 +635,7 @@ function main() {
     assertQueueFlushUsesGrpc();
     assertFrontendValveControls();
     const registry = assertRegistryParity();
+    assertConditionalRetryIsProtected(registry);
     assertActuatorsDurationBound(registry);
     assertBareOpenNotInRegistry(registry);
     console.log('verify-command-safety: OK');

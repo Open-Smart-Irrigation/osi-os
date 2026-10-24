@@ -662,15 +662,41 @@ return (async () => {
   );
 });
 
+// On this branch the scoped assignment router delegates to the lifecycle service
+// (osi-irrigation-policy routes.scopedDeviceAssign + lifecycle applyLifecycleMutation with
+// requireUnassigned). The "only an unassigned device" precondition lives there, in three places:
+// the route's pre-check and the lifecycle's two requireUnassigned checks (before and inside the
+// writer transaction). The mutation removes all three in a copy of the modules root.
+function mutatedModulesRoot(mutations) {
+  const source = path.join(ROOT, path.dirname(PROFILE), 'node-red');
+  const target = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'scoped-access-modules-'));
+  for (const entry of fs.readdirSync(source)) {
+    if (entry === 'node_modules') fs.symlinkSync(path.join(source, entry), path.join(target, entry));
+    else fs.cpSync(path.join(source, entry), path.join(target, entry), { recursive: true });
+  }
+  for (const [relative, from, to, count] of mutations) {
+    const file = path.join(target, relative);
+    const text = fs.readFileSync(file, 'utf8');
+    assert.equal(text.split(from).length - 1, count, relative + ' contains the precondition ' + count + ' time(s)');
+    fs.writeFileSync(file, text.split(from).join(to));
+  }
+  return target;
+}
+
 test('a device assignment that may take a device from another zone fails', async () => {
   const flows = loadFlows();
   const router = flows.find((node) => node.id === 'scoped-device-assign-router');
-  assert.ok(router.func.includes(' AND irrigation_zone_id IS NULL'));
-  router.func = router.func.replace(' AND irrigation_zone_id IS NULL', '');
-  assert.match(
-    await failuresFor(flows, ['assign-device-http']),
-    /assign-device-http.*changes a row outside the caller's scope \(URL .*devices row/
-  );
+  assert.ok(router.func.includes('routes.scopedDeviceAssign'), 'the router delegates to the lifecycle service');
+  const modulesRoot = mutatedModulesRoot([
+    ['osi-irrigation-policy/routes.js', '  if (currentAssignment.irrigation_zone_id != null) {', '  if (false) {', 1],
+    ['osi-irrigation-policy/lifecycle.js', 'input.requireUnassigned && current.irrigation_zone_id != null', 'false', 2],
+  ]);
+  try {
+    const failures = (await findFailures(flows, 'mutation', ALLOWLIST, { only: new Set(['assign-device-http']), modulesRoot })).join('\n');
+    assert.match(failures, /assign-device-http.*changes a row outside the caller's scope \(URL .*devices row/);
+  } finally {
+    fs.rmSync(modulesRoot, { recursive: true, force: true });
+  }
 });
 
 test('a weather station zone set that skips the per-zone check fails', async () => {

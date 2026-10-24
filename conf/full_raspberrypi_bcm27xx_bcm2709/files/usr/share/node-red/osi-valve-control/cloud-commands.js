@@ -9,6 +9,7 @@
 const P = require('./plan');
 const store = require('./store');
 const push = require('./push');
+const dispatch = require('./dispatch');
 const { cancelActuation } = require('./cancel');
 
 async function getDevice(db, eui) {
@@ -32,6 +33,12 @@ function scheduleOwnerMismatch(existing, eui) {
   return !!existing && String(existing.device_eui || '').trim().toUpperCase() !== eui;
 }
 
+const SCHEDULE_BINDING_FIELDS = ['kind', 'label', 'weekdays_mask', 'start_time', 'fire_at', 'duration_minutes', 'timezone', 'enabled', 'once_state', 'once_fired_at', 'condition_policy_uuid', 'effective_from'];
+
+function scheduleBindingChanged(before, next) {
+  return SCHEDULE_BINDING_FIELDS.some((field) => (before && before[field] == null ? null : before && before[field]) !== (next && next[field] == null ? null : next && next[field]));
+}
+
 function onceDispatchMarker(scheduleUuid, fireAt) {
   return 'one_time_open:' + scheduleUuid + ':' + fireAt;
 }
@@ -50,7 +57,7 @@ async function ensureOnceDispatchMarker(db, schedule, intent) {
   );
 }
 
-async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
+async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, transport, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
   if (!eui || !scheduleUuid) return { ok: false, error: 'device_eui and schedule_uuid are required' };
@@ -67,7 +74,7 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   // the SQLite write lock.
   let outcome;
   try {
-    outcome = await db.transaction(async (tx) => {
+    outcome = await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
     const device = await getDevice(tx, eui);
     if (!device) return { ok: false, error: 'not_found' };
     if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
@@ -80,7 +87,10 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
 
     if (cmd.deleted_at) {
       if (!existing) return { ok: true, weekly: false }; // idempotent: nothing to delete
-      if (!existing.deleted_at) await store.softDeleteSchedule(tx, scheduleUuid, eui);
+      if (!existing.deleted_at) {
+        await store.softDeleteSchedule(tx, scheduleUuid, eui);
+        await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_deleted', now });
+      }
       const afterDelete = await tx.get('SELECT deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=?', [scheduleUuid, eui]);
       if (!afterDelete || afterDelete.deleted_at === null) return { ok: false, error: 'not_found' };
       return { ok: true, weekly: existing.kind === 'WEEKLY' };
@@ -137,6 +147,7 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
         }
         const revived = await store.reviveSchedule(tx, scheduleUuid, revivePatch, eui);
         if (!revived) return { ok: false, error: 'not_found' };
+        await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_revived', now });
       } else {
         // Once dispatch history is durable in actuator_log. A stale replay can
         // arrive while a replacement fire_at is live; do not turn that replay
@@ -146,23 +157,27 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
           return { ok: true, weekly: false };
         }
         await store.updateSchedule(tx, scheduleUuid, v.value, eui);
+        if (scheduleBindingChanged(existing, v.value)) await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
       }
     } else {
       await store.insertSchedule(tx, Object.assign(
         { schedule_uuid: scheduleUuid, device_eui: eui, timezone: device.zone_timezone || tzFallback },
         v.value
       ));
+      await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_created', now });
     }
       return { ok: true, weekly: v.value.kind === 'WEEKLY' };
-    });
+    }));
   } catch (error) {
     if (error && error.code === 'once_fire_at_immutable') return { ok: false, error: error.code };
     throw error;
   }
   if (!outcome.ok) return { ok: false, error: outcome.error };
   if (!outcome.weekly) return { ok: true, downlinks: [] };
-  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
-  return { ok: true, downlinks: q.messages || [] };
+  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, transport, warn, timeZoneFallback: tzFallback });
+  const failure = push.transportFailure(q);
+  if (failure) return { ok: false, error: failure.error, phase: failure.phase, detail: failure.detail, downlinks: [] };
+  return compiledOk(q);
 }
 
 // (F144) device_eui is required here, not optional: commands.schema.json's generic rule
@@ -172,7 +187,7 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, warn, now,
 // removing valve Y's irrigation window. Reading it and matching the pair is contract
 // conformance, not a contract change. An unknown uuid keeps its existing answer (not_found);
 // a uuid owned by another valve is the same explicit rejection the upsert path uses.
-async function applyDeleteValveSchedule({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
+async function applyDeleteValveSchedule({ db, cmd, appId, flushQueue, transport, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const scheduleUuid = String(cmd.schedule_uuid || cmd.scheduleUuid || '').trim();
   if (!eui || !scheduleUuid) return { ok: false, error: 'device_eui and schedule_uuid are required' };
@@ -182,23 +197,43 @@ async function applyDeleteValveSchedule({ db, cmd, appId, flushQueue, warn, now,
   );
   if (!existing) return { ok: false, error: 'not_found' };
   if (scheduleOwnerMismatch(existing, eui)) return { ok: false, error: 'schedule_device_mismatch' };
-  await store.softDeleteSchedule(db, scheduleUuid, eui);
-  if (existing.kind !== 'WEEKLY') return { ok: true, downlinks: [] };
-  const q = await push.compileAndQueue({ db, deviceEui: existing.device_eui, appId, force: false, now, flushQueue, warn, timeZoneFallback: tzFallback });
-  return { ok: true, downlinks: q.messages || [] };
+  let deletedKind;
+  await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+    const fresh = await tx.get('SELECT kind, deleted_at FROM valve_schedules WHERE schedule_uuid=? AND UPPER(device_eui)=UPPER(?)', [scheduleUuid, eui]);
+    if (!fresh || fresh.deleted_at !== null) return;
+    deletedKind = fresh.kind;
+    await store.softDeleteSchedule(tx, scheduleUuid, eui);
+    await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_deleted', now });
+  }));
+  if (!deletedKind) return { ok: false, error: 'not_found' };
+  if (deletedKind !== 'WEEKLY') return { ok: true, downlinks: [] };
+  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: false, now, flushQueue, transport, warn, timeZoneFallback: tzFallback });
+  const failure = push.transportFailure(q);
+  if (failure) return { ok: false, error: failure.error, phase: failure.phase, detail: failure.detail, downlinks: [] };
+  return compiledOk(q);
 }
 
-async function applyResendValvePlan({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
+async function applyResendValvePlan({ db, cmd, appId, flushQueue, transport, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
   const device = await getDevice(db, eui);
   if (!device) return { ok: false, error: 'not_found' };
   if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
-  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: true, now, flushQueue, warn, timeZoneFallback: device.zone_timezone || tzFallback });
-  return { ok: true, downlinks: q.messages || [] };
+  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: true, now, flushQueue, transport, warn, timeZoneFallback: device.zone_timezone || tzFallback, resendPurpose: push.LIFECYCLE_CLEAR_RESEND_PURPOSE });
+  const failure = push.transportFailure(q);
+  if (failure) return { ok: false, error: failure.error, phase: failure.phase, detail: failure.detail, downlinks: [] };
+  return compiledOk(q);
 }
 
-async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, now, tzFallback }) {
+// (R13-M4 follow-up) A conversion back to fixed mode behind an active open is pending, not
+// silent: the command ACK's reason names the open the snapshot waits for.
+function compiledOk(q) {
+  const out = { ok: true, downlinks: (q && q.messages) || [] };
+  if (q && q.conversion_waits_for) Object.assign(out, { conversion_waits_for: q.conversion_waits_for, detail: 'conversion_waits_for=' + q.conversion_waits_for });
+  return out;
+}
+
+async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, transport, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   const status = String(cmd.status || '').trim().toUpperCase();
   const code = { ACTIVE: '0', SKIP_TODAY: '1', DEACTIVATED: '2' }[status];
@@ -206,9 +241,9 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
   const device = await getDevice(db, eui);
   if (!device) return { ok: false, error: 'not_found' };
   if (device.type_id !== 'STREGA_VALVE') return { ok: false, error: 'not_a_valve' };
-  // CMD-04 PR0 (C): a snapshot carrying the new status, as the REST route does.
-  // R5 M3: a pause never depends on plan validity. R5 N2: the settings are written inside the
-  // snapshot transaction.
+  // CMD-04 PR0 (C) + R11 probe 2, as the REST route: in fixed mode a snapshot carrying the new
+  // status first (R5 M1/M3/N2); in conditional mode the status appended with no flush
+  // (push.setSchedulerStatus). Never a lone status push behind a flush.
   const tz = device.zone_timezone || tzFallback;
   const lp = P.localParts(now, tz);
   const settingsPatch = {
@@ -217,8 +252,16 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
       ? `${lp.year}-${String(lp.month).padStart(2, '0')}-${String(lp.day).padStart(2, '0')}`
       : null,
   };
-  const q = await push.compileAndQueue({ db, deviceEui: eui, appId, now, flushQueue, warn, settingsPatch, statusOnlyOnConflict: true });
-  return { ok: true, downlinks: q.messages || [] };
+  let q;
+  try {
+    q = await push.setSchedulerStatus({ db, deviceEui: eui, appId, status, settingsPatch, now, flushQueue, transport, warn, timeZoneFallback: tzFallback });
+  } catch (e) {
+    if (e && e.code === 'conditional_readiness_pending') return { ok: false, error: 'conditional_readiness_pending' };
+    throw e;
+  }
+  const failure = push.transportFailure(q);
+  if (failure) return { ok: false, error: failure.error, phase: failure.phase, detail: failure.detail, downlinks: [] };
+  return compiledOk(q);
 }
 
 // Cloud->edge partial settings update: reuses the SAME store.upsertSettings() call api.js's
@@ -232,10 +275,10 @@ async function applySetValveSchedulerStatus({ db, cmd, appId, flushQueue, warn, 
 // accept scheduler_status either (that lives on POST /scheduler-status, i.e.
 // SET_VALVE_SCHEDULER_STATUS) - reject rather than silently ignore, so a cloud sender gets
 // an explicit signal instead of a command that silently did less than it looked like.
-// Unlike SET_STREGA_* generation/model commands elsewhere, the REST route never recompiles
-// or re-pushes a plan when strega_generation changes here (no push.compileAndQueue call in
-// that route), so this applier must not invent one either - downlinks is always [].
-async function applyUpsertValveSettings({ db, cmd, now }) {
+// A generation change is a durable plan transition: after the settings write, the applier
+// invokes the same compile-and-send path as the local settings route, with the supplied
+// transport. Unchanged settings remain a settings-only update and return no downlinks.
+async function applyUpsertValveSettings({ db, cmd, appId, flushQueue, transport, warn, now, tzFallback }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
   const device = await getDevice(db, eui);
@@ -264,14 +307,28 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
     if (!Number.isInteger(n) || n < 1 || n > 255) return { ok: false, error: 'invalid_default_open_minutes' };
     patch.default_open_minutes = n;
   }
-  await store.upsertSettings(db, eui, patch);
+  let generationChanged = false;
+  await dispatch.withValveWriter(eui, () => db.transaction(async (tx) => {
+    const before = await store.getSettings(tx, eui);
+    await store.upsertSettings(tx, eui, patch);
+    generationChanged = Boolean(patch.strega_generation && patch.strega_generation !== before.strega_generation);
+    if (generationChanged) {
+      await push.invalidateLifecycleClearTx(tx, eui, { reason: 'generation_changed', now });
+    }
+  }));
+  if (generationChanged) {
+    const q = await push.compileAndQueue({ db, deviceEui: eui, appId, force: true, now, flushQueue, transport, warn, timeZoneFallback: tzFallback });
+    const failure = push.transportFailure(q);
+    if (failure) return { ok: false, error: failure.error, phase: failure.phase, detail: failure.detail, downlinks: [] };
+    return compiledOk(q);
+  }
   return { ok: true, downlinks: [] };
 }
 
 // Cloud->edge cancel: reuses the SAME core (cancel.js) the REST cancel route uses - one
 // code path, two entry points, same as the four schedule appliers above. No downlink is
-// ever sent to the valve here; cancellation takes the named actuation's open out of the
-// ChirpStack queue and marks it CANCELLED (see cancel.js). expectation_id names the
+// ever sent to the valve here; cancellation flushes the device queue and marks the named
+// actuation CANCELLED only when its open was proven unsent (see cancel.js). expectation_id names the
 // actuation; a cancel without one is accepted only while exactly one actuation is active.
 // ambiguous_actuation and actuation_not_active are permanent refusals (permanent: true),
 // answered REJECTED_PERMANENT by the caller.
@@ -280,21 +337,36 @@ async function applyUpsertValveSettings({ db, cmd, now }) {
 // the queue, detail names them for the command ACK reason (stored by the cloud as free
 // text; capped here at 255 chars, which can cut the id list short), or says unknown when
 // the queue could not be read.
-async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, now, warn }) {
+function collateralLabel(c) {
+  if (c.owner_type === 'push') return 'push:' + (c.purpose || '?') + (c.weekday == null ? '' : ':' + c.weekday);
+  if (c.owner_type === 'expectation') return 'expectation:' + c.owner_id;
+  return (c.owner_type || 'item') + (c.fport == null ? '' : ':fport' + c.fport);
+}
+
+async function applyCancelValveActuation({ db, cmd, flushQueue, queueClient, transport, now, warn }) {
   const eui = String(cmd.device_eui || cmd.deviceEui || '').trim().toUpperCase();
   if (!eui) return { ok: false, error: 'device_eui is required' };
   const expectationId = cmd.expectation_id != null ? cmd.expectation_id : cmd.expectationId;
   const q = queueClient || null;
   const result = await cancelActuation({
-    db, deviceEui: eui, expectationId, reason: cmd.reason, flushQueue, now, warn,
+    db, deviceEui: eui, expectationId, reason: cmd.reason, flushQueue, transport, now, warn,
     readQueue: q && ((e) => q.getDeviceQueue(e)),
     enqueue: q && ((item) => q.enqueueDownlink(item)),
   });
   const dropped = result.droppedOpens;
   let detail = null;
-  if (result.ok && dropped === null) detail = 'dropped_opens=unknown';
-  else if (dropped && dropped.count) detail = ('dropped_opens=' + dropped.count + ' expectation_ids=' + dropped.expectationIds.join(',')).slice(0, 255);
-  return { ok: result.ok, error: result.error, permanent: !!result.permanent, detail, downlinks: result.downlinks || [] };
+  if (Array.isArray(result.collateral)) {
+    // Transport path (D19/Q01 = (a)): the outcome and every owner the whole-queue flush
+    // touched. The cloud stores reason as free text capped at 255 chars; the structured
+    // list is also returned as `collateral` for a structured ACK field (cloud slice pending).
+    const owners = result.collateral.map(collateralLabel);
+    detail = ('outcome=' + (result.outcome || 'unknown') + (owners.length ? '; collateral=' + owners.join(',') : '')).slice(0, 255);
+  } else {
+    if (result.ok && dropped === null) detail = 'dropped_opens=unknown';
+    else if (dropped && dropped.count) detail = ('dropped_opens=' + dropped.count + ' expectation_ids=' + dropped.expectationIds.join(',')).slice(0, 255);
+    if (result.ok && result.transport_uncertain) detail = detail ? detail + '; transport_outcome_uncertain' : 'transport_outcome_uncertain';
+  }
+  return { ok: result.ok, error: result.error, permanent: !!result.permanent, detail, outcome: result.outcome || null, collateral: Array.isArray(result.collateral) ? result.collateral : null, transport_uncertain: !!result.transport_uncertain, downlinks: result.downlinks || [] };
 }
 
 const APPLIERS = {
@@ -310,13 +382,13 @@ const APPLIERS = {
 // { ok, error, downlinks } rather than throwing or writing an HTTP response - the caller
 // (flows.json's "Valve Cloud Command Bridge") turns this into a command ACK plus MQTT
 // downlink messages via the existing command-ack path.
-async function applyCloudCommand({ db, cmd, appId, flushQueue, queueClient, warn, now }) {
+async function applyCloudCommand({ db, cmd, appId, flushQueue, queueClient, transport, warn, now }) {
   const body = cmd || {};
   const commandType = String(body.commandType || body.command_type || '').trim().toUpperCase();
   const applier = APPLIERS[commandType];
   if (!applier) return { ok: false, error: 'unknown_command_type' };
   const tzFallback = (await store.getGatewaySetting(db, 'gateway_timezone', warn)) || 'UTC';
-  return applier({ db, cmd: body, appId, flushQueue, queueClient, warn, now: now || new Date(), tzFallback });
+  return applier({ db, cmd: body, appId, flushQueue, queueClient, transport, warn, now: now || new Date(), tzFallback });
 }
 
 module.exports = { applyCloudCommand };

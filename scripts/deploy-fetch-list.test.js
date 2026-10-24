@@ -60,6 +60,7 @@ test('computeFetchList includes known always-fetched files', () => {
     'feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js',
     'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init',
     'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/hotplug.d/ntp/70-osi-irrigation-clock',
     'react_gui.tar.gz',
     'scripts/chirpstack-bootstrap.js',
     'scripts/deploy-payload-swap.js',

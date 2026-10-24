@@ -180,6 +180,19 @@ describe('StregaValveCard', () => {
         expect(screen.queryByRole('button', { name: /cancel queued open/i })).not.toBeInTheDocument();
     });
 
+    it('describes the legacy cancel button with the verbatim D04 text and offers it in a help button', async () => {
+        renderCard({
+            current_state: 'OPEN',
+            activeValveActuation: {
+                expectationId: 'vae-1',
+                reconciliationState: 'PENDING_OBSERVATION',
+            },
+        } as Partial<Device>);
+        const cancelBtn = await screen.findByRole('button', { name: /cancel queued open/i });
+        expect(cancelBtn).toHaveAccessibleDescription('Cancel deletes the pending command. It does not close a valve that is already open.');
+        expect(screen.getByRole('button', { name: 'About cancel' })).toBeInTheDocument();
+    });
+
     it('calls cancelIrrigation API for an active queued open without sending CLOSE', async () => {
         renderCard({
             current_state: 'OPEN',

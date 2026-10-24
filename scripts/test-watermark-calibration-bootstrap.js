@@ -37,8 +37,10 @@ for (const list of capabilityLists) assert.deepEqual(list, expectedCaps, 'capabi
 
 // Execute both shipped builders against one real SQLite fixture. The child
 // adapts node:sqlite's synchronous API to the callback-shaped DB helper and
-// supplies only deterministic local cloud responses to force-sync.
-const realSqlProbe = spawnSync(process.execPath, ['-e', `
+// supplies only deterministic local cloud responses to force-sync. The probe
+// goes through stdin: both builder bodies together exceed the kernel's
+// single-argument limit (MAX_ARG_STRLEN), which made '-e' fail with E2BIG.
+const realSqlProbe = spawnSync(process.execPath, ['-'], { cwd: ROOT, encoding: 'utf8', timeout: 60000, input: `
   const assert = require('node:assert/strict');
   const fs = require('node:fs');
   const path = require('node:path');
@@ -49,6 +51,9 @@ const realSqlProbe = spawnSync(process.execPath, ['-e', `
   const forceBody = ${JSON.stringify(byId['sync-force-build'].func)};
   const installation = require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'));
   const rejection = require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rejection-recovery/index.js'));
+  const conditional = require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/index.js'));
+  const historySync = require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-sync-helper/index.js'));
+  const valveControl = require(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js'));
   const gateway = '0011223344556677';
   const linkedGateway = '0011223344556677';
   const liveDevice = 'AABBCCDDEEFF0011';
@@ -96,6 +101,10 @@ const realSqlProbe = spawnSync(process.execPath, ['-e', `
   const osiLib = { require(name) {
     if (name === 'installation') return { ok: true, value: installation };
     if (name === 'rejection-recovery') return { ok: true, value: rejection };
+    // The snapshot builders fence on the conditional irrigation replication helper.
+    if (name === 'osi-irrigation-policy') return { ok: true, value: conditional };
+    if (name === 'history-sync') return { ok: true, value: historySync };
+    if (name === 'osi-valve-control') return { ok: true, value: valveControl };
     return { ok: false, error: 'unexpected helper ' + name };
   } };
   function assertSnapshot(payload) {
@@ -119,9 +128,10 @@ const realSqlProbe = spawnSync(process.execPath, ['-e', `
     assert.equal(JSON.stringify(payload).includes('watermark_readings'), false);
   }
   (async () => {
-    const bootstrap = new Function('msg', 'node', 'env', 'flow', 'osiDb', 'osiLib', bootstrapBody);
+    // The node's libs bind crypto to node:crypto (the global is WebCrypto).
+    const bootstrap = new Function('msg', 'node', 'env', 'flow', 'crypto', 'osiDb', 'osiLib', bootstrapBody);
     const bootstrapMsg = {};
-    const built = await bootstrap(bootstrapMsg, node, env, flow, { Database }, osiLib);
+    const built = await bootstrap(bootstrapMsg, node, env, flow, require('node:crypto'), { Database }, osiLib);
     assert.equal(built, bootstrapMsg);
     assertSnapshot(built.payload);
     const force = new Function('msg', 'node', 'env', 'flow', 'crypto', 'osiDb', 'osiCloudHttp', 'osiLib', forceBody);
@@ -133,7 +143,8 @@ const realSqlProbe = spawnSync(process.execPath, ['-e', `
     assertSnapshot(bootstrapRequest.payload);
     console.log('REAL_SQL_BOOTSTRAP_FORCE_OK');
   })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
-`], { cwd: ROOT, encoding: 'utf8', timeout: 60000 });
+` });
+assert.ifError(realSqlProbe.error);
 assert.equal(realSqlProbe.status, 0, realSqlProbe.stderr || realSqlProbe.stdout);
 assert.match(realSqlProbe.stdout, /REAL_SQL_BOOTSTRAP_FORCE_OK/);
 

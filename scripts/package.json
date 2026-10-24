@@ -1,0 +1,10 @@
+{
+  "name": "osi-contract-test-dependencies",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned development dependencies for OSI sync contract gates",
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  }
+}

@@ -15,6 +15,8 @@ const TERRA_EFFECT_KEY =
 const entityName = require('../osi-entity-name');
 // osi-crop-kc normalizeStage: the five FAO keys and the nine legacy keys; anything else is unset.
 const { normalizeStage } = require('../osi-crop-kc');
+const valveControl = require('../osi-valve-control');
+const lifecycle = require('../osi-irrigation-policy/lifecycle');
 
 // Today in the zone's timezone as YYYY-MM-DD; UTC for a missing or unknown zone id, as
 // osi-agronomy-daily reads it (formatToParts: the Node build has English locale data only).
@@ -1138,6 +1140,22 @@ async function applyMutation(tx, command) {
     await updateFullZone(tx, command, current, zone);
   } else if (command.type === 'UPSERT_ZONE_LOCATION') {
     await updateLocation(tx, command, current, zone);
+  } else if (command.type === 'DELETE_ZONE') {
+    if (current.deleted_at != null) {
+      throw commandError('missing_resource', 'Zone is already deleted');
+    }
+    const lifecycleResult = await lifecycle.applyZoneDeleteTx(tx, {
+      zoneUuid: command.zoneUuid,
+      deletedAt: zone.deletedAt,
+      zoneSyncVersion: command.target,
+      now: new Date().toISOString(),
+      reason: 'zone_deleted',
+    });
+    return {
+      appliedSyncVersion: command.target,
+      resourceUuid: command.zoneUuid,
+      clears: lifecycleResult.clears || [],
+    };
   } else {
     await deleteZone(tx, command, current, zone);
   }
@@ -1228,37 +1246,66 @@ async function applyOnce2(db, envelope, runtime) {
   envelope = object(envelope, 'Pending command envelope');
   const command = validateIdentity(envelope, runtime);
   if (!command) return { handled: false };
-  return db.transaction(async function(tx) {
-    const prior = await tx.get(
-      'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
-      [String(deliveryId(envelope))]
-    );
-    if (prior) {
-      return { handled: true, ack: await replay2(tx, prior) };
-    }
+  let lastDrift;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const writers = command.type === 'DELETE_ZONE'
+      ? await db.transaction((tx) => lifecycle.discoverAffectedWriters(tx, 'zone_delete', { zoneUuid: command.zoneUuid }))
+      : { valveEuis: [] };
+    let result;
     try {
-      const terminal = await applyMutation(tx, command);
-      terminal.result = 'APPLIED';
-      terminal.payloadHash = canonicalHash(command.payload);
-      return {
-        handled: true,
-        ack: await persistTerminal(tx, envelope, command, terminal),
-      };
+      result = await valveControl.withValveWriters(writers.valveEuis, () => db.transaction(async function(tx) {
+        const prior = await tx.get(
+          'SELECT * FROM applied_commands WHERE command_id=? LIMIT 1',
+          [String(deliveryId(envelope))]
+        );
+        if (prior) {
+          return { handled: true, ack: await replay2(tx, prior) };
+        }
+        try {
+          if (command.type === 'DELETE_ZONE') {
+            const currentWriters = await lifecycle.discoverAffectedWriters(tx, 'zone_delete', { zoneUuid: command.zoneUuid });
+            lifecycle.assertHeld(writers.valveEuis, currentWriters.valveEuis, 'zone_delete');
+          }
+          const terminal = await applyMutation(tx, command);
+          terminal.result = 'APPLIED';
+          terminal.payloadHash = canonicalHash(command.payload);
+          return {
+            handled: true,
+            ack: await persistTerminal(tx, envelope, command, terminal),
+            clears: terminal.clears || [],
+          };
+        } catch (error) {
+          const failure = classify(error);
+          if (!failure) throw error;
+          const current = await currentZone2(tx, command.zoneUuid);
+          failure.appliedSyncVersion = current
+            ? Number(current.sync_version)
+            : 0;
+          failure.resourceUuid = command.zoneUuid;
+          failure.payloadHash = canonicalHash(command.payload);
+          return {
+            handled: true,
+            ack: await persistTerminal(tx, envelope, command, failure),
+          };
+        }
+      }));
     } catch (error) {
-      const failure = classify(error);
-      if (!failure) throw error;
-      const current = await currentZone2(tx, command.zoneUuid);
-      failure.appliedSyncVersion = current
-        ? Number(current.sync_version)
-        : 0;
-      failure.resourceUuid = command.zoneUuid;
-      failure.payloadHash = canonicalHash(command.payload);
-      return {
-        handled: true,
-        ack: await persistTerminal(tx, envelope, command, failure),
-      };
+      if (error && error.code === 'membership_drift') {
+        lastDrift = error;
+        continue;
+      }
+      throw error;
     }
-  });
+    if (result && result.handled && Array.isArray(result.clears) && result.clears.length) {
+      result.clear_results = await lifecycle.sendLifecycleClears(db, result.clears, {
+        transport: runtime && runtime.transport,
+        warn: runtime && runtime.warn,
+      }, new Date().toISOString());
+      if (result.ack && typeof result.ack === 'object') result.ack.clear_results = result.clear_results;
+    }
+    return result;
+  }
+  throw lastDrift || commandError('membership_drift', 'zone writer membership kept changing');
 }
 
 // ---------------------------------------------------------------------------

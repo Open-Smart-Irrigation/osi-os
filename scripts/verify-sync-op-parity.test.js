@@ -128,6 +128,16 @@ const SCOPED_ACCESS_EVENT_OPS = [
   'USER_ZONE_ASSIGNMENT_DELETED',
   'USER_ZONE_ASSIGNMENT_UPSERTED',
 ];
+// Conditional irrigation (owner, feat/conditional-irrigation): edge-staged policy ops with a
+// cloud applier on osi-server feat/conditional-irrigation (IrrigationPolicyApplier,
+// IrrigationPolicyRuntimeApplier).
+const POLICY_EVENT_OPS = [
+  'IRRIGATION_POLICY_DECISION_UPSERTED',
+  'IRRIGATION_POLICY_RUNTIME_CHANGED',
+  'IRRIGATION_POLICY_UPSERTED',
+  'IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED',
+];
+
 function exactJournalStaging() {
   return {
     version: 1,
@@ -158,7 +168,10 @@ function exactJournalStaging() {
       edgeDeferred: [],
       // Cloud-before-edge deploy order: osi-server is sanctioned to land its landing
       // applier for each of these ops before the edge activates real emission of it.
-      edgeStaged: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED'],
+      // Conditional irrigation: the owner widened EXACT_EDGE_STAGED_OPS with the four policy ops;
+      // osi-server feat/conditional-irrigation (ad506b008) implements them, so they are staged,
+      // not cloud-deferred.
+      edgeStaged: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED', ...POLICY_EVENT_OPS],
       cloudDeferred: [...JOURNAL_EVENT_OPS, 'JOURNAL_CROP_CYCLE_UPSERTED', ...SCOPED_ACCESS_EVENT_OPS],
     },
   };
@@ -182,7 +195,7 @@ function createStagedParityFixture(overrides) {
       op: { enum: ['DEVICE_DATA_APPENDED'].concat(JOURNAL_EVENT_OPS, [
         'JOURNAL_CROP_CYCLE_UPSERTED',
         'WATERMARK_CALIBRATION_DELETED', 'WATERMARK_CALIBRATION_UPSERTED',
-      ]) },
+      ], POLICY_EVENT_OPS) },
       payload: {
         type: 'object',
         required: ['contract_version'],
@@ -227,6 +240,7 @@ class EdgeSyncService {
       case "DEVICE_DATA_APPENDED" -> { return true; }
       case "WATERMARK_CALIBRATION_DELETED" -> { return true; }
       case "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
+${POLICY_EVENT_OPS.map((op) => `      case "${op}" -> { return true; }`).join('\n')}
       default -> { return false; }
     }
   }
@@ -828,6 +842,7 @@ class EdgeSyncService {
     switch (event.op()) {
       case "DEVICE_DATA_APPENDED", "JOURNAL_ENTRY_UPSERTED",
            "WATERMARK_CALIBRATION_DELETED", "WATERMARK_CALIBRATION_UPSERTED" -> { return true; }
+${POLICY_EVENT_OPS.map((op) => `      case "${op}" -> { return true; }`).join('\n')}
       default -> { return false; }
     }
   }

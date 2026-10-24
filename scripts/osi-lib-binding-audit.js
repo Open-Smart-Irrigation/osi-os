@@ -18,6 +18,7 @@ const INSTALLATION_LOCATION_BINDING = Object.freeze({
 });
 const ENTITY_NAME_BINDING = Object.freeze({ variable: 'entityName', module: 'entity-name' });
 const CHIRPSTACK_BINDING = Object.freeze({ variable: 'chirpstack', module: 'chirpstack' });
+const CHIRPSTACK_DIRECT_BINDING = Object.freeze({ variable: 'chirpstack', module: 'osi-chirpstack-helper' });
 
 // Fail closed on complete reviewed sources. Any function change must be reviewed
 // and explicitly re-pinned here before either executable flow audit accepts it.
@@ -51,8 +52,13 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
     // commandType, not payload shape, so a legacy Terra UPSERT_ZONE_CONFIG
     // payload (handled upstream by terra-zone-config-command-apply-fn) is
     // never re-processed here.
-    funcSha256: 'e83cc198efe384ed14ff0be9ea4e6f3395d3f6f5e74450ca37068db4f5a37772',
+    // The post-commit clear sender needs the provisioning transport itself;
+    // it is a reviewed direct binding alongside the osi-lib helper set. The
+    // Task 7b2 inherited silent-catch repair only makes transport construction
+    // visible through node.warn and leaves the durable command pending.
+    funcSha256: '4ded97d7f4bfc29cba3f80fe5db097175c06851a9e2085dced33645f97815046',
     bindings: Object.freeze([DB_BINDING, ZONE_COMMAND_BINDING, SCOPE_BINDING]),
+    directBindings: Object.freeze([CHIRPSTACK_DIRECT_BINDING]),
   }),
   'weather-zones-command-apply-fn': Object.freeze({
     // Wave 3 zone/weather/calibration sync port (AgroLink 33eb12b94):
@@ -122,21 +128,32 @@ function bindingsMatch(actual, expected) {
     actualCanonical.every((value, index) => value === expectedCanonical[index]);
 }
 
+function reviewedDirectBindings(node, expected) {
+  if (!Array.isArray(expected) || expected.length === 0) return false;
+  const actual = Array.isArray(node && node.libs) ? node.libs : [];
+  return actual.length === expected.length + 1 &&
+    actual.some((binding) => binding && binding.var === 'osiLib' && binding.module === 'osi-lib') &&
+    expected.every((wanted) => actual.some((binding) => binding &&
+      binding.var === wanted.variable && binding.module === wanted.module));
+}
+
 function sha256(source) {
   return crypto.createHash('sha256').update(source, 'utf8').digest('hex');
 }
 
 function auditOsiLibBindings(node, expectedBindings) {
   const errors = [];
-  if (!hasExactOsiLibOnly(node)) {
-    errors.push('function node must declare exactly { var: osiLib, module: osi-lib }');
-  }
-
   const nodeId = node && typeof node.id === 'string' ? node.id : '';
   const policy = TASK9_OSI_LIB_NODE_POLICIES[nodeId];
   if (!policy) {
+    if (!hasExactOsiLibOnly(node)) {
+      errors.push('function node must declare exactly { var: osiLib, module: osi-lib }');
+    }
     errors.push(`function node ${nodeId || '(missing id)'} has no reviewed osi-lib source policy`);
     return { ok: false, errors };
+  }
+  if (!(hasExactOsiLibOnly(node) || reviewedDirectBindings(node, policy.directBindings))) {
+    errors.push('function node must declare its reviewed osi-lib bindings');
   }
   if (!bindingsMatch(expectedBindings, policy.bindings)) {
     errors.push(`function node ${nodeId} does not request its exact reviewed helper set`);

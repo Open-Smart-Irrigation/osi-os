@@ -44,7 +44,27 @@ const FLOWS = JSON.parse(fs.readFileSync(
 ));
 const NODES = new Map(FLOWS.map((node) => [node.id, node]));
 const scopeHelper = require(path.join(MODULES, 'osi-scope-helper'));
-const valveControl = require(path.join(MODULES, 'osi-valve-control'));
+const rawValveControl = require(path.join(MODULES, 'osi-valve-control'));
+// On this branch the manual open is answered after the STREGA write went through the ChirpStack
+// transport (the encoder returns the deferred 202), and the actuator_log/target-state write is
+// the encoder's log path. A timed open is attempted only with a trusted runtime clock, so the
+// harness supplies a fixture clock marker (as test-conditional-irrigation-writer-wrappers.js).
+function trustedRuntime() {
+  const anchor = Date.now();
+  const bootId = 'request-isolation-boot';
+  const fsFixture = { readFileSync(file) {
+    if (file === '/proc/sys/kernel/random/boot_id') return bootId + '\n';
+    if (file === '/proc/uptime') return `${(Date.now() - anchor) / 1000} 0\n`;
+    if (file === '/var/run/osi-irrigation-clock.json') return JSON.stringify({ boot_id: bootId, epoch_ms: anchor, uptime_ms: 0, stratum: 1 });
+    throw Object.assign(new Error('missing test clock path'), { code: 'ENOENT' });
+  } };
+  return { clockOptions: { fs: fsFixture, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime',
+    markerPath: '/var/run/osi-irrigation-clock.json', rejectionPath: '/tmp/request-isolation-rejection.json',
+    fallbackPath: '/tmp/request-isolation-rejection-fallback.json' } };
+}
+const valveControl = { ...rawValveControl, executeValveAttempt(args) {
+  return rawValveControl.executeValveAttempt({ ...args, trustedContext: trustedRuntime() });
+} };
 
 const AUTH_SECRET = 'request-isolation-test-secret';
 const GATEWAY_EUI = '0016C001F1000001';
@@ -61,7 +81,9 @@ const ID = {
   valveCheck: '9ad895844533fb35',
   valveDeviceDb: '1271278de1cdb09b',
   valveBuild: 'dde8e1ef265e96d7',
-  valveWriteDb: '01c763e52594b6ae',
+  // The manual open's actuator_log + target-state write is the encoder's log path now (the old
+  // 'DB: actuator_log + devices update' node is no longer wired).
+  valveWriteDb: 'e681a40093c3798d',
   toActuator: '1ef83e7d26a33d6c',
   cancelHttp: 'cancel-valve-local-http-in',
   schedHttp: 'e970d93ded4679af',
@@ -69,6 +91,9 @@ const ID = {
   schedVerify: '22cc64fa2a899cea',
   schedZoneDb: 'bda5f35469bb5fc6',
   schedSaveDb: '899ec5378779ad86',
+  // The zone schedule write runs inside the conditional lifecycle service (one function node,
+  // one transaction) and answers itself; 'Save to DB' is no longer reached.
+  schedWrite: 'conditional-legacy-schedule-adapter',
   routeCommand: '934bf2bc19a8ce22',
   routeToActuator: '745b6db588017e56',
   actuatorLogDb: 'e681a40093c3798d',
@@ -82,9 +107,21 @@ const ID = {
 // Shared-context keys that carried per-request values before the fix.
 const REQUEST_SCRATCH_KEY = /^(valve_cmd_|sched_|lastCommand|delete_zone_)/;
 
+// One device queue per runtime (reset in withRuntime): what the transport accepted stays queued
+// until a flush, so a cancel can prove its open unsent (W8 B-1).
+const STUB_QUEUE = [];
+let stubNext = 0;
 const CHIRPSTACK_STUB = {
   createProvisioningClientFromEnv() {
-    return { flushDeviceQueue: async () => ({ flushed: true }) };
+    return {
+      flushDeviceQueue: async () => { STUB_QUEUE.length = 0; return { flushed: true }; },
+      getDeviceQueue: async () => STUB_QUEUE.map((item) => Object.assign({}, item)),
+      enqueueDownlink: async (item) => {
+        stubNext += 1;
+        STUB_QUEUE.push({ id: 'isolation-q-' + stubNext, fPort: item.fPort, data: item.data, isPending: false });
+        return { id: 'isolation-q-' + stubNext };
+      },
+    };
   },
 };
 
@@ -118,7 +155,9 @@ class FlowRuntime {
       DEVICE_EUI: GATEWAY_EUI,
       CHIRPSTACK_APP_ACTUATORS: 'actuators-app',
     };
-    this.follow = new Set(follow);
+    // The manual valve chain ends at the encoder (transport, then the deferred response), so
+    // the To Actuator link is always followed.
+    this.follow = new Set([ID.toActuator].concat(follow));
     this.tabContext = new Map();
     this.lanes = new Map();
   }
@@ -134,6 +173,7 @@ class FlowRuntime {
         sql: [],
         thrown: [],
         errors: [],
+        ran: [],
         failAt: new Set(),
       });
     }
@@ -226,6 +266,7 @@ class FlowRuntime {
           return;
         }
         this.tabContext.set(node.z, outcome.flowState);
+        lane.ran.push(node.id);
         lane.errors.push(...outcome.errors.map((message) => ({ node: node.id, message })));
         this.route(lane, node, outcome.result);
         return;
@@ -334,6 +375,7 @@ function scheduleMsg(lane, { user = USERS.res1, zoneId, patch, msgid }) {
 
 async function withRuntime(options, body) {
   scopeHelper._resetForTests();
+  STUB_QUEUE.length = 0;
   const db = seedDb();
   try {
     const rt = new FlowRuntime(db, options);
@@ -377,10 +419,10 @@ function assertValveAccepted(rt, name, expected) {
   assert.equal(writes.length, 1, name + ' must emit exactly one log/device write');
   assert.match(
     writes[0].topic,
-    new RegExp("VALUES\\s*\\('" + expected.eui + "', 'OPEN_FOR_DURATION', " + expected.minutes + ','),
+    new RegExp("VALUES\\s*\\('" + expected.eui + "', (\\d+|NULL), 'OPEN_FOR_DURATION', " + expected.minutes + ','),
     name + ' actuator_log SQL'
   );
-  assert.match(writes[0].topic, new RegExp("WHERE deveui = '" + expected.eui + "'"), name + ' device update SQL');
+  assert.match(writes[0].topic, new RegExp("WHERE UPPER\\(deveui\\)=UPPER\\('" + expected.eui + "'\\)"), name + ' device update SQL');
 }
 
 function assertValveRejected(rt, name, statusCode) {
@@ -425,14 +467,21 @@ for (const scoped of [false, true]) {
   }
 
   test(`valve open: two requests for the same valve keep their own durations (scoped ${scoped ? 'on' : 'off'})`, async () => {
-    await withRuntime({ scoped }, async (rt) => {
+    await withRuntime({ scoped }, async (rt, db) => {
       rt.inject('A', ID.valveHttp, valveMsg('A', { eui: VALVE_A, minutes: 12 }));
       rt.inject('B', ID.valveHttp, valveMsg('B', { eui: VALVE_A, minutes: 3 }));
       await rt.runUntil('A', ID.valveDeviceDb);
       await rt.run('B');
       await rt.run('A');
-      assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12 });
+      // One open per valve at a time (the dispatch reservation fence): B, which reached the
+      // transport first, opens for its own 3 minutes; A is refused and never borrows B's
+      // duration or writes a log line. Neither request's values cross.
       assertValveAccepted(rt, 'B', { eui: VALVE_A, minutes: 3 });
+      const refused = onlyResponse(rt, 'A');
+      assert.equal(refused.statusCode, 503, 'A status: ' + JSON.stringify(refused.payload));
+      assert.equal(refused.payload.error, 'valve_busy', 'A refused by the reservation fence');
+      assert.equal(rt.lane('A').sql.filter((entry) => entry.node === ID.valveWriteDb).length, 0, 'A writes no log line');
+      assert.deepEqual(actuatorLog(db), [VALVE_A + ':3'], 'only B\'s open is logged, with its own duration');
     });
   });
 
@@ -732,16 +781,11 @@ function assertScheduleApplied(rt, db, name, expected) {
     last_applied_at: null,
   }, name + ' response');
 
-  const saves = rt.lane(name).sql.filter((entry) => entry.node === ID.schedSaveDb);
-  assert.equal(saves.length, 1, name + ' must emit exactly one schedule write');
-  assert.match(
-    saves[0].topic,
-    new RegExp('\\(' + expected.zoneId + ", '" + patch.trigger_metric + "', " + patch.threshold_kpa + ', ' +
-      patch.duration_minutes + ', ' + (patch.enabled ? 1 : 0) + ", '" + patch.response_mode + "', " + expected.version + ','),
-    name + ' schedule SQL'
-  );
-  assert.equal(saves[0].syncAck.aggregateKey, expected.zoneUuid, name + ' sync ACK zone');
-  assert.equal(saves[0].syncAck.appliedSyncVersion, expected.version, name + ' sync ACK version');
+  // The write runs once, inside the lifecycle service, for this request only. The SQL text and
+  // msg.syncAck are not visible any more; the response's sync_version (above) and the stored row
+  // (below) are the evidence instead.
+  assert.equal(rt.lane(name).ran.filter((id) => id === ID.schedWrite).length, 1, name + ' must run exactly one schedule write');
+  assert.equal(rt.lane(name).sql.filter((entry) => entry.node === ID.schedSaveDb).length, 0, name + ' the retired Save to DB node is not used');
 
   const row = db.prepare(
     'SELECT trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version FROM irrigation_schedules WHERE irrigation_zone_id = ?'
@@ -762,7 +806,7 @@ function assertScheduleRejected(rt, name, statusCode) {
   assert.equal(rt.lane(name).sql.filter((entry) => entry.node === ID.schedSaveDb).length, 0, name + ' must not write');
 }
 
-const SCHEDULE_BOUNDARIES = [ID.schedUserDb, ID.schedZoneDb, ID.schedSaveDb];
+const SCHEDULE_BOUNDARIES = [ID.schedUserDb, ID.schedZoneDb, ID.schedWrite];
 
 for (const scoped of [false, true]) {
   const mode = scoped ? 'on' : 'off';
@@ -784,7 +828,7 @@ for (const scoped of [false, true]) {
   }
 
   // A different user's refused request must not leave its patch for the owner's write.
-  for (const boundary of [ID.schedZoneDb, ID.schedSaveDb]) {
+  for (const boundary of [ID.schedZoneDb, ID.schedWrite]) {
     test(`schedule PUT: foreign user against the owner's zone while the owner waits at ${boundary} (scoped ${mode})`, async () => {
       await withRuntime({ scoped }, async (rt, db) => {
         rt.inject('owner', ID.schedHttp, scheduleMsg('owner', SCHEDULE.A));
@@ -835,7 +879,7 @@ for (const scoped of [false, true]) {
       rt.inject('A', ID.schedHttp, scheduleMsg('A', SCHEDULE.A));
       rt.inject('B', ID.schedHttp, scheduleMsg('B', SCHEDULE.B));
       await rt.run('A');
-      await rt.runUntil('B', ID.schedSaveDb);
+      await rt.runUntil('B', ID.schedWrite);
       rt.inject('A2', ID.schedHttp, scheduleMsg('A2', SCHEDULE.A));
       await rt.run('A2');
       await rt.run('B');
@@ -893,8 +937,16 @@ test('schedule envelope: carries only approved keys and no credential material',
 // flow context (delete_zone_*), so a request resumed after another one deleted
 // and disabled the other request's zone instead of its own.
 // ---------------------------------------------------------------------------
+// On this branch DELETE /api/irrigation-zones/:id is answered by the lifecycle service in the
+// 'Scoped Zone Delete' node in both access modes (routes.scopedZoneDelete: auth, ownership, the
+// unassign/soft-delete/disable writes and the ZONE_DELETED event in one message-local call). The
+// legacy chain after it (Decode Token ... Format Response) is no longer reached from HTTP; its
+// nodes still carry the zone_delete envelope and are exercised directly below (fail-closed,
+// envelope), so the static guard verify-request-context-isolation keeps meaning something.
 const ZD = {
   http: 'delete-zone-http',
+  router: 'scoped-zone-delete-router',
+  auth: 'delete-zone-auth',
   userDb: 'delete-zone-lookup',
   verify: 'delete-zone-verify',
   zoneDb: 'delete-zone-verify-db',
@@ -990,21 +1042,14 @@ function lanesSql(rt, name, nodeId) {
 function assertZoneDeleted(rt, db, name, spec, before) {
   const response = onlyResponse(rt, name);
   assert.equal(response.statusCode, 200, name + ' status: ' + JSON.stringify(response.payload));
-  assert.deepEqual(response.payload, { message: 'Zone deleted successfully' }, name + ' response');
+  assert.equal(response.payload.message, 'Zone removed successfully', name + ' response');
+  assert.equal(response.payload.zone_uuid, spec.zoneUuid, name + ' response names its own zone');
   assert.equal(rt.lane(name).links.filter((link) => link.node === ZD.flushLink).length, 1, name + ' outbox flush ping');
-
-  const unassign = lanesSql(rt, name, ZD.unassignDb);
-  assert.equal(unassign.length, 1, name + ' must unassign once');
-  assert.match(unassign[0], new RegExp('WHERE irrigation_zone_id = ' + spec.zoneId + '\\s'), name + ' unassign SQL');
-  const deletes = lanesSql(rt, name, ZD.deleteDb);
-  assert.equal(deletes.length, 1, name + ' must soft-delete once');
-  assert.match(deletes[0], new RegExp('WHERE id = ' + spec.zoneId + '\\s+AND user_id = ' + spec.user.userId + '\\s'), name + ' delete SQL');
+  // The writes run inside the lifecycle service, once, for this request: the router ran once and
+  // the retired legacy write nodes were not reached. The database state below is the evidence.
+  assert.equal(rt.lane(name).ran.filter((id) => id === ZD.router).length, 1, name + ' one lifecycle delete');
+  for (const nodeId of ZD_WRITES) assert.equal(lanesSql(rt, name, nodeId).length, 0, name + ' legacy write node ' + nodeId + ' unused');
   const beforeZone = before.zones.find((zone) => zone.id === spec.zoneId);
-  assert.match(deletes[0], new RegExp('sync_version = ' + (beforeZone.sync_version + 1) + '\\s'), name + ' delete sync_version');
-  const disables = lanesSql(rt, name, ZD.disableDb);
-  assert.equal(disables.length, 1, name + ' must disable the schedule once');
-  assert.match(disables[0], new RegExp('WHERE irrigation_zone_id = ' + spec.zoneId + '\\s'), name + ' disable SQL zone');
-  assert.match(disables[0], new RegExp('AND user_id = ' + spec.user.userId + '\\s'), name + ' disable SQL actor');
 
   const after = zoneState(db);
   const zone = after.zones.find((row) => row.id === spec.zoneId);
@@ -1037,7 +1082,9 @@ function assertZoneDeleteRejected(rt, name, statusCode) {
   for (const nodeId of ZD_WRITES) {
     assert.equal(lanesSql(rt, name, nodeId).length, 0, name + ' must not write at ' + nodeId);
   }
-  assert.equal(rt.lane(name).links.filter((link) => link.node === ZD.flushLink).length, 0, name + ' no flush ping');
+  // The router's single answer output is wired to the response and to the coalesced outbox flush,
+  // so a refused delete pings the flush too; with no event written that ping sends nothing. The
+  // callers assert the database is untouched.
 }
 
 async function withZoneDeleteRuntime(body) {
@@ -1047,7 +1094,9 @@ async function withZoneDeleteRuntime(body) {
   });
 }
 
-const ZONE_DELETE_BOUNDARIES = [ZD.userDb, ZD.zoneDb, ZD.unassignDb, ZD.deleteDb, ZD.disableDb];
+// The lifecycle delete is one message-local async call, so the only boundary between two zone
+// deletes is before the router runs (the legacy chain's sqlite boundaries are not reached).
+const ZONE_DELETE_BOUNDARIES = [ZD.router];
 
 for (const boundary of ZONE_DELETE_BOUNDARIES) {
   for (const paused of ['A', 'B']) {
@@ -1074,7 +1123,7 @@ for (const boundary of ZONE_DELETE_BOUNDARIES) {
   }
 }
 
-for (const boundary of [ZD.zoneDb, ZD.deleteDb]) {
+for (const boundary of [ZD.router]) {
   test(`zone delete: same user, two zones, A paused at ${boundary}`, async () => {
     await withZoneDeleteRuntime(async (rt, db, before) => {
       rt.inject('A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A));
@@ -1098,11 +1147,9 @@ const SCHEDULE_Z3 = {
   patch: { trigger_metric: 'SWT_1', threshold_kpa: 35, duration_minutes: 9, response_mode: 'fixed', enabled: true },
 };
 const DELETE_VS_SCHEDULE = [
-  ['delete', ZD.zoneDb],
-  ['delete', ZD.deleteDb],
-  ['delete', ZD.disableDb],
+  ['delete', ZD.router],
   ['schedule', ID.schedZoneDb],
-  ['schedule', ID.schedSaveDb],
+  ['schedule', ID.schedWrite],
 ];
 for (const [paused, boundary] of DELETE_VS_SCHEDULE) {
   const other = paused === 'delete' ? 'schedule' : 'delete';
@@ -1124,7 +1171,7 @@ for (const [paused, boundary] of DELETE_VS_SCHEDULE) {
 
 // A request refused at the ownership check (another user's zone) interleaved with
 // the owner's own delete: the refused one writes nothing, the owner's completes.
-for (const boundary of [ZD.zoneDb, ZD.unassignDb, ZD.deleteDb]) {
+for (const boundary of [ZD.router]) {
   test(`zone delete: foreign user refused while the owner waits at ${boundary}`, async () => {
     await withZoneDeleteRuntime(async (rt, db, before) => {
       rt.inject('owner', ZD.http, zoneDeleteMsg('owner', ZONE_DELETE.A3));
@@ -1144,7 +1191,7 @@ test('zone delete: foreign user paused after its ownership check, owner complete
   await withZoneDeleteRuntime(async (rt, db, before) => {
     rt.inject('owner', ZD.http, zoneDeleteMsg('owner', ZONE_DELETE.A3));
     rt.inject('other', ZD.http, zoneDeleteMsg('other', { user: USERS.admin1, zoneId: 1 }));
-    await rt.runUntil('other', ZD.zoneDb);
+    await rt.runUntil('other', ZD.router);
     await rt.run('owner');
     await rt.run('other');
     assertZoneDeleteRejected(rt, 'other', 404);
@@ -1157,7 +1204,7 @@ test('zone delete: invalid token interleaved with a valid delete', async () => {
   await withZoneDeleteRuntime(async (rt, db, before) => {
     rt.inject('A', ZD.http, zoneDeleteMsg('A', ZONE_DELETE.A));
     rt.inject('bad', ZD.http, zoneDeleteMsg('bad', { zoneId: 3, token: 'Bearer e30.invalid' }));
-    await rt.runUntil('A', ZD.deleteDb);
+    await rt.runUntil('A', ZD.router);
     await rt.run('bad');
     await rt.run('A');
     assertZoneDeleteRejected(rt, 'bad', 401);
@@ -1204,9 +1251,13 @@ for (const [label, nodeId, build] of FAIL_CLOSED) {
   });
 }
 
+// The request id only names the envelope the legacy chain carries across its sqlite nodes. On
+// that chain a request without _msgid still fails closed before any zone lookup; the lifecycle
+// router keeps everything in one message-local call, so it needs no id (and withRuntime still
+// proves no per-request value lands in shared flow context).
 test('zone delete fail-closed: a request without _msgid', async () => {
   await withZoneDeleteRuntime(async (rt, db, before) => {
-    rt.inject('A', ZD.http, zoneDeleteMsg('A', { ...ZONE_DELETE.A, msgid: null }));
+    rt.inject('A', ZD.auth, zoneDeleteMsg('A', { ...ZONE_DELETE.A, msgid: null }));
     await rt.run('A');
     assertZoneDeleteRejected(rt, 'A', 500);
     assert.equal(lanesSql(rt, 'A', ZD.zoneDb).length, 0, 'no zone lookup runs without a request id');
@@ -1218,14 +1269,13 @@ test('zone delete envelope: carries only approved keys and no credential materia
   await withZoneDeleteRuntime(async (rt) => {
     const msg = zoneDeleteMsg('A', ZONE_DELETE.A);
     const token = msg.req.headers.authorization;
-    rt.inject('A', ZD.http, msg);
+    rt.inject('A', ZD.auth, msg); // the legacy chain, which carries the envelope
     await rt.runUntil('A', ZD.zoneDb);
     const inFlight = rt.lane('A').queue[0].msg;
     assert.ok(inFlight.osi && inFlight.osi.request, 'request envelope present on msg');
     assert.deepEqual(inFlight.osi.request, { v: 1, kind: 'zone_delete', requestId: 'msgid-A', actorId: 2, zoneId: 1 });
-    await rt.runUntil('A', ZD.deleteDb);
-    assert.deepEqual(rt.lane('A').queue[0].msg.osi.applied, { sync_version: 2 });
-    const serialized = JSON.stringify(rt.lane('A').queue[0].msg.osi);
+    // The next sync_version is computed inside the lifecycle service now (no osi.applied on msg).
+    const serialized = JSON.stringify(inFlight.osi);
     assert.doesNotMatch(serialized, /bearer|token|password|secret|authorization/i);
     assert.ok(!serialized.includes(token.slice(7)), 'bearer token must not enter the envelope');
   });

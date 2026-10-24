@@ -37,6 +37,12 @@ const byId = Object.fromEntries(flows.filter((n) => n.id).map((n) => [n.id, n]))
 const { tempDb } = require(path.resolve(
   __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.js'
 ));
+const realPush = require(path.resolve(
+  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.js'
+));
+const valveControl = require(path.resolve(
+  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js'
+));
 
 // osi-db-helper's real Database class exposes a callback-style API (run/all/close), not the
 // promise-style facade tempDb()'s own `db` handle uses -- the registration-path flows.json
@@ -44,34 +50,54 @@ const { tempDb } = require(path.resolve(
 // SAME underlying node:sqlite connection tempDb() already opened, so writes made through it
 // are immediately visible to assertions made through tempDb()'s promise-style `db` handle.
 function makeCallbackDb(raw) {
+  function execute(sql, params) {
+    const stmt = raw.prepare(sql);
+    if (params === undefined) stmt.run(); else stmt.run(...params);
+  }
+  function rows(sql, params) {
+    const stmt = raw.prepare(sql);
+    return params === undefined ? stmt.all() : stmt.all(...params);
+  }
+  function row(sql, params) {
+    const result = rows(sql, params);
+    return result[0];
+  }
+  function callbackOrPromise(operation, cb) {
+    const result = Promise.resolve().then(operation);
+    if (typeof cb === 'function') {
+      result.then((value) => cb(null, value), (error) => cb(error));
+    }
+    return result;
+  }
   return {
     run(sql, params, cb) {
       if (typeof params === 'function') { cb = params; params = undefined; }
-      try {
-        const stmt = raw.prepare(sql);
-        if (params === undefined) stmt.run(); else stmt.run(...params);
-        if (cb) cb(null);
-      } catch (e) { if (cb) cb(e); }
+      return callbackOrPromise(() => { execute(sql, params); return undefined; }, cb);
     },
     all(sql, params, cb) {
       if (typeof params === 'function') { cb = params; params = undefined; }
-      try {
-        const stmt = raw.prepare(sql);
-        const rows = params === undefined ? stmt.all() : stmt.all(...params);
-        if (cb) cb(null, rows);
-      } catch (e) { if (cb) cb(e); }
+      return callbackOrPromise(() => rows(sql, params), cb);
     },
     get(sql, params, cb) {
       if (typeof params === 'function') { cb = params; params = undefined; }
-      try {
-        const stmt = raw.prepare(sql);
-        const row = params === undefined ? stmt.get() : stmt.get(...params);
-        if (cb) cb(null, row);
-      } catch (e) { if (cb) cb(e); }
+      return callbackOrPromise(() => row(sql, params), cb);
+    },
+    transaction(executor) {
+      return Promise.resolve().then(async () => {
+        raw.exec('BEGIN IMMEDIATE');
+        try {
+          const result = await executor(this);
+          raw.exec('COMMIT');
+          return result;
+        } catch (error) {
+          try { raw.exec('ROLLBACK'); } catch (_) {}
+          throw error;
+        }
+      });
     },
     // Deliberately a no-op: the node under test calls close() when it's done, but the test
     // wants to keep querying the same connection afterward to assert what actually landed.
-    close(cb) { if (cb) cb(); },
+    close(cb) { if (cb) cb(); return Promise.resolve(); },
   };
 }
 
@@ -116,6 +142,27 @@ function buildValveAckHarness(options) {
     ? opts.compileAndQueueMessages
     : [{ topic: 'application/APP1/device/AABBCCDDEEFF0011/command/down', payload: { fPort: 25 } }];
   const compileAndQueueThrows = !!opts.compileAndQueueThrows;
+  let compileFailuresRemaining = Number(opts.compileFailuresRemaining || 0);
+  const reconciliationNeeded = opts.reconciliationNeeded !== false;
+  const state = {
+    settings: { ...(settings || { strega_generation: 'GEN1' }) },
+    schedules: opts.schedules || [],
+    policies: opts.policies || [],
+    rows: opts.rows || [],
+    control: opts.control || {
+      fixed_generation_transition: {
+        transition_id: 'flow-harness-transition',
+        from: 'GEN1',
+        to: 'GEN2',
+        state: reconciliationNeeded ? 'PENDING' : 'APPLIED',
+        promoted_at: '2026-01-01T00:00:00.000Z',
+        plan_revision: 'flow-harness-plan',
+        required_push_ids: ['flow-harness-push'],
+        source_schedule_snapshot: { schedules: [], clock_timezone: 'UTC' },
+      },
+    },
+  };
+  const promoteOnHandleUplink = opts.promoteOnHandleUplink === true;
 
   const calls = {
     factory: 0,
@@ -126,14 +173,67 @@ function buildValveAckHarness(options) {
   };
 
   class FakeDb {
+    async get(sql, params) {
+      if (sql.includes('SELECT * FROM valve_settings')) {
+        return { ...state.settings, device_eui: 'AABBCCDDEEFF0011', conditional_control_json: JSON.stringify(state.control) };
+      }
+      if (sql.includes('SELECT conditional_control_json FROM valve_settings')) return { conditional_control_json: JSON.stringify(state.control) };
+      throw new Error('unexpected FakeDb.get query: ' + sql);
+    }
+    async all(sql, params) {
+      if (sql.includes('SELECT vs.*')) return state.schedules;
+      if (sql.includes('SELECT policy_uuid')) return state.policies;
+      if (sql.includes('SELECT purpose, weekday, payload_hex, plan_hash')) return state.rows;
+      if (sql.includes('SELECT push_id,state,error,transport_json')) {
+        const ids = Array.isArray(params) ? params : [];
+        return state.rows.filter((row) => ids.includes(row.push_id));
+      }
+      if (sql.includes('FROM valve_schedule_pushes')) {
+        const ids = Array.isArray(params) ? params.filter((value) => typeof value === 'string') : [];
+        return ids.length ? state.rows.filter((row) => ids.includes(row.push_id)) : state.rows;
+      }
+      throw new Error('unexpected FakeDb.all query: ' + sql);
+    }
+    async run(sql, params) {
+      if (sql.includes('INSERT OR IGNORE INTO valve_settings')) return undefined;
+      if (sql.includes('INSERT INTO valve_schedule_pushes')) {
+        state.rows.push({ push_id: params[0], device_eui: params[1], purpose: params[2], weekday: params[3], fport: params[4], payload_hex: params[5], plan_hash: params[6], state: 'QUEUED', error: null, transport_json: null });
+        return undefined;
+      }
+      if (sql.includes('UPDATE valve_schedule_pushes')) return undefined;
+      if (sql.includes('UPDATE valve_settings SET last_clock_sync_queued_at')) return undefined;
+      if (sql.includes('UPDATE valve_settings SET conditional_control_json')) {
+        state.control = JSON.parse(params[0]);
+        return undefined;
+      }
+      throw new Error('unexpected FakeDb.run query: ' + sql);
+    }
+    async transaction(callback) { return callback(this); }
     close(cb) { cb && cb(); }
   }
 
   const VC = {
     decodeGen1Fallback: () => ({}),
-    handleUplink: async () => { calls.handleUplinkCalled = true; return { acked: 1, generationPromoted: false }; },
+    handleUplink: async () => {
+      calls.handleUplinkCalled = true;
+      if (promoteOnHandleUplink && state.settings.strega_generation !== 'GEN2') {
+        state.settings.strega_generation = 'GEN2';
+          state.control.fixed_generation_transition = {
+            transition_id: 'flow-harness-promoted-transition',
+            from: 'GEN1',
+            to: 'GEN2',
+            state: 'PENDING',
+            promoted_at: '2026-01-01T00:00:00.000Z',
+            plan_revision: 'flow-harness-plan',
+            required_push_ids: ['flow-harness-push'],
+            source_schedule_snapshot: { schedules: [], clock_timezone: 'UTC' },
+        };
+        return { acked: 1, generationPromoted: true };
+      }
+      return { acked: 1, generationPromoted: false };
+    },
     store: {
-      getSettings: async () => settings,
+      getSettings: async () => state.settings,
       hasPendingObservation: async () => {
         if (hasPendingObservationThrows) throw new Error('injected hasPendingObservation failure');
         return hasPendingObservation;
@@ -141,20 +241,28 @@ function buildValveAckHarness(options) {
       getGatewaySetting: async () => 'Europe/Zurich',
     },
     push: {
+      conditionalReconciliationNeeded: (db, deviceEui, args) => realPush.conditionalReconciliationNeeded(db, deviceEui, args),
+      applyGenerationTransition: (db, deviceEui, result) => realPush.applyGenerationTransition(db, deviceEui, result),
       // Mirrors push.js's real queuePushes gating (MAJOR-1 invariant preserved): the
       // device-side flush is skipped while an open is pending observation, but the compiled
       // plan is still returned either way -- exactly the shape compileAndQueue's real
       // implementation returns, proven separately by push.test.js.
       compileAndQueue: async (args) => {
         calls.compileAndQueue.push(args);
-        if (compileAndQueueThrows) throw new Error('injected compileAndQueue failure');
+        if (compileAndQueueThrows || compileFailuresRemaining-- > 0) throw new Error('injected compileAndQueue failure');
         const pending = await VC.store.hasPendingObservation(args.db, args.deviceEui);
         let flushed = false;
         if (!pending && typeof args.flushQueue === 'function') {
           await args.flushQueue(args.deviceEui);
           flushed = true;
         }
-        return { rows: [], messages: compileAndQueueMessages, flushed };
+        return {
+          rows: [], messages: compileAndQueueMessages, flushed, generation: 'GEN2',
+          transition_id: state.control.fixed_generation_transition && state.control.fixed_generation_transition.transition_id,
+          plan_revision: state.control.fixed_generation_transition && state.control.fixed_generation_transition.plan_revision,
+          required_push_ids: state.control.fixed_generation_transition && state.control.fixed_generation_transition.required_push_ids,
+          complete: true,
+        };
       },
     },
   };
@@ -233,21 +341,101 @@ test('valve-ack-fn: GEN2 stored + mismatched profileId calls setDeviceProfile(de
   assert.deepEqual(calls.output, [null, [{ topic: 'application/APP1/device/AABBCCDDEEFF0011/command/down', payload: { fPort: 25 } }]]);
 });
 
-test('valve-ack-fn (MAJOR-4): GEN2 stored + already-matching profileId makes zero factory calls', async () => {
-  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: false });
+test('valve-ack-fn: healthy matching GEN2 profile is a durable no-op', async () => {
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: false, reconciliationNeeded: false });
   const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' });
   const calls = await runValveAck(harness, payload, {
     CHIRPSTACK_PROFILE_STREGA: GEN1_UUID,
     CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID,
     CHIRPSTACK_APP_ACTUATORS: 'APP1',
   });
-  assert.equal(harness.calls.factory, 0, 'profileId already equals gen2Profile: no gRPC client, no swap, no flush');
+  assert.equal(harness.calls.factory, 0, 'a healthy matching profile must not open a transport');
   assert.equal(harness.calls.setDeviceProfile.length, 0);
   assert.equal(harness.calls.flushDeviceQueue.length, 0);
-  // MAJOR-3 guard against a spurious push: nothing was re-pointed (fast path, zero gRPC),
-  // so nothing must be force-pushed either.
-  assert.equal(harness.calls.compileAndQueue.length, 0, 'no swap occurred: forcing a push here would be spurious');
+  assert.equal(harness.calls.compileAndQueue.length, 0, 'a READY current revision must not be recompiled');
   assert.equal(calls.output, null);
+});
+
+test('valve-ack-fn: a failed plan compile retries after the profile already matches', async () => {
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: false, compileFailuresRemaining: 1, reconciliationNeeded: true });
+  const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' });
+  const envVars = {
+    CHIRPSTACK_PROFILE_STREGA: GEN1_UUID,
+    CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID,
+    CHIRPSTACK_APP_ACTUATORS: 'APP1',
+  };
+  const first = await runValveAck(harness, payload, envVars);
+  assert.equal(first.output, null);
+  const second = await runValveAck(harness, payload, envVars);
+  assert.equal(harness.calls.setDeviceProfile.length, 0);
+  assert.equal(harness.calls.compileAndQueue.length, 2);
+  assert.deepEqual(second.output, [null, [{ topic: 'application/APP1/device/AABBCCDDEEFF0011/command/down', payload: { fPort: 25 } }]]);
+});
+
+test('valve-ack-fn: fixed plan/status/clock ACKs do not resend a healthy matching profile', async () => {
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: false, reconciliationNeeded: false });
+  const envVars = { CHIRPSTACK_PROFILE_STREGA: GEN1_UUID, CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID, CHIRPSTACK_APP_ACTUATORS: 'APP1' };
+  for (const [fPort, object] of [[25, { Ack_Port: 25 }], [21, { Schl_status_Port: 21 }], [12, { RTC_Port: 12 }]]) {
+    const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' });
+    payload.fPort = fPort;
+    payload.object = object;
+    const calls = await runValveAck(harness, payload, envVars);
+    assert.equal(calls.output, null);
+  }
+  assert.equal(harness.calls.compileAndQueue.length, 0);
+  assert.equal(harness.calls.flushDeviceQueue.length, 0);
+});
+
+test('valve-ack-fn: matching profile consumes one persisted fixed GEN1 to GEN2 transition', async () => {
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN1' }, promoteOnHandleUplink: true, hasPendingObservation: false });
+  const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' });
+  const envVars = { CHIRPSTACK_PROFILE_STREGA: GEN1_UUID, CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID, CHIRPSTACK_APP_ACTUATORS: 'APP1' };
+  const first = await runValveAck(harness, payload, envVars);
+  assert.equal(harness.calls.setDeviceProfile.length, 0, 'the profile already matches the promoted generation');
+  assert.equal(harness.calls.compileAndQueue.length, 1, 'the persisted promotion must force one resident-program compile');
+  assert.deepEqual(first.output, [null, [{ topic: 'application/APP1/device/AABBCCDDEEFF0011/command/down', payload: { fPort: 25 } }]]);
+  const second = await runValveAck(harness, payload, envVars);
+  assert.equal(harness.calls.compileAndQueue.length, 1, 'a later healthy ACK must not force another compile');
+  assert.equal(second.output, null);
+});
+
+test('valve-ack-fn: failed fixed transition compile remains pending and recovers on the next ACK', async () => {
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN1' }, promoteOnHandleUplink: true, hasPendingObservation: false, compileFailuresRemaining: 1 });
+  const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' });
+  const envVars = { CHIRPSTACK_PROFILE_STREGA: GEN1_UUID, CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID, CHIRPSTACK_APP_ACTUATORS: 'APP1' };
+  const failed = await runValveAck(harness, payload, envVars);
+  assert.equal(failed.output, null);
+  assert.equal(harness.calls.compileAndQueue.length, 1);
+  const recovered = await runValveAck(harness, payload, envVars);
+  assert.equal(harness.calls.compileAndQueue.length, 2, 'the pending transition must retry after an interrupted compile');
+  assert.deepEqual(recovered.output, [null, [{ topic: 'application/APP1/device/AABBCCDDEEFF0011/command/down', payload: { fPort: 25 } }]]);
+  await runValveAck(harness, payload, envVars);
+  assert.equal(harness.calls.compileAndQueue.length, 2, 'the applied transition must not recompile on a healthy ACK');
+});
+
+test('valve-ack-fn: terminal negative or malformed current ACK does not create a revision or enqueue', async () => {
+  for (const error of ['negative_ack', 'malformed_ack']) {
+    const currentId = 'current-' + error;
+    const harness = buildValveAckHarness({
+      settings: { strega_generation: 'GEN2' },
+      hasPendingObservation: false,
+      schedules: [{ schedule_uuid: 'conditional-schedule', kind: 'WEEKLY', enabled: 1, condition_policy_uuid: 'policy-1' }],
+      policies: [{ policy_uuid: 'policy-1', deleted_at: null, enabled: 1 }],
+      control: {
+        mode: 'CONDITIONAL', generation: 'GEN2', desired_revision: 'revision-1', required_push_ids: [currentId],
+        predecessor_push_ids: [], readiness: { state: 'PENDING', revision: 'revision-1', reason: 'awaiting_clear_ack' },
+      },
+      rows: [{ push_id: currentId, state: 'FAILED', error, transport_json: JSON.stringify({ phase: 'ATTEMPTED', attempted_at: '2026-01-01T00:00:00.000Z' }) }],
+    });
+    const calls = await runValveAck(harness, stregaUplink({ profileId: GEN2_UUID, profileName: 'OSI STREGA Valve Gen2' }), {
+      CHIRPSTACK_PROFILE_STREGA: GEN1_UUID,
+      CHIRPSTACK_PROFILE_STREGA_GEN2: GEN2_UUID,
+      CHIRPSTACK_APP_ACTUATORS: 'APP1',
+    });
+    assert.equal(harness.calls.compileAndQueue.length, 0, error + ' must remain terminal until explicit retry');
+    assert.equal(harness.calls.factory, 0);
+    assert.equal(calls.output, null);
+  }
 });
 
 test('valve-ack-fn: GEN1 stored never calls setDeviceProfile (this is the reconcile-from-state pin)', async () => {
@@ -335,7 +523,7 @@ test('valve-ack-fn (NEW-MINOR-B / whitelist): a Gen2 profile UUID is accepted ev
   // The hazard MAJOR-2 named: CS_PROFILE_STREGA_GEN2_NAME is operator-overridable. This uplink
   // proves acceptance comes from the CHIRPSTACK_PROFILE_STREGA_GEN2 whitelist entry, not the
   // 'STREGA' substring fallback -- the profile name here deliberately does not contain it.
-  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: true });
+  const harness = buildValveAckHarness({ settings: { strega_generation: 'GEN2' }, hasPendingObservation: true, reconciliationNeeded: false });
   const payload = stregaUplink({ profileId: GEN2_UUID, profileName: 'Acme Actuator v2' });
   const calls = await runValveAck(harness, payload, {
     CHIRPSTACK_PROFILE_STREGA: GEN1_UUID,
@@ -346,8 +534,10 @@ test('valve-ack-fn (NEW-MINOR-B / whitelist): a Gen2 profile UUID is accepted ev
   // block, including handleUplink, is never reached and this would silently stay false.
   assert.equal(harness.calls.handleUplinkCalled, true, 'the uplink must pass the top-level STREGA gate');
   assert.equal(calls.errors.length, 0);
-  // profileId (GEN2_UUID) matches gen2Profile, so MAJOR-4's fast path also applies here: zero gRPC.
+  // The whitelist path is healthy, so it must not create a periodic resend.
   assert.equal(harness.calls.factory, 0);
+  assert.equal(harness.calls.compileAndQueue.length, 0);
+  assert.equal(calls.output, null, 'the missing app id withholds the downlink');
 });
 
 test('valve-ack-fn: an unrelated profile (not STREGA at all) is rejected by the top-level gate', async () => {
@@ -672,10 +862,38 @@ async function runCsRegisterDeviceFn({ raw, registration, topicSql, envVars }) {
     }),
   };
   const osiDb = makeOsiDbStub(raw);
+  const osiLib = {
+    require: (name) => {
+      if (name === 'osi-valve-control') return { ok: true, value: valveControl };
+      throw new Error('unexpected osiLib.require: ' + name);
+    },
+  };
   const msg = { deviceRegistration: registration, topic: topicSql };
-  const execute = new Function('osiDb', 'chirpstack', 'env', 'node', 'msg', 'flow', byId['cs-register-device-fn'].func);
-  const out = await execute(osiDb, chirpstack, makeEnv(envVars), node, msg, flow);
+  const execute = new Function('osiDb', 'chirpstack', 'osiLib', 'env', 'node', 'msg', 'flow', byId['cs-register-device-fn'].func);
+  const out = await execute(osiDb, chirpstack, osiLib, makeEnv(envVars), node, msg, flow);
   return { out, calls, node };
+}
+
+async function readClaimFence(db, deviceEui) {
+  const before = await db.get(
+    'SELECT id, user_id, irrigation_zone_id, deleted_at, type_id, sync_version FROM devices WHERE UPPER(deveui)=UPPER(?)',
+    [deviceEui]
+  );
+  if (!before) return { exists: false };
+  const settings = await db.get(
+    'SELECT strega_generation FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)',
+    [deviceEui]
+  );
+  return {
+    exists: true,
+    id: Number(before.id),
+    type_id: before.type_id,
+    user_id: before.user_id == null ? null : Number(before.user_id),
+    irrigation_zone_id: before.irrigation_zone_id == null ? null : Number(before.irrigation_zone_id),
+    deleted_at: before.deleted_at == null ? null : before.deleted_at,
+    sync_version: Number(before.sync_version || 0),
+    strega_generation: String(settings && settings.strega_generation || 'GEN1').toUpperCase() === 'GEN2' ? 'GEN2' : 'GEN1',
+  };
 }
 
 test('cs-register-device-fn (execution): a GEN1-resolved re-registration never demotes a stored GEN2 valve_settings row', async () => {
@@ -687,7 +905,7 @@ test('cs-register-device-fn (execution): a GEN1-resolved re-registration never d
   // exercising this node's own defense-in-depth in isolation) must never be allowed to
   // overwrite a stored GEN2 row -- this is the exact v1 defect (review MAJOR-1's "upsert"
   // mutant) restated as an assertion against a real database write.
-  const registration = { devEui: eui, deviceType: 'STREGA_VALVE', stregaGeneration: 'GEN1' };
+  const registration = { devEui: eui, deviceType: 'STREGA_VALVE', stregaGeneration: 'GEN1', claimFence: await readClaimFence(db, eui), userId: 1 };
   const topicSql = `UPDATE devices SET updated_at = datetime('now') WHERE deveui = '${eui}'`;
   const { node } = await runCsRegisterDeviceFn({ raw, registration, topicSql, envVars: REG_ENV });
   assert.equal(node.calls.errors.length, 0);
@@ -701,7 +919,7 @@ test('cs-register-device-fn (execution): a GEN2-resolved registration promotes a
   const eui = '0016C001F1003002';
   await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'V', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
   await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN1', datetime('now'))", [eui]);
-  const registration = { devEui: eui, deviceType: 'STREGA_VALVE', stregaGeneration: 'GEN2' };
+  const registration = { devEui: eui, deviceType: 'STREGA_VALVE', stregaGeneration: 'GEN2', claimFence: await readClaimFence(db, eui), userId: 1 };
   const topicSql = `UPDATE devices SET updated_at = datetime('now') WHERE deveui = '${eui}'`;
   const { node } = await runCsRegisterDeviceFn({ raw, registration, topicSql, envVars: REG_ENV });
   assert.equal(node.calls.errors.length, 0);
@@ -733,6 +951,7 @@ async function runCsRegCloudFn({ raw, payload, envVars, osiDb }) {
   const osiLib = {
     require: (name) => {
       if (name === 'entity-name') return { ok: true, value: entityNameModule };
+      if (name === 'osi-valve-control') return { ok: true, value: valveControl };
       throw new Error('unexpected osiLib.require: ' + name);
     },
   };
@@ -761,6 +980,7 @@ function makeThrowingOsiDbStub(raw, sqlPattern) {
           real.all(sql, params, cb);
         },
         get: real.get,
+        transaction: real.transaction,
         close: real.close,
       };
     },
@@ -779,14 +999,10 @@ test('cs-reg-cloud-fn (execution): REGISTER_DEVICE for a stored-GEN2 valve provi
   // sync contract): the stored valve_settings row is the ONLY signal this path has. A mutant
   // that defeats the SELECT (review MAJOR-1's "cloudsel" mutant) makes this resolve GEN1 and
   // actively re-point a real Gen2 valve's ChirpStack device back onto the Gen1 profile.
-  // The pre-seeded devices row is soft-deleted: the REGISTER_DEVICE claim fence (10a097e92)
-  // short-circuits to an idempotent no-reprovision ACK whenever a *live* devices row already
-  // exists for this EUI, so a live row here would make this test assert dead code instead of
-  // the GEN2 stickiness it actually pins. A soft-deleted row is what "sticky across
-  // re-registration" means in practice: devices are never hard-deleted (soft-delete via
-  // deleted_at only), and valve_settings.device_eui's FK is ON DELETE CASCADE, not
-  // ON UPDATE CASCADE, so the sticky row survives the soft-delete untouched.
-  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
+  // Keep the device live so this fixture reaches the claim writer after provisioning.
+  // The cloud path must consult the stored generation and preserve it through the
+  // real owner transaction; a soft-deleted row would stop at the claim fence.
+  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
   await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN2', datetime('now'))", [eui]);
   const payload = {
     commandType: 'REGISTER_DEVICE',
@@ -848,7 +1064,7 @@ test('cs-reg-cloud-fn (execution, review §5 residual): a throwing valve_setting
   // The pre-seeded devices row is soft-deleted, for the same reason as the stored-GEN2 test
   // above: the REGISTER_DEVICE claim fence (10a097e92) short-circuits to an idempotent
   // no-reprovision ACK whenever a *live* devices row already exists for this EUI.
-  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
+  await db.run("INSERT INTO devices (deveui,name,type_id,user_id,current_state,target_state,sync_version,created_at,updated_at) VALUES (?,?,?,?,?,?,1,datetime('now'),datetime('now'))", [eui, 'Cloud Gen2 Valve', 'STREGA_VALVE', 1, 'CLOSED', 'CLOSED']);
   await db.run("INSERT INTO valve_settings (device_eui, strega_generation, updated_at) VALUES (?, 'GEN2', datetime('now'))", [eui]);
   const payload = {
     commandType: 'REGISTER_DEVICE',

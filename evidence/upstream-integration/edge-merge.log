@@ -1,0 +1,4 @@
+command: git merge --no-ff --no-edit 55b3d4b7bb48d0779234a03dca27468d935d34db
+exit: 1 (expected conflicts resolved below)
+conflicts: five bundled SQLite images, both profile UCI seed module lists, both profile flows.json, both profile osi-chirpstack-helper/index.js, database/seed-blank.sql
+resolution: canonical JSON script merge plus byte-identical profile mirror; unioned seed/UCI/helper behavior; regenerated seven DB images with node scripts/build-seed-db.js.

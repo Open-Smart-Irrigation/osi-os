@@ -864,3 +864,43 @@ test('R5 M3: SET_VALVE_SCHEDULER_STATUS is not refused by a plan_conflict in the
   assert.equal(out.ok, true);
   assert.deepEqual((await pendingSnapshot(db)).map((r) => [r.fport, r.payload_hex]), [[21, '32']]);
 });
+
+// Night-run conformance fix (B-1, M-2): a cloud cancel over the transport reports its
+// outcome and the flush collateral in the ACK detail, and a handed-off open is a permanent
+// refusal rather than a success.
+async function seedTransportCancel(db) {
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }), 'e1']);
+  await db.run("INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, transport_json) VALUES ('p-mon', ?, 'WEEKDAY_PLAN', 1, 15, '00', 'h', 'QUEUED', ?)",
+    [EUI, JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-plan', attempted_at: '2026-10-19T07:59:00.000Z' })]);
+}
+
+function cancelTransport(snapshot) {
+  return { getDeviceQueue: async () => snapshot, flushDeviceQueue: async () => ({}), enqueueDownlink: async () => { throw new Error('never'); } };
+}
+
+test('CANCEL_VALVE_ACTUATION over the transport: a proven cancel succeeds and names the collateral', async () => {
+  const { db } = await tempDb();
+  await seedTransportCancel(db);
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
+    transport: cancelTransport([{ id: 'q-plan', fPort: 15, data: 'AA==', isPending: false }, { id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }]),
+    now: new Date('2026-10-19T08:02:00.000Z'),
+  });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.detail, 'outcome=cancelled; collateral=push:WEEKDAY_PLAN:1');
+  assert.deepEqual(out.collateral.map((c) => c.owner_id), ['p-mon']);
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e1'")).reconciliation_state, 'CANCELLED');
+});
+
+test('CANCEL_VALVE_ACTUATION over the transport: a handed-off open is a permanent refusal with its outcome', async () => {
+  const { db } = await tempDb();
+  await seedTransportCancel(db);
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
+    transport: cancelTransport([]), now: new Date('2026-10-19T08:02:00.000Z'),
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'actuation_handed_off');
+  assert.equal(out.permanent, true);
+  assert.equal(out.detail, 'outcome=handed_off; collateral=push:WEEKDAY_PLAN:1');
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e1'")).reconciliation_state, 'PENDING_OBSERVATION');
+});

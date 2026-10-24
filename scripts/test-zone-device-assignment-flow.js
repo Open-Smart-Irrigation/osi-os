@@ -33,6 +33,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { DatabaseSync } = require('node:sqlite');
+const { facadeDb, moduleByName } = require('./lib/scoped-access-harness');
 
 const root = path.resolve(__dirname, '..');
 const flowsPath = path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
@@ -111,6 +112,32 @@ function execSqliteTopicNode(native, msg) {
   return msg;
 }
 
+// The route nodes now delegate to the conditional lifecycle service
+// (osi-irrigation-policy routes.*), which needs the osi-db-helper and osi-lib
+// function-node libs. Supply both against the same harness database: the
+// osiDb facade shares the DatabaseSync handle, osiLib resolves through the
+// osi-lib registry exactly as the gateway does.
+function lifecycleLibs(native) {
+  const database = facadeDb(native);
+  const osiDb = { Database: function Database() { return database; } };
+  const osiLib = {
+    require(name) {
+      const value = name === 'osi-db-helper' ? osiDb : moduleByName(name);
+      return value ? { ok: true, value } : { ok: false, error: `unregistered in harness: ${name}` };
+    },
+  };
+  // Node-RED binds every declared lib; no ChirpStack here, so the unclaim reports its
+  // in-flight cancel as not attempted.
+  return { osiDb, osiLib, crypto, chirpstack: null };
+}
+
+// The message a chain answers with is whatever reaches the http response node
+// (device-response), on whichever output the node under test wires to it.
+function respondingOutput(node, outputs) {
+  const index = (node.wires || []).findIndex((targets, i) => outputs[i] && targets.includes('device-response'));
+  return index >= 0 ? outputs[index] : null;
+}
+
 function freshDbCopy() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-assign-device-harness-'));
   const dbPath = path.join(tempDir, 'farming.db');
@@ -162,7 +189,11 @@ async function runAssignDeviceChain(flows, native, { userId, username, zoneId, d
   execSqliteTopicNode(native, afterDevice); // assign-device-verify-device-db
 
   const updateNode = findNode(flows, 'assign-device-update');
-  const updateOut = routeOutputs(updateNode, await executeFunctionNode(updateNode, afterDevice, { flowStore, env }));
+  const updateOut = routeOutputs(updateNode, await executeFunctionNode(updateNode, afterDevice, { flowStore, env, scope: lifecycleLibs(native) }));
+  // The lifecycle-owned assignment answers on its device-response output for
+  // both outcomes; a 200 there is the chain's success response.
+  const answered = respondingOutput(updateNode, updateOut);
+  if (answered && answered.statusCode === 200) return { stage: 'success', msg: answered };
   if (updateOut[1]) return { stage: 'update', msg: updateOut[1] };
   const afterUpdate = updateOut[0];
 

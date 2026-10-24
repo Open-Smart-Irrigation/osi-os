@@ -43,13 +43,228 @@ SELECT d.deveui, d.name, d.type_id, d.irrigation_zone_id, d.current_state, d.tar
  WHERE d.type_id = 'STREGA_VALVE' AND d.deleted_at IS NULL AND d.user_id = ?
  ORDER BY COALESCE(iz.name,'~'), d.name`;
 
-async function listValvesForUser(db, userId) { return db.all(VALVE_LIST_SQL, [userId]); }
+async function listValvesForUser(db, userId) {
+  const rows = await db.all(VALVE_LIST_SQL, [userId]);
+  const dispatch = require('./dispatch');
+  for (const row of rows) {
+    const candidates = await db.all(
+      "SELECT expectation_id, reconciliation_state, commanded_at, expected_close_at, commanded_duration_seconds AS duration_seconds, trigger, command_id, transport_json FROM valve_actuation_expectations WHERE UPPER(device_eui)=UPPER(?) AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') ORDER BY commanded_at DESC",
+      [row.deveui]
+    );
+    const active = candidates.find((candidate) => !dispatch.isReportOnlyExpectation(candidate));
+    if (!active) {
+      row.active_expectation_id = null;
+      row.active_reconciliation_state = null;
+      row.active_commanded_at = null;
+      row.active_expected_close_at = null;
+      row.active_duration_seconds = null;
+      row.active_trigger = null;
+      continue;
+    }
+    row.active_expectation_id = active.expectation_id;
+    row.active_reconciliation_state = active.reconciliation_state;
+    row.active_commanded_at = active.commanded_at;
+    row.active_expected_close_at = active.expected_close_at;
+    row.active_duration_seconds = active.duration_seconds;
+    row.active_trigger = active.trigger;
+  }
+  return rows;
+}
 
 async function listSchedules(db, deviceEui) {
   return db.all('SELECT vs.*, i.state AS dispatch_state, i.command_id AS dispatch_command_id, i.created_at AS dispatch_created_at, i.attempted_at AS dispatch_attempted_at FROM valve_schedules vs LEFT JOIN valve_once_dispatch_intents i ON i.schedule_uuid=vs.schedule_uuid WHERE UPPER(vs.device_eui)=UPPER(?) AND vs.deleted_at IS NULL ORDER BY vs.kind, vs.start_time, vs.fire_at', [deviceEui]);
 }
 
+async function listPoliciesForSchedules(db, schedules) {
+  const ids = [...new Set((schedules || []).map((s) => s && s.condition_policy_uuid).filter(Boolean).map(String))];
+  if (!ids.length) return [];
+  return db.all('SELECT policy_uuid, deleted_at, enabled FROM irrigation_policies WHERE policy_uuid IN (' + ids.map(() => '?').join(',') + ')', ids);
+}
+
 const SETTINGS_DEFAULTS = { strega_generation: 'GEN1', flow_rate_lpm: null, flow_rate_source: null, default_open_minutes: null, scheduler_status: 'ACTIVE', skip_today_date: null, last_clock_sync_queued_at: null, last_clock_sync_acked_at: null };
+
+function parseAckInstant(value) {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value !== 'string') return null;
+  const text = value.includes('T') ? value : value.replace(' ', 'T') + 'Z';
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function parseControl(value) {
+  if (value == null || value === '') return {};
+  let out;
+  try { out = typeof value === 'string' ? JSON.parse(value) : value; } catch (_) { throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' }); }
+  if (!out || typeof out !== 'object' || Array.isArray(out)) throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+  if (out.opaque !== undefined && !Array.isArray(out.opaque)) throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+  if (out.flushes !== undefined && !Array.isArray(out.flushes)) throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+  for (const key of ['required_push_ids', 'predecessor_push_ids']) {
+    if (out[key] !== undefined && (!Array.isArray(out[key]) || out[key].some((id) => typeof id !== 'string' || !id))) throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+  }
+  if (out.readiness !== undefined && (!out.readiness || typeof out.readiness !== 'object' || Array.isArray(out.readiness))) throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+  if (out.incident !== undefined) parseIncident(out.incident);
+  if (out.lifecycle_clear !== undefined) parseLifecycleClear(out.lifecycle_clear);
+  if (out.mode === 'LIFECYCLE_CLEAR') {
+    if (!out.lifecycle_clear || out.desired_revision !== out.lifecycle_clear.revision) {
+      throw Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+    }
+  }
+  return out;
+}
+
+function lifecycleMalformed() {
+  return Object.assign(new Error('conditional_control_malformed'), { code: 'conditional_control_malformed' });
+}
+
+function lifecycleString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function lifecycleNullableString(value) {
+  return value == null || lifecycleString(value);
+}
+
+function lifecycleInteger(value) {
+  return Number.isInteger(value) && value >= 0;
+}
+
+function lifecycleNullableInteger(value) {
+  return value == null || lifecycleInteger(value);
+}
+
+function lifecycleScheduleShape(schedule, deviceEui) {
+  return Boolean(schedule && typeof schedule === 'object' && !Array.isArray(schedule)
+    && lifecycleString(schedule.schedule_uuid)
+    && schedule.device_eui === deviceEui
+    && ['WEEKLY', 'ONCE'].includes(schedule.kind)
+    && lifecycleNullableString(schedule.label)
+    && lifecycleNullableInteger(schedule.weekdays_mask)
+    && (schedule.weekdays_mask == null || schedule.weekdays_mask <= 127)
+    && lifecycleNullableString(schedule.start_time)
+    && lifecycleNullableString(schedule.fire_at)
+    && typeof schedule.duration_minutes === 'number'
+    && Number.isFinite(schedule.duration_minutes)
+    && schedule.duration_minutes >= 0
+    && lifecycleString(schedule.timezone)
+    && [0, 1].includes(schedule.enabled)
+    && lifecycleNullableString(schedule.once_state)
+    && lifecycleNullableString(schedule.once_fired_at)
+    && lifecycleInteger(schedule.sync_version)
+    && lifecycleNullableString(schedule.deleted_at)
+    && lifecycleNullableString(schedule.condition_policy_uuid)
+    && lifecycleNullableString(schedule.effective_from));
+}
+
+function parseLifecycleClear(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.v !== 1
+      || !lifecycleString(value.revision) || !['PENDING', 'READY', 'SUPERSEDED'].includes(value.state)
+      || !lifecycleString(value.reason) || !lifecycleString(value.prepared_at)) throw lifecycleMalformed();
+  const device = value.device;
+  if (!device || typeof device !== 'object' || Array.isArray(device)
+      || !lifecycleInteger(device.row_id) || !/^[0-9A-F]{16}$/.test(device.device_eui || '')
+      || device.type_id !== 'STREGA_VALVE' || (device.user_id != null && !lifecycleInteger(device.user_id))
+      || (device.irrigation_zone_id != null && !lifecycleInteger(device.irrigation_zone_id))
+      || !lifecycleNullableString(device.deleted_at)) throw lifecycleMalformed();
+  if (!['GEN1', 'GEN2'].includes(value.generation)) throw lifecycleMalformed();
+  if (value.zone !== null) {
+    const zone = value.zone;
+    if (!zone || typeof zone !== 'object' || Array.isArray(zone) || !lifecycleString(zone.zone_uuid)
+        || !lifecycleInteger(zone.sync_version) || !lifecycleNullableString(zone.deleted_at)) throw lifecycleMalformed();
+  }
+  if (value.policy !== null) {
+    const policy = value.policy;
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy) || !lifecycleString(policy.policy_uuid)
+        || !lifecycleInteger(policy.sync_version) || ![0, 1].includes(policy.enabled)
+        || !lifecycleNullableString(policy.deleted_at)) throw lifecycleMalformed();
+  }
+  if (!Array.isArray(value.retired_schedules) || !Array.isArray(value.live_schedule_snapshot)) throw lifecycleMalformed();
+  const deviceEui = device.device_eui;
+  if (value.retired_schedules.some((schedule) => !lifecycleScheduleShape(schedule, deviceEui))
+      || value.live_schedule_snapshot.some((schedule) => !lifecycleScheduleShape(schedule, deviceEui))) throw lifecycleMalformed();
+  return value;
+}
+
+function parseIncident(value) {
+  if (value == null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  if (typeof value.incident_id !== 'string' || !value.incident_id || typeof value.physical_run_reference !== 'string' || !value.physical_run_reference) {
+    throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  }
+  if (typeof value.ended !== 'boolean' || !['OPEN', 'ENDED', 'RECONCILED'].includes(value.state)) {
+    throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  }
+  if (value.ended && (typeof value.ended_at !== 'string' || !Number.isFinite(parseAckInstant(value.ended_at)))) {
+    throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  }
+  if (value.reconciled_at != null && (typeof value.reconciled_at !== 'string' || !Number.isFinite(parseAckInstant(value.reconciled_at)))) {
+    throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  }
+  if (value.retry_revision !== undefined && value.retry_revision !== null
+      && (typeof value.retry_revision !== 'string' || !value.retry_revision.trim())) {
+    throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  }
+  if (value.state === 'OPEN' && value.ended) throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  if (value.state !== 'OPEN' && !value.ended) throw Object.assign(new Error('conditional_incident_malformed'), { code: 'conditional_incident_malformed' });
+  return value;
+}
+
+async function conditionalControl(db, deviceEui) {
+  const row = await db.get('SELECT conditional_control_json FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [deviceEui]);
+  return parseControl(row && row.conditional_control_json);
+}
+
+async function writeConditionalControl(db, deviceEui, control) {
+  const eui = String(deviceEui).toUpperCase();
+  const validated = parseControl(control);
+  if (validated.incident !== undefined) parseIncident(validated.incident);
+  await db.run('INSERT OR IGNORE INTO valve_settings(device_eui) VALUES (?)', [eui]);
+  await db.run("UPDATE valve_settings SET conditional_control_json=?, updated_at=datetime('now') WHERE device_eui=?", [JSON.stringify(validated), eui]);
+}
+
+async function writeConditionalControlIfRevisionTx(tx, deviceEui, revision, control, expectedRaw) {
+  const eui = String(deviceEui).toUpperCase();
+  const row = await tx.get('SELECT conditional_control_json FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [eui]);
+  const current = parseControl(row && row.conditional_control_json);
+  if (current.incident !== undefined) parseIncident(current.incident);
+  if (control.incident !== undefined) parseIncident(control.incident);
+  if (!revision || current.desired_revision !== revision) return false;
+  const raw = row && row.conditional_control_json != null ? row.conditional_control_json : null;
+  if (raw == null) return false;
+  if (expectedRaw !== undefined && raw !== expectedRaw) return false;
+  const nextRaw = JSON.stringify(control);
+  await tx.run("UPDATE valve_settings SET conditional_control_json=?, updated_at=datetime('now') WHERE device_eui=? AND conditional_control_json=?", [nextRaw, eui, raw]);
+  const after = await tx.get('SELECT conditional_control_json FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [eui]);
+  return !!after && after.conditional_control_json === nextRaw;
+}
+
+async function writeConditionalControlIfRevision(db, deviceEui, revision, control) {
+  const eui = String(deviceEui).toUpperCase();
+  const row = await db.get('SELECT conditional_control_json FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [eui]);
+  const expectedRaw = row && row.conditional_control_json != null ? row.conditional_control_json : null;
+  if (typeof db.transaction === 'function') {
+    try { return await db.transaction((tx) => writeConditionalControlIfRevisionTx(tx, eui, revision, control, expectedRaw)); }
+    catch (error) {
+      if (/cannot start a transaction within a transaction|database is locked/i.test(String(error && error.message || error))) return false;
+      throw error;
+    }
+  }
+  return writeConditionalControlIfRevisionTx(db, eui, revision, control, expectedRaw);
+}
+
+async function updateConditionalIncidentTx(tx, deviceEui, patch) {
+  const eui = String(deviceEui).toUpperCase();
+  const row = await tx.get('SELECT conditional_control_json FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [eui]);
+  const control = parseControl(row && row.conditional_control_json);
+  const current = control.incident == null ? null : parseIncident(control.incident);
+  if (!current && (!patch || !patch.incident_id || !patch.physical_run_reference)) {
+    throw Object.assign(new Error('conditional_incident_required'), { code: 'conditional_incident_required' });
+  }
+  const next = parseIncident({ ...(current || {}), ...(patch || {}) });
+  control.incident = next;
+  if (row) await tx.run('UPDATE valve_settings SET conditional_control_json=?, updated_at=datetime(\'now\') WHERE device_eui=?', [JSON.stringify(control), eui]);
+  else await tx.run('INSERT INTO valve_settings(device_eui, conditional_control_json) VALUES (?,?)', [eui, JSON.stringify(control)]);
+  return next;
+}
 
 async function getSettings(db, deviceEui) {
   const row = await db.get('SELECT * FROM valve_settings WHERE UPPER(device_eui)=UPPER(?)', [deviceEui]);
@@ -189,7 +404,8 @@ function daymaskOf(payloadHex) {
 
 async function insertPushes(db, rows) {
   for (const r of rows) {
-    await db.run('INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash) VALUES (?,?,?,?,?,?,?)', [r.push_id, String(r.device_eui).toUpperCase(), r.purpose, r.weekday, r.fport, r.payload_hex, r.plan_hash]);
+    const transportJson = r.transport_json == null ? null : (typeof r.transport_json === 'string' ? r.transport_json : JSON.stringify(r.transport_json));
+    await db.run('INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, transport_json) VALUES (?,?,?,?,?,?,?,?)', [r.push_id, String(r.device_eui).toUpperCase(), r.purpose, r.weekday, r.fport, r.payload_hex, r.plan_hash, transportJson]);
   }
 }
 
@@ -222,32 +438,145 @@ async function supersedeQueued(db, deviceEui, purpose, weekdayOrMask) {
   return db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND state='QUEUED'", [deviceEui, purpose]);
 }
 
+function parseTransportJson(value) {
+  if (value == null || value === '') return null;
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// R3-M2 (night run, matching CMD-04 PR0 on main): a queue flush that removed an unconfirmed
+// CLOCK_SYNC marks it SUPERSEDED and clears last_clock_sync_queued_at, so the next clock tick
+// computes a fresh one at its own time. The flushed payload is never replayed.
+async function supersedeFlushedClock(db, deviceEui, flushId) {
+  if (!flushId) return 0;
+  const rows = await db.all("SELECT push_id, transport_json FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose='CLOCK_SYNC' AND state='QUEUED'", [deviceEui]);
+  let superseded = 0;
+  for (const row of rows) {
+    const transport = parseTransportJson(row.transport_json);
+    if (!transport || transport.invalidated_by_flush !== flushId) continue;
+    await db.run("UPDATE valve_schedule_pushes SET state='SUPERSEDED' WHERE push_id=? AND state='QUEUED'", [row.push_id]);
+    superseded += 1;
+  }
+  if (superseded) await upsertSettings(db, deviceEui, { last_clock_sync_queued_at: null });
+  return superseded;
+}
+
+// A device ACK arrives in the uplink that follows the delivery; one handed off longer ago
+// than this cannot still be answered.
+const ACK_CORRELATION_WINDOW_MS = 24 * 3600 * 1000;
+
+// True when a completed flush removed this row's item while it was still unsent, so the device
+// never got it and it cannot own an ACK. R3-B1: the proof is persisted on the row at its first
+// invalidation (unsent_in_snapshot, never overwritten); rows from before that read every
+// COMPLETE flush snapshot instead of only the last stamp, since ChirpStack queue ids are unique
+// per item. A flush that did not complete proves nothing: its snapshot item may still be queued.
+// The flush call follows the snapshot within one ChirpStack round trip; that residual race is
+// documented in the night-run W8 report.
+function provenUndelivered(transport, flushes) {
+  if (!transport || !transport.queue_id) return false;
+  // Only a proof a completed flush stamped short-circuits (R3-M5); without one, scan.
+  if (transport.first_invalidated_by_flush != null && transport.unsent_in_snapshot === true) return true;
+  if (transport.first_invalidated_by_flush != null && transport.unsent_in_snapshot === false) return false;
+  if (!transport.invalidated_by_flush) return false;
+  return (Array.isArray(flushes) ? flushes : []).some((intent) => intent
+    && (intent.status === 'COMPLETE' || intent.result_status === 'COMPLETE')
+    && Array.isArray(intent.captured_snapshot)
+    && intent.captured_snapshot.some((item) => item && (item.id || item.queue_id || item.queueId) === transport.queue_id && !(item.isPending || item.is_pending)));
+}
+
+// B-2 (night run): an ACK echoes only the port and a status, never the payload, so it is
+// correlated by the order ChirpStack delivers a device queue in: first in, first out.
+// Candidates are the rows on this port (and GEN1 weekday) that were handed off (ATTEMPTED,
+// ACCEPTED or UNKNOWN), have not consumed an ACK yet (acked_at IS NULL), were attempted no
+// later than the ACK and within ACK_CORRELATION_WINDOW_MS of it, and are not proven
+// undelivered by a flush snapshot. SUPERSEDED and LOST rows stay candidates: a superseded
+// plan may still be on its way to the valve, and its ACK must not be read as the newer one's.
+// The oldest candidate owns the ACK when it is the only one, or when it is certainly still
+// queued ahead of the others (ACCEPTED with a queue id, untouched by any flush). Otherwise
+// the ACK is ambiguous: the oldest candidate consumes it (acked_at, 'ack_ambiguous') and the
+// next one is annotated 'ack_ambiguous'; neither is ACKED, so conditional readiness cannot
+// become READY from it. The newer row stays a candidate, so its own later ACK still confirms
+// it; unconfirmed at the 24-hour sweep, it becomes LOST.
 // The live osi-db-helper facade's run() resolves undefined (no change count), so ackPush
 // counts via SELECT-then-UPDATE instead of trusting run()'s return value.
-async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso) {
+async function ackPushTx(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso, options) {
+  const opts = options || {};
+  const received = parseAckInstant(atIso);
+  if (!Number.isFinite(received)) return 0;
+  const control = await conditionalControl(db, deviceEui);
+  const required = new Set(Array.isArray(control.required_push_ids) ? control.required_push_ids : []);
+  const isPlan = purpose === 'WEEKDAY_PLAN' || purpose === 'DAYMASK_PLAN';
   const where = weekdayOrNull == null ? '' : ' AND weekday=?';
   const selParams = [deviceEui, purpose, fport].concat(weekdayOrNull == null ? [] : [weekdayOrNull]);
-  const row = await db.get("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state='QUEUED'" + where + ' ORDER BY rowid DESC LIMIT 1', selParams);
-  if (!row) {
-    // (R13 M3) No outstanding row: a LOST row stays an ACK candidate while it is still the
-    // newest row of its slot. LOST means "may not hold", not "proven unsent" -- a transport
-    // timeout after acceptance, or a row already transmitted when a cancel flushed the queue,
-    // can still reach the valve, and its ACK recovers the slot. A row replaced by a newer
-    // snapshot (SUPERSEDED, or followed by newer rows) is never credited.
-    const newest = await db.get("SELECT push_id, state, error FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=?" + where + ' ORDER BY rowid DESC LIMIT 1', selParams);
-    if (!newest || !isLostRow(newest)) return 0;
-    await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=?, error=NULL WHERE push_id=? AND state='FAILED'", [status, atIso, newest.push_id]);
-    return 1;
+  const rows = await db.all("SELECT * FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND purpose=? AND fport=? AND state IN ('QUEUED','SUPERSEDED','FAILED','LOST') AND acked_at IS NULL" + where + ' ORDER BY rowid ASC', selParams);
+  const candidates = [];
+  for (const candidate of rows) {
+    if (candidate.state === 'FAILED' && !isLostRow(candidate)) continue;
+    const transport = parseTransportJson(candidate.transport_json);
+    if (!transport || !['ATTEMPTED', 'ACCEPTED', 'UNKNOWN'].includes(transport.phase)) continue;
+    const attempted = parseAckInstant(transport.attempted_at);
+    if (!Number.isFinite(attempted) || received < attempted || received - attempted > ACK_CORRELATION_WINDOW_MS) continue;
+    if (provenUndelivered(transport, control.flushes)) continue;
+    candidates.push({ row: candidate, transport });
   }
+  if (!candidates.length) return 0;
+  const first = candidates[0];
+  const queuedAhead = first.transport.phase === 'ACCEPTED' && first.transport.queue_id && !first.transport.invalidated_by_flush;
+  if (candidates.length > 1 && !queuedAhead) {
+    // Neither row changes state: the oldest consumes the ACK (acked_at), the next is annotated
+    // and stays a candidate. A row of the latest compile that is still unconfirmed at the
+    // 24-hour sweep becomes LOST there.
+    await db.run("UPDATE valve_schedule_pushes SET ack_status=?, acked_at=?, error='ack_ambiguous' WHERE push_id=?",
+      [status, atIso, first.row.push_id]);
+    await db.run("UPDATE valve_schedule_pushes SET error='ack_ambiguous' WHERE push_id=?",
+      [candidates[1].row.push_id]);
+    return 0;
+  }
+  const row = first.row;
   // CMD-04 PR0: a snapshot still waiting out the debounce window has not been sent, so an ACK
-  // arriving now answers an earlier (superseded) push and must not confirm the new row.
-  // SUPERSEDED rows are never matched (state='QUEUED' above). The remaining weak spot,
-  // recorded for CMD-04 proper: once the new snapshot is on the air, an earlier push's late ACK
-  // on the same port/purpose/weekday still credits the new row.
+  // arriving now answers an earlier push and must not confirm the new row. On the transport
+  // path such a row has no transport phase yet and is never a candidate above; this check keeps
+  // the rule independent of that.
   const pendingSnap = await getSnapshotPending(db, deviceEui);
   if (pendingSnap && pendingSnap.push_ids.includes(row.push_id)) return 0;
-  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=? WHERE push_id=?", [status, atIso, row.push_id]);
+  const conditionalRow = isPlan && required.has(row.push_id);
+  const settings = await getSettings(db, deviceEui);
+  const generation = String(opts.generation || (conditionalRow ? control.generation : settings.strega_generation) || 'GEN1').toUpperCase();
+  let positive = false;
+  let unresolved = false;
+  if (conditionalRow) {
+    // The caller's conditional clear rule applies to both generations (B-2: GEN2 used to skip
+    // it). Without one, a GEN2 clear is checked against its own payload (the all-days 0x80
+    // clear) and status 1; a GEN1 ACK stays unresolved, as before.
+    if (typeof opts.verifiedRule === 'function') positive = opts.verifiedRule({ row, status, generation: opts.generationIdentity || null }) === true;
+    else if (generation === 'GEN2') positive = status === 1 && String(row.payload_hex || '').replace(/^0x/i, '').toUpperCase() === '80';
+    else unresolved = true;
+  } else if (generation === 'GEN2') {
+    if (purpose === 'SCHEDULER_STATUS') {
+      const expected = { '30': 0, '31': 1, '32': 2 }[String(row.payload_hex || '').replace(/^0x/i, '')];
+      positive = expected !== undefined && status === expected;
+    } else positive = status === 1;
+  } else if (purpose === 'WEEKDAY_PLAN' || purpose === 'CLOCK_SYNC') positive = status === 0;
+  else if (purpose === 'SCHEDULER_STATUS') unresolved = true;
+  if (unresolved) {
+    await db.run("UPDATE valve_schedule_pushes SET ack_status=?, error=? WHERE push_id=?", [status, 'ack_protocol_unverified', row.push_id]);
+    return 0;
+  }
+  if (!positive) {
+    await db.run("UPDATE valve_schedule_pushes SET state=CASE WHEN state='SUPERSEDED' THEN 'SUPERSEDED' ELSE 'FAILED' END, ack_status=?, acked_at=?, error=? WHERE push_id=?", [status, atIso, 'negative_ack', row.push_id]);
+    return 0;
+  }
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED', ack_status=?, acked_at=?, error=NULL WHERE push_id=?", [status, atIso, row.push_id]);
   return 1;
+}
+
+async function ackPush(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso, options) {
+  if (typeof db.transaction === 'function') return db.transaction((tx) => ackPushTx(tx, deviceEui, purpose, fport, weekdayOrNull, status, atIso, options));
+  return ackPushTx(db, deviceEui, purpose, fport, weekdayOrNull, status, atIso, options);
 }
 
 async function failStalePushes(db, olderThanIso) {
@@ -385,14 +714,6 @@ async function supersedeOutstanding(db, deviceEui, purposes) {
   return rows.length;
 }
 
-// (R13 M3) Mark rows LOST (FAILED + reason). Guarded on state='QUEUED', so an ACK that raced
-// in first wins.
-async function markPushesLost(db, pushIds, reason) {
-  for (const id of pushIds || []) {
-    await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [reason || LOST_NOT_RESENT, id]);
-  }
-}
-
 // (R5 L1) Has the valve ever had a WEEKLY schedule here, tombstones included? (Bluetooth
 // guard in push.compileAndQueue, together with hasPlanHistory.)
 async function hasWeeklyEver(db, deviceEui) {
@@ -446,12 +767,27 @@ async function markFlushedSnapshotLost(db, deviceEui, opts) {
     const current = await getSnapshotEmittedRaw(db, deviceEui);
     if (current != null && current !== opts.emittedRawBeforeFlush) for (const id of emittedPushIds(current)) keep.add(id);
   }
-  const rows = await db.all("SELECT push_id FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS')", [deviceEui]);
-  const lost = rows.filter((r) => !keep.has(r.push_id));
+  const rows = await db.all("SELECT push_id, transport_json FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN','SCHEDULER_STATUS')", [deviceEui]);
+  // R13 R2: a lifecycle clear row with no transport phase was never attempted, so the flush did
+  // not remove it from the air; it stays QUEUED for the clear sender.
+  const neverAttemptedLifecycle = (row) => {
+    let transport = null;
+    try { transport = row.transport_json ? JSON.parse(row.transport_json) : null; } catch (_) { transport = null; }
+    return Boolean(transport && transport.lifecycle_clear_revision && transport.phase == null);
+  };
+  const lost = rows.filter((r) => !keep.has(r.push_id) && !neverAttemptedLifecycle(r));
   for (const r of lost) await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [LOST_NOT_RESENT, r.push_id]);
   const clocks = await supersedeOutstanding(db, deviceEui, ['CLOCK_SYNC']);
   if (clocks) await upsertSettings(db, deviceEui, { last_clock_sync_queued_at: null });
   return { lost: lost.length, clocksSuperseded: clocks };
+}
+
+// (R13 M3, converged with PR0 91b1466d4) Mark rows LOST (FAILED + reason, default
+// 'not_resent_q02c'). Guarded on state='QUEUED', so an ACK that raced in first wins.
+async function markPushesLost(db, pushIds, reason) {
+  for (const id of pushIds || []) {
+    await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error=? WHERE push_id=? AND state='QUEUED'", [reason || LOST_NOT_RESENT, id]);
+  }
 }
 
 // Has this gateway ever queued a plan for the valve? (Bluetooth guard in push.compileAndQueue.)
@@ -509,7 +845,7 @@ async function listSnapshotPending(db) {
 async function queuedPushesById(db, deviceEui, pushIds) {
   if (!pushIds || !pushIds.length) return [];
   const rows = await db.all(
-    "SELECT push_id, purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND push_id IN (" + pushIds.map(() => '?').join(',') + ') ORDER BY rowid',
+    "SELECT push_id, purpose, weekday, fport, payload_hex, transport_json FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND state='QUEUED' AND push_id IN (" + pushIds.map(() => '?').join(',') + ') ORDER BY rowid',
     [deviceEui].concat(pushIds)
   );
   return rows;
@@ -521,14 +857,20 @@ async function queuedPushesById(db, deviceEui, pushIds) {
 // device_eui instead of correlated on d.deveui. Used by runtime.js's buildRuntimePayload(), which
 // needs this per-device rather than batched across every valve a user owns.
 async function activeActuation(db, deviceEui) {
-  return db.get(
+  const rows = await db.all(
     'SELECT expectation_id, reconciliation_state, commanded_at, expected_close_at, ' +
     'commanded_duration_seconds AS duration_seconds, trigger ' +
     'FROM valve_actuation_expectations ' +
     "WHERE UPPER(device_eui) = UPPER(?) AND reconciliation_state IN ('PENDING_OBSERVATION','OBSERVED_RUNNING') " +
-    'ORDER BY commanded_at DESC LIMIT 1',
+    'ORDER BY commanded_at DESC',
     [deviceEui]
   );
+  const dispatch = require('./dispatch');
+  for (const row of rows) {
+    const expectation = await db.get('SELECT command_id, transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [row.expectation_id]);
+    if (!dispatch.isReportOnlyExpectation(expectation || row)) return row;
+  }
+  return null;
 }
 
 // Single-device counterpart of VALVE_LIST_SQL's recent_stale_state subquery above.
@@ -580,4 +922,5 @@ async function getGatewaySetting(db, key, warn) {
   }
 }
 
-module.exports = { supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, markPushesLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX, listValvesForUser, listSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS };
+module.exports = { markPushesLost, supersedeFlushedClock, provenUndelivered, ACK_CORRELATION_WINDOW_MS, listValvesForUser, listSchedules, listPoliciesForSchedules, getSettings, upsertSettings, insertSchedule, updateSchedule, reviveSchedule, softDeleteSchedule, insertPushes, supersedeQueued, ackPush, ackPushTx, failStalePushes, staleQueuedPlanDeviceEuis, pushSummary, activeActuation, recentStaleState, hasPendingObservation, weekdayPushStates, getGatewaySetting, SETTINGS_DEFAULTS, parseAckInstant, parseControl, parseLifecycleClear, parseIncident, updateConditionalIncidentTx, conditionalControl, writeConditionalControl, writeConditionalControlIfRevision, writeConditionalControlIfRevisionTx,
+  supersedeOutstanding, hasPlanHistory, hasWeeklyEver, markFlushedSnapshotLost, setSnapshotEmitted, getSnapshotEmittedRaw, SNAPSHOT_EMITTED_PREFIX, setSnapshotPending, clearSnapshotPending, getSnapshotPending, listSnapshotPending, queuedPushesById, isLostRow, daymaskOf, LOST_STALE, LOST_NOT_RESENT, LOST_REASONS, SNAPSHOT_PENDING_PREFIX };

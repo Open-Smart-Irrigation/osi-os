@@ -121,6 +121,14 @@ jobs:
       - run: node scripts/test-valve-schedule-sync-triggers.js
       - run: node scripts/test-valve-settings-sync-triggers.js
       - run: node --test scripts/test-strega-reconciliation-observed-events.js scripts/test-valve-actuation-bootstrap.js
+      - name: Conditional irrigation schema rehearsals
+        run: |
+          node scripts/test-conditional-irrigation-schema.js
+          node scripts/test-conditional-irrigation-sync-schema.js
+      - name: Conditional irrigation projection and history suites
+        run: |
+          node --test scripts/test-strega-reconciliation-observed-events.js scripts/test-task5b2-projections.js
+          node --test scripts/test-task5b3-history.js
       - name: Verify trigger-body parity (seed vs boot DDL)
         run: node scripts/verify-trigger-body-parity.js
       - name: Trigger-body parity unit tests
@@ -169,6 +177,7 @@ jobs:
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/lifecycle-clear.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.test.js \
@@ -176,6 +185,26 @@ jobs:
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.test.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.test.js
+      - name: Conditional irrigation module tests
+        run: |
+          node scripts/run-module-tests.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/evaluate.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/lifecycle.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/model.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/observations.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/occurrences.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/store.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/worker.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/composition-4c2.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/dispatch.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects-safety-dispatch.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects-safety.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrapper-4c2.test.js \
+            conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/writer-integration.test.js
       - run: |
           node scripts/run-module-tests.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-system-settings/api.test.js

@@ -1,4 +1,5 @@
 import axios, { type GenericAbortSignal, type InternalAxiosRequestConfig } from 'axios';
+import { parseValveCancelResult, type ValveCancelResult } from './valveCancel';
 import {
   StaleSessionRequestError,
   currentSessionSignal,
@@ -89,7 +90,12 @@ import type {
   WatermarkCalibrationState,
   WatermarkCalibrationValues,
   WatermarkPreviewChannel,
+  IrrigationPolicyPauseAction,
+  IrrigationPolicyRetryAction,
+  IrrigationPolicyView,
 } from '../types/farming';
+import type { PolicyEditDraft } from '../utils/irrigationPolicy';
+import { normalisePolicyView, toPolicyPayload } from '../utils/irrigationPolicy';
 
 type ApiErrorPayload = {
   detail?: string;
@@ -560,8 +566,11 @@ export const devicesAPI = {
     await api.post(`/api/valve/${deveui}`, action);
   },
 
-  cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<void> => {
-    await api.post(`/api/valve/${deveui}/cancel`, { reason });
+  // Resolves with the cancel outcome and its flush collateral (null when the reply has none). A
+  // handed-off or uncertain outcome rejects (409/503); read it with valveCancelResultFromError.
+  cancelIrrigation: async (deveui: string, reason: string = 'operator_cancel'): Promise<ValveCancelResult | null> => {
+    const response = await api.post(`/api/valve/${deveui}/cancel`, { reason });
+    return parseValveCancelResult(response?.data);
   },
 
   remove: async (deveui: string): Promise<void> => {
@@ -800,6 +809,74 @@ export const irrigationZonesAPI = {
   disableAllSchedules: async (): Promise<{ disabledSchedules: number }> => {
     const response = await api.post<{ disabledSchedules?: number }>('/api/irrigation-zones/schedules/disable-all');
     return { disabledSchedules: Number(response.data?.disabledSchedules ?? 0) };
+  },
+};
+
+/** Conditional irrigation policy boundary. Components receive one normalized view
+ * whether the gateway answers with its local flat runtime shape or the cloud's
+ * `{ runtime, pending }` projection. */
+export const irrigationPolicyAPI = {
+  get: async (zoneRef: number | string): Promise<IrrigationPolicyView> => {
+    const response = await api.get<unknown>(`/api/irrigation-zones/${encodeURIComponent(String(zoneRef))}/irrigation-policy`);
+    return { ...normalisePolicyView(response.data), httpStatus: response.status };
+  },
+
+  save: async (zoneRef: number | string, draft: PolicyEditDraft): Promise<IrrigationPolicyView> => {
+    const response = await api.put<unknown>(
+      `/api/irrigation-zones/${encodeURIComponent(String(zoneRef))}/irrigation-policy`,
+      toPolicyPayload(draft),
+    );
+    return { ...normalisePolicyView(response.data), httpStatus: response.status };
+  },
+
+  pause: async (zoneRef: number | string, body: Record<string, unknown> = {}): Promise<IrrigationPolicyPauseAction> => {
+    const response = await api.post<unknown>(
+      `/api/irrigation-zones/${encodeURIComponent(String(zoneRef))}/irrigation-policy/pause`,
+      body,
+    );
+    const value = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : {};
+    const list = (input: unknown): Array<Record<string, unknown>> => Array.isArray(input)
+      ? input.filter(item => item && typeof item === 'object' && !Array.isArray(item)) as Array<Record<string, unknown>>
+      : [];
+    return {
+      status: Number(value.status ?? response.status),
+      policy: value.policy && typeof value.policy === 'object' && !Array.isArray(value.policy) ? value.policy as Record<string, unknown> : null,
+      cancellations: list(value.cancellations),
+      activeExpectations: list(value.active_expectations ?? value.activeExpectations),
+      httpStatus: response.status,
+    };
+  },
+
+  retryValve: async (zoneRef: number | string, deviceEui: string, body: Record<string, unknown> = {}): Promise<IrrigationPolicyRetryAction> => {
+    const response = await api.post<unknown>(
+      `/api/irrigation-zones/${encodeURIComponent(String(zoneRef))}/irrigation-policy/retry-valve`,
+      { ...body, device_eui: deviceEui.trim().toUpperCase() },
+    );
+    const value = response.data && typeof response.data === 'object' && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : {};
+    return {
+      status: Number(value.status ?? response.status),
+      deviceEui: String(value.device_eui ?? deviceEui).trim().toUpperCase(),
+      result: value,
+      httpStatus: response.status,
+    };
+  },
+
+  decisions: async (zoneRef: number | string, params: { before?: string; cursor?: string; limit?: number } = {}) => {
+    const before = params.before ?? params.cursor;
+    const response = await api.get<unknown>(
+      `/api/irrigation-zones/${encodeURIComponent(String(zoneRef))}/irrigation-policy/decisions`,
+      { params: { before, limit: params.limit } },
+    );
+    const value = response.data as Record<string, unknown>;
+    return {
+      decisions: Array.isArray(value?.decisions) ? value.decisions : [],
+      nextCursor: typeof value?.next_cursor === 'string' ? value.next_cursor : null,
+      limit: Number(value?.limit ?? params.limit ?? 25),
+    };
   },
 };
 
@@ -1722,6 +1799,12 @@ function normaliseValveSchedule(row: any): ValveSchedule {
     dispatchCommandId: row?.dispatch_command_id ?? row?.dispatchCommandId ?? null,
     dispatchCreatedAt: row?.dispatch_created_at ?? row?.dispatchCreatedAt ?? null,
     dispatchAttemptedAt: row?.dispatch_attempted_at ?? row?.dispatchAttemptedAt ?? null,
+    syncVersion: row?.sync_version == null ? null : Number(row.sync_version),
+    conditionPolicyUuid: row?.condition_policy_uuid ?? row?.conditionPolicyUuid ?? null,
+    effectiveFrom: row?.effective_from ?? row?.effectiveFrom ?? null,
+    execution: row?.execution == null
+      ? (row?.condition_policy_uuid || row?.conditionPolicyUuid ? 'conditional' : null)
+      : (String(row.execution).toLowerCase() as ValveSchedule['execution']),
   };
 }
 
@@ -1855,7 +1938,23 @@ export const valvesAPI = {
     }
   },
   setSchedulerStatus: async (eui: string, status: ValveSchedulerStatus): Promise<void> => {
-    await api.post(`/api/valves/${eui}/scheduler-status`, { status });
+    try {
+      await api.post(`/api/valves/${eui}/scheduler-status`, { status });
+    } catch (error) {
+      // A conditional valve refuses Resume while its conditional clear is not confirmed (the
+      // valve may still hold a resident plan). Tag it so the panel can explain the refusal.
+      if (
+        axios.isAxiosError<{ error?: string }>(error)
+        && error.response?.status === 409
+        && error.response.data?.error === 'conditional_readiness_pending'
+      ) {
+        throw Object.assign(new Error('Resume refused until the conditional clear is confirmed'), {
+          name: 'ValveResumeRefusedError',
+          code: 'conditional_readiness_pending',
+        });
+      }
+      throw error;
+    }
   },
   updateSettings: async (
     eui: string,

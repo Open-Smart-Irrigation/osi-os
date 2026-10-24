@@ -16,6 +16,7 @@ import { SystemPanel } from '../components/farming/SystemPanel';
 import { SenseCapWeatherCard } from '../components/farming/SenseCapWeatherCard';
 import { LoRainGaugeCard } from '../components/farming/LoRainGaugeCard';
 import { ValveControlPanel } from '../components/farming/valves/ValveControlPanel';
+import { IrrigationPolicyEditor } from '../components/farming/IrrigationPolicyEditor';
 import { Sdi12SoilCard } from '../components/farming/Sdi12SoilCard';
 import { Sdi12SettingsModal } from '../components/farming/Sdi12SettingsModal';
 import { FieldTesterCard } from '../components/farming/FieldTesterCard';
@@ -25,7 +26,7 @@ import {
 } from '../components/farming/IrrigationOutcomesPanel';
 import { useDisplayPreferences } from '../utils/displayPreferences';
 import { useGatewayModules } from '../hooks/useGatewayModules';
-import type { Device, IrrigationZone, ValveSummary } from '../types/farming';
+import type { Device, IrrigationZone, ValveSchedule, ValveSummary } from '../types/farming';
 import { Button, EmptyState } from '../ui-core';
 import type { IrrigationActuationsResponse } from '../services/api';
 
@@ -47,6 +48,7 @@ export const FarmingDashboard: React.FC = () => {
   const [isAddDeviceModalOpen, setIsAddDeviceModalOpen] = useState(false);
   const [isCreateZoneModalOpen, setIsCreateZoneModalOpen] = useState(false);
   const [sdi12SettingsDevice, setSdi12SettingsDevice] = useState<Device | null>(null);
+  const [policyEditorRequest, setPolicyEditorRequest] = useState<{ valve: ValveSummary; schedule?: ValveSchedule } | null>(null);
 
   // Fetch devices with SWR - polls every 10 seconds
   const { data: devices, error: devicesError, mutate: mutateDevices } = useSWR<Device[]>(
@@ -205,6 +207,11 @@ export const FarmingDashboard: React.FC = () => {
     [allZones],
   );
 
+  const policyEditorZone = policyEditorRequest?.valve.zoneId == null
+    ? null
+    : allZones.find(zone => zone.id === policyEditorRequest.valve.zoneId) ?? null;
+  const policyEditorDevices = policyEditorZone ? devicesByZone.get(policyEditorZone.id) ?? [] : [];
+
   const isLoading = !devices && !devicesError && !zones && !zonesError;
   const error = devicesError || zonesError;
 
@@ -304,7 +311,12 @@ export const FarmingDashboard: React.FC = () => {
                 there anything to control at all" gate. */}
             {modules.valveControl && hasStregaValve && (
               <div className="mt-8">
-                <ValveControlPanel onUpdate={handleUpdate} canWrite={canWrite} batteryByEui={batteryByEui} />
+                <ValveControlPanel
+                  onUpdate={handleUpdate}
+                  canWrite={canWrite}
+                  batteryByEui={batteryByEui}
+                  onOpenPolicyEditor={(valve, schedule) => setPolicyEditorRequest({ valve, schedule })}
+                />
               </div>
             )}
 
@@ -509,13 +521,24 @@ export const FarmingDashboard: React.FC = () => {
         onZoneCreated={handleZoneCreated}
       />
 
-      {sdi12SettingsDevice && (
+        {sdi12SettingsDevice && (
         <Sdi12SettingsModal
           device={sdi12SettingsDevice}
           onClose={() => setSdi12SettingsDevice(null)}
           onUpdate={handleUpdate}
         />
-      )}
+        )}
+
+        {policyEditorRequest && policyEditorZone && (
+          <IrrigationPolicyEditor
+            zone={policyEditorZone}
+            devices={policyEditorDevices}
+            open
+            initialDeviceEui={policyEditorRequest.valve.deviceEui}
+            onClose={() => setPolicyEditorRequest(null)}
+            onSaved={handleUpdate}
+          />
+        )}
     </div>
   );
 };

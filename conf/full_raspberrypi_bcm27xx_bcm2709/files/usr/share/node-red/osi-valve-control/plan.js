@@ -29,7 +29,11 @@ function compileWindows(schedules) {
   const days = Array.from({ length: 7 }, () => []);
   const errors = [];
   for (const s of schedules || []) {
-    if (!s || s.kind !== 'WEEKLY' || !Number(s.enabled) || s.deleted_at) continue;
+    if (!s || s.kind !== 'WEEKLY' || s.deleted_at) continue;
+    // Conditional weekly schedules are represented in the edge ledger but are not
+    // resident valve programs.  They are compiled by the policy worker instead.
+    if (s.condition_policy_uuid) continue;
+    if (!Number(s.enabled)) continue;
     if (!parseHHMM(s.start_time)) {
       // Malformed start_time from a DB row: report instead of letting windowFrom throw.
       errors.push({ code: 'invalid_start_time', weekday: null, conflicts: [s.schedule_uuid] });
@@ -68,6 +72,37 @@ function compileWindows(schedules) {
     }
   }
   return { days, errors };
+}
+
+// Validate the resident-program boundary before compilation.  A valve may have
+// fixed weekly rows or rows attached to one live policy, but never both policies
+// or a mixture.  ONCE rows remain explicit resident commands and do not affect
+// this mode decision.
+function validateScheduleModes(schedules, policies) {
+  const rows = (schedules || []).filter((s) => s && s.kind === 'WEEKLY' && !s.deleted_at && Number(s.enabled));
+  const conditional = rows.filter((s) => s.condition_policy_uuid);
+  const fixed = rows.filter((s) => !s.condition_policy_uuid);
+  const policyIds = [...new Set(conditional.map((s) => String(s.condition_policy_uuid)))];
+  const policyMap = policies instanceof Map
+    ? policies
+    : new Map((Array.isArray(policies) ? policies : []).map((p) => [String(p.policy_uuid), p]));
+  const unresolved = conditional.filter((s) => {
+    const p = policyMap.get(String(s.condition_policy_uuid));
+    return !p || p.deleted_at != null;
+  });
+  if (unresolved.length) {
+    return { ok: false, code: 'invalid_conditional_policy', status: 409,
+      conflicts: unresolved.map((s) => s.schedule_uuid),
+      conditional: conditional.map((s) => s.schedule_uuid), policyIds,
+      unresolvedPolicies: [...new Set(unresolved.map((s) => String(s.condition_policy_uuid)))] };
+  }
+  if (conditional.length && (fixed.length || policyIds.length > 1)) {
+    return { ok: false, code: 'mixed_schedule_mode', status: 409,
+      conflicts: rows.map((s) => s.schedule_uuid),
+      fixed: fixed.map((s) => s.schedule_uuid),
+      conditional: conditional.map((s) => s.schedule_uuid), policyIds };
+  }
+  return { ok: true, mode: conditional.length ? 'CONDITIONAL' : 'FIXED', policyIds };
 }
 
 function encodeGen1Day(windows) {
@@ -226,6 +261,7 @@ function nextRun(schedules, now, timeZoneFallback) {
   let best = null;
   for (const s of schedules || []) {
     if (!s || !Number(s.enabled) || s.deleted_at) continue;
+    if (s.condition_policy_uuid) continue;
     const tz = s.timezone || timeZoneFallback || 'UTC';
     let at = null;
     if (s.kind === 'ONCE') {
@@ -281,7 +317,7 @@ function validateScheduleInput(body) {
 
 module.exports = {
   WEEKDAY_FPORT_BASE, GEN2_SCHEDULER_FPORT, STATUS_FPORT, CLOCK_FPORT, CLOCK_REQ_FPORT, MAX_WINDOWS_PER_DAY,
-  compileWindows, encodeGen1Day, encodeGen2, gen2Groups, planHash, gen1ClockPayload,
+  compileWindows, validateScheduleModes, encodeGen1Day, encodeGen2, gen2Groups, planHash, gen1ClockPayload,
   localParts, weekdayLocal, offsetMinutes, isDstTransitionWithin, nextLocalOccurrence, nextRun,
   validateScheduleInput, parseHHMM,
 };

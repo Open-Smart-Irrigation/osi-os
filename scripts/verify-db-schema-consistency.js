@@ -413,6 +413,24 @@ const schemaContract = {
     'event_uuid',
     'created_at',
   ],
+  irrigation_policies: [
+    'policy_uuid', 'zone_uuid', 'condition_json', 'timezone', 'enabled',
+    'observation_window_minutes', 'min_interval_minutes', 'max_daily_minutes',
+    'delivery_settings_json', 'effective_from', 'sync_version', 'created_at',
+    'updated_at', 'deleted_at',
+  ],
+  irrigation_occurrences: [
+    'schedule_uuid', 'local_date', 'local_time', 'policy_uuid', 'zone_uuid', 'device_eui',
+    'due_at', 'expires_at', 'policy_revision', 'schedule_revision', 'policy_sync_version',
+    'schedule_sync_version', 'decision', 'decision_reason', 'decision_evidence_json',
+    'decision_at', 'requested_duration_minutes', 'effective_duration_minutes', 'command_id',
+    'queue_id', 'state', 'reservation_start_at', 'reservation_end_at', 'reserved_minutes',
+    'claimed_at', 'attempted_at', 'sent_at', 'observed_open_at', 'observed_close_at',
+    'created_at', 'updated_at',
+  ],
+  irrigation_runtime_state: [
+    'singleton_id', 'last_trusted_tick_at', 'last_decided_due_at', 'updated_at',
+  ],
   sync_link_state: [
     'peer_node',
     'linked',
@@ -421,6 +439,10 @@ const schemaContract = {
     'gateway_device_eui',
     'updated_at',
     'installation_uuid',
+    'peer_capabilities_json',
+    'peer_capabilities_context_json',
+    'peer_capabilities_request_id',
+    'link_attempt_json',
   ],
   sync_outbox: [
     'event_uuid',
@@ -612,6 +634,7 @@ const schemaContract = {
     'created_at',
     'valve_channel',
     'trigger',
+    'transport_json',
   ],
   valve_schedules: [
     'id',
@@ -631,6 +654,8 @@ const schemaContract = {
     'deleted_at',
     'created_at',
     'updated_at',
+    'condition_policy_uuid',
+    'effective_from',
   ],
   valve_settings: [
     'device_eui',
@@ -645,6 +670,7 @@ const schemaContract = {
     'last_clock_sync_acked_at',
     'updated_at',
     'sync_version',
+    'conditional_control_json',
   ],
   valve_schedule_pushes: [
     'push_id',
@@ -659,6 +685,7 @@ const schemaContract = {
     'queued_at',
     'acked_at',
     'error',
+    'transport_json',
   ],
   app_settings: [
     'key',
@@ -1280,6 +1307,8 @@ const requiredIndexes = {
   ],
   valve_schedules: ['idx_valve_schedules_device', 'idx_valve_schedules_once_due'],
   valve_schedule_pushes: ['idx_valve_schedule_pushes_device_state'],
+  irrigation_policies: ['ux_irrigation_policies_live_zone', 'idx_irrigation_policies_zone_history'],
+  irrigation_occurrences: ['idx_irrigation_occurrences_device_due', 'idx_irrigation_occurrences_policy_state', 'idx_irrigation_occurrences_command'],
   journal_entries: [
     'idx_journal_entries_zone_time',
     'idx_journal_entries_gateway_time',

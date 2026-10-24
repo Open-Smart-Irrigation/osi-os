@@ -39,6 +39,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'network-api',
     'osi-command-ledger',
     'osi-db-helper',
+    'osi-irrigation-policy',
     'osi-journal',
     'osi-system-settings',
     'osi-valve-control',
@@ -85,6 +86,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['history-router'], 'osi-history-router');
   assert.equal(osiLib.NAME_TO_PATH['osi-db-helper'], 'osi-db-helper');
   assert.equal(osiLib.NAME_TO_PATH['osi-command-ledger'], 'osi-command-ledger');
+  assert.equal(osiLib.NAME_TO_PATH['osi-irrigation-policy'], 'osi-irrigation-policy');
   assert.equal(osiLib.NAME_TO_PATH['zone-commands'], 'osi-zone-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-journal'], 'osi-journal');
   assert.equal(osiLib.NAME_TO_PATH['journal-replication'], 'osi-journal-replication');

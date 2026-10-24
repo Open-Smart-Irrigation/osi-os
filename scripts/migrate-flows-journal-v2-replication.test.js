@@ -52,6 +52,14 @@ const WATERMARK_OWNED_FIELDS = {
   'entity-name-command-apply-fn': ['wires'],
 };
 
+// Task 6b1 owns this independent due-tick cluster. Keep the Journal V2
+// migration proof active for every other flow node; the conditional cluster
+// has its own exact wrapper and wiring assertions in test-conditional-irrigation-flow.js.
+const CONDITIONAL_IRRIGATION_OWNED_NODE_IDS = new Set([
+  'conditional-due-tick',
+  'conditional-due-fn',
+]);
+
 function withoutWatermarkOwnedFields(buffer) {
   const nodes = JSON.parse(buffer.toString('utf8'))
     .filter((node) => !WATERMARK_OWNED_FIELDS[node.id]?.includes('__node'))
@@ -73,10 +81,18 @@ test('the shipped flows are exactly the guarded migration output from the node-f
   const current = source(PROFILE_PATHS[0]);
   const ownedIds = new Set(migrator.EXPECTED_NODES.map((node) => node.id));
   const withoutWorker = JSON.parse(current.toString('utf8')).filter(
-    (node) => !ownedIds.has(node.id),
+    (node) => !ownedIds.has(node.id) && !CONDITIONAL_IRRIGATION_OWNED_NODE_IDS.has(node.id),
   );
   const migratedBaseline = migrator.migrate(serialize(withoutWorker));
-  assert.equal(withoutWatermarkOwnedFields(migratedBaseline).equals(withoutWatermarkOwnedFields(current)), true);
+  const currentWithoutOwnedNodes = JSON.parse(current.toString('utf8')).filter(
+    (node) => !CONDITIONAL_IRRIGATION_OWNED_NODE_IDS.has(node.id),
+  );
+  assert.equal(
+    withoutWatermarkOwnedFields(migratedBaseline).equals(
+      withoutWatermarkOwnedFields(serialize(currentWithoutOwnedNodes)),
+    ),
+    true,
+  );
 });
 
 test('migration adds one isolated Journal V2 worker cluster', () => {

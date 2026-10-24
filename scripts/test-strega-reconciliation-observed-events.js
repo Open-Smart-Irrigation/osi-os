@@ -1,318 +1,293 @@
 #!/usr/bin/env node
 'use strict';
-// Valve control Phase B Task 6: pins that strega-reconciliation-monitor logs an
-// irrigation_events row exactly when an expectation transitions to OBSERVED_COMPLETE for an
-// on-valve-observed trigger ('on_valve_schedule' / 'unexplained'), and never for 'one_time'
-// (already logged at fire time by osi-valve-control/workers.js:53,62 - logging it again here
-// would double-count the farmer's water). Execution-based (runs the node's real `func`
-// against a real sqlite database via node:sqlite), not a source-text regex, so a
-// behavior-preserving-looking refactor that actually inverts the gate is caught.
+
+// Task 5b2 integration checks: explicit STREGA observations own endpoint and
+// event completion; the periodic worker only recovers durable command timeouts.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-
-const FLOWS_PATH = path.resolve(
-  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'
-);
-const flows = JSON.parse(fs.readFileSync(FLOWS_PATH, 'utf8'));
-const monitorNode = flows.find((n) => n.id === 'strega-reconciliation-monitor');
-if (!monitorNode) throw new Error('strega-reconciliation-monitor node not found in flows.json');
-
-const { tempDb, linkCloud } = require(path.resolve(
-  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers.js'
-));
-// P3-E1 added an `osiLib.require('osi-valve-control')` call to the monitor node's own func
-// (for its VALVE_RUNTIME_CHANGED emission) -- the real module, not a hand-built stub, since this
-// test's whole point is to exercise real DB-writing side effects end to end (including, as of
-// P4-E1, VALVE_ACTUATION_ARCHIVED).
-const VC = require(path.resolve(
-  __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js'
-));
-const osiLib = {
-  require: (name) => (name === 'osi-valve-control' ? { ok: true, value: VC } : { ok: false, error: 'unexpected osiLib.require: ' + name }),
-};
+const { DatabaseSync } = require('node:sqlite');
+const { tempDb, facade, linkCloud } = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/test-helpers');
+const workers = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers');
 
 const EUI = '0016C001F1000001';
+let clockId = 0;
 
-// Same shape as osi-valve-control/test-helpers.js's facade(), except close() is a deliberate
-// no-op: the node under test (strega-reconciliation-monitor) opens its OWN
-// `new osiDb.Database(...)` and calls db.close() in its finally block. Reusing the real
-// facade() here would let that close() call tear down the SAME underlying node:sqlite
-// connection the test's own `db` handle needs afterward to assert what actually landed.
-function facadeNoClose(raw) {
-  return {
-    get: (sql, params) => Promise.resolve(raw.prepare(sql).get(...(params || []))),
-    all: (sql, params) => Promise.resolve(raw.prepare(sql).all(...(params || []))),
-    run: (sql, params) => { const r = raw.prepare(sql).run(...(params || [])); return Promise.resolve({ changes: Number(r.changes) }); },
-    async transaction(executor) {
-      raw.exec('BEGIN IMMEDIATE');
-      try { const out = await executor(facadeNoClose(raw)); raw.exec('COMMIT'); return out; }
-      catch (e) { try { raw.exec('ROLLBACK'); } catch (_) { /* already rolled back */ } throw e; }
-    },
-    close: (cb) => { if (cb) cb(); },
-  };
+function trustedRuntime(at) {
+  const id = ++clockId;
+  const epoch = Date.parse('2026-10-18T10:00:00.000Z');
+  const now = Date.parse(at);
+  const boot = 'task5b2-observation-' + id;
+  const markerPath = '/tmp/' + boot + '.json';
+  const rejectionPath = '/tmp/' + boot + '-rejection.json';
+  const fallbackPath = '/tmp/' + boot + '-rejection-fallback.json';
+  const fs = { readFileSync(file) {
+    if (file === '/proc/sys/kernel/random/boot_id') return boot + '\n';
+    if (file === '/proc/uptime') return ((now - epoch) / 1000) + ' 0\n';
+    if (file === markerPath) return JSON.stringify({ boot_id: boot, epoch_ms: epoch, uptime_ms: 0, stratum: 1 });
+    throw Object.assign(new Error('missing test clock path'), { code: 'ENOENT' });
+  } };
+  return { runtimeNow: () => now, clockOptions: { fs, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime', markerPath, rejectionPath, fallbackPath } };
 }
 
-function noopNode() {
-  const calls = { warns: [], logs: [], errors: [] };
-  return { warn: (m) => calls.warns.push(m), log: (m) => calls.logs.push(m), error: (m) => calls.errors.push(m), status: () => {}, calls };
+async function assignZone(db) {
+  await db.run("INSERT INTO irrigation_zones(name, user_id, timezone) VALUES ('5b2 zone', 1, 'UTC')");
+  const zone = await db.get("SELECT id FROM irrigation_zones WHERE name='5b2 zone'");
+  await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
+  return zone.id;
 }
 
-// Runs the real node `func` against `raw` (a node:sqlite DatabaseSync opened by tempDb()).
-// `new osiDb.Database(...)` always returns a facade over the SAME connection, so writes are
-// immediately visible to assertions made through the test's own `db` handle.
-async function runMonitor(raw) {
-  const osiDb = { Database: function Database() { return facadeNoClose(raw); } };
-  const node = noopNode();
-  const msg = { payload: null };
-  const runner = new Function(
-    'msg', 'node', 'osiDb', 'osiLib', 'flow', 'context', 'env', 'global',
-    monitorNode.func + '\n//# sourceURL=strega-reconciliation-monitor.js'
-  );
-  const noopCtx = { get: () => undefined, set: () => {} };
-  const outMsg = await runner(msg, node, osiDb, osiLib, noopCtx, noopCtx, { get: () => null }, { get: () => undefined });
-  return { result: outMsg && outMsg.payload, node };
-}
-
-async function seedExpectation(db, overrides) {
-  const now = Date.now();
-  const commandedAt = new Date(now - 20 * 60000).toISOString(); // 20 min ago
-  const expectedCloseAt = new Date(now - 5 * 60000).toISOString(); // already due
-  const base = {
-    expectation_id: 'exp-' + Math.random().toString(36).slice(2),
-    device_eui: EUI,
-    zone_id: null,
-    command_id: null,
-    effect_key: null,
-    commanded_at: commandedAt,
-    commanded_duration_seconds: 900,
-    expected_close_at: expectedCloseAt,
-    flow_rate_lpm: null,
-    flow_rate_source: null,
-    estimated_gross_liters: null,
-    volume_source: 'unknown',
-    observed_open_at: new Date(now - 15 * 60000).toISOString(),
-    observed_close_at: null,
-    reconciliation_state: 'OBSERVED_RUNNING',
-    cancel_reason: null,
-    created_at: commandedAt,
-    trigger: 'on_valve_schedule',
-  };
-  const row = Object.assign(base, overrides || {});
+async function seedPhysicalRun(db, { expectationId, trigger = 'unexplained', commandId = null, state = 'PENDING_OBSERVATION', futureEffectEnd = null } = {}) {
+  const marker = commandId == null ? { physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null } } : { effect_snapshot: { future_effect_end: futureEffectEnd } };
+  const at = '2026-10-18T10:00:00.000Z';
   await db.run(
-    `INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, effect_key,
-      commanded_at, commanded_duration_seconds, expected_close_at, flow_rate_lpm, flow_rate_source,
-      estimated_gross_liters, volume_source, observed_open_at, observed_close_at, reconciliation_state,
-      cancel_reason, created_at, trigger) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [row.expectation_id, row.device_eui, row.zone_id, row.command_id, row.effect_key,
-      row.commanded_at, row.commanded_duration_seconds, row.expected_close_at, row.flow_rate_lpm, row.flow_rate_source,
-      row.estimated_gross_liters, row.volume_source, row.observed_open_at, row.observed_close_at, row.reconciliation_state,
-      row.cancel_reason, row.created_at, row.trigger]
+    `INSERT INTO valve_actuation_expectations(expectation_id,device_eui,zone_id,command_id,effect_key,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,observed_open_at,observed_close_at,reconciliation_state,created_at,trigger,transport_json)
+     SELECT ?,deveui,irrigation_zone_id,?,?,?,900,?,'unknown',NULL,NULL,?,?,?,? FROM devices WHERE deveui=?`,
+    [expectationId, commandId, commandId ? 'effect' : null, at, new Date(Date.parse(at) + 900000).toISOString(), state, at, trigger, JSON.stringify(marker), EUI]
   );
-  return row;
 }
 
-// Simulates a fresh CLOSE uplink: current_state=CLOSE with device_data.recorded_at and
-// devices.updated_at both newer than commanded_at, matching the monitor's state-freshness gate.
-async function simulateCloseUplink(db) {
-  const recordedAt = new Date(Date.now() - 60000).toISOString();
-  await db.run("UPDATE devices SET current_state='CLOSED', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
-  await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
+async function observe(db, state, reportAt, checkedAt, warn = () => {}) {
+  return workers.recordValveObservation({ db, deviceEui: EUI, observedState: state, observedAt: reportAt, runtimeContext: trustedRuntime(checkedAt), warn });
 }
 
-async function main() {
-  await test('OBSERVED_COMPLETE + trigger=on_valve_schedule logs exactly one irrigation_events row with the observed-span duration', async () => {
-    const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
-    const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
-    await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
-    const exp = await seedExpectation(db, { trigger: 'on_valve_schedule' });
-    await simulateCloseUplink(db);
+async function seedLegacyCandidate(db, { expectationId, supported = true, durationSeconds = 900, observedOpenAt = '2026-10-18T10:01:00Z' } = {}) {
+  await seedPhysicalRun(db, { expectationId, trigger: 'on_valve_schedule', state: 'OBSERVED_RUNNING' });
+  await db.run(
+    "UPDATE valve_actuation_expectations SET commanded_at=?, commanded_duration_seconds=?, expected_close_at=?, observed_open_at=?, transport_json=? WHERE expectation_id=?",
+    [supported ? '2026-10-18T10:00:00Z' : '2026-10-18T10:00:00+01:00', durationSeconds, supported ? '2026-10-18T10:15:00Z' : '2026-10-18T10:15:00+01:00', observedOpenAt, JSON.stringify({ phase: 'legacy-audit' }), expectationId]
+  );
+}
 
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1);
+test('explicit OPEN/CLOSED completion logs one report-only event with null duration', async () => {
+  const fixture = await tempDb();
+  const zoneId = await assignZone(fixture.db);
+  await seedPhysicalRun(fixture.db, { expectationId: 'physical-5b2', trigger: 'on_valve_schedule' });
+  await observe(fixture.db, 'OPEN', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z');
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:00:20.000Z', '2026-10-18T10:00:21.000Z');
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:00:30.000Z', '2026-10-18T10:00:31.000Z');
+  const events = await fixture.db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].irrigation_zone_id, zoneId);
+  assert.equal(events[0].reason, 'on_valve_schedule_run');
+  assert.equal(events[0].duration_minutes, null);
+  assert.equal((await fixture.db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['physical-5b2'])).reconciliation_state, 'OBSERVED_COMPLETE');
+  fixture.cleanup();
+});
 
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 1, 'exactly one irrigation_events row must be written');
-    assert.equal(events[0].action, 'IRRIGATE');
-    assert.equal(events[0].reason, 'on_valve_schedule_run');
-    assert.notEqual(events[0].reason, 'one_time_open', 'reason must be distinct from the ONCE-run reason');
-    assert.equal(events[0].user_id, 1);
-    assert.equal(events[0].irrigation_zone_id, zone.id);
-    // The INSERT itself must omit event_uuid; the seed DB's trg_sync_irrigation_events_uuid_ai
-    // then mints the canonical 'irrig-<gwEui>-<seq>' key on top of it (proof the column was
-    // NULL going in - a hand-rolled UUID would not match this exact trigger-owned shape).
-    assert.match(events[0].event_uuid, /^irrig-[0-9A-Fa-f]+-\d+$/, 'event_uuid must be the trigger-minted canonical key, not a hand-rolled UUID');
-    const updated = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', [exp.expectation_id]);
-    assert.equal(updated.reconciliation_state, 'OBSERVED_COMPLETE');
+test('zone-less report-only completion warns and remains local without an irrigation event', async () => {
+  const fixture = await tempDb();
+  await seedPhysicalRun(fixture.db, { expectationId: 'physical-zone-less-5b2' });
+  const warnings = [];
+  await observe(fixture.db, 'OPEN', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z', (message) => warnings.push(message));
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:00:20.000Z', '2026-10-18T10:00:21.000Z', (message) => warnings.push(message));
+  assert.equal((await fixture.db.all('SELECT id FROM irrigation_events WHERE valve_deveui=?', [EUI])).length, 0);
+  assert.ok(warnings.some((message) => /observed run not logged/.test(String(message))));
+  fixture.cleanup();
+});
+
+test('restart recovery adopts a pre-existing on-valve row and preserves its v1 audit fields', async () => {
+  const fixture = await tempDb();
+  const zoneId = await assignZone(fixture.db);
+  const expectationId = 'legacy-preexisting-5b2';
+  await seedPhysicalRun(fixture.db, { expectationId, trigger: 'on_valve_schedule', state: 'OBSERVED_RUNNING' });
+  await fixture.db.run(
+    "UPDATE valve_actuation_expectations SET commanded_at=?, commanded_duration_seconds=?, expected_close_at=?, volume_source=?, observed_open_at=?, transport_json=? WHERE expectation_id=?",
+    ['2026-10-18T10:00:00Z', 1800, '2026-10-18T10:30:00Z', 'measured', '2026-10-18T10:01:00Z', JSON.stringify({ phase: 'legacy-audit', estimated_gross_liters: 42 }), expectationId]
+  );
+
+  const recovered = await workers.recoverValveObservation({ db: fixture.db, deviceEui: EUI, now: new Date('2026-10-18T10:02:00.000Z') });
+  assert.equal(recovered.adopted, true);
+  assert.equal(recovered.physical_run_id, expectationId);
+  const adopted = await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+  assert.equal(adopted.commanded_at, '2026-10-18T10:00:00Z');
+  assert.equal(adopted.commanded_duration_seconds, 1800);
+  assert.equal(adopted.expected_close_at, '2026-10-18T10:30:00Z');
+  assert.equal(adopted.volume_source, 'measured');
+  const adoptedTransport = JSON.parse(adopted.transport_json);
+  assert.equal(adoptedTransport.phase, 'legacy-audit');
+  assert.equal(adoptedTransport.estimated_gross_liters, 42);
+  assert.deepEqual(adoptedTransport.physical_run.legacy_v1_compatibility, {
+    version: 1,
+    source: 'preexisting_on_valve_schedule',
+    expectation_id: expectationId,
+    commanded_at: '2026-10-18T10:00:00Z',
+    commanded_duration_seconds: 1800,
+    expected_close_at: '2026-10-18T10:30:00Z',
   });
 
-  await test('OBSERVED_COMPLETE + trigger=unexplained also logs, with a distinct reason', async () => {
-    const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
-    const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
-    await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
-    await seedExpectation(db, { trigger: 'unexplained' });
-    await simulateCloseUplink(db);
+  await observe(fixture.db, 'OPEN', '2026-10-18T10:03:00.000Z', '2026-10-18T10:03:01.000Z');
+  fixture.raw.close();
+  fixture.db = facade(new DatabaseSync(fixture.path));
+  await observe(fixture.db, 'OPEN', '2026-10-18T10:04:00.000Z', '2026-10-18T10:04:01.000Z');
+  const reopened = await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+  assert.deepEqual(JSON.parse(reopened.transport_json).physical_run.legacy_v1_compatibility, adoptedTransport.physical_run.legacy_v1_compatibility);
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:05:00.000Z', '2026-10-18T10:05:01.000Z');
+  const completed = await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+  const completedTransport = JSON.parse(completed.transport_json);
+  assert.equal(completed.reconciliation_state, 'OBSERVED_COMPLETE');
+  assert.equal(completed.observed_close_at, '2026-10-18T10:05:00.000Z');
+  assert.deepEqual(completedTransport.physical_run.legacy_v1_compatibility, adoptedTransport.physical_run.legacy_v1_compatibility);
+  assert.equal((await fixture.db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI])).length, 1);
+  const event = await fixture.db.get('SELECT irrigation_zone_id, duration_minutes FROM irrigation_events WHERE valve_deveui=?', [EUI]);
+  assert.equal(event.irrigation_zone_id, zoneId);
+  assert.equal(event.duration_minutes, null);
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:06:00.000Z', '2026-10-18T10:06:01.000Z');
+  assert.equal((await fixture.db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI])).length, 1);
+  fixture.cleanup();
+});
 
-    await runMonitor(raw);
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].reason, 'unexplained_on_valve_run');
-  });
+test('legacy-v1 adoption gates reject sentinels, markers, commands, malformed transport, and unsafe timing', () => {
+  const valid = {
+    expectation_id: 'legacy-gate-5b2', command_id: null, trigger: 'on_valve_schedule',
+    commanded_at: '2026-10-18T10:00:00Z', commanded_duration_seconds: 1800,
+    expected_close_at: '2026-10-18T10:30:00Z', transport_json: null,
+  };
+  assert.equal(workers.isLegacyV1CompatibilityCandidate(valid), true);
+  for (const [name, mutation] of [
+    ['command', { command_id: 'already-commanded' }],
+    ['trigger', { trigger: 'service_action' }],
+    ['zero duration', { commanded_duration_seconds: 0 }],
+    ['string duration', { commanded_duration_seconds: '1800' }],
+    ['unsafe duration', { commanded_duration_seconds: Number.MAX_SAFE_INTEGER + 1 }],
+    ['bad commanded time', { commanded_at: 'not-a-time' }],
+    ['non-UTC time', { expected_close_at: '2026-10-18T10:30:00+01:00' }],
+    ['lowercase UTC marker', { expected_close_at: '2026-10-18T10:30:00z' }],
+    ['too many fractional digits', { expected_close_at: '2026-10-18T10:30:00.1234567890Z' }],
+    ['malformed transport', { transport_json: '{' }],
+    ['pre-existing marker', { transport_json: JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null } }) }],
+    ['synthetic sentinel', { commanded_duration_seconds: -1, expected_close_at: '', transport_json: JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null, legacy_v1_compatibility: { version: 1, source: 'preexisting_on_valve_schedule' } } }) }],
+  ]) {
+    assert.equal(workers.isLegacyV1CompatibilityCandidate({ ...valid, ...mutation }), false, name);
+  }
+});
 
-  await test('OBSERVED_COMPLETE + trigger=one_time logs NOTHING (already logged at fire time)', async () => {
-    const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
-    const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
-    await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
-    await seedExpectation(db, { trigger: 'one_time' });
-    await simulateCloseUplink(db);
+test('unsupported pre-existing legacy timing stays untouched and fails closed on recovery', async () => {
+  const fixture = await tempDb();
+  const expectationId = 'legacy-unsupported-5b2';
+  await seedPhysicalRun(fixture.db, { expectationId, trigger: 'on_valve_schedule', state: 'OBSERVED_RUNNING' });
+  await fixture.db.run(
+    "UPDATE valve_actuation_expectations SET commanded_at=?, expected_close_at=?, observed_open_at=?, transport_json=? WHERE expectation_id=?",
+    ['2026-10-18T10:00:00+01:00', '2026-10-18T10:30:00+01:00', '2026-10-18T10:01:00Z', JSON.stringify({ phase: 'legacy-unsupported' }), expectationId]
+  );
+  const before = await fixture.db.get('SELECT commanded_at, expected_close_at, transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+  const recovered = await workers.recoverValveObservation({ db: fixture.db, deviceEui: EUI, now: new Date('2026-10-18T10:02:00.000Z') });
+  assert.equal(recovered.reason, 'unsupported_legacy_recovery');
+  const after = await fixture.db.get('SELECT commanded_at, expected_close_at, transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+  assert.deepEqual({ ...after }, { ...before });
+  fixture.cleanup();
+});
 
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1, 'the expectation must still transition to OBSERVED_COMPLETE');
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 0, 'a ONCE run must not be double-logged');
-  });
-
-  await test('a zone-less/unclaimed valve logs nothing and warns, but still advances state', async () => {
-    const { db, raw } = await tempDb();
-    await db.run('UPDATE devices SET irrigation_zone_id=NULL WHERE deveui=?', [EUI]);
-    await seedExpectation(db, { trigger: 'on_valve_schedule' });
-    await simulateCloseUplink(db);
-
-    const { result, node } = await runMonitor(raw);
-    assert.equal(result.advanced, 1);
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 0, 'irrigation_events.irrigation_zone_id is NOT NULL - a zone-less valve must log nothing');
-    assert.ok(node.calls.warns.some((w) => /observed run not logged/.test(w)), 'must warn about the skipped log');
-  });
-
-  await test('a linked zone-less terminal actuation still emits its archive with a null zone_uuid', async () => {
-    const { db, raw } = await tempDb();
-    await linkCloud(db);
-    const exp = await seedExpectation(db, {
-      trigger: 'manual', reconciliation_state: 'PENDING_OBSERVATION',
-      observed_open_at: null, observed_close_at: null,
-      expected_close_at: new Date(Date.now() - 40 * 60000).toISOString(),
-    });
-
-    await runMonitor(raw);
-    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
-    assert.equal(rows.length, 1, 'a linked terminal row must be archived even without a zone');
-    assert.equal(JSON.parse(rows[0].payload_json).zone_uuid, null);
-    assert.equal(JSON.parse(rows[0].payload_json).status, 'OPEN_TIMEOUT');
-    assert.equal(exp.zone_id, null);
-  });
-
-  await test('observed_open_at null (never confirmed open) logs with a NULL duration, not zero', async () => {
-    const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, gateway_device_eui, created_at, updated_at) VALUES ('Z1',1,?,datetime('now'),datetime('now'))", [EUI]);
-    const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
-    await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
-    await seedExpectation(db, { trigger: 'unexplained', reconciliation_state: 'PENDING_OBSERVATION', observed_open_at: null });
-    await simulateCloseUplink(db);
-
-    await runMonitor(raw);
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].duration_minutes, null, 'an unknown observed-open time must log an unknown duration, never a substituted zero');
-  });
-
-  await test('a non-completing transition (PENDING_OBSERVATION -> OBSERVED_RUNNING) never logs an event', async () => {
-    const { db, raw } = await tempDb();
-    await db.run("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
-    const zone = await db.get('SELECT id FROM irrigation_zones LIMIT 1');
-    await db.run('UPDATE devices SET irrigation_zone_id=? WHERE deveui=?', [zone.id, EUI]);
-    await seedExpectation(db, { trigger: 'on_valve_schedule', reconciliation_state: 'PENDING_OBSERVATION', observed_open_at: null, observed_close_at: null });
-    const recordedAt = new Date(Date.now() - 60000).toISOString();
-    await db.run("UPDATE devices SET current_state='OPEN', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
-    await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
-
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1);
-    const events = await db.all('SELECT * FROM irrigation_events WHERE valve_deveui=?', [EUI]);
-    assert.equal(events.length, 0);
-  });
-
-  // --- cloud full-parity Task P4-E1: VALVE_ACTUATION_ARCHIVED on terminal transitions ---
-
-  await test('OBSERVED_COMPLETE on a linked gateway emits a VALVE_ACTUATION_ARCHIVED sync_outbox row (status=COMPLETED); unlinked emits nothing', async () => {
-    const { db, raw } = await tempDb();
-    await seedExpectation(db, { trigger: 'unexplained' });
-    await simulateCloseUplink(db);
-    await runMonitor(raw);
-    assert.equal((await db.all('SELECT * FROM sync_outbox')).length, 0, 'unlinked gateway must not enqueue anything');
-
-    const exp2 = await seedExpectation(db, { trigger: 'unexplained' });
-    await linkCloud(db);
-    const recordedAt = new Date(Date.now() - 60000).toISOString();
-    await db.run("UPDATE devices SET current_state='CLOSED', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
-    await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
-
-    await runMonitor(raw);
-    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].aggregate_key, exp2.expectation_id);
-    const payload = JSON.parse(rows[0].payload_json);
-    assert.equal(payload.expectation_id, exp2.expectation_id);
-    assert.equal(payload.status, 'COMPLETED');
-    assert.equal(payload.trigger, 'unexplained');
-  });
-
-  await test('STALE_NO_OBSERVATION (never observed open, past grace) emits status=OPEN_TIMEOUT on a linked gateway', async () => {
-    const { db, raw } = await tempDb();
-    await linkCloud(db);
-    const farPast = new Date(Date.now() - 40 * 60000).toISOString(); // 40 min ago: past the 30-min grace
-    const exp = await seedExpectation(db, {
-      trigger: 'manual', reconciliation_state: 'PENDING_OBSERVATION',
-      observed_open_at: null, observed_close_at: null, expected_close_at: farPast,
-    });
-
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1);
-    const updated = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', [exp.expectation_id]);
-    assert.equal(updated.reconciliation_state, 'STALE_NO_OBSERVATION');
-
-    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
-    assert.equal(rows.length, 1);
-    assert.equal(JSON.parse(rows[0].payload_json).status, 'OPEN_TIMEOUT');
-  });
-
-  await test('STALE_OPEN_OBSERVED (observed open, never observed close, past grace) emits status=CLOSE_TIMEOUT on a linked gateway', async () => {
-    const { db, raw } = await tempDb();
-    await linkCloud(db);
-    const farPast = new Date(Date.now() - 40 * 60000).toISOString(); // 40 min ago: past the 30-min grace
-    const exp = await seedExpectation(db, {
-      trigger: 'manual', reconciliation_state: 'OBSERVED_RUNNING',
-      observed_open_at: new Date(Date.now() - 35 * 60000).toISOString(), observed_close_at: null, expected_close_at: farPast,
-    });
-
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1);
-    const updated = await db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', [exp.expectation_id]);
-    assert.equal(updated.reconciliation_state, 'STALE_OPEN_OBSERVED');
-
-    const rows = await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'");
-    assert.equal(rows.length, 1);
-    assert.equal(JSON.parse(rows[0].payload_json).status, 'CLOSE_TIMEOUT');
-  });
-
-  await test('a non-completing transition (PENDING_OBSERVATION -> OBSERVED_RUNNING) never emits VALVE_ACTUATION_ARCHIVED, even on a linked gateway', async () => {
-    const { db, raw } = await tempDb();
-    await linkCloud(db);
-    await seedExpectation(db, { trigger: 'on_valve_schedule', reconciliation_state: 'PENDING_OBSERVATION', observed_open_at: null, observed_close_at: null });
-    const recordedAt = new Date(Date.now() - 60000).toISOString();
-    await db.run("UPDATE devices SET current_state='OPEN', updated_at=? WHERE deveui=?", [recordedAt, EUI]);
-    await db.run('INSERT INTO device_data(deveui, recorded_at) VALUES (?,?)', [EUI, recordedAt]);
-
-    const { result } = await runMonitor(raw);
-    assert.equal(result.advanced, 1, 'the expectation must still advance to OBSERVED_RUNNING');
-    assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 0);
-    // The runtime-state emission is unaffected by this task's addition.
-    assert.equal((await db.all("SELECT * FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED'")).length, 1);
+for (const [label, reportAt, checkedAt] of [
+  ['trusted', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z'],
+  ['untrusted', '2026-10-18T10:00:03.000Z', '2026-10-18T10:00:02.000Z'],
+]) {
+  test(`live ${label} OPEN leaves unsupported legacy row unchanged`, async () => {
+    const fixture = await tempDb();
+    await seedLegacyCandidate(fixture.db, { expectationId: `unsupported-live-${label}` , supported: false, observedOpenAt: null });
+    const beforeRow = await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [`unsupported-live-${label}`]);
+    const beforeEvents = await fixture.db.all('SELECT * FROM irrigation_events');
+    const beforeState = await fixture.db.get('SELECT current_state, updated_at FROM devices WHERE deveui=?', [EUI]);
+    const result = await observe(fixture.db, 'OPEN', reportAt, checkedAt);
+    assert.equal(result.kind, 'blocked');
+    assert.equal(result.reason, 'unsupported_legacy_recovery');
+    const afterRow = await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [`unsupported-live-${label}`]);
+    assert.deepEqual({ ...afterRow }, { ...beforeRow });
+    assert.deepEqual(await fixture.db.all('SELECT * FROM irrigation_events'), beforeEvents);
+    assert.deepEqual({ ...(await fixture.db.get('SELECT current_state, updated_at FROM devices WHERE deveui=?', [EUI])) }, { ...beforeState });
+    fixture.cleanup();
   });
 }
 
-main();
+for (const durationSeconds of [0, 1.5]) {
+  for (const [label, reportAt, checkedAt] of [
+    ['trusted', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z'],
+    ['untrusted', '2026-10-18T10:00:03.000Z', '2026-10-18T10:00:02.000Z'],
+  ]) {
+    test(`live ${label} OPEN blocks unsupported duration ${durationSeconds} without mutation`, async () => {
+      const fixture = await tempDb();
+      const expectationId = `unsupported-duration-${durationSeconds}-${label}`;
+      await seedLegacyCandidate(fixture.db, { expectationId, durationSeconds, observedOpenAt: null });
+      const beforeRow = await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId]);
+      const beforeState = await fixture.db.get('SELECT current_state, updated_at FROM devices WHERE deveui=?', [EUI]);
+      const result = await observe(fixture.db, 'OPEN', reportAt, checkedAt);
+      assert.equal(result.kind, 'blocked');
+      assert.equal(result.reason, 'unsupported_legacy_recovery');
+      assert.deepEqual({ ...(await fixture.db.get('SELECT * FROM valve_actuation_expectations WHERE expectation_id=?', [expectationId])) }, { ...beforeRow });
+      assert.deepEqual({ ...(await fixture.db.get('SELECT current_state, updated_at FROM devices WHERE deveui=?', [EUI])) }, { ...beforeState });
+      const control = JSON.parse((await fixture.db.get('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?', [EUI])).conditional_control_json);
+      assert.equal(control.observation.physical_run_id, undefined);
+      assert.equal(control.incident, undefined);
+      assert.equal((await fixture.db.all('SELECT id FROM irrigation_events')).length, 0);
+      fixture.cleanup();
+    });
+  }
+}
+
+for (const durationSeconds of [0, 1.5]) {
+  for (const [label, reportAt, checkedAt] of [
+    ['trusted', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z'],
+    ['untrusted', '2026-10-18T10:00:03.000Z', '2026-10-18T10:00:02.000Z'],
+  ]) {
+    test(`live ${label} OPEN blocks supported plus duration ${durationSeconds} legacy rows`, async () => {
+      const fixture = await tempDb();
+      await seedLegacyCandidate(fixture.db, { expectationId: `supported-competing-${durationSeconds}-${label}`, observedOpenAt: null });
+      await seedLegacyCandidate(fixture.db, { expectationId: `unsupported-competing-${durationSeconds}-${label}`, durationSeconds, observedOpenAt: null });
+      const before = await fixture.db.all('SELECT expectation_id, commanded_duration_seconds, transport_json FROM valve_actuation_expectations WHERE expectation_id LIKE ?', [`%-competing-${durationSeconds}-${label}`]);
+      const result = await observe(fixture.db, 'OPEN', reportAt, checkedAt);
+      assert.equal(result.kind, 'blocked');
+      assert.equal(result.reason, 'ambiguous_legacy_recovery');
+      const after = await fixture.db.all('SELECT expectation_id, commanded_duration_seconds, transport_json FROM valve_actuation_expectations WHERE expectation_id LIKE ?', [`%-competing-${durationSeconds}-${label}`]);
+      assert.deepEqual(after.map((row) => ({ ...row })), before.map((row) => ({ ...row })));
+      assert.equal((await fixture.db.all('SELECT id FROM irrigation_events')).length, 0);
+      fixture.cleanup();
+    });
+  }
+}
+
+for (const [label, supportedFlags] of [
+  ['two-supported', [true, true]],
+  ['supported-and-unsupported', [true, false]],
+]) {
+  test(`recovery blocks ${label} legacy identity ambiguity without mutation`, async () => {
+    const fixture = await tempDb();
+    await seedLegacyCandidate(fixture.db, { expectationId: `${label}-old`, supported: supportedFlags[0] });
+    await seedLegacyCandidate(fixture.db, { expectationId: `${label}-new`, supported: supportedFlags[1] });
+    const before = await fixture.db.all('SELECT expectation_id, commanded_at, expected_close_at, transport_json FROM valve_actuation_expectations WHERE expectation_id LIKE ?', [`${label}-%`]);
+    const result = await workers.recoverValveObservation({ db: fixture.db, deviceEui: EUI, now: new Date('2026-10-18T10:02:00.000Z') });
+    assert.equal(result.reason, 'ambiguous_legacy_recovery');
+    assert.equal(result.physical_run_id, null);
+    const after = await fixture.db.all('SELECT expectation_id, commanded_at, expected_close_at, transport_json FROM valve_actuation_expectations WHERE expectation_id LIKE ?', [`${label}-%`]);
+    assert.deepEqual(after.map((row) => ({ ...row })), before.map((row) => ({ ...row })));
+    fixture.cleanup();
+  });
+}
+
+test('service_action completion preserves its category and does not create an irrigation event', async () => {
+  const fixture = await tempDb();
+  await assignZone(fixture.db);
+  await seedPhysicalRun(fixture.db, { expectationId: 'physical-service-5b2', trigger: 'service_action' });
+  await observe(fixture.db, 'OPEN', '2026-10-18T10:00:01.000Z', '2026-10-18T10:00:02.000Z');
+  await observe(fixture.db, 'CLOSED', '2026-10-18T10:00:20.000Z', '2026-10-18T10:00:21.000Z');
+  assert.equal((await fixture.db.all('SELECT id FROM irrigation_events WHERE valve_deveui=?', [EUI])).length, 0);
+  assert.equal((await fixture.db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['physical-service-5b2'])).reconciliation_state, 'OBSERVED_COMPLETE');
+  fixture.cleanup();
+});
+
+test('reconciliation recovers immutable command timeout and ignores generic current_state', async () => {
+  const fixture = await tempDb();
+  await linkCloud(fixture.db);
+  await seedPhysicalRun(fixture.db, { expectationId: 'command-timeout-5b2', commandId: 'command-5b2', state: 'PENDING_OBSERVATION', futureEffectEnd: '2026-10-18T09:00:00.000Z' });
+  const result = await workers.runReconciliationTick({ db: fixture.db, now: new Date('2026-10-18T10:00:00.000Z'), warn: () => {} });
+  assert.equal(result.reconciled, 1);
+  assert.equal(result.advanced, 1);
+  assert.equal((await fixture.db.get('SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id=?', ['command-timeout-5b2'])).reconciliation_state, 'STALE_NO_OBSERVATION');
+  assert.equal((await fixture.db.all("SELECT * FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED'")).length, 1);
+
+  const legacy = await tempDb();
+  await legacy.db.run("UPDATE devices SET current_state='OPEN', updated_at='2026-10-18T10:00:00.000Z' WHERE deveui=?", [EUI]);
+  await seedPhysicalRun(legacy.db, { expectationId: 'legacy-current-state-5b2', trigger: 'unexplained' });
+  const recovery = await workers.runReconciliationTick({ db: legacy.db, now: new Date('2026-10-18T10:00:00.000Z'), warn: () => {} });
+  assert.equal(recovery.advanced, 0);
+  legacy.cleanup();
+  fixture.cleanup();
+});

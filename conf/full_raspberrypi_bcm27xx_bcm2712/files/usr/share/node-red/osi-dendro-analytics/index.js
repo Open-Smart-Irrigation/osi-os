@@ -391,6 +391,27 @@ function applyDendroSchedulePolicy(decision,hist3,schedule){
     reasoning:`${decision.reasoning} Blocked by DENDRO threshold: requires ${requiredStress} stress or higher.`
   };
 }
+function buildRawDecisionEvidence(decision, context){
+  const c=context||{};
+  const computedAt=c.computedAt||c.computed_at||null;
+  const usableTreeCount=typeof c.usableTreeCount==='number'&&Number.isFinite(c.usableTreeCount)&&Number.isInteger(c.usableTreeCount)&&c.usableTreeCount>0
+    ? c.usableTreeCount : null;
+  const analysis={
+    stress:c.zoneStress==null?null:c.zoneStress,
+    usable_tree_count:usableTreeCount,
+    action:decision&&decision.action?String(decision.action):null,
+    reasoning:decision&&decision.reasoning?String(decision.reasoning):null,
+    computed_at:computedAt,
+    rain_suppression_active:c.rainSuppressionActive?1:0,
+    recovery_verification_active:c.recoveryVerificationActive?1:0,
+  };
+  return {
+    version:1,
+    captured_at:computedAt,
+    decision:{version:1,action:analysis.action,reasoning:analysis.reasoning,computed_at:computedAt},
+    evidence:{version:1,analysis,trees:Array.isArray(c.trees)?c.trees:[]},
+  };
+}
 const CONSTANTS = {
   RANK,
   PHENO_MOD,
@@ -434,6 +455,7 @@ module.exports = {
   dendroThresholdStressLevel,
   decisionEscalationStress,
   applyDendroSchedulePolicy,
+  buildRawDecisionEvidence,
   phenoModFor,
   RANK,
   PHENO_MOD,

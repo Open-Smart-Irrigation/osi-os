@@ -55,6 +55,7 @@ const NAME_TO_PATH = {
   // Rain correctness programme: rainfall measurement rules and the LoRain writer.
   'rain': 'osi-rain',
   'agronomy-daily': 'osi-agronomy-daily',
+  'osi-irrigation-policy': 'osi-irrigation-policy',
   'osi-valve-control': 'osi-valve-control',
   'osi-system-settings': 'osi-system-settings',
   'watermark-helper': 'osi-watermark-helper',

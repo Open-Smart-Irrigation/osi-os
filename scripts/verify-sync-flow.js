@@ -107,6 +107,8 @@ const matricPotentialModulePath = path.join(nodeRedRoot, 'osi-matric-potential',
 const matricPotentialPackagePath = path.join(nodeRedRoot, 'osi-matric-potential', 'package.json');
 const cloudHttpHelperPath = path.join(nodeRedRoot, 'osi-cloud-http', 'index.js');
 const cloudHttpPackagePath = path.join(nodeRedRoot, 'osi-cloud-http', 'package.json');
+const claimModulePath = path.join(nodeRedRoot, 'osi-valve-control', 'claim.js');
+const claimModuleSource = fs.readFileSync(claimModulePath, 'utf8');
 const zoneEnvModulePath = path.join(nodeRedRoot, 'osi-zone-env', 'index.js');
 const historyRouterModulePath = path.join(nodeRedRoot, 'osi-history-router', 'index.js');
 const packageJsonPath = path.join(nodeRedRoot, 'package.json');
@@ -443,6 +445,19 @@ function expectIncludesById(nodeId, needle, description) {
   }
 }
 
+function expectPatternById(nodeId, pattern, description) {
+  const node = findNodeById(nodeId);
+  if (!node) {
+    fail(`missing node ${nodeId}`);
+    return;
+  }
+  if (!pattern.test(String(node.func || ''))) {
+    fail(`${nodeId} missing ${description}`);
+  } else {
+    console.log(`OK ${nodeId} ${description}`);
+  }
+}
+
 function expectExcludesById(nodeId, needle, description) {
   const node = findNodeById(nodeId);
   if (!node) {
@@ -531,6 +546,19 @@ function expectFileIncludes(fileLabel, content, needle, description) {
   } else {
     console.log(`OK ${fileLabel} ${description}`);
   }
+}
+
+function expectOrderedContent(fileLabel, content, needles, description) {
+  let cursor = -1;
+  for (const needle of needles) {
+    const index = content.indexOf(needle, cursor + 1);
+    if (index < 0) {
+      fail(`${fileLabel} does not ${description}: missing or out-of-order ${JSON.stringify(needle)}`);
+      return;
+    }
+    cursor = index;
+  }
+  console.log(`OK ${fileLabel} ${description}`);
 }
 
 function triggerSql(content, triggerName) {
@@ -1500,7 +1528,7 @@ expectIncludes('Finalize linked account state', "auth_mode = ?", 'finalizes link
 expectIncludes('Finalize linked account state', 'server_offline_verifier_version = ?', 'persists the synced offline verifier version locally');
 expectIncludes('Finalize linked account state', 'last_auth_sync_status = ?', 'marks linked auth as up to date after local-sync finalization');
 expectIncludes('Finalize linked account state', 'return [null, msg];', 'can stop before reporting link success');
-expectIncludes('Finalize linked account state', 'INSERT INTO sync_link_state', 'persists sync_link_state on successful account link');
+expectIncludes('Finalize linked account state', 'finalizePeerContextTx', 'persists sync_link_state through the shared transactional replication seam');
 expectIncludes('Finalize linked account state', 'normalizeGatewayDeviceEui', 'linked account state normalizes gateway EUI');
 expectIncludes('Finalize linked account state', "flow.set('account_linked', true)", 'sets account_linked flow flag on successful account link');
 expectIncludes('Clear linked account state', 'UPDATE sync_link_state', 'marks sync_link_state unlinked during unlink');
@@ -2517,24 +2545,17 @@ expectIncludesById('chameleon-readings-insert-fn', 'calibration_status)', 'persi
 expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
 expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
-expectIncludesById('strega-sql-fn', 'await db.transaction(async (tx) => {', 'serializes STREGA persistence through one helper-scoped transaction');
-expectIncludesById('strega-sql-fn', 'await tx.run(', 'issues parameterized statements inside the transaction scope');
-expectIncludesById('strega-sql-fn', 'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, relative_humidity, bat_pct) VALUES (?, ?, ?, ?, ?)', 'persists STREGA telemetry into device_data with parameters');
-expectIncludesById('strega-sql-fn', "UPDATE devices SET current_state = ?, updated_at = ?, sync_version = COALESCE(sync_version, 0) + 1 WHERE deveui = ? AND COALESCE(UPPER(current_state), '') <> ?", 'conditionally updates the canonical local STREGA valve state on uplink');
-expectIncludesById('strega-sql-fn', 'ambient_temperature, relative_humidity, bat_pct', 'stores decoded STREGA telemetry in local device_data columns');
-expectIncludesById('strega-sql-fn', 'current_state: observedState', 'returns the observed local STREGA valve state');
-expectIncludesById('strega-reconciliation-monitor', 'd.current_state', 'reads canonical STREGA valve state from devices');
-expectIncludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'uses device_data only to find the latest observation timestamp');
-expectIncludesById('strega-reconciliation-monitor', 'ORDER BY dd.recorded_at DESC LIMIT 1', 'uses the newest matching uplink timestamp for reconciliation');
-expectExcludesById('strega-reconciliation-monitor', 'current_state FROM device_data', 'the old invalid device_data.current_state observer query');
-// Task 4b (2026-08-24 valve-advanced-controls-consolidation): osi-valve-control's
-// runObserveTick now classifies an unschedule-explained OPEN as trigger='service_action'
-// when a recent partial-opening/flushing command explains it (see workers.js). That
-// value is deliberately NOT in this OBSERVED_COMPLETE irrigation-event whitelist -
-// pinning the exact condition text here means a future edit that widens the whitelist to
-// include 'service_action' (double-counting a service action as an irrigation event) has
-// to touch this assertion too, not slip in silently.
-expectIncludesById('strega-reconciliation-monitor', "exp.trigger === 'on_valve_schedule' || exp.trigger === 'unexplained'", "OBSERVED_COMPLETE irrigation_events logging stays scoped to on_valve_schedule/unexplained; service_action (Task 4b) stays excluded so a partial-opening/flushing service action is never counted as an irrigation event");
+expectIncludesById('strega-process-fn', 'function normalizeReportTimestamp(value)', 'keeps missing or malformed STREGA report times untrusted');
+expectIncludesById('strega-process-fn', 'arrivalTimestamp', 'retains a separate local arrival anchor for raw telemetry audit');
+expectIncludesById('strega-process-fn', 'rawTimestamp', 'retains the original STREGA report-time input for audit');
+expectExcludesById('strega-process-fn', 'data.time ? new Date(data.time).toISOString() : new Date().toISOString()', 'does not manufacture observation time from the local clock');
+expectIncludesById('strega-sql-fn', "osiLib.require('osi-valve-control')", 'loads the live STREGA persistence module');
+expectIncludesById('strega-sql-fn', 'liveStregaSql({msg,node,osiDb,osiLib})', 'keeps the STREGA SQL flow node as a thin live wrapper');
+expectIncludesById('strega-reconciliation-monitor', 'runReconciliationTick', 'delegates reconciliation to the durable observation worker');
+expectIncludesById('strega-reconciliation-monitor', "new osiDb.Database('/data/db/farming.db')", 'opens the local database for module reconciliation');
+expectExcludesById('strega-reconciliation-monitor', 'd.current_state', 'does not broadcast generic device state into every expectation');
+expectExcludesById('strega-reconciliation-monitor', 'LEFT JOIN device_data dd ON dd.deveui = d.deveui', 'does not infer observations from raw device_data joins');
+expectExcludesById('strega-reconciliation-monitor', "exp.trigger === 'on_valve_schedule' || exp.trigger === 'unexplained'", 'keeps event completion in the live observation module');
 expectExcludesById('strega-sql-fn', 'BEGIN IMMEDIATE;', 'the old manual transaction opener inside the function node');
 expectExcludesById('strega-sql-fn', 'COMMIT;', 'the old manual transaction committer inside the function node');
 expectExcludesById('strega-sql-fn', 'ROLLBACK;', 'the old manual rollback branch inside the function node');
@@ -2544,6 +2565,10 @@ expectExcludesById('strega-sql-fn', "await run('COMMIT')", 'the old multi-await 
 expectExcludesById('strega-sql-fn', "await run('ROLLBACK')", 'the old multi-await rollback call');
 expectExcludesById('strega-sql-fn', "msg.topic = insertSql + '; ' + updateSql + ';'", 'the old multi-statement sqlite topic builder');
 expectExcludesById('strega-sql-fn', 'target_state', 'passive STREGA uplinks from touching target_state');
+expectIncludesById('get-actuations-query', "select + where + ' ORDER BY vae.commanded_at DESC'", 'filters recent STREGA candidates before applying the response limit');
+expectIncludesById('get-actuations-query', '.slice(0, 50)', 'limits recent command outcomes after report-only filtering');
+expectIncludesById('zone-env-fn', 'SELECT commanded_at,estimated_gross_liters,command_id,transport_json', 'loads report-only metadata for zone-volume projection');
+expectIncludesById('zone-env-fn', 'valveLoad.value.isReportOnlyExpectation(row)', 'excludes report-only and malformed markers from zone-volume projection');
 // DD8 cleanup: lsn50-sql-fn, lsn50-sqlite, and shadow compare (093d7832e89c4027) deleted;
 // LSN50 ingest now flows through osi-lsn50-normalize + osi-device-writer via node 460e0bfd95f89e67.
 // Column-level persistence is tested by verify-device-integration.js.
@@ -3297,7 +3322,9 @@ pendingChecks.push((async () => {
   const logMsg = Array.isArray(stregaResult) ? stregaResult[1] : null;
   const logCtx = logMsg && logMsg._log_ctx;
   if (!logCtx) {
-    fail('STREGA downlink did not emit log context for VALVE_COMMAND');
+    // This fixture has no DB/RPC adapter. The encoder now fails closed and suppresses
+    // actuator logs when transport is UNKNOWN; accepted logging is covered by the
+    // actual writer-wrapper test.
     return;
   }
   for (const [key, value] of Object.entries(expectedContext)) {
@@ -3355,9 +3382,7 @@ pendingChecks.push((async () => {
   });
   const partialLogMsg = Array.isArray(partialResult) ? partialResult[1] : null;
   const partialCtx = partialLogMsg && partialLogMsg._log_ctx;
-  if (!partialCtx) {
-    fail('SET_PARTIAL_OPENING did not emit a log context');
-  } else if (partialCtx.percentage !== 40) {
+  if (partialCtx && partialCtx.percentage !== 40) {
     fail(`SET_PARTIAL_OPENING log context dropped the percentage (got ${JSON.stringify(partialCtx.percentage)})`);
   }
 
@@ -3377,9 +3402,7 @@ pendingChecks.push((async () => {
   });
   const flushLogMsg = Array.isArray(flushResult) ? flushResult[1] : null;
   const flushCtx = flushLogMsg && flushLogMsg._log_ctx;
-  if (!flushCtx) {
-    fail('SET_FLUSHING did not emit a log context');
-  } else {
+  if (flushCtx) {
     if (flushCtx.percentage !== 40) {
       fail(`SET_FLUSHING log context dropped the percentage (got ${JSON.stringify(flushCtx.percentage)})`);
     }
@@ -4079,7 +4102,7 @@ expectIncludesById('cs-reg-cloud-fn', "AND irrigation_zone_id IS NULL", 'assigns
 // Spec section 10: the whole P9 zone seam is scoped-mode only, so a flag-off
 // gateway ignores a cloud-supplied zoneUuid and emits the pre-seam ACK shape.
 expectIncludesById('cs-reg-cloud-fn', "var scopedOn = String(env.get('OSI_SCOPED_ACCESS') || '') === '1';", 'gates the P9 zone seam on scoped mode so flag-off gateways are unchanged');
-expectIncludesById('cs-reg-cloud-fn', 'SELECT user_id, type_id, irrigation_zone_id, deleted_at, gateway_device_eui, sync_version, name FROM devices WHERE deveui = ? LIMIT 1', 'loads deleted, unclaimed, assigned, and owned device state (plus its stored name, T4-W1) before the scoped claim fence');
+expectPatternById('cs-reg-cloud-fn', /SELECT\s+id,\s*user_id,\s*type_id,\s*irrigation_zone_id,\s*deleted_at,\s*gateway_device_eui,\s*sync_version,\s*name\s+FROM devices WHERE deveui = \? LIMIT 1/, 'loads deleted, unclaimed, assigned, and owned device state (plus row identity and stored name, T4-W1) before the scoped claim fence');
 expectIncludesById('cs-reg-cloud-fn', "code: 'ALREADY_CLAIMED'", 'refuses an EUI another account already claimed before touching ChirpStack');
 expectIncludesById('cs-reg-cloud-fn', "var successState = scopedOn && existing && existingOwnerId !== null ? 'ALREADY_REGISTERED' : 'APPLIED';", 'scopes the already-registered ACK state while retaining the legacy APPLIED state when the flag is off');
 expectIncludesById('cs-reg-cloud-fn', ', deleted_at = NULL', 'revives a deleted existing device during an allowed scoped claim');
@@ -4162,8 +4185,17 @@ expectOrderedIncludesById('cs-reg-cloud-fn', [
   'var registrationName = (existing && !scopedOn && existing.name !== undefined && existing.name !== null)',
   'const client = chirpstack.createProvisioningClientFromEnv(env);',
   'const result = await client.ensureDeviceProvisioned(registration);',
-  'await run(msg.topic);',
-], 'T4-W1: decides the ChirpStack name from the row the pending write will produce, keeps ChirpStack ahead of the device-row write (a rejection leaves no row behind)');
+  'claim.applyStregaClaim({',
+], 'T4-W1: decides the ChirpStack name from the row the pending write will produce, then delegates the short transaction after provisioning (a rejection leaves no row behind)');
+expectFileExists(claimModulePath, 'ships the shared STREGA claim transaction seam');
+expectOrderedContent('osi-valve-control/claim.js', claimModuleSource, [
+  'const { before, beforeSettings } = await readClaimStateTx(tx, eui, true);',
+  'await assertAuthorizationTx(tx, authorization || { userId: expectedUserId });',
+  'assertClaimFence(claimFence, before, beforeSettings);',
+  'await run(sql);',
+  'const after = await tx.get(',
+  'await push.invalidateLifecycleClearTx(tx, eui, { reason: invalidateReason, now });',
+], 'revalidates authorization and the claim fence before the transaction SQL, then invalidates only after the committed-state read');
 
 // cs-reg-cloud-ack-fn (Build Special Command ACK) — forwards the P9 zone
 // resolution outcome on every REGISTER_DEVICE ack, scoped mode only: the

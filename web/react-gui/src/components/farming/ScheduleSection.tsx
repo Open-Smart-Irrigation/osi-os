@@ -3,6 +3,7 @@ import { irrigationZonesAPI } from '../../services/api';
 import type { IrrigationZone, SchedulerType, DendroStressThreshold, TriggerMetric } from '../../types/farming';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { SwtPreference } from './shared/SwtPreference';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -105,11 +106,7 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, zoneId, 
   // Its own `useTranslation`: this is a separate function component, and the
   // parent's `t` never reached it.
   const { t } = useTranslation('devices');
-  const ids = {
-    sensor: `swt-sensor-${zoneId}`,
-    threshold: `swt-threshold-${zoneId}`,
-    duration: `swt-duration-${zoneId}`,
-  };
+  const ids = { sensor: `swt-sensor-${zoneId}`, duration: `swt-duration-${zoneId}` };
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div>
@@ -128,24 +125,10 @@ const SwtForm: React.FC<SwtFormProps> = ({ metric, threshold, duration, zoneId, 
         </select>
       </div>
       <div>
-        <label htmlFor={ids.threshold} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
+        <div className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
           {t('schedule.thresholdKpa', { defaultValue: 'Threshold (kPa)' })}
-        </label>
-        <input
-          id={ids.threshold}
-          type="number"
-          value={threshold}
-          onChange={e => onThreshold(Number(e.target.value))}
-          min="1" max="300" step="1"
-          className="w-full px-3 py-2 bg-[var(--card)] border-2 border-[var(--border)] rounded-lg text-[var(--text)] focus:outline-none focus:border-[var(--focus)] focus:ring-2 focus:ring-[var(--focus)]"
-        />
-        <p className="mt-1 text-[var(--text-tertiary)] text-xs">
-          {t('schedule.irrigateWhen', {
-            sensor: swtMetricLabel(t, metric),
-            value: threshold,
-            defaultValue: 'Irrigate when {{sensor}} exceeds {{value}} kPa',
-          })}
-        </p>
+        </div>
+        <SwtPreference value={threshold} onChange={onThreshold} />
       </div>
       <div>
         <label htmlFor={ids.duration} className="block text-[var(--text-secondary)] text-sm font-semibold mb-2">
@@ -250,12 +233,15 @@ interface ScheduleSectionProps {
   zoneName: string;
   onScheduleSaved?: () => void;
   onAdvancedOpen?: () => void;
+  onOpenPolicyEditor?: () => void;
+  openRequest?: number;
 }
 
 export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
-  zoneId, onScheduleSaved, onAdvancedOpen,
+  zoneId, onScheduleSaved, onAdvancedOpen, onOpenPolicyEditor, openRequest,
 }) => {
   const { t } = useTranslation('devices');
+  const { t: valveT } = useTranslation('valves');
   const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading]   = useState(true);
   const [saving, setSaving]     = useState(false);
@@ -266,7 +252,9 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
   const [schedulerType, setSchedulerType]   = useState<SchedulerType>('SWT');
   const [triggerMetric, setTriggerMetric]   = useState<TriggerMetric>('SWT_1');
   const [threshold, setThreshold]           = useState(30);
-  const [duration, setDuration]             = useState(20);
+  const [swtDuration, setSwtDuration]       = useState(20);
+  const [dendroDuration, setDendroDuration] = useState(20);
+  const [swtThreshold, setSwtThreshold]     = useState(30);
   const [stressThreshold, setStressThreshold] = useState<DendroStressThreshold>('moderate');
   const [responseMode, setResponseMode]     = useState('proportional');
 
@@ -275,24 +263,26 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     if (!s) return;
     const metric = normalizeTriggerMetric(s.trigger_metric ?? s.triggerMetric ?? 'SWT_1');
     const type = schedulerTypeFromMetric(metric);
+    const mins = s.duration_minutes ?? s.durationMinutes;
     setSchedulerType(type);
     setTriggerMetric(metric);
     if (type === 'DENDRO') {
       const kpa = s.threshold_kpa ?? s.thresholdKpa;
       setStressThreshold(DENDRO_STRESS_FROM_NUM[Number(kpa)] ?? 'moderate');
-      setThreshold(2);
+      setDendroDuration(typeof mins === 'number' ? mins : 20);
     } else {
       const kpa = s.threshold_kpa ?? s.thresholdKpa;
-      setThreshold(typeof kpa === 'number' ? kpa : 30);
+      const loaded = typeof kpa === 'number' ? kpa : 30;
+      setThreshold(loaded);
+      setSwtThreshold(loaded);
+      setSwtDuration(typeof mins === 'number' ? mins : 20);
     }
-    const mins = s.duration_minutes ?? s.durationMinutes;
-    if (typeof mins === 'number') setDuration(mins);
     if (typeof s.enabled === 'boolean') setEnabled(s.enabled);
     else if (s.enabled === 0 || s.enabled === 1) setEnabled(Boolean(s.enabled));
     if (s.responseMode) setResponseMode(s.responseMode);
   };
 
-  useEffect(() => {
+  const loadSchedule = () => {
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -307,13 +297,26 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
       if (!cancelled) setLoading(false);
     });
     return () => { cancelled = true; };
+  };
+  useEffect(() => {
+    const cleanup = loadSchedule();
+    return cleanup;
+  // The zone id is the API identity; loadSchedule intentionally reads the current zone snapshot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoneId]);
-
+  const initialOpenRequest = React.useRef(openRequest);
+  useEffect(() => {
+    if (openRequest != null && openRequest !== initialOpenRequest.current) {
+      setCollapsed(false);
+      loadSchedule();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
   // ── Scheduler type switch ─────────────────────────────────────────────────
   const handleTypeChange = (type: SchedulerType) => {
     setSchedulerType(type);
     setTriggerMetric(defaultMetricForType(type, triggerMetric));
-    if (type === 'SWT') setThreshold(prev => prev <= 100 ? 30 : prev);
+    if (type === 'SWT') setThreshold(swtThreshold);
   };
 
   // ── Save ──────────────────────────────────────────────────────────────────
@@ -324,12 +327,12 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     try {
       const thresholdPayload = schedulerType === 'DENDRO'
         ? DENDRO_STRESS_VALUES[stressThreshold]
-        : Math.min(300, Math.max(1, Math.round(threshold)));
+        : threshold;
       const payload = {
         trigger_metric: triggerMetric,
         threshold_kpa: thresholdPayload,
         enabled,
-        duration_minutes: Math.min(240, Math.max(1, Math.round(duration))),
+        duration_minutes: schedulerType === 'DENDRO' ? dendroDuration : swtDuration,
         response_mode: schedulerType === 'DENDRO' ? responseMode : undefined,
       };
       await irrigationZonesAPI.updateSchedule(zoneId, payload);
@@ -342,9 +345,9 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
     }
   };
 
-  const canSave = schedulerType === 'DENDRO'
-    ? true
-    : Number.isFinite(threshold) && threshold > 0;
+  const activeDuration = schedulerType === 'DENDRO' ? dendroDuration : swtDuration;
+  const canSave = Number.isFinite(activeDuration) && Number.isInteger(activeDuration) && activeDuration >= 1 && activeDuration <= 240
+    && (schedulerType === 'DENDRO' || (Number.isFinite(threshold) && threshold > 0 && threshold <= 300));
 
   const reload = () => {
     setLoading(true);
@@ -374,6 +377,15 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
 
       {!collapsed && (
         <div className="mt-3 bg-[var(--card)] rounded-lg p-4">
+          {onOpenPolicyEditor && (
+            <button
+              type="button"
+              onClick={onOpenPolicyEditor}
+              className="mb-4 min-h-11 rounded-lg border border-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--primary)] transition-colors hover:bg-[var(--secondary-bg)]"
+            >
+              {valveT('irrigationPolicy.openEditor', { defaultValue: 'Configure conditional irrigation' })}
+            </button>
+          )}
           {/* Enabled toggle row */}
           <div className="flex items-center justify-end gap-2 mb-4">
             <span className="text-[var(--text-secondary)] text-sm font-semibold">{t('schedule.enabled')}</span>
@@ -401,6 +413,7 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
             <div className="text-[var(--text-tertiary)] text-sm">{t('schedule.loadingSchedule')}</div>
           ) : (
             <>
+              {!canSave && <p role="alert" className="mb-3 text-sm text-[var(--error-text)]">{valveT('irrigationPreference.invalidSchedule')}</p>}
               {/* Scheduler type selector */}
               <div className="mb-4">
                 <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2">
@@ -420,22 +433,22 @@ export const ScheduleSection: React.FC<ScheduleSectionProps> = ({
               {schedulerType === 'SWT' && (
                 <SwtForm
                   metric={triggerMetric}
-                  threshold={threshold}
-                  duration={duration}
+                  threshold={swtThreshold}
+                  duration={swtDuration}
                   zoneId={zoneId}
                   onMetric={setTriggerMetric}
-                  onThreshold={setThreshold}
-                  onDuration={setDuration}
+                  onThreshold={(value) => { setThreshold(value); setSwtThreshold(value); }}
+                  onDuration={setSwtDuration}
                 />
               )}
               {schedulerType === 'DENDRO' && (
                 <DendroForm
                   stressThreshold={stressThreshold}
-                  duration={duration}
+                  duration={dendroDuration}
                   responseMode={responseMode}
                   zoneId={zoneId}
                   onStress={setStressThreshold}
-                  onDuration={setDuration}
+                  onDuration={setDendroDuration}
                   onResponseMode={setResponseMode}
                   onAdvanced={onAdvancedOpen ?? (() => {})}
                 />

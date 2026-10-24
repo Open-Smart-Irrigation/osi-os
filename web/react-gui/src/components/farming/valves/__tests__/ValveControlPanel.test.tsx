@@ -16,10 +16,25 @@ const { translateForTest } = vi.hoisted(() => {
     scheduleHelpLabel: 'About weekly schedules',
     empty: 'No STREGA valves registered yet.',
     actionFailed: 'The action could not be completed.',
+    resumeRefusedClearPending: 'Resume is not possible yet: the valve has not confirmed its conditional clear.',
     loadFailed: 'Could not load valves.',
     'openDialog.error': 'Could not send the open command.',
     loading: 'Loading...',
     retry: 'Retry',
+    cancelHelp: 'Cancel deletes the pending command. It does not close a valve that is already open.',
+    'cancelOutcome.cancelled': 'The pending open was deleted.',
+    'cancelOutcome.handed_off': 'The open may already have been sent to the valve, so it was not deleted.',
+    'cancelOutcome.already_running': 'The valve is already open: there was no pending command to delete.',
+    'cancelOutcome.uncertain': 'The gateway could not confirm that the pending open was deleted.',
+    'cancelCollateral.title': 'Also removed from the valve queue:',
+    'cancelCollateral.weekdayPlan': 'Plan for {{weekday}}',
+    'cancelCollateral.planGroup': 'Plan update',
+    'cancelCollateral.clockSync': 'Clock sync',
+    'cancelCollateral.schedulerStatus': 'Scheduler status change',
+    'cancelCollateral.open': 'Another pending open',
+    'cancelCollateral.config': 'Configuration command (port {{fport}})',
+    'cancelCollateral.configUnknown': 'Configuration command',
+    'weekdays.1': 'Mon',
   };
   return {
     translateForTest: (key: string, options?: Record<string, unknown>): string => {
@@ -133,22 +148,22 @@ describe('ValveControlPanel', () => {
     vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
     render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
     expect(screen.queryByText('All valves, all zones. Weekly plans run on the valve itself.')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     const help=screen.getByRole('button',{name:'About weekly schedules'});
     fireEvent.mouseEnter(help.parentElement!);
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/^Weekly schedules run on each valve\.$/);
+    expect(screen.getByRole('region', { name: 'About weekly schedules' })).toHaveTextContent(/^Weekly schedules run on each valve\.$/);
     fireEvent.mouseLeave(help.parentElement!);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     fireEvent.focus(help);
-    expect(help).toHaveAttribute('aria-describedby',screen.getByRole('tooltip').id);
+    expect(help).toHaveAttribute('aria-controls',screen.getByRole('region', { name: 'About weekly schedules' }).id);
     fireEvent.keyDown(help,{key:'Escape'});
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     fireEvent.click(help);
-    expect(screen.getByRole('tooltip')).toBeVisible();
+    expect(screen.getByRole('region', { name: 'About weekly schedules' })).toBeVisible();
     fireEvent.click(help);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     fireEvent.blur(help);
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
   });
 
   describe('schedule help', () => {
@@ -164,7 +179,7 @@ describe('ValveControlPanel', () => {
       fireEvent.pointerDown(help);
       fireEvent.focus(help);
       fireEvent.click(help);
-      expect(screen.getByRole('tooltip')).toHaveTextContent('Weekly schedules run on each valve.');
+      expect(screen.getByRole('region', { name: 'About weekly schedules' })).toHaveTextContent('Weekly schedules run on each valve.');
       for (const call of [devicesAPI.controlValve, devicesAPI.cancelIrrigation, devicesAPI.rename,
         valvesAPI.updateSettings, valvesAPI.setSchedulerStatus, valvesAPI.resendPlan]) {
         expect(call).not.toHaveBeenCalled();
@@ -173,44 +188,46 @@ describe('ValveControlPanel', () => {
 
     it('ties the tooltip to the button only while it is open', () => {
       const help = renderReadOnly();
-      expect(help).not.toHaveAttribute('aria-describedby');
-      // A dangling IDREF while closed: the tooltip element does not exist then.
-      expect(help).not.toHaveAttribute('aria-controls');
+      const regionId = help.getAttribute('aria-controls');
+      expect(regionId).toBeTruthy();
+      const closedRegion = document.getElementById(regionId!);
+      expect(closedRegion).not.toBeNull();
       fireEvent.focus(help);
-      const tooltip = screen.getByRole('tooltip');
-      expect(help).toHaveAttribute('aria-describedby', tooltip.id);
+      const tooltip = screen.getByRole('region', { name: 'About weekly schedules' });
+      expect(help).toHaveAttribute('aria-controls', tooltip.id);
       expect(tooltip).not.toHaveAttribute('aria-live');
       expect(tooltip.querySelector('button, a, input, select, textarea, [tabindex]')).toBeNull();
       fireEvent.blur(help);
-      expect(help).not.toHaveAttribute('aria-describedby');
+      expect(help).toHaveAttribute('aria-controls', tooltip.id);
+      expect(tooltip).toHaveAttribute('hidden');
     });
 
     it('dismisses on Escape while focus stays on the button', () => {
       const help = renderReadOnly();
       act(() => help.focus());
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'About weekly schedules' })).toBeInTheDocument();
       fireEvent.keyDown(help, { key: 'Escape' });
-      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
       expect(help).toHaveFocus();
     });
 
     it('dismisses hover-opened help on Escape although the button has no focus', () => {
       const help = renderReadOnly();
       fireEvent.mouseEnter(help.parentElement!);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'About weekly schedules' })).toBeInTheDocument();
       fireEvent.keyDown(document, { key: 'Escape' });
-      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     });
 
     it('dismisses on a tap outside, also on a non-focusable element', () => {
       const help = renderReadOnly();
       fireEvent.click(help);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'About weekly schedules' })).toBeInTheDocument();
       fireEvent.pointerDown(screen.getByRole('heading', { name: 'Valve control' }));
-      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
       fireEvent.click(help);
       fireEvent.pointerDown(document.body);
-      expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+      expect(screen.queryByRole('region', { name: 'About weekly schedules' })).not.toBeInTheDocument();
     });
 
     it('stays open when the pointer leaves while the button keeps focus', () => {
@@ -218,7 +235,7 @@ describe('ValveControlPanel', () => {
       fireEvent.focus(help);
       fireEvent.mouseEnter(help.parentElement!);
       fireEvent.mouseLeave(help.parentElement!);
-      expect(screen.getByRole('tooltip')).toBeInTheDocument();
+      expect(screen.getByRole('region', { name: 'About weekly schedules' })).toBeInTheDocument();
     });
 
     it('keeps a 48 px target and wraps narrow translated text inside the card', () => {
@@ -227,11 +244,46 @@ describe('ValveControlPanel', () => {
       expect(help.className).toMatch(/\bmin-w-12\b/);
       expect(help.className).toContain('focus-visible:ring-[var(--focus)]');
       fireEvent.focus(help);
-      const tooltip = screen.getByRole('tooltip');
-      for (const cls of ['absolute', 'right-0', 'top-full', 'w-56', 'max-w-[calc(100vw-4rem)]', 'whitespace-normal', 'break-words']) {
+      const tooltip = screen.getByRole('region', { name: 'About weekly schedules' });
+      for (const cls of ['fixed', 'w-56', 'max-w-[calc(100vw-1rem)]', 'whitespace-normal', 'break-words']) {
         expect(tooltip.className.split(/\s+/)).toContain(cls);
       }
     });
+  });
+
+  // D19/Q01 = (a): a cancel is a whole-queue flush; the panel says what happened to the open and
+  // lists the other queued items the flush removed.
+  it('shows the cancel outcome and the collateral the flush removed', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({
+      outcome: 'cancelled',
+      collateral: [
+        { ownerType: 'push', ownerId: 'p-mon', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: null, inQueue: true },
+        { ownerType: 'opaque', ownerId: 'q3', purpose: null, weekday: null, fport: 11, inQueue: true },
+        { ownerType: 'expectation', ownerId: 'e2', purpose: null, weekday: null, fport: null, inQueue: false },
+      ],
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The pending open was deleted.');
+    expect(status).toHaveTextContent('Also removed from the valve queue:');
+    expect(status).toHaveTextContent('Plan for Mon');
+    expect(status).toHaveTextContent('Configuration command (port 11)');
+    expect(status).not.toHaveTextContent('Another pending open');
+  });
+
+  it('shows a handed-off cancel honestly, with the D04 text, instead of a generic failure', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockRejectedValueOnce({
+      response: { status: 409, data: { error: 'actuation_handed_off', outcome: 'handed_off', collateral: [] } },
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The open may already have been sent to the valve, so it was not deleted.');
+    expect(status).toHaveTextContent('Cancel deletes the pending command. It does not close a valve that is already open.');
+    expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
   });
 
   it('labels a failed non-open action (cancel/skip/pause/resume/resend) with actionFailed, not the open error', async () => {
@@ -244,6 +296,15 @@ describe('ValveControlPanel', () => {
 
     expect(await screen.findByText('The action could not be completed.')).toBeInTheDocument();
     expect(screen.queryByText('Could not send the open command.')).not.toBeInTheDocument();
+  });
+
+  it('explains a refused Resume (conditional clear not confirmed) instead of the generic actionFailed', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(valvesAPI.setSchedulerStatus).mockRejectedValueOnce(Object.assign(new Error('refused'), { code: 'conditional_readiness_pending' }));
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume-0016C001F1000001' }));
+    expect(await screen.findByText('Resume is not possible yet: the valve has not confirmed its conditional clear.')).toBeInTheDocument();
+    expect(screen.queryByText('The action could not be completed.')).not.toBeInTheDocument();
   });
 
   it('isolates a failed default-open-minutes save from the open command: still refreshes, does not surface actionFailed', async () => {

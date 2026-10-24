@@ -1,0 +1,140 @@
+{
+  "commands": [
+    {
+      "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+      "pending": {
+        "eventUuid": "52345678-1234-4234-8234-123456789abc",
+        "commandType": "UPSERT_IRRIGATION_POLICY",
+        "createdAt": "2026-10-20T00:00:00.000Z",
+        "payload": {
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "A840410000000001",
+          "request_id": "62345678-1234-4234-8234-123456789abc",
+          "expected_policy_version": null,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 29.9,
+            "sources": [
+              { "device_eui": "A840410000000001", "channel": "swt_1" },
+              { "device_eui": "A840410000000002", "channel": "swt_2" }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "72345678-1234-4234-8234-123456789abc",
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional",
+              "expected_sync_version": null
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+      "pending": {
+        "eventUuid": "82345678-1234-4234-8234-123456789abc",
+        "commandType": "UPSERT_IRRIGATION_POLICY",
+        "createdAt": "2026-10-20T00:01:00.000Z",
+        "payload": {
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "A840410000000001",
+          "request_id": "92345678-1234-4234-8234-123456789abc",
+          "expected_policy_version": 1,
+          "condition": {
+            "kind": "SWT",
+            "threshold_kpa": 29.9,
+            "sources": [
+              { "device_eui": "A840410000000001", "channel": "swt_1" },
+              { "device_eui": "A840410000000002", "channel": "swt_2" }
+            ]
+          },
+          "timezone": "UTC",
+          "enabled": true,
+          "observation_window_minutes": 60,
+          "min_interval_minutes": 15,
+          "max_daily_minutes": 120,
+          "delivery_settings": {},
+          "schedules": [
+            {
+              "schedule_uuid": "72345678-1234-4234-8234-123456789abc",
+              "device_eui": "A840410000000002",
+              "kind": "WEEKLY",
+              "weekdays_mask": 127,
+              "start_time": "06:00",
+              "duration_minutes": 30,
+              "enabled": true,
+              "detach": false,
+              "execution": "conditional",
+              "expected_sync_version": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+      "pending": {
+        "eventUuid": "a2345678-1234-4234-8234-123456789abc",
+        "commandType": "UPSERT_IRRIGATION_POLICY",
+        "createdAt": "2026-10-20T00:02:00.000Z",
+        "payload": {
+          "policy_uuid": "22345678-1234-4234-8234-123456789abc",
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "A840410000000001",
+          "request_id": "b2345678-1234-4234-8234-123456789abc",
+          "expected_policy_version": 2,
+          "schedules": [
+            {
+              "schedule_uuid": "72345678-1234-4234-8234-123456789abc",
+              "expected_sync_version": 2,
+              "duration_minutes": 45
+            }
+          ]
+        }
+      }
+    },
+    {
+      "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+      "pending": {
+        "eventUuid": "c2345678-1234-4234-8234-123456789abc",
+        "commandType": "PAUSE_IRRIGATION_POLICY",
+        "createdAt": "2026-10-20T00:03:00.000Z",
+        "payload": {
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "A840410000000001",
+          "request_id": "d2345678-1234-4234-8234-123456789abc",
+          "expected_policy_version": 3
+        }
+      }
+    },
+    {
+      "actor_user_uuid": "42345678-1234-4234-8234-123456789abc",
+      "pending": {
+        "eventUuid": "e2345678-1234-4234-8234-123456789abc",
+        "commandType": "RETRY_IRRIGATION_VALVE",
+        "createdAt": "2026-10-20T00:04:00.000Z",
+        "payload": {
+          "zone_uuid": "32345678-1234-4234-8234-123456789abc",
+          "gateway_device_eui": "A840410000000001",
+          "device_eui": "A840410000000002",
+          "request_id": "f2345678-1234-4234-8234-123456789abc"
+        }
+      }
+    }
+  ]
+}

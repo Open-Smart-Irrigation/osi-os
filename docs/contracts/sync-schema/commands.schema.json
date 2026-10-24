@@ -1,830 +1,2131 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "https://contracts.opensmartirrigation.org/sync-schema/commands.schema.json",
-    "title": "Command Payload",
-    "x-semantic-bindings": {
-        "UPSERT_JOURNAL_ENTRY": {
-            "effect_key": {"prefix": "journal_entry", "uuid_path": "entry.entry_uuid", "version_path": "entry.base_sync_version"}
-        },
-        "UPSERT_JOURNAL_ENTRY_BATCH": {
-            "effect_key": {"prefix": "journal_entry_batch", "uuid_path": "batch_uuid", "version_path": "base_sync_version"}
-        },
-        "VOID_JOURNAL_ENTRY": {
-            "effect_key": {"prefix": "journal_entry", "uuid_path": "entry_uuid", "version_path": "base_sync_version"}
-        },
-        "UPSERT_JOURNAL_CUSTOM_VOCAB": {
-            "effect_key": {"prefix": "journal_vocab", "uuid_path": "custom_vocab.custom_field_uuid", "version_path": "custom_vocab.base_sync_version"}
-        },
-        "UPSERT_JOURNAL_PLOT": {
-            "effect_key": {"prefix": "journal_plot", "uuid_path": "plot.plot_uuid", "version_path": "plot.base_sync_version"}
-        },
-        "UPSERT_JOURNAL_PLOT_GROUP": {
-            "effect_key": {"prefix": "journal_plot_group", "uuid_path": "plot_group.group_uuid", "version_path": "plot_group.base_sync_version"}
-        },
-        "UPSERT_SCOPED_USER": {
-            "effect_key": {"prefix": "scoped_user", "uuid_path": "user.user_uuid", "version_path": "user.base_sync_version"}
-        },
-        "RESET_SCOPED_USER_PASSWORD": {
-            "effect_key": {"prefix": "scoped_user_password", "uuid_path": "user_uuid", "version_path": "base_sync_version"}
-        },
-        "UPSERT_USER_ZONE_ASSIGNMENT": {
-            "effect_key": {"prefix": "scoped_zone_assignment", "uuid_path": "zone_assignment.assignment_uuid", "version_path": "zone_assignment.base_sync_version"}
-        },
-        "DELETE_USER_ZONE_ASSIGNMENT": {
-            "effect_key": {"prefix": "scoped_zone_assignment", "uuid_path": "assignment_uuid", "version_path": "base_sync_version"}
-        },
-        "UPSERT_USER_PLOT_ASSIGNMENT": {
-            "effect_key": {"prefix": "scoped_plot_assignment", "uuid_path": "plot_assignment.assignment_uuid", "version_path": "plot_assignment.base_sync_version"}
-        },
-        "DELETE_USER_PLOT_ASSIGNMENT": {
-            "effect_key": {"prefix": "scoped_plot_assignment", "uuid_path": "assignment_uuid", "version_path": "base_sync_version"}
-        },
-        "SET_WATERMARK_CALIBRATION": {
-            "effect_key": {"prefix": "watermark_calibration:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
-        },
-        "DELETE_WATERMARK_CALIBRATION": {
-            "effect_key": {"prefix": "watermark_calibration:delete", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
-        },
-        "UPSERT_DEVICE_SOIL_DEPTHS": {
-            "effect_key": {"prefix": "device_soil_depths:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
-        },
-        "SET_CHAMELEON_CONFIG": {
-            "effect_key": {"prefix": "chameleon_config:set", "gateway_path": "gateway_device_eui", "device_path": "device_eui", "version_path": "base_sync_version"}
-        }
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://contracts.opensmartirrigation.org/sync-schema/commands.schema.json",
+  "title": "Command Payload",
+  "x-semantic-bindings": {
+    "UPSERT_JOURNAL_ENTRY": {
+      "effect_key": {
+        "prefix": "journal_entry",
+        "uuid_path": "entry.entry_uuid",
+        "version_path": "entry.base_sync_version"
+      }
     },
-    "type": "object",
-    "required": ["command_type", "command_id"],
-    "additionalProperties": false,
-    "properties": {
-        "command_id": {"type": "string", "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"},
-        "owner_user_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "author_principal_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "author_label": {"type": ["string", "null"], "maxLength": 120},
-        "actor_user_uuid": {"type": "string", "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", "description": "The acting user's gateway-local users.user_uuid exactly as stored: the lower-case hyphenated form, or 32 lower-case hex digits (first admin and backfilled users). Never rewritten; the edge matches it exactly."},
-        "duplicate_guard_ack_entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "command_type": {
+    "UPSERT_JOURNAL_ENTRY_BATCH": {
+      "effect_key": {
+        "prefix": "journal_entry_batch",
+        "uuid_path": "batch_uuid",
+        "version_path": "base_sync_version"
+      }
+    },
+    "VOID_JOURNAL_ENTRY": {
+      "effect_key": {
+        "prefix": "journal_entry",
+        "uuid_path": "entry_uuid",
+        "version_path": "base_sync_version"
+      }
+    },
+    "UPSERT_JOURNAL_CUSTOM_VOCAB": {
+      "effect_key": {
+        "prefix": "journal_vocab",
+        "uuid_path": "custom_vocab.custom_field_uuid",
+        "version_path": "custom_vocab.base_sync_version"
+      }
+    },
+    "UPSERT_JOURNAL_PLOT": {
+      "effect_key": {
+        "prefix": "journal_plot",
+        "uuid_path": "plot.plot_uuid",
+        "version_path": "plot.base_sync_version"
+      }
+    },
+    "UPSERT_JOURNAL_PLOT_GROUP": {
+      "effect_key": {
+        "prefix": "journal_plot_group",
+        "uuid_path": "plot_group.group_uuid",
+        "version_path": "plot_group.base_sync_version"
+      }
+    },
+    "UPSERT_SCOPED_USER": {
+      "effect_key": {
+        "prefix": "scoped_user",
+        "uuid_path": "user.user_uuid",
+        "version_path": "user.base_sync_version"
+      }
+    },
+    "RESET_SCOPED_USER_PASSWORD": {
+      "effect_key": {
+        "prefix": "scoped_user_password",
+        "uuid_path": "user_uuid",
+        "version_path": "base_sync_version"
+      }
+    },
+    "UPSERT_USER_ZONE_ASSIGNMENT": {
+      "effect_key": {
+        "prefix": "scoped_zone_assignment",
+        "uuid_path": "zone_assignment.assignment_uuid",
+        "version_path": "zone_assignment.base_sync_version"
+      }
+    },
+    "DELETE_USER_ZONE_ASSIGNMENT": {
+      "effect_key": {
+        "prefix": "scoped_zone_assignment",
+        "uuid_path": "assignment_uuid",
+        "version_path": "base_sync_version"
+      }
+    },
+    "UPSERT_USER_PLOT_ASSIGNMENT": {
+      "effect_key": {
+        "prefix": "scoped_plot_assignment",
+        "uuid_path": "plot_assignment.assignment_uuid",
+        "version_path": "plot_assignment.base_sync_version"
+      }
+    },
+    "DELETE_USER_PLOT_ASSIGNMENT": {
+      "effect_key": {
+        "prefix": "scoped_plot_assignment",
+        "uuid_path": "assignment_uuid",
+        "version_path": "base_sync_version"
+      }
+    },
+    "SET_WATERMARK_CALIBRATION": {
+      "effect_key": {
+        "prefix": "watermark_calibration:set",
+        "gateway_path": "gateway_device_eui",
+        "device_path": "device_eui",
+        "version_path": "base_sync_version"
+      }
+    },
+    "DELETE_WATERMARK_CALIBRATION": {
+      "effect_key": {
+        "prefix": "watermark_calibration:delete",
+        "gateway_path": "gateway_device_eui",
+        "device_path": "device_eui",
+        "version_path": "base_sync_version"
+      }
+    },
+    "UPSERT_DEVICE_SOIL_DEPTHS": {
+      "effect_key": {
+        "prefix": "device_soil_depths:set",
+        "gateway_path": "gateway_device_eui",
+        "device_path": "device_eui",
+        "version_path": "base_sync_version"
+      }
+    },
+    "SET_CHAMELEON_CONFIG": {
+      "effect_key": {
+        "prefix": "chameleon_config:set",
+        "gateway_path": "gateway_device_eui",
+        "device_path": "device_eui",
+        "version_path": "base_sync_version"
+      }
+    },
+    "UPSERT_IRRIGATION_POLICY": {
+      "effect_key": {
+        "prefix": "irrigation_policy:upsert",
+        "gateway_path": "gateway_device_eui",
+        "version_path": "expected_policy_version"
+      }
+    },
+    "PAUSE_IRRIGATION_POLICY": {
+      "effect_key": {
+        "prefix": "irrigation_policy:pause",
+        "gateway_path": "gateway_device_eui",
+        "version_path": "expected_policy_version"
+      }
+    },
+    "RETRY_IRRIGATION_VALVE": {
+      "effect_key": {
+        "prefix": "irrigation_policy:retry",
+        "gateway_path": "gateway_device_eui",
+        "device_path": "device_eui"
+      }
+    }
+  },
+  "type": "object",
+  "required": [
+    "command_type",
+    "command_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+    },
+    "owner_user_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "author_principal_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "author_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 120
+    },
+    "actor_user_uuid": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+      "description": "The acting user's gateway-local users.user_uuid exactly as stored: the lower-case hyphenated form, or 32 lower-case hex digits (first admin and backfilled users). Never rewritten; the edge matches it exactly."
+    },
+    "duplicate_guard_ack_entry_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "command_type": {
+      "type": "string",
+      "enum": [
+        "OPEN_FOR_DURATION",
+        "UC512_OPEN_FOR_DURATION",
+        "SET_STREGA_TIMED_ACTION",
+        "CLOSE",
+        "VALVE_COMMAND",
+        "SET_STREGA_INTERVAL",
+        "SET_STREGA_MODEL",
+        "SET_STREGA_MAGNET_MODE",
+        "SET_STREGA_PARTIAL_OPENING",
+        "SET_STREGA_FLUSHING",
+        "SET_LSN50_MODE",
+        "SET_LSN50_INTERVAL",
+        "SET_LSN50_INTERRUPT_MODE",
+        "SET_LSN50_5V_WARMUP",
+        "SET_KIWI_INTERVAL",
+        "ENABLE_KIWI_TEMP_HUMIDITY",
+        "SET_CHAMELEON_CONFIG",
+        "SET_WATERMARK_CALIBRATION",
+        "DELETE_WATERMARK_CALIBRATION",
+        "SET_SDI12_IDENTIFY",
+        "REGISTER_DEVICE",
+        "REBOOT",
+        "REBOOT_DEVICE",
+        "REMOVE_DEVICE_FROM_ZONE",
+        "UNCLAIM_DEVICE",
+        "SET_FAN",
+        "FORCE_EDGE_SYNC",
+        "SYNC_LINKED_AUTH",
+        "UPSERT_ZONE",
+        "DELETE_ZONE",
+        "UPSERT_ZONE_CONFIG",
+        "UPSERT_ZONE_LOCATION",
+        "UPSERT_ZONE_NAME",
+        "ASSIGN_DEVICE_TO_ZONE",
+        "UPSERT_DEVICE_FLAGS",
+        "UPSERT_DEVICE_RADIO_CONFIGURATION",
+        "UPSERT_DEVICE_INSTALLATION_LOCATION",
+        "UPSERT_DEVICE_SOIL_DEPTHS",
+        "UPSERT_DEVICE_NAME",
+        "UPDATE_SCHEDULE",
+        "UPSERT_SCHEDULE",
+        "UPSERT_VALVE_SCHEDULE",
+        "DELETE_VALVE_SCHEDULE",
+        "RESEND_VALVE_PLAN",
+        "SET_VALVE_SCHEDULER_STATUS",
+        "CANCEL_VALVE_ACTUATION",
+        "UPSERT_VALVE_SETTINGS",
+        "WORK_REQUEST_STATUS",
+        "UPSERT_JOURNAL_ENTRY",
+        "UPSERT_JOURNAL_ENTRY_BATCH",
+        "VOID_JOURNAL_ENTRY",
+        "UPSERT_JOURNAL_CUSTOM_VOCAB",
+        "UPSERT_JOURNAL_PLOT",
+        "UPSERT_JOURNAL_PLOT_GROUP",
+        "UPSERT_SCOPED_USER",
+        "RESET_SCOPED_USER_PASSWORD",
+        "UPSERT_USER_ZONE_ASSIGNMENT",
+        "DELETE_USER_ZONE_ASSIGNMENT",
+        "UPSERT_USER_PLOT_ASSIGNMENT",
+        "DELETE_USER_PLOT_ASSIGNMENT",
+        "UPSERT_IRRIGATION_POLICY",
+        "PAUSE_IRRIGATION_POLICY",
+        "RETRY_IRRIGATION_VALVE"
+      ]
+    },
+    "installation_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "revision_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "base_revision_uuid": {
+      "$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"
+    },
+    "values": {
+      "type": "object"
+    },
+    "device_eui": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{16}$"
+    },
+    "gateway_device_eui": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{16}$"
+    },
+    "zone_uuid": {
+      "$ref": "resources.schema.json#/definitions/Uuid"
+    },
+    "requested_at": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"
+    },
+    "policy_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "expected_policy_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "expected_sync_version": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "condition": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "timezone": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "enabled": {
+      "type": [
+        "boolean",
+        "integer",
+        "null"
+      ]
+    },
+    "observation_window_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 1440
+    },
+    "min_interval_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1440
+    },
+    "max_daily_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 1440
+    },
+    "delivery_settings": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "schedules": {
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "zone_id": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "duration_seconds": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "duration_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "amount": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "unit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "SECONDS",
+        "MINUTES",
+        "HOURS",
+        null
+      ]
+    },
+    "action": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "OPEN",
+        "CLOSE",
+        "OPEN_FOR_DURATION",
+        null
+      ]
+    },
+    "effect_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expectation_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "description": "CANCEL_VALVE_ACTUATION: the actuation to cancel (ValveActuation.expectation_id; for a cloud-issued open, its command id as text). Without it the edge cancels only when exactly one actuation of the valve is active."
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "set",
+        "delete"
+      ]
+    },
+    "issued_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "config": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "human_message": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "released_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "updated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "entry": {
+      "$ref": "resources.schema.json#/definitions/JournalEntry"
+    },
+    "contract_version": {
+      "type": "integer"
+    },
+    "batch_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "submitted_intent_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "shared": {
+      "$ref": "resources.schema.json#/definitions/JournalEntryBatchShared"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "resources.schema.json#/definitions/JournalEntryBatchMember"
+      }
+    },
+    "entry_uuid": {
+      "$ref": "resources.schema.json#/definitions/Uuid"
+    },
+    "base_sync_version": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "custom_vocab": {
+      "$ref": "resources.schema.json#/definitions/JournalVocab"
+    },
+    "plot": {
+      "$ref": "resources.schema.json#/definitions/JournalPlot"
+    },
+    "plot_group": {
+      "$ref": "resources.schema.json#/definitions/JournalPlotGroup"
+    },
+    "schedule_uuid": {
+      "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+    },
+    "kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "weekdays_mask": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "start_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fire_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "deleted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "strega_generation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "flow_rate_lpm": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "flow_rate_source": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_open_minutes": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "user": {
+      "$ref": "resources.schema.json#/definitions/ScopedUserCommand"
+    },
+    "zone_assignment": {
+      "$ref": "resources.schema.json#/definitions/UserZoneAssignmentCommand"
+    },
+    "plot_assignment": {
+      "$ref": "resources.schema.json#/definitions/UserPlotAssignmentCommand"
+    },
+    "assignment_uuid": {
+      "$ref": "resources.schema.json#/definitions/Uuid"
+    },
+    "user_uuid": {
+      "$ref": "resources.schema.json#/definitions/Uuid"
+    },
+    "password_hash": {
+      "type": "string",
+      "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "SET_WATERMARK_CALIBRATION"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "gateway_device_eui",
+          "device_eui",
+          "actor_user_uuid",
+          "base_sync_version",
+          "operation",
+          "effect_key",
+          "values"
+        ],
+        "properties": {
+          "operation": {
+            "const": "set"
+          },
+          "effect_key": {
+            "type": "string",
+            "pattern": "^watermark_calibration:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "pullup_1_ohm",
+              "pulldown_1_ohm",
+              "series_fwd_1_ohm",
+              "series_rev_1_ohm",
+              "pullup_2_ohm",
+              "pulldown_2_ohm",
+              "series_fwd_2_ohm",
+              "series_rev_2_ohm"
+            ],
+            "properties": {
+              "pullup_1_ohm": {
+                "type": "number",
+                "minimum": 25000,
+                "maximum": 65000
+              },
+              "pulldown_1_ohm": {
+                "type": "number",
+                "minimum": 25000,
+                "maximum": 65000
+              },
+              "series_fwd_1_ohm": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 500,
+                "x-positive-minimum": 2.2250738585072014e-308
+              },
+              "series_rev_1_ohm": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 500,
+                "x-positive-minimum": 2.2250738585072014e-308
+              },
+              "pullup_2_ohm": {
+                "type": "number",
+                "minimum": 25000,
+                "maximum": 65000
+              },
+              "pulldown_2_ohm": {
+                "type": "number",
+                "minimum": 25000,
+                "maximum": 65000
+              },
+              "series_fwd_2_ohm": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 500,
+                "x-positive-minimum": 2.2250738585072014e-308
+              },
+              "series_rev_2_ohm": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 500,
+                "x-positive-minimum": 2.2250738585072014e-308
+              },
+              "measured_at": {
+                "$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "worst_residual_pct": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 100,
+                "x-positive-minimum": 2.2250738585072014e-308
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "DELETE_WATERMARK_CALIBRATION"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "gateway_device_eui",
+          "device_eui",
+          "actor_user_uuid",
+          "base_sync_version",
+          "operation",
+          "effect_key"
+        ],
+        "not": {
+          "required": [
+            "values"
+          ]
+        },
+        "properties": {
+          "operation": {
+            "const": "delete"
+          },
+          "effect_key": {
+            "type": "string",
+            "pattern": "^watermark_calibration:delete:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_DEVICE_SOIL_DEPTHS"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "gateway_device_eui",
+          "device_eui",
+          "actor_user_uuid",
+          "base_sync_version",
+          "operation",
+          "effect_key",
+          "values"
+        ],
+        "properties": {
+          "operation": {
+            "const": "set"
+          },
+          "effect_key": {
+            "type": "string",
+            "pattern": "^device_soil_depths:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "soil_moisture_probe_depths_json",
+              "soil_moisture_probe_depths_configured"
+            ],
+            "properties": {
+              "soil_moisture_probe_depths_json": {
+                "type": "object",
+                "propertyNames": {
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                }
+              },
+              "soil_moisture_probe_depths_configured": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "SET_CHAMELEON_CONFIG"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "gateway_device_eui",
+          "device_eui",
+          "actor_user_uuid",
+          "base_sync_version",
+          "operation",
+          "effect_key",
+          "values"
+        ],
+        "properties": {
+          "operation": {
+            "const": "set"
+          },
+          "effect_key": {
+            "type": "string",
+            "pattern": "^chameleon_config:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"
+          },
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "chameleon_enabled"
+            ],
+            "properties": {
+              "chameleon_enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_DEVICE_RADIO_CONFIGURATION"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "device_eui",
+          "installation_uuid",
+          "revision_uuid",
+          "base_revision_uuid",
+          "actor_user_uuid",
+          "values",
+          "effect_key"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "effectiveFrom"
+            ],
+            "properties": {
+              "effectiveFrom": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "supersedesRevisionUuid": {
+                "$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"
+              },
+              "txPowerDbm": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "antennaGainDbi": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 13
+              },
+              "feederLossDb": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "configurationSource": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          "effect_key": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_DEVICE_INSTALLATION_LOCATION"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "device_eui",
+          "installation_uuid",
+          "revision_uuid",
+          "base_revision_uuid",
+          "actor_user_uuid",
+          "values",
+          "effect_key"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "latitude",
+              "longitude",
+              "effectiveFrom"
+            ],
+            "properties": {
+              "effectiveFrom": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "supersedesRevisionUuid": {
+                "$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"
+              },
+              "latitude": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "longitude": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              },
+              "altitudeM": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "accuracyM": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "antennaHeightAglM": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "verticalReference": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 80
+              },
+              "coordinateSource": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            }
+          },
+          "effect_key": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "enum": [
+              "UPSERT_JOURNAL_ENTRY",
+              "UPSERT_JOURNAL_ENTRY_BATCH",
+              "VOID_JOURNAL_ENTRY",
+              "UPSERT_JOURNAL_CUSTOM_VOCAB",
+              "UPSERT_JOURNAL_PLOT",
+              "UPSERT_JOURNAL_PLOT_GROUP",
+              "UPSERT_SCOPED_USER",
+              "RESET_SCOPED_USER_PASSWORD",
+              "UPSERT_USER_ZONE_ASSIGNMENT",
+              "DELETE_USER_ZONE_ASSIGNMENT",
+              "UPSERT_USER_PLOT_ASSIGNMENT",
+              "DELETE_USER_PLOT_ASSIGNMENT",
+              "UPSERT_ZONE_NAME",
+              "PAUSE_IRRIGATION_POLICY",
+              "RETRY_IRRIGATION_VALVE",
+              "UPSERT_IRRIGATION_POLICY"
+            ]
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "else": {
+        "required": [
+          "device_eui"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "enum": [
+              "UPSERT_JOURNAL_ENTRY",
+              "UPSERT_JOURNAL_ENTRY_BATCH",
+              "VOID_JOURNAL_ENTRY",
+              "UPSERT_JOURNAL_CUSTOM_VOCAB",
+              "UPSERT_JOURNAL_PLOT",
+              "UPSERT_JOURNAL_PLOT_GROUP",
+              "UPSERT_SCOPED_USER",
+              "RESET_SCOPED_USER_PASSWORD",
+              "UPSERT_USER_ZONE_ASSIGNMENT",
+              "DELETE_USER_ZONE_ASSIGNMENT",
+              "UPSERT_USER_PLOT_ASSIGNMENT",
+              "DELETE_USER_PLOT_ASSIGNMENT"
+            ]
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "issued_at": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"
+          },
+          "expires_at": {
+            "$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_ENTRY"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "duplicate_guard_ack_entry_uuid"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_ENTRY_BATCH"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "contract_version",
+          "batch_uuid",
+          "base_sync_version",
+          "submitted_intent_hash",
+          "shared",
+          "members"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "contract_version",
+            "batch_uuid",
+            "base_sync_version",
+            "submitted_intent_hash",
+            "shared",
+            "members"
+          ]
+        },
+        "properties": {
+          "contract_version": {
+            "const": 1
+          },
+          "base_sync_version": {
+            "const": 0
+          },
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_entry_batch:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:0$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "OPEN_FOR_DURATION"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_seconds"
+        ],
+        "properties": {
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UC512_OPEN_FOR_DURATION"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "duration_seconds"
+        ],
+        "properties": {
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "SET_STREGA_TIMED_ACTION"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "WORK_REQUEST_STATUS"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "request_id",
+          "status"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_ENTRY"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "entry"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "device_eui",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "entry",
+            "duplicate_guard_ack_entry_uuid"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+          },
+          "entry": {
+            "allOf": [
+              {
+                "$ref": "resources.schema.json#/definitions/JournalEntryCommand"
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "final"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "VOID_JOURNAL_ENTRY"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "entry_uuid",
+          "base_sync_version",
+          "reason"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "device_eui",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "entry_uuid",
+            "base_sync_version",
+            "reason"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+          },
+          "entry_uuid": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          },
+          "base_sync_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_CUSTOM_VOCAB"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "custom_vocab"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "device_eui",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "custom_vocab"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_vocab:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+          },
+          "custom_vocab": {
+            "$ref": "resources.schema.json#/definitions/JournalVocabCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_PLOT"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "plot"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "device_eui",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "plot"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_plot:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+          },
+          "plot": {
+            "$ref": "resources.schema.json#/definitions/JournalPlotCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_JOURNAL_PLOT_GROUP"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "owner_user_uuid",
+          "author_principal_uuid",
+          "author_label",
+          "effect_key",
+          "plot_group"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "owner_user_uuid",
+            "author_principal_uuid",
+            "author_label",
+            "device_eui",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "plot_group"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
+          },
+          "plot_group": {
+            "$ref": "resources.schema.json#/definitions/JournalPlotGroupCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_VALVE_SCHEDULE"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "device_eui",
+          "schedule_uuid"
+        ],
+        "properties": {
+          "schedule_uuid": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          },
+          "kind": {
             "type": "string",
             "enum": [
-                "OPEN_FOR_DURATION",
-                "UC512_OPEN_FOR_DURATION",
-                "SET_STREGA_TIMED_ACTION",
-                "CLOSE",
-                "VALVE_COMMAND",
-                "SET_STREGA_INTERVAL",
-                "SET_STREGA_MODEL",
-                "SET_STREGA_MAGNET_MODE",
-                "SET_STREGA_PARTIAL_OPENING",
-                "SET_STREGA_FLUSHING",
-                "SET_LSN50_MODE",
-                "SET_LSN50_INTERVAL",
-                "SET_LSN50_INTERRUPT_MODE",
-                "SET_LSN50_5V_WARMUP",
-                "SET_KIWI_INTERVAL",
-                "ENABLE_KIWI_TEMP_HUMIDITY",
-                "SET_CHAMELEON_CONFIG",
-                "SET_WATERMARK_CALIBRATION",
-                "DELETE_WATERMARK_CALIBRATION",
-                "SET_SDI12_IDENTIFY",
-                "REGISTER_DEVICE",
-                "REBOOT",
-                "REBOOT_DEVICE",
-                "REMOVE_DEVICE_FROM_ZONE",
-                "UNCLAIM_DEVICE",
-                "SET_FAN",
-                "FORCE_EDGE_SYNC",
-                "SYNC_LINKED_AUTH",
-                "UPSERT_ZONE",
-                "DELETE_ZONE",
-                "UPSERT_ZONE_CONFIG",
-                "UPSERT_ZONE_LOCATION",
-                "UPSERT_ZONE_NAME",
-                "ASSIGN_DEVICE_TO_ZONE",
-                "UPSERT_DEVICE_FLAGS",
-                "UPSERT_DEVICE_RADIO_CONFIGURATION",
-                "UPSERT_DEVICE_INSTALLATION_LOCATION",
-                "UPSERT_DEVICE_SOIL_DEPTHS",
-                "UPSERT_DEVICE_NAME",
-                "UPDATE_SCHEDULE",
-                "UPSERT_SCHEDULE",
-                "UPSERT_VALVE_SCHEDULE",
-                "DELETE_VALVE_SCHEDULE",
-                "RESEND_VALVE_PLAN",
-                "SET_VALVE_SCHEDULER_STATUS",
-                "CANCEL_VALVE_ACTUATION",
-                "UPSERT_VALVE_SETTINGS",
-                "WORK_REQUEST_STATUS",
-                "UPSERT_JOURNAL_ENTRY",
-                "UPSERT_JOURNAL_ENTRY_BATCH",
-                "VOID_JOURNAL_ENTRY",
-                "UPSERT_JOURNAL_CUSTOM_VOCAB",
-                "UPSERT_JOURNAL_PLOT",
-                "UPSERT_JOURNAL_PLOT_GROUP",
-                "UPSERT_SCOPED_USER",
-                "RESET_SCOPED_USER_PASSWORD",
-                "UPSERT_USER_ZONE_ASSIGNMENT",
-                "DELETE_USER_ZONE_ASSIGNMENT",
-                "UPSERT_USER_PLOT_ASSIGNMENT",
-                "DELETE_USER_PLOT_ASSIGNMENT"
+              "WEEKLY",
+              "ONCE"
             ]
-        },
-        "installation_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "revision_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "base_revision_uuid": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"},
-        "values": {"type": "object"},
-        "device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-        "gateway_device_eui": {"type": "string", "pattern": "^[0-9A-F]{16}$"},
-        "zone_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
-        "requested_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
-        "zone_id": {"type": ["integer", "null"]},
-        "duration_seconds": {"type": ["integer", "null"], "minimum": 1},
-        "duration_minutes": {"type": ["integer", "null"], "minimum": 1},
-        "amount": {"type": ["integer", "null"], "minimum": 1},
-        "unit": {"type": ["string", "null"], "enum": ["SECONDS", "MINUTES", "HOURS", null]},
-        "action": {"type": ["string", "null"], "enum": ["OPEN", "CLOSE", "OPEN_FOR_DURATION", null]},
-        "effect_key": {"type": ["string", "null"]},
-        "expectation_id": {"type": ["string", "null"], "minLength": 1, "description": "CANCEL_VALVE_ACTUATION: the actuation to cancel (ValveActuation.expectation_id; for a cloud-issued open, its command id as text). Without it the edge cancels only when exactly one actuation of the valve is active."},
-        "operation": {"type": "string", "enum": ["set", "delete"]},
-        "issued_at": {"type": "string", "format": "date-time"},
-        "expires_at": {"type": ["string", "null"], "format": "date-time"},
-        "config": {"type": ["object", "null"]},
-        "request_id": {"type": ["string", "null"]},
-        "status": {"type": ["string", "null"]},
-        "reason": {"type": ["string", "null"]},
-        "human_message": {"type": ["string", "null"]},
-        "released_version": {"type": ["string", "null"]},
-        "updated_at": {"type": ["string", "null"], "format": "date-time"},
-        "entry": {"$ref": "resources.schema.json#/definitions/JournalEntry"},
-        "contract_version": {"type": "integer"},
-        "batch_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "submitted_intent_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "shared": {"$ref": "resources.schema.json#/definitions/JournalEntryBatchShared"},
-        "members": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 100,
-            "uniqueItems": true,
-            "items": {"$ref": "resources.schema.json#/definitions/JournalEntryBatchMember"}
-        },
-        "entry_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
-        "base_sync_version": {"type": "integer", "minimum": 0},
-        "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocab"},
-        "plot": {"$ref": "resources.schema.json#/definitions/JournalPlot"},
-        "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroup"},
-        "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-        "kind": {"type": ["string", "null"]},
-        "weekdays_mask": {"type": ["integer", "null"]},
-        "start_time": {"type": ["string", "null"]},
-        "fire_at": {"type": ["string", "null"], "format": "date-time"},
-        "label": {"type": ["string", "null"]},
-        "enabled": {"type": ["boolean", "integer", "null"]},
-        "deleted_at": {"type": ["string", "null"], "format": "date-time"},
-        "strega_generation": {"type": ["string", "null"]},
-        "flow_rate_lpm": {"type": ["number", "null"]},
-        "flow_rate_source": {"type": ["string", "null"]},
-        "default_open_minutes": {"type": ["integer", "null"]},
-        "user": {"$ref": "resources.schema.json#/definitions/ScopedUserCommand"},
-        "zone_assignment": {"$ref": "resources.schema.json#/definitions/UserZoneAssignmentCommand"},
-        "plot_assignment": {"$ref": "resources.schema.json#/definitions/UserPlotAssignmentCommand"},
-        "assignment_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
-        "user_uuid": {"$ref": "resources.schema.json#/definitions/Uuid"},
-        "password_hash": {"type": "string", "pattern": "^\\$2[aby]\\$[0-9]{2}\\$.{53}$"}
+          },
+          "weekdays_mask": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 127
+          },
+          "start_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          },
+          "fire_at": {
+            "$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"
+          },
+          "duration_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1439
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 80
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "integer"
+            ],
+            "enum": [
+              true,
+              false,
+              0,
+              1
+            ]
+          },
+          "deleted_at": {
+            "$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"
+          }
+        }
+      }
     },
-    "allOf": [
-        {
-            "if": {"properties": {"command_type": {"const": "SET_WATERMARK_CALIBRATION"}}, "required": ["command_type"]},
-            "then": {
-                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
-                "properties": {
-                    "operation": {"const": "set"},
-                    "effect_key": {"type": "string", "pattern": "^watermark_calibration:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
-                    "values": {
-                        "type": "object", "additionalProperties": false,
-                        "required": ["pullup_1_ohm", "pulldown_1_ohm", "series_fwd_1_ohm", "series_rev_1_ohm", "pullup_2_ohm", "pulldown_2_ohm", "series_fwd_2_ohm", "series_rev_2_ohm"],
-                        "properties": {
-                            "pullup_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "pulldown_1_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "series_fwd_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
-                            "series_rev_1_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
-                            "pullup_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "pulldown_2_ohm": {"type": "number", "minimum": 25000, "maximum": 65000},
-                            "series_fwd_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
-                            "series_rev_2_ohm": {"type": "number", "minimum": 0, "maximum": 500, "x-positive-minimum": 2.2250738585072014e-308},
-                            "measured_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
-                            "method": {"type": ["string", "null"], "minLength": 1, "maxLength": 64},
-                            "worst_residual_pct": {"type": ["number", "null"], "minimum": 0, "maximum": 100, "x-positive-minimum": 2.2250738585072014e-308},
-                            "notes": {"type": ["string", "null"], "maxLength": 500}
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "DELETE_WATERMARK_CALIBRATION"}}, "required": ["command_type"]},
-            "then": {
-                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key"],
-                "not": {"required": ["values"]},
-                "properties": {
-                    "operation": {"const": "delete"},
-                    "effect_key": {"type": "string", "pattern": "^watermark_calibration:delete:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_DEVICE_SOIL_DEPTHS"}}, "required": ["command_type"]},
-            "then": {
-                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
-                "properties": {
-                    "operation": {"const": "set"},
-                    "effect_key": {"type": "string", "pattern": "^device_soil_depths:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
-                    "values": {
-                        "type": "object", "additionalProperties": false,
-                        "required": ["soil_moisture_probe_depths_json", "soil_moisture_probe_depths_configured"],
-                        "properties": {
-                            "soil_moisture_probe_depths_json": {
-                                "type": "object",
-                                "propertyNames": {"minLength": 1},
-                                "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 1000}
-                            },
-                            "soil_moisture_probe_depths_configured": {"const": true}
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "SET_CHAMELEON_CONFIG"}}, "required": ["command_type"]},
-            "then": {
-                "required": ["gateway_device_eui", "device_eui", "actor_user_uuid", "base_sync_version", "operation", "effect_key", "values"],
-                "properties": {
-                    "operation": {"const": "set"},
-                    "effect_key": {"type": "string", "pattern": "^chameleon_config:set:[0-9A-F]{16}:[0-9A-F]{16}:(?:0|[1-9][0-9]*)$"},
-                    "values": {
-                        "type": "object", "additionalProperties": false,
-                        "required": ["chameleon_enabled"],
-                        "properties": {"chameleon_enabled": {"type": "boolean"}}
-                    }
-                }
-            }
-        },
-        {
-            "if": {
-                "properties": {
-                    "command_type": {
-                        "const": "UPSERT_DEVICE_RADIO_CONFIGURATION"
-                    }
-                },
-                "required": [
-                    "command_type"
-                ]
-            },
-            "then": {
-                "required": [
-                    "device_eui",
-                    "installation_uuid",
-                    "revision_uuid",
-                    "base_revision_uuid",
-                    "actor_user_uuid",
-                    "values",
-                    "effect_key"
-                ],
-                "properties": {
-                    "values": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                            "effectiveFrom"
-                        ],
-                        "properties": {
-                            "effectiveFrom": {
-                                "type": "string",
-                                "format": "date-time"
-                            },
-                            "recordedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                            },
-                            "supersedesRevisionUuid": {
-                                "$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"
-                            },
-                            "txPowerDbm": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ]
-                            },
-                            "antennaGainDbi": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ],
-                                "minimum": 0,
-                                "maximum": 13
-                            },
-                            "feederLossDb": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ],
-                                "minimum": 0
-                            },
-                            "configurationSource": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 80
-                            }
-                        }
-                    },
-                    "effect_key": {
-                        "type": "string",
-                        "minLength": 1
-                    }
-                }
-            }
-        },
-        {
-            "if": {
-                "properties": {
-                    "command_type": {
-                        "const": "UPSERT_DEVICE_INSTALLATION_LOCATION"
-                    }
-                },
-                "required": [
-                    "command_type"
-                ]
-            },
-            "then": {
-                "required": [
-                    "device_eui",
-                    "installation_uuid",
-                    "revision_uuid",
-                    "base_revision_uuid",
-                    "actor_user_uuid",
-                    "values",
-                    "effect_key"
-                ],
-                "properties": {
-                    "values": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                            "latitude",
-                            "longitude",
-                            "effectiveFrom"
-                        ],
-                        "properties": {
-                            "effectiveFrom": {
-                                "type": "string",
-                                "format": "date-time"
-                            },
-                            "recordedAt": {
-                                "type": "string",
-                                "format": "date-time"
-                            },
-                            "supersedesRevisionUuid": {
-                                "$ref": "resources.schema.json#/definitions/NullableCanonicalUuid"
-                            },
-                            "latitude": {
-                                "type": "number",
-                                "minimum": -90,
-                                "maximum": 90
-                            },
-                            "longitude": {
-                                "type": "number",
-                                "minimum": -180,
-                                "maximum": 180
-                            },
-                            "altitudeM": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ]
-                            },
-                            "accuracyM": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ],
-                                "minimum": 0
-                            },
-                            "antennaHeightAglM": {
-                                "type": [
-                                    "number",
-                                    "null"
-                                ],
-                                "minimum": 0
-                            },
-                            "verticalReference": {
-                                "type": [
-                                    "string",
-                                    "null"
-                                ],
-                                "maxLength": 80
-                            },
-                            "coordinateSource": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 80
-                            }
-                        }
-                    },
-                    "effect_key": {
-                        "type": "string",
-                        "minLength": 1
-                    }
-                }
-            }
-        },
-        {
-            "if": {
-                "properties": {
-                    "command_type": {
-                        "enum": [
-                            "UPSERT_JOURNAL_ENTRY",
-                            "UPSERT_JOURNAL_ENTRY_BATCH",
-                            "VOID_JOURNAL_ENTRY",
-                            "UPSERT_JOURNAL_CUSTOM_VOCAB",
-                            "UPSERT_JOURNAL_PLOT",
-                            "UPSERT_JOURNAL_PLOT_GROUP",
-                            "UPSERT_SCOPED_USER",
-                            "RESET_SCOPED_USER_PASSWORD",
-                            "UPSERT_USER_ZONE_ASSIGNMENT",
-                            "DELETE_USER_ZONE_ASSIGNMENT",
-                            "UPSERT_USER_PLOT_ASSIGNMENT",
-                            "DELETE_USER_PLOT_ASSIGNMENT",
-                            "UPSERT_ZONE_NAME"
-                        ]
-                    }
-                },
-                "required": ["command_type"]
-            },
-            "else": {"required": ["device_eui"]}
-        },
-        {
-            "if": {
-                "properties": {
-                    "command_type": {
-                        "enum": [
-                            "UPSERT_JOURNAL_ENTRY",
-                            "UPSERT_JOURNAL_ENTRY_BATCH",
-                            "VOID_JOURNAL_ENTRY",
-                            "UPSERT_JOURNAL_CUSTOM_VOCAB",
-                            "UPSERT_JOURNAL_PLOT",
-                            "UPSERT_JOURNAL_PLOT_GROUP",
-                            "UPSERT_SCOPED_USER",
-                            "RESET_SCOPED_USER_PASSWORD",
-                            "UPSERT_USER_ZONE_ASSIGNMENT",
-                            "DELETE_USER_ZONE_ASSIGNMENT",
-                            "UPSERT_USER_PLOT_ASSIGNMENT",
-                            "DELETE_USER_PLOT_ASSIGNMENT"
-                        ]
-                    }
-                },
-                "required": ["command_type"]
-            },
-            "then": {
-                "properties": {
-                    "issued_at": {"$ref": "resources.schema.json#/definitions/CanonicalUtcTimestamp"},
-                    "expires_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
-            "else": {"not": {"required": ["duplicate_guard_ack_entry_uuid"]}}
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY_BATCH"}}},
-            "then": {
-                "required": [
-                    "owner_user_uuid", "author_principal_uuid", "author_label", "effect_key",
-                    "contract_version", "batch_uuid", "base_sync_version", "submitted_intent_hash",
-                    "shared", "members"
-                ],
-                "propertyNames": {
-                    "enum": [
-                        "command_id", "command_type", "owner_user_uuid", "author_principal_uuid",
-                        "author_label", "effect_key", "issued_at", "expires_at", "contract_version",
-                        "batch_uuid", "base_sync_version", "submitted_intent_hash", "shared", "members"
-                    ]
-                },
-                "properties": {
-                    "contract_version": {"const": 1},
-                    "base_sync_version": {"const": 0},
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_entry_batch:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:0$"
-                    }
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "OPEN_FOR_DURATION"}}},
-            "then": {
-                "required": ["duration_seconds"],
-                "properties": {
-                    "duration_seconds": {"type": "integer", "minimum": 1}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UC512_OPEN_FOR_DURATION"}}},
-            "then": {
-                "required": ["duration_seconds"],
-                "properties": {
-                    "duration_seconds": {"type": "integer", "minimum": 1}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "SET_STREGA_TIMED_ACTION"}}},
-            "then": {
-                "required": ["amount"],
-                "properties": {
-                    "amount": {"type": "integer", "minimum": 1}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "WORK_REQUEST_STATUS"}}},
-            "then": {
-                "required": ["request_id", "status"],
-                "properties": {
-                    "request_id": {"type": "string", "minLength": 1},
-                    "status": {"type": "string", "minLength": 1}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_ENTRY"}}},
-            "then": {
-                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry", "duplicate_guard_ack_entry_uuid"]
-                },
-                "properties": {
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
-                    },
-                    "entry": {
-                        "allOf": [
-                            {"$ref": "resources.schema.json#/definitions/JournalEntryCommand"},
-                            {"properties": {"status": {"const": "final"}}}
-                        ]
-                    }
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "VOID_JOURNAL_ENTRY"}}},
-            "then": {
-                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "entry_uuid", "base_sync_version", "reason"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "entry_uuid", "base_sync_version", "reason"]
-                },
-                "properties": {
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_entry:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
-                    },
-                    "entry_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-                    "base_sync_version": {"type": "integer", "minimum": 0},
-                    "reason": {"type": "string", "minLength": 1, "maxLength": 4000}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_CUSTOM_VOCAB"}}},
-            "then": {
-                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "custom_vocab"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "custom_vocab"]
-                },
-                "properties": {
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_vocab:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
-                    },
-                    "custom_vocab": {"$ref": "resources.schema.json#/definitions/JournalVocabCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT"}}},
-            "then": {
-                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot"]
-                },
-                "properties": {
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_plot:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
-                    },
-                    "plot": {"$ref": "resources.schema.json#/definitions/JournalPlotCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_JOURNAL_PLOT_GROUP"}}},
-            "then": {
-                "required": ["owner_user_uuid", "author_principal_uuid", "author_label", "effect_key", "plot_group"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "owner_user_uuid", "author_principal_uuid", "author_label", "device_eui", "effect_key", "issued_at", "expires_at", "plot_group"]
-                },
-                "properties": {
-                    "effect_key": {
-                        "type": "string",
-                        "pattern": "^journal_plot_group:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:(?:0|[1-9][0-9]*)$"
-                    },
-                    "plot_group": {"$ref": "resources.schema.json#/definitions/JournalPlotGroupCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SCHEDULE"}}},
-            "then": {
-                "required": ["device_eui", "schedule_uuid"],
-                "properties": {
-                    "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"},
-                    "kind": {"type": "string", "enum": ["WEEKLY", "ONCE"]},
-                    "weekdays_mask": {"type": ["integer", "null"], "minimum": 1, "maximum": 127},
-                    "start_time": {"type": ["string", "null"], "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"},
-                    "fire_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"},
-                    "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1439},
-                    "label": {"type": ["string", "null"], "maxLength": 80},
-                    "enabled": {"type": ["boolean", "integer"], "enum": [true, false, 0, 1]},
-                    "deleted_at": {"$ref": "resources.schema.json#/definitions/NullableCanonicalUtcTimestamp"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "DELETE_VALVE_SCHEDULE"}}},
-            "then": {
-                "required": ["schedule_uuid"],
-                "properties": {
-                    "schedule_uuid": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "RESEND_VALVE_PLAN"}}},
-            "then": {
-                "required": ["device_eui"]
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "SET_VALVE_SCHEDULER_STATUS"}}},
-            "then": {
-                "required": ["device_eui", "status"],
-                "properties": {
-                    "status": {"type": "string", "enum": ["ACTIVE", "SKIP_TODAY", "DEACTIVATED"]}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "CANCEL_VALVE_ACTUATION"}}},
-            "then": {
-                "required": ["device_eui"]
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_VALVE_SETTINGS"}}},
-            "then": {
-                "required": ["device_eui"],
-                "properties": {
-                    "strega_generation": {"type": "string", "enum": ["GEN1", "GEN2"]},
-                    "flow_rate_lpm": {"type": ["number", "null"], "minimum": 0, "maximum": 10000},
-                    "flow_rate_source": {"type": ["string", "null"]},
-                    "default_open_minutes": {"type": "integer", "minimum": 1, "maximum": 255}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_SCOPED_USER"}}},
-            "then": {
-                "required": ["effect_key", "user"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "user"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_user:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"},
-                    "user": {"$ref": "resources.schema.json#/definitions/ScopedUserCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "RESET_SCOPED_USER_PASSWORD"}}},
-            "then": {
-                "required": ["effect_key", "user_uuid", "base_sync_version", "password_hash"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "user_uuid", "base_sync_version", "password_hash"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_user_password:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_USER_ZONE_ASSIGNMENT"}}},
-            "then": {
-                "required": ["effect_key", "zone_assignment"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "zone_assignment"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_zone_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"},
-                    "zone_assignment": {"$ref": "resources.schema.json#/definitions/UserZoneAssignmentCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "DELETE_USER_ZONE_ASSIGNMENT"}}},
-            "then": {
-                "required": ["effect_key", "assignment_uuid", "base_sync_version"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "assignment_uuid", "base_sync_version"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_zone_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "UPSERT_USER_PLOT_ASSIGNMENT"}}},
-            "then": {
-                "required": ["effect_key", "plot_assignment"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "plot_assignment"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"},
-                    "plot_assignment": {"$ref": "resources.schema.json#/definitions/UserPlotAssignmentCommand"}
-                }
-            }
-        },
-        {
-            "if": {"properties": {"command_type": {"const": "DELETE_USER_PLOT_ASSIGNMENT"}}},
-            "then": {
-                "required": ["effect_key", "assignment_uuid", "base_sync_version"],
-                "propertyNames": {
-                    "enum": ["command_id", "command_type", "effect_key", "issued_at", "expires_at", "assignment_uuid", "base_sync_version"]
-                },
-                "properties": {
-                    "effect_key": {"type": "string", "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"}
-                }
-            }
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "DELETE_VALVE_SCHEDULE"
+          }
         }
-        ,
-        {
-            "if": {
-                "properties": {"command_type": {"const": "UPSERT_DEVICE_NAME"}},
-                "required": ["command_type"]
-            },
-            "then": {
-                "required": [
-                    "device_eui",
-                    "gateway_device_eui",
-                    "actor_user_uuid",
-                    "requested_at",
-                    "values"
-                ],
-                "properties": {
-                    "values": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["name"],
-                        "properties": {
-                            "name": {"type": "string", "minLength": 1, "maxLength": 100}
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "if": {
-                "properties": {"command_type": {"const": "UPSERT_ZONE_NAME"}},
-                "required": ["command_type"]
-            },
-            "then": {
-                "required": [
-                    "zone_uuid",
-                    "gateway_device_eui",
-                    "actor_user_uuid",
-                    "requested_at",
-                    "values"
-                ],
-                "properties": {
-                    "values": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["name"],
-                        "properties": {
-                            "name": {"type": "string", "minLength": 1, "maxLength": 100}
-                        }
-                    }
-                }
-            }
+      },
+      "then": {
+        "required": [
+          "schedule_uuid"
+        ],
+        "properties": {
+          "schedule_uuid": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          }
         }
-    ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "RESEND_VALVE_PLAN"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "device_eui"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "SET_VALVE_SCHEDULER_STATUS"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "device_eui",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "SKIP_TODAY",
+              "DEACTIVATED"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "CANCEL_VALVE_ACTUATION"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "device_eui"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_VALVE_SETTINGS"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "device_eui"
+        ],
+        "properties": {
+          "strega_generation": {
+            "type": "string",
+            "enum": [
+              "GEN1",
+              "GEN2"
+            ]
+          },
+          "flow_rate_lpm": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "flow_rate_source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "default_open_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_SCOPED_USER"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "user"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "user"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_user:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          },
+          "user": {
+            "$ref": "resources.schema.json#/definitions/ScopedUserCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "RESET_SCOPED_USER_PASSWORD"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "user_uuid",
+          "base_sync_version",
+          "password_hash"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "user_uuid",
+            "base_sync_version",
+            "password_hash"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_user_password:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_USER_ZONE_ASSIGNMENT"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "zone_assignment"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "zone_assignment"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_zone_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          },
+          "zone_assignment": {
+            "$ref": "resources.schema.json#/definitions/UserZoneAssignmentCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "DELETE_USER_ZONE_ASSIGNMENT"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "assignment_uuid",
+          "base_sync_version"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "assignment_uuid",
+            "base_sync_version"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_zone_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_USER_PLOT_ASSIGNMENT"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "plot_assignment"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "plot_assignment"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          },
+          "plot_assignment": {
+            "$ref": "resources.schema.json#/definitions/UserPlotAssignmentCommand"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "DELETE_USER_PLOT_ASSIGNMENT"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "effect_key",
+          "assignment_uuid",
+          "base_sync_version"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "effect_key",
+            "issued_at",
+            "expires_at",
+            "assignment_uuid",
+            "base_sync_version"
+          ]
+        },
+        "properties": {
+          "effect_key": {
+            "type": "string",
+            "pattern": "^scoped_plot_assignment:[0-9a-f-]{32,36}:(?:0|[1-9][0-9]*)$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_DEVICE_NAME"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "device_eui",
+          "gateway_device_eui",
+          "actor_user_uuid",
+          "requested_at",
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_ZONE_NAME"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "zone_uuid",
+          "gateway_device_eui",
+          "actor_user_uuid",
+          "requested_at",
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "UPSERT_IRRIGATION_POLICY"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "policy_uuid",
+          "zone_uuid",
+          "gateway_device_eui",
+          "actor_user_uuid",
+          "requested_at",
+          "request_id",
+          "expected_policy_version"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "policy_uuid",
+            "zone_uuid",
+            "gateway_device_eui",
+            "actor_user_uuid",
+            "requested_at",
+            "request_id",
+            "expected_policy_version",
+            "expected_sync_version",
+            "condition",
+            "timezone",
+            "enabled",
+            "observation_window_minutes",
+            "min_interval_minutes",
+            "max_daily_minutes",
+            "delivery_settings",
+            "schedules",
+            "effective_from"
+          ]
+        },
+        "properties": {
+          "condition": {
+            "$ref": "conditional-irrigation-v1.schema.json#/definitions/Condition"
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "schedules": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "conditional-irrigation-v1.schema.json#/definitions/ScheduleEdit"
+            }
+          },
+          "request_id": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          },
+          "expected_policy_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "condition",
+              "timezone",
+              "enabled"
+            ],
+            "properties": {
+              "expected_policy_version": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "required": [
+              "policy_uuid"
+            ],
+            "properties": {
+              "expected_policy_version": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "PAUSE_IRRIGATION_POLICY"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "zone_uuid",
+          "gateway_device_eui",
+          "actor_user_uuid",
+          "requested_at",
+          "request_id",
+          "expected_policy_version"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "policy_uuid",
+            "zone_uuid",
+            "gateway_device_eui",
+            "actor_user_uuid",
+            "requested_at",
+            "request_id",
+            "expected_policy_version",
+            "expected_sync_version"
+          ]
+        },
+        "properties": {
+          "request_id": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          },
+          "expected_policy_version": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command_type": {
+            "const": "RETRY_IRRIGATION_VALVE"
+          }
+        },
+        "required": [
+          "command_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "zone_uuid",
+          "gateway_device_eui",
+          "device_eui",
+          "actor_user_uuid",
+          "requested_at",
+          "request_id"
+        ],
+        "propertyNames": {
+          "enum": [
+            "command_id",
+            "command_type",
+            "policy_uuid",
+            "zone_uuid",
+            "gateway_device_eui",
+            "device_eui",
+            "actor_user_uuid",
+            "requested_at",
+            "request_id",
+            "expected_policy_version",
+            "expected_sync_version"
+          ]
+        },
+        "properties": {
+          "request_id": {
+            "$ref": "resources.schema.json#/definitions/CanonicalUuid"
+          }
+        }
+      }
+    }
+  ]
 }

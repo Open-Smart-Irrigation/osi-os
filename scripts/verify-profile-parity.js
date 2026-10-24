@@ -39,6 +39,7 @@ const CANONICAL_PAYLOAD = [
   'files/etc/uci-defaults/99_set_hostname',
   'files/etc/uci-defaults/99_set_sx1301_gateway_id',
   'files/etc/uci-defaults/99_tailscale_init',
+  'files/etc/hotplug.d/ntp/70-osi-irrigation-clock',
   'files/usr/libexec/osi-gateway-identity.sh',
   'files/usr/libexec/osi-identityd.sh',
   'files/usr/libexec/osi-sync-protocol-capability-cli.js',
