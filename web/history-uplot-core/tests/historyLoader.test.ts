@@ -64,6 +64,36 @@ const deferred = <T>() => {
 };
 
 describe("pilot whole-response history loader", () => {
+  test('keeps equal range coverage separate by read policy', async () => {
+    const loader = createHistoryLoader();
+    const load = vi.fn(async () => data());
+    await loader.foreground(demand({ request: { ...request, readPolicy: 'cloud-rollup-hourly' }, readPolicy: 'cloud-rollup-hourly' }), load).result;
+    await loader.foreground(demand({ request: { ...request, readPolicy: 'cloud-raw-hourly' }, readPolicy: 'cloud-raw-hourly' }), load).result;
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  test('serves a selected subset from a cached superset and evicts denied series', async () => {
+    const loader = createHistoryLoader();
+    const superset = data({ series: [{ id: 'a', label: 'A', unit: 'kPa', points: [{ t: 1, value: 1 }] }, { id: 'b', label: 'B', unit: 'kPa', points: [{ t: 1, value: 2 }] }] });
+    const load = vi.fn(async () => superset);
+    const full = demand({ selectedIds: ['a', 'b'], selectionKey: '["a","b"]' });
+    await loader.foreground(full, load).result;
+    const subset = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), load);
+    expect(subset.source).toBe('cache');
+    expect((await subset.result).data.series.map((item) => item.id)).toEqual(['a']);
+    loader.evictSeries(['b']);
+    const after = loader.foreground(full, load);
+    expect(after.source).toBe('network');
+  });
+
+  test('eviction aborts an in-flight demand containing a denied series', async () => {
+    const loader = createHistoryLoader();
+    const pending = deferred<HistoryAcceptedData>();
+    const handle = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => pending.promise);
+    loader.evictSeries(['a']);
+    await expect(handle.result).rejects.toMatchObject({ name: 'AbortError', reason: 'superseded' });
+    pending.resolve(data());
+  });
   test("returns a covering cache hit while preserving original response age", async () => {
     let clock = 1_000;
     const loader = createHistoryLoader({ now: () => clock });

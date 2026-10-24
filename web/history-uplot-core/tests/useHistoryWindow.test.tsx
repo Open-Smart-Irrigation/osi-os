@@ -23,6 +23,34 @@ function deferred<T>() {
 }
 
 describe('useHistoryWindow', () => {
+  test('treats intentional empty selection as a no-request state', async () => {
+    const load = vi.fn();
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: [], now: () => 10 * 86_400_000, load }));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.status).toBe('empty');
+    expect(load).not.toHaveBeenCalled();
+  });
+  test('clamps the initial analysis viewport to the supplied seven-day maximum', () => {
+    const { result } = renderHook(() => useHistoryWindow({ enabled: false, context, maxSpanMs: 7 * 86_400_000, now: () => 10 * 86_400_000, load: vi.fn() }));
+    expect(result.current.viewportStore.get().to - result.current.viewportStore.get().from).toBe(86_400_000);
+    result.current.selectPreset('90d');
+    expect(result.current.viewportStore.get().to - result.current.viewportStore.get().from).toBe(7 * 86_400_000);
+  });
+  test('removes a selected series immediately and restores it from backing cache without a request', async () => {
+    const load = vi.fn(async (request: HistoryWindowRequest) => response(request, { series: [
+      { id: 'swt-1', label: 'Probe 1', unit: 'kPa', points: [{ t: request.from, value: 0 }] },
+      { id: 'swt-2', label: 'Probe 2', unit: 'kPa', points: [{ t: request.from, value: 1 }] },
+    ] }));
+    const { result } = renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['swt-1', 'swt-2'], now: () => 10 * 86_400_000, load }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const calls = load.mock.calls.length;
+    act(() => result.current.selectSources?.(['swt-1']));
+    expect(result.current.accepted?.series.map((item) => item.id)).toEqual(['swt-1']);
+    expect(load).toHaveBeenCalledTimes(calls);
+    act(() => result.current.selectSources?.(['swt-1', 'swt-2']));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    expect(result.current.accepted?.series.map((item) => item.id)).toEqual(['swt-1', 'swt-2']);
+  });
   test('does not load while disabled or without a host context', () => {
     const load = vi.fn();
     const { result } = renderHook(() => useHistoryWindow({ enabled: false, context: null, load }));

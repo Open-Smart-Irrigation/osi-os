@@ -29,6 +29,8 @@ interface CacheEntry {
   lastUsedOrdinal: number;
   points: number;
   horizonEnd: number;
+  readPolicy: string;
+  selectedIds: readonly string[];
 }
 interface Slot {
   priority: SlotPriority;
@@ -50,6 +52,14 @@ const sameRequest = (a: HistoryRangeRequest, b: HistoryRangeRequest) =>
   a.to === b.to &&
   a.aggregation === b.aggregation &&
   a.rangeLabel === b.rangeLabel;
+const policyOf = (demand: HistoryDemand): string => demand.readPolicy ?? demand.request.readPolicy ?? 'card-default';
+const idsOf = (demand: HistoryDemand): readonly string[] => demand.selectedIds ?? [];
+const containsIds = (have: readonly string[], want: readonly string[]) => want.every((id) => have.includes(id));
+const projectData = (data: HistoryAcceptedData, ids: readonly string[]): HistoryAcceptedData => {
+  if (ids.length === 0 || data.series.every((item) => ids.includes(item.id))) return data;
+  const series = data.series.filter((item) => ids.includes(item.id));
+  return { ...data, series, unitGroups: data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => ids.includes(id)) })).filter((group) => group.seriesIds.length > 0) };
+};
 const intersects = (a: HistoryRangeRequest, b: { from: number; to: number }) =>
   a.from <= b.to && a.to >= b.from;
 const pointCost = (data: HistoryAcceptedData) =>
@@ -62,6 +72,7 @@ const cacheEligible = (data: HistoryAcceptedData, request: HistoryRangeRequest) 
   validCoverage(data) &&
   !data.limits.truncated &&
   data.aggregation.level === request.aggregation &&
+  (data.readPolicy === undefined || data.readPolicy === (request.readPolicy ?? 'card-default')) &&
   Number.isFinite(pointCost(data));
 
 export function createHistoryLoader(
@@ -77,7 +88,7 @@ export function createHistoryLoader(
   let accessOrdinal = 0;
 
   const cacheKey = (context: HistoryContext, request: HistoryRangeRequest) =>
-    `${context.sessionKey}|${context.scopeKey}|${context.cardId}|${context.sourceKey ?? ''}|${request.from}|${request.to}|${request.aggregation}|${request.rangeLabel}`;
+    `${context.sessionKey}|${context.scopeKey}|${context.cardId}|${context.sourceKey ?? ''}|${request.from}|${request.to}|${request.aggregation}|${request.rangeLabel}|${request.readPolicy ?? 'card-default'}|${request.selectionKey ?? ''}`;
   const ttlFor = (entry: CacheEntry) =>
     Math.abs(entry.horizonEnd - entry.request.to) <= 60_000
       ? HISTORY_LATEST_TTL_MS
@@ -88,6 +99,8 @@ export function createHistoryLoader(
     const candidates = [...cache.values()].filter(
       (entry) =>
         sameContext(entry.context, demand.context) &&
+        entry.readPolicy === policyOf(demand) &&
+        containsIds(entry.selectedIds, idsOf(demand)) &&
         entry.request.aggregation === demand.request.aggregation &&
         !entry.data.limits.truncated &&
         entry.data.aggregation.level === demand.request.aggregation &&
@@ -133,6 +146,8 @@ export function createHistoryLoader(
       lastUsedOrdinal: ++accessOrdinal,
       points,
       horizonEnd: demand.horizon.to,
+      readPolicy: policyOf(demand),
+      selectedIds: [...idsOf(demand)],
     });
     totalPoints += points;
     for (const [oldKey, entry] of [...cache.entries()]) {
@@ -167,6 +182,8 @@ export function createHistoryLoader(
       (
         slot &&
         sameContext(slot.demand.context, demand.context) &&
+        policyOf(slot.demand) === policyOf(demand) &&
+        (slot.demand.selectionKey ?? '') === (demand.selectionKey ?? '') &&
         slot.demand.request.aggregation === demand.request.aggregation &&
         (sameRequest(slot.demand.request, demand.request) ||
           (slot.demand.request.from <= demand.visible.from &&
@@ -228,7 +245,7 @@ export function createHistoryLoader(
   const usefulness = (slot: Slot, demand: HistoryDemand): number => {
     if (!sameContext(slot.demand.context, demand.context) || slot.demand.request.aggregation !== demand.request.aggregation) return 0;
     if (intersects(slot.demand.request, demand.visible)) return 2;
-    const neighbor = neighborRequest(demand.visible, demand.direction ?? "back", demand.horizon);
+    const neighbor = demand.neighbor === undefined ? neighborRequest(demand.visible, demand.direction ?? "back", demand.horizon) : demand.neighbor;
     return neighbor && intersects(slot.demand.request, neighbor) ? 1 : 0;
   };
   const retainBest = (demand: HistoryDemand, candidates: Slot[]): void => {
@@ -268,7 +285,7 @@ export function createHistoryLoader(
       if (hit) {
         retainBest(demand, [foreground, prefetch].filter((slot): slot is Slot => !!slot));
         foreground = null;
-        const value = { data: hit.data, receivedAt: hit.receivedAt };
+        const value = { data: projectData(hit.data, idsOf(demand)), receivedAt: hit.receivedAt };
         return handleFor("cache", demand, Promise.resolve(value));
       }
     }
@@ -313,6 +330,25 @@ export function createHistoryLoader(
     abortPrefetch() {
       abortSlot(prefetch, "superseded");
       prefetch = null;
+    },
+    evictSeries(ids) {
+      const denied = new Set(ids);
+      for (const [key, entry] of [...cache.entries()]) {
+        const kept = entry.data.series.filter((series) => !denied.has(series.id));
+        if (kept.length === entry.data.series.length) continue;
+        totalPoints -= entry.points;
+        cache.delete(key);
+        const data = { ...entry.data, series: kept, unitGroups: entry.data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => !denied.has(id)) })).filter((group) => group.seriesIds.length > 0) };
+        const next = { ...entry, data, selectedIds: entry.selectedIds.filter((id) => !denied.has(id)), points: pointCost(data) };
+        totalPoints += next.points;
+        cache.set(key, next);
+      }
+      for (const slot of [foreground, prefetch]) {
+        if (!slot || slot.settled) continue;
+        if (ids.some((id) => (slot.demand.selectedIds ?? []).includes(id))) abortSlot(slot, 'superseded');
+      }
+      if (foreground?.settled) foreground = null;
+      if (prefetch?.settled) prefetch = null;
     },
     clear() {
       for (const slot of [foreground, prefetch]) abortSlot(slot, "cleared");

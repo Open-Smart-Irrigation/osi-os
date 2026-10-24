@@ -3,6 +3,7 @@ import type {
   HistoryWindowReason,
   HistoryWindowRequest,
   HistoryWindowResponse,
+  HistoryReadPolicy,
   SensorSeries,
   Viewport,
 } from '../shared/types';
@@ -19,6 +20,11 @@ export interface HistoryDemand {
   reason: HistoryWindowReason;
   forceFresh: boolean;
   direction?: 'back' | 'forward';
+  neighbor?: HistoryRangeRequest | null;
+  readPolicy?: HistoryReadPolicy;
+  selectionKey?: string;
+  selectedIds?: readonly string[];
+  requestRevision?: number;
 }
 
 export interface HistoryLoadValue {
@@ -50,6 +56,7 @@ export interface HistoryLoader {
   ): Promise<'cached' | 'joined' | 'skipped'>;
   abortPrefetch(): void;
   clear(): void;
+  evictSeries(ids: readonly string[]): void;
   destroy(): void;
   diagnostics(): {
     entries: number;

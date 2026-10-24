@@ -7,6 +7,7 @@ import {
   HISTORY_SETTLE_MS,
 } from './historyLoader';
 import { bufferedRequest, coverageContains, HISTORY_MAX_VIEWPORT_SPAN_MS, HISTORY_NAVIGATION_START_MS, minuteViewport, neighborRequest } from './range';
+import { cardHistoryRangeStrategy, type HistoryRangeStrategy } from './rangeStrategy';
 import { HistoryAbortError, HistoryAuthError, type HistoryAcceptedData, type HistoryDemand, type HistoryLoader, type HistoryRangeRequest } from './types';
 import { DAY_MS, HOUR_MS, MINUTE_MS, type HistoryWindowOptions, type HistoryWindowReason, type Viewport } from '../shared/types';
 import { createViewportStore, type ViewportStore } from '../shared/viewport';
@@ -25,6 +26,26 @@ export interface HistoryWindowResult {
   moveWindow(direction: 'back' | 'forward'): void;
   showLatest(): void;
   retry(): void;
+  selectedIds?: readonly string[] | undefined;
+  displayedIds?: readonly string[] | undefined;
+  selectSources?(ids: readonly string[]): void;
+  evictSeries?(ids: readonly string[]): void;
+}
+
+function filterAccepted(data: HistoryAcceptedData | null, ids: readonly string[] | undefined): HistoryAcceptedData | null {
+  if (!data || ids === undefined) return data;
+  const allowed = new Set(ids);
+  return { ...data, series: data.series.filter((item) => allowed.has(item.id)), unitGroups: data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => allowed.has(id)) })).filter((group) => group.seriesIds.length > 0) };
+}
+
+function mergeAccepted(previous: HistoryAcceptedData | null, next: HistoryAcceptedData): HistoryAcceptedData {
+  if (!previous || previous.request.from !== next.request.from || previous.request.to !== next.request.to || previous.request.aggregation !== next.request.aggregation) return next;
+  const series = [...previous.series];
+  for (const item of next.series) {
+    const index = series.findIndex((candidate) => candidate.id === item.id);
+    if (index >= 0) series[index] = item; else series.push(item);
+  }
+  return { ...next, series, unitGroups: next.unitGroups.length ? next.unitGroups : previous.unitGroups };
 }
 
 const identityOf = (context: HistoryWindowOptions['context']): string => context
@@ -40,9 +61,19 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const now = options.now ?? browserNow;
   const context = options.context;
   const identity = identityOf(context);
+  const viewportIdentity = options.viewportIdentity ?? identity;
+  const rangeStrategy: HistoryRangeStrategy = options.rangeStrategy ?? cardHistoryRangeStrategy;
+  const maxSpanMs = options.maxSpanMs ?? HISTORY_MAX_VIEWPORT_SPAN_MS;
+  const selectionMode = options.selectedIds !== undefined;
+  const [selection, setSelection] = useState<readonly string[] | undefined>(() => options.selectedIds?.slice());
+  const [selectionRevision, setSelectionRevision] = useState(0);
+  const selectionRef = useRef<readonly string[] | undefined>(selection);
+  selectionRef.current = selection;
+  const selectionRevisionRef = useRef(0);
   const [horizonEnd, setHorizonEnd] = useState(() => Math.floor(now() / MINUTE_MS) * MINUTE_MS);
   const [acceptedState, setAcceptedState] = useState<{ identity: string; data: HistoryAcceptedData } | null>(null);
-  const accepted = acceptedState?.identity === identity ? acceptedState.data : null;
+  const backingAccepted = acceptedState?.identity === identity ? acceptedState.data : null;
+  const accepted = filterAccepted(backingAccepted, selection);
   const [status, setStatus] = useState<HistoryWindowResult['status']>(options.enabled && context ? 'loading' : 'idle');
   const [loadingRequest, setLoadingRequest] = useState<HistoryRangeRequest | null>(null);
   const [failedRequest, setFailedRequest] = useState<HistoryRangeRequest | null>(null);
@@ -52,14 +83,14 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const horizon = useMemo(() => ({ from: options.navigationStartMs ?? HISTORY_NAVIGATION_START_MS, to: horizonEnd }), [options.navigationStartMs, horizonEnd]);
   const visibleSpan = useRef(DAY_MS);
   const viewportStore = useMemo(() => {
-    const span = Math.min(HISTORY_MAX_VIEWPORT_SPAN_MS, Math.max(options.minSpanMs ?? HOUR_MS, visibleSpan.current));
-    return createViewportStore({ from: horizon.to - span, to: horizon.to }, horizon, options.minSpanMs ?? HOUR_MS, HISTORY_MAX_VIEWPORT_SPAN_MS);
-  }, [options.minSpanMs, identity]);
+    const span = Math.min(maxSpanMs, Math.max(options.minSpanMs ?? HOUR_MS, visibleSpan.current));
+    return createViewportStore({ from: horizon.to - span, to: horizon.to }, horizon, options.minSpanMs ?? HOUR_MS, maxSpanMs);
+  }, [options.minSpanMs, viewportIdentity, maxSpanMs]);
   useEffect(() => {
     viewportStore.setExtent?.(horizon);
   }, [horizon.from, horizon.to, viewportStore]);
-  const acceptedRef = useRef(accepted);
-  acceptedRef.current = accepted;
+  const acceptedRef = useRef(backingAccepted);
+  acceptedRef.current = backingAccepted;
   const identityRef = useRef(identity);
   identityRef.current = identity;
   const intent = useRef(0);
@@ -94,7 +125,7 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const schedulePrefetch = (visible: Viewport, immediate = false) => {
     if (!options.enabled || !context || typeof document === 'undefined' || document.hidden) return;
     if (now() - lastPrefetch.current < HISTORY_PREFETCH_COOLDOWN_MS) return;
-    const request = neighborRequest(visible, direction.current, horizon);
+    const request = rangeStrategy.neighborRequest(visible, direction.current, horizon);
     if (!request) return;
     clear(prefetchTimer.current);
     const lifetimeAtSchedule = lifetime.current;
@@ -103,7 +134,10 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
       prefetchTimer.current = null;
       if (document.hidden || identityRef.current !== identityAtSchedule || lifetime.current !== lifetimeAtSchedule) return;
       lastPrefetch.current = now();
-      const demand: HistoryDemand = { context, visible, request, horizon, reason: 'prefetch', forceFresh: false, direction: direction.current };
+      const policy = options.readPolicy?.(request) ?? request.readPolicy ?? 'card-default';
+      const selected = selectionRef.current;
+      const selectionKey = selected === undefined ? undefined : JSON.stringify([...selected].sort());
+      const demand: HistoryDemand = { context, visible, request: { ...request, readPolicy: policy, selectionKey }, horizon, reason: 'prefetch', forceFresh: false, direction: direction.current, neighbor: request, readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
       void loader.prefetch(demand, (signal) => options.load(request, signal)).catch((cause: unknown) => {
         if (cause instanceof HistoryAuthError && identityRef.current === identityAtSchedule && lifetime.current === lifetimeAtSchedule) options.onAuthError?.(cause);
       });
@@ -112,13 +146,18 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
 
   const schedule = (viewport: Viewport, reason: Exclude<HistoryWindowReason, 'prefetch'>, extra: { forceFresh?: boolean; failedRequest?: HistoryRangeRequest } = {}) => {
     if (!options.enabled || !context) return;
-    const visible = minuteViewport(viewport);
-    const request = extra.failedRequest ?? bufferedRequest(visible, horizon);
+    const visible = rangeStrategy === cardHistoryRangeStrategy ? minuteViewport(viewport) : viewport;
+    const baseRequest = extra.failedRequest ?? rangeStrategy.bufferedRequest(visible, horizon);
+    const policy = options.readPolicy?.(baseRequest) ?? baseRequest.readPolicy ?? 'card-default';
+    const selected = selectionRef.current;
+    const selectionKey = selected === undefined ? undefined : JSON.stringify([...selected].sort());
+    const request = { ...baseRequest, readPolicy: policy, selectionKey };
     const generation = ++intent.current;
     const identityAtStart = identity;
     const lifetimeAtStart = lifetime.current;
-    const demand: HistoryDemand = { context, visible, request, horizon, reason, direction: direction.current, forceFresh: extra.forceFresh ?? (reason === 'latest' || reason === 'retry') };
+    const demand: HistoryDemand = { context, visible, request, horizon, reason, direction: direction.current, neighbor: rangeStrategy.neighborRequest(visible, direction.current, horizon), forceFresh: extra.forceFresh ?? (reason === 'latest' || reason === 'retry'), readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
     const handle = loader.foreground(demand, (signal) => options.load(request, signal));
+    options.onDiagnostics?.({ reason, ...loader.diagnostics() });
     const sessionCurrent = () => lifetime.current === lifetimeAtStart && identityRef.current === identityAtStart;
     const current = () => lifetime.current === lifetimeAtStart && identityRef.current === identityAtStart && generation === intent.current;
     if (handle.source === 'cache') {
@@ -132,11 +171,11 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     }
     void handle.result.then((value) => {
       if (!current()) return;
-      const visibleNow = minuteViewport(viewportStore.get());
+      const visibleNow = rangeStrategy === cardHistoryRangeStrategy ? minuteViewport(viewportStore.get()) : viewportStore.get();
       const direct = visibleNow.from === visible.from && visibleNow.to === visible.to;
       const reusable = !value.data.limits.truncated && value.data.aggregation.level === request.aggregation && coverageContains(value.data, visibleNow, request.aggregation);
       if (!direct && !reusable) return;
-      setAcceptedState({ identity: identityAtStart, data: value.data });
+      setAcceptedState({ identity: identityAtStart, data: mergeAccepted(acceptedRef.current, value.data) });
       acceptedReceivedAt.current = value.receivedAt;
       setLoadingRequest(null);
       setRefreshing(false);
@@ -163,6 +202,10 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     resetAccepted();
     if (!options.enabled || !context) {
       setStatus('idle');
+      return;
+    }
+    if (selection !== undefined && selection.length === 0) {
+      setStatus('empty');
       return;
     }
     setStatus('loading');
@@ -224,8 +267,9 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const selectPreset = (span: '24h' | '7d' | '30d' | '90d') => {
     const durations = { '24h': DAY_MS, '7d': 7 * DAY_MS, '30d': 30 * DAY_MS, '90d': 90 * DAY_MS };
     const to = viewportStore.get().to;
-    const next = { from: Math.max(horizon.from, to - durations[span]), to };
-    visibleSpan.current = durations[span];
+    const selectedSpan = Math.min(durations[span], maxSpanMs);
+    const next = { from: Math.max(horizon.from, to - selectedSpan), to };
+    visibleSpan.current = selectedSpan;
     cancelTimers();
     viewportStore.set(next, 'external');
     schedule(next, 'preset');
@@ -263,5 +307,27 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     schedule(next, 'latest', { forceFresh: true });
   }, [horizon.to, viewportStore]);
   const retry = () => schedule(viewportStore.get(), 'retry', { forceFresh: true, failedRequest: failedRequest ?? loadingRequest ?? undefined });
-  return { status, accepted, loadingRequest, failedRequest, error, refreshing, viewportStore, store: viewportStore, horizon, selectPreset, moveWindow, showLatest, retry };
+  const selectSources = (ids: readonly string[]) => {
+    if (!selectionMode) return;
+    const next = [...ids];
+    const previous = selection ?? [];
+    setSelection(next);
+    selectionRef.current = next;
+    selectionRevisionRef.current += 1;
+    setSelectionRevision(selectionRevisionRef.current);
+    clear(timer.current);
+    timer.current = null;
+    intent.current += 1;
+    const adding = next.some((id) => !previous.includes(id));
+    if (next.length === 0) setStatus('empty');
+    else if (adding) timer.current = window.setTimeout(() => schedule(viewportStore.get(), 'gesture'), HISTORY_SETTLE_MS);
+  };
+  const evictSeries = (ids: readonly string[]) => {
+    loader.evictSeries(ids);
+    const denied = new Set(ids);
+    setSelection((current) => current?.filter((id) => !denied.has(id)));
+    setAcceptedState((current) => current ? { ...current, data: { ...current.data, series: current.data.series.filter((item) => !denied.has(item.id)), unitGroups: current.data.unitGroups.map((group) => ({ ...group, seriesIds: group.seriesIds.filter((id) => !denied.has(id)) })).filter((group) => group.seriesIds.length > 0) } } : current);
+    intent.current += 1;
+  };
+  return { status, accepted, loadingRequest, failedRequest, error, refreshing, viewportStore, store: viewportStore, horizon, selectPreset, moveWindow, showLatest, retry, selectedIds: selection, displayedIds: selection, selectSources, evictSeries };
 }

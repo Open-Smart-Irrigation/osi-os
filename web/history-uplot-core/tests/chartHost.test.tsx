@@ -11,6 +11,17 @@ vi.mock('../src/shared/gestures', () => ({
 const series = [{ id: 'soil', label: 'Soil', unit: 'kPa', points: [{ t: 1_000, value: 4 }] }] as const;
 
 describe('packaged ChartHost', () => {
+  test('inspects the containing half-open bucket with explicit locale inputs', () => {
+    const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
+    const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 7_200_000 }, 1_000, 7_200_000);
+    const buckets = [{ from: 0, to: 3_600_000, value: 23.416666666666668, count: 2, quality: 'ok' }, { from: 3_600_000, to: 7_200_000, value: null, count: 0, quality: 'partial' }] as const;
+    const view = render(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets }]} store={store} extent={{ from: 0, to: 7_200_000 }} inspectionMode="containing-bucket" locale="fr" timeZone="UTC" />);
+    fireEvent.click(view.getByTestId('chart-host'), { clientX: 25, clientY: 50 });
+    expect(view.getByTestId('inspector').textContent).toContain('23,4167');
+    view.rerender(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets }]} store={store} extent={{ from: 0, to: 7_200_000 }} inspectionMode="containing-bucket" locale="en-GB" timeZone="UTC" />);
+    fireEvent.click(view.getByTestId('chart-host'), { clientX: 75, clientY: 50 });
+    expect(view.getByTestId('inspector').textContent).toContain('Unavailable');
+  });
   test('applies external viewport writes and element resize geometry', () => {
     let resizeCallback: (() => void) | undefined;
     class Observer {

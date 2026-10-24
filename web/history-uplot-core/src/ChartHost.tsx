@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { attachD3ViewportController, type D3ViewportController } from './shared/gestures';
-import { inspectAtTime, type Inspection } from './shared/inspection';
+import { inspectAtTime, inspectBucketAtTime, type Inspection } from './shared/inspection';
 import type { ChartAdapter, ChartRenderOptions, CoverageWindow, MountAdapter, SensorSeries, Viewport } from './shared/types';
 import { sameViewport, type ViewportStore } from './shared/viewport';
 
@@ -14,15 +14,18 @@ export interface ChartHostProps {
   yRange?: ChartRenderOptions['yRange'];
   coverage?: CoverageWindow;
   notLoadedLabel?: string;
-  labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string };
+  labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string; hourlyAverage?: string; bucketInterval?: (from: number, to: number) => string };
   focusedSeriesId?: string | null;
+  locale?: string;
+  timeZone?: string;
+  inspectionMode?: 'nearest-point' | 'containing-bucket';
 }
 
-interface Pin { targetTime: number; rows: readonly Inspection[]; }
+interface Pin { targetTime: number; rows: readonly (Inspection | ReturnType<typeof inspectBucketAtTime>)[]; }
 
 const DEFAULT_LABELS = { pinnedReading: 'Pinned reading', close: 'Close', unavailable: 'Unavailable at this sample', visibleWindow: 'Visible time window' };
 
-export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null }: ChartHostProps) {
+export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null, locale, timeZone, inspectionMode = 'nearest-point' }: ChartHostProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -137,7 +140,10 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     if (event.clientX < plot.left || event.clientX > plot.left + plot.width || event.clientY < plot.top || event.clientY > plot.top + plot.height) return;
     const viewport = store.get();
     const targetTime = viewport.from + ((event.clientX - plot.left) / plot.width) * (viewport.to - viewport.from);
-    const nextPin = { targetTime, rows: inspectAtTime(series, targetTime, viewport) };
+    const rows = inspectionMode === 'containing-bucket'
+      ? series.map((item) => item.buckets ? inspectBucketAtTime(item.id, item.unit, item.buckets, targetTime) : { kind: 'bucket-unavailable' as const, from: targetTime, to: targetTime, count: 0, quality: null, unit: item.unit, seriesId: item.id })
+      : inspectAtTime(series, targetTime, viewport);
+    const nextPin = { targetTime, rows };
     pinRef.current = nextPin;
     setPin(nextPin);
     projectGuide(targetTime, viewport);
@@ -164,14 +170,18 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     <span className="window-readout" role="group" aria-label={labels.visibleWindow ?? DEFAULT_LABELS.visibleWindow} ref={readoutRef}>{formatDate(store.get().from)} – {formatDate(store.get().to)}</span>
     {coverage && leftCoverage > 0 && <div className="not-loaded not-loaded-left" style={{ width: `${leftCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
     {coverage && rightCoverage > 0 && <div className="not-loaded not-loaded-right" style={{ width: `${rightCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
-    {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>
-      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {new Date(pin.targetTime).toLocaleString()}</time>
-      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {row.value} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{new Date(row.sampledAt).toLocaleString()}</time></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
+      {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>
+      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {formatDate(pin.targetTime, locale, timeZone)}</time>
+      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {formatValue(row.value, locale)} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{formatDate(row.sampledAt, locale, timeZone)}</time></div> : row.kind === 'bucket' ? <div key={row.seriesId}><strong>{series[index]?.label}: {formatValue(row.value, locale)} {row.unit}</strong><span>{labels.hourlyAverage ?? 'Hourly average'} {labels.bucketInterval?.(row.from, row.to) ?? `${formatDate(row.from, locale, timeZone)} – ${formatDate(row.to, locale, timeZone)}`}</span></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
       <button type="button" data-testid="inspector-close" onClick={(event) => { event.stopPropagation(); pinRef.current = null; setPin(null); if (guideRef.current) guideRef.current.hidden = true; }}>{labels.close}</button>
     </aside>}
   </div>;
 }
 
-function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
+function formatDate(timestamp: number, locale?: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone }).format(timestamp);
+}
+
+function formatValue(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, { maximumSignificantDigits: 6 }).format(value);
 }

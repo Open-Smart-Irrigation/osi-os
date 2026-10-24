@@ -27,9 +27,10 @@ const dateTick = new Intl.DateTimeFormat('en-GB', {
   month: 'short',
 });
 
-export function formatUplotTimeTick(value: number, min: number, max: number): string {
+export function formatUplotTimeTick(value: number, min: number, max: number, locale = 'en-GB', timeZone?: string): string {
   const date = new Date(value * 1_000);
-  return max - min <= 48 * 60 * 60 ? timeTick.format(date) : dateTick.format(date);
+  const formatter = max - min <= 48 * 60 * 60 ? new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }) : new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', timeZone });
+  return formatter.format(date);
 }
 
 function seconds(viewport: Viewport): { min: number; max: number } {
@@ -148,7 +149,7 @@ export const mountUplot: MountAdapter = (
           values: (u, values) => {
             const min = u.scales.x.min ?? values[0] ?? 0;
             const max = u.scales.x.max ?? values[values.length - 1] ?? min;
-            return values.map((value) => formatUplotTimeTick(value, min, max));
+            return values.map((value) => formatUplotTimeTick(value, min, max, options.locale, options.timeZone));
           },
         },
         { size: PLOT_INSETS.left },

@@ -1,4 +1,5 @@
 export type HistoryAggregation = 'raw' | '15m' | 'hourly' | 'daily';
+export type HistoryReadPolicy = 'card-default' | 'edge-hourly' | 'cloud-raw-hourly' | 'cloud-rollup-hourly';
 
 export interface Viewport {
   from: number;
@@ -24,6 +25,7 @@ export interface SensorSeries {
   unit: string;
   points: readonly Point[];
   appearance?: SeriesAppearance;
+  buckets?: readonly MobileBucket[];
 }
 
 export interface HistoryUnitGroup {
@@ -44,6 +46,8 @@ export interface HistoryWindowRequest {
   to: number;
   rangeLabel: '24h' | '7d' | '30d';
   aggregation: HistoryAggregation;
+  readPolicy?: HistoryReadPolicy;
+  selectionKey?: string;
 }
 
 export interface HistoryWindowResponse {
@@ -59,6 +63,7 @@ export interface HistoryWindowResponse {
   };
   limits: { maxPointsPerSeries: number; truncated: boolean };
   freshness?: { dataAsOf?: string | null; syncState?: string | null };
+  readPolicy?: HistoryReadPolicy;
 }
 
 export interface HistoryWindowOptions {
@@ -71,6 +76,75 @@ export interface HistoryWindowOptions {
   minSpanMs?: number;
   loader?: import('../history/types').HistoryLoader;
   onAuthError?: (error: unknown) => void;
+  rangeStrategy?: import('../history/rangeStrategy').HistoryRangeStrategy;
+  viewportIdentity?: string;
+  maxSpanMs?: number;
+  readPolicy?: (request: HistoryWindowRequest) => Exclude<HistoryReadPolicy, 'card-default'> | HistoryReadPolicy;
+  selectedIds?: readonly string[];
+  onDiagnostics?: (snapshot: HistoryDiagnostics) => void;
+}
+
+export interface HistoryDiagnostics {
+  reason: HistoryWindowReason;
+  foregroundActive: boolean;
+  prefetchActive: boolean;
+  entries: number;
+  points: number;
+}
+
+export interface MobileSelectionState {
+  selectedIds: readonly string[];
+  displayedIds: readonly string[];
+  requestRevision: number;
+}
+
+export interface MobileTensionSource {
+  seriesId: string;
+  sourceKey: string;
+  channelKey: string;
+  label: string;
+  unit: 'kPa';
+  zoneId: string;
+  deviceId?: string;
+  depthCm?: number | null;
+  available: boolean;
+  legacy?: boolean;
+  status?: 'current' | 'other_supported' | 'unknown';
+  measurementKind?: 'soil' | 'other';
+}
+
+export interface MobileBucket {
+  from: number;
+  to: number;
+  value: number | null;
+  count: number;
+  quality: string | null;
+}
+
+export interface MobileAnalysisSeries {
+  seriesId: string;
+  buckets: readonly MobileBucket[];
+  latestFiniteBucket: number | null;
+}
+
+export interface MobileAnalysisWindow {
+  series: readonly MobileAnalysisSeries[];
+  coverage: { from: number; to: number };
+  complete: boolean;
+  invalidHourlyAverageCount: number;
+}
+
+export interface MobileNormalizedResponse {
+  response: HistoryWindowResponse;
+  window: MobileAnalysisWindow;
+}
+
+export type MobileHistoryFailureKind = 'auth' | 'size' | 'missing' | 'protocol' | 'transient';
+export interface MobileHistoryFailure {
+  kind: MobileHistoryFailureKind;
+  status?: number;
+  missingIds?: readonly string[];
+  reason: string;
 }
 
 export type HistoryWindowReason =
@@ -99,6 +173,8 @@ export interface ChartRenderOptions {
   minSpanMs?: number;
   maxSpanMs?: number;
   yRange?: 'fixed-0-100' | 'auto';
+  locale?: string;
+  timeZone?: string;
 }
 
 export interface CoverageWindow {
