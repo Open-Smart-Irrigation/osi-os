@@ -48,21 +48,22 @@ export function MobileTensionHistoryRoute() {
   const sessionKey = serializeSessionIdentity(sessionIdentity);
   const [retry, setRetry] = useState(0);
   const [zoneState, setZoneState] = useState<{
+    requestedZoneId: number | null;
     loading: boolean;
     zones: IrrigationZone[];
     failed: boolean;
-  }>({ loading: true, zones: [], failed: false });
+  }>({ requestedZoneId: zoneId, loading: true, zones: [], failed: false });
   const [diagnostics, setDiagnostics] = useState<MobileHistoryDiagnostics | null>(null);
   const diagnosticsEnabled = MOBILE_HISTORY_INTERNAL_ENABLED && MOBILE_HISTORY_INTERNAL_DIAGNOSTICS_ENABLED;
 
   useEffect(() => {
     if (!MOBILE_HISTORY_INTERNAL_ENABLED || zoneId === null) return;
     let active = true;
-    setZoneState({ loading: true, zones: [], failed: false });
+    setZoneState({ requestedZoneId: zoneId, loading: true, zones: [], failed: false });
     void irrigationZonesAPI.getAll().then((zones) => {
-      if (active) setZoneState({ loading: false, zones, failed: false });
+      if (active) setZoneState({ requestedZoneId: zoneId, loading: false, zones, failed: false });
     }).catch(() => {
-      if (active) setZoneState({ loading: false, zones: [], failed: true });
+      if (active) setZoneState({ requestedZoneId: zoneId, loading: false, zones: [], failed: true });
     });
     return () => {
       active = false;
@@ -71,7 +72,7 @@ export function MobileTensionHistoryRoute() {
 
   const zone = zoneId === null ? undefined : zoneState.zones.find((candidate) => candidate.id === zoneId);
   const timeZone = usableTimeZone(zone?.timezone);
-  const zoneReady = zoneState.zones.length > 0 && zone !== undefined;
+  const zoneReady = zoneState.requestedZoneId === zoneId && zoneState.zones.length > 0 && zone !== undefined;
   const enabled = MOBILE_HISTORY_INTERNAL_ENABLED && zoneReady && timeZone !== null && sessionKey !== '';
   const catalog = useMobileTensionCatalog({ enabled, zoneId: String(zoneId ?? ''), sessionKey });
   const loader = useMemo(() => createMobileAnalysisLoader(), []);
@@ -100,7 +101,7 @@ export function MobileTensionHistoryRoute() {
   }, [catalog.error, logout]);
 
   if (!MOBILE_HISTORY_INTERNAL_ENABLED || zoneId === null) return <Navigate to="/history" replace />;
-  if (zoneState.loading) return routeMessage(t('history.mobileTension.route.zoneLoading'));
+  if (zoneState.loading || zoneState.requestedZoneId !== zoneId) return routeMessage(t('history.mobileTension.route.zoneLoading'));
   if (zoneState.failed) {
     return (
       <div className="min-h-[12rem] p-6 text-[var(--text)]">
