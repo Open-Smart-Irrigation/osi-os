@@ -1000,3 +1000,44 @@ test('R19-2: disabling a fixed row through the policy API compiles and queues th
     closeFixture(f);
   }
 });
+
+// R19 finding 4: on GEN2, a conversion clear whose enqueue ChirpStack rejected (pre-acceptance)
+// must not make every uplink flush the whole queue for nothing; once ChirpStack recovers, the
+// valve tick retries it as a fresh revision (a pre-acceptance failure never reached the valve).
+test('R19-4: a rejected GEN2 clear causes no flush per uplink and is retried by the tick after recovery', async () => {
+  const workers = require('../osi-valve-control/workers');
+  const f = fixture();
+  try {
+    await f.db.run("INSERT INTO valve_settings(device_eui,strega_generation) VALUES (?,'GEN2')", [VALVE]);
+    let flushes = 0; let enq = 0; let rejectEnqueue = true; const planPorts = [];
+    const transport = { getDeviceQueue: async () => [], flushDeviceQueue: async () => { flushes += 1; return {}; },
+      enqueueDownlink: async (item) => { enq += 1; if (Number(item.fPort) === 25) planPorts.push(item.fPort); if (rejectEnqueue) throw Object.assign(new Error('unauthenticated'), { grpcCode: 16, provenance: 'chirpstack_enqueue_preacceptance', step: 'enqueueDownlink' }); return { id: 'q' + enq }; } };
+    const saved = await api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, transport, runtimeClockStatus: () => ({ trusted: true }), now: '2026-10-24T10:00:00.000Z',
+      request: { zone_uuid: 'zone-policy-test', expected_policy_version: null, condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }, timezone: 'UTC', enabled: false,
+        schedules: [{ device_eui: VALVE, weekdays_mask: 127, start_time: '06:00', duration_minutes: 10, enabled: true, execution: 'conditional', expected_sync_version: null }] } });
+    assert.equal(saved.revision_results[0].readiness.state, 'FAILED', JSON.stringify(saved.revision_results));
+    rejectEnqueue = false;
+    const flushesBefore = flushes;
+    const attemptsBefore = enq;
+    const planBefore = planPorts.length;
+    for (let i = 0; i < 3; i += 1) {
+      const needs = await push.conditionalReconciliationNeeded(f.db, VALVE, { profileId: 'gen2', generationProfileId: 'gen2' });
+      if (needs) await push.compileAndQueue({ db: f.db, deviceEui: VALVE, appId: 'a', force: true, auto: 1, now: new Date('2026-10-24T10:01:00.000Z'), transport, warn: () => {} });
+    }
+    assert.equal(flushes, flushesBefore, 'no whole-queue flush on uplinks while nothing would be sent');
+    assert.equal(enq, attemptsBefore);
+    workers._resetHousekeepingForTests();
+    await workers.runValveTick({ db: f.db, now: new Date('2026-10-24T10:10:00.000Z'), appId: 'a', transport, warn: () => {} });
+    assert.equal(planPorts.length, planBefore, 'no clear retry inside the backoff window');
+    await workers.runValveTick({ db: f.db, now: new Date('2026-10-24T10:40:00.000Z'), appId: 'a', transport, warn: () => {} });
+    assert.ok(planPorts.length > planBefore, 'the tick retried the clear after ChirpStack recovered');
+    const control = JSON.parse((await f.db.get('SELECT conditional_control_json c FROM valve_settings WHERE device_eui=?', [VALVE])).c);
+    assert.equal(control.readiness.state, 'PENDING', JSON.stringify(control.readiness));
+    assert.equal(control.readiness.reason, 'awaiting_clear_ack');
+    const planAfterRetry = planPorts.length;
+    await workers.runValveTick({ db: f.db, now: new Date('2026-10-24T11:41:00.000Z'), appId: 'a', transport, warn: () => {} });
+    assert.equal(planPorts.length, planAfterRetry, 'an accepted clear is never sent again');
+  } finally {
+    closeFixture(f);
+  }
+});

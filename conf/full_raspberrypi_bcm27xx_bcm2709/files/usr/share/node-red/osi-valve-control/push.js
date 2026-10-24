@@ -229,6 +229,14 @@ function lifecycleRowProvablyUnattempted(row) {
   return row && row.state === 'QUEUED' && !evidence.malformed && evidence.phase == null;
 }
 
+// A required clear row the senders would enqueue now: no transport evidence, not ACKED, no
+// terminal device ACK failure (the same skips as the send loops).
+function sendableRequiredRow(row) {
+  if (!row || row.state === 'ACKED' || terminalAckFailure(row) || transportUncertain(row)) return false;
+  const evidence = transportEvidence(row);
+  return !evidence.malformed && evidence.phase == null;
+}
+
 async function prepareLifecycleClearRevisionTx(tx, { deviceEui, generation, reason = 'lifecycle_clear', now, zone, policy, retiredSchedules, liveSchedules, force = true } = {}) {
   const eui = String(deviceEui || '').toUpperCase();
   if (!/^[0-9A-F]{16}$/.test(eui)) throw Object.assign(new Error('invalid_device_eui'), { code: 'invalid_device_eui' });
@@ -567,7 +575,10 @@ async function conditionalReconciliationNeeded(db, deviceEui, { profileId, gener
     // actionable only so the sender can inspect/reuse the current set; it never
     // authorizes a new revision or a second one-shot send.
     if (evidence.malformed || ['INTENT', 'ATTEMPTED', 'ACCEPTED', 'UNKNOWN'].includes(evidence.phase)) return true;
-    if (evidence.phase === 'enqueue_failed_before_acceptance' || evidence.phase === 'enqueue_rejected') return true;
+    // R19 finding 4: a pre-acceptance failure cannot be re-sent by the uplink path (its phase is
+    // terminal), so treating it as actionable made every GEN2 uplink flush the queue for
+    // nothing. The valve tick retries it as a fresh revision (emitPendingClears).
+    if (PREACCEPTANCE_PHASES.has(evidence.phase)) return false;
     if (row.state === 'FAILED') return RETRYABLE_RECONCILIATION_ERRORS.has(String(row.error || ''));
     if (row.state !== 'QUEUED') return false;
     return evidence.phase == null;
@@ -597,6 +608,10 @@ async function sendPreparedRevision({ db, deviceEui, revision, transport, now, w
       return { sent: 0, blocked: true, casLost: !persisted, conflict, readiness: blocked.readiness };
     }
     const uncertain = rows.some((row) => transportUncertain(row));
+    // R19 finding 4: never flush the device queue when no required row would be sent.
+    if (!rows.some((row) => sendableRequiredRow(row))) {
+      return { sent: 0, nothingToSend: true, readiness: control.readiness || null };
+    }
     // A live OPEN_FOR_DURATION owner keeps the remote queue intact while the
     // conditional clear is recorded and sent; only an empty observation window
     // authorizes the destructive flush.  An attempted/accepted/unknown or
@@ -693,6 +708,10 @@ async function sendPreparedLifecycleClearLocked({ db, deviceEui, revision, trans
   }
   const rows = initial.rows;
   const preacceptance = rows.some((row) => PREACCEPTANCE_PHASES.has(transportEvidence(row).phase));
+  // R19 finding 4: never flush the device queue when no required row would be sent.
+  if (!rows.some((row) => sendableRequiredRow(row))) {
+    return { sent: 0, revision, nothingToSend: true, readiness: control.readiness || null };
+  }
   const predecessorIds = new Set(Array.isArray(control.predecessor_push_ids) ? control.predecessor_push_ids : []);
   for (const id of ids) predecessorIds.add(id);
   const conflict = await db.transaction((tx) => dispatch.findValveConflictTx(tx, eui, revision, now || new Date(), { reconciledPushIds: predecessorIds }));
@@ -1216,6 +1235,8 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, transpor
 // (sendPrepared* skip any row with transport evidence), so Q02(c) still holds: an attempted,
 // accepted or unknown row is never re-sent. A clear blocked by an active owner is re-checked
 // every tick and never flushes the queue under that owner.
+const CLEAR_RETRY_BACKOFF_MS = 30 * 60 * 1000;
+
 async function emitPendingClears({ db, now, warn, transport, transportFactory }) {
   const out = { sent: 0, attempted: 0, failures: [] };
   let rows = [];
@@ -1236,8 +1257,19 @@ async function emitPendingClears({ db, now, warn, transport, transportFactory })
     const ids = Array.isArray(control.required_push_ids) ? control.required_push_ids : [];
     if (!ids.length) continue;
     const required = await db.all('SELECT push_id, state, transport_json FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND push_id IN (' + ids.map(() => '?').join(',') + ')', [row.device_eui].concat(ids));
-    if (!required.some((r) => lifecycleRowProvablyUnattempted(r))) continue;
-    candidates.push({ eui: String(row.device_eui).toUpperCase(), mode: control.mode, revision: control.desired_revision });
+    if (required.some((r) => lifecycleRowProvablyUnattempted(r))) {
+      candidates.push({ eui: String(row.device_eui).toUpperCase(), mode: control.mode, revision: control.desired_revision });
+      continue;
+    }
+    // R19 finding 4: a clear ChirpStack refused before accepting it never reached the valve, so a
+    // fresh revision is safe to send. Retried at most once per CLEAR_RETRY_BACKOFF_MS (each retry
+    // is a new revision with a new prepared_at).
+    const preparedMs = Date.parse(control.prepared_at || '');
+    const nowMs = (now || new Date()).getTime();
+    if (required.some((r) => PREACCEPTANCE_PHASES.has(transportEvidence(r).phase))
+        && (!Number.isFinite(preparedMs) || nowMs - preparedMs >= CLEAR_RETRY_BACKOFF_MS)) {
+      candidates.push({ eui: String(row.device_eui).toUpperCase(), mode: control.mode, revision: control.desired_revision, retry: true });
+    }
   }
   if (!candidates.length) return out;
   const owned = !transport && typeof transportFactory === 'function' ? lazyTransport(transportFactory, warn) : null;
@@ -1247,9 +1279,17 @@ async function emitPendingClears({ db, now, warn, transport, transportFactory })
     for (const c of candidates) {
       out.attempted += 1;
       try {
-        const result = c.mode === 'LIFECYCLE_CLEAR'
-          ? await sendPreparedLifecycleClear({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn })
-          : await sendPreparedRevision({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn });
+        let result;
+        if (c.retry) {
+          const retried = c.mode === 'LIFECYCLE_CLEAR'
+            ? await retryLifecycleClear({ db, deviceEui: c.eui, transport: via, now, warn })
+            : await retryClearRevision({ db, deviceEui: c.eui, transport: via, now, warn });
+          result = retried && retried.send ? retried.send : retried;
+        } else {
+          result = c.mode === 'LIFECYCLE_CLEAR'
+            ? await sendPreparedLifecycleClear({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn })
+            : await sendPreparedRevision({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn });
+        }
         out.sent += Number(result && result.sent || 0);
         if (result && result.readiness && result.readiness.state === 'FAILED') out.failures.push({ device_eui: c.eui, reason: result.readiness.reason });
       } catch (e) {
