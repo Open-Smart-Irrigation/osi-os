@@ -173,3 +173,38 @@ for (const profile of PROFILES) {
     }
   });
 }
+
+// R19 finding 5: the cloud policy command must take the valve writers before it opens its
+// SQLite write transaction, as the lifecycle adapter does. A writer holder (a manual open or a
+// cancel waiting on gRPC) must be able to run its own transaction when it resumes; the command
+// waits for the writer instead of holding the write lock while it waits.
+const path = require('node:path');
+for (const profile of PROFILES) {
+  test(`${profile}: R19-5 the cloud policy command takes the valve writer before its ledger transaction`, async () => {
+    const db = seedScopedDb(VALVE);
+    try {
+      policyFixture(db);
+      const dispatch = require(path.join(profilePaths('bcm2712').nodeRedModules, 'osi-valve-control/dispatch'));
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      const events = [];
+      const holder = dispatch.withValveWriter(VALVE, async () => {
+        await gate;
+        db.exec('BEGIN IMMEDIATE');
+        db.prepare('UPDATE devices SET updated_at=? WHERE UPPER(deveui)=UPPER(?)').run(AT, VALVE);
+        db.exec('COMMIT');
+        events.push('holder-committed');
+      });
+      const command = runCommand(profile, db, envelope(721, 'PAUSE_IRRIGATION_POLICY', uuid(721), { expected_policy_version: 4 }), transportRecorder())
+        .then((out) => { events.push('command-done'); return out; });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      await holder;
+      const out = await command;
+      assert.deepEqual(events, ['holder-committed', 'command-done']);
+      assert.equal(out.result[1].payload.result, 'APPLIED', JSON.stringify(out.result[1].payload));
+    } finally {
+      db.close();
+    }
+  });
+}

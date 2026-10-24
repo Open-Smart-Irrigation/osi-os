@@ -1222,8 +1222,22 @@ async function handleHttpRequest(options = {}) {
   }
 }
 
+// R19 finding 5: the valve writers a cloud policy command will take, discovered before its
+// ledger transaction opens, so the command acquires them first (the lifecycle adapter's order).
+// The service re-discovers inside and refuses a drifted set; the caller then retries.
+async function discoverCommandWriters(db, commandType, request = {}) {
+  if (commandType === 'RETRY_IRRIGATION_VALVE') {
+    const eui = normalizeEui(request.device_eui || request.deveui);
+    return eui ? [eui] : [];
+  }
+  const zone = await zoneRow(db, request.zone_uuid || request.zone_id || request.zoneRef);
+  const discovered = await discoverAffected(db, zone, commandType === 'PAUSE_IRRIGATION_POLICY' ? {} : request);
+  return discovered.keys;
+}
+
 module.exports = {
   apiError,
+  discoverCommandWriters,
   linkFence,
   normalizeDeliverySettings,
   completePolicyEditTransport,

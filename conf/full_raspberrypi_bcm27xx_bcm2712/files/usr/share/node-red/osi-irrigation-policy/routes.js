@@ -927,7 +927,10 @@ async function conditionalPolicyCommand(context) {
   });
   let committed;
   try {
-    const result = await ledger.withLifecycleCommandTransaction(db, trustedEnvelope, runtime, async (scoped) => {
+    // R19 finding 5: take the valve writers first, then the ledger's SQLite write transaction
+    // (the lifecycle adapter's order). The service takes the same writers again inside
+    // (re-entrant); a drifted membership is refused there and retried here with a fresh set.
+    const runCommandTransaction = () => ledger.withLifecycleCommandTransaction(db, trustedEnvelope, runtime, async (scoped) => {
       const options = Object.assign({}, policyOptions, { db: txFacade(scoped.tx) });
       let mutation;
       if (commandType === 'UPSERT_IRRIGATION_POLICY') mutation = await policy.applyPolicyEdit(options);
@@ -940,6 +943,19 @@ async function conditionalPolicyCommand(context) {
       }));
       return { handled: true, ack: durable, mutation };
     });
+    let result;
+    for (let attempt = 0; attempt < 3 && !result; attempt += 1) {
+      const writerKeys = typeof policy.discoverCommandWriters === 'function'
+        ? await policy.discoverCommandWriters(db, commandType, request)
+        : [];
+      try {
+        result = await dispatch.withValveWriters(writerKeys, runCommandTransaction);
+      } catch (writerError) {
+        const drift = writerError && (writerError.code === 'valve_writer_expansion' || writerError.code === 'membership_drift');
+        if (drift && attempt < 2) continue;
+        throw writerError;
+      }
+    }
     committed = result;
     if (result && result.mutation) {
       try {
