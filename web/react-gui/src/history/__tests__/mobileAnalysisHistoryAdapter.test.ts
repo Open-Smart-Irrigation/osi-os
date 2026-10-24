@@ -39,10 +39,21 @@ describe('edge mobile analysis adapter', () => {
     expect(normalized.response.series[0]?.buckets?.[0]).toEqual({ from: Date.parse('2026-01-01T00:00:00.000Z'), to: Date.parse('2026-01-01T01:00:00.000Z'), value: 0, count: 0, quality: null });
   });
 
+  it('sanitizes an invalid hourly average in both points and buckets', () => {
+    const normalized = adaptMobileAnalysisResponse(raw({
+      series: [
+        { ...raw().series[0], points: raw().series[0].points.map((point, index) => index === 0 ? { ...point, value: 1_000_001 } : point) },
+      ],
+    }), logical, { selectedIds: ['opaque-1'], selectionKey: 'opaque-1', requestRevision: 1, readPolicy: 'edge-hourly' });
+    expect(normalized.response.series[0]?.points[0]?.value).toBeNull();
+    expect(normalized.response.series[0]?.buckets?.[0]).toMatchObject({ value: null, quality: 'invalid' });
+    expect(normalized.window.invalidHourlyAverageCount).toBe(1);
+  });
+
   it('extracts cloud-compatible machine codes and preserves auth status', () => {
     const error = Object.assign(new Error('Request failed'), { isAxiosError: true, response: { status: 400, data: { title: 'Bad Request', detail: 'range_too_large', error: 'Bad Request' } } });
     expect(toMobileFailureInput(error)).toEqual({ kind: 'http', status: 400, code: 'range_too_large', message: 'range_too_large' });
-    expect(toMobileFailureInput(new Error('offline'))).toEqual({ kind: 'network', message: 'offline' });
+    expect(toMobileFailureInput(Object.assign(new Error('offline'), { isAxiosError: true }))).toEqual({ kind: 'network', message: 'offline' });
     expect(() => { throw new HistoryAuthError(401, 'expired'); }).toThrow(HistoryAuthError);
   });
 
@@ -69,11 +80,27 @@ describe('edge mobile analysis adapter', () => {
     vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(unauthorized);
     await expect(loader(logical, new AbortController().signal, context)).rejects.toBeInstanceOf(HistoryAuthError);
 
+    const forbidden = Object.assign(new Error('denied'), { isAxiosError: true, response: { status: 403, data: { detail: 'denied' } } });
+    vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(forbidden);
+    await expect(loader(logical, new AbortController().signal, context)).rejects.toMatchObject({ status: 403 });
+
+    const unavailable = Object.assign(new Error('server down'), { isAxiosError: true, response: { status: 503, data: { message: 'server down' } } });
+    vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(unavailable);
+    await expect(loader(logical, new AbortController().signal, context)).rejects.toMatchObject({ failure: { kind: 'transient', status: 503 } });
+
     const cancellation = new axios.CanceledError('cancelled');
     vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(cancellation);
     await expect(loader(logical, new AbortController().signal, context)).rejects.toBe(cancellation);
 
     vi.mocked(analysisAPI.getSeries).mockRejectedValueOnce(new Error('unexpected'));
     await expect(loader(logical, new AbortController().signal, context)).rejects.toBeInstanceOf(MobileHistoryError);
+
+    vi.mocked(analysisAPI.getSeries).mockClear();
+    await expect(loader(logical, new AbortController().signal, { ...context, selectedIds: [] })).rejects.toMatchObject({ failure: { kind: 'protocol', code: 'invalid-selection-count' } });
+    expect(analysisAPI.getSeries).not.toHaveBeenCalled();
+
+    for (const dropped of [{ seriesId: null, reason: 'missing' }, { seriesId: ' ', reason: 'missing' }]) {
+      await expect(Promise.resolve().then(() => adaptMobileAnalysisResponse(raw({ dropped: [dropped] }), logical, context))).rejects.toMatchObject({ failure: { kind: 'protocol', code: 'unrequested-series' } });
+    }
   });
 });

@@ -40,12 +40,19 @@ describe('edge mobile measurement catalog', () => {
       expect.objectContaining({ seriesId: 'other', status: 'other_supported' }),
     ]));
     expect(sources).toHaveLength(2);
+    expect(initialMobileTensionSelection(sources, '7', undefined).selectedIds).toEqual(['opaque-1']);
   });
 
-  it('selects eight by stable source ordering, preserves saved empty, and reports vanished IDs', () => {
-    const sources = normalizeMobileTensionCatalog(catalog(Array.from({ length: 10 }, (_, index) => entry(`s${index}`, { sourceKey: `device-${String(index).padStart(2, '0')}` }))), '7');
+  it('selects eight by stable source ordering, caps saved selections at 25, and reports vanished IDs', () => {
+    const sources = normalizeMobileTensionCatalog(catalog([
+      ...Array.from({ length: 26 }, (_, index) => entry(`s${index}`, { sourceKey: `device-${String(index).padStart(2, '0')}`, depthCm: 30 })),
+      entry('same-depth-other-device', { sourceKey: 'device-zz', depthCm: 30 }),
+    ]), '7');
     expect(initialMobileTensionSelection(sources, '7', undefined).selectedIds).toHaveLength(8);
     expect(initialMobileTensionSelection(sources, '7', []).selectedIds).toEqual([]);
+    expect(initialMobileTensionSelection(sources, '7', sources.map((source) => source.seriesId)).selectedIds).toHaveLength(25);
     expect(initialMobileTensionSelection(sources, '7', ['s0', 'vanished'])).toEqual({ selectedIds: ['s0'], unavailableIds: ['vanished'] });
+    expect(sources.filter((source) => source.depthCm === 30).map((source) => source.sourceKey)).toContain('device-zz');
+    expect(new Set(sources.filter((source) => source.depthCm === 30).map((source) => source.seriesId)).size).toBe(27);
   });
 });

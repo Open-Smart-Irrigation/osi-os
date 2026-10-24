@@ -8,6 +8,17 @@ import { HistoryAuthError, MobileHistoryError } from '@osi/history-uplot';
 
 vi.mock('../../services/api', () => ({ analysisAPI: { getChannels: vi.fn() } }));
 
+const sourceResponse = (seriesId: string) => ({
+  generatedAt: 'now',
+  channels: [{ seriesId, hubEui: 'AA', zoneId: 7, zoneName: 'North', cardType: 'soil', sourceKey: `source-${seriesId}`, channelKey: 'swt_1', displayName: seriesId, unit: 'kPa', availability: 'available' as const, deviceName: 'Probe', depthCm: 30, sourceKind: 'device' }],
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe('edge mobile tension catalog hook', () => {
   beforeEach(() => vi.mocked(analysisAPI.getChannels).mockReset());
   it('fetches one session and zone keyed catalog and refreshes once per generation', async () => {
@@ -35,5 +46,61 @@ describe('edge mobile tension catalog hook', () => {
     const malformed = renderHook(() => useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey: 'malformed' }), { wrapper });
     await waitFor(() => expect(malformed.result.current.error).toBeInstanceOf(MobileHistoryError));
     expect(malformed.result.current.error).toMatchObject({ failure: { kind: 'protocol', code: 'http-error' } });
+  });
+
+  it('deduplicates same-key consumers while separating zone and session keys', async () => {
+    const pending = deferred<ReturnType<typeof sourceResponse>>();
+    vi.mocked(analysisAPI.getChannels).mockReturnValueOnce(pending.promise);
+    const cache = new Map();
+    const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={{ provider: () => cache, revalidateOnFocus: false }}>{children}</SWRConfig>;
+    const consumers = renderHook(() => [
+      useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey: 'same' }),
+      useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey: 'same' }),
+    ], { wrapper });
+    expect(analysisAPI.getChannels).toHaveBeenCalledTimes(1);
+    pending.resolve(sourceResponse('shared'));
+    await waitFor(() => expect(consumers.result.current[0].sources[0]?.seriesId).toBe('shared'));
+
+    vi.mocked(analysisAPI.getChannels).mockResolvedValueOnce(sourceResponse('zone-8'));
+    consumers.rerender();
+    const zone = renderHook(() => useMobileTensionCatalog({ enabled: true, zoneId: '8', sessionKey: 'same' }), { wrapper });
+    await waitFor(() => expect(zone.result.current.isLoading).toBe(false));
+    vi.mocked(analysisAPI.getChannels).mockResolvedValueOnce(sourceResponse('session-2'));
+    const session = renderHook(() => useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey: 'other' }), { wrapper });
+    await waitFor(() => expect(session.result.current.isLoading).toBe(false));
+    expect(analysisAPI.getChannels).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a late old-key response out and does not fetch when disabled', async () => {
+    const old = deferred<ReturnType<typeof sourceResponse>>();
+    const current = deferred<ReturnType<typeof sourceResponse>>();
+    vi.mocked(analysisAPI.getChannels).mockImplementationOnce(() => old.promise).mockImplementationOnce(() => current.promise);
+    const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false }}>{children}</SWRConfig>;
+    const hook = renderHook(({ sessionKey }: { sessionKey: string }) => useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey }), { initialProps: { sessionKey: 'old' }, wrapper });
+    hook.rerender({ sessionKey: 'new' });
+    current.resolve(sourceResponse('current'));
+    await waitFor(() => expect(hook.result.current.sources[0]?.seriesId).toBe('current'));
+    old.resolve(sourceResponse('old'));
+    await Promise.resolve();
+    expect(hook.result.current.sources[0]?.seriesId).toBe('current');
+
+    const disabled = renderHook(() => useMobileTensionCatalog({ enabled: false, zoneId: '7', sessionKey: 'disabled' }), { wrapper });
+    expect(disabled.result.current.isLoading).toBe(false);
+    expect(disabled.result.current.sources).toEqual([]);
+  });
+
+  it('resets generation refresh state when the session key changes', async () => {
+    vi.mocked(analysisAPI.getChannels).mockResolvedValue({ generatedAt: 'now', channels: [] });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false }}>{children}</SWRConfig>;
+    const hook = renderHook(({ sessionKey }: { sessionKey: string }) => useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey }), { initialProps: { sessionKey: 'one' }, wrapper });
+    await waitFor(() => expect(hook.result.current.isLoading).toBe(false));
+    await hook.result.current.refreshForGeneration(3);
+    await hook.result.current.refreshForGeneration(3);
+    expect(analysisAPI.getChannels).toHaveBeenCalledTimes(2);
+    hook.rerender({ sessionKey: 'two' });
+    await waitFor(() => expect(analysisAPI.getChannels).toHaveBeenCalledTimes(3));
+    await hook.result.current.refreshForGeneration(3);
+    await hook.result.current.refreshForGeneration(3);
+    expect(analysisAPI.getChannels).toHaveBeenCalledTimes(4);
   });
 });
