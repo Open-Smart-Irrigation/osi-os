@@ -119,9 +119,9 @@ function hasCompleteObservation(row) {
   return Number.isFinite(open) && Number.isFinite(close) && close >= open;
 }
 
-// R13 R1: a cancel that proved its open never left the queue (or never reached ChirpStack)
-// settles the expectation: cancel.js stamps cancelled_unsent_at / cancelled_before_send_at only on
-// that proof. A handed_off open carries neither stamp and keeps fencing until its evidence says so.
+// R13 R1: a cancel that proved its open never reached ChirpStack settles the expectation:
+// cancel.js stamps cancelled_unsent_at / cancelled_before_send_at only on that proof, never on a
+// queue snapshot (fail closed, owner decision 2026-10-24). A handed_off open carries neither stamp and keeps fencing until its evidence says so.
 function cancelledUnsent(row, transport) {
   return Boolean(row && row.reconciliation_state === 'CANCELLED' && transport
     && (transport.cancelled_unsent_at || transport.cancelled_before_send_at));
@@ -1499,8 +1499,11 @@ async function loadFlushIntent(db, deviceEui, flushId) {
   });
 }
 
-// completedSnapshot is passed only after the flush RPC completed: then an item the snapshot held
-// unsent was removed and can never be delivered (R3-B1, persisted once on the row).
+// completedSnapshot is passed only after the flush RPC completed: an item the snapshot held unsent
+// was most likely removed before delivery (R3-B1, persisted once on the row). This is ACK
+// correlation evidence only (store.provenUndelivered). It never proves a cancel: ChirpStack may
+// deliver the item between the pre-flush read and the flush (owner decision 2026-10-24, fail
+// closed; Codex P1 on PR #515), so cancel.js answers handed_off for a flushed open.
 async function reconcileFlushOwners(db, deviceEui, owners, flushId, now, completedSnapshot) {
   const invalidated = [];
   for (const entry of owners) {

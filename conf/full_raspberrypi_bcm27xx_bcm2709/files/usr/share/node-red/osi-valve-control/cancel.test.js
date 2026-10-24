@@ -454,11 +454,12 @@ test('cancelActuation flushes the whole queue when the queue holds an open it ca
 });
 
 // --- Night-run conformance fix (B-1, M-2, M-3; D19/Q01 = (a)). With a transport the
-// cancel is a whole-queue flush. The flushed target is CANCELLED only when the queue
-// snapshot proves its open was still queued and unsent; otherwise the truthful outcome is
-// handed_off (the open may already have been sent) and nothing is marked. Every other owner
-// the flush touched is returned as structured collateral. devices.target_state is written
-// CLOSED only for a proven cancel. Never a CLOSE downlink.
+// cancel is a whole-queue flush. A flushed open is handed_off: the pre-flush queue read does
+// not prove the open unsent, because ChirpStack may deliver it between the read and the flush
+// (owner decision 2026-10-24, fail closed; Codex P1 on PR #515). Nothing is marked and the open
+// keeps fencing the valve. Every other owner the flush touched is returned as structured
+// collateral. devices.target_state is written CLOSED only for a proven cancel (an open that never
+// reached ChirpStack). Never a CLOSE downlink.
 const { cancelHttpResponse } = require('./cancel');
 
 async function setTransport(db, table, idColumn, id, transport) {
@@ -489,7 +490,7 @@ async function seedTransportCancel(db) {
   await db.run("UPDATE devices SET target_state='OPEN' WHERE deveui=?", [EUI]);
 }
 
-test('transport cancel: a target still queued and unsent becomes CANCELLED, and the flushed collateral is returned as a structured list', async () => {
+test('transport cancel: a target still listed unsent before the flush is handed_off (fail closed), and the flushed collateral is returned as a structured list', async () => {
   const { db } = await tempDb();
   await seedTransportCancel(db);
   const transport = flushTransport([
@@ -500,12 +501,14 @@ test('transport cancel: a target still queued and unsent becomes CANCELLED, and 
   ]);
   const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-target', reason: 'field_visit', transport, now: new Date('2026-10-19T08:02:00.000Z') });
 
-  assert.equal(out.ok, true, JSON.stringify(out));
-  assert.equal(out.outcome, 'cancelled');
+  assert.equal(out.ok, false, JSON.stringify(out));
+  assert.equal(out.error, 'actuation_handed_off');
+  assert.equal(out.outcome, 'handed_off');
+  assert.equal(out.pending, true);
   assert.deepEqual(out.downlinks, []);
   assert.equal(transport.calls.flush, 1);
   const rows = Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((r) => [r.expectation_id, r.reconciliation_state]));
-  assert.equal(rows['e-target'], 'CANCELLED');
+  assert.equal(rows['e-target'], 'PENDING_OBSERVATION', 'a possibly delivered open stays observed');
   assert.equal(rows['e-other'], 'PENDING_OBSERVATION', 'another actuation flushed as collateral is not marked cancelled');
 
   const byOwner = Object.fromEntries(out.collateral.map((c) => [c.owner_type + ':' + c.owner_id, c]));
@@ -519,16 +522,16 @@ test('transport cancel: a target still queued and unsent becomes CANCELLED, and 
   db.close();
 });
 
-test('transport cancel: a lone proven cancel closes target_state', async () => {
+test('transport cancel: a lone flushed open is handed_off and leaves target_state alone (fail closed)', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e-target', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-target', { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
   await db.run("UPDATE devices SET target_state='OPEN' WHERE deveui=?", [EUI]);
   const out = await cancelActuation({ db, deviceEui: EUI, transport: flushTransport([{ id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }]), now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.ok, true);
-  assert.equal(out.outcome, 'cancelled');
+  assert.equal(out.ok, false);
+  assert.equal(out.outcome, 'handed_off');
   assert.deepEqual(out.collateral, []);
-  assert.equal((await db.get('SELECT target_state FROM devices WHERE deveui=?', [EUI])).target_state, 'CLOSED');
+  assert.equal((await db.get('SELECT target_state FROM devices WHERE deveui=?', [EUI])).target_state, 'OPEN');
   db.close();
 });
 
@@ -609,7 +612,8 @@ test('transport cancel: a queued plan the flush removed is reported as collatera
   await seedTransportCancel(db);
   const transport = flushTransport([{ id: 'q-plan', fPort: 15, data: 'AA==', isPending: false }, { id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }]);
   const out = await cancelActuation({ db, deviceEui: EUI, expectationId: 'e-target', reason: null, transport, now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.ok, true);
+  assert.equal(out.outcome, 'handed_off');
+  assert.equal(out.queueScope, 'full_flush');
   const plan = await db.get("SELECT state, error, transport_json FROM valve_schedule_pushes WHERE push_id='p-mon'");
   // CMD-04 PR0 (R5 H1): the flushed plan row is LOST at once (surfaced, never re-sent).
   assert.equal(plan.state, 'FAILED');
@@ -659,15 +663,15 @@ test('R3-M4: an attempted open without a queue id is handed_off, without a flush
   db.close();
 });
 
-test('R3-M4: an open an earlier flush proved unsent is cancelled without another flush', async () => {
+test('R3-M4: an open an earlier flush removed is handed_off without another flush, even with a snapshot unsent stamp (fail closed)', async () => {
   const { db } = await tempDb();
   await soleTarget(db, { phase: 'UNKNOWN', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z', invalidated_by_flush: 'f1', first_invalidated_by_flush: 'f1', unsent_in_snapshot: true });
   const cs = flushTransport([]);
   const out = await cancelActuation({ db, deviceEui: EUI, transport: cs, now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.ok, true);
-  assert.equal(out.outcome, 'cancelled');
+  assert.equal(out.ok, false);
+  assert.equal(out.outcome, 'handed_off');
   assert.equal(cs.calls.read + cs.calls.flush, 0);
-  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'CANCELLED');
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'PENDING_OBSERVATION');
   db.close();
 });
 
@@ -699,16 +703,16 @@ async function attemptedWithoutQueueId(db) {
   await soleTarget(db, { phase: 'ATTEMPTED', attempted_at: '2026-10-19T08:00:00.100Z', effect_snapshot: OPEN_15_MIN });
 }
 
-test('R3-M4b: the lost-answer open still sits unsent in the queue: flush, cancelled, collateral reported', async () => {
+test('R3-M4b: the lost-answer open still listed unsent in the queue: flush, handed_off (fail closed), collateral reported', async () => {
   const { db } = await tempDb();
   await attemptedWithoutQueueId(db);
   const cs = flushTransport([{ id: 'q-lost', fPort: 2, data: Buffer.from('410F', 'hex').toString('base64'), isPending: false }, { id: 'q-cfg', fPort: 11, data: 'AA8AAg==', isPending: false }]);
   const out = await cancelActuation({ db, deviceEui: EUI, transport: cs, now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.ok, true, JSON.stringify(out));
-  assert.equal(out.outcome, 'cancelled');
+  assert.equal(out.ok, false, JSON.stringify(out));
+  assert.equal(out.outcome, 'handed_off');
   assert.equal(cs.calls.flush, 1);
   assert.ok(out.collateral.some((c) => c.owner_id === 'q-cfg'));
-  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'CANCELLED');
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'PENDING_OBSERVATION');
   db.close();
 });
 
@@ -736,9 +740,9 @@ test('R3-M4b: no matching and no water-moving item: handed_off without a flush',
   db.close();
 });
 
-// R3-M5: a flush that did not complete leaves no proof, so a cancel retried after the 503
-// flushes again and can still prove the open unsent.
-test('R3-M5: a cancel retried after a failed flush flushes again and cancels', async () => {
+// R3-M5: a flush that did not complete leaves no record, so a cancel retried after the 503
+// flushes again (and answers handed_off: fail closed).
+test('R3-M5: a cancel retried after a failed flush flushes again', async () => {
   const { db } = await tempDb();
   await soleTarget(db, { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
   const queue = [{ id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }];
@@ -749,8 +753,8 @@ test('R3-M5: a cancel retried after a failed flush flushes again and cancels', a
   const retry = flushTransport(queue);
   const second = await cancelActuation({ db, deviceEui: EUI, transport: retry, now: new Date('2026-10-19T08:03:00.000Z') });
   assert.equal(retry.calls.flush, 1, 'the retry flushes again');
-  assert.equal(second.outcome, 'cancelled', JSON.stringify(second));
-  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'CANCELLED');
+  assert.equal(second.outcome, 'handed_off', JSON.stringify(second));
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-t'")).reconciliation_state, 'PENDING_OBSERVATION');
   db.close();
 });
 
@@ -773,7 +777,8 @@ test('R3 minor: a sender meeting a cancelled reservation gets a replay refusal a
 // actuation may still run reads `pending`. It is true whenever the open was not proven deleted.
 test('cancel results say whether the actuation may still run (pending)', async () => {
   const cases = [
-    [{ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }, [{ id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }], {}, 'cancelled', false],
+    [{ phase: 'INTENT', intent_at: '2026-10-19T08:00:00.000Z' }, [], {}, 'cancelled', false],
+    [{ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }, [{ id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }], {}, 'handed_off', true],
     [{ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }, [], {}, 'handed_off', true],
     [{ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }, [], { failFlush: true }, 'uncertain', true],
     [undefined, [], {}, 'handed_off', true],
@@ -814,7 +819,7 @@ test('a pending CLOSE owner is not a cancellable actuation', async () => {
   await insertExpectation(db, { id: 'open-1', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:30.000Z' });
   await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:30.100Z' }), 'open-1']);
   const out = await cancelActuation({ db, deviceEui: EUI, transport: flushTransport([{ id: 'q-open', fPort: 2, data: 'QQo=', isPending: false }]), now: new Date('2026-10-19T08:01:00.000Z') });
-  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(out.outcome, 'handed_off', JSON.stringify(out));
   assert.equal(out.expectationId, 'open-1', 'the one real open is the target, not ambiguous');
   db.close();
 });
@@ -824,7 +829,7 @@ test('a pending CLOSE owner is not a cancellable actuation', async () => {
 // reports the real outcome.
 const { cancelForUnclaim } = require('./cancel');
 
-test('unclaim cancel: every queued open is cancelled through one whole-queue flush, nothing is enqueued', async () => {
+test('unclaim cancel: every queued open is stopped through one whole-queue flush, answered handed_off (fail closed), nothing is enqueued', async () => {
   const { db } = await tempDb();
   await seedTransportCancel(db);
   const transport = flushTransport([
@@ -833,14 +838,13 @@ test('unclaim cancel: every queued open is cancelled through one whole-queue flu
     { id: 'q-other', fPort: 2, data: 'QQ8=', isPending: false },
   ]);
   const out = await cancelForUnclaim({ db, deviceEui: EUI, transport, now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.state, 'cancelled', JSON.stringify(out));
+  assert.equal(out.state, 'handed_off', JSON.stringify(out));
   assert.equal(out.error, null);
   assert.equal(out.whole_queue_flushed, true);
   assert.equal(transport.calls.flush, 1, 'one D19(a) flush covers every queued open');
-  assert.deepEqual(out.results.map((r) => [r.expectation_id, r.outcome]), [['e-target', 'cancelled'], ['e-other', 'cancelled']]);
+  assert.deepEqual(out.results.map((r) => [r.expectation_id, r.outcome]), [['e-target', 'handed_off'], ['e-other', 'handed_off']]);
   const rows = await db.all("SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations ORDER BY expectation_id");
-  assert.deepEqual(rows.map((r) => r.reconciliation_state), ['CANCELLED', 'CANCELLED']);
-  assert.ok(rows.every((r) => r.cancel_reason === 'device_unclaimed'));
+  assert.deepEqual(rows.map((r) => r.reconciliation_state), ['PENDING_OBSERVATION', 'PENDING_OBSERVATION'], 'possibly delivered opens stay observed');
   assert.ok(Array.isArray(out.collateral));
   db.close();
 });
@@ -859,18 +863,18 @@ test('unclaim cancel: a running open is left to run out its bounded duration: no
   db.close();
 });
 
-test('unclaim cancel: a queued open beside a running one is cancelled; the running one is reported first', async () => {
+test('unclaim cancel: a queued open beside a running one is flushed and handed_off; the running one is reported first', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e-run', state: 'OBSERVED_RUNNING', commandedAt: '2026-10-19T07:50:00.000Z' });
   await insertExpectation(db, { id: 'e-queued', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
   await setTransport(db, 'valve_actuation_expectations', 'expectation_id', 'e-queued', { phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' });
   const transport = flushTransport([{ id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }]);
   const out = await cancelForUnclaim({ db, deviceEui: EUI, transport, now: new Date('2026-10-19T08:02:00.000Z') });
-  assert.equal(out.state, 'already_running');
-  assert.deepEqual(out.results.map((r) => [r.expectation_id, r.outcome]), [['e-run', 'already_running'], ['e-queued', 'cancelled']]);
+  assert.equal(out.state, 'handed_off');
+  assert.deepEqual(out.results.map((r) => [r.expectation_id, r.outcome]), [['e-run', 'already_running'], ['e-queued', 'handed_off']]);
   assert.equal(transport.calls.flush, 1);
   const rows = Object.fromEntries((await db.all('SELECT expectation_id, reconciliation_state FROM valve_actuation_expectations')).map((r) => [r.expectation_id, r.reconciliation_state]));
-  assert.deepEqual(rows, { 'e-run': 'OBSERVED_RUNNING', 'e-queued': 'CANCELLED' });
+  assert.deepEqual(rows, { 'e-run': 'OBSERVED_RUNNING', 'e-queued': 'PENDING_OBSERVATION' });
   db.close();
 });
 
@@ -890,33 +894,90 @@ test('unclaim cancel: nothing active is none_active; no transport is not_attempt
   db.close();
 });
 
-// R13 re-review R1: a cancel that proved the open never left the queue settles it, so the next
-// manual open is not refused valve_busy. A handed_off open (it may have been sent) keeps fencing.
-test('a proven-unsent cancelled open no longer fences the valve; a handed_off one still does', async () => {
+// R13 re-review R1, narrowed by the owner decision of 2026-10-24 (fail closed): a cancel that
+// proves the open never reached ChirpStack settles it, so the next manual open is not refused
+// valve_busy. A flushed open, even one the pre-flush read listed unsent, may have been delivered
+// and keeps fencing until its bounded duration has passed.
+test('only an open that never reached ChirpStack stops fencing after a cancel; a flushed one still fences', async () => {
   const dispatch = require('./dispatch');
   const { tempDb: freshDb, FIXTURE_EUI, fakeChirpStack } = require('./test-helpers');
   const T0 = Date.parse('2026-08-19T10:00:00Z');
   const at = (s) => new Date(T0 + s * 1000);
   const outcomes = {};
-  for (const scenario of ['cancelled', 'handed_off']) {
+  for (const scenario of ['never_sent', 'listed_unsent', 'drained']) {
     const { db, cleanup } = await freshDb();
     try {
       const cs = fakeChirpStack();
       const first = await dispatch.reserveValveCommand({ db, command: { device_eui: FIXTURE_EUI, command_id: 'm1', action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(0).toISOString(), timezone: 'UTC' }, now: at(0).toISOString() });
-      await dispatch.enqueueValveCommand({ db, deviceEui: FIXTURE_EUI, owner: { type: 'expectation', id: first.expectation.expectation_id }, item: { devEui: FIXTURE_EUI, fPort: 2, data: Buffer.from([0x41, 5]).toString('base64'), confirmed: false }, transport: cs.transport, now: at(0) });
-      if (scenario === 'handed_off') cs.drain();
-      const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport: cs.transport, now: at(10), warn: () => {} });
-      assert.equal(cancel.outcome, scenario);
-      try {
-        const next = await dispatch.reserveValveCommand({ db, command: { device_eui: FIXTURE_EUI, command_id: 'm2', action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(20).toISOString(), timezone: 'UTC' }, now: at(20).toISOString() });
-        outcomes[scenario] = next && next.expectation ? 'reserved' : 'none';
-      } catch (error) {
-        outcomes[scenario] = 'refused ' + error.code;
+      if (scenario === 'never_sent') {
+        // The reservation's claim was written but never attempted (crash before the RPC).
+        await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'INTENT', intent_at: at(0).toISOString() }), first.expectation.expectation_id]);
+      } else {
+        await dispatch.enqueueValveCommand({ db, deviceEui: FIXTURE_EUI, owner: { type: 'expectation', id: first.expectation.expectation_id }, item: { devEui: FIXTURE_EUI, fPort: 2, data: Buffer.from([0x41, 5]).toString('base64'), confirmed: false }, transport: cs.transport, now: at(0) });
       }
+      if (scenario === 'drained') cs.drain();
+      const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport: cs.transport, now: at(10), warn: () => {} });
+      outcomes[scenario] = { cancel: cancel.outcome };
+      const tryReserve = async (s) => {
+        try {
+          const next = await dispatch.reserveValveCommand({ db, command: { device_eui: FIXTURE_EUI, command_id: 'm2-' + s, action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(s).toISOString(), timezone: 'UTC' }, now: at(s).toISOString() });
+          return next && next.expectation ? 'reserved' : 'none';
+        } catch (error) {
+          return 'refused ' + error.code;
+        }
+      };
+      outcomes[scenario].soon = await tryReserve(20);
     } finally {
       cleanup();
     }
   }
-  assert.equal(outcomes.cancelled, 'reserved', 'a proven cancel frees the valve');
-  assert.equal(outcomes.handed_off, 'refused valve_busy', 'an open that may have been sent still fences');
+  assert.deepEqual(outcomes.never_sent, { cancel: 'cancelled', soon: 'reserved' }, 'a proven cancel frees the valve');
+  // Release after the bounded duration is the effect horizon (effects.canReleaseByHorizon, trusted
+  // clock only), covered in effects.test.js; here the valve is still inside that duration.
+  assert.deepEqual(outcomes.listed_unsent, { cancel: 'handed_off', soon: 'refused valve_busy' }, 'a flushed open keeps fencing the valve');
+  assert.deepEqual(outcomes.drained, { cancel: 'handed_off', soon: 'refused valve_busy' });
+});
+
+// Release review (Codex P1 on PR #515), owner decision 2026-10-24 = fail closed: the pre-flush
+// queue read is a separate RPC from the flush, and ChirpStack may hand the open to the radio
+// between the two. A snapshot that still lists the open unsent therefore proves nothing: the
+// cancel answers handed_off, nothing is marked CANCELLED, and the valve stays fenced until the
+// open's bounded duration has passed. D04: no CLOSE is ever sent.
+test('fail closed: an open delivered between the queue read and the flush is handed_off and keeps fencing the valve', async () => {
+  const dispatch = require('./dispatch');
+  const { tempDb: freshDb, FIXTURE_EUI, fakeChirpStack } = require('./test-helpers');
+  const T0 = Date.parse('2026-08-19T10:00:00Z');
+  const at = (s) => new Date(T0 + s * 1000);
+  const { db, cleanup } = await freshDb();
+  try {
+    const cs = fakeChirpStack();
+    const first = await dispatch.reserveValveCommand({ db, command: { device_eui: FIXTURE_EUI, command_id: 'm1', action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(0).toISOString(), timezone: 'UTC' }, now: at(0).toISOString() });
+    await dispatch.enqueueValveCommand({ db, deviceEui: FIXTURE_EUI, owner: { type: 'expectation', id: first.expectation.expectation_id }, item: { devEui: FIXTURE_EUI, fPort: 2, data: Buffer.from([0x41, 5]).toString('base64'), confirmed: false }, transport: cs.transport, now: at(0) });
+    // The probe: the read still sees the open unsent, then an uplink delivers it before the flush.
+    const transport = {
+      ...cs.transport,
+      async getDeviceQueue(eui) { const snapshot = await cs.transport.getDeviceQueue(eui); cs.drain(); return snapshot; },
+      async enqueueDownlink() { throw new Error('a cancel must never enqueue anything (D04: no CLOSE)'); },
+    };
+    const cancel = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, now: at(10), warn: () => {} });
+    assert.equal(cancel.outcome, 'handed_off', JSON.stringify(cancel));
+    assert.equal(cancel.ok, false);
+    assert.equal(cancel.pending, true);
+    assert.deepEqual(cancel.downlinks, []);
+    const row = await db.get('SELECT reconciliation_state, transport_json FROM valve_actuation_expectations WHERE expectation_id=?', [first.expectation.expectation_id]);
+    assert.equal(row.reconciliation_state, 'PENDING_OBSERVATION', 'the possibly delivered open is still observed');
+    const stamped = JSON.parse(row.transport_json);
+    // unsent_in_snapshot may be stamped for ACK correlation (store.provenUndelivered); it is never
+    // a cancel proof, so no cancelled_unsent_at and no CANCELLED state follow from it.
+    assert.equal(stamped.cancelled_unsent_at, undefined, 'no unsent stamp from the snapshot');
+    await assert.rejects(
+      dispatch.reserveValveCommand({ db, command: { device_eui: FIXTURE_EUI, command_id: 'm2', action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(20).toISOString(), timezone: 'UTC' }, now: at(20).toISOString() }),
+      (error) => error.code === 'valve_busy',
+      'the valve stays fenced while the open may be running');
+    // A second cancel finds the earlier flush and still cannot prove the open unsent.
+    const again = await cancelActuation({ db, deviceEui: FIXTURE_EUI, expectationId: first.expectation.expectation_id, reason: 'operator', transport, now: at(30), warn: () => {} });
+    assert.equal(again.outcome, 'handed_off');
+  } finally {
+    cleanup();
+  }
 });

@@ -77,7 +77,10 @@ an optional companion that adds convenience and heavier analytics on top.
    expectation against the valve's actual reported state and flags anomalies
    (e.g. a valve that stayed open too long).
 4. Farmers can also trigger or cancel irrigation manually from the dashboard;
-   cancel flushes the radio queue and marks the expectation `CANCELLED`.
+   cancel flushes the radio queue. The expectation becomes `CANCELLED` only
+   when the open never reached ChirpStack; otherwise the open may already be
+   on its way, so it stays observed and keeps the valve reserved until its
+   bounded duration has passed.
 
 ## Design principles (the rules everything follows)
 

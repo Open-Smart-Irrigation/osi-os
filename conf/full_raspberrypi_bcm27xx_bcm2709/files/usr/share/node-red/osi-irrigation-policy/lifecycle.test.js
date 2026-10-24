@@ -351,7 +351,10 @@ function recordingTransport(queue) {
   };
 }
 
-test('unclaim with a queued open cancels it through the D19(a) flush and reports in_flight_cancel cancelled', async () => {
+// Owner decision 2026-10-24 (fail closed, Codex P1 on PR #515): the D19(a) flush stops a queued
+// open, but the pre-flush read cannot prove it was not delivered, so the cancel is handed_off and
+// the open stays observed (and keeps the valve fenced) until its bounded duration has passed.
+test('unclaim with a queued open flushes it through D19(a) and reports in_flight_cancel handed_off', async () => {
   const f = await tempDb();
   try {
     await seedPolicy(f);
@@ -360,16 +363,14 @@ test('unclaim with a queued open cancels it through the D19(a) flush and reports
     const result = await lifecycle.applyLifecycleMutation({
       db: f.db, operation: 'device_unclaim', deviceEui: EUI, gatewayDeviceEui: '0016C001F1000002', transport, now: '2026-10-19T03:00:00.000Z',
     });
-    assert.equal(result.in_flight_cancel.state, 'cancelled', JSON.stringify(result.in_flight_cancel));
-    assert.equal((await f.db.get("SELECT reconciliation_state, cancel_reason FROM valve_actuation_expectations WHERE expectation_id='e-queued'")).reconciliation_state, 'CANCELLED');
+    assert.equal(result.in_flight_cancel.state, 'handed_off', JSON.stringify(result.in_flight_cancel));
+    assert.equal((await f.db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e-queued'")).reconciliation_state, 'PENDING_OBSERVATION');
     const cleanup = lifecycle.unclaimValveCleanup({ deviceEui: EUI, mutation: result });
-    assert.equal(cleanup.in_flight_cancel, 'cancelled');
-    assert.equal(cleanup.in_flight_cancel_error, null);
+    assert.equal(cleanup.in_flight_cancel, 'handed_off');
     assert.equal(cleanup.whole_queue_flushed, true);
     assert.equal(cleanup.outcome, 'clearing_scheduled');
-    // R13 R1: the cancelled open no longer counts as an active owner, so the clear is sent now.
-    assert.equal(cleanup.reason, null, 'no false clear_waits_for: SKIPPED_ACTIVE_OWNER');
-    assert.ok(cleanup.clearing_downlinks_sent > 0, 'the clearing plan went out after the cancel');
+    assert.match(cleanup.reason, /queued_open_may_have_been_sent/);
+    assert.equal(cleanup.may_still_hold_plan, true);
     assert.ok(transport.calls.enqueued.every((item) => Number(item.fPort) !== 1), 'no CLOSE (or any valve action) is ever enqueued');
   } finally {
     f.cleanup();

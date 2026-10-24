@@ -243,9 +243,14 @@ function droppedFromCollateral(collateral) {
 // Task 4 core, which owns every STREGA queue mutation; nothing is rebuilt or replayed. A
 // queue snapshot cannot prove that an item already crossed the radio handoff, so the
 // outcome is decided from evidence:
-//   cancelled      the target's own queue item was in the pre-flush snapshot, unsent;
-//   handed_off     it was not (sent, pending, or never had a queue id): the open may
-//                  already have reached the valve, so nothing is marked;
+//   cancelled      only when the open provably never reached ChirpStack (a local
+//                  reservation, or an enqueue that failed or was rejected);
+//   handed_off     the open was handed to ChirpStack. Owner decision 2026-10-24 (fail
+//                  closed, Codex P1 on PR #515): the pre-flush queue read is a separate RPC
+//                  from the flush, and ChirpStack may deliver the open between the two, so a
+//                  snapshot that still lists it unsent proves nothing. The queue is flushed,
+//                  nothing is marked, and the open keeps fencing the valve until its bounded
+//                  duration has passed;
 //   already_running the valve is observed open: there is no pending command to delete,
 //                  so nothing is flushed (no collateral);
 //   uncertain      the flush itself failed or its outcome is unknown.
@@ -259,15 +264,12 @@ async function flushForCancel({ db, eui, target, transport, now }) {
   catch (_) { before = null; }
   const noFlush = (outcome, extra) => ({ ok: true, outcome, scope: 'not_queued', flushed: null, kept: 0, lost: 0, collateral: [], dropped: { count: 0, expectationIds: [] }, ...(extra || {}) });
   if (before && before.invalidated_by_flush && before.first_invalidated_by_flush != null) {
-    // An earlier COMPLETED flush already took this open out of the queue. Its proof, persisted
-    // on the row at that flush (R3-B1), says whether the item was still unsent then: if so the
-    // open can never be delivered and the cancel is proven; otherwise it may have been sent.
-    // Flushing again could only add collateral. (R3-M5: after a flush that did not complete
-    // there is no proof, and the retry below flushes again.)
-    return noFlush(before.unsent_in_snapshot === true ? 'cancelled' : 'handed_off');
+    // An earlier COMPLETED flush already took this open out of the queue; it may have been
+    // delivered before that flush (fail closed: no snapshot proves otherwise). Flushing again
+    // could only add collateral. (R3-M5: after a flush that did not complete, the retry below
+    // flushes again.)
+    return noFlush('handed_off');
   }
-  // proves(snapshot): the flush's own pre-flush snapshot held the target's item unsent.
-  let proves = () => false;
   if (before) {
     // R3-M4: only an open that may sit in the ChirpStack queue is worth a flush.
     const phase = before.phase || null;
@@ -278,12 +280,12 @@ async function flushForCancel({ db, eui, target, transport, now }) {
     // without a phase is stamped terminal, so a replay of the same command cannot resume it.
     if (neverSent) return noFlush('cancelled', { stampNeverSent: !phase || phase === 'INTENT' });
     if (before.queue_id && (phase === 'ACCEPTED' || phase === 'UNKNOWN')) {
-      proves = (snapshot) => snapshotHolds(snapshot, before.queue_id) === true;
+      // Flushed below; handed_off whatever the pre-flush snapshot says (fail closed).
     } else if ((phase === 'ATTEMPTED' || phase === 'UNKNOWN') && !before.queue_id) {
       // R3-M4b: the enqueue answer was lost, so there is no queue id, but the exact frame is in
-      // the effect snapshot. Read the queue first: a matching unsent item is flushed and the
-      // cancel proven; another unsent water-moving item is flushed too (the operator asked for
-      // the open to stop) and answered handed_off; otherwise nothing is flushed.
+      // the effect snapshot. Read the queue first: a matching unsent item, or another unsent
+      // water-moving item, is flushed (the operator asked for the open to stop) and answered
+      // handed_off, since the read does not prove non-delivery; otherwise nothing is flushed.
       const frame = before.effect_snapshot;
       const matchesFrame = (item) => Boolean(frame && item && !(item.isPending || item.is_pending)
         && Number(item.fPort) === Number(frame.fPort)
@@ -297,7 +299,6 @@ async function flushForCancel({ db, eui, target, transport, now }) {
       }
       if (!Array.isArray(items)) return noFlush('handed_off');
       if (!items.some(matchesFrame) && !items.some((item) => isOpenItem(item) || isUnboundedMoveItem(item))) return noFlush('handed_off');
-      proves = (snapshot) => Array.isArray(snapshot) && snapshot.some(matchesFrame);
     } else {
       return noFlush('handed_off');
     }
@@ -312,7 +313,7 @@ async function flushForCancel({ db, eui, target, transport, now }) {
   if (!flushed || flushed.ok !== true) {
     return { ok: false, phase: flushed && flushed.phase, outcome: 'uncertain', scope: 'flush_uncertain', flushed, kept: 0, lost: 0, collateral, dropped };
   }
-  return { ok: true, phase: flushed.phase, outcome: proves(flushed.snapshot) ? 'cancelled' : 'handed_off', scope: 'full_flush', flushed, kept: 0, lost: 0, collateral, dropped };
+  return { ok: true, phase: flushed.phase, outcome: 'handed_off', scope: 'full_flush', flushed, kept: 0, lost: 0, collateral, dropped };
 }
 
 // Takes the target's open out of the device queue and puts plan pushes and configuration
@@ -508,8 +509,9 @@ async function cancelActuationLocked({ db, deviceEui, expectationId, all, reason
       await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: active.expectation_id },
         { phase: 'enqueue_failed_before_acceptance', cancelled_before_send_at: nowIso });
     } else if (transport && all !== true && queue.outcome === 'cancelled') {
-      // R13 R1: the flush proof (or an earlier flush's) says the open never left the queue, so the
-      // cancelled expectation stops fencing the valve (dispatch cancelledUnsent).
+      // R13 R1: the open provably never reached ChirpStack (its enqueue failed or was rejected),
+      // so the cancelled expectation stops fencing the valve (dispatch cancelledUnsent). A queue
+      // snapshot never reaches this branch (fail closed, owner decision 2026-10-24).
       await dispatch.updateOwnerTransportTx(tx, { type: 'expectation', id: active.expectation_id },
         { cancelled_unsent_at: nowIso });
     }

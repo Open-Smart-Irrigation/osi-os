@@ -1446,6 +1446,8 @@ for (const profile of PROFILES) {
 
 // Owner decision 2026-10-22: the unclaim cancels queued opens through the D19(a) cancel path,
 // never sends a CLOSE, lets a running open run out, and in_flight_cancel reports the outcome.
+// Owner decision 2026-10-24 (fail closed, Codex P1 on PR #515): a flushed queued open is reported
+// handed_off, since the pre-flush read cannot prove it undelivered; it stays observed.
 function seedOpen(db, id, state) {
   db.prepare("INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at, transport_json) VALUES (?, ?, ?, 900, ?, 'unknown', ?, 'manual', ?, ?)")
     .run(id, VALVE, AT, '2026-10-19T10:15:00.000Z', state, AT, JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-' + id, attempted_at: AT }));
@@ -1473,7 +1475,7 @@ for (const profile of PROFILES) {
       ? { msg: request(2, 'res1', 'DELETE', '/api/devices/' + VALVE, { deveui: VALVE }), env: ENV, db, libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } } }
       : { msg: { payload: [{ id: 2 }] }, env: { ...ENV, OSI_SCOPED_ACCESS: '0' }, flowState: { delete_device_deveui: VALVE }, db, libOverrides: { chirpstack: { createProvisioningClientFromEnv: () => transport } } });
 
-    test(`${profile} ${mode}: local unclaim with a queued open cancels it (in_flight_cancel cancelled), no CLOSE`, async () => {
+    test(`${profile} ${mode}: local unclaim with a queued open flushes it (in_flight_cancel handed_off), no CLOSE`, async () => {
       const db = seedScopedDb(VALVE);
       try {
         policyFixture(db);
@@ -1481,8 +1483,9 @@ for (const profile of PROFILES) {
         const transport = queueTransport([{ id: 'q-e-queued', fPort: 2, data: 'QQ8=', isPending: false }]);
         const response = (await call(db, transport)).result[1];
         assert.equal(response.statusCode, 200, JSON.stringify(response.payload));
-        assert.equal(response.payload.valve_cleanup.in_flight_cancel, 'cancelled');
-        assert.equal(expectationState(db, 'e-queued'), 'CANCELLED');
+        assert.equal(response.payload.valve_cleanup.in_flight_cancel, 'handed_off');
+        assert.match(response.payload.valve_cleanup.reason, /queued_open_may_have_been_sent/);
+        assert.equal(expectationState(db, 'e-queued'), 'PENDING_OBSERVATION');
         assert.ok(transport.calls.flush >= 1);
         assert.ok(transport.calls.enqueued.every((item) => Number(item.fPort) !== 1), 'no CLOSE');
         assert.equal(db.prepare('SELECT COUNT(*) AS n FROM valve_actuation_expectations').get().n, 1, 'unclaim creates no actuation');
@@ -1506,7 +1509,7 @@ for (const profile of PROFILES) {
   }
 
   const base = 9300 + PROFILES.indexOf(profile) * 20;
-  test(`${profile}: cloud UNCLAIM_DEVICE with a queued open: ACK reports in_flight_cancel cancelled, durably`, async () => {
+  test(`${profile}: cloud UNCLAIM_DEVICE with a queued open: ACK reports in_flight_cancel handed_off, durably`, async () => {
     const db = seedScopedDb(VALVE);
     try {
       policyFixture(db);
@@ -1519,10 +1522,10 @@ for (const profile of PROFILES) {
       });
       const ack = (await run()).result[1].payload;
       assert.equal(ack.result, 'APPLIED');
-      assert.equal(ack.valveCleanup.in_flight_cancel, 'cancelled');
-      assert.equal(expectationState(db, 'e-queued'), 'CANCELLED');
+      assert.equal(ack.valveCleanup.in_flight_cancel, 'handed_off');
+      assert.equal(expectationState(db, 'e-queued'), 'PENDING_OBSERVATION');
       const queued = JSON.parse(db.prepare('SELECT payload_json FROM command_ack_outbox WHERE command_id=?').get(String(envelope.commandId)).payload_json);
-      assert.equal(queued.valveCleanup.in_flight_cancel, 'cancelled', 'the outbox ACK carries the post-commit outcome');
+      assert.equal(queued.valveCleanup.in_flight_cancel, 'handed_off', 'the outbox ACK carries the post-commit outcome');
       assert.equal(ack.valveCleanup.final, true, 'the amended ACK is final');
       assert.equal(queued.valveCleanup.final, true);
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM command_ack_outbox WHERE command_id=?').get(String(envelope.commandId)).n, 1, 'an undelivered ACK is amended in place');
@@ -1582,7 +1585,7 @@ for (const profile of PROFILES) {
       assert.equal(provisional.valveCleanup.in_flight_cancel, null);
       assert.equal(final.result, 'APPLIED');
       assert.equal(final.valveCleanup.final, true);
-      assert.equal(final.valveCleanup.in_flight_cancel, 'cancelled');
+      assert.equal(final.valveCleanup.in_flight_cancel, 'handed_off');
       assert.deepEqual(ack, final);
     } finally { close(db); }
   });
