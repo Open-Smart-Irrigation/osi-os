@@ -113,6 +113,9 @@
     "yesRemove": "Sim, remover",
     "removing": "A remover...",
     "failedToRemove": "Falha ao remover dispositivo",
+    "removedClearingScheduled": "Válvula removida. O seu programa semanal está a ser apagado; até a válvula confirmar, pode continuar a executar o programa.",
+    "removedClearingFailed": "Válvula removida, mas não foi possível apagar o seu programa semanal. A válvula pode continuar a executar o programa.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Visto há {{minutes}} minutos",
     "actuationFeedback": {
       "closed": "Fechado",

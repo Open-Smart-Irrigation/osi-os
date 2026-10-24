@@ -683,7 +683,9 @@ async function applyLifecycleMutation(options = {}) {
 // and the cloud UNCLAIM_DEVICE, and reports W1's AUTH-09 cleanup outcome: the keys and the
 // vocabulary of osi-valve-control runUnclaimCleanup, so the cloud maps one contract. The
 // schedules are retired in the unclaim transaction and the clearing plan is a durable
-// lifecycle clear revision that goes out with the next snapshot (clearing_scheduled). The
+// lifecycle clear revision (clearing_scheduled): sent after commit, and when that send could not
+// run (no transport, flush failed), by the valve tick once ChirpStack answers
+// (push.emitPendingClears, R19 finding 1). The
 // outcome says what the cleanup did and never that the plan is gone: the valve has no
 // read-back, so may_still_hold_plan stays true and plan_clear_confirmed false. Nothing here
 // sends a CLOSE. The lifecycle does not cancel an in-flight actuation, so in_flight_cancel is

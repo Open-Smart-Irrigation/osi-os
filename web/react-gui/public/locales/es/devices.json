@@ -113,6 +113,9 @@
     "yesRemove": "Sí, eliminar",
     "removing": "Eliminando...",
     "failedToRemove": "Error al eliminar el dispositivo",
+    "removedClearingScheduled": "Válvula eliminada. Su programa semanal se está borrando; hasta que la válvula lo confirme, puede seguir ejecutando su programa.",
+    "removedClearingFailed": "Válvula eliminada, pero no se pudo borrar su programa semanal. La válvula puede seguir ejecutando su programa.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Visto hace {{minutes}} minutos",
     "actuationFeedback": {
       "closed": "Cerrada",

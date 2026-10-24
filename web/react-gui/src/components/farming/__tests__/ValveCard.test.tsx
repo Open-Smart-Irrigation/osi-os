@@ -503,4 +503,29 @@ describe('StregaValveCard enclosure history', () => {
         await screen.findByText('not measured on Gen2');
         expect(screen.queryByTitle('View history')).not.toBeInTheDocument();
     });
+
+    // R19 finding 1: removing a valve whose plan is still being cleared must say so instead of
+    // vanishing as a plain success; the card stays until the farmer acknowledges.
+    it.each([
+        ['clearing_scheduled', 'stregaValve.removedClearingScheduled'],
+        ['failed', 'stregaValve.removedClearingFailed'],
+    ])('after removal with valve_cleanup %s, shows the clearing state and waits for acknowledgement', async (outcome, key) => {
+        vi.mocked(devicesAPI.remove).mockResolvedValueOnce({ message: 'x', valve_cleanup: { outcome, may_still_hold_plan: true } } as never);
+        const { onRemove } = renderCard();
+        fireEvent.click(screen.getByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(screen.getByText('stregaValve.yesRemove'));
+        const notice = await screen.findByRole('status');
+        expect(notice).toHaveTextContent(key);
+        expect(onRemove).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText('stregaValve.removedNoticeOk'));
+        expect(onRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it('after removal with nothing to clear, calls onRemove at once', async () => {
+        vi.mocked(devicesAPI.remove).mockResolvedValueOnce({ message: 'Device removed successfully', valve_cleanup: { outcome: 'no_plan_to_clear', may_still_hold_plan: null } } as never);
+        const { onRemove } = renderCard();
+        fireEvent.click(screen.getByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(screen.getByText('stregaValve.yesRemove'));
+        await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
+    });
 });

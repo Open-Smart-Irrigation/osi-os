@@ -344,3 +344,14 @@ Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the
 auto-stack test's `PENDING_HUMAN_LUGANDA` set, which asserts each key's `lg`
 value is still byte-identical to `en`. A human Luganda pass must drop each key
 from that set and from this table in the same change.
+
+## `devices.json` — valve removal notice
+
+| Keys | Reason |
+|---|---|
+| `stregaValve.removedClearingScheduled`, `stregaValve.removedClearingFailed`, `stregaValve.removedNoticeOk` (3 keys in `devices.json`) | Added with the conditional irrigation release review (R19 finding 1): after a valve is removed, the card says whether its weekly plan is still being cleared or the clear failed, and waits for an OK. de-CH/es/fr/it/pt carry translations that still need a native-speaker review. The texts say whether a valve may keep watering, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/devicesI18n.test.ts`
+(`PENDING_HUMAN_LUGANDA` in the removal-notice test), which asserts each key's
+`lg` value is still byte-identical to `en`. A human Luganda pass must drop the
+key from that set and from this table in the same change.

@@ -751,6 +751,9 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
+  // R19 finding 1: a removed valve whose weekly plan is still being cleared (or whose clear
+  // failed) shows that state until the farmer acknowledges it, instead of vanishing.
+  const [removalNotice, setRemovalNotice] = useState<'clearing_scheduled' | 'failed' | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [openDurationMin, setOpenDurationMin] = useState('5');
@@ -840,7 +843,13 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       // Only the unassigned-grid placement (the default, 'farm') actually deletes the
       // device.
       if (removeContext === 'farm') {
-        await devicesAPI.remove(device.deveui);
+        const result = await devicesAPI.remove(device.deveui);
+        const outcome = result?.valve_cleanup?.outcome;
+        if (outcome === 'clearing_scheduled' || outcome === 'failed') {
+          setShowConfirm(false);
+          setRemovalNotice(outcome);
+          return;
+        }
       }
       onRemove?.();
     } catch (err: any) {
@@ -897,6 +906,20 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
       {error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-bg)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-4 text-sm">
           {error}
+        </div>
+      )}
+
+      {removalNotice && (
+        <div role="status" className="bg-[var(--warn-bg)] border-2 border-[var(--warn-border)] text-[var(--warn-text)] px-4 py-3 rounded-lg mb-4">
+          <p className="text-sm mb-3">
+            {removalNotice === 'failed' ? t('stregaValve.removedClearingFailed') : t('stregaValve.removedClearingScheduled')}
+          </p>
+          <button
+            onClick={() => { setRemovalNotice(null); onRemove?.(); }}
+            className="bg-[var(--secondary-bg)] hover:bg-[var(--border)] text-[var(--text)] font-bold px-4 py-2 rounded-lg transition-colors"
+          >
+            {t('stregaValve.removedNoticeOk')}
+          </button>
         </div>
       )}
 

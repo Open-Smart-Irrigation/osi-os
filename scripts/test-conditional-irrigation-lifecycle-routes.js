@@ -1300,7 +1300,8 @@ for (const profile of PROFILES) {
         const result = await localUnclaim(profile, db, VALVE, { scoped });
         const response = result.result[1];
         assert.equal(response.statusCode, 200, JSON.stringify(response.payload));
-        assert.equal(response.payload.message, 'Device removed successfully');
+        // R19 finding 1: the message says the clear is scheduled, not plain success.
+        assert.equal(response.payload.message, 'Device removed. Clearing the valve plan is scheduled; the valve may keep its program until it confirms the clear.');
         const cleanup = response.payload.valve_cleanup;
         assert.deepEqual(Object.keys(cleanup).sort(), CLEANUP_KEYS);
         assert.equal(cleanup.outcome, 'clearing_scheduled');

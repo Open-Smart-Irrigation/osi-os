@@ -356,6 +356,15 @@ function closeUnclaimTransport(transport) {
 
 // S6: the AUTH-09 cleanup outcome of a local unclaim that applied. Building it never turns
 // the applied detach into an error: a failure is reported as outcome 'failed'.
+// R19 finding 1: the local DELETE answer says what happened to the valve plan, so a removed
+// valve whose clear is still on its way (or failed) is not reported as a plain success.
+function unclaimMessage(cleanup) {
+  const outcome = cleanup && cleanup.outcome;
+  if (outcome === 'failed') return 'Device removed, but clearing the valve plan failed; the valve may keep its program.';
+  if (outcome === 'clearing_scheduled') return 'Device removed. Clearing the valve plan is scheduled; the valve may keep its program until it confirms the clear.';
+  return 'Device removed successfully';
+}
+
 function unclaimCleanupFor(lifecycle, deveui, lifecycleResult, node) {
   try {
     return lifecycle.unclaimValveCleanup({ deviceEui: deveui, mutation: lifecycleResult });
@@ -449,7 +458,8 @@ if (!scope.canMutate(actorScope.role)) {
   });
   // S6: the detach applied, so 200 whatever the valve cleanup did; valve_cleanup says what that was.
   msg.statusCode = 200;
-  msg.payload = { message: 'Device removed successfully', device_eui: deveui, gateway_device_eui: lifecycleGatewayEui, valve_cleanup: unclaimCleanupFor(lifecycleLoad.value, deveui, lifecycleResult, node), clear_results: lifecycleResult.clear_results || [] };
+  const valveCleanup = unclaimCleanupFor(lifecycleLoad.value, deveui, lifecycleResult, node);
+  msg.payload = { message: unclaimMessage(valveCleanup), device_eui: deveui, gateway_device_eui: lifecycleGatewayEui, valve_cleanup: valveCleanup, clear_results: lifecycleResult.clear_results || [] };
   return [null, msg];
 } catch (error) {
   msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;
@@ -1128,7 +1138,8 @@ try {
   const lifecycleResult = await policyLoad.value.applyLifecycleMutation({ db: lifecycleDb, operation: 'device_unclaim', deviceEui: deveui, gatewayDeviceEui, actor: { user_id: userId }, requireOwner: true, transport, warn: (message) => node.warn(String(message)), now: new Date().toISOString() });
   // S6: the detach applied, so 200 whatever the valve cleanup did; valve_cleanup says what that was.
   msg.statusCode = 200;
-  msg.payload = { message: 'Device removed successfully', device_eui: deveui, gateway_device_eui: gatewayDeviceEui, valve_cleanup: unclaimCleanupFor(policyLoad.value, deveui, lifecycleResult, node), clear_results: lifecycleResult.clear_results || [] };
+  const valveCleanup = unclaimCleanupFor(policyLoad.value, deveui, lifecycleResult, node);
+  msg.payload = { message: unclaimMessage(valveCleanup), device_eui: deveui, gateway_device_eui: gatewayDeviceEui, valve_cleanup: valveCleanup, clear_results: lifecycleResult.clear_results || [] };
   return [null, msg];
 } catch (error) {
   msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;

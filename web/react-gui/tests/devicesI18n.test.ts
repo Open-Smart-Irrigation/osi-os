@@ -40,6 +40,10 @@ test('devices locale files include irrigation actuation translation keys', () =>
     'stregaValve.targetIntent.acknowledged',
     'stregaValve.targetIntent.failed',
     'stregaValve.targetIntent.expired',
+    // R19 finding 1: the removal notice for a valve whose weekly plan is still being cleared.
+    'stregaValve.removedClearingScheduled',
+    'stregaValve.removedClearingFailed',
+    'stregaValve.removedNoticeOk',
   ];
 
   for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
@@ -48,4 +52,12 @@ test('devices locale files include irrigation actuation translation keys', () =>
       assert.equal(typeof getPath(devices, key), 'string', `${locale} missing ${key}`);
     }
   }
+});
+
+test('valve removal notice: lg ships the English source text until a human Luganda pass', () => {
+  // docs/i18n/pending-luganda-translations.md, "devices.json — valve removal notice".
+  const PENDING_HUMAN_LUGANDA = ['stregaValve.removedClearingScheduled', 'stregaValve.removedClearingFailed', 'stregaValve.removedNoticeOk'];
+  const en = readDevices('en');
+  const lg = readDevices('lg');
+  for (const key of PENDING_HUMAN_LUGANDA) assert.equal(getPath(lg, key), getPath(en, key), key);
 });

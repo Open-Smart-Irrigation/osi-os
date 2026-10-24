@@ -424,3 +424,71 @@ test('unclaim cleanup outcome: final is true unless the caller marks a commit-ti
   assert.equal(lifecycle.unclaimValveCleanup({ deviceEui: EUI, mutation, final: false }).final, false);
   assert.equal(lifecycle.unclaimValveCleanup({ deviceEui: EUI, refused: { code: 'stale_sync_version' } }).final, true);
 });
+
+// R19 finding 1 (release review of PR #515): a lifecycle clear that cannot be sent at commit
+// (flush failed, or no transport) must stay pending, and the 60-second valve tick must send it
+// once ChirpStack answers -- exactly once, and only rows that were never attempted.
+const workers = require('../osi-valve-control/workers');
+
+function downTransport() {
+  const fail = () => Promise.reject(Object.assign(new Error('chirpstack_transport_unavailable'), { code: 'transport_unavailable' }));
+  return { getDeviceQueue: fail, flushDeviceQueue: fail, enqueueDownlink: fail };
+}
+
+function upTransport() {
+  const calls = { enqueued: [], flushes: 0 };
+  return {
+    calls,
+    getDeviceQueue: async () => [],
+    flushDeviceQueue: async () => { calls.flushes += 1; return {}; },
+    enqueueDownlink: async (item) => { calls.enqueued.push(item); return { id: 'q-' + calls.enqueued.length }; },
+  };
+}
+
+async function seedFixedSchedule(f) {
+  await f.db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,'06:00',30,'UTC',1,1)", ['11111111-1111-4111-8111-111111111111', EUI]);
+}
+
+async function tickThrice(f, transport, startMs) {
+  workers._resetHousekeepingForTests();
+  for (let i = 1; i <= 3; i += 1) {
+    await workers.runValveTick({ db: f.db, now: new Date(startMs + i * 10 * 60000), appId: 'app', transport, warn: () => {} });
+  }
+}
+
+test('R19-1: an unclaim clear whose flush failed is sent by the valve tick once ChirpStack answers, exactly once', async () => {
+  const f = await tempDb();
+  try {
+    await seedFixedSchedule(f);
+    const now = Date.parse('2026-10-24T10:00:00.000Z');
+    const result = await lifecycle.applyLifecycleMutation({ db: f.db, operation: 'device_unclaim', deviceEui: EUI, gatewayDeviceEui: 'AABBCCDDEEFF0011', actor: { user_id: 1 }, transport: downTransport(), now: new Date(now).toISOString() });
+    assert.ok(result.clears && result.clears.length === 1, 'the unclaim prepared one clear');
+    const control = JSON.parse((await f.db.get('SELECT conditional_control_json c FROM valve_settings WHERE device_eui=?', [EUI])).c);
+    const required = control.required_push_ids;
+    assert.ok(required.length > 0);
+    const up = upTransport();
+    await tickThrice(f, up, now);
+    assert.equal(up.calls.enqueued.length, required.length, 'every required clear row is sent once');
+    assert.ok(up.calls.enqueued.every((item) => Number(item.fPort) !== 1), 'never a CLOSE');
+    const rows = await f.db.all('SELECT push_id, transport_json FROM valve_schedule_pushes WHERE push_id IN (' + required.map(() => '?').join(',') + ')', required);
+    assert.ok(rows.every((row) => JSON.parse(row.transport_json).phase === 'ACCEPTED'), 'all required rows were handed to ChirpStack');
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('R19-1: a zone_delete clear prepared without a transport is sent by the valve tick', async () => {
+  const f = await tempDb();
+  try {
+    await seedPolicy(f);
+    const now = Date.parse('2026-10-24T10:00:00.000Z');
+    const result = await lifecycle.applyLifecycleMutation({ db: f.db, operation: 'zone_delete', zoneId: 1, actor: { user_id: 1 }, now: new Date(now).toISOString() });
+    assert.ok(result.clears && result.clears.length === 1, 'the zone deletion prepared one clear: ' + JSON.stringify(result.clears));
+    const control = JSON.parse((await f.db.get('SELECT conditional_control_json c FROM valve_settings WHERE device_eui=?', [EUI])).c);
+    const up = upTransport();
+    await tickThrice(f, up, now);
+    assert.equal(up.calls.enqueued.length, control.required_push_ids.length, 'the clear goes out once');
+  } finally {
+    f.cleanup();
+  }
+});

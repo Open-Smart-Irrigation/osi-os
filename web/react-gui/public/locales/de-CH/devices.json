@@ -113,6 +113,9 @@
     "yesRemove": "Ja, entfernen",
     "removing": "Wird entfernt...",
     "failedToRemove": "Gerät konnte nicht entfernt werden",
+    "removedClearingScheduled": "Ventil entfernt. Sein Wochenplan wird gelöscht; bis das Ventil dies bestätigt, kann es sein Programm weiter ausführen.",
+    "removedClearingFailed": "Ventil entfernt, aber das Löschen seines Wochenplans ist fehlgeschlagen. Das Ventil kann sein Programm weiter ausführen.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Zuletzt gesehen: vor {{minutes}} Minuten",
     "actuationFeedback": {
       "closed": "Geschlossen",

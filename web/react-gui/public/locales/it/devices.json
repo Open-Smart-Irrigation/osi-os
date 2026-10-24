@@ -113,6 +113,9 @@
     "yesRemove": "Sì, rimuovi",
     "removing": "Rimozione in corso...",
     "failedToRemove": "Impossibile rimuovere il dispositivo",
+    "removedClearingScheduled": "Valvola rimossa. Il suo programma settimanale è in fase di cancellazione; finché la valvola non lo conferma, può continuare il suo programma.",
+    "removedClearingFailed": "Valvola rimossa, ma la cancellazione del suo programma settimanale non è riuscita. La valvola può continuare il suo programma.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Ultimo rilevamento: {{minutes}} minuti fa",
     "actuationFeedback": {
       "closed": "Chiusa",

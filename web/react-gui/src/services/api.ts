@@ -103,6 +103,11 @@ type ApiErrorPayload = {
   message?: string;
 };
 
+export interface DeviceRemoveResult {
+  message?: string;
+  valve_cleanup?: { outcome?: string | null; may_still_hold_plan?: boolean | null } | null;
+}
+
 export interface SystemFeatureFlags {
   historyUxEnabled: boolean;
   historyComparisonEnabled: boolean;
@@ -573,8 +578,11 @@ export const devicesAPI = {
     return parseValveCancelResult(response?.data);
   },
 
-  remove: async (deveui: string): Promise<void> => {
-    await api.delete(`/api/devices/${deveui}`);
+  // The DELETE answer carries valve_cleanup for a valve (R19 finding 1): whether its weekly plan
+  // still has to be cleared on the device.
+  remove: async (deveui: string): Promise<DeviceRemoveResult | undefined> => {
+    const response = await api.delete(`/api/devices/${deveui}`);
+    return response?.data as DeviceRemoveResult | undefined;
   },
 
   rename: async (deveui: string, name: string): Promise<DeviceRenameResult> => {

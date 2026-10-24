@@ -870,6 +870,9 @@ async function runHousekeeping({ db, now, appId, transport, warn }) {
   out.snapshotsEmitted = snaps.emitted;
   out.messages.push(...snaps.messages);
   out.transportFailures.push(...snaps.transportFailures);
+  // R19 finding 1: lifecycle and conversion clears that could not be sent at commit.
+  const clears = await push.emitPendingClears({ db, now: nowDate, warn, transport });
+  out.clearsSent = clears.sent;
   const skips = await db.all("SELECT vs.device_eui, vs.skip_today_date, iz.timezone AS zone_timezone FROM valve_settings vs JOIN devices d ON d.deveui = vs.device_eui LEFT JOIN irrigation_zones iz ON iz.id = d.irrigation_zone_id WHERE vs.scheduler_status='SKIP_TODAY'");
   for (const s of skips) {
     const lp = P.localParts(nowDate, s.zone_timezone || gatewayTimezone || 'UTC');

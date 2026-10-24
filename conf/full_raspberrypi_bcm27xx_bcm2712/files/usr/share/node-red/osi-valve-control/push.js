@@ -1209,6 +1209,60 @@ async function emitPendingSnapshots({ db, now, appId, warn, debounceMs, transpor
   return out;
 }
 
+// R19 finding 1 (release review of PR #515): a lifecycle or conversion clear is prepared in
+// the mutation transaction and sent once after commit. When that send could not run (no
+// transport, or the flush failed), its required rows stay QUEUED with no transport phase. The
+// valve tick sends them here once ChirpStack answers. Only provably unattempted rows are sent
+// (sendPrepared* skip any row with transport evidence), so Q02(c) still holds: an attempted,
+// accepted or unknown row is never re-sent. A clear blocked by an active owner is re-checked
+// every tick and never flushes the queue under that owner.
+async function emitPendingClears({ db, now, warn, transport, transportFactory }) {
+  const out = { sent: 0, attempted: 0, failures: [] };
+  let rows = [];
+  try {
+    rows = await db.all("SELECT device_eui, conditional_control_json FROM valve_settings WHERE conditional_control_json IS NOT NULL AND conditional_control_json <> ''");
+  } catch (e) {
+    warn && warn('[valve-control] pending clears unreadable: ' + (e && e.message ? e.message : e));
+    return out;
+  }
+  const candidates = [];
+  for (const row of rows) {
+    const control = store.parseControl(row.conditional_control_json);
+    if (!control || !control.desired_revision) continue;
+    if (control.mode !== 'LIFECYCLE_CLEAR' && control.mode !== 'CONDITIONAL') continue;
+    if (control.mode === 'LIFECYCLE_CLEAR' && (!control.lifecycle_clear || control.lifecycle_clear.state === 'SUPERSEDED')) continue;
+    const readiness = control.readiness || {};
+    if (readiness.state === 'READY' || readiness.state === 'INVALID') continue;
+    const ids = Array.isArray(control.required_push_ids) ? control.required_push_ids : [];
+    if (!ids.length) continue;
+    const required = await db.all('SELECT push_id, state, transport_json FROM valve_schedule_pushes WHERE UPPER(device_eui)=UPPER(?) AND push_id IN (' + ids.map(() => '?').join(',') + ')', [row.device_eui].concat(ids));
+    if (!required.some((r) => lifecycleRowProvablyUnattempted(r))) continue;
+    candidates.push({ eui: String(row.device_eui).toUpperCase(), mode: control.mode, revision: control.desired_revision });
+  }
+  if (!candidates.length) return out;
+  const owned = !transport && typeof transportFactory === 'function' ? lazyTransport(transportFactory, warn) : null;
+  const via = transport || owned;
+  try {
+    if (!via || (typeof via.ensure === 'function' && !via.ensure())) return out;
+    for (const c of candidates) {
+      out.attempted += 1;
+      try {
+        const result = c.mode === 'LIFECYCLE_CLEAR'
+          ? await sendPreparedLifecycleClear({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn })
+          : await sendPreparedRevision({ db, deviceEui: c.eui, revision: c.revision, transport: via, now, warn });
+        out.sent += Number(result && result.sent || 0);
+        if (result && result.readiness && result.readiness.state === 'FAILED') out.failures.push({ device_eui: c.eui, reason: result.readiness.reason });
+      } catch (e) {
+        warn && warn('[valve-control] pending clear for ' + c.eui + ' failed: ' + (e && e.message ? e.message : e));
+        out.failures.push({ device_eui: c.eui, reason: 'transport_uncertain' });
+      }
+    }
+  } finally {
+    if (owned) owned.close();
+  }
+  return out;
+}
+
 async function compileAndQueue({ db, deviceEui, appId, force, now, flushQueue, transport, warn, timeZoneFallback, automaticReconcile = false, auto = false, resendPurpose, settingsPatch, statusOnlyOnConflict, schedulerStatus } = {}) {
   const eui = String(deviceEui).toUpperCase();
   const fixedOptions = { db, deviceEui: eui, appId, force, now, flushQueue, transport, warn, timeZoneFallback, settingsPatch, statusOnlyOnConflict, schedulerStatus };
@@ -1383,7 +1437,7 @@ async function applyGenerationTransition(db, deviceEui, result, now) {
   });
 }
 
-module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, buildSnapshotPushes, statusCodeFor, queuePushes, queueSnapshot, emitPendingSnapshots, lazyTransport, _resetTransportWarningsForTests, compileAndQueue, setSchedulerStatus, transportFailure,
+module.exports = { buildPlanPushes, buildDownlinkMessage, buildStatusPush, buildClockPush, buildSnapshotPushes, statusCodeFor, queuePushes, queueSnapshot, emitPendingSnapshots, emitPendingClears, lazyTransport, _resetTransportWarningsForTests, compileAndQueue, setSchedulerStatus, transportFailure,
   clearPlanPushes, prepareClearRevisionTx, prepareClearRevision, prepareLifecycleClearRevisionTx, sendPreparedRevision, sendPreparedLifecycleClear,
   retryLifecycleClear, invalidateLifecycleClearTx, LIFECYCLE_CLEAR_RESEND_PURPOSE, conditionalReadinessTx, conditionalReadiness,
   conditionalReconciliationNeeded, prepareFixedGenerationTransition, reconcileGenerationTransition, markGenerationTransitionApplied,
