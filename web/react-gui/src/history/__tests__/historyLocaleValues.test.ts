@@ -158,6 +158,24 @@ const PENDING_HUMAN_LUGANDA: ReadonlySet<string> = new Set([
   'mobileUplot.seriesLegend.legend', 'mobileUplot.seriesLegend.showAll',
   'mobileUplot.seriesLegend.plottedSeries', 'mobileUplot.seriesLegend.seriesCount',
   'mobileUplot.seriesLegend.focusAnnouncement', 'mobileUplot.seriesLegend.allSeriesAnnouncement',
+  'history.mobileTension.title', 'history.mobileTension.chart', 'history.mobileTension.waterTension', 'history.mobileTension.controls',
+  'history.mobileTension.time', 'history.mobileTension.timeRange', 'history.mobileTension.range24h', 'history.mobileTension.range7d',
+  'history.mobileTension.latest', 'history.mobileTension.hourlyAverages', 'history.mobileTension.hourlyAverage', 'history.mobileTension.loading',
+  'history.mobileTension.refreshing', 'history.mobileTension.emptyInterval', 'history.mobileTension.showLatest24h',
+  'history.mobileTension.unavailableValue', 'history.mobileTension.notLoaded', 'history.mobileTension.chooseSources',
+  'history.mobileTension.historicalUnverified', 'history.mobileTension.sources', 'history.mobileTension.chartSources',
+  'history.mobileTension.openSources', 'history.mobileTension.sourceDiscoveryIncomplete', 'history.mobileTension.catalogFailed',
+  'history.mobileTension.unavailableSources', 'history.mobileTension.requestTooLarge',
+  'history.mobileTension.fewerSourcesOrShorterWindow', 'history.mobileTension.accessDenied', 'history.mobileTension.incompleteResponse',
+  'history.mobileTension.transientFailure', 'history.mobileTension.retry', 'history.mobileTension.details', 'history.mobileTension.close',
+  'history.mobileTension.sourceCap', 'history.mobileTension.sourceCount', 'history.mobileTension.invalidHourlyAverages',
+  'history.mobileTension.removedSources', 'history.mobileTension.removeSource', 'history.mobileTension.transportCoverage',
+  'history.mobileTension.bucketInterval', 'history.mobileTension.latestBucket', 'history.mobileTension.seriesLegend.legend',
+  'history.mobileTension.seriesLegend.showAll', 'history.mobileTension.seriesLegend.plottedSeries',
+  'history.mobileTension.seriesLegend.seriesCount', 'history.mobileTension.seriesLegend.focusAnnouncement',
+  'history.mobileTension.seriesLegend.allSeriesAnnouncement', 'history.mobileTension.pinnedReading',
+  'history.mobileTension.visibleWindow', 'history.mobileTension.route.zoneLoading', 'history.mobileTension.route.zonesFailed',
+  'history.mobileTension.route.timeZoneUnavailable',
 ]);
 
 function isAllowedIdentical(locale: Locale, key: string): boolean {
@@ -167,14 +185,14 @@ function isAllowedIdentical(locale: Locale, key: string): boolean {
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    // 453 (two accessible names of the mobile uPlot range group and window
+    // 505 (the mobile tension shell and route labels add 52 leaves to the
     // readout added after the #512 review), including six series-legend labels: main carries the mobile uPlot
     // irrigationTimeline.eventLabel keys from the valve-control work
     // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
     // history.nav.admin key added for the scoped-access admin nav entry
     // point. All are already present in every shipped locale, so only the
     // count moves.
-    expect(Object.keys(english)).toHaveLength(453);
+    expect(Object.keys(english)).toHaveLength(505);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);
@@ -208,6 +226,8 @@ describe('history locale value parity', () => {
     expect(notEnglish, 'pending lg keys must equal the English source text').toEqual([]);
     const unlisted = Object.keys(english).filter((key) => key.startsWith('mobileUplot.') && !PENDING_HUMAN_LUGANDA.has(key));
     expect(unlisted, 'new mobileUplot keys need a human Luganda pass or a pending entry').toEqual([]);
+    const unlistedTension = Object.keys(english).filter((key) => key.startsWith('mobileTension.') && !PENDING_HUMAN_LUGANDA.has(key));
+    expect(unlistedTension, 'new mobileTension keys need a human Luganda pass or a pending entry').toEqual([]);
   });
 
   it('uses Swiss spelling in de-CH', () => {
