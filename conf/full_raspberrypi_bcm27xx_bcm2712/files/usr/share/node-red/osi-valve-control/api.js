@@ -10,6 +10,20 @@ const dispatch = require('./dispatch');
 
 const MAX_BODY_BYTES = 256 * 1024;
 
+// A valve runs either fixed weekly rows or rows of one live conditional policy, never both
+// (plan.validateScheduleModes). compileWindows() skips conditional rows, so the plan check
+// before a write cannot see the mix; check the stored result inside the write transaction,
+// so a refused request rolls back instead of leaving a mixed program that blocks every
+// later compile (Pause included).
+async function assertScheduleModeTx(tx, eui) {
+  const live = await store.listSchedules(tx, eui);
+  const mode = P.validateScheduleModes(live, await store.listPoliciesForSchedules(tx, live));
+  if (!mode.ok) {
+    const code = mode.code || 'mixed_schedule_mode';
+    throw apiError(mode.status || 409, code, code, mode);
+  }
+}
+
 function apiError(statusCode, code, message, details) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -230,6 +244,7 @@ async function handleHttpRequest(options) {
         const freshDevice = await ownedValve(tx, eui, auth.userId);
         row.timezone = freshDevice.zone_timezone || tzFallback;
         await store.insertSchedule(tx, row);
+        await assertScheduleModeTx(tx, eui);
         await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
       }));
       const q = row.kind === 'WEEKLY' ? await push.compileAndQueue({ db, deviceEui: eui, appId: options.appId, force: false, now, flushQueue: options.flushQueue, transport: options.transport, warn, timeZoneFallback: tzFallback }) : { rows: [], messages: [] };
@@ -273,6 +288,7 @@ async function handleHttpRequest(options) {
           if (!fresh) throw apiError(404, 'not_found', 'Schedule not found');
           changed = scheduleBindingChanged(fresh, v.value);
           await store.updateSchedule(tx, uuid, v.value, eui); // (F144) scoped to the path's valve, see the DELETE branch
+          await assertScheduleModeTx(tx, eui);
           if (changed) await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_changed', now });
         }));
       }

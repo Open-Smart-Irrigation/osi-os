@@ -326,3 +326,38 @@ test('R13-M4: REST schedule create during a pending open names the open the fixe
   assert.equal(out.payload.pushes_queued, 8);
   db.close();
 });
+
+// Release review (Codex, PR #515): a fixed WEEKLY schedule on a valve whose enabled
+// schedule is attached to a live conditional policy passes compileWindows() (which skips
+// conditional rows) and used to commit before compileAndQueue() refused the mixed mode
+// with 409. The refused request must leave no fixed row behind, so Pause and the other
+// compile paths keep working.
+async function conditionalValve() {
+  const { FIXTURE_EUI: EUI } = require('./test-helpers');
+  const fixture = await tempDb();
+  await store.insertSchedule(fixture.db, { schedule_uuid: 'conditional-row', device_eui: EUI, kind: 'WEEKLY', weekdays_mask: 127, start_time: '08:00', duration_minutes: 5, timezone: 'UTC', enabled: 1 });
+  await fixture.db.run('UPDATE valve_schedules SET condition_policy_uuid=? WHERE schedule_uuid=?', ['policy-1', 'conditional-row']);
+  await fixture.db.run("INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone) VALUES ('policy-1','zone-1','{}','UTC')");
+  return Object.assign(fixture, { EUI });
+}
+
+test('mixed mode: POST of a fixed schedule beside a conditional one is refused and persists nothing', async () => {
+  const { path, db, EUI } = await conditionalValve();
+  const out = await call(path, req('POST', `/api/valves/${EUI}/schedules`, { kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, enabled: true }));
+  assert.equal(out.statusCode, 409, JSON.stringify(out.payload));
+  assert.equal(out.payload.error, 'mixed_schedule_mode');
+  const rows = await db.all('SELECT schedule_uuid FROM valve_schedules WHERE device_eui=? AND deleted_at IS NULL', [EUI]);
+  assert.deepEqual(rows.map((r) => r.schedule_uuid), ['conditional-row'], 'the refused fixed schedule is not stored');
+  db.close();
+});
+
+test('mixed mode: enabling a disabled fixed schedule beside a conditional one is refused and changes nothing', async () => {
+  const { path, db, EUI } = await conditionalValve();
+  await store.insertSchedule(db, { schedule_uuid: '11111111-2222-4333-8444-555555555555', device_eui: EUI, kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, timezone: 'UTC', enabled: 0 });
+  const out = await call(path, req('PUT', `/api/valves/${EUI}/schedules/11111111-2222-4333-8444-555555555555`, { enabled: true }));
+  assert.equal(out.statusCode, 409, JSON.stringify(out.payload));
+  assert.equal(out.payload.error, 'mixed_schedule_mode');
+  const row = await db.get('SELECT enabled FROM valve_schedules WHERE schedule_uuid=?', ['11111111-2222-4333-8444-555555555555']);
+  assert.equal(Number(row.enabled), 0, 'the refused enable is rolled back');
+  db.close();
+});
