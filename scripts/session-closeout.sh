@@ -4,7 +4,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENTS_FILE="$REPO_ROOT/AGENTS.md"
 CLAUDE_FILE="$REPO_ROOT/CLAUDE.md"
-MEMORY_FILE="${OSI_OS_MEMORY_FILE:-/home/phil/.claude/projects/-home-phil-Repos-osi-os/memory/MEMORY.md}"
+# Opt-in: the memory index of the harness running the closeout, if it has one.
+MEMORY_FILE="${OSI_OS_MEMORY_FILE:-}"
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -60,15 +61,10 @@ printf 'Dry-run candidates from `git clean -nd`:\n'
 print_list "$cleanup_candidates"
 
 section "Documentation consistency"
+behind="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo '?')"
+printf 'INFO: %s is %s commits behind origin/main (as of the last fetch)\n' "$current_branch" "$behind"
+
 if [ -f "$AGENTS_FILE" ]; then
-  agents_branch="$(awk -F'`' '/^- `osi-os`: `/ { print $4; exit }' "$AGENTS_FILE")"
-
-  if [ -n "$agents_branch" ] && [ "$agents_branch" = "$current_branch" ]; then
-    printf 'OK: AGENTS.md documents osi-os branch as `%s`\n' "$current_branch"
-  else
-    printf 'WARN: AGENTS.md branch entry is `%s`, repo branch is `%s`\n' "${agents_branch:-missing}" "$current_branch"
-  fi
-
   check_contains "$AGENTS_FILE" 'source of truth|canonical' 'AGENTS.md records the edge-first source-of-truth model'
   check_contains "$AGENTS_FILE" 'REST polling' 'AGENTS.md records cloud-to-edge commands via REST polling'
   check_contains "$AGENTS_FILE" 'telemetry only' 'AGENTS.md records MQTT as telemetry only'
@@ -83,24 +79,16 @@ else
   printf 'WARN: CLAUDE.md not found at %s\n' "$CLAUDE_FILE"
 fi
 
-if [ -f "$MEMORY_FILE" ]; then
-  memory_branch="$(awk -F'`' '/^\| \*\*Current Branch\*\* \| `/ { print $2; exit }' "$MEMORY_FILE")"
-
-  if [ -n "$memory_branch" ] && [ "$memory_branch" = "$current_branch" ]; then
-    printf 'OK: MEMORY.md documents current branch as `%s`\n' "$current_branch"
-  else
-    printf 'WARN: MEMORY.md branch entry is `%s`, repo branch is `%s`\n' "${memory_branch:-missing}" "$current_branch"
-  fi
-
-  check_contains "$MEMORY_FILE" 'source of truth|canonical' 'MEMORY.md records the edge-first source-of-truth model'
-  check_contains "$MEMORY_FILE" 'REST polling' 'MEMORY.md records cloud-to-edge commands via REST polling'
-  check_contains "$MEMORY_FILE" 'telemetry only' 'MEMORY.md records MQTT as telemetry only'
+if [ -z "$MEMORY_FILE" ]; then
+  printf 'INFO: OSI_OS_MEMORY_FILE unset; no harness memory index checked\n'
+elif [ -f "$MEMORY_FILE" ]; then
+  printf 'INFO: memory index %s last modified %s\n' "$MEMORY_FILE" "$(date -r "$MEMORY_FILE" '+%Y-%m-%d %H:%M')"
 else
-  printf 'WARN: MEMORY.md not found at %s\n' "$MEMORY_FILE"
+  printf 'WARN: OSI_OS_MEMORY_FILE points to a missing file: %s\n' "$MEMORY_FILE"
 fi
 
 section "Closeout reminder"
 printf '%s\n' '- Update AGENTS.md only for durable repo-level context changes.'
-printf '%s\n' '- Update MEMORY.md for operational notes, historical context, and device-level details.'
+printf '%s\n' "- Record operational and historical context in your own harness memory (or the run HANDOVER.md); never edit another harness's memory."
 printf '%s\n' '- Delete only clearly temporary session artifacts; otherwise report candidates.'
 printf '%s\n' '- Summarize remaining risks, skipped checks, and the next recommended step.'
