@@ -34,6 +34,7 @@ const { translateForTest } = vi.hoisted(() => {
     'cancelCollateral.open': 'Another pending open',
     'cancelCollateral.config': 'Configuration command (port {{fport}})',
     'cancelCollateral.configUnknown': 'Configuration command',
+    'cancelCollateral.planStillRunning': 'The valve may still run its previous program: this cancel removed a plan change that had not reached it. Delete or disable the schedule again.',
     'weekdays.1': 'Mon',
   };
   return {
@@ -271,6 +272,33 @@ describe('ValveControlPanel', () => {
     expect(status).toHaveTextContent('Plan for Mon');
     expect(status).toHaveTextContent('Configuration command (port 11)');
     expect(status).not.toHaveTextContent('Another pending open');
+  });
+
+  // Owner ruling 2026-10-24 (R19 residual 1): no replay. When the flush removed a pending plan
+  // change (a clear or a reduction), the panel says the valve still runs its previous program and
+  // that the farmer must delete or disable again.
+  it('warns that the valve still runs its previous program when the flush removed a plan change', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({
+      outcome: 'handed_off',
+      collateral: [{ ownerType: 'push', ownerId: 'p-day', purpose: 'DAYMASK_PLAN', weekday: null, fport: null, inQueue: true }],
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('The valve may still run its previous program: this cancel removed a plan change that had not reached it. Delete or disable the schedule again.');
+  });
+
+  it('shows no plan warning when the flush removed no plan change', async () => {
+    vi.mocked(valvesAPI.list).mockResolvedValue([makeValve()]);
+    vi.mocked(devicesAPI.cancelIrrigation).mockResolvedValueOnce({
+      outcome: 'cancelled',
+      collateral: [{ ownerType: 'push', ownerId: 'p-clock', purpose: 'CLOCK_SYNC', weekday: null, fport: null, inQueue: true }],
+    });
+    render(<ValveControlPanel onUpdate={vi.fn()} canWrite />);
+    fireEvent.click(await screen.findByRole('button', { name: `Cancel-${makeValve().deviceEui}` }));
+    const status = await screen.findByRole('status');
+    expect(status).not.toHaveTextContent('previous program');
   });
 
   it('shows a handed-off cancel honestly, with the D04 text, instead of a generic failure', async () => {

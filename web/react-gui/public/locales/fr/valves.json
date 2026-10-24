@@ -64,5 +64,5 @@
   "cancelHelp": "Cancel deletes the pending command. It does not close a valve that is already open.",
   "cancelHelpLabel": "About cancel",
   "cancelOutcome": { "cancelled": "The pending open was deleted.", "handed_off": "The open may already have been sent to the valve, so it was not deleted.", "already_running": "The valve is already open: there was no pending command to delete.", "uncertain": "The gateway could not confirm that the pending open was deleted." },
-  "cancelCollateral": { "title": "Also removed from the valve queue:", "weekdayPlan": "Plan for {{weekday}}", "planGroup": "Plan update", "clockSync": "Clock sync", "schedulerStatus": "Scheduler status change", "open": "Another pending open", "config": "Configuration command (port {{fport}})", "configUnknown": "Configuration command" }
+  "cancelCollateral": { "title": "Also removed from the valve queue:", "weekdayPlan": "Plan for {{weekday}}", "planGroup": "Plan update", "clockSync": "Clock sync", "schedulerStatus": "Scheduler status change", "open": "Another pending open", "config": "Configuration command (port {{fport}})", "configUnknown": "Configuration command", "planStillRunning": "La vanne exécute peut-être encore son programme précédent : cette annulation a retiré une modification du programme qui ne lui était pas encore parvenue. Supprimez ou désactivez à nouveau le programme." }
 }

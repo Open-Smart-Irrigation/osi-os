@@ -34,7 +34,8 @@ const SCHEDULE_HELP={scheduleHelp:'Weekly schedules run on each valve.',schedule
 // the English source text (docs/i18n/pending-luganda-translations.md).
 // resumeRefusedClearPending (W29) is translated in every edge locale except lg (English, ledger).
 // irrigationPolicy.vwcDisabled (R17-M1, W29) is translated in every edge locale except lg (English, ledger).
-const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel',...PENDING_TRANSLATION,'resumeRefusedClearPending','irrigationPolicy.vwcDisabled'];
+// cancelCollateral.planStillRunning (owner ruling 2026-10-24, R19 residual 1) is translated in every edge locale except lg (English, ledger).
+const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel',...PENDING_TRANSLATION,'resumeRefusedClearPending','irrigationPolicy.vwcDisabled','cancelCollateral.planStillRunning'];
 // D04 (owner decision 2026-10-18): the cancel help text is verbatim.
 test('cancel help is the verbatim D04 text',()=>{
   assert.equal(english.cancelHelp,'Cancel deletes the pending command. It does not close a valve that is already open.');

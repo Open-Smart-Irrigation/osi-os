@@ -9,6 +9,9 @@ export function ValveCancelOutcome({ valveName, result }: { valveName: string; r
   const { t } = useTranslation('valves');
   const removed = removedCollateral(result);
   const showHelp = result.outcome === 'handed_off' || result.outcome === 'already_running';
+  // Owner ruling 2026-10-24: nothing is replayed after a cancel. A removed plan change (a clear or
+  // a reduction) never reached the valve, so it still runs its previous program.
+  const planRemoved = removed.some((item) => item.ownerType === 'push' && (item.purpose === 'WEEKDAY_PLAN' || item.purpose === 'DAYMASK_PLAN'));
   const label = (item: ValveCancelCollateralItem): string => {
     if (item.ownerType === 'push') {
       if (item.purpose === 'WEEKDAY_PLAN' && item.weekday != null) {
@@ -30,6 +33,7 @@ export function ValveCancelOutcome({ valveName, result }: { valveName: string; r
         {t(`cancelOutcome.${result.outcome}`)}
       </p>
       {showHelp && <p className="mt-1 text-[var(--text-secondary)]">{t('cancelHelp')}</p>}
+      {planRemoved && <p className="mt-1 font-semibold text-[var(--warn-text)]">{t('cancelCollateral.planStillRunning')}</p>}
       {removed.length > 0 && (
         <>
           <p className="mt-1">{t('cancelCollateral.title')}</p>
