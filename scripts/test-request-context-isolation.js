@@ -656,12 +656,16 @@ test('valve open and cancel interleaved on different valves', async () => {
     await rt.run('A');
     assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12 });
     const cancel = onlyResponse(rt, 'cancel');
-    assert.equal(cancel.statusCode, 200, JSON.stringify(cancel.payload));
-    assert.equal(cancel.payload.deveui, VALVE_B);
+    // Owner decision 2026-10-24 (fail closed): B's open was handed to ChirpStack, so the cancel
+    // flushes B's queue and answers handed_off; it must still answer for valve B only.
+    assert.equal(cancel.statusCode, 409, JSON.stringify(cancel.payload));
+    assert.equal(cancel.payload.outcome, 'handed_off');
+    const bRow = db.prepare('SELECT expectation_id FROM valve_actuation_expectations WHERE device_eui=?').get(VALVE_B);
+    assert.equal(String(cancel.payload.expectation_id), String(bRow.expectation_id), 'the cancel answers for valve B');
     const states = db.prepare(
       'SELECT device_eui, reconciliation_state FROM valve_actuation_expectations ORDER BY created_at, rowid'
     ).all().map((row) => row.device_eui + ':' + row.reconciliation_state);
-    assert.ok(states.includes(VALVE_B + ':CANCELLED'), 'valve B expectation cancelled: ' + states);
+    assert.ok(states.includes(VALVE_B + ':PENDING_OBSERVATION'), 'valve B expectation stays observed: ' + states);
     assert.ok(states.some((state) => state.startsWith(VALVE_A + ':') && !state.endsWith('CANCELLED')),
       'valve A expectation untouched: ' + states);
   });
