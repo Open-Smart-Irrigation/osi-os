@@ -9,7 +9,7 @@ const english=read('en');
 const shared=['openDialog.liters','scheduleDialog.noWindows','scheduleDialog.preview','scheduleDialog.previewLiters','settingsDialog.gen1','settingsDialog.gen2','format.temperature'];
 // CMD-04 PR0 (owner decision Q02 c) containment strings ship the English source text in every
 // edge locale until a reviewed translation lands (lg: docs/i18n/pending-luganda-translations.md).
-const PENDING_TRANSLATION=['planLost','scheduleDialog.push.LOST'];
+const PENDING_TRANSLATION=['planLost','schedulerStatusLost','scheduleDialog.push.LOST'];
 const extra:Record<string,string[]>={
   'de-CH':['scheduleDialog.startTime','trigger.cloud_command'],
   fr:['scheduleDialog.date','serviceDialog.configSection','serviceDialog.timed.unitMinutes'],

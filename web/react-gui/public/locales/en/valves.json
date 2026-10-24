@@ -27,6 +27,7 @@
   "nextRunOnce": "Next: {{when}} · {{minutes}} min (one-time, gateway-timed)",
   "noSchedule": "No schedule",
   "schedulerPaused": "Schedules paused",
+  "schedulerStatusLost": "Device may not hold the latest pause, skip or resume",
   "skippedToday": "Skipped today",
   "planIncomplete": "{{count}} plan update(s) not yet confirmed by the valve — resend the plan",
   "planLost": "Device may not hold this plan",

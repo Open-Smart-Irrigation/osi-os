@@ -27,6 +27,7 @@
   "nextRunOnce": "Prochaine ouverture : {{when}} · {{minutes}} min (ponctuelle, envoyée par la passerelle)",
   "noSchedule": "Aucun programme",
   "schedulerPaused": "Programmes suspendus",
+  "schedulerStatusLost": "Device may not hold the latest pause, skip or resume",
   "skippedToday": "Irrigation sautée aujourd'hui",
   "planIncomplete": "{{count}} mise(s) à jour du programme non confirmée(s) par la vanne — renvoyer le programme",
   "planLost": "Device may not hold this plan",

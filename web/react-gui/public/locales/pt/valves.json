@@ -27,6 +27,7 @@
   "nextRunOnce": "Próxima: {{when}} · {{minutes}} min (pontual, enviada pelo gateway)",
   "noSchedule": "Sem programa",
   "schedulerPaused": "Programas pausados",
+  "schedulerStatusLost": "Device may not hold the latest pause, skip or resume",
   "skippedToday": "Ignorado hoje",
   "planIncomplete": "{{count}} atualização(ões) do programa ainda não confirmada(s) pela válvula — reenviar o programa",
   "planLost": "Device may not hold this plan",
