@@ -6,7 +6,7 @@ import {
   HISTORY_PREFETCH_IDLE_MS,
   HISTORY_SETTLE_MS,
 } from './historyLoader';
-import { bufferedRequest, coverageContains, HISTORY_MAX_VIEWPORT_SPAN_MS, HISTORY_NAVIGATION_START_MS, minuteViewport, neighborRequest } from './range';
+import { HISTORY_MAX_VIEWPORT_SPAN_MS, HISTORY_NAVIGATION_START_MS, minuteViewport } from './range';
 import { cardHistoryRangeStrategy, type HistoryRangeStrategy } from './rangeStrategy';
 import { HistoryAbortError, HistoryAuthError, type HistoryAcceptedData, type HistoryDemand, type HistoryLoader, type HistoryRangeRequest } from './types';
 import { DAY_MS, HOUR_MS, MINUTE_MS, type HistoryLoadContext, type HistoryWindowOptions, type HistoryWindowReason, type Viewport, type HistoryEmptyReason } from '../shared/types';
@@ -64,7 +64,6 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
   const maxSpanMs = options.maxSpanMs ?? HISTORY_MAX_VIEWPORT_SPAN_MS;
   const selectionMode = options.selectedIds !== undefined;
   const [selection, setSelection] = useState<readonly string[] | undefined>(() => options.selectedIds?.slice());
-  const [selectionRevision, setSelectionRevision] = useState(0);
   const deniedIdsRef = useRef(new Set<string>());
   const authScopeRef = useRef(`${context?.sessionKey ?? ''}|${context?.scopeKey ?? ''}`);
   const lastControlledSelectionKeyRef = useRef<string | undefined>(undefined);
@@ -237,7 +236,6 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     }
     if (selectionRef.current !== undefined && context) {
       selectionRevisionRef.current = loader.advanceSelectionRevision(context);
-      setSelectionRevision(selectionRevisionRef.current);
     }
     setStatus('loading');
     schedule(viewportStore.get(), 'initial');
@@ -347,7 +345,6 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     setSelection(next);
     selectionRef.current = next;
     selectionRevisionRef.current = revision;
-    setSelectionRevision(revision);
     clear(timer.current);
     timer.current = null;
     intent.current += 1;

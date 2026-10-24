@@ -37,6 +37,7 @@ export function normalizeMobileSeries(series: SensorSeries, invalid: { count: nu
       invalid.count += 1;
       return { ...bucket, value: null, quality: 'invalid' };
     }
+    if (bucket.value === null && bucket.quality === 'invalid') invalid.count += 1;
     return { ...bucket };
   });
   const finite = buckets.filter((bucket) => bucket.value !== null);
@@ -80,14 +81,16 @@ export function normalizeMobileAnalysisResponse(dto: MobileAnalysisResponseDto, 
   if (![dto.coverage.from, dto.coverage.to, dto.grid.from, dto.grid.to].every(Number.isFinite) || dto.coverage.from > request.from || dto.coverage.to < request.to || dto.grid.from > request.from || dto.grid.to < request.to) protocol('invalid-coverage', 'response coverage does not enclose request');
   const expected = new Set(selectedIds);
   const actual = dto.series.map((series) => series.seriesId);
+  if (dto.dropped.some((item) => typeof item.seriesId !== 'string' || item.seriesId.trim() === '')) protocol('unrequested-series', 'response contains a dropped series without a series ID');
   const duplicates = new Set(actual.filter((id, index) => actual.indexOf(id) !== index));
   if (duplicates.size) protocol('duplicate-series', 'response contains duplicate series');
   if (actual.some((id) => !expected.has(id))) protocol('unrequested-series', 'response contains an unrequested series');
   const missing = selectedIds.filter((id) => !actual.includes(id));
-  const dropped = dto.dropped.filter((item) => expected.has(item.seriesId));
-  if (missing.length || dropped.length) {
-    const accessDeniedIds = dropped.filter((item) => item.reason === 'access_denied').map((item) => item.seriesId);
-    const failure: MobileHistoryFailure = { kind: 'sources', missingIds: missing, dropped, accessDeniedIds, reason: 'selected sources are missing or dropped' };
+  const dropped = dto.dropped as Array<{ seriesId: string; reason: string }>;
+  const selectedDropped = dropped.filter((item) => expected.has(item.seriesId));
+  if (missing.length || selectedDropped.length) {
+    const accessDeniedIds = selectedDropped.filter((item) => item.reason === 'access_denied').map((item) => item.seriesId);
+    const failure: Extract<MobileHistoryFailure, { kind: 'sources' }> = { kind: 'sources', missingIds: missing, dropped: selectedDropped, accessDeniedIds, reason: 'selected sources are missing or dropped' };
     throw new MobileAnalysisValidationError(failure);
   }
   if (dto.grid.platform === 'cloud') {

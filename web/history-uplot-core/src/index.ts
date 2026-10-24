@@ -3,6 +3,7 @@ export * from './shared/seriesAppearance';
 export * from './shared/gestures';
 export * from './shared/inspection';
 export * from './mobile/mobileTensionPolicy';
+export * from './mobile/mobileHistoryError';
 export * from './shared/viewport';
 export * from './history/range';
 export * from './history/rangeStrategy';

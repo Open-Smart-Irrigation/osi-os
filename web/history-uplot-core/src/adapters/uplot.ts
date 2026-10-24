@@ -17,16 +17,6 @@ import { toUplotData } from './uplot-data';
 const EMPTY_DATA: uPlot.AlignedData = [[]];
 const MAX_MARKER_POINTS = 500;
 
-const timeTick = new Intl.DateTimeFormat('en-GB', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-});
-const dateTick = new Intl.DateTimeFormat('en-GB', {
-  day: '2-digit',
-  month: 'short',
-});
-
 export function formatUplotTimeTick(value: number, min: number, max: number, locale = 'en-GB', timeZone?: string): string {
   const date = new Date(value * 1_000);
   const formatter = max - min <= 48 * 60 * 60 ? new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }) : new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short', timeZone });

@@ -149,7 +149,7 @@ export interface MobileAnalysisDtoSeries {
   truncated: boolean;
   points: readonly MobileAnalysisDtoPoint[];
 }
-export interface MobileAnalysisDroppedSeries { seriesId: string; reason: string; }
+export interface MobileAnalysisDroppedSeries { seriesId: string | null; reason: string; }
 export type MobileAnalysisGrid =
   | { platform: 'cloud'; from: number; to: number; stepSeconds: number; bucketCount: number }
   | { platform: 'edge'; from: number; to: number };
