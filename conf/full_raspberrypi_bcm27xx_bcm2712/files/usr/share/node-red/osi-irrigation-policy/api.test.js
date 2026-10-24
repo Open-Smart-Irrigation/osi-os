@@ -1077,3 +1077,22 @@ test('NTP removal: the default clock gate enables a policy without an NTP marker
     assert.equal(result.policy.enabled, true);
   } finally { closeFixture(f); }
 });
+
+// Cloud fix (osi-server PR #389): a paused or disabled policy may keep zero enabled weekly rows,
+// so a policy can be retired; no_targets applies only when the policy ends up enabled.
+test('no_targets: a disabled policy may keep no enabled weekly row; an enabled one may not', async () => {
+  const f = fixture();
+  try {
+    await f.db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,'06:00',30,'UTC',1,1)", ['11111111-1111-4111-8111-111111111111', VALVE]);
+    const base = { zone_uuid: 'zone-policy-test', expected_policy_version: null, condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }, timezone: 'UTC',
+      schedules: [{ schedule_uuid: '11111111-1111-4111-8111-111111111111', expected_sync_version: 1, execution: 'always', enabled: false }] };
+    await assert.rejects(api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: { ...base, enabled: true }, now: '2026-10-24T10:00:00Z', runtimeClockStatus: () => ({ trusted: true }), qualificationProvider: () => ({ qualified: true, identity: 'fixture', margin_seconds: 0 }) }),
+      (error) => error.code === 'no_targets');
+    const result = await api.applyPolicyEdit({ db: f.db, actor: { user_id: 1 }, request: { ...base, enabled: false }, now: '2026-10-24T10:00:00Z', runtimeClockStatus: () => ({ trusted: true }) });
+    assert.equal(result.policy.enabled, false);
+    const row = await f.db.get("SELECT enabled FROM valve_schedules WHERE schedule_uuid='11111111-1111-4111-8111-111111111111'");
+    assert.equal(Number(row.enabled), 0);
+  } finally {
+    closeFixture(f);
+  }
+});

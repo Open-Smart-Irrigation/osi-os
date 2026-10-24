@@ -503,7 +503,9 @@ async function validateScheduleTargets(tx, rows, zoneId, policy) {
   const targetEuIs = new Set(activeWeekly(rows).map((row) => String(row.device_eui).toUpperCase()));
   for (const key of keys) if (!targetEuIs.has(key)) throw apiError(422, 'foreign_delivery_settings_key', 'delivery settings key is not a selected valve', { device_eui: key }, [key]);
   for (const eui of targetEuIs) if (!policy.delivery_settings[eui]) policy.delivery_settings[eui] = { delivery_interval_minutes: 10 };
-  if (!targetEuIs.size) throw apiError(422, 'no_targets', 'at least one enabled WEEKLY valve target is required');
+  // A paused or disabled policy may keep zero enabled weekly rows (the cloud retires a policy
+  // that way, osi-server PR #389); only a policy that ends up enabled needs a target.
+  if (!targetEuIs.size && policy.enabled) throw apiError(422, 'no_targets', 'at least one enabled WEEKLY valve target is required');
   const conditionalTargetEuIs = new Set(activeWeekly(rows)
     .filter((row) => row.condition_policy_uuid === policy.policy_uuid)
     .map((row) => String(row.device_eui).toUpperCase()));

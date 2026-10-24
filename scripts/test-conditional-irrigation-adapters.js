@@ -232,3 +232,26 @@ for (const profile of PROFILES) {
     }
   });
 }
+
+// Cloud fix (osi-server PR #389): the cloud retires a policy with UPSERT_IRRIGATION_POLICY
+// enabled:false and its last weekly row disabled; no_targets applies only to an enabled policy.
+for (const profile of PROFILES) {
+  test(`${profile}: a cloud UPSERT_IRRIGATION_POLICY may retire a policy to zero enabled rows`, async () => {
+    const db = seedScopedDb(VALVE);
+    try {
+      policyFixture(db);
+      const retire = envelope(741, 'UPSERT_IRRIGATION_POLICY', uuid(741), {
+        policy_uuid: POLICY, expected_policy_version: 4,
+        condition: { kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' },
+        timezone: 'UTC', enabled: false, observation_window_minutes: 60, min_interval_minutes: 60, max_daily_minutes: 240, delivery_settings: {},
+        schedules: [{ schedule_uuid: SCHEDULE, device_eui: VALVE, expected_sync_version: 7, weekdays_mask: 127, start_time: '06:00', duration_minutes: 10, enabled: false, execution: 'conditional' }],
+      });
+      const out = await runCommand(profile, db, retire, transportRecorder());
+      assert.equal(out.result[1].payload.result, 'APPLIED', JSON.stringify(out.result[1].payload));
+      assert.equal(db.prepare('SELECT enabled FROM irrigation_policies WHERE policy_uuid=?').get(POLICY).enabled, 0);
+      assert.equal(db.prepare('SELECT enabled FROM valve_schedules WHERE schedule_uuid=?').get(SCHEDULE).enabled, 0);
+    } finally {
+      db.close();
+    }
+  });
+}
