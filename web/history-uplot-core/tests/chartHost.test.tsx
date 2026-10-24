@@ -16,11 +16,20 @@ describe('packaged ChartHost', () => {
     const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 7_200_000 }, 1_000, 7_200_000);
     const buckets = [{ from: 0, to: 3_600_000, value: 23.416666666666668, count: 2, quality: 'ok' }, { from: 3_600_000, to: 7_200_000, value: null, count: 0, quality: 'partial' }] as const;
     const view = render(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets }]} store={store} extent={{ from: 0, to: 7_200_000 }} inspectionMode="containing-bucket" locale="fr" timeZone="UTC" />);
+    expect(mountAdapter).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), expect.objectContaining({ locale: 'fr', timeZone: 'UTC' }));
     fireEvent.click(view.getByTestId('chart-host'), { clientX: 25, clientY: 50 });
     expect(view.getByTestId('inspector').textContent).toContain('23,4167');
+    expect(view.getByTestId('inspector').textContent).toContain('janv.');
     view.rerender(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets }]} store={store} extent={{ from: 0, to: 7_200_000 }} inspectionMode="containing-bucket" locale="en-GB" timeZone="UTC" />);
     fireEvent.click(view.getByTestId('chart-host'), { clientX: 75, clientY: 50 });
     expect(view.getByTestId('inspector').textContent).toContain('Unavailable');
+  });
+  test('keeps nearest-point numeric output in legacy raw form', () => {
+    const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
+    const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 7_200_000 }, 1_000, 7_200_000);
+    const view = render(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], points: [{ t: 1_800_000, value: 23.416666666666668 }] }]} store={store} extent={{ from: 0, to: 7_200_000 }} />);
+    fireEvent.click(view.getByTestId('chart-host'), { clientX: 25, clientY: 50 });
+    expect(view.getByTestId('inspector').textContent).toContain('23.416666666666668');
   });
   test('uses rerendered locale for subscribed window updates', () => {
     const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));

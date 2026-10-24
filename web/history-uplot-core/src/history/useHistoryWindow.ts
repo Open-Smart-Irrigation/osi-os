@@ -363,12 +363,20 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
     if (compatible) {
       const projected = filterAccepted(acceptedRef.current, next)!;
       const finite = hasFiniteVisibleData(projected, visible);
+      clear(prefetchTimer.current);
+      prefetchTimer.current = null;
+      setLoadingRequest(null);
+      setRefreshing(false);
+      setError(null);
+      setFailedRequest(null);
       setEmptyReason(finite ? null : 'no-finite-data');
       setStatus(finite ? 'ready' : 'empty');
       return;
     }
     const removing = previous.some((id) => !next.includes(id));
-    if (removing && !acceptedRef.current) {
+    const adding = next.some((id) => !previous.includes(id));
+    const pureRemoval = removing && !adding;
+    if (pureRemoval) {
       schedule(viewportStore.get(), 'gesture');
       return;
     }

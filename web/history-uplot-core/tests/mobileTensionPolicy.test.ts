@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { classifyMobileAnalysisFailure, normalizeMobileAnalysisResponse, normalizeMobileSeries, selectMobileTensionSources, toMobileAnalysisWindow, validateMobileCloudGrid, validateMobileEdgeGrid, visibleMobileAnalysisEmpty } from '../src/mobile/mobileTensionPolicy';
+import { MobileAnalysisValidationError } from '../src/shared/types';
 import type { HistoryWindowRequest, HistoryWindowResponse, MobileAnalysisResponseDto, MobileTensionSource } from '../src/shared/types';
 
 const source = (id: string, overrides: Partial<MobileTensionSource> = {}): MobileTensionSource => ({ seriesId: id, sourceKey: id, channelKey: 'swt_1', label: id, unit: 'kPa', zoneId: 'z', available: true, measurementKind: 'soil', ...overrides });
@@ -38,7 +39,14 @@ describe('mobile tension policy', () => {
     expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [dto().series[0], { ...dto().series[0] }] }, request, ['a', 'b'])).toThrow(/duplicate/);
     expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [dto().series[0]] }, request, ['a', 'b'])).toThrow(/missing/);
     expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [{ ...dto().series[0], seriesId: 'x' }, dto().series[1]] }, request, ['a', 'b'])).toThrow(/unrequested/);
-    expect(() => normalizeMobileAnalysisResponse({ ...dto(), dropped: [{ seriesId: 'b', reason: 'access_denied' }] }, request, ['a', 'b'])).toThrow(/missing or dropped/);
+    try {
+      normalizeMobileAnalysisResponse({ ...dto(), dropped: [{ seriesId: 'b', reason: 'access_denied' }] }, request, ['a', 'b']);
+      throw new Error('expected source failure');
+    } catch (error) {
+      expect(error).toBeInstanceOf(MobileAnalysisValidationError);
+      const failure = classifyMobileAnalysisFailure(error as MobileAnalysisValidationError);
+      expect(failure).toMatchObject({ kind: 'sources', missingIds: [], accessDeniedIds: ['b'], dropped: [{ seriesId: 'b', reason: 'access_denied' }] });
+    }
   });
   test('classifies structured source, auth, size, network and transient failures', () => {
     expect(classifyMobileAnalysisFailure({ kind: 'http', status: 401, code: null, message: 'expired' }).kind).toBe('auth');

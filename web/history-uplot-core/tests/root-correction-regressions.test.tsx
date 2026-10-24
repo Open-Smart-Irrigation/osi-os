@@ -26,6 +26,7 @@ describe('root correction verification', () => {
     const load = vi.fn(async (r: HistoryWindowRequest, _s: AbortSignal, c?: HistoryLoadContext) => data(r, c!.selectedIds!));
     const { result, rerender } = renderHook(({ ids }) => useHistoryWindow({ ...base, selectedIds: ids, load }), { initialProps: { ids: ['a', 'b'] } });
     await flush(); rerender({ ids: ['a'] });
+    expect(load.mock.calls[0][2]?.selectedIds).toEqual(['a', 'b']);
     expect(result.current.accepted?.series.map(s => s.id)).toEqual(['a']);
     expect(load).toHaveBeenCalledTimes(1);
   });
@@ -60,4 +61,31 @@ describe('root correction verification', () => {
     await flush(); act(() => result.current.selectSources?.(['null']));
     expect(result.current.status).toBe('empty'); expect(result.current.emptyReason).toBe('no-finite-data');
   });
+  test('removing a pending addition settles loading when retained backing satisfies the selection', async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(async (r: HistoryWindowRequest, _s: AbortSignal, c?: HistoryLoadContext) => data(r, c!.selectedIds!));
+    const { result } = renderHook(() => useHistoryWindow({ ...base, selectedIds: ['a'], load }));
+    await flush();
+    load.mockImplementationOnce(() => new Promise(() => {}));
+    act(() => result.current.selectSources?.(['a', 'b']));
+    await act(async () => { await vi.advanceTimersByTimeAsync(151); });
+    expect(result.current.refreshing).toBe(true);
+    act(() => result.current.selectSources?.(['a']));
+    expect(result.current.refreshing).toBe(false);
+    expect(result.current.loadingRequest).toBeNull();
+  });
+  test('excluding a failed addition clears the error when retained backing satisfies the selection', async () => {
+    vi.useFakeTimers();
+    const load = vi.fn(async (r: HistoryWindowRequest, _s: AbortSignal, c?: HistoryLoadContext) => data(r, c!.selectedIds!));
+    const { result } = renderHook(() => useHistoryWindow({ ...base, selectedIds: ['a'], load }));
+    await flush();
+    load.mockRejectedValueOnce(new Error('source b unavailable'));
+    act(() => result.current.selectSources?.(['a', 'b']));
+    await act(async () => { await vi.advanceTimersByTimeAsync(151); });
+    expect(result.current.error).toBeInstanceOf(Error);
+    act(() => result.current.selectSources?.(['a']));
+    expect(result.current.error).toBeNull();
+    expect(result.current.failedRequest).toBeNull();
+  });
+
 });
