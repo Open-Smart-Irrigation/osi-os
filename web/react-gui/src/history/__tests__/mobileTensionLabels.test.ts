@@ -78,11 +78,21 @@ describe('mobileTensionLabels', () => {
       [labels.seriesLegend.focusAnnouncement, ['Probe 1']],
     ] as const;
 
-    for (const [factory, args] of functions) {
-      const value = (factory as (...values: unknown[]) => string)(...args);
-      expect(value).not.toMatch(/\{\{/);
-      expect(value).not.toMatch(/\}\}/);
-    }
+    const rendered = functions.map(([factory, args]) =>
+      (factory as (...values: unknown[]) => string)(...args));
+    expect(rendered).toEqual([
+      'You can select up to 3 sources.',
+      'Selected 2 of 5 sources.',
+      'Invalid hourly averages: 1.',
+      'Removed sources: Probe 1.',
+      'Remove Probe 1',
+      'Loaded from 08:00 to 09:00.',
+      'From 08:00 to 09:00.',
+      'Latest hourly average: 09:00.',
+      'Series shown: 2',
+      'Focused series: Probe 1',
+    ]);
+    expect(rendered.every((value) => !value.includes('{{') && !value.includes('}}'))).toBe(true);
 
     expect(new Set(calls.map(({ key }) => key))).toEqual(new Set(Object.keys(VALUES)));
   });

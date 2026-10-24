@@ -226,7 +226,7 @@ describe('history locale value parity', () => {
     expect(notEnglish, 'pending lg keys must equal the English source text').toEqual([]);
     const unlisted = Object.keys(english).filter((key) => key.startsWith('mobileUplot.') && !PENDING_HUMAN_LUGANDA.has(key));
     expect(unlisted, 'new mobileUplot keys need a human Luganda pass or a pending entry').toEqual([]);
-    const unlistedTension = Object.keys(english).filter((key) => key.startsWith('mobileTension.') && !PENDING_HUMAN_LUGANDA.has(key));
+    const unlistedTension = Object.keys(english).filter((key) => key.startsWith('history.mobileTension.') && !PENDING_HUMAN_LUGANDA.has(key));
     expect(unlistedTension, 'new mobileTension keys need a human Luganda pass or a pending entry').toEqual([]);
   });
 
