@@ -1380,14 +1380,20 @@ async function setSchedulerStatus({ db, deviceEui, appId, status, settingsPatch,
     if (wanted === 'ACTIVE' && conditional && !clearReady) {
       throw Object.assign(new Error('conditional_readiness_pending'), { code: 'conditional_readiness_pending', statusCode: 409 });
     }
-    if (conditional) {
+    // R19 finding 3: a stored mixed or orphaned program refuses every compile. Pause and skip
+    // today must still work, so they go out as a status-only push; resume stays refused.
+    const invalidMode = !mode.ok;
+    if (invalidMode && wanted === 'ACTIVE') {
+      throw Object.assign(new Error(mode.code || 'mixed_schedule_mode'), { code: mode.code || 'mixed_schedule_mode', statusCode: 409, details: mode });
+    }
+    if (conditional || invalidMode) {
       const rows = [toRow(eui, buildStatusPush(code))];
       await db.transaction(async (tx) => {
         await store.supersedeOutstanding(tx, eui, ['SCHEDULER_STATUS']);
         await store.insertPushes(tx, rows);
         await store.upsertSettings(tx, eui, patch);
       });
-      const out = { statusOnly: true, conditional: true, rows, messages: [], transportResults: [], requeued: 0 };
+      const out = { statusOnly: true, conditional, invalidMode, rows, messages: [], transportResults: [], requeued: 0 };
       if (transport) out.transportResults = await sendRows({ db, deviceEui: eui, rows, transport, now });
       else out.messages = rows.map((r) => buildDownlinkMessage({ appId, deviceEui: eui, fport: r.fport, payloadHex: r.payload_hex }));
       return out;

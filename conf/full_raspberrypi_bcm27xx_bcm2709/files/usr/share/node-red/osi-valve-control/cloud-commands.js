@@ -147,6 +147,9 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, transport,
         }
         const revived = await store.reviveSchedule(tx, scheduleUuid, revivePatch, eui);
         if (!revived) return { ok: false, error: 'not_found' };
+        // R19 finding 3: a tombstone keeps its policy reference by design; revived through this
+        // legacy command it is a fixed row. Conditional rows change only through the policy commands.
+        await tx.run('UPDATE valve_schedules SET condition_policy_uuid=NULL, effective_from=NULL WHERE schedule_uuid=? AND UPPER(device_eui)=?', [scheduleUuid, eui]);
         await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_revived', now });
       } else {
         // Once dispatch history is durable in actuator_log. A stale replay can
@@ -166,9 +169,16 @@ async function applyUpsertValveSchedule({ db, cmd, appId, flushQueue, transport,
       ));
       await push.invalidateLifecycleClearTx(tx, eui, { reason: 'schedule_created', now });
     }
+      // R19 finding 3: the local route's check (api.js assertScheduleModeTx). A fixed row beside
+      // a live conditional one (or an orphaned conditional row) would refuse every later
+      // compile, so the command is refused here and rolls back.
+      const live = await store.listSchedules(tx, eui);
+      const mode = P.validateScheduleModes(live, await store.listPoliciesForSchedules(tx, live));
+      if (!mode.ok) throw Object.assign(new Error(mode.code || 'mixed_schedule_mode'), { code: mode.code || 'mixed_schedule_mode', modeRefusal: true });
       return { ok: true, weekly: v.value.kind === 'WEEKLY' };
     }));
   } catch (error) {
+    if (error && error.modeRefusal) return { ok: false, error: error.code };
     if (error && error.code === 'once_fire_at_immutable') return { ok: false, error: error.code };
     throw error;
   }
