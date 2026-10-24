@@ -45,3 +45,18 @@ npm run test:browser:loading-baseline
 Each test writes `diagnostics.json` below ignored `test-results/slice1-baseline/`. The runner, fixture construction and package command are tracked; generated records are local evidence. A clean execution worktree must import the reviewed runner and package script before measuring its own baseline against the audited edge ref. Do not compare new product results only to the older prototype numbers above.
 
 The earlier exploratory runner used `key` instead of the pilot contract's `id` for series identity, yielding an empty chart. Those discarded runs are excluded from both result tables.
+
+## Slice 1 worktree baseline
+
+Task0 ran from worktree commit `21f37c388` with the reviewed runner restored from `2b57875e5` and its `test:browser:loading-baseline` package command. The canonical `web/history-uplot-core` package passed `npm test` with 8 test files and 68 tests, followed by its TypeScript build. Both the core and prototype packages were installed with `npm ci` before the checks.
+
+The prototype command built and served the tracked app on port 4178. Playwright used Chromium `153.0.8010.12`, a 448 × 998 CSS-pixel viewport, DPR 3 and touch emulation. The six runs used the existing synthetic pilot routes and the runner's 8-series × 672-point responses, 600 ms plus measured-byte delay, and 125,000 bytes-per-second transfer model.
+
+| Route | First Ready, three runs (ms) | Median (ms) | Highest run frame p95 (ms) | Worst frame (ms) |
+| --- | --- | --- | --- | --- |
+| edge API prefix | 3476, 3492, 3489 | 3489 | 16.8 | 16.8 |
+| cloud API prefix | 3458, 3510, 3533 | 3510 | 16.8 | 49.9 |
+
+All six runs passed. Every run made two requests totaling 642,830 serialized JSON bytes, with one response handler active at most. Requested and rendered viewport bounds agreed after the delayed responses settled, the pinch changed the span, the pan moved the viewport, and renderer errors were zero. No request aborts, request errors or page errors were recorded. The cloud-prefix set had one 49.9 ms frame; each run's p95 stayed at or below 16.8 ms.
+
+The first attempt was stopped during the prototype build because the root worktree was still running concurrent baseline builds. It produced no benchmark result and is excluded from the table. The completed rerun began after those builds finished.
