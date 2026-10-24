@@ -193,6 +193,24 @@ describe('useHistoryWindow', () => {
     second.resolve(response(load.mock.calls[1][0]));
   });
 
+  test('passes ordered selection context to foreground and prefetch lanes', async () => {
+    vi.useFakeTimers();
+    try {
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+      const contexts: unknown[] = [];
+      const load = vi.fn(async (request: HistoryWindowRequest, _signal: AbortSignal, loadContext?: { selectedIds: readonly string[] | undefined }) => {
+        contexts.push(loadContext?.selectedIds);
+        return response(request, { series: ['b', 'a'].map((id) => ({ id, label: id, unit: 'kPa', points: [{ t: request.from, value: 1 }] })) });
+      });
+      renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['b', 'a'], now: () => 10 * 86_400_000, load }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      expect(contexts).toEqual([['b', 'a']]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test('keeps accepted data visible during a Latest horizon refresh', async () => {
     let clock = 10 * 86_400_000;
     const first = deferred<HistoryWindowResponse>();

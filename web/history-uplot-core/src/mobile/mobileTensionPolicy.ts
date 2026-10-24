@@ -77,7 +77,7 @@ export function normalizeMobileAnalysisResponse(dto: MobileAnalysisResponseDto, 
   if (policy !== dto.readPolicy) protocol('unexpected-read-policy', 'response read policy does not match request');
   if (dto.appliedAggregation !== 'hourly') protocol('invalid-aggregation', 'response aggregation is not hourly');
   if (dto.truncated || dto.series.some((series) => series.truncated)) protocol('response-truncated', 'response is truncated');
-  if (dto.coverage.from > request.from || dto.coverage.to < request.to || dto.grid.from > request.from || dto.grid.to < request.to) protocol('invalid-coverage', 'response coverage does not enclose request');
+  if (![dto.coverage.from, dto.coverage.to, dto.grid.from, dto.grid.to].every(Number.isFinite) || dto.coverage.from > request.from || dto.coverage.to < request.to || dto.grid.from > request.from || dto.grid.to < request.to) protocol('invalid-coverage', 'response coverage does not enclose request');
   const expected = new Set(selectedIds);
   const actual = dto.series.map((series) => series.seriesId);
   const duplicates = new Set(actual.filter((id, index) => actual.indexOf(id) !== index));

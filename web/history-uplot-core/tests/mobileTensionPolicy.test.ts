@@ -36,11 +36,24 @@ describe('mobile tension policy', () => {
   });
   test('rejects duplicate, missing and extra response IDs', () => {
     expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [dto().series[0], { ...dto().series[0] }] }, request, ['a', 'b'])).toThrow(/duplicate/);
+    expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [dto().series[0]] }, request, ['a', 'b'])).toThrow(/missing/);
+    expect(() => normalizeMobileAnalysisResponse({ ...dto(), series: [{ ...dto().series[0], seriesId: 'x' }, dto().series[1]] }, request, ['a', 'b'])).toThrow(/unrequested/);
+    expect(() => normalizeMobileAnalysisResponse({ ...dto(), dropped: [{ seriesId: 'b', reason: 'access_denied' }] }, request, ['a', 'b'])).toThrow(/missing or dropped/);
   });
-  test('classifies auth, size and transient failures', () => {
+  test('classifies structured source, auth, size, network and transient failures', () => {
     expect(classifyMobileAnalysisFailure({ kind: 'http', status: 401, code: null, message: 'expired' }).kind).toBe('auth');
+    expect(classifyMobileAnalysisFailure({ kind: 'http', status: 403, code: null, message: 'denied' }).kind).toBe('auth');
     expect(classifyMobileAnalysisFailure({ kind: 'http', status: 413, code: null, message: 'large' }).kind).toBe('size');
+    expect(classifyMobileAnalysisFailure({ kind: 'http', status: 400, code: 'range_too_large', message: 'large' }).kind).toBe('size');
+    expect(classifyMobileAnalysisFailure({ kind: 'http', status: 400, code: 'bad_request', message: 'bad' }).kind).toBe('protocol');
+    expect(classifyMobileAnalysisFailure({ kind: 'network', message: 'offline' }).kind).toBe('transient');
     expect(classifyMobileAnalysisFailure({ kind: 'http', status: 503, code: null, message: 'down' }).kind).toBe('transient');
+  });
+  test('requires finite coverage and preserves partial final edge buckets', () => {
+    expect(() => normalizeMobileAnalysisResponse({ ...dto(), coverage: { from: Number.NaN, to: 3_600_000 } }, request, ['a', 'b'])).toThrow(/coverage/);
+    const partial = { ...dto(), grid: { platform: 'edge' as const, from: 0, to: 5_400_000 }, series: ['a', 'b'].map((seriesId) => ({ seriesId, label: seriesId, unit: 'kPa', truncated: false, points: [{ at: 0, value: null, count: 0, quality: 'partial' }, { at: 3_600_000, value: 0, count: 1, quality: 'ok' }] })) };
+    const normalized = normalizeMobileAnalysisResponse(partial, request, ['a', 'b']);
+    expect(normalized.window.series[0]?.buckets).toEqual([{ from: 0, to: 3_600_000, value: null, count: 0, quality: 'partial' }, { from: 3_600_000, to: 5_400_000, value: 0, count: 1, quality: 'ok' }]);
   });
   test('rejects malformed hourly grids instead of filling gaps', () => {
     const series = [{ id: 'a', label: 'A', unit: 'kPa', points: [{ t: 0, value: 1 }, { t: 7_200_000, value: 2 }] }];
