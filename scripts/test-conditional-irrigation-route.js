@@ -51,9 +51,19 @@ process.env.OSI_SCOPED_ACCESS = '1';
 process.env.OSI_LIB_COOLDOWN_MS = '1';
 process.env.NODE_PATH = path.join(path.resolve(root, '../..'), 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules');
 require('node:module').Module._initPaths();
+// Outside a gateway image (CI) neither the native sqlite3 binding nor the
+// ChirpStack gRPC packages are installed. The database helper then runs over
+// node:sqlite, and the ChirpStack helper is replaced by its only member the
+// route uses, createProvisioningClientFromEnv, which this harness overrides.
+require('./lib/sqlite3-node-adapter').installSqlite3Fallback();
 const osiDbReal = require(path.join(runtimeRoot, 'osi-db-helper'));
 const osiLib = require(path.join(runtimeRoot, 'osi-lib'));
-const chirpstackReal = require(path.join(runtimeRoot, 'osi-chirpstack-helper'));
+let chirpstackReal = {};
+try {
+  chirpstackReal = require(path.join(runtimeRoot, 'osi-chirpstack-helper'));
+} catch (error) {
+  if (!error || error.code !== 'MODULE_NOT_FOUND') throw error;
+}
 class TestDatabase extends osiDbReal.Database {
   constructor() { super(file); }
 }

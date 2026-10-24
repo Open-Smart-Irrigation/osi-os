@@ -68,6 +68,9 @@ async function run(profile) {
   const oldNodePath = process.env.NODE_PATH;
   process.env.NODE_PATH = path.join(path.resolve(root, '../..'), 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules');
   Module._initPaths();
+  // Outside a gateway image (CI) the native sqlite3 binding is not installed;
+  // the database helper then runs over node:sqlite.
+  require('./lib/sqlite3-node-adapter').installSqlite3Fallback();
   const osiLib = require(path.join(runtimeRoot, 'osi-lib'));
   const dbReal = require(path.join(runtimeRoot, 'osi-db-helper'));
   const policy = require(path.join(runtimeRoot, 'osi-irrigation-policy'));
