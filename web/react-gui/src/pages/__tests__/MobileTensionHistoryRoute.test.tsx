@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -92,6 +92,22 @@ describe('mobile tension history route', () => {
     expect(useMobileTensionCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
   });
 
+  it('offers retry for a zone-list transport failure', async () => {
+    getAll.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([{ id: 7, name: 'North block', timezone: 'UTC' }]);
+    renderRoute('/internal/mobile-history/zones/7');
+    await waitFor(() => expect(screen.getByText('mobileTension.route.zonesFailed')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'mobileTension.retry' }));
+    await waitFor(() => expect(screen.getByTestId('mobile-shell')).toHaveTextContent('North block'));
+    expect(getAll).toHaveBeenCalledTimes(2);
+  });
+
+  it('redirects malformed zone ids without loading zones or catalog data', async () => {
+    renderRoute('/internal/mobile-history/zones/1e2');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/history'));
+    expect(getAll).not.toHaveBeenCalled();
+    expect(useMobileTensionCatalog).toHaveBeenLastCalledWith(expect.objectContaining({ enabled: false }));
+  });
+
   it('redirects an absent zone only after the successful zone list arrives', async () => {
     getAll.mockResolvedValue([{ id: 8, name: 'Other block', timezone: 'UTC' }]);
     renderRoute('/internal/mobile-history/zones/7');
@@ -106,5 +122,14 @@ describe('mobile tension history route', () => {
     renderRoute('/internal/mobile-history/zones/7');
     await waitFor(() => expect(screen.getByText('mobileTension.accessDenied')).toBeInTheDocument());
     expect(logout).not.toHaveBeenCalled();
+  });
+
+  it('uses the existing session-expiry path for a catalog 401', async () => {
+    getAll.mockResolvedValue([{ id: 7, name: 'North block', timezone: 'UTC' }]);
+    useMobileTensionCatalog.mockReturnValue({
+      sources: [], defaultSelectedIds: [], error: new TestHistoryAuthError(401), isLoading: false, refreshForGeneration: vi.fn(),
+    });
+    renderRoute('/internal/mobile-history/zones/7');
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
   });
 });
