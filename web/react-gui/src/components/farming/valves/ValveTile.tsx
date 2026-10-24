@@ -203,11 +203,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             )}
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
-          {schedulerStatusLine && (
-            <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
-              {schedulerStatusLine}
-            </p>
-          )}
+          {/* Mounted before its text appears, so a poll that turns the push LOST is announced. */}
+          <p
+            role="status"
+            data-testid="valve-scheduler-status-lost"
+            className={schedulerStatusLine ? 'mt-0.5 text-xs text-[var(--text-tertiary)]' : undefined}
+          >
+            {schedulerStatusLine}
+          </p>
           {planLine && (
             <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
               {planLine}

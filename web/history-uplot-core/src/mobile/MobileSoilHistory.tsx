@@ -120,7 +120,7 @@ export function MobileSoilHistory({ model, contextKey, mountAdapter = mountUplot
   }, [available, focusedSeriesId]);
 
   return <section className="mobile-soil-history" data-testid="mobile-soil-history">
-    <div className="history-ranges" aria-label={labels.rangesGroup}>
+    <div className="history-ranges" role="group" aria-label={labels.rangesGroup}>
       <button type="button" onClick={() => model.selectPreset('24h')}>{labels.ranges.day}</button>
       <button type="button" onClick={() => model.selectPreset('7d')}>{labels.ranges.week}</button>
       <button type="button" onClick={() => model.selectPreset('30d')}>{labels.ranges.month}</button>
