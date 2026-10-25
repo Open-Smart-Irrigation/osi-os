@@ -22,7 +22,7 @@ Verified context: the current controller creates branches named
 `agent/req-*` branches remain readable only for historical jobs. Draft-PR and
 evidence requirements originate in
 `docs/superpowers/specs/2026-07-08-field-to-pr-design.md`. Production
-restrictions are in `AGENTS.md` ("Production cloud access").
+and customer-host restrictions are in `AGENTS.md` ("Host access gate").
 
 ## Environment
 

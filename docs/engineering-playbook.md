@@ -52,7 +52,9 @@ subtle aggregation bug nobody had reported.
 execute verbatim is not a plan. Exact file paths, complete code in every step, exact
 commands with expected output, and the commit sequence. "Add appropriate error
 handling" is a planning failure. Plans live in `docs/superpowers/plans/` and get
-committed with the work — they are the reviewable design record.
+committed with the work; while it is in progress they are its reviewable design
+record. A finished plan moves to the maintainers' archive under the rules in
+`docs/superpowers/README.md`.
 
 **Adversarial review before execution.** A second mind (a fresh agent or colleague,
 never the author) reads the plan with the mandate *hunt for flaws*, verifying every
@@ -186,8 +188,9 @@ down where the next person will trip.
 - Redirect/URL inputs: same-origin proof via the URL constructor *plus* serialized
   re-check (§3). Assume every query param is hostile.
 - Secrets never enter the repo, docs, or memory — AppKeys, sync tokens, production
-  SSH. Production (`osicloud.ch`) access requires explicit user consent in the
-  current conversation; a working key is not consent.
+  SSH, test-account passwords. Production (`osicloud.ch`) and customer-hosted
+  instances need the user to name the host in the current turn; a working key
+  or an earlier grant is not consent (AGENTS.md, "Host access gate").
 - Prefer reading sysfs to spawning subprocesses in long-running flows; prefer
   read-only DB access in observability paths.
 
@@ -248,8 +251,9 @@ down where the next person will trip.
 ## 8. Definition of done
 
 A change is done when: the issue's claim was re-verified against reality; the plan
-and its review live in the repo while the work is in progress (finished
-records move to the maintainers' archive, see `docs/superpowers/README.md`);
+and its review live in the repo while the work is in progress or another file
+refers to them (a finished plan moves to the maintainers' archive under the
+rules in `docs/superpowers/README.md`);
 tests exist that fail without the change; every
 gate is green *as re-run by a non-author*; **a user can actually reach the
 behaviour** — a fully-tested component that nothing mounts is zero delivered

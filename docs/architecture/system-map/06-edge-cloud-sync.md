@@ -100,7 +100,7 @@ verifiability:
    `applied_commands` effect-key ledger, so replays become harmless no-ops.
 4. **Route Command** dispatches by type: zone/schedule/config upserts, device
    claims, valve commands, fan/reboot, device registration, forced sync… (full
-   list in [AGENTS.md](../../../AGENTS.md) § Sync REST endpoints).
+   list in [docs/api/sync-endpoints.md](../../api/sync-endpoints.md)).
 5. The result (applied, already-applied, or rejected with a reason) is queued in
    `command_ack_outbox` and delivered both fast (MQTT `command_ack`) and
    reliably (REST ACK batch every 30 s). The cloud's `CommandAckController`

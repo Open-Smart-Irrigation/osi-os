@@ -13,7 +13,12 @@ and queues commands until the edge applies them.
 
 Verified sources to re-check before changing behavior:
 
-- `AGENTS.md` sync model, REST endpoint table, MQTT topic table, and production rules.
+- `AGENTS.md` sync model, MQTT topic table, and production rules.
+- `docs/api/sync-endpoints.md` (REST endpoint table, cloud-to-edge command
+  types, rename routes, reported sync capabilities).
+- `docs/sync/watermark-cloud-parity.md`, `docs/sync/chameleon-calibration.md`,
+  and `docs/sync/gateway-identity-convergence.md` (edge-side detail moved out
+  of `AGENTS.md`).
 - `docs/contracts/sync-schema/README.md`.
 - `docs/contracts/sync-schema/events.schema.json`.
 - `docs/contracts/sync-schema/commands.schema.json`.
