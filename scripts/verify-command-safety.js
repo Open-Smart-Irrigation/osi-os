@@ -419,7 +419,9 @@ function assertFrontendValveControls() {
     // removal must be gated on removeContext -- the zone-card placement (removeContext=
     // "zone") must only ever detach from the zone (its caller's onRemove does that), never
     // also unclaim the device from the whole farm.
-    if (!/if\s*\(\s*removeContext\s*===\s*'farm'\s*\)\s*\{\s*\n\s*await devicesAPI\.remove/.test(stregaCard)) {
+    // R19 finding 1: the farm removal now keeps the DELETE answer (valve_cleanup), so the call
+    // may be assigned; the gate on removeContext === 'farm' is what this pins.
+    if (!/if\s*\(\s*removeContext\s*===\s*'farm'\s*\)\s*\{\s*\n\s*(?:const\s+\w+\s*=\s*)?await devicesAPI\.remove/.test(stregaCard)) {
         throw new Error("StregaValveCard must gate devicesAPI.remove on removeContext === 'farm' -- the zone-card placement must not unclaim the device from the farm");
     }
 
