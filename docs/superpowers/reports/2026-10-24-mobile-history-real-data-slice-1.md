@@ -128,3 +128,16 @@ Luna's final edge host run passed typecheck, all 339 Node/TSX tests, 3,011 Vites
 Root then ran the unchanged six-case dense benchmark with task browser/build workloads paused. All six cases and its build passed. Every run used two requests, 642,830 bytes and at most one active response handler; maximum gesture p95 was 16.8 ms and renderer mismatch was zero. Edge first-ready times were 3,495, 3,627 and 3,441 ms; cloud-prefix times were 4,098, 3,433 and 3,437 ms. The fixture hash remains `237f37d465543fc7d4a8e19642228ef658159262f5211f6ec4c3a3ac35a5183b`. Evidence: `/tmp/mobile-history-final-corrections-dense.log`. Documentation/private-term hygiene scanned 386 files successfully, and the silent-catch gate passed.
 
 The canonical correction is ready to commit and push for fresh hosted checks. Cloud must resync from that clean commit and rerun its local gates; its existing account billing/spending-limit block still prevents hosted checks. This section supersedes the earlier source pin once the paired cloud manifest is updated. Both PRs remain draft until their own final-head checks pass. No merge, deployment or production-host access occurred.
+
+
+## Y-axis correction verification (2026-10-25)
+
+Direct review found that the new mobile shell omitted `yRange="auto"`, leaving the adapter's fixed 0–100 kPa default. Accepted 150–151 kPa readings fell outside the plot. The shell now selects the existing automatic range mode; adapter math, transport, feature flags and acceptance budgets are unchanged.
+
+Luna's component regression failed before the prop change because the adapter received an undefined y-range option. The final regression requires both 150 and 151 kPa in the same accepted series and checks the typed adapter mount options. Sol reviewed the patch against the written correction plan with no blocker. Root independently passed 141 core tests and the package TypeScript build, plus the edge host typecheck.
+
+Root's Chromium probe renders the real mobile shell with its real uPlot adapter. The unpatched shell used 0–100 ticks for accepted 150–151 readings; the patched shell supplied automatic scaling and displayed both readings. All-zero data stayed zero, and all-null data retained the empty-interval message and Show latest 24 hours action. No page errors occurred. Evidence: `/tmp/mobile-history-y-axis-shell-{red,green}.json`, `/tmp/mobile-history-y-axis-shell-green.log` and the corresponding screenshots.
+
+The full production browser matrix passed 21 cases, with 21 opposite-project exclusions and no failures or flaky retries. Both enabled and disabled production builds passed. Unthrottled gesture p95 was 16.7 ms; the separate four-times-CPU case reported 16.8 ms. Evidence: `/tmp/mobile-history-y-axis-edge-browser/results.json` and `/tmp/mobile-history-y-axis-edge-browser.log`. The final core logs are `/tmp/mobile-history-y-axis-core-root.log` and `/tmp/mobile-history-y-axis-build-root.log`; RED evidence is `/tmp/mobile-history-y-axis-red.log`.
+
+Cloud must receive the mechanical resync from this correction's canonical commit. Hosted final-head checks remain separate gates; neither deployment nor production enablement is included.

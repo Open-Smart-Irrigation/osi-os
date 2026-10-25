@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { MobileTensionHistory, type MobileTensionHistoryLabels } from '../src/mobile/MobileTensionHistory';
-import type { HistoryLoadContext, HistoryWindowResponse, MobileTensionSource } from '../src/shared/types';
+import type { HistoryLoadContext, HistoryWindowResponse, MobileTensionSource, MountAdapter } from '../src/shared/types';
 import { HistoryAuthError } from '../src/history/types';
 import { MobileHistoryError } from '../src/mobile/mobileHistoryError';
 
@@ -55,6 +55,42 @@ describe('MobileTensionHistory', () => {
     render(<StrictMode><MobileTensionHistory {...props({ mountAdapter })} /></StrictMode>);
     await waitFor(() => expect(load).toHaveBeenCalled());
     await waitFor(() => expect(setData.mock.calls.some(([series]) => (series as Array<{ points?: Array<{ value: number | null }> }>).some((item) => item.points?.some((point) => typeof point.value === 'number' && Number.isFinite(point.value))))).toBe(true));
+  });
+
+  test('passes accepted high tension values to an auto-ranged chart', async () => {
+    const setData = vi.fn();
+    let mountOptions: Parameters<MountAdapter>[3];
+    const mountAdapter = vi.fn<MountAdapter>((_host, _initial, _onViewportChange, options) => {
+      mountOptions = options;
+      return {
+        setData,
+        setViewport: vi.fn(),
+        getViewport: () => ({ from: 0, to: 86_400_000 }),
+        getPlotRect: () => new DOMRect(0, 0, 100, 100),
+        resize: vi.fn(),
+        destroy: vi.fn(),
+      };
+    });
+    const highLoad = vi.fn(async (request = { from: 0, to: 86_400_000, rangeLabel: '24h' as const, aggregation: 'hourly' as const }): Promise<HistoryWindowResponse> => ({
+      request,
+      coverage: { from: request.from, to: request.to },
+      series: [{
+        id: 'series-1', label: 'series-1', unit: 'kPa',
+        points: [{ t: request.from, value: 150 }, { t: request.from + 3_600_000, value: 151 }],
+        buckets: [
+          { from: request.from, to: request.from + 3_600_000, value: 150, count: 1, quality: 'ok' },
+          { from: request.from + 3_600_000, to: request.from + 7_200_000, value: 151, count: 1, quality: 'ok' },
+        ],
+      }],
+      unitGroups: [], aggregation: { level: 'hourly', pointCount: 2 },
+      limits: { maxPointsPerSeries: 2_000, truncated: false }, readPolicy: 'edge-hourly',
+    }));
+    render(<MobileTensionHistory {...props({ load: highLoad, mountAdapter })} />);
+    await waitFor(() => expect(setData.mock.calls.some(([series]) => (series as Array<{ points?: Array<{ value: number | null }> }>).some((item) => {
+      const values = item.points?.map((point) => point.value) ?? [];
+      return values.includes(150) && values.includes(151);
+    }))).toBe(true));
+    expect(mountOptions).toMatchObject({ yRange: 'auto' });
   });
 
   test('passes offset-qualified rollback endpoints to the mobile bucket label', async () => {
