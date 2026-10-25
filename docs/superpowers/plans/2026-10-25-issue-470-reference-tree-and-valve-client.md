@@ -2,7 +2,7 @@
 
 Resolve both current findings in [osi-os #470](https://github.com/Open-Smart-Irrigation/osi-os/issues/470): reject flag-off reference-tree writes by other accounts, and allocate a valve-router ChirpStack client only for an authenticated queue flush, then close it after that work settles.
 
-Status: design awaiting independent adversarial review. This commit contains the plan only. The campaign coordinator assigns a separate reviewer, executor and verifier. This plan's author does not approve its implementation.
+Status: amended after the first independent review rejected execution; a fresh adversarial review is required. This commit contains the plan only. The campaign coordinator assigns a separate reviewer, executor and verifier. This plan's author does not approve its implementation.
 
 ## Scope and verified base
 
@@ -10,9 +10,23 @@ Base: `63c7a70f8f3b373f162b33b0669b0df89b3763fa`, fetched from `origin/main` on 
 
 Read the current `AGENTS.md`, `docs/engineering-playbook.md`, and the `osi-flows-json-editing`, `osi-common-pitfalls`, `osi-verification-commands`, `osi-sync-contract-awareness`, `osi-config-and-flags` and `anti-slop-writing` skills before execution. Use subscription capacity only. No children, SSH, live access, deployments, merges or release publication. The campaign ends 2026-11-01 at 23:59 Europe/Zurich. The coordinator may publish a reviewed draft PR after independent verification; this design stage does not push or create a PR.
 
-Both issues were open with zero comments when read through the GitHub connector. #470 now has `priority:P1`. The flag-off open-registration rationale is stale: `auth-db-insert` already permits only first-account bootstrap. Existing additional accounts still expose the missing ownership predicate.
+At initial design, both issues were open with zero comments. At amendment, #470 has one triage comment and `priority:P1`; that comment confirms the two primary defects but does not settle the sibling claims. The GitHub connector also confirms #451 is open with zero comments. The flag-off open-registration rationale is stale: `auth-db-insert` already permits only first-account bootstrap. Existing additional accounts still expose the missing ownership predicate.
 
-[Issue #465](https://github.com/Open-Smart-Irrigation/osi-os/issues/465) lists ten client-lifetime callers. This plan resolves its overlapping `valve-api-router-fn` instance only. Leave #465 open for its remaining callers; a later PR must say “partially addresses #465”, never “fixes #465”. Chameleon and WATERMARK routes mentioned in #470 are outside these two findings and retain their separate authorization work. No cloud companion or schema migration is required: neither fix changes a sync resource, payload or command.
+[Issue #465](https://github.com/Open-Smart-Irrigation/osi-os/issues/465) lists ten client-lifetime callers. This plan resolves its overlapping `valve-api-router-fn` instance only. Leave #465 open for its remaining callers; a later PR must say “partially addresses #465”, never “fixes #465”. The sibling claims in #470 have the explicit current-base dispositions below; their grant-parity work stays outside the two-node implementation. No cloud companion or schema migration is required: neither fix changes a sync resource, payload or command.
+
+### Sibling-claim dispositions at the reviewed base
+
+The original #470 body also names Chameleon refresh/depth and WATERMARK calibration. Each claim has a disposition; none warrants another flag-off ownership patch.
+
+- `POST /api/devices/:deveui/chameleon/refresh-calibration`: flag-off ownership is already enforced by the `chameleon-refresh-query` node in canonical `flows.json`. Its latest-array SELECT joins `devices`, binds `d.user_id = ?` to `msg._authUser.userId` and excludes deleted devices. The owner reaches the array-ID continuation. A foreign account gets 404 `no_array_id_seen`, even with an actual array reading in the fixture.
+- `PUT /api/devices/:deveui/chameleon/depth`: flag-off ownership is already enforced by `chameleon-depth-save`. Its transaction binds `user_id = ?`, checks the affected-row count and returns 404 `Device not found` on refusal. A foreign request changes neither depth nor `sync_version`; the owner saves successfully and increments once.
+- WATERMARK calibration: the flag-off owner filter is already present in `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-helper/calibration.js`. `assertAccessibleLsn50` adds a bound `user_id` predicate only when `scoped` is false; `saveCalibrationTx` and `deleteCalibrationTx` recheck it inside the transaction. `watermark-cal-fn` supplies the authenticated identity and flag. The existing `scripts/test-watermark-calibration-routes.js` tests foreign flag-off PUT/DELETE/GET refusals without mutation and scoped granted-user write success. Its 28 cases pass on this base. No new filter is needed.
+
+A separate Chameleon grant defect remains current. Both refresh and depth handlers apply their owner predicates in scoped mode too: a researcher granted the foreign device's zone passes `scoped-device-config-guard` and auth, then gets 404 downstream. An owner succeeds in either flag state; an out-of-scope admin gets 404 at the scoped guard. An independent amendment probe exercised 24 actual guard → auth → handler scenarios across both maintained profiles, with a real array-reading fixture and depth/version assertions. Refresh probing ended at the array-ID continuation and never entered its network-fetch stage. This is route evidence, rather than a SQL-only demonstration or guard-only coverage.
+
+Associate these refresh/depth instances with existing [#451](https://github.com/Open-Smart-Irrigation/osi-os/issues/451), “Scoped access: valve open, STREGA timed actions and Chameleon refuse a granted member on the gateway's own screens”. Its current body names the Chameleon enable handler alongside valve/STREGA handlers; refresh/depth are additional verified instances of that same owner-only downstream handler class. Keep their owner/granted/denied route tests in both flag states with that existing grant-parity work. Do not create a duplicate follow-up or widen this plan's two-node patch. This amendment records the association; it does not claim a GitHub comment or issue edit was posted.
+
+The reference-tree defect and valve-router leak remain the only runtime edits here. #470 stays open pending final issue-wide acceptance review, including the retained Chameleon grant behavior. The proposed PR wording is exactly “Partially addresses #470; partially addresses #465; related #451”. Use no auto-closing wording for any of these issues.
 
 ### Route evidence
 
@@ -45,7 +59,7 @@ Keep the four base variables together until rebasing and re-review. Stop and rep
 
 ### 1. Commit the failing behavioral tests
 
-Create `scripts/test-reference-tree-and-valve-router.js` with the complete source below. The tests run shipped flow text through real auth and SQLite. They exercise the guard before the reference-tree handler, check response wiring, and run the real valve API for route cases. Only the final cleanup fault-injection cases substitute that API to force router-level failure and downlink conversion. ChirpStack is always fake; configured test secrets prevent credential-file reads.
+Create `scripts/test-reference-tree-and-valve-router.js` with the complete source below. The tests run shipped flow text through real auth and SQLite. They exercise the guard before the reference-tree handler, check response wiring, and run the real valve API for route cases. The cleanup fault-injection cases and the synchronous-API/mapping/repeated-flush cases substitute that API to force router-only branches. The synchronous flush failure still runs the real API. ChirpStack is always fake; configured test secrets prevent credential-file reads.
 
 The mirror's function bodies run separately. The unchanged helper bindings use canonical modules; profile parity proves the helper copies agree. These tests do not measure network channel counts or prove the issue's claimed 30-minute idle duration.
 
@@ -189,6 +203,8 @@ for (const profile of profiles) {
     try {
       const incoming = JSON.parse(require('node:fs').readFileSync(flowsPath, 'utf8')).filter(n => n.type === 'http in' && n.wires.flat().includes('valve-api-router-fn'));
       assert.equal(incoming.length, 8);
+      const actualRoutes = incoming.map(n => [n.method.toUpperCase(), n.url.replace(':deveui', EUI).replace(':uuid', UUID)]);
+      assert.deepEqual(actualRoutes.map(pair => JSON.stringify(pair)).sort(), routes.map(pair => JSON.stringify(pair)).sort());
       let creates = 0, opens = 0;
       const dbHelper = { Database: function () { opens++; throw new Error('unauthorized DB open'); } };
       for (const [method, url] of routes) for (const auth of [null, 'Bearer x', bearer(2, 'res1', { expiresAt: Date.now() - 10000 }), bearer(2, 'res1', { secret: 'wrong-test-secret' })]) {
@@ -266,6 +282,66 @@ for (const profile of profiles) {
       else { assert.deepEqual(out.result[1], [{ topic: 'fixture/topic', payload: { fPort: 21 } }]); assert.ok(out.warnings.some(w => w.includes('client close failed'))); }
     } finally { db.close(); }
   });
+  for (const fault of ['SELECT', 'UPDATE', 'close']) test(`${profile}: reference ${fault} exception closes once and preserves response semantics`, async () => {
+    const db = H.seedScopedDb();
+    let closes = 0;
+    try {
+      const before = row(db);
+      const facade = H.facadeDb(db);
+      if (fault === 'SELECT') facade.all = (...args) => args.at(-1)(new Error('fixture SELECT failure'));
+      if (fault === 'UPDATE') facade.run = (...args) => args.at(-1)(new Error('fixture UPDATE failure'));
+      facade.close = callback => { closes++; if (fault === 'close') throw new Error('fixture close failure'); callback(); };
+      const out = await reference(db, { libOverrides: { osiDb: { Database: function () { return facade; } } } });
+      assert.equal(out.statusCode, fault === 'close' ? 200 : 500);
+      assert.equal(closes, 1);
+      if (fault === 'close') assert.deepEqual(row(db), { ...before, is_reference_tree: 1, sync_version: before.sync_version + 1 });
+      else { assert.deepEqual(row(db), before); assert.equal(out.payload.error, `fixture ${fault} failure`); }
+    } finally { db.close(); }
+  });
+  test(`${profile}: real valve API catches synchronous flush failure and still closes`, async () => {
+    const db = H.seedScopedDb();
+    let creates = 0, closes = 0, flushes = 0;
+    try {
+      db.prepare("UPDATE devices SET deveui=? WHERE deveui='VALVE1'").run(EUI);
+      const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() {
+        creates++;
+        return { flushDeviceQueue() { flushes++; throw new Error('fixture synchronous flush failure'); }, close() { closes++; return []; } };
+      } });
+      assert.equal(out.result[0].statusCode, 202);
+      assert.deepEqual([creates, flushes, closes], [1, 1, 1]);
+      assert.ok(out.warnings.some(w => w.includes('queue flush failed')));
+      assert.ok(db.prepare('SELECT COUNT(*) AS n FROM valve_schedule_pushes').get().n > 0);
+    } finally { db.close(); }
+  });
+  for (const fault of ['synchronous API throw', 'mapping failure', 'two flushes']) test(`${profile}: router handles ${fault}`, async () => {
+    const db = H.seedScopedDb();
+    const events = [];
+    let creates = 0, closes = 0, flushes = 0;
+    try {
+      // These three cases deliberately substitute the API to reach router-only branches.
+      const vc = { handleHttpRequest(options) {
+        if (fault === 'synchronous API throw') throw new Error('fixture synchronous API failure');
+        return (async () => {
+          await options.flushQueue(EUI);
+          if (fault === 'two flushes') await options.flushQueue(EUI);
+          const out = Object.assign(options.msg, { statusCode: 202, payload: { ok: true } });
+          if (fault === 'mapping failure') Object.defineProperty(out, 'valvePushMessages', { get() { throw new Error('fixture mapping failure'); } });
+          return out;
+        })();
+      } };
+      const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() {
+        creates++; events.push('create');
+        return { async flushDeviceQueue() { flushes++; events.push('flush'); }, close() { closes++; events.push('close'); return []; } };
+      } }, vc);
+      assert.equal(out.result[0].statusCode, fault === 'two flushes' ? 202 : 500);
+      if (fault === 'synchronous API throw') assert.deepEqual([creates, flushes, closes], [0, 0, 0]);
+      else {
+        assert.deepEqual([creates, flushes, closes], [1, fault === 'two flushes' ? 2 : 1, 1]);
+        assert.deepEqual(events, fault === 'two flushes' ? ['create', 'flush', 'flush', 'close'] : ['create', 'flush', 'close']);
+      }
+      if (fault !== 'two flushes') { assert.equal(out.result[1], null); assert.equal(out.result[0].payload.error, 'internal_error'); assert.equal(out.errors.length, 1); }
+    } finally { db.close(); }
+  });
 }
 ```
 
@@ -280,16 +356,19 @@ Run:
 
 ```bash
 heavy node --test scripts/test-reference-tree-and-valve-router.js
-heavy node scripts/verify-test-inventory.js
 ```
 
-Expected regression result on the reviewed base: 52 tests, 34 pass, 18 fail, zero cancelled/skipped. Per profile, the foreign flag-off write and ownership-change cases return 200 instead of 404; the eight-route session matrix creates 32 clients instead of zero; the authenticated read/ownership rejection creates two instead of zero; the two deferred-flush cases and three cleanup fault cases close zero clients instead of one. Every scoped-role/grant control passes. The inventory gate exits 0 after the workflow step is added. A different failure is harness divergence: report it before changing production code.
+Expected regression result on the reviewed base: 66 tests, 38 pass, 28 fail, zero cancelled/skipped. Per profile, the foreign flag-off write and ownership-change cases return 200 instead of 404; the eight-route session matrix creates 32 clients instead of zero; the authenticated read/ownership rejection creates two instead of zero; the two deferred-flush cases and three cleanup fault cases close zero clients instead of one. The added reference close failure, synchronous API throw, synchronous flush failure, mapping failure and repeated-flush cases fail once per profile too. The SELECT/UPDATE exception cases pass on base. Every scoped-role/grant control and the exact HTTP method/URL-set assertion passes. This is the expected RED result; record its exit 1 before staging. A different failure is harness divergence: report it before changing production code.
 
 ```bash
 git diff --check
 git add scripts/test-reference-tree-and-valve-router.js .github/workflows/verify-sync-flow.yml
+heavy node scripts/verify-test-inventory.js
+git diff --cached --check
 git commit -m "test: cover reference-tree ownership and valve client lifetime"
 ```
+
+The staging order is required. `verify-test-inventory.js` builds its file set with `git ls-files -z`; an untracked test named in the workflow is rejected as `not a tracked file`. After the `git add` above, the inventory gate must exit 0 with 817 test files accounted for. Commit only after it and the staged diff check pass. Do not weaken the inventory verifier or treat a pre-staging failure as baseline divergence.
 
 ### 2. Apply the two reviewed function bodies
 
@@ -453,7 +532,7 @@ node /tmp/osi-470-design/apply-470.cjs
 heavy node --test scripts/test-reference-tree-and-valve-router.js
 ```
 
-Expected: two before/after `byte-identical: true` pairs; the changed-node assertion names only `dendro-ref-tree-fn` and `valve-api-router-fn`; the editor prints reference-tree 6700 → 7054 (+354), valve router 1866 → 2385 (+519), and total growth +873 characters per profile. The route suite exits 0 with 52 passed and no failures, cancellations or skips. Inspect both profile diffs and the allowance provenance; do not accept unexplained formatting or wiring changes.
+Expected: two before/after `byte-identical: true` pairs; the changed-node assertion names only `dendro-ref-tree-fn` and `valve-api-router-fn`; the editor prints reference-tree 6700 → 7054 (+354), valve router 1866 → 2385 (+519), and total growth +873 characters per profile. The route suite exits 0 with 66 passed and no failures, cancellations or skips. Inspect both profile diffs and the allowance provenance; do not accept unexplained formatting or wiring changes.
 
 ### 3. Run the existing gates and commit the fix
 
@@ -461,6 +540,7 @@ Run each command directly, retaining exit codes and logs. They are sequential be
 
 ```bash
 heavy node --test scripts/test-export-routes-require-session.js scripts/test-scoped-access-writes.js
+heavy node scripts/test-watermark-calibration-routes.js
 heavy node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.test.js
 heavy node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
 heavy node scripts/verify-flows-fn-parse.js
@@ -481,7 +561,7 @@ heavy node scripts/verify-doc-hygiene.js
 git diff --check
 ```
 
-Every command must exit 0. Parse prints `verify-flows-fn-parse: OK`; wiring ends with its existing STREGA/DB-close guard PASS; size and DDL ratchets print OK; auth hermeticity reports zero flag-off scope loads. Full sync prints `Sync flow verification passed` in its section and ends `All parity checks passed.` A private documentation-name list may be absent; report that limitation rather than claiming that check ran. Do not read or print credential environment values.
+Every command must exit 0. The WATERMARK route gate reports 28 passing cases. Parse prints `verify-flows-fn-parse: OK`; wiring ends with its existing STREGA/DB-close guard PASS; size and DDL ratchets print OK; auth hermeticity reports zero flag-off scope loads. Full sync prints `Sync flow verification passed` in its section and ends `All parity checks passed.` A private documentation-name list may be absent; report that limitation rather than claiming that check ran. Do not read or print credential environment values.
 
 No GUI, schema, seed or cloud file changes are planned, so their separate build/migration suites are unnecessary. The full sync verifier still runs its normal chained contract/schema/helper checks. No change to `sync-init-fn`, the scope helper, the valve helper, or ChirpStack helper is authorized by this plan.
 
@@ -521,14 +601,22 @@ PYBASE
 OSI_470_FLOWS_ROOT=/tmp/osi-470-base heavy node --test scripts/test-reference-tree-and-valve-router.js
 ```
 
-Expected: the same 18 failures from step 1, exit 1. Remove the override and rerun the focused suite for 52/52 green. The actual auth/helper code remains real in both runs; the only substituted production artifact is the loaded flow source. These are offline function-node tests, so the final report must not claim an HTTP-listener smoke check, live hardware verification or measured gRPC idle time.
+Expected: the same 28 failures from step 1, exit 1. Remove the override and rerun the focused suite for 66/66 green. The actual auth/helper code remains real in both runs; the only substituted production artifact is the loaded flow source. These are offline function-node tests, so the final report must not claim an HTTP-listener smoke check, live hardware verification or measured gRPC idle time.
 
-After independent GREEN the coordinator prepares the draft PR with `Fixes #470` and “partially addresses #465 (valve-api-router-fn only)”. State that no server companion or sync-contract mirror is needed. Link the draft PR with T3 immediately after creation. No merge or deployment belongs to this campaign.
+After independent GREEN the coordinator prepares the draft PR with exactly “Partially addresses #470; partially addresses #465; related #451”. Keep #470 and #465 open; use no auto-closing wording until a separate final issue-wide acceptance review permits it. State that no server companion or sync-contract mirror is needed. Link the draft PR with T3 immediately after creation. No merge or deployment belongs to this campaign.
+
+## Response to the first plan review
+
+The review at plan commit `4c3fcd227dc5a6f9aea4d5adf5647e6d0009c0a9` rejected execution. R1 is addressed by observing RED first, staging the new test and workflow, then running inventory and the staged diff check before commit. An amendment probe of the actual verifier confirms the unstaged-file rejection and a clean result when the new file is supplied in the tracked-file set; it substitutes verifier inputs without changing the repository index or runtime files.
+
+R2 is addressed by independently inspecting and probing all sibling claims, recording the already-shipped flag-off filters, and associating the retained Chameleon grant failure with existing #451. Delivery wording now partially addresses #470 and #465 and relates #451. Issue closure awaits final acceptance review.
+
+Both optional findings are adopted. The suite compares the actual eight HTTP `(method, url)` pairs against the exercised route set. Seven additional exception scenarios run per profile: reference SELECT, UPDATE and close failures; a synchronous API throw; synchronous flush failure through the real API; mapping failure after a flush; and two flushes sharing one request-local client. These additions bring the suite to 66 cases.
 
 ## Design-stage verification record
 
-Before writing this plan, actual shipped-route probes reproduced both findings. A prospective copy of the complete test suite above was run from `/tmp` against both untouched flow profiles; it was corrected to preserve the shipped zone-scope rule for admins. Its expected failures identify the production defects, while its existing auth/grant controls pass. No runtime source was modified to obtain a green result.
+Before writing this plan, actual shipped-route probes reproduced both findings. A prospective copy of the complete test suite above was run from `/tmp` against both untouched flow profiles; it was corrected to preserve the shipped zone-scope rule for admins. Its expected failures identify the production defects, while its existing auth/grant controls pass. No repository runtime source was modified to obtain a green result. After amendment the same 66-case source returned 38 pass / 28 expected fail on untouched base flows and 66 pass / zero fail on the independent reviewer's existing scratch-proposed flow artifacts. A file-based check proved that those artifacts match exactly the unchanged two proposed function bodies and all other nodes match the base. Scratch GREEN is evidence for the revised plan, not final-SHA implementation verification. All amendment probes used file arguments through `run-heavy.py`; none depended on stdin forwarding.
 
 The design base passed function-node parse, bare-require scan, silent-catch, stray-DDL and size ratchets, auth flag-off hermeticity, scoped-access ratchet, flow wiring, test inventory and the full sync verifier. Full sync ended `All parity checks passed.` Gate output and the route reproduction are recorded in the campaign handoff. Post-fix GREEN and independent plan review remain pending.
 
-There is no unresolved product decision. The next stage is adversarial plan review, particularly the owner predicate's write-time race and the promise boundary that keeps the client open through a rejected async flush. Broader #465 callers and any partially constructed helper-client cleanup remain outside this change.
+There is no unresolved product decision. The next stage is adversarial plan review, particularly the owner predicate's write-time race and the promise boundary that keeps the client open through a rejected async flush. Broader #465 callers, the Chameleon grant-parity instances associated with #451, and any partially constructed helper-client cleanup remain outside this change.
