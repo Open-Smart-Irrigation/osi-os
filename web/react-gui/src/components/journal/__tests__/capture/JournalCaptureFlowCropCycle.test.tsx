@@ -14,6 +14,8 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const TEST_NOW = new Date('2026-07-16T12:30:00.000Z');
+
 const apiMocks = vi.hoisted(() => ({
   listEntries: vi.fn(),
   createEntry: vi.fn(),
@@ -262,6 +264,8 @@ async function proceedToConfirmAndFinish(): Promise<void> {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(TEST_NOW);
   apiMocks.listEntries.mockReset().mockResolvedValue({ entries: [], next_cursor: null });
   apiMocks.createEntry.mockReset().mockResolvedValue({ entry_uuid: 'draft-1', sync_version: 0 });
   apiMocks.createFinalBatch.mockReset().mockResolvedValue({
@@ -281,6 +285,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
