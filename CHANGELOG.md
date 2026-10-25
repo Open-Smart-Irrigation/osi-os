@@ -31,6 +31,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   CMD-04 snapshot path no longer falls back to MQTT downlinks: without a
   transport, snapshots stay pending and STREGA writes fail closed.
 
+- **Sync contract: a cloud `PAUSE_IRRIGATION_POLICY` may carry
+  `expected_policy_version: null`.** The field stays required. Null pauses the
+  version that is current on the gateway, also while a newer edit is still
+  pending on the valve or was not applied; an integer still has to match the
+  current version or the pause is refused as a version conflict.
+
 ### Fixed
 - **A valve unclaimed from the cloud now gets the same plan-clearing push as
   a local delete.** A cloud `UNCLAIM_DEVICE` cleared the device owner and

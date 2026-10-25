@@ -946,6 +946,10 @@ Runtime update/incident summaries are read-only and separately capability-gated.
 
 Cloud uses UPSERT_IRRIGATION_POLICY, PAUSE_IRRIGATION_POLICY and RETRY_IRRIGATION_VALVE
 via REST pending commands with the same validation/version rules as local requests.
+One exception (contract change of 2026-10-25, for the cloud's stop path): a
+PAUSE_IRRIGATION_POLICY may carry `expected_policy_version: null`, which pauses
+whatever version is current on the edge, including while a newer edit is still
+pending or was not applied. The field stays required; an integer still has to match.
 Always conversion uses the ordinary atomic policy/schedule edit, not a release command.
 Configuration remains pending until edge application, then can remain Updating valve
 until pushes finish. Cloud never evaluates or issues conditional scheduled opens.

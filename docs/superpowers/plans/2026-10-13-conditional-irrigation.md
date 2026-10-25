@@ -636,6 +636,8 @@ Update `scripts/verify-edge-sync-contract-vendor.sh` and the vendored contract f
 Interfaces: IRRIGATION_POLICY_UPSERTED; commands UPSERT_IRRIGATION_POLICY,
 PAUSE_IRRIGATION_POLICY, RETRY_IRRIGATION_VALVE; supportedSyncCapabilities in link
 and bootstrap; explicit runtime summaries distinct from editable resources.
+PAUSE_IRRIGATION_POLICY requires `expected_policy_version` but accepts null (pause the
+current version; contract change of 2026-10-25 for the cloud's stop path).
 
 - [ ] Write shared golden fixtures for 29.9 kPa, 0% VWC, local DENDRO, delivery settings,
   observation windows 60/180, tombstone, out-of-order policy/schedule and scope rejection.

@@ -255,3 +255,41 @@ for (const profile of PROFILES) {
     }
   });
 }
+
+// Cloud stop path (contract: PAUSE_IRRIGATION_POLICY.expected_policy_version may be null).
+// A null-version PAUSE pauses the current policy version, also when a newer cloud edit was
+// not applied on the edge (here: refused retryable) and when the edge's version moved on
+// without the cloud knowing it.
+for (const profile of PROFILES) {
+  test(`${profile}: a null-version cloud PAUSE pauses the current version after an unapplied edit`, async () => {
+    const db = seedScopedDb(VALVE);
+    const transport = transportRecorder();
+    try {
+      policyFixture(db);
+      const edit = envelope(741, 'UPSERT_IRRIGATION_POLICY', uuid(741), {
+        policy_uuid: POLICY,
+        expected_policy_version: 4,
+        schedules: [{ schedule_uuid: SCHEDULE, expected_sync_version: 7, duration_minutes: 25 }],
+      });
+      const edited = await runCommand(profile, db, edit, transport);
+      assert.equal(edited.result[1].payload.result, 'FAILED_RETRYABLE', 'the enabled edit is not applied on this gateway');
+      assert.deepEqual({ ...db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY) },
+        { enabled: 1, sync_version: 4 });
+
+      const pause = envelope(742, 'PAUSE_IRRIGATION_POLICY', uuid(742), { expected_policy_version: null });
+      const paused = await runCommand(profile, db, pause, transport);
+      assert.equal(paused.result[1].payload.result, 'APPLIED', JSON.stringify(paused.result[1].payload));
+      assert.deepEqual({ ...db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY) },
+        { enabled: 0, sync_version: 5 }, 'the pause applies to the current version');
+
+      // The edge version moved on (a local edit the cloud has not seen): a null pause still applies.
+      db.prepare('UPDATE irrigation_policies SET enabled=1, sync_version=9 WHERE policy_uuid=?').run(POLICY);
+      const again = await runCommand(profile, db, envelope(743, 'PAUSE_IRRIGATION_POLICY', uuid(743), { expected_policy_version: null }), transport);
+      assert.equal(again.result[1].payload.result, 'APPLIED', JSON.stringify(again.result[1].payload));
+      assert.deepEqual({ ...db.prepare('SELECT enabled,sync_version FROM irrigation_policies WHERE policy_uuid=?').get(POLICY) },
+        { enabled: 0, sync_version: 10 });
+    } finally {
+      db.close();
+    }
+  });
+}

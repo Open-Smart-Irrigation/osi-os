@@ -120,6 +120,13 @@ sparseNullUpdate.schedules[0] = {
 };
 assert.equal(commandCheck(sparseNullUpdate), false,
   'a null schedule version is a create marker and still requires complete schedule fields');
+const nullVersionPause = {...commandBase, command_type: 'PAUSE_IRRIGATION_POLICY', expected_policy_version: null};
+assert.equal(commandCheck(nullVersionPause), true,
+  `a stop-path PAUSE may carry a null policy version (pause the current version): ${JSON.stringify(commandCheck.errors)}`);
+const pauseWithoutVersion = {...commandBase, command_type: 'PAUSE_IRRIGATION_POLICY'};
+assert.equal(commandCheck(pauseWithoutVersion), false, 'PAUSE still requires an explicit expected_policy_version (integer or null)');
+assert.equal(commandCheck({...nullVersionPause, expected_policy_version: -1}), false, 'a negative PAUSE policy version is rejected');
+assert.equal(commandCheck({...nullVersionPause, expected_policy_version: '1'}), false, 'a string PAUSE policy version is rejected');
 const malformed = {...envelopes[0], request_id: 'not-a-uuid'};
 assert.equal(commandCheck(malformed), false, 'malformed request_id must be rejected by AJV');
 console.log('test-conditional-irrigation-contract: OK (Draft-07 AJV positive/negative typed resources and UPSERT/PAUSE/RETRY envelopes, canonical sets, tombstone, nested raw-field rejection)');

@@ -1096,3 +1096,41 @@ test('no_targets: a disabled policy may keep no enabled weekly row; an enabled o
     closeFixture(f);
   }
 });
+
+// Cloud stop path: PAUSE_IRRIGATION_POLICY may carry expected_policy_version null. A null-version
+// pause applies to the current version, also while the latest edit is still pending on the valve
+// (its plan rows are queued, not ACKed) and after the version moved past the caller's view.
+test('a null-version pause pauses the current version while an edit is still pending', async () => {
+  const f = fixture();
+  try {
+    const first = await savePreviewPolicy(f, { now: '2026-10-18T10:00:00Z', timezone: 'UTC' });
+    const edit = request(true);
+    edit.timezone = 'UTC';
+    edit.expected_policy_version = first.policy.sync_version;
+    edit.schedules[0] = {
+      schedule_uuid: f.db.prepare('SELECT schedule_uuid FROM valve_schedules WHERE device_eui=?').get(VALVE).schedule_uuid,
+      expected_sync_version: f.db.prepare('SELECT sync_version FROM valve_schedules WHERE device_eui=?').get(VALVE).sync_version,
+      duration_minutes: 25,
+    };
+    const edited = await api.applyPolicyEdit({
+      db: f.db, actor: { user_id: 1 }, request: edit, now: '2026-10-18T10:01:00Z',
+      runtimeClockStatus: () => ({ trusted: true, reason: 'trusted' }),
+      qualificationProvider: () => ({ qualified: true, identity: 'fixture', margin_seconds: 0 }),
+    });
+    assert.equal(edited.policy.enabled, true);
+    assert.ok(edited.policy.sync_version > first.policy.sync_version);
+    assert.equal(f.db.prepare("SELECT COUNT(*) AS n FROM valve_schedule_pushes WHERE state='ACKED'").get().n, 0,
+      'no plan row of the edit is confirmed by the valve');
+    const paused = await api.pausePolicy({
+      db: f.db, actor: { user_id: 1 }, zone: 'zone-policy-test',
+      request: { expected_policy_version: null }, now: '2026-10-18T10:02:00Z',
+    });
+    assert.equal(paused.policy.enabled, false);
+    assert.equal(paused.policy.sync_version, edited.policy.sync_version + 1, 'the pause applies to the current version');
+    // A stale integer version is still a conflict; null is the only "whatever is current" form.
+    await assert.rejects(api.pausePolicy({
+      db: f.db, actor: { user_id: 1 }, zone: 'zone-policy-test',
+      request: { expected_policy_version: first.policy.sync_version }, now: '2026-10-18T10:03:00Z',
+    }), (error) => error.code === 'version_conflict' && error.statusCode === 409);
+  } finally { closeFixture(f); }
+});

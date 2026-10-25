@@ -2079,7 +2079,10 @@
             "$ref": "resources.schema.json#/definitions/CanonicalUuid"
           },
           "expected_policy_version": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "minimum": 0
           }
         }
