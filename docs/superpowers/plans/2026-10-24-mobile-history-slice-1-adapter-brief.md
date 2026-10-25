@@ -17,7 +17,7 @@ Both frontends already declare camelCase Analysis types and send camelCase JSON.
 | Grid | Absent | `{ stepSeconds, from, to, bucketCount }` |
 | Point | `{ t, value, count, quality }`; `quality` is often null | `{ t, value, count, quality }`; aligned gaps use `0` and `"gap"`, values use `"ok"` |
 | Series | `{ seriesId, resolved, label, unit, points, truncated, cadence, timezone }` | `{ seriesId, resolved, label, unit, coveragePct, points, truncated }` |
-| Dropped | `{ seriesId: string | null, reason }` | Same |
+| Dropped | `{ seriesId: string \| null, reason }` | Same |
 | Oversize | HTTP 413 with `{ error, suggestion }`; there is no code | HTTP 400 whose Spring detail/reason is `range_too_large` |
 
 The edge helper returns the exact requested range. The mobile edge request builder must floor `from` and ceil `to` to UTC hour boundaries, so that returned range is also the edge grid. Cloud receives the logical timestamps unchanged; `AnalysisGrid` floors and ceils them and emits the resulting grid.

@@ -3,6 +3,7 @@ import { attachD3ViewportController, type D3ViewportController } from './shared/
 import { inspectAtTime, inspectBucketAtTime, type Inspection } from './shared/inspection';
 import type { ChartAdapter, ChartRenderOptions, CoverageWindow, MountAdapter, SensorSeries, Viewport } from './shared/types';
 import { sameViewport, type ViewportStore } from './shared/viewport';
+import { formatExactInstant } from './shared/formatting';
 
 interface ChartHostBaseProps {
   mountAdapter: MountAdapter;
@@ -183,8 +184,8 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     {coverage && leftCoverage > 0 && <div className="not-loaded not-loaded-left" style={{ width: `${leftCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
     {coverage && rightCoverage > 0 && <div className="not-loaded not-loaded-right" style={{ width: `${rightCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
       {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>
-      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {formatDate(pin.targetTime, locale, timeZone, inspectionMode === 'containing-bucket')}</time>
-      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {inspectionMode === 'containing-bucket' ? formatValue(row.value, locale) : String(row.value)} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{formatDate(row.sampledAt, locale, timeZone)}</time></div> : row.kind === 'bucket' ? <div key={row.seriesId}><strong>{series[index]?.label}: {formatValue(row.value, locale)} {row.unit}</strong><span>{labels.hourlyAverage ?? 'Hourly average'} {labels.bucketInterval?.(row.from, row.to) ?? `${formatDate(row.from, locale, timeZone, true)} – ${formatDate(row.to, locale, timeZone, true)}`}</span></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
+      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {inspectionMode === 'containing-bucket' ? formatExactInstant(pin.targetTime, locale, timeZone) : formatDate(pin.targetTime, locale, timeZone)}</time>
+      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {inspectionMode === 'containing-bucket' ? formatValue(row.value, locale) : String(row.value)} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{formatDate(row.sampledAt, locale, timeZone)}</time></div> : row.kind === 'bucket' ? <div key={row.seriesId}><strong>{series[index]?.label}: {formatValue(row.value, locale)} {row.unit}</strong><span>{labels.hourlyAverage ?? 'Hourly average'} {labels.bucketInterval?.(row.from, row.to) ?? `${formatExactInstant(row.from, locale, timeZone)} – ${formatExactInstant(row.to, locale, timeZone)}`}</span></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
       <button type="button" data-testid="inspector-close" onClick={(event) => { event.stopPropagation(); pinRef.current = null; setPin(null); if (guideRef.current) guideRef.current.hidden = true; }}>{labels.close}</button>
     </aside>}
   </div>;

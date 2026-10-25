@@ -142,7 +142,7 @@ export function useHistoryWindow(options: HistoryWindowOptions): HistoryWindowRe
       const policy = optionsRef.current.readPolicy?.(request) ?? request.readPolicy ?? 'card-default';
       const selected = selectionRef.current;
       const selectionKey = selected === undefined ? undefined : JSON.stringify([...selected].sort());
-      const demand: HistoryDemand = { context, visible, request: { ...request, readPolicy: policy, selectionKey }, horizon, reason: 'prefetch', forceFresh: false, direction: direction.current, neighbor: request, readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
+      const demand: HistoryDemand = { context, visible: { from: request.from, to: request.to }, request: { ...request, readPolicy: policy, selectionKey }, horizon, reason: 'prefetch', forceFresh: false, direction: direction.current, neighbor: request, readPolicy: policy, selectionKey, selectedIds: selected, requestRevision: selectionRevisionRef.current };
       const loadContext: HistoryLoadContext = { selectedIds: selected, selectionKey, requestRevision: selectionRevisionRef.current, readPolicy: policy };
       void loader.prefetch(demand, (signal) => optionsRef.current.load(demand.request, signal, loadContext)).catch((cause: unknown) => {
         if (cause instanceof HistoryAuthError && identityRef.current === identityAtSchedule && lifetime.current === lifetimeAtSchedule) optionsRef.current.onAuthError?.(cause);

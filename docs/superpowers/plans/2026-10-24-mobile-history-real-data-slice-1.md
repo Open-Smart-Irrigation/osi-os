@@ -57,7 +57,7 @@
 | `scripts/verify-history-uplot-core-vendor.mjs` | Compare canonical and vendored file paths and SHA-256 bytes; fail on missing, extra, or changed files. |
 | `frontend/vendor/history-uplot-core/**` | Byte-for-byte cloud copy of the canonical edge package. |
 | `frontend/vendor/history-uplot-core-origin.json` | Source commit and sorted hashes, outside the byte-compared package. |
-| `*/src/history/mobileMeasurementCatalog.ts` | Platform catalog normalization and the explicit `current | other_supported | unknown` policy. |
+| `*/src/history/mobileMeasurementCatalog.ts` | Platform catalog normalization and the explicit `current`, `other_supported`, or `unknown` policy. |
 | `*/src/history/mobileAnalysisHistoryAdapter.ts` | Platform request construction and DTO normalization before shared validation. |
 | `*/src/history/useMobileTensionCatalog.ts` | Session- and zone-keyed SWR catalog read. |
 | `*/src/pages/MobileTensionHistoryRoute.tsx` | Resolve route zone/timezone/session and compose the shared shell. |

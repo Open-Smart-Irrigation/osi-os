@@ -36,6 +36,19 @@ describe('packaged ChartHost', () => {
     fireEvent.click(view.getByTestId('chart-host'), { clientX: 75, clientY: 50 });
     expect(view.getByTestId('inspector').textContent).toContain('Unavailable');
   });
+  test('disambiguates rollback target and fallback bucket endpoints', () => {
+    const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: Date.parse('2026-10-25T00:00:00Z'), to: Date.parse('2026-10-25T01:00:00Z') }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
+    const from = Date.parse('2026-10-25T00:00:00Z');
+    const to = Date.parse('2026-10-25T01:00:00Z');
+    const store = createViewportStore({ from, to }, { from, to }, 1_000, to - from);
+    const buckets = [{ from, to, value: 23.4, count: 2, quality: 'ok' }] as const;
+    const view = render(<ChartHost mountAdapter={mountAdapter} series={[{ ...series[0], buckets }]} store={store} extent={{ from, to }} inspectionMode="containing-bucket" locale="en-GB" timeZone="Europe/Zurich" />);
+    fireEvent.click(view.getByTestId('chart-host'), { clientX: 50, clientY: 50 });
+    const text = view.getByTestId('inspector').textContent ?? '';
+    expect(view.getByTestId('inspector-target').textContent).toContain('GMT+2');
+    expect(text).toContain('GMT+2');
+    expect(text).toContain('GMT+1');
+  });
   test('keeps nearest-point numeric output in legacy raw form', () => {
     const mountAdapter = vi.fn(() => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: 0, to: 7_200_000 }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() }));
     const store = createViewportStore({ from: 0, to: 7_200_000 }, { from: 0, to: 7_200_000 }, 1_000, 7_200_000);

@@ -23,6 +23,37 @@ export function formatUplotTimeTick(value: number, min: number, max: number, loc
   return formatter.format(date);
 }
 
+function wallMinuteKey(value: number, formatter: Intl.DateTimeFormat): string {
+  const parts = formatter.formatToParts(new Date(value * 1_000));
+  return ['year', 'month', 'day', 'hour', 'minute'].map((type) => parts.find((part) => part.type === type)?.value ?? '').join('-');
+}
+
+function shortOffset(value: number, formatter: Intl.DateTimeFormat): string {
+  return formatter.formatToParts(new Date(value * 1_000)).find((part) => part.type === 'timeZoneName')?.value ?? '';
+}
+
+function formatUplotTimeTicks(values: readonly number[], min: number, max: number, locale = 'en-GB', timeZone?: string): string[] {
+  const narrow = max - min <= 48 * 60 * 60;
+  const baseFormatter = new Intl.DateTimeFormat(locale, narrow ? { hour: '2-digit', minute: '2-digit', hour12: false, timeZone } : { day: '2-digit', month: 'short', timeZone });
+  if (!narrow) return values.map((value) => baseFormatter.format(new Date(value * 1_000)));
+  const wallFormatter = new Intl.DateTimeFormat('en-US-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone });
+  const offsetFormatter = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone, timeZoneName: 'shortOffset' });
+  const labels = values.map((value) => baseFormatter.format(new Date(value * 1_000)));
+  const keys = values.map((value) => wallMinuteKey(value, wallFormatter));
+  const offsetsForValues = values.map((value) => shortOffset(value, offsetFormatter));
+  const offsets = new Map<string, Set<string>>();
+  offsetsForValues.forEach((offset, index) => {
+    const current = offsets.get(keys[index]) ?? new Set<string>();
+    current.add(offset);
+    offsets.set(keys[index], current);
+  });
+  return values.map((_value, index) => {
+    const label = labels[index];
+    const group = offsets.get(keys[index]);
+    return group && group.size > 1 ? `${label}\n${offsetsForValues[index]}` : label;
+  });
+}
+
 function seconds(viewport: Viewport): { min: number; max: number } {
   return { min: viewport.from / 1_000, max: viewport.to / 1_000 };
 }
@@ -116,12 +147,24 @@ export const mountUplot: MountAdapter = (
   void onViewportChange;
 
   let cachedYRange: [number, number] = [0, 1];
+  let latestAxisHasFoldLabels = false;
+  let foldAxisPadding = false;
   const plot = new uPlot(
     {
       width: Math.max(1, host.clientWidth),
       height: Math.max(1, host.clientHeight || CHART_HEIGHT),
       ms: 1e-3,
-      padding: [PLOT_INSETS.top, PLOT_INSETS.right, 0, 0],
+      padding: [
+        PLOT_INSETS.top,
+        (_u, _side, _sidesWithAxes, cycleNum) => {
+          if (cycleNum === 0) return PLOT_INSETS.right;
+          if (cycleNum === 1) foldAxisPadding = latestAxisHasFoldLabels;
+          else if (latestAxisHasFoldLabels) foldAxisPadding = true;
+          return foldAxisPadding ? 28 : PLOT_INSETS.right;
+        },
+        0,
+        0,
+      ],
       legend: { show: false },
       cursor: {
         show: false,
@@ -134,12 +177,14 @@ export const mountUplot: MountAdapter = (
       },
       axes: [
         {
-          size: PLOT_INSETS.bottom,
+          size: (_u, values) => PLOT_INSETS.bottom + (values?.some((value) => value.includes('\n')) ? 16 : 0),
           space: 64,
           values: (u, values) => {
             const min = u.scales.x.min ?? values[0] ?? 0;
             const max = u.scales.x.max ?? values[values.length - 1] ?? min;
-            return values.map((value) => formatUplotTimeTick(value, min, max, options.locale, options.timeZone));
+            const labels = formatUplotTimeTicks(values, min, max, options.locale, options.timeZone);
+            latestAxisHasFoldLabels = labels.some((value) => value.includes('\n'));
+            return labels;
           },
         },
         { size: PLOT_INSETS.left },

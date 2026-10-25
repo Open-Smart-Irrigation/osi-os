@@ -256,6 +256,26 @@ describe("pilot whole-response history loader", () => {
     await expect(loader.prefetch(demand(), async () => data({ aggregation: { level: "15m", pointCount: 2 } }))).resolves.toBe("skipped");
   });
 
+  test.each([
+    ['short coverage', data({ coverage: { from: 0, to: 99 }, readPolicy: 'edge-hourly' })],
+    ['mismatched read policy', data({ readPolicy: 'cloud-rollup-hourly' })],
+    ['missing selected series', data({ readPolicy: 'edge-hourly', series: [], unitGroups: [] })],
+  ])('does not cache a prefetch response with %s', async (_label, invalid) => {
+    const loader = createHistoryLoader();
+    const neighbor = demand({
+      selectedIds: ['s'],
+      selectionKey: '["s"]',
+      visible: { from: request.from, to: request.to },
+      readPolicy: 'edge-hourly',
+      request: { ...request, readPolicy: 'edge-hourly' },
+    });
+    await loader.prefetch(neighbor, async () => invalid);
+    expect(loader.diagnostics().entries).toBe(0);
+    const foreground = loader.foreground(neighbor, async () => data({ readPolicy: 'edge-hourly' }));
+    expect(foreground.source).toBe('network');
+    await foreground.result;
+  });
+
   test("joins a covering request but does not join an overlapping partial request", async () => {
     const loader = createHistoryLoader();
     const pending = deferred<HistoryAcceptedData>();

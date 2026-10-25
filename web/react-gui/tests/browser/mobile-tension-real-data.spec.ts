@@ -777,7 +777,7 @@ test('seven-day production request keeps 169 hourly buckets and inspector uses c
     const responseRange = (request.body as { range: { from: string } }).range;
     const boundary = Date.parse(responseRange.from) + 24 * 3_600_000;
     const layer = page.locator('.mobile-tension-chart-frame .gesture-layer');
-    const formatDate = (timestamp: number) => new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short', timeZone: FIXTURE_TIME_ZONE }).format(timestamp);
+    const formatInspectorDate = (timestamp: number) => new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: FIXTURE_TIME_ZONE, timeZoneName: 'shortOffset' }).format(timestamp);
     const inspectAt = async (targetTime: number, bucketFrom: number, bucketIndex: number): Promise<string> => {
       const clientX = plot!.left + ((targetTime - from) / (to - from)) * plot!.width;
       const clientY = plot!.top + plot!.height / 2;
@@ -791,7 +791,7 @@ test('seven-day production request keeps 169 hourly buckets and inspector uses c
       const text = await inspector.innerText();
       const expectedValue = new Intl.NumberFormat('en', { maximumSignificantDigits: 6 }).format(18 + Math.sin(bucketIndex / 6));
       expect(text).toContain(`${expectedValue} kPa`);
-      expect(text).toContain(`From ${formatDate(bucketFrom)} to ${formatDate(bucketFrom + 3_600_000)}.`);
+      expect(text).toContain(`From ${formatInspectorDate(bucketFrom)} to ${formatInspectorDate(bucketFrom + 3_600_000)}.`);
       expect(text).toContain('Hourly average');
       await page.getByTestId('inspector-close').click();
       return text;

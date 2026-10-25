@@ -1,9 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { useHistoryWindow } from '../src/history/useHistoryWindow';
+import { createHistoryLoader, HISTORY_PREFETCH_IDLE_MS } from '../src/history/historyLoader';
 import { analysisHourlyRangeStrategy } from '../src/history/rangeStrategy';
 import { HistoryAuthError } from '../src/history/types';
-import type { HistoryWindowContext, HistoryWindowRequest, HistoryWindowResponse } from '../src/shared/types';
+import type { HistoryLoadContext, HistoryWindowContext, HistoryWindowRequest, HistoryWindowResponse } from '../src/shared/types';
 
 const context: HistoryWindowContext = { sessionKey: 'session-1', scopeKey: 'zone:7', cardId: 'soil', sourceKey: 'swt' };
 const response = (request: HistoryWindowRequest, overrides: Partial<HistoryWindowResponse> = {}): HistoryWindowResponse => ({
@@ -22,6 +23,12 @@ function deferred<T>() {
   const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
 }
+
+const flushMicrotasks = async () => {
+  await act(async () => {
+    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+  });
+};
 
 describe('useHistoryWindow', () => {
   test('removing a source during the initial load aborts it and requests the reduced selection', async () => {
@@ -194,8 +201,9 @@ describe('useHistoryWindow', () => {
     second.resolve(response(load.mock.calls[1][0]));
   });
 
-  test('passes ordered selection context to the foreground lane', async () => {
+  test('passes ordered selection context to both foreground and prefetch lanes', async () => {
     vi.useFakeTimers();
+    const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
     try {
       Object.defineProperty(document, 'hidden', { value: false, configurable: true });
       const contexts: unknown[] = [];
@@ -204,10 +212,153 @@ describe('useHistoryWindow', () => {
         return response(request, { series: ['b', 'a'].map((id) => ({ id, label: id, unit: 'kPa', points: [{ t: request.from, value: 1 }] })) });
       });
       renderHook(() => useHistoryWindow({ enabled: true, context, selectedIds: ['b', 'a'], now: () => 10 * 86_400_000, load }));
-      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      await flushMicrotasks();
       await act(async () => { await vi.advanceTimersByTimeAsync(600); });
-      expect(contexts).toEqual([['b', 'a']]);
+      expect(contexts).toEqual([['b', 'a'], ['b', 'a']]);
     } finally {
+      if (hidden) Object.defineProperty(document, 'hidden', hidden);
+      else delete (document as { hidden?: boolean }).hidden;
+      vi.useRealTimers();
+    }
+  });
+
+  test('prefetches and reuses two requested hourly neighbors across backward moves', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-24T00:00:00.000Z'));
+    const now = () => Date.now();
+    const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    let unmount: (() => void) | undefined;
+    try {
+      const load = vi.fn(async (request: HistoryWindowRequest, _signal: AbortSignal, loadContext?: HistoryLoadContext) => {
+        void loadContext;
+        return response(request, { readPolicy: 'edge-hourly' });
+      });
+      const loader = createHistoryLoader({ now });
+      const rendered = renderHook(() => useHistoryWindow({
+        enabled: true,
+        context,
+        selectedIds: ['swt-1'],
+        now,
+        navigationStartMs: 0,
+        rangeStrategy: analysisHourlyRangeStrategy,
+        readPolicy: () => 'edge-hourly' as const,
+        loader,
+        load,
+      }));
+      const { result } = rendered;
+      unmount = rendered.unmount;
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(1);
+      const initialViewport = result.current.viewportStore.get();
+      const firstNeighbor = analysisHourlyRangeStrategy.neighborRequest(initialViewport, 'back', { from: 0, to: initialViewport.to });
+      expect(firstNeighbor).not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(HISTORY_PREFETCH_IDLE_MS); });
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(load.mock.calls[1][0]).toMatchObject({
+        from: firstNeighbor!.from,
+        to: firstNeighbor!.to,
+        aggregation: 'hourly',
+        readPolicy: 'edge-hourly',
+      });
+      expect(load.mock.calls[1][2]).toMatchObject({ selectedIds: ['swt-1'], readPolicy: 'edge-hourly' });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(501); });
+      act(() => result.current.moveWindow('back'));
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(2);
+      expect(result.current.accepted?.request.from).toBe(firstNeighbor!.from);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(HISTORY_PREFETCH_IDLE_MS); });
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(3);
+      const secondNeighbor = analysisHourlyRangeStrategy.neighborRequest(result.current.viewportStore.get(), 'back', { from: 0, to: result.current.viewportStore.get().to });
+      expect(secondNeighbor).not.toBeNull();
+      expect(load.mock.calls[2][0]).toMatchObject({
+        from: secondNeighbor!.from,
+        to: secondNeighbor!.to,
+        aggregation: 'hourly',
+        readPolicy: 'edge-hourly',
+      });
+      expect(load.mock.calls[2][2]).toMatchObject({ selectedIds: ['swt-1'], readPolicy: 'edge-hourly' });
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(501); });
+      act(() => result.current.moveWindow('back'));
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(result.current.accepted?.request.from).toBe(secondNeighbor!.from);
+    } finally {
+      unmount?.();
+      if (hidden) Object.defineProperty(document, 'hidden', hidden);
+      else delete (document as { hidden?: boolean }).hidden;
+      vi.useRealTimers();
+    }
+  });
+
+  test('public gesture movement settles into prefetched neighbors and validates the next prefetch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-24T00:00:00.000Z'));
+    const now = () => Date.now();
+    const hidden = Object.getOwnPropertyDescriptor(document, 'hidden');
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    let unmount: (() => void) | undefined;
+    try {
+      const load = vi.fn(async (request: HistoryWindowRequest) => response(request, { readPolicy: 'edge-hourly' }));
+      const rendered = renderHook(() => useHistoryWindow({
+        enabled: true,
+        context,
+        selectedIds: ['swt-1'],
+        now,
+        navigationStartMs: 0,
+        rangeStrategy: analysisHourlyRangeStrategy,
+        readPolicy: () => 'edge-hourly' as const,
+        load,
+      }));
+      const { result } = rendered;
+      unmount = rendered.unmount;
+      await flushMicrotasks();
+      const initialViewport = result.current.viewportStore.get();
+      const firstNeighbor = analysisHourlyRangeStrategy.neighborRequest(initialViewport, 'back', { from: 0, to: initialViewport.to });
+      expect(firstNeighbor).not.toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(HISTORY_PREFETCH_IDLE_MS); });
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(501); });
+      act(() => result.current.viewportStore.set({ from: firstNeighbor!.from, to: firstNeighbor!.to }, 'gesture'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(150); await Promise.resolve(); await Promise.resolve(); });
+      await flushMicrotasks();
+      const secondNeighbor = analysisHourlyRangeStrategy.neighborRequest(result.current.viewportStore.get(), 'back', { from: 0, to: result.current.viewportStore.get().to });
+      expect(secondNeighbor).not.toBeNull();
+      expect(load.mock.calls.filter(([request]) => request.from === firstNeighbor!.from)).toHaveLength(1);
+      expect(result.current.accepted?.request.from).toBe(firstNeighbor!.from);
+      await act(async () => { await vi.advanceTimersByTimeAsync(HISTORY_PREFETCH_IDLE_MS); });
+      await flushMicrotasks();
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(load.mock.calls[2][0]).toMatchObject({ from: secondNeighbor!.from, to: secondNeighbor!.to, aggregation: 'hourly', readPolicy: 'edge-hourly' });
+      await act(async () => { await vi.advanceTimersByTimeAsync(501); });
+      act(() => result.current.viewportStore.set({ from: secondNeighbor!.from, to: secondNeighbor!.to }, 'gesture'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(150); await Promise.resolve(); await Promise.resolve(); });
+      await flushMicrotasks();
+      const callsAfterSecondGesture = load.mock.calls.slice(3);
+      expect(callsAfterSecondGesture.length).toBeLessThanOrEqual(1);
+      expect(load.mock.calls.filter(([request]) => request.from === secondNeighbor!.from)).toHaveLength(1);
+      expect(result.current.accepted?.request.from).toBe(secondNeighbor!.from);
+      if (callsAfterSecondGesture.length === 1) {
+        const thirdNeighbor = analysisHourlyRangeStrategy.neighborRequest(result.current.viewportStore.get(), 'back', { from: 0, to: result.current.viewportStore.get().to });
+        expect(thirdNeighbor).not.toBeNull();
+        expect(callsAfterSecondGesture[0][0]).toMatchObject({
+          from: thirdNeighbor!.from,
+          to: thirdNeighbor!.to,
+          aggregation: 'hourly',
+          readPolicy: 'edge-hourly',
+        });
+        expect(load.mock.calls.filter(([request]) => request.from === thirdNeighbor!.from)).toHaveLength(1);
+      }
+    } finally {
+      unmount?.();
+      if (hidden) Object.defineProperty(document, 'hidden', hidden);
+      else delete (document as { hidden?: boolean }).hidden;
       vi.useRealTimers();
     }
   });

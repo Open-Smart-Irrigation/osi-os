@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { MobileTensionHistory, type MobileTensionHistoryLabels } from '../src/mobile/MobileTensionHistory';
@@ -40,6 +41,48 @@ const props = (overrides: Partial<React.ComponentProps<typeof MobileTensionHisto
 
 describe('MobileTensionHistory', () => {
   beforeEach(() => load.mockClear());
+
+  test('loads and renders finite data after StrictMode effect replay', async () => {
+    const setData = vi.fn();
+    const mountAdapter = vi.fn(() => ({
+      setData,
+      setViewport: vi.fn(),
+      getViewport: () => ({ from: 0, to: 86_400_000 }),
+      getPlotRect: () => new DOMRect(0, 0, 100, 100),
+      resize: vi.fn(),
+      destroy: vi.fn(),
+    }));
+    render(<StrictMode><MobileTensionHistory {...props({ mountAdapter })} /></StrictMode>);
+    await waitFor(() => expect(load).toHaveBeenCalled());
+    await waitFor(() => expect(setData.mock.calls.some(([series]) => (series as Array<{ points?: Array<{ value: number | null }> }>).some((item) => item.points?.some((point) => typeof point.value === 'number' && Number.isFinite(point.value))))).toBe(true));
+  });
+
+  test('passes offset-qualified rollback endpoints to the mobile bucket label', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-25T01:30:00Z'));
+    const from = Date.parse('2026-10-25T00:00:00Z');
+    const to = Date.parse('2026-10-25T01:00:00Z');
+    const bucketInterval = vi.fn((start: string, end: string) => `${start} / ${end}`);
+    const mobileLoad = vi.fn(async (request: Parameters<typeof load>[0]): Promise<HistoryWindowResponse> => ({
+      request,
+      coverage: { from: request.from, to: request.to },
+      series: [{ id: 'series-1', label: 'series-1', unit: 'kPa', points: [{ t: from, value: 4 }], buckets: [{ from, to, value: 4, count: 1, quality: 'ok' }] }],
+      unitGroups: [], aggregation: { level: 'hourly', pointCount: 1 }, limits: { maxPointsPerSeries: 2_000, truncated: false }, readPolicy: 'edge-hourly',
+    }));
+    try {
+      const mountAdapter = () => ({ setData: vi.fn(), setViewport: vi.fn(), getViewport: () => ({ from: Date.parse('2026-10-24T01:30:00Z'), to: Date.parse('2026-10-25T01:30:00Z') }), getPlotRect: () => new DOMRect(0, 0, 100, 100), resize: vi.fn(), destroy: vi.fn() });
+      render(<MobileTensionHistory {...props({ load: mobileLoad, mountAdapter, locale: 'en-GB', timeZone: 'Europe/Zurich', labels: { ...labels, bucketInterval } })} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); for (let index = 0; index < 8; index += 1) await Promise.resolve(); });
+      expect(mobileLoad).toHaveBeenCalled();
+      fireEvent.click(screen.getByTestId('chart-host'), { clientX: 95, clientY: 50 });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); for (let index = 0; index < 8; index += 1) await Promise.resolve(); });
+      expect(bucketInterval).toHaveBeenCalled();
+      expect(bucketInterval.mock.calls[0][0]).toContain('GMT+2');
+      expect(bucketInterval.mock.calls[0][1]).toContain('GMT+1');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   test('renders the compact shell, fixed kPa unit, and accessible time/sources sheets', async () => {
     render(<MobileTensionHistory {...props()} />);
