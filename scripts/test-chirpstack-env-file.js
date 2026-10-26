@@ -298,6 +298,7 @@ const ROOT_B3_FAILURES = [
   'B3 expected failure: base writer creates permissive credentials',
   'B3 expected failure: base writer retains permissive replacement'
 ];
+const B3_BASE_SOURCE_SHA256 = '5f521479463c2ebc2aaf17e4a6ee5ec0a0235a93a6146914f6da626b8c92074d';
 
 function assertRootTap(output, profile = 'candidate') {
   assert.ok(profile === 'candidate' || profile === 'B3', 'root TAP profile is explicit');
@@ -329,6 +330,28 @@ function assertRootTap(output, profile = 'candidate') {
   return summary;
 }
 
+function assertB3Snapshots(output, expectedSource = SOURCE) {
+  const records = [...output.matchAll(/^# B3 A([^\s]+) old-source snapshot ([^\r\n]*)$/gm)];
+  assert.equal(records.length, 2, 'B3 output has exactly two old-source snapshot records');
+  assert.deepEqual(records.map(match => match[1]), ['1', '2'], 'B3 snapshots are A1 and A2 exactly once and in order');
+  const expected = [
+    { bytes: 22, hex: '53594e5448455449433d626173652d6372656174650a' },
+    { bytes: 23, hex: '53594e5448455449433d626173652d7265706c6163650a' }
+  ];
+  for (const [index, match] of records.entries()) {
+    const value = JSON.parse(match[2]);
+    assert.equal(value.base, RUNTIME_BASE, 'snapshot binds the approved runtime base');
+    assert.equal(value.source, expectedSource, 'snapshot source path matches the extracted source');
+    assert.equal(value.sourceSha256, B3_BASE_SOURCE_SHA256, 'snapshot source hash matches the approved base source');
+    assert.equal(value.bytes, expected[index].bytes, 'snapshot has the expected synthetic byte count');
+    assert.equal(value.snapshotHex, expected[index].hex, 'snapshot has the expected exact synthetic bytes');
+    assert.equal(value.uid, 0, 'snapshot owner is root');
+    assert.equal(value.gid, 0, 'snapshot group is root');
+    assert.equal(value.mode, 0o644, 'old writer snapshot records the permissive mode');
+    assert.equal(value.directStatus, 0, 'old writer returned direct status zero');
+  }
+}
+
 if (process.geteuid() !== 0) {
   test('issue 183 root qualification re-entry', t => {
     const cleanEnv = ['PATH=/usr/bin:/bin'];
@@ -336,7 +359,9 @@ if (process.geteuid() !== 0) {
     if (process.env.OSI_DEPLOY_UNDER_TEST) cleanEnv.push('OSI_DEPLOY_UNDER_TEST=' + process.env.OSI_DEPLOY_UNDER_TEST);
     if (process.env.OSI_BOOTSTRAP_B3 === '1') cleanEnv.push('OSI_BOOTSTRAP_B3=1');
     const result = cp.spawnSync('sudo', ['-n', 'env', '-i', ...cleanEnv, process.execPath, '--test', '--test-concurrency=1', path.resolve(__filename)], { encoding: 'utf8', timeout: 45000, maxBuffer: 2 * 1024 * 1024 });
-    t.diagnostic((result.stdout || '') + (result.stderr || ''));
+    for (const line of ((result.stdout || '') + (result.stderr || '')).split(/\r?\n/)) {
+      if (line) t.diagnostic(line);
+    }
     assert.equal(result.error && result.error.code, undefined, 'root child did not time out or fail to spawn');
     assert.equal(result.signal, null);
     const b3 = process.env.OSI_BOOTSTRAP_B3 === '1';
@@ -346,6 +371,7 @@ if (process.geteuid() !== 0) {
     assert.equal(result.status, expectedStatus);
     for (const name of requiredNames) assert.ok((result.stdout || '').includes(name));
     assertRootTap(result.stdout || '', b3 ? 'B3' : 'candidate');
+    if (b3) assertB3Snapshots(result.stdout || '');
   });
 } else if (process.env.OSI_BOOTSTRAP_B3 === '1') {
   test('B3 expected failure: base writer creates permissive credentials', t => {
@@ -408,7 +434,24 @@ if (process.geteuid() !== 0) {
       const todoSummary = candidate.stdout.replace('# todo 0', '# todo 1');
       const wrongNames = candidate.stdout.replace(/^(?:not )?ok (\d+) - .*$/gm, (_, index) => 'ok ' + index + ' - unrelated result');
       const truncated = candidate.stdout.split('\n').filter(line => !line.startsWith('ok 11 -')).join('\n').replace('1..11', '1..10').replace('# tests 11', '# tests 10').replace('# pass 11', '# pass 10');
-      for (const malformed of [commentsOnly, todoSummary, wrongNames, truncated]) assert.throws(() => assertRootTap(malformed, 'candidate'));
+      const wrongStatus = candidate.stdout.replace('ok 1 - T0 TAP oracle', 'not ok 1 - T0 TAP oracle').replace('# pass 11', '# pass 10').replace('# fail 0', '# fail 1');
+      for (const malformed of [commentsOnly, todoSummary, wrongNames, truncated, wrongStatus]) assert.throws(() => assertRootTap(malformed, 'candidate'));
+      assert.throws(() => assertRootTap(truncated, 'candidate'), 'negative control: a missing result is rejected');
+      assert.throws(() => assertRootTap(wrongStatus, 'candidate'), 'negative control: a wrong result status is rejected');
+
+      const snapshotSource = '/tmp/issue-183-base-source-fixture.js';
+      const snapshotRows = [
+        { id: 1, value: { base: RUNTIME_BASE, source: snapshotSource, sourceSha256: B3_BASE_SOURCE_SHA256, snapshotHex: '53594e5448455449433d626173652d6372656174650a', bytes: 22, uid: 0, gid: 0, mode: 0o644, directStatus: 0 } },
+        { id: 2, value: { base: RUNTIME_BASE, source: snapshotSource, sourceSha256: B3_BASE_SOURCE_SHA256, snapshotHex: '53594e5448455449433d626173652d7265706c6163650a', bytes: 23, uid: 0, gid: 0, mode: 0o644, directStatus: 0 } }
+      ];
+      const snapshotLines = snapshotRows.map(row => '# B3 A' + row.id + ' old-source snapshot ' + JSON.stringify(row.value));
+      const snapshotOutput = snapshotLines.join('\n') + '\n';
+      assert.doesNotThrow(() => assertB3Snapshots(snapshotOutput, snapshotSource));
+      assert.throws(() => assertB3Snapshots(snapshotLines[0] + '\n', snapshotSource), 'negative control: missing A2 is rejected');
+      assert.throws(() => assertB3Snapshots(snapshotOutput + snapshotLines[0] + '\n', snapshotSource), 'negative control: duplicate A1 is rejected');
+      assert.throws(() => assertB3Snapshots(snapshotOutput.replace(snapshotLines[0], snapshotLines[0].replace(JSON.stringify(snapshotRows[0].value), '{malformed')), snapshotSource), 'negative control: malformed snapshot JSON is rejected');
+      assert.throws(() => assertB3Snapshots(snapshotOutput.replace(B3_BASE_SOURCE_SHA256, 'bad-source-hash'), snapshotSource), 'negative control: wrong source hash is rejected');
+      assert.throws(() => assertB3Snapshots(snapshotOutput.replace(snapshotSource, '/tmp/wrong-source.js'), snapshotSource), 'negative control: wrong source path is rejected');
       assert.doesNotThrow(() => oldOracle(commentsOnly, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old comments-only acceptance');
       assert.doesNotThrow(() => oldOracle(todoSummary, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old TODO acceptance');
       assert.doesNotThrow(() => oldOracle(truncated, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old partial-suite acceptance');
