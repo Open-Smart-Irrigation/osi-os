@@ -67,7 +67,7 @@ outside the one sanctioned exception.
 | Reseed or overwrite `/data/db/farming.db` on a provisioned Pi | `deploy.sh`'s `seed_db_if_missing` only seeds when the file is absent *and* no WAL/SHM/journal sidecars exist; it refuses otherwise. Overwriting destroys irreplaceable farm history. |
 | Add new schema behavior to `sync-init-fn` (the boot node) | It is FROZEN (AGENTS.md "Boot-DDL freeze"). New schema goes through the migration runner's ordered files and deploy-time runner path, not boot-time inline DDL. |
 | Add ad hoc DDL to `flows.json` or `deploy.sh` without routing through schema change control | `scripts/verify-no-stray-ddl.js` is a git-anchored DDL-marker ratchet over the maintained flow copies and `deploy.sh`. A green migration verifier does not prove this guard will pass. |
-| Modify an already-merged `database/migrations/ordered/NNNN__slug.sql` file | Migrations are checksummed (SHA-256 of the raw file bytes, `lib/osi-migrate/migrations-loader.js`). Changing a merged file makes the ledger's stored checksum mismatch the file on next apply, which the runner treats as `repair_required` and refuses to proceed past. |
+| Modify an already-merged `database/migrations/ordered/NNNN__slug.sql` file | `lib/osi-migrate/migrations-loader.js` hashes the raw file bytes (SHA-256) and compares each hash with `CHECKSUMS.json`. A changed file with an unchanged manifest is refused with `ERR_MIGRATION_CORPUS` before the runner opens the database. If the manifest is edited to match, the corpus loads, the hash disagrees with the ledger row of every gateway that already applied the file, and `applyPending` marks that row `repair_required` and stops. |
 | Update `seed-blank.sql` or one bundled DB without the others | `verify-seed-replay.js` and `verify-db-schema-consistency.js` both fail if any of the 7 bundled copies drifts from the seed/migration-replay schema. One home for the fact: keep all copies byte/fingerprint-identical in the same commit. |
 | Rebuild a parent table (drop/rename swap) without the FK fence | Without `PRAGMA foreign_keys=OFF` held across the swap, `ON DELETE CASCADE` on child tables (`device_data`, `chameleon_readings`) silently wipes their rows when the parent is dropped. This caused a documented field history-loss incident (`docs/operations/edge-history-retention.md`). |
 | Run a `destructive`-class migration without writers stopped | `runner.js` enforces this in code — it throws `refuse to run unless writers are stopped (deploy/pre-start)` — because a table rebuild racing a live Node-RED writer can corrupt or lose in-flight rows. |
@@ -123,16 +123,19 @@ Use the next contiguous four-digit version after the highest `NNNN` present; do
 not copy an example version from this skill. `CHECKSUMS.json` is mandatory for runtime loading. Keep it consistent when authoring a new migration; never edit already-recorded migration bytes or regenerate expected hashes from suspect files.
 
 The filename format is enforced by a regex in
-`lib/osi-migrate/migrations-loader.js`:
-`^(\d{4})__([a-z0-9_]+)\.sql$` — four-digit version, double underscore, lowercase
-slug. Versions must be unique and are sorted numerically, not lexically.
+`lib/osi-migrate/migration-manifest.js`, which checks every `CHECKSUMS.json` key:
+`^([0-9]{4})__([a-z0-9_]+)\.sql$` (four-digit version, double underscore,
+lowercase slug). The loader then requires the `.sql` files on disk to equal the
+manifest keys exactly. Versions must be unique and are sorted numerically, not
+lexically.
 
 **The risk class is declared in a mandatory file header, not inferred from
 content or filename.** `migrations-loader.js` requires the first non-blank line
 (a UTF-8 BOM and leading blank lines are tolerated) to match
 `-- risk: additive|destructive|data`. A migration missing this header throws
-`migration <file> missing '-- risk: additive|destructive|data' header` and is
-rejected before it can run. Example, verbatim from `0002__gateway_health.sql`:
+`ERR_MIGRATION_CORPUS` (`migration corpus: migration <file> missing '-- risk:
+additive|destructive|data' header`), and the whole corpus is rejected before any
+migration runs. Example, verbatim from `0002__gateway_health.sql`:
 
 ```sql
 -- risk: additive
@@ -140,11 +143,19 @@ rejected before it can run. Example, verbatim from `0002__gateway_health.sql`:
 ```
 
 Each migration file is also SHA-256 checksummed over its **raw bytes**
-(`crypto.createHash('sha256').update(raw)` in `migrations-loader.js`) and that
-checksum is stored in the `schema_migrations` ledger row on success. If a
-previously-applied migration's on-disk checksum no longer matches the stored one,
-`applyPending` marks it `repair_required` and throws — this is the enforcement
-mechanism behind "never modify a merged migration."
+(`crypto.createHash('sha256').update(raw)` in `migrations-loader.js`). The
+checksum is enforced at two points:
+
+1. At corpus load, before any database access, the hash must equal the file's
+   `CHECKSUMS.json` entry. A mismatch throws `ERR_MIGRATION_CORPUS`
+   (`checksum mismatch for <file>`); `applyPending`, `bootstrapFresh` and
+   `verifyHead` refuse before they touch the ledger. Editing a merged file
+   without its manifest entry stops here.
+2. On success the runner stores the checksum in the
+   `schema_migrations` row. If the file and its manifest entry were both
+   changed, the corpus loads, but the checksum no longer matches the stored
+   row on a gateway that already applied it: `applyPending` marks that row
+   `repair_required` and throws.
 
 ### Risk-class semantics, verified against `lib/osi-migrate/runner.js`
 
