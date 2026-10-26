@@ -74,7 +74,7 @@ The synthetic SQLite fixture supplies all 6 table, 13 index, and 28 trigger name
 python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node --test --test-name-pattern 'verify library leaves process exit state to caller; CLI maps results' scripts/ops/generate-uganda-catchup-20260911.test.js
 ```
 
-Expected on the unmodified product script: child status 1 where the test expects 0, so the named test and command fail. If it fails for another reason, stop and report. Preserve the exact command, cwd, base SHA, exit status, and output.
+Expected on the unmodified product script: `verify(missing)` sets `process.exitCode` to 1, so the unset-state assertion sees `1 !== undefined`. The `apiProbe` catch calls `process.exit(2)`, making the probe child exit 2 where the parent test expects 0. The named Node test command exits 1. If it fails for another reason, stop and report. Preserve the exact command, cwd, base SHA, exit status, and output.
 
 4. In `verify(dbPath)` of `scripts/ops/generate-uganda-catchup-20260911.js`, delete only `process.exitCode = 1;` from the `if (missing.length)` branch. Retain its diagnostic and `return false;`, the success diagnostic and `return true;`, and all of `main()` verbatim. This makes the imported API return a boolean without changing caller process state; the CLI still maps false/true to exit 1/0 and exceptions to 2.
 
