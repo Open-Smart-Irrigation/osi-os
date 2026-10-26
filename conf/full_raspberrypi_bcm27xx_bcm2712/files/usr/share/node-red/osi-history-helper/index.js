@@ -4233,6 +4233,7 @@ module.exports = {
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
   deviceSourceId,
+  sourceKeyForCsv,
   describeDeviceSource,
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,

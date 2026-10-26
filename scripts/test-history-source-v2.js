@@ -17,6 +17,7 @@ const PROFILES = [
 ];
 
 const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')).fiveObservationCase;
+const identityVectors = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/contracts/history-source-v2/identity-vectors.json'), 'utf8')).vectors;
 const seed = fs.readFileSync(SEED_PATH, 'utf8');
 
 function compareExpectedSeries(expectedSeries, actualSeries, tolerance) {
@@ -358,6 +359,19 @@ for (const profile of PROFILES) {
       assert.deepEqual(mismatches, [], JSON.stringify({ result, responseSeries, expectedResponseSeries }));
     } finally {
       raw.close();
+    }
+  });
+
+  test(`${profile}: Analysis source keys and device source IDs match the contract identity vectors`, () => {
+    const helper = loadHelper(profile);
+    assert.ok(identityVectors.length > 0);
+    for (const vector of identityVectors) {
+      const device = { deveui: vector.deveui };
+      // sourceKeyForCsv is the key Analysis and export expose as sourceKey;
+      // it must be the contract's edge selector for each card.
+      assert.equal(helper.sourceKeyForCsv({ cardType: 'soil' }, device), vector.sourceKeys.soil.edge, `${vector.deveui} soil`);
+      assert.equal(helper.sourceKeyForCsv({ cardType: 'environment' }, device), vector.sourceKeys.environment.edge, `${vector.deveui} environment`);
+      assert.equal(helper.deviceSourceId(device), vector.deviceSourceId, `${vector.deveui} deviceSourceId`);
     }
   });
 

@@ -24,6 +24,19 @@ selector remains `soil-src-*` or `env-src-*` by card. They identify the same
 current authorized device but are host specific. Authorization is evaluated
 against the requested account, gateway, and zone before a source is returned.
 
+Three identifiers name a source, at different scopes. `deviceSourceId` is the
+physical identity and is the same value on both hosts. `sourceKey` is a
+per-host selector whose 12-character suffix is the `deviceSourceId` suffix.
+On the edge, the history router (`displaySafeSourceKey`) and Analysis and
+export (`sourceKeyForCsv` in `osi-history-helper`) derive the same soil and
+environment selector; the cloud derives `soil-src-*`, `env-src-*` and
+`dendro-src-*` in `HistoryCardService`.
+`identity-vectors.json` pins both hosts' selectors per card. The Analysis
+`seriesId` is the first 16 hexadecimal characters of the SHA-256 digest of
+`zoneId|cardType|sourceKey|channelKey`. It selects one series within one zone,
+so it is not a device identity: it changes when the device moves to another
+zone.
+
 An edge HTTP request that names a source resolves an explicit, authorized
 physical-device list. Its retained reads use that device's source-keyed rollups
 and keep the device/channel partition, including the per-device SWT3 eligibility
