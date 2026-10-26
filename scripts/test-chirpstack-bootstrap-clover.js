@@ -34,13 +34,20 @@ const SCRIPT = process.env.OSI_BOOTSTRAP_UNDER_TEST
 const CODEC_DIR = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs');
 // The DevEUI normalisation is the real helper's, so the tests pin production
 // validation; only the ChirpStack client is faked.
-const { normalizeDevEui } = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'));
+const realHelper = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'));
+const { normalizeDevEui } = realHelper;
 const TEKTELIC_CODEC = path.join(CODEC_DIR, 'tektelic_agriculture_decoder.js');
 const ENV_FILE = '/srv/node-red/.chirpstack.env';
 const API_KEY = 'synthetic-api-key-0001';
 const JS_RUNTIME = 2;
 
 let uuidCounter = 0;
+const testWorlds = [];
+process.on('exit', () => {
+  for (const world of testWorlds) {
+    try { fs.rmSync(world.tempDir, { recursive: true, force: true }); } catch (_) {}
+  }
+});
 function nextUuid() {
   uuidCounter += 1;
   return `00000000-0000-4000-8000-${String(uuidCounter).padStart(12, '0')}`;
@@ -61,9 +68,20 @@ function makeWorld(seed = {}) {
     writes: [],
     uciCommands: [],
     cliApiKeyCalls: 0,
+    cliExecOptions: [],
+    realClientValidation: Boolean(seed.realClientValidation),
+    clientApiKeys: [],
+    cliApiKeyOutput: seed.cliApiKeyOutput === undefined ? 'id: x\ntoken: minted-by-cli\n' : seed.cliApiKeyOutput,
+    cliApiKeyError: seed.cliApiKeyError || null,
     logs: [],
+    stdoutLogs: [],
+    stderrLogs: [],
+    fsEvents: [],
     exitCode: null,
+    tempDir: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-clover-test-')),
   };
+  world.envFile = path.join(world.tempDir, '.chirpstack.env');
+  testWorlds.push(world);
   return world;
 }
 
@@ -149,7 +167,15 @@ function makeChirpStack(world) {
     },
   };
   return {
-    createClient: () => client,
+    createClient: (options) => {
+      world.clientApiKeys.push(options.apiKey);
+      if (world.realClientValidation) {
+        // Build (and close) a real helper client first, so its API key
+        // validation runs exactly as on a gateway. ChirpStack itself stays fake.
+        realHelper.createClient(options).close();
+      }
+      return client;
+    },
     listItemToObject: (item) => item,
     normalizeDevEui,
   };
@@ -168,53 +194,42 @@ function makeFs(world) {
     const local = path.join(CODEC_DIR, match[1]);
     return fs.existsSync(local) ? fs.readFileSync(local, 'utf8') : null;
   };
-  return {
-    readFileSync(file) {
-      if (world.files.has(file)) return world.files.get(file);
-      const codec = codecFor(file);
-      if (codec !== null) return codec;
-      throw enoent(file);
-    },
-    writeFileSync(file, content, options) {
-      world.files.set(file, String(content));
-      if (options && typeof options === 'object' && options.mode !== undefined) world.fileModes.set(file, options.mode);
-    },
-    existsSync(file) { return world.files.has(file) || codecFor(file) !== null; },
-    statSync(file) {
-      if (!world.files.has(file)) throw enoent(file);
-      return { mode: world.fileModes.has(file) ? world.fileModes.get(file) : 0o100600 };
-    },
-    renameSync(from, to) {
-      if (!world.files.has(from)) throw enoent(from);
-      world.files.set(to, world.files.get(from));
-      world.files.delete(from);
-      if (world.fileModes.has(from)) {
-        world.fileModes.set(to, world.fileModes.get(from));
-        world.fileModes.delete(from);
-      }
-    },
-    unlinkSync(file) { world.files.delete(file); },
-    openSync(file, flags, mode) {
-      const fd = world.nextFd = (world.nextFd || 100) + 1;
-      world.openFds = world.openFds || new Map();
-      world.openFds.set(fd, { file, chunks: [], synced: false });
-      world.files.set(file, '');
-      if (mode !== undefined) world.fileModes.set(file, mode);
-      return fd;
-    },
-    writeSync(fd, text) { world.openFds.get(fd).chunks.push(String(text)); },
-    fsyncSync(fd) {
-      const entry = world.openFds.get(fd);
-      world.files.set(entry.file, entry.chunks.join(''));
-      entry.synced = true;
-      world.fsyncs = (world.fsyncs || 0) + 1;
-    },
-    closeSync(fd) {
-      const entry = world.openFds.get(fd);
-      world.files.set(entry.file, entry.chunks.join(''));
-      world.openFds.delete(fd);
-    },
+  const fakeRootStat = (stat) => {
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(stat)), stat);
+    copy.uid = 0;
+    copy.gid = 0;
+    return copy;
   };
+  return new Proxy(fs, {
+    get(target, key) {
+      if (key === 'readFileSync') return (file, options) => {
+        if (typeof file === 'string') {
+          const codec = codecFor(file);
+          if (codec !== null) return codec;
+        }
+        return target.readFileSync(file, options);
+      };
+      if (key === 'existsSync') return (file) => codecFor(file) !== null || target.existsSync(file);
+      if (key === 'fchownSync') return () => {};
+      if (key === 'fstatSync' || key === 'lstatSync' || key === 'statSync') {
+        return (...args) => fakeRootStat(target[key](...args));
+      }
+      if (key === 'writeFileSync') return (file, content, options) => {
+        world.fsEvents.push(['write', typeof file === 'number' ? 'fd' : String(file), Buffer.isBuffer(content) ? content.length : String(content).length]);
+        return target.writeFileSync(file, content, options);
+      };
+      if (key === 'fsyncSync') return (fd) => {
+        world.fsEvents.push(['fsync', target.fstatSync(fd).isDirectory() ? 'directory' : 'file']);
+        return target.fsyncSync(fd);
+      };
+      if (key === 'renameSync' || key === 'linkSync') return (from, to) => {
+        world.fsEvents.push([key === 'renameSync' ? 'rename' : 'link', String(from), String(to)]);
+        return target[key](from, to);
+      };
+      const value = target[key];
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }
 
 function makeChildProcess(world) {
@@ -242,10 +257,12 @@ function makeChildProcess(world) {
     throw new Error(`unexpected uci call: ${args.join(' ')}`);
   };
   return {
-    execSync(command) {
+    execSync(command, options) {
       if (/create-api-key/.test(command)) {
         world.cliApiKeyCalls += 1;
-        return Buffer.from('id: x\ntoken: minted-by-cli\n');
+        world.cliExecOptions.push({ command, options });
+        if (world.cliApiKeyError) throw world.cliApiKeyError;
+        return Buffer.from(world.cliApiKeyOutput);
       }
       throw new Error(`unexpected execSync: ${command}`);
     },
@@ -260,6 +277,12 @@ function makeChildProcess(world) {
 // every side effect redirected into `world`. The fakes resolve synchronously or
 // as already-settled promises, so one macrotask turn drains the whole run.
 async function runBootstrap(world, { args = [], env = {} } = {}) {
+  if (world.files.has(ENV_FILE)) {
+    fs.writeFileSync(world.envFile, world.files.get(ENV_FILE), { mode: world.fileModes.get(ENV_FILE) || 0o600 });
+    fs.chmodSync(world.envFile, world.fileModes.get(ENV_FILE) || 0o600);
+  } else {
+    try { fs.unlinkSync(world.envFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
   const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\n/, '');
   const helper = makeChirpStack(world);
   const fakeFs = makeFs(world);
@@ -269,24 +292,44 @@ async function runBootstrap(world, { args = [], env = {} } = {}) {
     if (name === 'fs') return fakeFs;
     if (name === 'child_process') return fakeCp;
     if (name === 'path') return path;
-    throw new Error(`unexpected require: ${name}`);
+    return require(name);
   };
   const fakeModule = { exports: {} };
   fakeRequire.main = fakeModule;
   const fakeProcess = {
-    env: { ENV_FILE, CHIRPSTACK_API_KEY: API_KEY, ...env },
+    env: { ENV_FILE: world.envFile, CHIRPSTACK_API_KEY: API_KEY, ...env },
     argv: ['node', '/srv/node-red/chirpstack-bootstrap.js', ...args],
+    getuid: () => 0,
+    geteuid: () => 0,
     exit: (code) => { if (world.exitCode === null) world.exitCode = code; },
   };
   const fakeConsole = {
-    log: (...parts) => world.logs.push(parts.join(' ')),
-    error: (...parts) => world.logs.push(parts.join(' ')),
-    warn: (...parts) => world.logs.push(parts.join(' ')),
+    log: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stdoutLogs.push(line);
+    },
+    error: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
+    warn: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
   };
   // eslint-disable-next-line no-new-func
   const run = new Function('require', 'module', 'exports', '__dirname', '__filename', 'process', 'console', source);
   run(fakeRequire, fakeModule, fakeModule.exports, '/srv/node-red', '/srv/node-red/chirpstack-bootstrap.js', fakeProcess, fakeConsole);
   await new Promise((resolve) => setImmediate(resolve));
+  if (fs.existsSync(world.envFile)) {
+    world.files.set(ENV_FILE, fs.readFileSync(world.envFile, 'utf8'));
+    world.fileModes.set(ENV_FILE, fs.statSync(world.envFile).mode & 0o7777);
+  } else {
+    world.files.delete(ENV_FILE);
+  }
   if (world.exitCode === null) world.exitCode = 0;
   return world;
 }
@@ -356,6 +399,123 @@ function provisionedGatewaySeed({ kiwiCodec = '' } = {}) {
 }
 
 // ------------------------------------------------------------------ cases --
+
+test('CLI key creation success provisions with the parsed synthetic token', async () => {
+  const world = await runBootstrap(makeWorld(), { env: { CHIRPSTACK_API_KEY: '' } });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.cliApiKeyCalls, 1);
+  assert.deepEqual(world.clientApiKeys, ['minted-by-cli']);
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_API_KEY, 'minted-by-cli');
+});
+
+test('CLI key creation failures do not log output or process errors', async () => {
+  const malformedMarker = 'SYNTHETIC_MALFORMED_OUTPUT_SECRET_522';
+  const malformed = await runBootstrap(makeWorld({
+    cliApiKeyOutput: `warning: ${malformedMarker}\n`,
+  }), { env: { CHIRPSTACK_API_KEY: '' } });
+  const malformedLogs = [...malformed.stdoutLogs, ...malformed.stderrLogs].join('\n');
+  assert.equal(malformed.exitCode, 1);
+  assert.match(malformedLogs, /CLI create-api-key failed \(invalid output\)/);
+  for (const [streamName, logs] of [['stdout', malformed.stdoutLogs], ['stderr', malformed.stderrLogs]]) {
+    assert.ok(!logs.join('\n').includes(malformedMarker), `malformed command output is not logged to ${streamName}`);
+  }
+
+  const messageMarker = 'SYNTHETIC_ERROR_MESSAGE_SECRET_522';
+  const stdoutMarker = 'SYNTHETIC_API_KEY_FIXTURE_522';
+  const stderrMarker = 'SYNTHETIC_ERROR_STDERR_SECRET_522';
+  const commandError = Object.assign(new Error(`command failed: ${messageMarker}`), {
+    status: 23,
+    stdout: Buffer.from(`token: ${stdoutMarker}\n`),
+    stderr: Buffer.from(`command output: ${stderrMarker}`),
+  });
+  const failed = await runBootstrap(makeWorld({ cliApiKeyError: commandError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const failedLogs = [...failed.stdoutLogs, ...failed.stderrLogs].join('\n');
+  assert.equal(failed.exitCode, 1);
+  assert.match(failedLogs, /CLI create-api-key failed \(command error, exit status 23\)/);
+  for (const [streamName, logs] of [['stdout', failed.stdoutLogs], ['stderr', failed.stderrLogs]]) {
+    const output = logs.join('\n');
+    for (const marker of [messageMarker, stdoutMarker, stderrMarker]) {
+      assert.ok(!output.includes(marker), `${marker} is not logged to ${streamName}`);
+    }
+  }
+
+  const invalidStatusError = Object.assign(new Error('synthetic process error'), { status: 256 });
+  const invalidStatus = await runBootstrap(makeWorld({ cliApiKeyError: invalidStatusError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const invalidStatusLogs = [...invalidStatus.stdoutLogs, ...invalidStatus.stderrLogs].join('\n');
+  assert.equal(invalidStatus.exitCode, 1);
+  assert.match(invalidStatusLogs, /CLI create-api-key failed \(command error\)/);
+  assert.doesNotMatch(invalidStatusLogs, /exit status/);
+});
+
+test('CLI key creation captures the child stderr instead of inheriting it', async () => {
+  const world = await runBootstrap(makeWorld(), { env: { CHIRPSTACK_API_KEY: '' } });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.cliExecOptions.length, 1);
+  const { command, options } = world.cliExecOptions[0];
+  assert.deepEqual(options, { stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.doesNotMatch(command, /2>&1/, 'stderr is piped by execSync, not merged by the shell');
+});
+
+// A token gRPC metadata cannot carry: grpc-js would throw an error that quotes
+// the whole `Bearer <token>` header value. Synthetic values only.
+const UNSENDABLE_TOKENS = [
+  ['an ANSI colour code', 'SYNTHETIC_ESC_TOKEN_522', (marker) => `\x1b[32m${marker}\x1b[0m`],
+  ['a tab', 'SYNTHETIC_TAB_TOKEN_522', (marker) => `${marker}\tsuffix`],
+  ['a non-ASCII character', 'SYNTHETIC_NONASCII_TOKEN_522', (marker) => `${marker}é`],
+];
+
+function assertMarkerNotLogged(world, marker) {
+  for (const [streamName, logs] of [['stdout', world.stdoutLogs], ['stderr', world.stderrLogs], ['console', world.logs]]) {
+    assert.ok(!logs.join('\n').includes(marker), `${marker} is not logged to ${streamName}`);
+  }
+}
+
+for (const [label, marker, build] of UNSENDABLE_TOKENS) {
+  test(`CLI key creation rejects a token with ${label} before it reaches the ChirpStack client`, async () => {
+    const world = await runBootstrap(makeWorld({
+      cliApiKeyOutput: `id: x\ntoken: ${build(marker)}\n`,
+      realClientValidation: true,
+    }), { env: { CHIRPSTACK_API_KEY: '' } });
+    assert.equal(world.exitCode, 1);
+    assert.match(world.stderrLogs.join('\n'), /CLI create-api-key failed \(invalid output\)/);
+    assert.deepEqual(world.clientApiKeys, [], 'the token never reaches createClient');
+    assert.equal(world.files.has(ENV_FILE), false, 'the token is never written to the env file');
+    assertMarkerNotLogged(world, marker);
+  });
+
+  test(`a pre-created CHIRPSTACK_API_KEY with ${label} fails without logging the key`, async () => {
+    const world = await runBootstrap(makeWorld({ realClientValidation: true }), {
+      env: { CHIRPSTACK_API_KEY: build(marker) },
+    });
+    assert.equal(world.exitCode, 1);
+    assert.equal(world.cliApiKeyCalls, 0);
+    assert.match(world.stderrLogs.join('\n'), /CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata/);
+    assertMarkerNotLogged(world, marker);
+  });
+
+  test(`--repair-soil-profiles with a CHIRPSTACK_API_KEY containing ${label} fails without logging the key`, async () => {
+    const gw = provisionedGatewaySeed();
+    const world = makeWorld({ ...gw.seed, realClientValidation: true });
+    await runBootstrap(world, {
+      args: ['--repair-soil-profiles'],
+      env: { CHIRPSTACK_API_KEY: build(marker) },
+    });
+    assert.equal(world.exitCode, 1);
+    assert.match(world.stderrLogs.join('\n'), /CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata/);
+    assert.deepEqual(world.writes, []);
+    assertMarkerNotLogged(world, marker);
+  });
+}
+
+test('a well-formed pre-created API key passes the real client validation', async () => {
+  const world = await runBootstrap(makeWorld({ realClientValidation: true }));
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.deepEqual(world.clientApiKeys, [API_KEY]);
+});
 
 test('the Tektelic agriculture codec ships in the codecs directory', () => {
   assert.ok(fs.existsSync(TEKTELIC_CODEC), `missing ${path.relative(ROOT, TEKTELIC_CODEC)}`);
@@ -590,7 +750,7 @@ test('--repair-soil-profiles refuses to run without the existing API key', async
 test('--repair-soil-profiles refuses a gateway that was never provisioned', async () => {
   const world = makeWorld();
   await runBootstrap(world, { args: ['--repair-soil-profiles'] });
-  assert.equal(world.exitCode, 1);
+  assert.equal(world.exitCode, 74, 'a required missing soil env file is a credential-filesystem failure');
   assert.deepEqual(world.writes, [], 'never creates a tenant or profile on an unprovisioned gateway');
   assert.equal(world.files.has(ENV_FILE), false);
 });
@@ -624,7 +784,7 @@ test('an unknown option (also the unreleased --repair-clover-profile) fails inst
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
   await runBootstrap(world, { args: ['--repair-clover-profile'] });
-  assert.equal(world.exitCode, 1);
+  assert.equal(world.exitCode, 2);
   assert.deepEqual(world.writes, []);
   assert.equal(world.files.get(ENV_FILE), gw.envText);
 });
@@ -638,7 +798,7 @@ test('--repoint-clover-device without a DevEUI fails instead of being ignored', 
     const gw = provisionedGatewaySeed();
     const world = makeWorld(gw.seed);
     await runBootstrap(world, { args });
-    assert.equal(world.exitCode, 1, args.join(' '));
+    assert.equal(world.exitCode, 2, args.join(' '));
     assert.deepEqual(world.writes, [], args.join(' '));
     assert.equal(world.files.get(ENV_FILE), gw.envText, args.join(' '));
   }
@@ -649,7 +809,93 @@ test('--repair-soil-profiles flushes the new env file to disk before it replaces
   const world = makeWorld(gw.seed);
   await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
-  assert.equal(world.fsyncs, 1, 'the temp env file is fsynced once');
-  assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file keeps its mode');
+  const stagedFlush = world.fsEvents.findIndex((event) => event[0] === 'fsync' && event[1] === 'file');
+  const publish = world.fsEvents.findIndex((event) => event[0] === 'rename' || event[0] === 'link');
+  const directoryFlush = world.fsEvents.findIndex((event) => event[0] === 'fsync' && event[1] === 'directory');
+  assert.ok(stagedFlush >= 0 && publish > stagedFlush && directoryFlush > publish, 'staged file flush precedes publication and parent flush follows it');
+  assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file is forced to exact mode 0600');
   assert.ok(![...world.files.keys()].some((f) => f.endsWith('.tmp')), 'no temp file left behind');
+});
+
+// A crash between link() and unlink() in a create-only publication leaves the
+// published file with a second link inside its staging directory. Every later
+// run refuses that entry; the diagnostic reports the link count and whether a
+// staging directory remains, and removing only that leftover clears the
+// refusal (the osi-live-ops-runbook recovery recipe).
+function credentialDiagnostic(world) {
+  const match = world.stderrLogs.join('\n').match(/Credential env-file operation failed (\{[^\n]*\})/);
+  assert.ok(match, 'emits the safe credential diagnostic');
+  return JSON.parse(match[1]);
+}
+
+for (const entry of ['.chirpstack.env', '.chirpstack.env.pre-gen2']) {
+  test(`an interrupted link publication of ${entry} reports its link count and staging leftover`, async () => {
+    const gw = provisionedGatewaySeed();
+    const world = makeWorld(gw.seed);
+    world.files.set(ENV_FILE, gw.envText);
+    world.fileModes.set(ENV_FILE, 0o600);
+    fs.writeFileSync(world.envFile, gw.envText, { mode: 0o600 });
+    const target = path.join(world.tempDir, entry);
+    if (entry !== '.chirpstack.env') fs.writeFileSync(target, gw.envText, { mode: 0o600 });
+    const stagingDir = path.join(world.tempDir, `.${entry}.tmp-crash01`);
+    fs.mkdirSync(stagingDir, { mode: 0o700 });
+    fs.linkSync(target, path.join(stagingDir, 'env'));
+    assert.equal(fs.statSync(target).nlink, 2);
+
+    await runBootstrap(world, { args: ['--secure-env-file'] });
+    assert.equal(world.exitCode, 74);
+    const refused = credentialDiagnostic(world);
+    assert.equal(refused.reason, 'UNSAFE_ENTRY');
+    assert.equal(refused.phase, 'validate');
+    assert.equal(refused.linkCount, 2);
+    assert.equal(refused.stagingLeftover, true);
+    assert.doesNotMatch(world.stderrLogs.join('\n'), /crash01|synthetic-api-key/, 'no staging name or key in the diagnostic');
+    assert.equal(fs.statSync(target).nlink, 2, 'the refusal removes nothing');
+    assert.equal(fs.statSync(path.join(stagingDir, 'env')).ino, fs.statSync(target).ino);
+
+    fs.unlinkSync(path.join(stagingDir, 'env'));
+    fs.rmdirSync(stagingDir);
+    const repaired = makeWorld(gw.seed);
+    repaired.files.set(ENV_FILE, gw.envText);
+    repaired.fileModes.set(ENV_FILE, 0o600);
+    repaired.envFile = world.envFile;
+    await runBootstrap(repaired, { args: ['--secure-env-file'] });
+    assert.equal(repaired.exitCode, 0, repaired.logs.join('\n'));
+    assert.equal(fs.statSync(target).nlink, 1);
+    assert.equal(fs.readFileSync(target, 'utf8'), gw.envText, 'the published bytes survive the recovery');
+  });
+}
+
+test('a hard link outside a staging directory reports no staging leftover', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.files.set(ENV_FILE, gw.envText);
+  world.fileModes.set(ENV_FILE, 0o600);
+  fs.writeFileSync(world.envFile, gw.envText, { mode: 0o600 });
+  fs.mkdirSync(path.join(world.tempDir, 'elsewhere'));
+  fs.linkSync(world.envFile, path.join(world.tempDir, 'elsewhere', 'env'));
+  await runBootstrap(world, { args: ['--secure-env-file'] });
+  assert.equal(world.exitCode, 74);
+  const refused = credentialDiagnostic(world);
+  assert.equal(refused.reason, 'UNSAFE_ENTRY');
+  assert.equal(refused.linkCount, 2);
+  assert.equal(refused.stagingLeftover, false);
+});
+
+test('a symlinked env file refuses without a link-count diagnostic', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.files.set(ENV_FILE, gw.envText);
+  world.fileModes.set(ENV_FILE, 0o600);
+  const real = path.join(world.tempDir, 'real.env');
+  fs.writeFileSync(real, gw.envText, { mode: 0o600 });
+  // runBootstrap's pre-step writes through the symlink, so it stays in place.
+  fs.symlinkSync(real, world.envFile);
+  await runBootstrap(world, { args: ['--secure-env-file'] });
+  assert.equal(world.exitCode, 74);
+  const refused = credentialDiagnostic(world);
+  assert.equal(refused.reason, 'UNSAFE_ENTRY');
+  assert.equal('linkCount' in refused, false);
+  assert.equal('stagingLeftover' in refused, false);
+  assert.ok(fs.lstatSync(world.envFile).isSymbolicLink(), 'the refusal removes nothing');
 });

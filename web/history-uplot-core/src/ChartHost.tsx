@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { attachD3ViewportController, type D3ViewportController } from './shared/gestures';
-import { inspectAtTime, type Inspection } from './shared/inspection';
+import { inspectAtTime, inspectBucketAtTime, type Inspection } from './shared/inspection';
 import type { ChartAdapter, ChartRenderOptions, CoverageWindow, MountAdapter, SensorSeries, Viewport } from './shared/types';
 import { sameViewport, type ViewportStore } from './shared/viewport';
+import { formatExactInstant } from './shared/formatting';
 
-export interface ChartHostProps {
+interface ChartHostBaseProps {
   mountAdapter: MountAdapter;
   series: readonly SensorSeries[];
   store: ViewportStore;
@@ -14,15 +15,25 @@ export interface ChartHostProps {
   yRange?: ChartRenderOptions['yRange'];
   coverage?: CoverageWindow;
   notLoadedLabel?: string;
-  labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string };
+  labels?: { pinnedReading: string; close: string; unavailable: string; visibleWindow?: string; hourlyAverage?: string; bucketInterval?: (from: number, to: number) => string };
   focusedSeriesId?: string | null;
+  registerInternalDiagnostics?: (reader: ChartHostInternalDiagnosticsReader | null) => void;
 }
+export type ChartHostProps = ChartHostBaseProps & (
+  | { inspectionMode?: 'nearest-point'; locale?: never; timeZone?: never }
+  | { inspectionMode: 'containing-bucket'; locale: string; timeZone: string }
+);
 
-interface Pin { targetTime: number; rows: readonly Inspection[]; }
+interface Pin { targetTime: number; rows: readonly (Inspection | ReturnType<typeof inspectBucketAtTime>)[]; }
+
+export type ChartHostInternalDiagnosticsReader = () => {
+  renderedViewport: Viewport;
+  plotRect: { left: number; top: number; width: number; height: number };
+};
 
 const DEFAULT_LABELS = { pinnedReading: 'Pinned reading', close: 'Close', unavailable: 'Unavailable at this sample', visibleWindow: 'Visible time window' };
 
-export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null }: ChartHostProps) {
+export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxSpanMs, yRange, coverage, notLoadedLabel = 'Not loaded', labels = DEFAULT_LABELS, focusedSeriesId = null, locale, timeZone, inspectionMode = 'nearest-point', registerInternalDiagnostics }: ChartHostProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -64,8 +75,12 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
       const accepted = store.set(viewport, 'gesture');
       if (!sameViewport(viewport, accepted)) adapterRef.current?.setViewport(accepted);
     };
-    const adapter = mountAdapter(renderer, store.get(), onViewportChange, { extent, minSpanMs, maxSpanMs, yRange });
+    const adapter = mountAdapter(renderer, store.get(), onViewportChange, { extent, minSpanMs, maxSpanMs, yRange, ...(inspectionMode === 'containing-bucket' ? { locale, timeZone } : {}) });
     adapterRef.current = adapter;
+    registerInternalDiagnostics?.(() => {
+      const plot = adapter.getPlotRect();
+      return { renderedViewport: adapter.getViewport(), plotRect: { left: plot.left, top: plot.top, width: plot.width, height: plot.height } };
+    });
     adapter.setData(series);
     adapter.setViewport(store.get());
     adapter.resize();
@@ -86,10 +101,11 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
       window.removeEventListener('resize', resize);
       controllerRef.current?.destroy();
       controllerRef.current = null;
+      registerInternalDiagnostics?.(null);
       adapter.destroy();
       adapterRef.current = null;
     };
-  }, [mountAdapter, store, minSpanMs, maxSpanMs, yRange]);
+  }, [mountAdapter, store, minSpanMs, maxSpanMs, yRange, inspectionMode, locale, timeZone, registerInternalDiagnostics]);
 
   useEffect(() => {
     controllerRef.current?.updateExtent?.(extent);
@@ -117,12 +133,12 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     const unsubscribe = store.subscribe((viewport, source) => {
       adapterRef.current?.setViewport(viewport);
       setViewportVersion((value) => value + 1);
-      if (readoutRef.current) readoutRef.current.textContent = `${formatDate(viewport.from)} – ${formatDate(viewport.to)}`;
+      if (readoutRef.current) readoutRef.current.textContent = `${formatDate(viewport.from, locale, timeZone, inspectionMode === 'containing-bucket')} – ${formatDate(viewport.to, locale, timeZone, inspectionMode === 'containing-bucket')}`;
       if (pinRef.current) projectGuide(pinRef.current.targetTime, viewport);
       void source;
     });
     return unsubscribe;
-  }, [store]);
+  }, [store, locale, timeZone, inspectionMode]);
 
   useEffect(() => {
     return () => { pinRef.current = null; };
@@ -137,7 +153,10 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     if (event.clientX < plot.left || event.clientX > plot.left + plot.width || event.clientY < plot.top || event.clientY > plot.top + plot.height) return;
     const viewport = store.get();
     const targetTime = viewport.from + ((event.clientX - plot.left) / plot.width) * (viewport.to - viewport.from);
-    const nextPin = { targetTime, rows: inspectAtTime(series, targetTime, viewport) };
+    const rows = inspectionMode === 'containing-bucket'
+      ? series.map((item) => item.buckets ? inspectBucketAtTime(item.id, item.unit, item.buckets, targetTime) : { kind: 'bucket-unavailable' as const, from: targetTime, to: targetTime, count: 0, quality: null, unit: item.unit, seriesId: item.id })
+      : inspectAtTime(series, targetTime, viewport);
+    const nextPin = { targetTime, rows };
     pinRef.current = nextPin;
     setPin(nextPin);
     projectGuide(targetTime, viewport);
@@ -161,17 +180,22 @@ export function ChartHost({ mountAdapter, series, store, extent, minSpanMs, maxS
     <div className="renderer-host" ref={rendererRef} />
     <div className="gesture-layer" ref={overlayRef} aria-hidden="true" />
     <div className="inspector-guide" ref={guideRef} aria-hidden="true" hidden />
-    <span className="window-readout" role="group" aria-label={labels.visibleWindow ?? DEFAULT_LABELS.visibleWindow} ref={readoutRef}>{formatDate(store.get().from)} – {formatDate(store.get().to)}</span>
+    <span className="window-readout" role="group" aria-label={labels.visibleWindow ?? DEFAULT_LABELS.visibleWindow} ref={readoutRef}>{formatDate(store.get().from, locale, timeZone, inspectionMode === 'containing-bucket')} – {formatDate(store.get().to, locale, timeZone, inspectionMode === 'containing-bucket')}</span>
     {coverage && leftCoverage > 0 && <div className="not-loaded not-loaded-left" style={{ width: `${leftCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
     {coverage && rightCoverage > 0 && <div className="not-loaded not-loaded-right" style={{ width: `${rightCoverage}%` }} role="img" aria-label={notLoadedLabel} />}
-    {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>
-      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {new Date(pin.targetTime).toLocaleString()}</time>
-      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {row.value} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{new Date(row.sampledAt).toLocaleString()}</time></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
+      {pin && <aside className="inspector" data-testid="inspector" aria-label={labels.pinnedReading}>
+      <time data-testid="inspector-target" dateTime={new Date(pin.targetTime).toISOString()}>{labels.pinnedReading}: {inspectionMode === 'containing-bucket' ? formatExactInstant(pin.targetTime, locale, timeZone) : formatDate(pin.targetTime, locale, timeZone)}</time>
+      {pin.rows.map((row, index) => row.kind === 'value' ? <div key={row.seriesId}><strong>{series[index]?.label}: {inspectionMode === 'containing-bucket' ? formatValue(row.value, locale) : String(row.value)} {row.unit}</strong><time dateTime={new Date(row.sampledAt).toISOString()}>{formatDate(row.sampledAt, locale, timeZone)}</time></div> : row.kind === 'bucket' ? <div key={row.seriesId}><strong>{series[index]?.label}: {formatValue(row.value, locale)} {row.unit}</strong><span>{labels.hourlyAverage ?? 'Hourly average'} {labels.bucketInterval?.(row.from, row.to) ?? `${formatExactInstant(row.from, locale, timeZone)} – ${formatExactInstant(row.to, locale, timeZone)}`}</span></div> : <div key={series[index]?.id ?? index}><strong>{series[index]?.label}</strong><span>{labels.unavailable}</span></div>)}
       <button type="button" data-testid="inspector-close" onClick={(event) => { event.stopPropagation(); pinRef.current = null; setPin(null); if (guideRef.current) guideRef.current.hidden = true; }}>{labels.close}</button>
     </aside>}
   </div>;
 }
 
-function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(timestamp);
+function formatDate(timestamp: number, locale?: string, timeZone?: string, explicit = false): string {
+  if (!explicit) return new Date(timestamp).toLocaleString();
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone }).format(timestamp);
+}
+
+function formatValue(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale, { maximumSignificantDigits: 6 }).format(value);
 }

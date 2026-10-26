@@ -405,7 +405,7 @@ test('scoped bootstrap race: a same-username loser whose own INSERT affected zer
     assert.equal(loserRejection.statusCode, 403);
     assert.equal(
       loserRejection.payload && loserRejection.payload.message,
-      'Public registration is closed. Ask an admin to create your account.'
+      'Public registration is closed. Ask an administrator to create your account, or contact the gateway operator for account recovery.'
     );
 
     // Exactly one row must exist, and it must be the winner's, never
@@ -528,7 +528,7 @@ test('placeholder-EUI linked login resolves with the password-hash fallback inst
 
 // osi-os#468: with OSI_SCOPED_ACCESS off, POST /auth/register created an account for any
 // LAN client. Self-registration is now only the first-run bootstrap in both flag states:
-// flag off, it is open while the users table is empty; flag on keeps its admin rule.
+// both modes require zero users; scoped bootstrap retains the explicit admin role.
 async function registerThroughChain(helper, env, username, password) {
   const flows = readFlows();
   const flowStore = new Map();
@@ -628,7 +628,7 @@ test('#468 flag on: registration rules are unchanged (bootstrap admin, then clos
     assert.equal(first.inserted, true);
     const second = await registerThroughChain(helper, scopedEnv, 'scoped_peer', 'peerPassword1');
     assert.equal(second.response.statusCode, 403);
-    assert.equal(second.response.payload.message, 'Public registration is closed. Ask an admin to create your account.');
+    assert.equal(second.response.payload.message, 'Public registration is closed. Ask an administrator to create your account, or contact the gateway operator for account recovery.');
     assert.deepEqual((await userRows(helper)).map((r) => ({ username: r.username, role: r.role })), [{ username: 'scoped_admin', role: 'admin' }]);
   } finally {
     cleanup();

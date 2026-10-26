@@ -337,6 +337,16 @@ dev workstation unless noted.
      API key, env file rewritten without operator lines, the Clover alias back).
    - Only with `--repair-soil-profiles` (or `--repoint-clover-device`). With
      either flag the script never runs the full pass: it fails instead.
+   - `deploy.sh` pins every bootstrap invocation to
+     `/srv/node-red/.chirpstack.env`, secures that file before provisioning,
+     and stops on credential filesystem status `74` (recovery for
+     `UNSAFE_ENTRY`: "Credential env-file refusal" under Live-repair recipes).
+     The CLI's `ENV_FILE` override is for direct use only. Updated and replaced files are
+     root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
+     existing backup is retained. Text repair requires lossless UTF-8.
+   - Deploy updates `/srv/node-red/` but does not replace the image's ROM
+     `/usr/share/node-red/` writer. `osi-bootstrap` continues to prefer that
+     ROM file whenever it exists; only a new image supplies an updated ROM copy.
    - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
      none (a codec already there is left alone), a new `OSI CLOVER Sensor`
      profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
@@ -632,6 +642,80 @@ reaches the Node-RED runtime ONLY through this file (`node-red.init` does not
 export it from UCI) — a regenerated env missing it silently breaks LoRain ingest
 until the ChirpStack bootstrap rewrites the file. Full flag semantics and where
 this file's other variables come from: `osi-config-and-flags`.
+
+### Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`
+
+`chirpstack-bootstrap.js` exits `74` and prints `Credential env-file operation
+failed {...}` on stderr when it refuses a credential file; `deploy.sh` stops with
+the same status. On first boot `osi-bootstrap` logs only `bootstrap failed, will
+retry next boot` (`logread -e osi-bootstrap`). The JSON diagnostic went to the
+init script's stderr and is not in `logread`, and every later boot fails the
+same way.
+
+One cause has a known repair. The writer creates a missing file by `link()`ing
+a flushed staging copy into place and then `unlink()`ing the staging name. A
+crash or power cut between the two leaves the published file complete but with
+a second link in its staging directory:
+`/srv/node-red/..chirpstack.env.tmp-XXXXXX/env` (first-boot provisioning of
+`.chirpstack.env`) or `/srv/node-red/..chirpstack.env.pre-gen2.tmp-XXXXXX/env`
+(the deploy's first Gen2 recovery backup). The writer refuses any credential
+file with more than one link, so the refusal repeats until the leftover is gone.
+
+1. Reproduce the diagnostic with the file-only check. It reads and narrows
+   the two env files and makes no ChirpStack call. Pick a writer that supports
+   the flag: an older image's ROM copy ignores unknown flags and runs a full
+   provisioning pass.
+   ```sh
+   S=
+   for f in /usr/share/node-red/chirpstack-bootstrap.js /srv/node-red/chirpstack-bootstrap.js; do
+     if [ -z "$S" ] && [ -f "$f" ] && grep -q -- '--secure-env-file' "$f"; then S="$f"; fi
+   done
+   echo "writer: ${S:-none}"
+   [ -n "$S" ] && node "$S" --secure-env-file; echo "exit=$?"
+   ```
+   No writer means the `74` came from somewhere else; stop. This recipe
+   applies when the diagnostic reads `"reason":"UNSAFE_ENTRY"`; current
+   writers add `"linkCount":2,"stagingLeftover":true` for this case. Other
+   reasons have other causes: `ROOT_REQUIRED` (not run as root),
+   `SNAPSHOT_CHANGED` (a concurrent writer), `OS_ERROR` with an `osCode` such
+   as `ENOSPC` or `EROFS` (fix the filesystem, then rerun).
+2. Inspect both credential entries and every staging directory. In `ls -li`
+   output the first column is the inode number and the third the link count.
+   ```sh
+   ls -lid /srv/node-red/.chirpstack.env /srv/node-red/.chirpstack.env.pre-gen2
+   ls -lid /srv/node-red/..chirpstack.env*.tmp-*
+   ls -lia /srv/node-red/..chirpstack.env*.tmp-*/
+   ```
+3. Delete nothing unless all of these hold for the entry with two links:
+   it is a regular file (`-rw-------`, owner root); its link count is exactly
+   2; exactly one staging directory exists for that entry
+   (`..chirpstack.env.tmp-*` for `.chirpstack.env`,
+   `..chirpstack.env.pre-gen2.tmp-*` for `.chirpstack.env.pre-gen2`); and that
+   directory holds only `env`, with the same inode number as the entry. A
+   symlink, a directory, a link count above 2, or a second link outside a
+   staging directory is not an interrupted publication: leave the gateway
+   refusing and escalate. When the checks hold, remove the staging link and
+   its directory, never a globbed `rm -rf`:
+   ```sh
+   D=/srv/node-red/..chirpstack.env.tmp-XXXXXX   # the directory found in step 2
+   rm "$D/env" && rmdir "$D"
+   ls -li /srv/node-red/.chirpstack.env          # link count back to 1
+   node "$S" --secure-env-file; echo "exit=$?"   # exit=0
+   ```
+   The published file and its bytes stay in place; only the second name goes.
+4. Rerun the step that failed. After a deploy, rerun `deploy.sh`. After a
+   first-boot failure, `.chirpstack.env` already holds the API key the failed
+   run created; pass it in so the rerun does not create a second key (#181):
+   ```sh
+   rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
+   ```
+
+A staging directory that is empty, or whose `env` has link count 1, comes from
+an interruption before publication or after a rename. It does not block later
+runs, and the writer leaves its contents root-owned mode `0600` inside a mode
+`0700` directory. An unpublished `env` from a first-boot run can hold the only
+copy of the key that run created, so keep it until the gateway provisions
+cleanly, then remove it the same way.
 
 ### Changing DEVICE_EUI breaks linked login
 

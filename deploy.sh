@@ -515,12 +515,14 @@ print_bootstrap_note() {
     else
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
     fi
+    echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
+    echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."
+    echo "NOTE: osi-bootstrap may still prefer an older ROM script; this deploy does not replace it."
     if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
        grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
         echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
         echo "        this at every boot. To re-provision through the service with"
-        echo "        the existing API key ($pbn_script; it rewrites"
-        echo "        $CHIRPSTACK_ENV_FILE with the CHIRPSTACK_* keys only):"
+        echo "        the existing API key (service-selected script: $pbn_script):"
         # shellcheck disable=SC2016 # the command is printed for the operator, not run
         printf '        rm -f %s && CHIRPSTACK_API_KEY="$(sed -n '\''s/^CHIRPSTACK_API_KEY=//p'\'' %s | head -1)" %s start\n' \
             "$OSI_BOOTSTRAP_STAMP" "$CHIRPSTACK_ENV_FILE" "$OSI_BOOTSTRAP_INIT"
@@ -1848,6 +1850,20 @@ fetch_required "Gateway identity service enable script" \
     "/etc/uci-defaults/94_osi_identityd_enable"
 chmod 755 /etc/uci-defaults/94_osi_identityd_enable
 
+fetch_required "chirpstack-bootstrap.js" \
+    "scripts/chirpstack-bootstrap.js" \
+    "/srv/node-red/chirpstack-bootstrap.js"
+
+# issue-183 early secure begin
+if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+    :
+else
+    cs_env_rc=$?
+    echo "ERROR: ChirpStack credential env-file safety check failed; refusing deploy" >&2
+    exit "$cs_env_rc"
+fi
+# issue-183 early secure end
+
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
     "/etc/init.d/osi-bootstrap"
@@ -2466,10 +2482,6 @@ fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
     "/srv/node-red/edge-channels.json"
 
-fetch_required "chirpstack-bootstrap.js" \
-    "scripts/chirpstack-bootstrap.js" \
-    "/srv/node-red/chirpstack-bootstrap.js"
-
 fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
     "/srv/node-red/codecs/strega_gen1_decoder.js"
@@ -2506,48 +2518,47 @@ fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
-if [ -f /srv/node-red/.chirpstack.env ] && \
-   ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' /srv/node-red/.chirpstack.env 2>/dev/null; then
+# issue-183 Gen2 begin
+if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
+   ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
     echo "--- Provisioning STREGA Gen2 device profile (one-time) ---"
-    # Reuse the gateway's existing osi-nodered token; bootstrap only calls
-    # `chirpstack create-api-key` when CHIRPSTACK_API_KEY is empty, so this
-    # avoids leaving a second admin key behind. Empty value = old behaviour.
-    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1 | tr -d '\r')"
-    # bootstrap rewrites .chirpstack.env wholesale with only the CHIRPSTACK_* keys
-    # it manages, so any operator-added line (AGROSCOPE_*, LOG_*, ...) is dropped.
-    # Keep a copy and restore the non-CHIRPSTACK lines afterwards.
-    cs_env_backup="/srv/node-red/.chirpstack.env.pre-gen2"
-    cp /srv/node-red/.chirpstack.env "$cs_env_backup" || {
-        echo "ERROR: could not back up .chirpstack.env; skipping Gen2 provisioning"
-        cs_env_backup=""
-    }
-    if [ -n "$cs_env_backup" ]; then
-        if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
-            echo "OK: Gen2 profile provisioned"
-        else
-            echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
-            echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
-        fi
-        # Restore unconditionally: bootstrap rewrites .chirpstack.env BEFORE its
-        # last steps (writeUciConfig), so a late failure leaves the file already
-        # stripped of operator keys -- including DEVICE_EUI. The loop is
-        # idempotent, so running it after success or failure is equally safe.
-        if [ -f /srv/node-red/.chirpstack.env ]; then
-            while IFS= read -r cs_line || [ -n "$cs_line" ]; do
-                case "$cs_line" in
-                    ''|\#*) continue ;;
-                esac
-                cs_key="${cs_line%%=*}"
-                [ "$cs_key" = "$cs_line" ] && continue
-                if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
-                    echo "$cs_line" >> /srv/node-red/.chirpstack.env
-                    echo "NOTE: restored env key ${cs_key} dropped by the bootstrap rewrite"
-                fi
-            done < "$cs_env_backup"
-        fi
-        chmod 600 "$cs_env_backup" 2>/dev/null || true
+    cs_env_backup="${CHIRPSTACK_ENV_FILE}.pre-gen2"
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --backup-env-file; then
+        :
+    else
+        cs_env_rc=$?
+        echo "ERROR: secure ChirpStack recovery backup unavailable; refusing Gen2 provisioning" >&2
+        exit "$cs_env_rc"
+    fi
+    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' "$CHIRPSTACK_ENV_FILE" | head -1 | tr -d '\r')"
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+        echo "OK: Gen2 profile provisioned"
+    else
+        cs_bootstrap_rc=$?
+        case "$cs_bootstrap_rc" in
+            1)
+                echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+                echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
+                ;;
+            74)
+                echo "ERROR: Gen2 credential env-file operation failed; refusing deploy; recovery backup retained" >&2
+                exit 74
+                ;;
+            *)
+                echo "ERROR: Gen2 bootstrap exited unexpectedly ($cs_bootstrap_rc); refusing deploy" >&2
+                exit "$cs_bootstrap_rc"
+                ;;
+        esac
+    fi
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+        :
+    else
+        cs_env_rc=$?
+        echo "ERROR: ChirpStack credential env-file unsafe after provisioning; refusing deploy" >&2
+        exit "$cs_env_rc"
     fi
 fi
+# issue-183 Gen2 end
 
 # Earlier bootstraps created the Kiwi profile without a codec and wrote
 # CHIRPSTACK_PROFILE_CLOVER as an alias of the codec-less RAK field-tester
@@ -2558,18 +2569,42 @@ fi
 # write once all is correct. Each ChirpStack call is bounded at 20 s. Node-RED
 # picks the id up at its restart later in this deploy. Never fails the deploy;
 # a failure is repeated in the closing banner.
+# issue-183 soil begin
 soil_profile_repair_failed=0
-if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null; then
+if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
     echo "--- Kiwi and Clover device profiles (codec and Clover profile id) ---"
-    if OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
         echo "OK: Kiwi and Clover device profiles checked"
     else
-        soil_profile_repair_failed=1
-        echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
-        echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
-        echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
+        cs_soil_rc=$?
+        case "$cs_soil_rc" in
+            1)
+                soil_profile_repair_failed=1
+                echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
+                echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
+                echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
+                ;;
+            74)
+                echo "ERROR: soil-profile credential env-file operation failed; refusing deploy; recovery backup retained" >&2
+                exit 74
+                ;;
+            *)
+                echo "ERROR: soil-profile repair exited unexpectedly ($cs_soil_rc); refusing deploy" >&2
+                exit "$cs_soil_rc"
+                ;;
+        esac
     fi
 fi
+# issue-183 soil end
+# issue-183 final secure begin
+if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+    :
+else
+    cs_env_rc=$?
+    echo "ERROR: ChirpStack credential env-file final safety check failed; refusing deploy" >&2
+    exit "$cs_env_rc"
+fi
+# issue-183 final secure end
 
 materialize_native_sqlite3 || exit 1
 

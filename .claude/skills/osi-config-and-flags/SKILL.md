@@ -351,7 +351,26 @@ exists and lacks a `CHIRPSTACK_PROFILE_STREGA_GEN2=` line, it reruns
 the rerun only adds the missing profile instead of minting a second admin key.
 A provisioning failure there is non-fatal — deploy continues and new Gen1
 registrations still work; only Gen2 registration and profile reconciliation
-are degraded until the next successful deploy. Five flows.json nodes read
+are degraded until the next successful deploy. The deploy now secures the
+canonical `/srv/node-red/.chirpstack.env` before provisioning and checks it
+again after each writer. New and replaced credential files are root-owned mode
+`0600`; the first Gen2 provisioning attempt keeps an exact raw-byte
+`.pre-gen2` recovery copy and does not replace an older copy. Full and soil
+updates retain unrelated valid UTF-8 lines; malformed UTF-8 stops text
+mutation before ChirpStack API or UCI work. A credential filesystem failure
+exits deploy with status `74` (recovery for `UNSAFE_ENTRY`, including an
+interrupted publication's leftover staging link: `osi-live-ops-runbook`,
+"Credential env-file refusal"); API/profile failure status `1` may still warn
+when the later safety check succeeds. Direct CLI use may set `ENV_FILE` for a
+separate file, while deploy always pins the canonical path. An older image can keep selecting its ROM
+`/usr/share/node-red/chirpstack-bootstrap.js` even after deploy installs the
+updated `/srv/node-red/` copy. `osi-bootstrap` prefers the ROM path whenever it
+exists; only a new image supplies the updated ROM writer. Deploy's file checks
+cover its own `/srv/node-red/` invocations. These checks
+cover file handling only; they do not change key lifecycle (issue 181). CLI
+API-key redaction in diagnostics shipped separately in #530.
+
+Five flows.json nodes read
 the resulting env var: `post-devices-insert` and `cs-reg-cloud-fn` (both
 registration paths select it for a Gen2 STREGA valve); `valve-ack-fn`
 (re-points a valve's ChirpStack profile to it once the valve's stored
