@@ -13,7 +13,7 @@ __pycache__/
 .pytest_cache/
 
 # Contract-gate dependencies installed by `npm ci --prefix scripts`
-/scripts/node_modules/
+/scripts/node_modules
 
 # Hidden files
 /.*
