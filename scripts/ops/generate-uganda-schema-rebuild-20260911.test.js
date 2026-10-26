@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -36,7 +37,7 @@ function sha256File(p) {
 // genuinely needs to reach head via migrate-cli) uses the full MIGRATIONS_DIR.
 function ref1MigrationsDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-schema-rebuild-ref1-subset-'));
-  fs.copyFileSync(path.join(MIGRATIONS_DIR, '0001__baseline.sql'), path.join(dir, '0001__baseline.sql'));
+  fixtureCopy(path.join(MIGRATIONS_DIR, '0001__baseline.sql'), path.join(dir, '0001__baseline.sql'));
   return dir;
 }
 

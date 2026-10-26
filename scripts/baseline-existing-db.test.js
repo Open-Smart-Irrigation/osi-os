@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 // Gate-pass, gate-fail-stamps-nothing, checksum-source, idempotency, and the
 // end-to-end kaba100-shaped scenario. Uses the real repo migrations.
 const test = require('node:test');
@@ -57,7 +58,7 @@ function referenceDbAt(n) {
 async function makePreLedgerDeviceAt(n, extraSql = '') {
   const refDb = await referenceDbAt(n);
   const db = path.join(scratch(), 'device.db');
-  fs.copyFileSync(refDb, db);
+  fixtureCopy(refDb, db);
   const r = cliRunner(db);
   await r.exec('DROP TABLE IF EXISTS schema_migrations;\nDROP TABLE IF EXISTS schema_object_fingerprints;');
   if (extraSql) await r.exec(extraSql);
@@ -115,13 +116,13 @@ test('report mode walks all N and stamps nothing', async () => {
 
 test('checksum manifest divergence from disk refuses before comparing', async () => {
   const dir = scratch();
-  fs.writeFileSync(path.join(dir, '0001__x.sql'), '-- risk: additive\nCREATE TABLE a (x TEXT);\n');
-  fs.writeFileSync(path.join(dir, 'CHECKSUMS.json'), JSON.stringify({ '0001__x.sql': 'f'.repeat(64) }, null, 2));
+  fixtureWrite(path.join(dir, '0001__x.sql'), '-- risk: additive\nCREATE TABLE a (x TEXT);\n');
+  fixtureWrite(path.join(dir, 'CHECKSUMS.json'), JSON.stringify({ '0001__x.sql': 'f'.repeat(64) }, null, 2));
   const db = path.join(scratch(), 'd.db');
   await cliRunner(db).exec('CREATE TABLE a (x TEXT);');
   await assert.rejects(
     () => runBaseline({ dbPath: db, migrationsDir: dir, log: () => {} }),
-    /manifest mismatch/
+    /migration corpus: checksum mismatch for 0001__x\.sql/
   );
 });
 
@@ -129,14 +130,46 @@ test('refuses a missing db path (anti-typo)', async () => {
   await assert.rejects(() => runBaseline({ dbPath: '/nonexistent/nope.db', log: () => {} }), /does not exist/);
 });
 
+// Every subset-* step directory below root (the chain's scratch directory
+// and the ref-chain-* directory inside it).
+function subsetDirsUnder(root) {
+  const found = [];
+  for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith('subset-')) found.push(path.join(entry.parentPath, entry.name));
+  }
+  return found;
+}
+
+test('reference chain removes each step subset directory once the step is done', async () => {
+  const dir = path.join(scratch(), 'migrations');
+  fs.mkdirSync(dir);
+  for (const [i, t] of ['a', 'b', 'c'].entries()) {
+    fixtureWrite(path.join(dir, `000${i + 1}__${t}.sql`), `-- risk: additive\nCREATE TABLE ${t} (id INTEGER PRIMARY KEY);\n`);
+  }
+  const chainScratch = scratch();
+  const ref2 = await buildReference(dir, 2, chainScratch);
+  assert.deepEqual(subsetDirsUnder(chainScratch), [], 'no subset directory may remain after reference(2)');
+  const ref3 = await buildReference(dir, 3, chainScratch);
+  assert.equal(path.dirname(ref3), path.dirname(ref2), 'reference(3) extends the same cached chain');
+  assert.deepEqual(subsetDirsUnder(chainScratch), [], 'no subset directory may remain after the full chain');
+  // The published per-version snapshots stay usable after the cleanup.
+  assert.deepEqual(fs.readdirSync(path.dirname(ref3)).filter((n) => n.startsWith('ref-')).sort(),
+    ['ref-0001.db', 'ref-0002.db', 'ref-0003.db']);
+  assert.deepEqual((await cliRunner(ref2).all("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('a','b','c') ORDER BY name"))
+    .map((r) => r.name), ['a', 'b']);
+});
+
 test('reference chain retry rebuilds from the last published snapshot after a migration failure', async () => {
   const dir = path.join(scratch(), 'migrations');
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
-  fs.writeFileSync(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\nNOT VALID SQL;\n');
-  await assert.rejects(() => buildReference(dir, 2, scratch()), /syntax error|SQLITE_ERROR/);
-  fs.writeFileSync(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\nNOT VALID SQL;\n');
+  const failedScratch = scratch();
+  await assert.rejects(() => buildReference(dir, 2, failedScratch), /syntax error|SQLITE_ERROR/);
+  assert.deepEqual(subsetDirsUnder(failedScratch), [], 'a failed step must remove its subset directory');
+  fixtureWrite(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\n');
   const db = await buildReference(dir, 2, scratch());
+  assert.deepEqual(subsetDirsUnder(path.dirname(db)), [], 'a retried chain must not leave subset directories');
   assert.deepEqual(await cliRunner(db).all("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"), [
     { name: 'a' }, { name: 'b' }, { name: 'schema_migrations' },
     { name: 'schema_object_fingerprints' },
@@ -147,7 +180,7 @@ test('reference chain uses the persistent adapter without spawning sqlite3', () 
   const dir = path.join(scratch(), 'migrations');
   fs.mkdirSync(dir);
   for (const version of [1, 2, 3]) {
-    fs.writeFileSync(path.join(dir, `000${version}__a${version}.sql`),
+    fixtureWrite(path.join(dir, `000${version}__a${version}.sql`),
       `-- risk: additive\nCREATE TABLE a${version} (id INTEGER PRIMARY KEY);\n`);
   }
   const script = `
@@ -170,7 +203,7 @@ test('reference chain uses the persistent adapter without spawning sqlite3', () 
 test('reference chain defaults to cliRunner when no persistent runner opt-in is set', () => {
   const dir = path.join(scratch(), 'migrations');
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
   const script = `
     const cp = require('node:child_process');
     let sqlite3Calls = 0;
@@ -217,19 +250,19 @@ test('reference chain defaults to cliRunner when no persistent runner opt-in is 
 test('candidate scan across a migrations-dir version gap matches at the highest present version below the gap, without crashing; buildReference/referenceSnapshot stay strict for a gap version and for n > head', async () => {
   const dir = path.join(scratch(), 'gapped-migrations');
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__base.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
-  fs.writeFileSync(path.join(dir, '0002__widget.sql'), '-- risk: additive\nCREATE TABLE widget (id INTEGER PRIMARY KEY, name TEXT);\n');
+  fixtureWrite(path.join(dir, '0001__base.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0002__widget.sql'), '-- risk: additive\nCREATE TABLE widget (id INTEGER PRIMARY KEY, name TEXT);\n');
   // Deliberate gap: no 0003 file on disk. Head is 0004.
-  fs.writeFileSync(path.join(dir, '0004__gadget.sql'), '-- risk: additive\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n');
+  fixtureWrite(path.join(dir, '0004__gadget.sql'), '-- risk: additive\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n');
   const manifest = {};
   for (const m of loadMigrations(dir)) manifest[m.name] = m.checksum;
-  fs.writeFileSync(path.join(dir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+  fixtureWrite(path.join(dir, 'CHECKSUMS.json'), JSON.stringify(manifest));
 
   // Pre-ledger device DB shaped exactly like reference(2): only migrations
   // 1-2 applied, nothing at or past the gap.
   const refDb2 = await buildReference(dir, 2, scratch());
   const db = path.join(scratch(), 'device.db');
-  fs.copyFileSync(refDb2, db);
+  fixtureCopy(refDb2, db);
   await cliRunner(db).exec('DROP TABLE IF EXISTS schema_migrations;\nDROP TABLE IF EXISTS schema_object_fingerprints;');
 
   const logs = [];

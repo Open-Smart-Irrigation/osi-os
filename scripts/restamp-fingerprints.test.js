@@ -1,4 +1,5 @@
 'use strict';
+const { writeFixture } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), crypto = require('node:crypto');
@@ -17,7 +18,7 @@ const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 test('restamp-fingerprints re-baselines a stale stamp', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-'));
   const dir = path.join(root, 'm'); fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeFixture(dir, { '0001__b.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n') });
   const db = path.join(root, 't.db');
   const r = cliRunner(db);
   await applyPending(r, { migrationsDir: dir, appVersion: 'x' });
@@ -49,7 +50,7 @@ function sha256File(p) {
 test('restamp-fingerprints --report: no diffs -> exit 0, never writes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-report-clean-'));
   const dir = path.join(root, 'm'); fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeFixture(dir, { '0001__b.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n') });
   const db = path.join(root, 't.db');
   const r = cliRunner(db);
   await applyPending(r, { migrationsDir: dir, appVersion: 'x' });
@@ -64,7 +65,7 @@ test('restamp-fingerprints --report: no diffs -> exit 0, never writes', async ()
 test('restamp-fingerprints --report: real drift -> exit non-zero, never writes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-report-drift-'));
   const dir = path.join(root, 'm'); fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeFixture(dir, { '0001__b.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n') });
   const db = path.join(root, 't.db');
   const r = cliRunner(db);
   await applyPending(r, { migrationsDir: dir, appVersion: 'x' });
@@ -84,7 +85,7 @@ test('restamp-fingerprints --report: real drift -> exit non-zero, never writes',
 test('restamp-fingerprints --report: pure normalizer-scheme bump only -> exit 0, never writes', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-report-scheme-'));
   const dir = path.join(root, 'm'); fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeFixture(dir, { '0001__b.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n') });
   const db = path.join(root, 't.db');
   const r = cliRunner(db);
   await applyPending(r, { migrationsDir: dir, appVersion: 'x' }); // stamped under CURRENT (v3) scheme
@@ -105,7 +106,7 @@ test('restamp-fingerprints --report: pure normalizer-scheme bump only -> exit 0,
 test('restamp-fingerprints default (no flags) and --apply both remain backward-compatible: they still restamp unconditionally', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'restamp-apply-'));
   const dir = path.join(root, 'm'); fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  writeFixture(dir, { '0001__b.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n') });
   const db = path.join(root, 't.db');
   const r = cliRunner(db);
   await applyPending(r, { migrationsDir: dir, appVersion: 'x' });

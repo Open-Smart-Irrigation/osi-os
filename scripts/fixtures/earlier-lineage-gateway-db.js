@@ -38,18 +38,13 @@ function lineageReaching49() {
 }
 
 function buildMigrationsDir(dir) {
-  const { loadMigrations } = require('../../lib/osi-migrate/migrations-loader');
-  fs.mkdirSync(dir, { recursive: true });
-  for (const m of loadMigrations(MAIN_MIGRATIONS_DIR)) {
-    if (m.version <= 21) fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(dir, m.name));
-  }
-  const lineageDir = lineageReaching49();
-  for (const name of fs.readdirSync(lineageDir).filter((f) => f.endsWith('.sql'))) {
-    if (Number(name.slice(0, 4)) <= 49) fs.copyFileSync(path.join(lineageDir, name), path.join(dir, name));
-  }
-  for (const [foreignName, mainName] of Object.entries(FOREIGN_TAIL)) {
-    fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, mainName), path.join(dir, foreignName));
-  }
+  const { loadMigrationCorpus, materializeMigrations } = require('../../lib/osi-migrate/migrations-loader');
+  const main = loadMigrationCorpus(MAIN_MIGRATIONS_DIR);
+  const lineage = loadMigrationCorpus(lineageReaching49());
+  const selections = main.migrations.filter((m) => m.version <= 21).map((m) => ({ corpus: main, name: m.name }));
+  selections.push(...lineage.migrations.filter((m) => m.version <= 49).map((m) => ({ corpus: lineage, name: m.name })));
+  selections.push(...Object.entries(FOREIGN_TAIL).map(([asName, name]) => ({ corpus: main, name, asName })));
+  materializeMigrations(dir, selections);
   return dir;
 }
 

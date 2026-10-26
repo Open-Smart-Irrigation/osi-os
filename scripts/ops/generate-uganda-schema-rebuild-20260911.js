@@ -39,6 +39,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { cliRunner } = require('../../lib/osi-migrate/runner-iface');
 const { bootstrapFresh } = require('../../lib/osi-migrate');
+const { resolveCorpus, materializeMigrations } = require('../../lib/osi-migrate/migrations-loader');
 const { snapshotSchema, compareSchemas, FAILING_CLASSES } = require('../semantic-schema-compare');
 
 const REPO = path.resolve(__dirname, '..', '..');
@@ -124,13 +125,13 @@ function renameCreateTable(createSql, oldName, newName) {
 
 // --- reference(1) build (needed to enumerate exact column names per table so
 // the generated INSERT's column list is explicit and complete, never "SELECT *") ---
-async function buildReference1(scratchRoot) {
+async function buildReference1(scratchRoot, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   const dir = fs.mkdtempSync(path.join(scratchRoot, 'uganda-rebuild-ref1-'));
   const subset = path.join(dir, 'migrations');
-  fs.mkdirSync(subset);
-  fs.copyFileSync(SOURCE_MIGRATION, path.join(subset, path.basename(SOURCE_MIGRATION)));
+  const selected = materializeMigrations(subset, [{ corpus, name: '0001__baseline.sql' }]);
   const dbPath = path.join(dir, 'ref1.db');
-  await bootstrapFresh(cliRunner(dbPath), { migrationsDir: subset, appVersion: 'uganda-rebuild-ref1' });
+  await bootstrapFresh(cliRunner(dbPath), { migrationsDir: subset, corpus: selected, appVersion: 'uganda-rebuild-ref1' });
   return dbPath;
 }
 
@@ -172,8 +173,11 @@ function buildRebuildBlock({
   return lines.join('\n');
 }
 
-async function generate() {
-  const src = fs.readFileSync(SOURCE_MIGRATION, 'utf8');
+async function generate({ corpus } = {}) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
+  const baseline = corpus.migrations.find((m) => m.name === '0001__baseline.sql');
+  if (!baseline) throw new Error('rebuild source requires 0001__baseline.sql');
+  const src = baseline.sql;
   const tables = extractStatements(src, 'TABLE');
   const indexes = extractStatements(src, 'INDEX');
   const triggers = extractStatements(src, 'TRIGGER');
@@ -191,7 +195,7 @@ async function generate() {
   ], 'trigger');
 
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-gen-'));
-  const ref1Path = await buildReference1(scratchRoot);
+  const ref1Path = await buildReference1(scratchRoot, corpus);
   const ref1 = cliRunner(ref1Path);
 
   const devicesCols = await columnNames(ref1, 'devices');
@@ -352,9 +356,10 @@ async function generate() {
 // --- guarded orchestration (JS layer; the .sql artifact above is provenance,
 // this is what actually runs) -----------------------------------------------
 
-async function referenceCompare(dbPath) {
+async function referenceCompare(dbPath, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-cmp-'));
-  const ref1Path = await buildReference1(scratchRoot);
+  const ref1Path = await buildReference1(scratchRoot, corpus);
   const liveSnap = await snapshotSchema(cliRunner(dbPath));
   const refSnap = await snapshotSchema(cliRunner(ref1Path));
   const cmp = compareSchemas(liveSnap, refSnap, null);
@@ -401,13 +406,14 @@ function scopedFailingDiffs(cmp, relatedNames) {
   });
 }
 
-async function preflightDriftSignature(dbPath, log) {
+async function preflightDriftSignature(dbPath, log = console.error, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-preflight-'));
-  const ref1Path = await buildReference1(scratchRoot);
+  const ref1Path = await buildReference1(scratchRoot, corpus);
   const relatedNames = await objectNamesForTables(ref1Path, EXPECTED_TABLES);
   fs.rmSync(scratchRoot, { recursive: true, force: true });
 
-  const cmp = await referenceCompare(dbPath);
+  const cmp = await referenceCompare(dbPath, corpus);
   const scoped = scopedFailingDiffs(cmp, relatedNames);
   const outOfScope = scoped.filter((d) => {
     const key = `${d.class}:${d.kind}:${d.name}`;
@@ -489,10 +495,11 @@ function parseArtifactBlocks(sql) {
   return blocks;
 }
 
-async function dryRun(dbPath, log = console.error) {
+async function dryRun(dbPath, log = console.error, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
   if (!fs.existsSync(ARTIFACT_PATH)) throw new Error(`artifact not generated yet: ${ARTIFACT_PATH}`);
-  const { scoped } = await preflightDriftSignature(dbPath, log);
+  const { scoped } = await preflightDriftSignature(dbPath, log, corpus);
   const runner = cliRunner(dbPath);
   const sql = fs.readFileSync(ARTIFACT_PATH, 'utf8');
   const blocks = parseArtifactBlocks(sql);
@@ -504,10 +511,11 @@ async function dryRun(dbPath, log = console.error) {
   }
 }
 
-async function apply(dbPath, log = console.error) {
+async function apply(dbPath, log = console.error, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
   if (!fs.existsSync(ARTIFACT_PATH)) throw new Error(`artifact not generated yet: ${ARTIFACT_PATH}`);
-  const { scoped } = await preflightDriftSignature(dbPath, log);
+  const { scoped } = await preflightDriftSignature(dbPath, log, corpus);
 
   const runner = cliRunner(dbPath);
   const sql = fs.readFileSync(ARTIFACT_PATH, 'utf8');
@@ -572,13 +580,14 @@ async function apply(dbPath, log = console.error) {
   return { ran: toRun };
 }
 
-async function verify(dbPath, log = console.error) {
+async function verify(dbPath, log = console.error, corpus) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-rebuild-verify-'));
-  const ref1Path = await buildReference1(scratchRoot);
+  const ref1Path = await buildReference1(scratchRoot, corpus);
   const relatedNames = await objectNamesForTables(ref1Path, EXPECTED_TABLES);
   fs.rmSync(scratchRoot, { recursive: true, force: true });
-  const cmp = await referenceCompare(dbPath);
+  const cmp = await referenceCompare(dbPath, corpus);
   const failing = scopedFailingDiffs(cmp, relatedNames);
   if (failing.length) {
     log(`[uganda-rebuild] --verify FAILED: ${failing.length} diff(s) remain on the 6 rebuild tables:`);
@@ -609,7 +618,11 @@ async function main() {
 // canonical"). 1 = REFUSE-AND-HOLD - a known precondition failed (drift
 // signature mismatch, or a per-table orphan/NULL/drift data guard) BEFORE
 // any DDL ran; the DB is untouched and the fix is to repair the data or
-// re-run the audit, not to restore a backup. 2 = an unexpected failure
+// re-run the audit, not to restore a backup. A migration-corpus refusal
+// (ERR_MIGRATION_CORPUS: CHECKSUMS.json or the ordered SQL failed
+// validation) is also exit 1: every corpus load happens before the first
+// DDL statement, so the DB is untouched and the fix is to restore the
+// payload's migration corpus, not the database. 2 = an unexpected failure
 // (e.g. a crash mid-DDL, caught by SQLite's own transaction rollback rather
 // than one of this tool's own preflight guards) - the window script treats
 // this as a signal to stop and have an operator restore the pre-rebuild
@@ -619,7 +632,7 @@ async function main() {
 if (require.main === module) {
   main().catch((e) => {
     console.error(`[uganda-rebuild] FAILED: ${e.message}`);
-    process.exit(e.refuseAndHold ? 1 : 2);
+    process.exit(e.refuseAndHold || e.code === 'ERR_MIGRATION_CORPUS' ? 1 : 2);
   });
 }
 

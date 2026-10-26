@@ -93,7 +93,7 @@ test('verify-migrations rejects migration files missing from the checksum manife
   const result = runVerifier(['--migrations-dir', dir]);
 
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /missing checksum manifest entry for 0002__later\.sql/);
+  assert.match(result.stderr, /migration corpus: file set mismatch: expected=\["0001__baseline\.sql"\], actual=\["0001__baseline\.sql","0002__later\.sql"\]/);
 });
 
 test('verify-migrations rejects checksum manifest entries without migration files', () => {
@@ -109,7 +109,7 @@ test('verify-migrations rejects checksum manifest entries without migration file
   const result = runVerifier(['--migrations-dir', dir]);
 
   assert.notEqual(result.status, 0, result.stdout);
-  assert.match(result.stderr, /checksum manifest entry has no migration file: 0002__stale\.sql/);
+  assert.match(result.stderr, /migration corpus: file set mismatch: expected=\["0001__baseline\.sql","0002__stale\.sql"\], actual=\["0001__baseline\.sql"\]/);
 });
 
 test('verify-migrations rejects edits to base migrations even when the manifest is updated', () => {

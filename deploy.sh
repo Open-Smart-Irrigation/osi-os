@@ -598,12 +598,14 @@ print_bootstrap_note() {
     else
         pbn_script="$BOOTSTRAP_SCRIPT_FALLBACK"
     fi
+    echo "NOTE: this deploy secures the canonical env file using the /srv/node-red bootstrap copy."
+    echo "NOTE: the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines."
+    echo "NOTE: osi-bootstrap may still prefer an older ROM script; this deploy does not replace it."
     if [ -e "$OSI_BOOTSTRAP_STAMP" ] && \
        grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
         echo "  NOTE: ChirpStack is provisioned; osi-bootstrap (START=99) rechecks"
         echo "        this at every boot. To re-provision through the service with"
-        echo "        the existing API key ($pbn_script; it rewrites"
-        echo "        $CHIRPSTACK_ENV_FILE with the CHIRPSTACK_* keys only):"
+        echo "        the existing API key (service-selected script: $pbn_script):"
         # shellcheck disable=SC2016 # the command is printed for the operator, not run
         printf '        rm -f %s && CHIRPSTACK_API_KEY="$(sed -n '\''s/^CHIRPSTACK_API_KEY=//p'\'' %s | head -1)" %s start\n' \
             "$OSI_BOOTSTRAP_STAMP" "$CHIRPSTACK_ENV_FILE" "$OSI_BOOTSTRAP_INIT"
@@ -1434,47 +1436,19 @@ ensure_sqlite3_cli() {
 # them) in directory $2; $3 is the repo path printed in each ERROR line.
 check_fetched_manifest() {
     node -e '
-        const crypto = require("crypto");
-        const fs = require("fs");
-        const path = require("path");
-        const [mode, dir, label] = process.argv.slice(1);
-        let manifest;
+        const [modulePath, mode, dir, label] = process.argv.slice(1);
         try {
-            manifest = JSON.parse(fs.readFileSync(path.join(dir, "CHECKSUMS.json"), "utf8"));
+            const loader = require(modulePath);
+            if (mode === "manifest") {
+                for (const entry of loader.readMigrationManifest(dir)) console.log(entry.name);
+            } else if (mode === "files") {
+                loader.loadMigrationCorpus(dir);
+            } else { throw new Error("unknown manifest validation mode"); }
         } catch (error) {
-            console.error("ERROR: " + label + "/CHECKSUMS.json is missing, empty or not valid JSON: " + error.message);
+            console.error("ERROR: " + label + ": " + error.message);
             process.exit(1);
         }
-        const names = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? Object.keys(manifest).sort() : [];
-        const malformed = names.filter((name) => name.includes("/") || !/^[0-9a-f]{64}$/.test(String(manifest[name])));
-        if (names.length === 0 || malformed.length > 0) {
-            console.error("ERROR: " + label + "/CHECKSUMS.json names no files or has malformed entries " + malformed.join(" "));
-            process.exit(1);
-        }
-        if (mode !== "files") process.exit(0);
-        let failed = false;
-        for (const name of names) {
-            let actual;
-            try {
-                actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, name))).digest("hex");
-            } catch (error) {
-                console.error("ERROR: " + label + "/" + name + " is named in CHECKSUMS.json but missing (" + (error.code || error.message) + ")");
-                failed = true;
-                continue;
-            }
-            if (actual !== manifest[name]) {
-                console.error("ERROR: " + label + "/" + name + " does not match its SHA-256 in CHECKSUMS.json (truncated or altered download)");
-                failed = true;
-            }
-        }
-        for (const name of fs.readdirSync(dir)) {
-            if (name.endsWith(".sql") && !Object.prototype.hasOwnProperty.call(manifest, name)) {
-                console.error("ERROR: " + label + "/" + name + " is not named in CHECKSUMS.json");
-                failed = true;
-            }
-        }
-        process.exit(failed ? 1 : 0);
-    ' "$1" "$2" "$3"
+    ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$1" "$2" "$3"
 }
 
 # Fails, naming the file, when a fetched JavaScript file is missing, empty or
@@ -1516,19 +1490,25 @@ fetch_migration_runner() {
         return 1
     fi
 
+    fetch_required "Migration manifest parser" \
+        "lib/osi-migrate/migration-manifest.js" \
+        "$TMP_DIR/lib/osi-migrate/migration-manifest.js" || return 1
+    fetch_required "Migration corpus loader" \
+        "lib/osi-migrate/migrations-loader.js" \
+        "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+    check_fetched_js_files "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+
     fetch_required "Migration checksum manifest" \
         "database/migrations/ordered/CHECKSUMS.json" \
         "$migrations_dir/CHECKSUMS.json" || return 1
-    check_fetched_manifest manifest "$migrations_dir" database/migrations/ordered || return 1
+    migration_names="$(check_fetched_manifest manifest "$migrations_dir" database/migrations/ordered)" || return 1
 
-    for migration in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$migrations_dir/CHECKSUMS.json"); do
+    for migration in $migration_names; do
         fetch_required "Migration $migration" \
             "database/migrations/ordered/$migration" \
             "$migrations_dir/$migration" || return 1
     done
-    # migrate-cli.js and verify-head-cli.js read this directory, not
-    # CHECKSUMS.json: a migration missing here would be skipped without an
-    # error, so the fetched set must be exactly the manifest's.
+    # Keep the early transfer guard; runtime independently validates the same corpus.
     check_fetched_manifest files "$migrations_dir" database/migrations/ordered || return 1
 
     # The positional parameters collect every fetched runner file for the
@@ -1554,7 +1534,6 @@ fetch_migration_runner() {
         fingerprints.js \
         index.js \
         ledger.js \
-        migrations-loader.js \
         runner-iface.js \
         runner.js \
         sql-normalize.js
@@ -1583,8 +1562,8 @@ fetch_reconciliation_assets() {
         fetch_required "Lineage fixture manifest ($lineage)" \
             "scripts/fixtures/lineages/$lineage/CHECKSUMS.json" \
             "$lineage_fixtures_dir/$lineage/CHECKSUMS.json" || return 1
-        check_fetched_manifest manifest "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage" || return 1
-        for fixture in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"); do
+        fixture_names="$(check_fetched_manifest manifest "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage")" || return 1
+        for fixture in $fixture_names; do
             fetch_required "Lineage fixture $lineage/$fixture" \
                 "scripts/fixtures/lineages/$lineage/$fixture" \
                 "$lineage_fixtures_dir/$lineage/$fixture" || return 1
@@ -1758,7 +1737,7 @@ run_schema_migration() {
         # reconcile probe begin
         recon_probe_failed=""
         recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")" || recon_probe_failed="ledger"
-        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(padded + '__')); const mainChecksum=name ? manifest[name] : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$migrations_dir/CHECKSUMS.json")" || recon_probe_failed="${recon_probe_failed:-compare}"
+        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=require(process.argv[1]).readMigrationManifest(process.argv[2]); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const entry=manifest.find((e) => e.name.startsWith(padded + '__')); const mainChecksum=entry ? entry.checksum : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir")" || recon_probe_failed="${recon_probe_failed:-compare}"
         # reconcile probe end
         case "$recon_probe_failed" in
             ledger)
@@ -1953,6 +1932,20 @@ fetch_required "Gateway identity service enable script" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/94_osi_identityd_enable" \
     "/etc/uci-defaults/94_osi_identityd_enable"
 chmod 755 /etc/uci-defaults/94_osi_identityd_enable
+
+fetch_required "chirpstack-bootstrap.js" \
+    "scripts/chirpstack-bootstrap.js" \
+    "/srv/node-red/chirpstack-bootstrap.js"
+
+# issue-183 early secure begin
+if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+    :
+else
+    cs_env_rc=$?
+    echo "ERROR: ChirpStack credential env-file safety check failed; refusing deploy" >&2
+    exit "$cs_env_rc"
+fi
+# issue-183 early secure end
 
 fetch_required "ChirpStack bootstrap service" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap" \
@@ -2663,10 +2656,6 @@ fetch_required "edge-channels.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json" \
     "/srv/node-red/edge-channels.json"
 
-fetch_required "chirpstack-bootstrap.js" \
-    "scripts/chirpstack-bootstrap.js" \
-    "/srv/node-red/chirpstack-bootstrap.js"
-
 fetch_required "STREGA codec" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/strega_gen1_decoder.js" \
     "/srv/node-red/codecs/strega_gen1_decoder.js"
@@ -2703,48 +2692,47 @@ fetch_required "Agroscope uplink transform" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs/agroscope_uplink_transform.js" \
     "/srv/node-red/codecs/agroscope_uplink_transform.js"
 
-if [ -f /srv/node-red/.chirpstack.env ] && \
-   ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' /srv/node-red/.chirpstack.env 2>/dev/null; then
+# issue-183 Gen2 begin
+if [ -f "$CHIRPSTACK_ENV_FILE" ] && \
+   ! grep -q 'CHIRPSTACK_PROFILE_STREGA_GEN2=' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
     echo "--- Provisioning STREGA Gen2 device profile (one-time) ---"
-    # Reuse the gateway's existing osi-nodered token; bootstrap only calls
-    # `chirpstack create-api-key` when CHIRPSTACK_API_KEY is empty, so this
-    # avoids leaving a second admin key behind. Empty value = old behaviour.
-    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1 | tr -d '\r')"
-    # bootstrap rewrites .chirpstack.env wholesale with only the CHIRPSTACK_* keys
-    # it manages, so any operator-added line (AGROSCOPE_*, LOG_*, ...) is dropped.
-    # Keep a copy and restore the non-CHIRPSTACK lines afterwards.
-    cs_env_backup="/srv/node-red/.chirpstack.env.pre-gen2"
-    cp /srv/node-red/.chirpstack.env "$cs_env_backup" || {
-        echo "ERROR: could not back up .chirpstack.env; skipping Gen2 provisioning"
-        cs_env_backup=""
-    }
-    if [ -n "$cs_env_backup" ]; then
-        if CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
-            echo "OK: Gen2 profile provisioned"
-        else
-            echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
-            echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
-        fi
-        # Restore unconditionally: bootstrap rewrites .chirpstack.env BEFORE its
-        # last steps (writeUciConfig), so a late failure leaves the file already
-        # stripped of operator keys -- including DEVICE_EUI. The loop is
-        # idempotent, so running it after success or failure is equally safe.
-        if [ -f /srv/node-red/.chirpstack.env ]; then
-            while IFS= read -r cs_line || [ -n "$cs_line" ]; do
-                case "$cs_line" in
-                    ''|\#*) continue ;;
-                esac
-                cs_key="${cs_line%%=*}"
-                [ "$cs_key" = "$cs_line" ] && continue
-                if ! grep -q "^${cs_key}=" /srv/node-red/.chirpstack.env 2>/dev/null; then
-                    echo "$cs_line" >> /srv/node-red/.chirpstack.env
-                    echo "NOTE: restored env key ${cs_key} dropped by the bootstrap rewrite"
-                fi
-            done < "$cs_env_backup"
-        fi
-        chmod 600 "$cs_env_backup" 2>/dev/null || true
+    cs_env_backup="${CHIRPSTACK_ENV_FILE}.pre-gen2"
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --backup-env-file; then
+        :
+    else
+        cs_env_rc=$?
+        echo "ERROR: secure ChirpStack recovery backup unavailable; refusing Gen2 provisioning" >&2
+        exit "$cs_env_rc"
+    fi
+    cs_api_key="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' "$CHIRPSTACK_ENV_FILE" | head -1 | tr -d '\r')"
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" CHIRPSTACK_API_KEY="$cs_api_key" node /srv/node-red/chirpstack-bootstrap.js; then
+        echo "OK: Gen2 profile provisioned"
+    else
+        cs_bootstrap_rc=$?
+        case "$cs_bootstrap_rc" in
+            1)
+                echo "WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile"
+                echo "NOTE: pre-provisioning env backup kept at $cs_env_backup"
+                ;;
+            74)
+                echo "ERROR: Gen2 credential env-file operation failed; refusing deploy; recovery backup retained" >&2
+                exit 74
+                ;;
+            *)
+                echo "ERROR: Gen2 bootstrap exited unexpectedly ($cs_bootstrap_rc); refusing deploy" >&2
+                exit "$cs_bootstrap_rc"
+                ;;
+        esac
+    fi
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+        :
+    else
+        cs_env_rc=$?
+        echo "ERROR: ChirpStack credential env-file unsafe after provisioning; refusing deploy" >&2
+        exit "$cs_env_rc"
     fi
 fi
+# issue-183 Gen2 end
 
 # Earlier bootstraps created the Kiwi profile without a codec and wrote
 # CHIRPSTACK_PROFILE_CLOVER as an alias of the codec-less RAK field-tester
@@ -2755,18 +2743,42 @@ fi
 # write once all is correct. Each ChirpStack call is bounded at 20 s. Node-RED
 # picks the id up at its restart later in this deploy. Never fails the deploy;
 # a failure is repeated in the closing banner.
+# issue-183 soil begin
 soil_profile_repair_failed=0
-if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' /srv/node-red/.chirpstack.env 2>/dev/null; then
+if grep -q 'CHIRPSTACK_APP_SENSORS=[0-9a-f]\{8\}-' "$CHIRPSTACK_ENV_FILE" 2>/dev/null; then
     echo "--- Kiwi and Clover device profiles (codec and Clover profile id) ---"
-    if OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
+    if ENV_FILE="$CHIRPSTACK_ENV_FILE" OSI_CHIRPSTACK_GRPC_DEADLINE_MS=20000 node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles; then
         echo "OK: Kiwi and Clover device profiles checked"
     else
-        soil_profile_repair_failed=1
-        echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
-        echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
-        echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
+        cs_soil_rc=$?
+        case "$cs_soil_rc" in
+            1)
+                soil_profile_repair_failed=1
+                echo "WARN: Kiwi/Clover profile repair failed; their uplinks may stay undecoded until it succeeds"
+                echo "NOTE: rerun exactly: node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles"
+                echo "NOTE: never the /usr/share/node-red copy: an older image ignores the flag and re-provisions ChirpStack fully"
+                ;;
+            74)
+                echo "ERROR: soil-profile credential env-file operation failed; refusing deploy; recovery backup retained" >&2
+                exit 74
+                ;;
+            *)
+                echo "ERROR: soil-profile repair exited unexpectedly ($cs_soil_rc); refusing deploy" >&2
+                exit "$cs_soil_rc"
+                ;;
+        esac
     fi
 fi
+# issue-183 soil end
+# issue-183 final secure begin
+if ENV_FILE="$CHIRPSTACK_ENV_FILE" node /srv/node-red/chirpstack-bootstrap.js --secure-env-file; then
+    :
+else
+    cs_env_rc=$?
+    echo "ERROR: ChirpStack credential env-file final safety check failed; refusing deploy" >&2
+    exit "$cs_env_rc"
+fi
+# issue-183 final secure end
 
 materialize_native_sqlite3 || exit 1
 

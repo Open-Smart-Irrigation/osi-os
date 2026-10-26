@@ -1,0 +1,176 @@
+'use strict';
+const test = require('node:test'),
+  assert = require('node:assert/strict'),
+  fs = require('node:fs'),
+  os = require('node:os'),
+  path = require('node:path');
+const { writeFixture } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
+const { loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
+const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+const { buildReference, runBaseline } = require('./baseline-existing-db');
+const { runMigrateCli } = require('./migrate-cli');
+const {
+  runReconcile,
+  clearRepairRequired,
+  verifyReconciliationConsistency,
+} = require('./reconcile-ledger-numbering');
+const sql = (t) => `-- risk: additive\nCREATE TABLE ${t}(id INTEGER PRIMARY KEY);\n`;
+
+function fixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi397-callers-')),
+    dir = path.join(root, 'm');
+  fs.mkdirSync(dir);
+  writeFixture(dir, { '0001__a.sql': sql('a'), '0003__c.sql': sql('c') });
+  return { root, dir, db: path.join(root, 't.db'), backupDir: path.join(root, 'backups') };
+}
+
+test('direct reference cache validates whole corpus and keys valid replacements', async () => {
+  const { root, dir } = fixture();
+  try {
+    const one = await buildReference(dir, 1, root);
+    assert.equal((await cliRunner(one).all("SELECT name FROM sqlite_master WHERE name='a'")).length, 1);
+    await assert.rejects(() => buildReference(dir, 2, root), /no migration file/);
+    fs.appendFileSync(path.join(dir, '0003__c.sql'), '-- stale');
+    await assert.rejects(() => buildReference(dir, 1, root), { code: 'ERR_MIGRATION_CORPUS' });
+    writeFixture(dir, { '0003__c.sql': sql('c'), '0001__a.sql': sql('replacement') });
+    const two = await buildReference(dir, 1, root);
+    assert.notEqual(two, one);
+    assert.equal(
+      (await cliRunner(two).all("SELECT name FROM sqlite_master WHERE name='replacement'")).length,
+      1
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('reference chain retry restores published DB under the same corpus', async () => {
+  const { root, dir } = fixture();
+  try {
+    let failed = false;
+    const factory = (db) => {
+      const r = cliRunner(db),
+        exec = r.exec.bind(r);
+      r.exec = async (text) => {
+        if (!failed && text.includes('CREATE TABLE c(')) {
+          failed = true;
+          throw new Error('transient-test-failure');
+        }
+        return exec(text);
+      };
+      return r;
+    };
+    await buildReference(dir, 1, root, { runnerFactory: factory });
+    await assert.rejects(
+      () => buildReference(dir, 3, root, { runnerFactory: factory }),
+      /transient-test-failure/
+    );
+    const final = await buildReference(dir, 3, root, { runnerFactory: factory });
+    assert.equal((await cliRunner(final).all("SELECT name FROM sqlite_master WHERE name='c'")).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI accepted risk decision and apply share bytes; invalid prune does nothing', async () => {
+  const { root, dir, db, backupDir } = fixture();
+  try {
+    await cliRunner(db).exec('PRAGMA user_version=0;');
+    let changed = false;
+    const result = await runMigrateCli({
+      dbPath: db,
+      migrationsDir: dir,
+      backupDir,
+      log: () => {
+        if (!changed) {
+          changed = true;
+          writeFixture(dir, { '0003__c.sql': '-- risk: data\nCREATE TABLE changed(id);\n' });
+        }
+      },
+    });
+    assert.equal(result.offDeviceBackup, null);
+    assert.equal((await cliRunner(db).all("SELECT name FROM sqlite_master WHERE name='c'")).length, 1);
+    assert.equal((await cliRunner(db).all("SELECT name FROM sqlite_master WHERE name='changed'")).length, 0);
+    const marker = path.join(backupDir, 't.db.premigrate-2000');
+    fs.writeFileSync(marker, 'keep');
+    fs.appendFileSync(path.join(dir, '0001__a.sql'), '-- stale');
+    await assert.rejects(
+      () => runMigrateCli({ dbPath: db, migrationsDir: dir, backupDir, pruneOnly: true }),
+      { code: 'ERR_MIGRATION_CORPUS' }
+    );
+    assert.equal(fs.readFileSync(marker, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('invalid main blocks baseline, reconciliation and clear before bookkeeping', async () => {
+  const { root, dir, db, backupDir } = fixture();
+  try {
+    await cliRunner(db).exec('PRAGMA user_version=0;');
+    const bytes = fs.readFileSync(db);
+    fs.unlinkSync(path.join(dir, '0003__c.sql'));
+    for (const fn of [
+      () => runBaseline({ dbPath: db, migrationsDir: dir }),
+      () =>
+        runReconcile({
+          dbPath: db,
+          migrationsDir: dir,
+          fixturesDir: root,
+          backupDir,
+          apply: true,
+          writersStopped: true,
+        }),
+      () => clearRepairRequired({ dbPath: db, migrationsDir: dir, backupDir, writersStopped: true }),
+      () =>
+        verifyReconciliationConsistency(
+          { all: async () => assert.fail('DB touched') },
+          { migrationsDir: dir }
+        ),
+    ])
+      await assert.rejects(fn, { code: 'ERR_MIGRATION_CORPUS' });
+    assert.deepEqual(fs.readFileSync(db), bytes);
+    assert.equal(fs.existsSync(backupDir), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('clear consumes main only; invalid lineage blocks reconcile without touching target', async () => {
+  const { root, dir, db } = fixture();
+  try {
+    const R = require('../lib/osi-migrate');
+    await R.bootstrapFresh(cliRunner(db), { migrationsDir: dir, appVersion: 'test' });
+    assert.deepEqual(await clearRepairRequired({ dbPath: db, migrationsDir: dir, log: () => {} }), {
+      cleared: 0,
+      stillWedged: [],
+    });
+    const fixtures = path.join(root, 'lineages');
+    fs.mkdirSync(fixtures);
+    fs.mkdirSync(path.join(fixtures, 'bad'));
+    fs.writeFileSync(path.join(fixtures, 'bad', '0099__bad.sql'), sql('bad'));
+    const bytes = fs.readFileSync(db);
+    await assert.rejects(() => runReconcile({ dbPath: db, migrationsDir: dir, fixturesDir: fixtures }), {
+      code: 'ERR_MIGRATION_CORPUS',
+    });
+    assert.deepEqual(fs.readFileSync(db), bytes);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('empty registry containers consume no corpus; SQL without manifest still refuses', () => {
+  const { root } = fixture();
+  try {
+    const { buildLineageRegistry } = require('./reconcile-ledger-numbering');
+    assert.equal(buildLineageRegistry(path.join(root, 'missing')).byChecksum.size, 0);
+    const dir = path.join(root, 'registry');
+    fs.mkdirSync(dir);
+    fs.mkdirSync(path.join(dir, 'empty'));
+    assert.equal(buildLineageRegistry(dir).byChecksum.size, 0);
+    fs.writeFileSync(path.join(dir, 'empty', '0001__a.sql'), sql('a'));
+    assert.throws(() => buildLineageRegistry(dir), { code: 'ERR_MIGRATION_CORPUS' });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -32,6 +32,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { cliRunner } = require('../../lib/osi-migrate/runner-iface');
+const { resolveCorpus } = require('../../lib/osi-migrate/migrations-loader');
 const { snapshotSchema } = require('../semantic-schema-compare');
 
 const REPO = path.resolve(__dirname, '..', '..');
@@ -167,8 +168,16 @@ function requireAll(map, names, label) {
   }
 }
 
-function generate() {
-  const src = fs.readFileSync(SOURCE_MIGRATION, 'utf8');
+// generate() reads 0001__baseline.sql only from a validated migration corpus
+// (CHECKSUMS.json plus the exact ordered file set), so changed baseline bytes
+// throw ERR_MIGRATION_CORPUS before an artifact is written. --apply and
+// --verify do not load the corpus: they execute or check the checked-in
+// artifact, which is a separate sanctioned repair, not an ordered migration.
+function generate({ corpus } = {}) {
+  corpus = resolveCorpus(path.dirname(SOURCE_MIGRATION), corpus);
+  const baseline = corpus.migrations.find((m) => m.name === path.basename(SOURCE_MIGRATION));
+  if (!baseline) throw new Error(`catch-up source requires ${path.basename(SOURCE_MIGRATION)}`);
+  const src = baseline.sql;
   const tables = extractStatements(src, 'TABLE');
   const indexes = extractStatements(src, 'INDEX');
   const triggers = extractStatements(src, 'TRIGGER');
@@ -247,7 +256,6 @@ async function verify(dbPath) {
   for (const tr of TRIGGERS) if (!snap.triggers[tr]) missing.push(`trigger:${tr}`);
   if (missing.length) {
     console.error(`[uganda-catchup] --verify FAILED: still missing: ${missing.join(', ')}`);
-    process.exitCode = 1;
     return false;
   }
   console.error(`[uganda-catchup] --verify PASSED: all ${TABLES.length} tables, ${INDEXES.length} indexes, ${TRIGGERS.length} triggers present.`);

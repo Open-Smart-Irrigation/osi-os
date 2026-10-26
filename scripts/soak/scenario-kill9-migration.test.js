@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite } = require('../../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -15,19 +16,19 @@ const MIG_0002 = '-- risk: additive\nALTER TABLE t ADD COLUMN v TEXT;\n';
 
 async function buildKilledCopy() {
   const dir = scratchDir('kill9-migr-');
-  fs.writeFileSync(path.join(dir, '0001__base.sql'), MIG_0001);
+  fixtureWrite(path.join(dir, '0001__base.sql'), MIG_0001);
   const db = path.join(scratchDir('kill9-db-'), 'copy.db');
-  fs.writeFileSync(db, '');
+  fixtureWrite(db, '');
   await applyPending(cliRunner(db), { migrationsDir: dir, appVersion: 'soak', writersStopped: true });
-  fs.writeFileSync(path.join(dir, '0002__addcol.sql'), MIG_0002);
+  fixtureWrite(path.join(dir, '0002__addcol.sql'), MIG_0002);
   return { db, dir };
 }
 
 test('recover-from-backup path: a good backup passes integrity_check and restore yields an openable DB', async () => {
   const dir = scratchDir('kill9-migr2-');
-  fs.writeFileSync(path.join(dir, '0001__base.sql'), MIG_0001);
+  fixtureWrite(path.join(dir, '0001__base.sql'), MIG_0001);
   const db = path.join(scratchDir('kill9-db2-'), 'copy.db');
-  fs.writeFileSync(db, '');
+  fixtureWrite(db, '');
   await applyPending(cliRunner(db), { migrationsDir: dir, appVersion: 'soak', writersStopped: true });
   const backupPath = await backupDb(db, { keep: 5 });
   const check = execFileSync('sqlite3', [backupPath, 'PRAGMA integrity_check;'], { encoding: 'utf8' }).trim();

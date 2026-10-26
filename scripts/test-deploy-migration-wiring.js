@@ -27,7 +27,10 @@ test('deploy migration wiring fetches the ordered migration corpus from CHECKSUM
     .sort();
   assert.deepEqual(Object.keys(manifest).sort(), migrationFiles);
   assert.match(deploy, /database\/migrations\/ordered\/CHECKSUMS\.json/);
-  assert.match(deploy, /Object\.keys\(manifest\)\.sort\(\)/);
+  assert.match(deploy, /migration_names="\$\(check_fetched_manifest manifest/);
+  assert.match(deploy, /for migration in \$migration_names; do/);
+  assert.ok(indexOf('"lib/osi-migrate/migration-manifest.js"') < indexOf('"database/migrations/ordered/CHECKSUMS.json"'));
+  assert.ok(indexOf('"lib/osi-migrate/migrations-loader.js"') < indexOf('"database/migrations/ordered/CHECKSUMS.json"'));
   assert.match(deploy, /database\/migrations\/ordered\/\$migration/);
   assert.match(deploy, /\$migrations_dir\/\$migration/);
 });
@@ -202,6 +205,18 @@ test('deploy migration wiring probes for a foreign-numbered ledger only after SK
   // scripts/test-deploy-reconcile-probe.js; this is only the static shape.
   assert.doesNotMatch(deploy, /SELECT MIN\(version\) FROM schema_migrations/, 'must not regress to a single-row MIN(version) probe');
   assert.match(deploy, /ORDER BY version/, 'the whole-ledger probe query must read rows in ascending version order (first mismatch wins)');
+});
+
+test('deploy migration wiring: the reconcile probe reads CHECKSUMS.json only through the validated manifest reader', () => {
+  const probe = deploy.slice(indexOf('# reconcile probe begin'), indexOf('# reconcile probe end'));
+  assert.match(probe, /require\(process\.argv\[1\]\)\.readMigrationManifest\(process\.argv\[2\]\)/,
+    'the probe must parse the manifest with lib/osi-migrate readMigrationManifest');
+  assert.match(probe, /"\$TMP_DIR\/lib\/osi-migrate\/migrations-loader\.js" "\$migrations_dir"/,
+    'the probe must load the fetched loader and pass it the migrations directory');
+  assert.doesNotMatch(probe, /JSON\.parse/, 'the probe must not parse CHECKSUMS.json raw');
+  assert.doesNotMatch(probe, /CHECKSUMS\.json/, 'the probe must not open CHECKSUMS.json by path itself');
+  assert.ok(indexOf('    if ! fetch_migration_runner; then') < indexOf('# reconcile probe begin'),
+    'run_schema_migration fetches and checks the loader before the probe requires it');
 });
 
 test('deploy migration wiring: a main-numbered gateway (checksums already match) takes the untouched fast path', () => {

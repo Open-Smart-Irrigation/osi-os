@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 // rehearse-devices-type-migration.test.js - a POPULATED gateway must survive the
 // devices table rebuild that a new devices.type_id member forces.
 //
@@ -163,7 +164,7 @@ function subsetDir(upTo, scratch) {
   for (const name of fs.readdirSync(MIGRATIONS_DIR)) {
     const m = /^(\d{4})__/.exec(name);
     if (m && Number(m[1]) <= upTo) {
-      fs.copyFileSync(path.join(MIGRATIONS_DIR, name), path.join(dir, name));
+      fixtureCopy(path.join(MIGRATIONS_DIR, name), path.join(dir, name));
     }
   }
   return dir;
