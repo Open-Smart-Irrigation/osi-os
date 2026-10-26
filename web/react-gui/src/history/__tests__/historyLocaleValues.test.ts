@@ -185,13 +185,11 @@ function isAllowedIdentical(locale: Locale, key: string): boolean {
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    // 505 (the mobile tension shell and route labels add 52 leaves to the
-    // readout added after the #512 review), including six series-legend labels: main carries the mobile uPlot
-    // irrigationTimeline.eventLabel keys from the valve-control work
-    // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
-    // history.nav.admin key added for the scoped-access admin nav entry
-    // point. All are already present in every shipped locale, so only the
-    // count moves.
+    // 505 = 453 on main plus 52 history.mobileTension leaves (the mobile
+    // tension shell, its six series-legend labels, and the route labels).
+    // The 453 already covers the mobile uPlot keys, the valve-control
+    // irrigationTimeline.eventLabel keys and history.nav.admin. All keys
+    // exist in every shipped locale, so adding keys only changes this count.
     expect(Object.keys(english)).toHaveLength(505);
 
     for (const locale of LOCALES) {

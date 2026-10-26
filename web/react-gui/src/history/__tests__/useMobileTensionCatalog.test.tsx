@@ -31,6 +31,16 @@ describe('edge mobile tension catalog hook', () => {
     expect(analysisAPI.getChannels).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps refreshForGeneration stable across rerenders with the same key', async () => {
+    vi.mocked(analysisAPI.getChannels).mockResolvedValue({ generatedAt: 'now', channels: [] });
+    const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false }}>{children}</SWRConfig>;
+    const { result, rerender } = renderHook(() => useMobileTensionCatalog({ enabled: true, zoneId: '7', sessionKey: 'stable' }), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const first = result.current.refreshForGeneration;
+    rerender();
+    expect(result.current.refreshForGeneration).toBe(first);
+  });
+
   it('returns the shared transient, auth and protocol errors without retrying', async () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => <SWRConfig value={{ provider: () => new Map(), revalidateOnFocus: false }}>{children}</SWRConfig>;
     vi.mocked(analysisAPI.getChannels).mockRejectedValueOnce(Object.assign(new Error('offline'), { isAxiosError: true }));

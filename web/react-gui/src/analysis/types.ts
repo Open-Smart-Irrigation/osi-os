@@ -92,8 +92,8 @@ export interface AnalysisSeries {
   points: AnalysisPoint[];
   truncated: boolean;
   /** 'daily' when each point stands for one zone-local day. */
-  cadence?: 'hourly' | 'daily';
-  timezone?: string | null;
+  cadence: 'hourly' | 'daily';
+  timezone: string | null;
 }
 
 export interface AnalysisDropped {

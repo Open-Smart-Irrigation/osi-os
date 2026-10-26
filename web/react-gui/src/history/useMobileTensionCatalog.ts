@@ -73,7 +73,7 @@ export function useMobileTensionCatalog(options: MobileTensionCatalogOptions): {
     if (generations.current.has(generation)) return;
     generations.current.add(generation);
     await mutate();
-  }, [generationKey, key, mutate, options.enabled]);
+  }, [generationKey, mutate, options.enabled]);
 
   const sources = data ?? [];
   const defaultSelectedIds = initialMobileTensionSelection(sources, options.zoneId, undefined).selectedIds;
