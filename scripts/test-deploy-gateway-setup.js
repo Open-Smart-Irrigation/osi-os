@@ -663,6 +663,39 @@ test('a failed enable is logged and does not fail the deploy', () => {
   }
 });
 
+test('the bootstrap fetch and canonical env-file gate precede service enable and later deploy work', () => {
+  const fetch = DEPLOY.indexOf('fetch_required "chirpstack-bootstrap.js"');
+  const early = DEPLOY.indexOf('# issue-183 early secure begin');
+  const enable = DEPLOY.indexOf('\nenable_osi_bootstrap\n');
+  const schema = DEPLOY.indexOf('run_schema_migration || exit 1');
+  assert.ok(fetch > 0 && early > fetch && enable > early && schema > enable);
+  const fragment = extractBetween('# issue-183 early secure begin', '# issue-183 early secure end');
+  assert.match(fragment, /ENV_FILE="\$CHIRPSTACK_ENV_FILE" node \/srv\/node-red\/chirpstack-bootstrap\.js --secure-env-file/);
+});
+
+test('the early secure invocation selects the canonical env file and stops on its original status', () => {
+  const fx = bootstrapFixture();
+  const decoy = path.join(fx.dir, 'decoy.env');
+  const calls = path.join(fx.dir, 'bootstrap.calls');
+  const marker = path.join(fx.dir, 'continued');
+  writeExecutable(path.join(fx.binDir, 'node'), [
+    '#!/bin/sh',
+    'printf "%s|%s\\n" "$ENV_FILE" "$*" >> "$CALLS"',
+    'exit "$NODE_STATUS"',
+  ]);
+  const fragment = extractBetween('# issue-183 early secure begin', '# issue-183 early secure end');
+  for (const expected of [0, 74]) {
+    fs.writeFileSync(calls, '');
+    const script = 'set -eu\nCHIRPSTACK_ENV_FILE=' + JSON.stringify(fx.envFile) + '\nENV_FILE=' + JSON.stringify(decoy) +
+      '\nCALLS=' + JSON.stringify(calls) + '\nNODE_STATUS=' + expected + '\nexport CALLS NODE_STATUS\n' + fragment + '\n: > ' + JSON.stringify(marker) + '\n';
+    const result = runShell(script, { PATH: childPath(fx.binDir) });
+    assert.equal(result.status, expected, result.stderr);
+    assert.ok(fs.readFileSync(calls, 'utf8').includes(fx.envFile + '|/srv/node-red/chirpstack-bootstrap.js --secure-env-file'));
+    assert.equal(fs.existsSync(marker), expected === 0);
+    if (expected === 0) fs.unlinkSync(marker);
+  }
+});
+
 test('deploy.sh enables the service where it installs it, with the init script\'s stamp test', () => {
   const install = DEPLOY.indexOf('chmod 755 /etc/init.d/osi-bootstrap');
   const call = DEPLOY.indexOf('\nenable_osi_bootstrap\n', install);
@@ -721,6 +754,11 @@ test('the banner names the bootstrap script path the service runs on this gatewa
   assert.equal(r2.status, 0, r2.stderr);
   assert.ok(r2.stdout.includes(fb2), r2.stdout);
   assert.ok(!r2.stdout.includes(rom2), r2.stdout);
+  for (const note of [
+    'this deploy secures the canonical env file using the /srv/node-red bootstrap copy.',
+    'the updated /srv/node-red script updates managed CHIRPSTACK_* keys and preserves other valid UTF-8 env lines.',
+    'osi-bootstrap may still prefer an older ROM script; this deploy does not replace it.'
+  ]) assert.ok(r2.stdout.includes(note), r2.stdout);
 });
 
 test('the banner never tells the operator to run the bootstrap script directly', () => {
@@ -797,6 +835,26 @@ test('running the service by hand provisions and writes the stamp', () => {
   assert.ok(fs.existsSync(fx.stampFile), 'start() must write the stamp');
   assert.equal(serviceWouldBeNoOp(fx), true);
   assert.ok(initCalls(fx).some((c) => c.startsWith('restart-request request-restart chirpstack_bootstrap')), initCalls(fx).join('\n'));
+});
+
+test('an updated bootstrap failure leaves the stamp absent and does not request a restart', () => {
+  const fx = bootstrapFixture({ enabled: true });
+  const script = path.join(fx.dir, 'chirpstack-bootstrap.js');
+  fs.writeFileSync(script, '');
+  writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', 'exit 74']);
+  writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', 'echo "restart-request $*" >> ' + JSON.stringify(fx.log)]);
+  const body = BOOTSTRAP_INIT
+    .slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
+    .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
+    .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
+    .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
+  const result = runShell('BOOTSTRAP_ROM=/nonexistent-rom.js\\nBOOTSTRAP_FALLBACK=' + JSON.stringify(script) + '\\n' + body + '\\nstart', { PATH: childPath(fx.binDir) });
+  assert.equal(fs.existsSync(fx.stampFile), false);
+  assert.ok(!initCalls(fx).some(call => call.startsWith('restart-request')), initCalls(fx).join('\\n'));
 });
 
 test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap path', () => {
