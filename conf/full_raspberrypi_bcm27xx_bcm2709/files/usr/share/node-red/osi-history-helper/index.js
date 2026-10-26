@@ -2572,7 +2572,11 @@ async function rawLegacySensorHistory(db, options = {}) {
     LIMIT ?
   `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit + 1]));
   if (rows.length > limit) throw legacyRawLimitError();
+  // Deduplicate first so a newer invalid row still hides an older valid one
+  // at the same timestamp, then drop missing values as the aggregated
+  // legacy path (flattenLegacyAggregate) does.
   return dedupeLegacyHistoryRows(rows.filter(recordedAtRangeFilter(start, end)))
+    .filter((row) => toFiniteNumber(row.value) !== null)
     .map((row) => ({ t: canonicalRecordedAt(row.recorded_at), value: toFiniteNumber(row.value) }));
 }
 

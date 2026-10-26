@@ -1292,6 +1292,24 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: legacy raw history omits rows whose value is missing`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2) VALUES (?, ?, ?, ?)');
+      // A row that carries only another channel, and a newer equal-time row
+      // that hides the older valid 13:00 value.
+      insert.run('A8404100000000A1', '2026-10-04T10:00:00Z', null, 5);
+      insert.run('A8404100000000A1', '2026-10-03T13:00:00Z', null, 6);
+      const points = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(points, [{ t: '2026-10-03T12:00:00.000Z', value: 24 }]);
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${profile}: legacy raw entry rejects the 30001st row`, async () => {
     const helper = loadHelper(profile);
     const oversized = (dendro) => helper.legacySensorHistory({
