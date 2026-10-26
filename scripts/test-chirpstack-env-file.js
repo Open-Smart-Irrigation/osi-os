@@ -1078,6 +1078,14 @@ if (process.geteuid() !== 0) {
             env: process.env.OSI_ISSUE183_SHADOW_ROOT === '1' ? { ISSUE183_VIRTUAL_ROOT: '1' } : {}
           });
           assert.equal(metadata.status, fault === 'private-unlink' ? 74 : 0, operation + '/' + fault + ' follow-up metadata probe status');
+          if (fault === 'private-unlink') {
+            const probeMatch = String(metadata.stderr || '').match(/Credential env-file operation failed (\{[^\n]+\})/);
+            assert.ok(probeMatch, operation + '/' + fault + ' follow-up probe emitted the safe credential diagnostic');
+            const probe = JSON.parse(probeMatch[1]);
+            assert.equal(probe.reason, 'UNSAFE_ENTRY', operation + '/' + fault + ' follow-up probe reason');
+            assert.equal(probe.linkCount, 2, operation + '/' + fault + ' follow-up probe link count');
+            assert.equal(probe.stagingLeftover, true, operation + '/' + fault + ' follow-up probe staging leftover');
+          }
           assert.equal(fs.existsSync(run.canonical), !targetAbsentAfterCreateLinkFailure, operation + '/' + fault + ' metadata probe preserves expected file presence');
           if (!targetAbsentAfterCreateLinkFailure) {
             assertSnapshot(run.canonical, expectedRetainedBytes, 0o600, fault === 'private-unlink' ? 2 : 1, operation + '/' + fault + ' retained canonical after metadata probe');

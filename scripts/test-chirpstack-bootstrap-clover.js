@@ -816,3 +816,86 @@ test('--repair-soil-profiles flushes the new env file to disk before it replaces
   assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file is forced to exact mode 0600');
   assert.ok(![...world.files.keys()].some((f) => f.endsWith('.tmp')), 'no temp file left behind');
 });
+
+// A crash between link() and unlink() in a create-only publication leaves the
+// published file with a second link inside its staging directory. Every later
+// run refuses that entry; the diagnostic reports the link count and whether a
+// staging directory remains, and removing only that leftover clears the
+// refusal (the osi-live-ops-runbook recovery recipe).
+function credentialDiagnostic(world) {
+  const match = world.stderrLogs.join('\n').match(/Credential env-file operation failed (\{[^\n]*\})/);
+  assert.ok(match, 'emits the safe credential diagnostic');
+  return JSON.parse(match[1]);
+}
+
+for (const entry of ['.chirpstack.env', '.chirpstack.env.pre-gen2']) {
+  test(`an interrupted link publication of ${entry} reports its link count and staging leftover`, async () => {
+    const gw = provisionedGatewaySeed();
+    const world = makeWorld(gw.seed);
+    world.files.set(ENV_FILE, gw.envText);
+    world.fileModes.set(ENV_FILE, 0o600);
+    fs.writeFileSync(world.envFile, gw.envText, { mode: 0o600 });
+    const target = path.join(world.tempDir, entry);
+    if (entry !== '.chirpstack.env') fs.writeFileSync(target, gw.envText, { mode: 0o600 });
+    const stagingDir = path.join(world.tempDir, `.${entry}.tmp-crash01`);
+    fs.mkdirSync(stagingDir, { mode: 0o700 });
+    fs.linkSync(target, path.join(stagingDir, 'env'));
+    assert.equal(fs.statSync(target).nlink, 2);
+
+    await runBootstrap(world, { args: ['--secure-env-file'] });
+    assert.equal(world.exitCode, 74);
+    const refused = credentialDiagnostic(world);
+    assert.equal(refused.reason, 'UNSAFE_ENTRY');
+    assert.equal(refused.phase, 'validate');
+    assert.equal(refused.linkCount, 2);
+    assert.equal(refused.stagingLeftover, true);
+    assert.doesNotMatch(world.stderrLogs.join('\n'), /crash01|synthetic-api-key/, 'no staging name or key in the diagnostic');
+    assert.equal(fs.statSync(target).nlink, 2, 'the refusal removes nothing');
+    assert.equal(fs.statSync(path.join(stagingDir, 'env')).ino, fs.statSync(target).ino);
+
+    fs.unlinkSync(path.join(stagingDir, 'env'));
+    fs.rmdirSync(stagingDir);
+    const repaired = makeWorld(gw.seed);
+    repaired.files.set(ENV_FILE, gw.envText);
+    repaired.fileModes.set(ENV_FILE, 0o600);
+    repaired.envFile = world.envFile;
+    await runBootstrap(repaired, { args: ['--secure-env-file'] });
+    assert.equal(repaired.exitCode, 0, repaired.logs.join('\n'));
+    assert.equal(fs.statSync(target).nlink, 1);
+    assert.equal(fs.readFileSync(target, 'utf8'), gw.envText, 'the published bytes survive the recovery');
+  });
+}
+
+test('a hard link outside a staging directory reports no staging leftover', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.files.set(ENV_FILE, gw.envText);
+  world.fileModes.set(ENV_FILE, 0o600);
+  fs.writeFileSync(world.envFile, gw.envText, { mode: 0o600 });
+  fs.mkdirSync(path.join(world.tempDir, 'elsewhere'));
+  fs.linkSync(world.envFile, path.join(world.tempDir, 'elsewhere', 'env'));
+  await runBootstrap(world, { args: ['--secure-env-file'] });
+  assert.equal(world.exitCode, 74);
+  const refused = credentialDiagnostic(world);
+  assert.equal(refused.reason, 'UNSAFE_ENTRY');
+  assert.equal(refused.linkCount, 2);
+  assert.equal(refused.stagingLeftover, false);
+});
+
+test('a symlinked env file refuses without a link-count diagnostic', async () => {
+  const gw = provisionedGatewaySeed();
+  const world = makeWorld(gw.seed);
+  world.files.set(ENV_FILE, gw.envText);
+  world.fileModes.set(ENV_FILE, 0o600);
+  const real = path.join(world.tempDir, 'real.env');
+  fs.writeFileSync(real, gw.envText, { mode: 0o600 });
+  // runBootstrap's pre-step writes through the symlink, so it stays in place.
+  fs.symlinkSync(real, world.envFile);
+  await runBootstrap(world, { args: ['--secure-env-file'] });
+  assert.equal(world.exitCode, 74);
+  const refused = credentialDiagnostic(world);
+  assert.equal(refused.reason, 'UNSAFE_ENTRY');
+  assert.equal('linkCount' in refused, false);
+  assert.equal('stagingLeftover' in refused, false);
+  assert.ok(fs.lstatSync(world.envFile).isSymbolicLink(), 'the refusal removes nothing');
+});

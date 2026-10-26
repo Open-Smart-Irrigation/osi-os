@@ -359,6 +359,12 @@ class CredentialEnvError extends Error {
     this.published = Boolean(fields.published);
     this.publication = fields.publication === 'rename' || fields.publication === 'link' ? fields.publication : null;
     this.cleanupErrors = Array.isArray(fields.cleanupErrors) ? fields.cleanupErrors.slice() : [];
+    // Set only for a named entry that is a regular file with a link count
+    // other than 1, so the operator can tell an interrupted create-only
+    // publication (link count 2 plus a leftover staging directory) apart
+    // from other unsafe entries.
+    this.linkCount = Number.isSafeInteger(fields.linkCount) ? fields.linkCount : null;
+    this.stagingLeftover = typeof fields.stagingLeftover === 'boolean' ? fields.stagingLeftover : null;
   }
 }
 
@@ -455,6 +461,18 @@ function regularSingleLink(stat) {
   return Boolean(stat && stat.isFile() && stat.nlink === 1);
 }
 
+// True when a staging directory publishEnvContent creates for `name` is still
+// present. Diagnostic only: a failed listing returns null and never replaces
+// the primary error.
+function stagingLeftoverPresent(directory, name) {
+  try {
+    const prefix = '.' + name + '.tmp-';
+    return fs.readdirSync(directory.dirPath).some(entry => String(entry).startsWith(prefix));
+  } catch (_) {
+    return null;
+  }
+}
+
 function checkedEnvStat(stat) {
   return Boolean(regularSingleLink(stat) && stat.uid === 0 && stat.gid === 0 && (stat.mode & 0o7777) === 0o600);
 }
@@ -535,7 +553,12 @@ function secureExistingEnvFile(directory, name, required = false, operation = 's
       }
       throw error;
     }
-    if (!regularSingleLink(namedStat)) throw new CredentialEnvError({ operation, phase: 'validate', reason: 'UNSAFE_ENTRY' });
+    if (!regularSingleLink(namedStat)) {
+      const linkDiagnostic = namedStat.isFile()
+        ? { linkCount: namedStat.nlink, stagingLeftover: stagingLeftoverPresent(directory, name) }
+        : {};
+      throw new CredentialEnvError({ operation, phase: 'validate', reason: 'UNSAFE_ENTRY', ...linkDiagnostic });
+    }
     phase = 'read';
     fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     phase = 'metadata';
@@ -1327,7 +1350,7 @@ async function run(argv) {
 }
 
 function safeCredentialDiagnostic(error) {
-  return 'Credential env-file operation failed ' + JSON.stringify({
+  const record = {
     operation: error.operation,
     phase: error.phase,
     reason: error.reason,
@@ -1335,7 +1358,12 @@ function safeCredentialDiagnostic(error) {
     published: Boolean(error.published),
     publication: error.publication,
     cleanupErrors: error.cleanupErrors
-  });
+  };
+  if (Number.isSafeInteger(error.linkCount)) {
+    record.linkCount = error.linkCount;
+    record.stagingLeftover = typeof error.stagingLeftover === 'boolean' ? error.stagingLeftover : null;
+  }
+  return 'Credential env-file operation failed ' + JSON.stringify(record);
 }
 
 run(process.argv.slice(2)).catch((error) => {
