@@ -378,10 +378,19 @@ if (process.geteuid() !== 0) {
     const runNodeTests = (names, failing = false) => {
       const definitions = names.map((name, index) => 'test(' + JSON.stringify(name) + ', () => ' + (failing ? 'assert.fail(' + JSON.stringify('synthetic B3 red ' + index) + ')' : '{}') + ');').join('\n');
       fs.writeFileSync(child, 'const test=require("node:test");const assert=require("node:assert/strict");\n' + definitions + '\n');
-      return cp.spawnSync(process.execPath, ['--test', '--test-concurrency=1', child], { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+      return cp.spawnSync(process.execPath, ['--test', '--test-concurrency=1', child], {
+        encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024, env: { PATH: '/usr/bin:/bin' }
+      });
     };
     try {
       const candidate = runNodeTests(ROOT_CANDIDATE_TESTS);
+      const inheritedContext = cp.spawnSync(process.execPath, ['--test', '--test-concurrency=1', child], {
+        encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024,
+        env: { PATH: '/usr/bin:/bin', NODE_TEST_CONTEXT: 'child-v8' }
+      });
+      assert.equal(inheritedContext.status, 0, 'Node 22 inherited-context negative control exits successfully');
+      assert.equal(inheritedContext.stdout, '', 'inherited test context suppresses nested TAP output');
+      assert.throws(() => assertRootTap(inheritedContext.stdout, 'candidate'), 'empty inherited-context output is rejected');
       assert.equal(candidate.status, 0, candidate.stderr);
       assertRootTap(candidate.stdout, 'candidate');
       const b3 = runNodeTests(ROOT_B3_FAILURES, true);
@@ -471,16 +480,68 @@ if (process.geteuid() !== 0) {
       assert.equal(mode(backupOnly.backup), 0o600);
     } finally { clean(backupOnly); }
     const nonroot = fixture(); const nonrootBytes = Buffer.from('UNCHANGED=1\n');
-    fs.writeFileSync(nonroot.envFile, nonrootBytes, { mode: 0o644 }); fs.chmodSync(nonroot.envFile, 0o644);
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-issue-183-readable-source-'));
+    const sourceCopy = path.join(sourceDir, 'chirpstack-bootstrap.js');
+    const sourceBytes = fs.readFileSync(SOURCE);
+    const dropped = (args) => cp.spawnSync(process.execPath, [sourceCopy, ...args], {
+      encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ENV_FILE: nonroot.envFile },
+      uid: 65534, gid: 65534, timeout: 5000, maxBuffer: 2 * 1024 * 1024
+    });
+    const safeDroppedSummary = (result, flagName) => {
+      const stderr = String(result.stderr || '');
+      const allowlistedReasons = new Set(['ROOT_REQUIRED','PRIMITIVE_UNAVAILABLE','REQUIRED_FILE_MISSING','UNSAFE_ENTRY','CONTENT_TYPE_INVALID','CONTENT_ENCODING_INVALID','SNAPSHOT_CHANGED','OS_ERROR']);
+      const allowlistedPhases = new Set(['validate','read','metadata','stage','publish','verify','cleanup']);
+      let classification = 'unclassified'; let reason = null; let phase = null;
+      const match = stderr.match(/Credential env-file operation failed (\{[^\r\n]*\})/);
+      if (match) {
+        classification = 'credential-diagnostic';
+        try {
+          const record = JSON.parse(match[1]);
+          reason = allowlistedReasons.has(record.reason) ? record.reason : 'other';
+          phase = allowlistedPhases.has(record.phase) ? record.phase : 'other';
+        } catch (_) { classification = 'malformed-credential-diagnostic'; }
+      } else if (/Cannot find module|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND/.test(stderr)) {
+        classification = 'node-loader-error';
+      } else if (/Invalid ChirpStack bootstrap arguments/.test(stderr)) {
+        classification = 'usage-diagnostic';
+      } else if (result.error) {
+        classification = 'spawn-error';
+      }
+      const safeSpawnCode = result.error && /^[A-Z0-9_]+$/.test(String(result.error.code || '')) ? result.error.code : null;
+      return {
+        operation: 'T2 file-only CLI refusal', source: path.basename(sourceCopy), argvFlags: [flagName],
+        requestedUid: 65534, requestedGid: 65534, status: result.status, signal: result.signal,
+        spawnErrorCode: safeSpawnCode, stderrBytes: Buffer.byteLength(stderr),
+        classification, phase, reason
+      };
+    };
     try {
-      const result = cp.spawnSync(process.execPath, [SOURCE, '--secure-env-file'], {
-        encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ENV_FILE: nonroot.envFile },
-        uid: 65534, gid: 65534, timeout: 5000, maxBuffer: 2 * 1024 * 1024
+      fs.chmodSync(sourceDir, 0o755);
+      fs.writeFileSync(sourceCopy, sourceBytes, { mode: 0o644 }); fs.chmodSync(sourceCopy, 0o644);
+      assert.deepEqual(fs.readFileSync(sourceCopy), sourceBytes, 'world-readable child source is byte-identical to the tested bootstrap');
+      fs.writeFileSync(nonroot.envFile, nonrootBytes, { mode: 0o644 }); fs.chmodSync(nonroot.envFile, 0o644);
+      const effectiveUid = cp.spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.geteuid()))'], {
+        encoding: 'utf8', env: { PATH: '/usr/bin:/bin' }, uid: 65534, gid: 65534,
+        timeout: 5000, maxBuffer: 1024 * 1024
       });
-      assert.equal(result.status, 74);
+      assert.equal(effectiveUid.status, 0, 'privilege-drop control starts Node');
+      assert.equal(effectiveUid.stdout, '65534', 'privilege-drop control confirms actual child effective UID');
+      const invalid = dropped(['--issue-183-invalid-flag']);
+      t.diagnostic('T2 invalid-flag child ' + JSON.stringify(safeDroppedSummary(invalid, '--issue-183-invalid-flag')));
+      assert.equal(invalid.status, 2, 'same dropped child proves the copied bootstrap started and parsed arguments');
+      const before = fs.statSync(nonroot.envFile);
+      const result = dropped(['--secure-env-file']);
+      const summary = safeDroppedSummary(result, '--secure-env-file');
+      t.diagnostic('T2 secure-env-file child ' + JSON.stringify(summary));
+      assert.equal(result.status, 74, 'privilege-dropped file-only command exits with credential refusal');
+      assert.equal(summary.classification, 'credential-diagnostic', 'child reached the credential error handler');
+      assert.equal(summary.phase, 'validate');
+      assert.equal(summary.reason, 'ROOT_REQUIRED');
       assert.deepEqual(fs.readFileSync(nonroot.envFile), nonrootBytes);
-      assert.equal(mode(nonroot.envFile), 0o644);
-    } finally { clean(nonroot); }
+      const after = fs.statSync(nonroot.envFile);
+      assert.equal(after.mode & 0o7777, before.mode & 0o7777);
+      assert.equal(after.uid, before.uid); assert.equal(after.gid, before.gid);
+    } finally { clean(nonroot); fs.rmSync(sourceDir, { recursive: true, force: true }); }
     const foreign = fixture(); const foreignBytes = Buffer.from('FOREIGN=preserved\n');
     fs.writeFileSync(foreign.envFile, foreignBytes, { mode: 0o640 }); fs.chmodSync(foreign.envFile, 0o640); fs.chownSync(foreign.envFile, 65534, 65534);
     try {
@@ -665,11 +726,22 @@ if (process.geteuid() !== 0) {
         assert.equal(cli(['--secure-env-file'], parentLink, { source: cliSource, env: { ENV_FILE: path.join(aliasParent, 'env') } }).status, 74);
         assert.equal(fs.readFileSync(parentTarget, 'utf8'), 'PARENT=untouched\n'); assert.equal(mode(parentTarget), 0o644);
       } finally { clean(parentLink); }
-      const unsupported = hooks(fx, { fs: new Proxy(fs, { get(target, key) {
-        if (key === 'constants') return { ...target.constants, O_NOFOLLOW: undefined };
-        const value = target[key]; return typeof value === 'function' ? value.bind(target) : value;
-      }}) });
-      assert.throws(() => unsupported.api.secureEnvFiles(), credentialError);
+      const primitiveBytes = fs.readFileSync(fx.envFile); const primitiveMode = mode(fx.envFile);
+      const unsupportedFs = new Proxy(Object.create(null), { get(_target, key) {
+        if (key === 'constants') return { ...fs.constants, O_NOFOLLOW: undefined };
+        const value = fs[key]; return typeof value === 'function' ? value.bind(fs) : value;
+      }});
+      const unsupported = hooks(fx, { fs: unsupportedFs });
+      assert.throws(() => unsupported.api.secureEnvFiles(), error => {
+        credentialError(error);
+        assert.equal(error.name, 'CredentialEnvError');
+        assert.equal(error.reason, 'PRIMITIVE_UNAVAILABLE');
+        assert.equal(error.phase, 'validate');
+        assert.equal(error.exitStatus, 74);
+        return true;
+      });
+      assert.deepEqual(fs.readFileSync(fx.envFile), primitiveBytes, 'unsupported-constant rejection preserves sentinel bytes');
+      assert.equal(mode(fx.envFile), primitiveMode, 'unsupported-constant rejection preserves sentinel mode');
       const noProc = hooks(fx, { fs: new Proxy(fs, { get(target, key) {
         if (key === 'statSync') return (file, ...args) => {
           if (file === '/proc/self/fd') throw syntheticError('ENOENT');
@@ -677,7 +749,14 @@ if (process.geteuid() !== 0) {
         };
         const value = target[key]; return typeof value === 'function' ? value.bind(target) : value;
       }}) });
-      assert.throws(() => noProc.api.secureEnvFiles(), credentialError);
+      assert.throws(() => noProc.api.secureEnvFiles(), error => {
+        credentialError(error);
+        assert.equal(error.name, 'CredentialEnvError');
+        assert.equal(error.phase, 'validate');
+        assert.equal(error.exitStatus, 74);
+        assert.notEqual(error.name, 'TypeError');
+        return true;
+      });
       const confined = guardedProductFs(fx);
       const outside = path.join(fx.dir, '..', path.basename(fx.dir) + '-outside-sentinel');
       fs.writeFileSync(outside, 'OUTSIDE=unchanged\n', { mode: 0o600 });

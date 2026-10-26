@@ -203,6 +203,7 @@ jobs:
       - name: ChirpStack credential env-file safety
         run: node --test --test-concurrency=1 scripts/test-chirpstack-env-file.js
       - name: Issue 183 base defect qualification (root)
+        id: issue183_b3
         shell: bash
         run: |
           set -o pipefail
@@ -222,14 +223,14 @@ jobs:
           grep -Fq 'B3 A2 old-source snapshot' "$RUNNER_TEMP/issue-183-b3-root.tap"
           printf 'outer_reentry_exit=%s\nroot_child_direct_exit=1\nroot_child_expected_named_failures=2\n' "$status" > "$RUNNER_TEMP/issue-183-b3-root.status"
       - name: Retain Issue 183 B3 root qualification evidence
-        if: always()
+        if: always() && steps.issue183_b3.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: issue-183-b3-root-qualification
           path: |
             ${{ runner.temp }}/issue-183-b3-root.tap
             ${{ runner.temp }}/issue-183-b3-root.status
-          if-no-files-found: error
+          if-no-files-found: warn
       # Migration 0068 rehearsal (bound applied-command columns, calibration-only
       # outbox triggers, live and tombstone events, readings stay local) and the
       # journal v2 replication flows migration this branch touches.
