@@ -85,13 +85,21 @@ function ensureReferenceUpTo(state, n) {
     while (state.nextIdx < state.entries.length) {
       const entry = state.entries[state.nextIdx];
       if (entry.version > n) break;
+      // stepRoot holds only this step's materialized 1..N migration subset.
+      // The working DB, its backups and the published ref-NNNN.db files live
+      // in state.dir, so the subset is removed as soon as the step's runner
+      // call returns or throws (gateway /tmp is RAM).
       const stepRoot = fs.mkdtempSync(path.join(state.dir, 'subset-'));
-      const subset = path.join(stepRoot, 'migrations');
-      const corpus = materializeMigrations(subset, state.entries.slice(0, state.nextIdx + 1)
-        .map((m) => ({ corpus: state.corpus, name: m.name })));
-      const opts = { migrationsDir: subset, corpus, appVersion: 'stage0-reference', writersStopped: true };
-      if (!state.bootstrapped) { await bootstrapFresh(state.runner, opts); state.bootstrapped = true; }
-      else await applyPending(state.runner, opts);
+      try {
+        const subset = path.join(stepRoot, 'migrations');
+        const corpus = materializeMigrations(subset, state.entries.slice(0, state.nextIdx + 1)
+          .map((m) => ({ corpus: state.corpus, name: m.name })));
+        const opts = { migrationsDir: subset, corpus, appVersion: 'stage0-reference', writersStopped: true };
+        if (!state.bootstrapped) { await bootstrapFresh(state.runner, opts); state.bootstrapped = true; }
+        else await applyPending(state.runner, opts);
+      } finally {
+        fs.rmSync(stepRoot, { recursive: true, force: true });
+      }
       const snap = await snapshotSchema(state.runner);
       const savedPath = path.join(state.dir, `ref-${String(entry.version).padStart(4, '0')}.db`);
       fs.copyFileSync(state.workingDb, savedPath);

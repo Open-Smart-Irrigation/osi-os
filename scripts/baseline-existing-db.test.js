@@ -130,14 +130,46 @@ test('refuses a missing db path (anti-typo)', async () => {
   await assert.rejects(() => runBaseline({ dbPath: '/nonexistent/nope.db', log: () => {} }), /does not exist/);
 });
 
+// Every subset-* step directory below root (the chain's scratch directory
+// and the ref-chain-* directory inside it).
+function subsetDirsUnder(root) {
+  const found = [];
+  for (const entry of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (entry.isDirectory() && entry.name.startsWith('subset-')) found.push(path.join(entry.parentPath, entry.name));
+  }
+  return found;
+}
+
+test('reference chain removes each step subset directory once the step is done', async () => {
+  const dir = path.join(scratch(), 'migrations');
+  fs.mkdirSync(dir);
+  for (const [i, t] of ['a', 'b', 'c'].entries()) {
+    fixtureWrite(path.join(dir, `000${i + 1}__${t}.sql`), `-- risk: additive\nCREATE TABLE ${t} (id INTEGER PRIMARY KEY);\n`);
+  }
+  const chainScratch = scratch();
+  const ref2 = await buildReference(dir, 2, chainScratch);
+  assert.deepEqual(subsetDirsUnder(chainScratch), [], 'no subset directory may remain after reference(2)');
+  const ref3 = await buildReference(dir, 3, chainScratch);
+  assert.equal(path.dirname(ref3), path.dirname(ref2), 'reference(3) extends the same cached chain');
+  assert.deepEqual(subsetDirsUnder(chainScratch), [], 'no subset directory may remain after the full chain');
+  // The published per-version snapshots stay usable after the cleanup.
+  assert.deepEqual(fs.readdirSync(path.dirname(ref3)).filter((n) => n.startsWith('ref-')).sort(),
+    ['ref-0001.db', 'ref-0002.db', 'ref-0003.db']);
+  assert.deepEqual((await cliRunner(ref2).all("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('a','b','c') ORDER BY name"))
+    .map((r) => r.name), ['a', 'b']);
+});
+
 test('reference chain retry rebuilds from the last published snapshot after a migration failure', async () => {
   const dir = path.join(scratch(), 'migrations');
   fs.mkdirSync(dir);
   fixtureWrite(path.join(dir, '0001__a.sql'), '-- risk: additive\nCREATE TABLE a (id INTEGER PRIMARY KEY);\n');
   fixtureWrite(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\nNOT VALID SQL;\n');
-  await assert.rejects(() => buildReference(dir, 2, scratch()), /syntax error|SQLITE_ERROR/);
+  const failedScratch = scratch();
+  await assert.rejects(() => buildReference(dir, 2, failedScratch), /syntax error|SQLITE_ERROR/);
+  assert.deepEqual(subsetDirsUnder(failedScratch), [], 'a failed step must remove its subset directory');
   fixtureWrite(path.join(dir, '0002__bad.sql'), '-- risk: additive\nCREATE TABLE b (id INTEGER PRIMARY KEY);\n');
   const db = await buildReference(dir, 2, scratch());
+  assert.deepEqual(subsetDirsUnder(path.dirname(db)), [], 'a retried chain must not leave subset directories');
   assert.deepEqual(await cliRunner(db).all("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"), [
     { name: 'a' }, { name: 'b' }, { name: 'schema_migrations' },
     { name: 'schema_object_fingerprints' },
