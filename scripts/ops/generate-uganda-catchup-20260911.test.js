@@ -121,3 +121,52 @@ test('apply() is idempotent (safe to re-run)', async () => {
   const ok = await verify(db);
   assert.equal(ok, true);
 });
+
+test('generate() reads 0001__baseline.sql only from the validated corpus', () => {
+  const { loadMigrationCorpus, materializeMigrations } = require('../../lib/osi-migrate/migrations-loader');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-catchup-corpus-'));
+  const read = fs.readFileSync;
+  try {
+    fs.cpSync(path.join(REPO, 'lib'), path.join(root, 'lib'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'scripts/ops'), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'scripts/semantic-schema-compare.js'), path.join(root, 'scripts/semantic-schema-compare.js'));
+    fs.copyFileSync(path.join(__dirname, 'generate-uganda-catchup-20260911.js'), path.join(root, 'scripts/ops/generate-uganda-catchup-20260911.js'));
+    const dir = path.join(root, 'database/migrations/ordered');
+    fs.mkdirSync(path.dirname(dir), { recursive: true });
+    materializeMigrations(dir, [{ corpus: loadMigrationCorpus(MIGRATIONS_DIR), name: '0001__baseline.sql' }]);
+    const G = require(path.join(root, 'scripts/ops/generate-uganda-catchup-20260911'));
+    const source = path.join(dir, '0001__baseline.sql');
+    const raw = read(source);
+
+    // Accepted corpus: the artifact matches the one generated from the repo.
+    generate();
+    assert.equal(G.generate(), G.ARTIFACT_PATH);
+    assert.deepEqual(read(G.ARTIFACT_PATH), read(ARTIFACT_PATH));
+    const stable = read(G.ARTIFACT_PATH);
+
+    // Changed baseline bytes: refused before writing, and the generator never
+    // reopens the source by path (a hook restoring the bytes cannot help).
+    const changed = raw.toString().replace('CREATE TABLE sync_link_state (', 'CREATE TABLE sync_link_state_changed (');
+    assert.notEqual(changed, raw.toString(), 'fixture premise: the baseline creates sync_link_state');
+    fs.writeFileSync(source, changed);
+    let reopened = false;
+    fs.readFileSync = function (...args) {
+      if (args[0] === source) {
+        reopened = true;
+        fs.writeFileSync(source, raw);
+      }
+      return read.apply(this, args);
+    };
+    assert.throws(() => G.generate(), { code: 'ERR_MIGRATION_CORPUS' });
+    assert.equal(reopened, false, 'generate() must not read 0001__baseline.sql by path');
+    fs.readFileSync = read;
+    assert.deepEqual(read(G.ARTIFACT_PATH), stable);
+
+    // A caller-supplied corpus must be a validated snapshot of the same directory.
+    fs.writeFileSync(source, raw);
+    assert.throws(() => G.generate({ corpus: { migrations: [] } }), { code: 'ERR_MIGRATION_CORPUS' });
+  } finally {
+    fs.readFileSync = read;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
