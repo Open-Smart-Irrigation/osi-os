@@ -75,7 +75,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
-const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
+const { resolveCorpus, loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
 const { ensureLedger, sqlQuote } = require('../lib/osi-migrate/ledger');
 const { syncFingerprints, readStoredFingerprints, sortFps } = require('../lib/osi-migrate/runner');
 const { computeFingerprints } = require('../lib/osi-migrate/fingerprints');
@@ -111,8 +111,9 @@ function headerStrippedChecksum(sql) {
 // Exact + header-stripped indices over main's OWN ordered migrations
 // (database/migrations/ordered/CHECKSUMS.json + files, per the ledger
 // reconciliation brief).
-function buildMainIndex(migrationsDir) {
-  const migrations = loadMigrations(migrationsDir);
+function buildMainIndex(migrationsDir, corpus) {
+  corpus = resolveCorpus(migrationsDir, corpus);
+  const migrations = corpus.migrations;
   const byChecksum = new Map();
   const byVersion = new Map();
   const byHeaderStrippedChecksum = new Map();
@@ -124,7 +125,7 @@ function buildMainIndex(migrationsDir) {
     list.push(m);
     byHeaderStrippedChecksum.set(hs, list);
   }
-  return { migrations, byChecksum, byVersion, byHeaderStrippedChecksum };
+  return { corpus, migrations, byChecksum, byVersion, byHeaderStrippedChecksum };
 }
 
 // Registry of every vendored known-foreign-lineage migration file, keyed by
@@ -134,35 +135,26 @@ function buildMainIndex(migrationsDir) {
 // text. Refuses (throws) if a vendored file's bytes have drifted from its own
 // checksum manifest — the fixtures must stay exactly what was audited.
 function buildLineageRegistry(fixturesDir) {
-  const byChecksum = new Map();
-  const lineages = {};
-  if (!fs.existsSync(fixturesDir)) return { byChecksum, lineages };
+  const byChecksum = new Map(), lineages = {}, corpora = new Map();
+  let root;
+  try { root = fs.lstatSync(fixturesDir); }
+  catch (e) { if (e.code === 'ENOENT') return { byChecksum, lineages, corpora }; throw e; }
+  if (!root.isDirectory() || root.isSymbolicLink()) throw new Error('lineage root must be a nonsymlink directory');
   for (const lineage of fs.readdirSync(fixturesDir).sort()) {
-    const dir = path.join(fixturesDir, lineage);
-    if (!fs.statSync(dir).isDirectory()) continue;
-    const manifestPath = path.join(dir, 'CHECKSUMS.json');
-    if (!fs.existsSync(manifestPath)) continue;
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    const migrations = loadMigrations(dir);
-    for (const m of migrations) {
-      if (manifest[m.name] !== m.checksum) {
-        throw new Error(
-          `lineage fixture drift: ${lineage}/${m.name} does not match ${lineage}/CHECKSUMS.json — refusing to build the lineage registry`
-        );
-      }
-      byChecksum.set(m.checksum, { ...m, lineage });
-    }
-    for (const filename of Object.keys(manifest)) {
-      if (!migrations.some((m) => m.name === filename)) {
-        throw new Error(`lineage fixture manifest ${lineage}/CHECKSUMS.json names ${filename}, which is missing on disk`);
-      }
-    }
-    lineages[lineage] = migrations.map((m) => m.name);
+    const dir = path.join(fixturesDir, lineage), stat = fs.lstatSync(dir);
+    if (stat.isSymbolicLink()) throw new Error('lineage symlink refused: ' + lineage);
+    if (!stat.isDirectory()) continue;
+    const names = fs.readdirSync(dir);
+    // A missing/empty registry container supplies no corpus. Any SQL or
+    // manifest makes this a consumed corpus and requires strict loading.
+    if (!names.includes('CHECKSUMS.json') && !names.some((n) => n.endsWith('.sql'))) continue;
+    const corpus = loadMigrationCorpus(dir);
+    corpora.set(lineage, corpus);
+    for (const m of corpus.migrations) byChecksum.set(m.checksum, { ...m, lineage });
+    lineages[lineage] = corpus.migrations.map((m) => m.name);
   }
-  return { byChecksum, lineages };
+  return { byChecksum, lineages, corpora };
 }
-
-// --- ledger read ---------------------------------------------------------
 
 async function readLedgerRows(runner) {
   await ensureLedger(runner);
@@ -312,14 +304,15 @@ function getReferenceScratchRoot() {
 // with no file simply contributes nothing), so resolving n down to the
 // highest migration version actually present at or below n yields the
 // exact same applied set and is safe to substitute.
-async function buildReferenceAt(migrationsDir, n) {
+async function buildReferenceAt(migrationsDir, n, corpus) {
+  corpus = resolveCorpus(migrationsDir, corpus);
   const refRoot = getReferenceScratchRoot();
   if (n <= 0) {
     const dbPath = path.join(fs.mkdtempSync(path.join(refRoot, 'ref-empty-')), 'empty.db');
     await cliRunner(dbPath).exec('PRAGMA user_version=0;');
     return dbPath;
   }
-  const presentAtOrBelow = loadMigrations(migrationsDir)
+  const presentAtOrBelow = corpus.migrations
     .map((m) => m.version)
     .filter((v) => v <= n);
   if (presentAtOrBelow.length === 0) {
@@ -328,7 +321,7 @@ async function buildReferenceAt(migrationsDir, n) {
     return dbPath;
   }
   const resolvedN = Math.max(...presentAtOrBelow);
-  return buildReference(migrationsDir, resolvedN, refRoot);
+  return buildReference(migrationsDir, resolvedN, refRoot, { corpus });
 }
 
 // Resolves every 'pending-proof' row in place (mutates decision/proof/reason)
@@ -337,10 +330,11 @@ async function buildReferenceAt(migrationsDir, n) {
 // pre-state. Sequential on purpose: buildReference's own chain cache is
 // serialized per migrationsDir already, and this path only ever has a
 // handful of candidates per real device.
-async function resolveStructuralProofs(rows, { migrationsDir, scratchRoot }) {
+async function resolveStructuralProofs(rows, { migrationsDir, scratchRoot, corpus }) {
+  corpus = resolveCorpus(migrationsDir, corpus);
   for (const r of rows) {
     if (r.decision !== 'pending-proof') continue;
-    const refDbPath = await buildReferenceAt(migrationsDir, r.target.version - 1);
+    const refDbPath = await buildReferenceAt(migrationsDir, r.target.version - 1, corpus);
     const proofDir = fs.mkdtempSync(path.join(scratchRoot, `proof-v${r.version}-`));
     const copyForeign = path.join(proofDir, 'foreign.db');
     const copyMain = path.join(proofDir, 'main.db');
@@ -373,7 +367,7 @@ async function resolveStructuralProofs(rows, { migrationsDir, scratchRoot }) {
 async function classifyLedger(ledgerRows, { mainIndex, lineageRegistry, migrationsDir, scratchRoot }) {
   let rows = ledgerRows.map((row) => classifyRow(row, mainIndex, lineageRegistry));
   rows = refuseVersionSlotCollisions(rows);
-  rows = await resolveStructuralProofs(rows, { migrationsDir, scratchRoot });
+  rows = await resolveStructuralProofs(rows, { migrationsDir, scratchRoot, corpus: mainIndex.corpus });
   // A structural-proof pass can turn a 'pending-proof' winner into 'remap',
   // which could newly collide with another row's already-claimed target
   // (e.g. two header-stripped candidates both proving into the same slot
@@ -412,9 +406,9 @@ async function classifyLedger(ledgerRows, { mainIndex, lineageRegistry, migratio
 // `applied` row whose checksum still disagrees with main's checksum at
 // that version — plus the same live-vs-stamped fingerprint comparison
 // verifyHead performs (proving syncFingerprints actually took).
-async function verifyReconciliationConsistency(runner, { migrationsDir }) {
+async function verifyReconciliationConsistency(runner, { migrationsDir, corpus }) {
+  const mainByVersion = buildMainIndex(migrationsDir, corpus).byVersion;
   const rows = await runner.all('SELECT version, checksum, status FROM schema_migrations ORDER BY version');
-  const mainByVersion = buildMainIndex(migrationsDir).byVersion;
   for (const r of rows) {
     if (r.status === 'repair_required') {
       return { ok: false, reason: `version ${r.version} is still repair_required after reconciliation` };
@@ -484,10 +478,10 @@ async function runReconcile({
   }
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-reconcile-'));
   try {
-    const runner = cliRunner(dbPath);
-    const ledgerRows = await readLedgerRows(runner);
     const mainIndex = buildMainIndex(migrationsDir);
     const lineageRegistry = buildLineageRegistry(fixturesDir);
+    const runner = cliRunner(dbPath);
+    const ledgerRows = await readLedgerRows(runner);
     const { rows, refused, summary } = await classifyLedger(ledgerRows, { mainIndex, lineageRegistry, migrationsDir, scratchRoot });
 
     for (const r of rows) {
@@ -521,7 +515,7 @@ async function runReconcile({
     log(`[reconcile] remapped ${remapped} ledger row(s)`);
     await syncFingerprints(runner);
 
-    const check = await verifyReconciliationConsistency(runner, { migrationsDir });
+    const check = await verifyReconciliationConsistency(runner, { migrationsDir, corpus: mainIndex.corpus });
     if (!check.ok) {
       log(`[reconcile] post-apply consistency self-check FAILED: ${check.reason}`);
       const restored = restoreByteImage(dbPath, backupPath);
@@ -561,9 +555,9 @@ async function clearRepairRequired({
   if (!fs.existsSync(dbPath)) {
     throw new Error(`refusing: database file does not exist: ${dbPath}`);
   }
+  const mainIndex = buildMainIndex(migrationsDir);
   const runner = cliRunner(dbPath);
   const ledgerRows = await readLedgerRows(runner);
-  const mainIndex = buildMainIndex(migrationsDir);
   const wedged = ledgerRows.filter((r) => r.status === 'repair_required');
   if (wedged.length === 0) {
     log('[reconcile] no repair_required rows found; nothing to clear.');
@@ -597,7 +591,7 @@ async function clearRepairRequired({
   const updates = clearable.map((r) => `UPDATE schema_migrations SET status='applied', error=NULL, finished_at=${sqlQuote(now)} WHERE version=${r.version};`).join('\n');
   await runner.exec(`BEGIN IMMEDIATE;\n${updates}\nCOMMIT;`);
   await syncFingerprints(runner);
-  const check = await verifyReconciliationConsistency(runner, { migrationsDir });
+  const check = await verifyReconciliationConsistency(runner, { migrationsDir, corpus: mainIndex.corpus });
   if (!check.ok) {
     const restored = restoreByteImage(dbPath, backupPath);
     if (!restored) {

@@ -110,6 +110,8 @@ by the ADR but was never committed to the repo — do not go looking for it.)
 
 ### Ordered migrations: format and risk-class declaration
 
+Every runtime corpus requires a strict CHECKSUMS.json, including selected references and synthetic fixtures. Preserve the accepted parent checksums when constructing a prefix. Operator authority and corruption recovery are defined in [migration manifest authority](../../../docs/operations/migration-manifest-trust.md); never regenerate expected hashes from suspect files.
+
 Files live at `database/migrations/ordered/NNNN__slug.sql`. Check the current
 inventory before choosing a version:
 
@@ -118,9 +120,7 @@ ls database/migrations/ordered/
 ```
 
 Use the next contiguous four-digit version after the highest `NNNN` present; do
-not copy an example version from this skill. If `CHECKSUMS.json` is present in
-that directory, keep it in mind when interpreting `verify-migrations.js` output
-and do not edit already-recorded migration bytes casually.
+not copy an example version from this skill. `CHECKSUMS.json` is mandatory for runtime loading. Keep it consistent when authoring a new migration; never edit already-recorded migration bytes or regenerate expected hashes from suspect files.
 
 The filename format is enforced by a regex in
 `lib/osi-migrate/migrations-loader.js`:

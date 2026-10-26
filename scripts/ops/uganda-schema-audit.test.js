@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -25,7 +26,7 @@ function tmpDb() {
 // building only reference(1) keeps this file fast enough to run in CI.
 function ref1MigrationsDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-audit-ref1-subset-'));
-  fs.copyFileSync(path.join(MIGRATIONS_DIR, '0001__baseline.sql'), path.join(dir, '0001__baseline.sql'));
+  fixtureCopy(path.join(MIGRATIONS_DIR, '0001__baseline.sql'), path.join(dir, '0001__baseline.sql'));
   return dir;
 }
 

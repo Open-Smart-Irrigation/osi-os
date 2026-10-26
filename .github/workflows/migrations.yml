@@ -69,6 +69,8 @@ jobs:
             lib/osi-migrate/__tests__/ledger-fixes.test.js \
             lib/osi-migrate/__tests__/ledger.test.js \
             lib/osi-migrate/__tests__/migrations-loader.test.js \
+            lib/osi-migrate/__tests__/migration-manifest.test.js \
+            lib/osi-migrate/__tests__/runner-corpus.test.js \
             lib/osi-migrate/__tests__/runner-additive.test.js \
             lib/osi-migrate/__tests__/runner-atomicity.test.js \
             lib/osi-migrate/__tests__/runner-boot-devices-rebuild-grace.test.js \
@@ -99,6 +101,7 @@ jobs:
       - run: node --test scripts/test-timestamp-clamp.js
       - run: node --test scripts/test-scheduler-clock-jump.js
       - run: node --test scripts/test-crash-loop-escalation.js
+      - run: node --test scripts/migration-caller-corpus.test.js scripts/ops/rebuild-corpus.test.js scripts/deploy-corpus.test.js
       - run: node scripts/verify-migrations.js
       - run: node scripts/verify-no-stray-ddl.js
       - run: node scripts/verify-flows-size-ratchet.js

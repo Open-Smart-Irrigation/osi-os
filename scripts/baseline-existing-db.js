@@ -15,7 +15,7 @@ const { cliRunner, nodeSqliteRunner } = require('../lib/osi-migrate/runner-iface
 const { bootstrapFresh, applyPending } = require('../lib/osi-migrate');
 const { syncFingerprints } = require('../lib/osi-migrate/runner');
 const { ensureLedger, successInsertSql } = require('../lib/osi-migrate/ledger');
-const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
+const { loadMigrationCorpus, resolveCorpus, materializeMigrations } = require('../lib/osi-migrate/migrations-loader');
 const { snapshotSchema, compareSchemas, FAILING_CLASSES } = require('./semantic-schema-compare');
 
 const REPO = path.resolve(__dirname, '..');
@@ -65,149 +65,55 @@ function resolveRunner(options = {}) {
 const referenceChains = new Map();
 
 function getChainState(migrationsDir, scratchRoot, runnerOptions = {}) {
+  const corpus = resolveCorpus(migrationsDir, runnerOptions.corpus);
   const runner = resolveRunner(runnerOptions);
-  const key = `${path.resolve(migrationsDir)}\0${runner.key}`;
+  const key = `${corpus.dir}\0${corpus.identity}\0${runner.key}`;
   let state = referenceChains.get(key);
   if (!state) {
     const dir = fs.mkdtempSync(path.join(scratchRoot, 'ref-chain-'));
-    const subset = path.join(dir, 'migrations');
-    fs.mkdirSync(subset);
-    state = {
-      dir,
-      subset,
-      workingDb: path.join(dir, 'working.db'),
-      files: fs.readdirSync(migrationsDir)
-        .filter((f) => /^\d{4}__[a-z0-9_]+\.sql$/.test(f))
-        .sort(),
-      bootstrapped: false,
-      nextIdx: 0,
-      byVersion: new Map(), // version -> { dbPath, snap }
-      runner: null,
-      runnerFactory: runner.factory,
-      chain: Promise.resolve(),
-    };
+    state = { dir, corpus, entries: corpus.migrations, workingDb: path.join(dir, 'working.db'),
+      bootstrapped: false, nextIdx: 0, byVersion: new Map(), runner: null,
+      runnerFactory: runner.factory, chain: Promise.resolve() };
     referenceChains.set(key, state);
   }
   return state;
 }
 
-// Extends the shared chain to cover every migration <= n that isn't already
-// built, applying only the newly-reached ones. Serialized on state.chain so
-// concurrent callers for the same migrationsDir and runner mode can't race the
-// one working DB.
-function ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions = {}) {
-  const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
+function ensureReferenceUpTo(state, n) {
   const run = state.chain.then(async () => {
     if (!state.runner) state.runner = state.runnerFactory(state.workingDb);
-    const runner = state.runner;
-    while (state.nextIdx < state.files.length) {
-      const f = state.files[state.nextIdx];
-      const version = Number(f.slice(0, 4));
-      if (version > n) break;
-      fs.copyFileSync(path.join(migrationsDir, f), path.join(state.subset, f));
-      if (!state.bootstrapped) {
-        await bootstrapFresh(runner, { migrationsDir: state.subset, appVersion: 'stage0-reference' });
-        state.bootstrapped = true;
-      } else {
-        await applyPending(runner, { migrationsDir: state.subset, appVersion: 'stage0-reference', writersStopped: true });
-      }
-      const snap = await snapshotSchema(runner);
-      const savedPath = path.join(state.dir, `ref-${f.slice(0, 4)}.db`);
+    while (state.nextIdx < state.entries.length) {
+      const entry = state.entries[state.nextIdx];
+      if (entry.version > n) break;
+      const stepRoot = fs.mkdtempSync(path.join(state.dir, 'subset-'));
+      const subset = path.join(stepRoot, 'migrations');
+      const corpus = materializeMigrations(subset, state.entries.slice(0, state.nextIdx + 1)
+        .map((m) => ({ corpus: state.corpus, name: m.name })));
+      const opts = { migrationsDir: subset, corpus, appVersion: 'stage0-reference', writersStopped: true };
+      if (!state.bootstrapped) { await bootstrapFresh(state.runner, opts); state.bootstrapped = true; }
+      else await applyPending(state.runner, opts);
+      const snap = await snapshotSchema(state.runner);
+      const savedPath = path.join(state.dir, `ref-${String(entry.version).padStart(4, '0')}.db`);
       fs.copyFileSync(state.workingDb, savedPath);
-      state.byVersion.set(version, { dbPath: savedPath, snap });
-      state.nextIdx += 1;
+      state.byVersion.set(entry.version, { dbPath: savedPath, snap });
+      state.nextIdx++;
     }
   });
-  // Keep the serialization chain usable after a failed attempt. The caller
-  // still receives the rejection, while the next call starts from the last
-  // published snapshot with a fresh connection.
   state.chain = run.catch(async () => {
-    // nodeSqliteRunner closes on exec failure, rolling back any open
-    // transaction. Do not reuse a failed handle on the next retry.
     if (state.runner) await state.runner.close();
     state.runner = null;
-    // A failed first migration leaves recordFailure's metadata tables behind,
-    // while a later failure leaves the working DB one step past the last
-    // published snapshot. Restore the exact published file before retrying so
-    // bootstrapFresh/applyPending see the same state as a fresh attempt.
-    for (const suffix of ['', '-wal', '-shm']) {
-      const target = state.workingDb + suffix;
-      if (fs.existsSync(target)) fs.unlinkSync(target);
-    }
-    if (state.nextIdx > 0) {
-      const prior = state.byVersion.get(Number(state.files[state.nextIdx - 1].slice(0, 4))).dbPath;
-      fs.copyFileSync(prior, state.workingDb);
-    }
+    for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(state.workingDb + suffix, { force: true });
+    if (state.nextIdx > 0) fs.copyFileSync(state.byVersion.get(state.entries[state.nextIdx - 1].version).dbPath, state.workingDb);
     state.bootstrapped = state.nextIdx > 0;
-    return undefined;
   });
   return run;
 }
 
-// "reference(n)" means "a DB with every migration whose version <= n
-// applied" (see bb3bda079, which fixed the same class of bug on reconcile's
-// side) - NOT "the migration file literally numbered n". On a tree with a
-// version gap (e.g. this branch's own missing 0059, renumbered to 0060
-// because main owns 0059, #351) there is no file at version n itself, so
-// byVersion - keyed only by versions that exist as files - has no entry for
-// n.
-//
-// referenceSnapshot()/buildReference() do NOT resolve n down to the nearest
-// present version themselves - they stay STRICT and throw (via
-// byVersion.get(n) being undefined) for any n with no migration file,
-// whether an interior gap or n > the last present version. That strictness
-// is load-bearing for a THIRD caller neither bb3bda079 nor 5c8470e94 (which
-// added gap resolution here and then removed it again, see git history)
-// accounted for: lib/osi-migrate/runner.js's isBootOwnedTriggerBodyDrift
-// (reached from the live runner's drift-grace path in applyPending and
-// verifyHead) calls buildReference with the DEVICE's highest *applied*
-// ledger version, not a version this tree's migration files necessarily
-// have - a gap on this branch, or n > head on a downgrade/rollback (on main
-// too), both throw a plain TypeError before this comment's fix, which that
-// caller's try/catch turns into a safe refusal (fail closed on an
-// unprovable state - a version the device ran but this reference chain
-// cannot build is not proof the live schema is safe to bless). Resolving
-// the gap down here would instead silently compare the live schema against
-// a reference that is missing a migration the device actually applied.
-//
-// Callers that legitimately need "the highest present version <= n" must
-// resolve it themselves, at the call site, before calling in:
-// - reconcile-ledger-numbering.js's buildReferenceAt (bb3bda079): n there is
-//   target.version-1, a tree-relative offset, not a device-applied version -
-//   resolving down to the nearest present file is exactly correct there.
-// - runBaseline() below: the default candidate scan only ever walks real
-//   migration-file versions (5c8470e94), and an explicit --version is
-//   validated against the migration list before it ever reaches here (see
-//   runBaseline's version checks) - so runBaseline never passes a gap
-//   version in the first place.
-//
-// On a contiguous tree (main) every version has a file, so none of this
-// changes behaviour there either way.
-
-// Reference(N) snapshot, built (or reused) via the shared incremental chain.
 async function referenceSnapshot(migrationsDir, n, scratchRoot, runnerOptions = {}) {
-  await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
-  return getChainState(migrationsDir, scratchRoot, runnerOptions).byVersion.get(n).snap;
-}
-
-function loadManifest(migrationsDir) {
-  const p = path.join(migrationsDir, 'CHECKSUMS.json');
-  if (!fs.existsSync(p)) throw new Error(`checksum manifest missing: ${p}`);
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
-}
-
-function assertManifestMatchesDisk(migrations, manifest) {
-  const migrationNames = new Set(migrations.map((m) => m.name));
-  for (const m of migrations) {
-    if (manifest[m.name] !== m.checksum) {
-      throw new Error(`checksum manifest mismatch for ${m.name}: this checkout's migration files diverge from CHECKSUMS.json - refusing to baseline anything`);
-    }
-  }
-  for (const filename of Object.keys(manifest)) {
-    if (!migrationNames.has(filename)) {
-      throw new Error(`checksum manifest has no migration file for ${filename} - refusing to baseline anything`);
-    }
-  }
+  const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
+  if (!state.entries.some((m) => m.version === n)) throw new TypeError(`reference version ${n} has no migration file`);
+  await ensureReferenceUpTo(state, n);
+  return state.byVersion.get(n).snap;
 }
 
 // reference(N): a DB with exactly migrations 1..n applied (same runner calls,
@@ -227,8 +133,10 @@ function assertManifestMatchesDisk(migrations, manifest) {
 // the reason this function must stay strict rather than resolve gaps
 // itself.
 async function buildReference(migrationsDir, n, scratchRoot, runnerOptions = {}) {
-  await ensureReferenceUpTo(migrationsDir, n, scratchRoot, runnerOptions);
-  return getChainState(migrationsDir, scratchRoot, runnerOptions).byVersion.get(n).dbPath;
+  const state = getChainState(migrationsDir, scratchRoot, runnerOptions);
+  if (!state.entries.some((m) => m.version === n)) throw new TypeError(`reference version ${n} has no migration file`);
+  await ensureReferenceUpTo(state, n);
+  return state.byVersion.get(n).dbPath;
 }
 
 function summarize(diffs) {
@@ -240,7 +148,7 @@ function printDiffs(log, label, diffs) {
   for (const d of diffs) log(`  [${d.class}] ${d.kind} ${d.name} - ${d.detail}`);
 }
 
-async function stamp(dbPath, migrations, manifest, n) {
+async function stamp(dbPath, migrations, n) {
   const runner = cliRunner(dbPath);
   await ensureLedger(runner);
   const inserts = migrations
@@ -248,7 +156,7 @@ async function stamp(dbPath, migrations, manifest, n) {
     .map((m) => successInsertSql({
       version: m.version,
       name: m.name,
-      checksum: manifest[m.name],
+      checksum: m.checksum,
       appVersion: APP_VERSION,
       backupPath: '',
     }));
@@ -261,10 +169,8 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
   if (!fs.existsSync(dbPath)) {
     throw new Error(`refusing: database file does not exist: ${dbPath}`);
   }
-  const migrations = loadMigrations(migrationsDir);
-  if (migrations.length === 0) throw new Error(`no migrations found in ${migrationsDir}`);
-  const manifest = loadManifest(migrationsDir);
-  assertManifestMatchesDisk(migrations, manifest);
+  const corpus = loadMigrationCorpus(migrationsDir);
+  const migrations = corpus.migrations;
   const head = migrations[migrations.length - 1].version;
   if (version !== null && (!Number.isInteger(version) || version < 1 || version > head)) {
     throw new Error(`--version must be an integer in 1..${head}`);
@@ -280,7 +186,7 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
 
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-baseline-'));
   const liveSnap = await snapshotSchema(cliRunner(dbPath));
-  const runnerOptions = { runnerFactory };
+  const runnerOptions = { runnerFactory, corpus };
   const headSnap = await referenceSnapshot(migrationsDir, head, scratchRoot, runnerOptions);
 
   // Only scan versions that actually have a migration file. Walking every
@@ -323,7 +229,7 @@ async function runBaseline({ dbPath, version = null, report = false, migrationsD
     log(`[baseline] report mode: best match N=${matched}; nothing stamped`);
     return { matched, tried };
   }
-  await stamp(dbPath, migrations, manifest, matched);
+  await stamp(dbPath, migrations, matched);
   log(`[baseline] stamped versions 1..${matched} (checksums from CHECKSUMS.json, app_version='${APP_VERSION}') and synced fingerprints.`);
   log('[baseline] next: Stage 1 applyPending (writers stopped) carries the device to head.');
   return { matched, tried };

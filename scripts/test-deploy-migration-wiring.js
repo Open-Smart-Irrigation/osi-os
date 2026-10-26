@@ -27,7 +27,10 @@ test('deploy migration wiring fetches the ordered migration corpus from CHECKSUM
     .sort();
   assert.deepEqual(Object.keys(manifest).sort(), migrationFiles);
   assert.match(deploy, /database\/migrations\/ordered\/CHECKSUMS\.json/);
-  assert.match(deploy, /Object\.keys\(manifest\)\.sort\(\)/);
+  assert.match(deploy, /migration_names="\$\(check_fetched_manifest manifest/);
+  assert.match(deploy, /for migration in \$migration_names; do/);
+  assert.ok(indexOf('"lib/osi-migrate/migration-manifest.js"') < indexOf('"database/migrations/ordered/CHECKSUMS.json"'));
+  assert.ok(indexOf('"lib/osi-migrate/migrations-loader.js"') < indexOf('"database/migrations/ordered/CHECKSUMS.json"'));
   assert.match(deploy, /database\/migrations\/ordered\/\$migration/);
   assert.match(deploy, /\$migrations_dir\/\$migration/);
 });

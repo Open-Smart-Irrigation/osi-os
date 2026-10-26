@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -33,7 +34,7 @@ const REAL_FIXTURES_DIR = path.join(REPO, 'scripts/fixtures/lineages');
 function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-test-')); }
 
 function writeMigration(dir, filename, body) {
-  fs.writeFileSync(path.join(dir, filename), body);
+  fixtureWrite(path.join(dir, filename), body);
 }
 
 function sha(raw) { return crypto.createHash('sha256').update(raw).digest('hex'); }
@@ -89,7 +90,7 @@ test('buildLineageRegistry loads a vendored fixture dir and tags entries by line
   fs.mkdirSync(lineageDir, { recursive: true });
   const body = '-- risk: additive\n-- 0099: acme thing\nCREATE TABLE acme_thing (id INTEGER PRIMARY KEY);\n';
   writeMigration(lineageDir, '0099__acme_thing.sql', body);
-  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify({ '0099__acme_thing.sql': sha(Buffer.from(body)) }));
+  fixtureWrite(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify({ '0099__acme_thing.sql': sha(Buffer.from(body)) }));
 
   const reg = buildLineageRegistry(fixturesDir);
   const entry = reg.byChecksum.get(sha(Buffer.from(body)));
@@ -104,9 +105,9 @@ test('buildLineageRegistry refuses (throws) when a vendored file has drifted fro
   const lineageDir = path.join(fixturesDir, 'acme');
   fs.mkdirSync(lineageDir, { recursive: true });
   writeMigration(lineageDir, '0099__acme_thing.sql', '-- risk: additive\nCREATE TABLE acme_thing (id INTEGER PRIMARY KEY);\n');
-  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify({ '0099__acme_thing.sql': 'f'.repeat(64) }));
+  fixtureWrite(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify({ '0099__acme_thing.sql': 'f'.repeat(64) }));
 
-  assert.throws(() => buildLineageRegistry(fixturesDir), /drift/);
+  assert.throws(() => buildLineageRegistry(fixturesDir), /migration corpus: checksum mismatch for 0099__acme_thing\.sql/);
 });
 
 test('buildLineageRegistry tolerates a fixtures dir that does not exist (empty registry)', () => {
@@ -269,9 +270,9 @@ test('structural proof: a mutated header-only candidate with a differing DDL bod
   // pass structural proof even though the header-stripped-by-body-slug
   // lookup below is bypassed manually with a crafted registry entry.
   const mutatedSql = '-- risk: additive\n-- 0099: widget table (mutated)\nCREATE TABLE widget (id INTEGER PRIMARY KEY, name TEXT, extra_column TEXT);\n';
-  fs.writeFileSync(path.join(lineageDir, '0099__widget.sql'), mutatedSql);
+  fixtureWrite(path.join(lineageDir, '0099__widget.sql'), mutatedSql);
   const manifest = { '0099__widget.sql': sha(Buffer.from(mutatedSql)) };
-  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+  fixtureWrite(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
 
   // Force a header-stripped "candidate" pairing by hand: the mutated foreign
   // body does NOT actually share a header-stripped hash with any main
@@ -299,9 +300,9 @@ test('structural proof: identical schema effect from the same pre-state passes a
   fs.mkdirSync(lineageDir, { recursive: true });
   // Same DDL body as main's 0003__gadget.sql, header differs only.
   const foreignSql = '-- risk: additive\n-- 0077: gadget table (foreign numbering)\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n';
-  fs.writeFileSync(path.join(lineageDir, '0077__gadget.sql'), foreignSql);
+  fixtureWrite(path.join(lineageDir, '0077__gadget.sql'), foreignSql);
   const manifest = { '0077__gadget.sql': sha(Buffer.from(foreignSql)) };
-  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+  fixtureWrite(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
 
   const mainIndex = buildMainIndex(dir);
   const lineageRegistry = buildLineageRegistry(fixturesDir);
@@ -344,9 +345,9 @@ test('reconcile across a migrations-dir version gap: header-stripped match, stru
   // exactly the renumber-only diff the real device's ledger row 59 has
   // against main's 0060 (line 2 is the only difference).
   const oldHeaderSql = '-- risk: additive\n-- 0003: gadget table (pre-renumber)\nCREATE TABLE gadget (id INTEGER PRIMARY KEY, kind TEXT);\n';
-  fs.writeFileSync(path.join(lineageDir, '0003__gadget.sql'), oldHeaderSql);
+  fixtureWrite(path.join(lineageDir, '0003__gadget.sql'), oldHeaderSql);
   const manifest = { '0003__gadget.sql': sha(Buffer.from(oldHeaderSql)) };
-  fs.writeFileSync(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
+  fixtureWrite(path.join(lineageDir, 'CHECKSUMS.json'), JSON.stringify(manifest));
 
   // Device DB: only 0001/0002 actually applied through the real runner, then
   // hand-plant ledger row 3 with the OLD file's checksum — the same shape as
@@ -354,8 +355,8 @@ test('reconcile across a migrations-dir version gap: header-stripped match, stru
   // landed on main.
   const deviceDir = path.join(root, 'device');
   fs.mkdirSync(deviceDir);
-  fs.copyFileSync(path.join(dir, '0001__base.sql'), path.join(deviceDir, '0001__base.sql'));
-  fs.copyFileSync(path.join(dir, '0002__widget.sql'), path.join(deviceDir, '0002__widget.sql'));
+  fixtureCopy(path.join(dir, '0001__base.sql'), path.join(deviceDir, '0001__base.sql'));
+  fixtureCopy(path.join(dir, '0002__widget.sql'), path.join(deviceDir, '0002__widget.sql'));
   const db = path.join(root, 'device.db');
   await bootstrapFresh(cliRunner(db), { migrationsDir: deviceDir, appVersion: 'gap-fixture' });
   await cliRunner(db).exec(
@@ -589,15 +590,15 @@ function buildDeviceMigrationsDir(root, lineage, throughVersion, extra = {}) {
   const dir = path.join(root, `device-${lineage}`);
   fs.mkdirSync(dir);
   for (const m of loadMigrations(MAIN_MIGRATIONS_DIR)) {
-    if (m.version <= 21) fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(dir, m.name));
+    if (m.version <= 21) fixtureCopy(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(dir, m.name));
   }
   const lineageDir = path.join(REAL_FIXTURES_DIR, lineage);
   for (const name of fs.readdirSync(lineageDir).filter((f) => f.endsWith('.sql'))) {
     const version = Number(name.slice(0, 4));
-    if (version <= throughVersion) fs.copyFileSync(path.join(lineageDir, name), path.join(dir, name));
+    if (version <= throughVersion) fixtureCopy(path.join(lineageDir, name), path.join(dir, name));
   }
   for (const [foreignName, mainName] of Object.entries(extra)) {
-    fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, mainName), path.join(dir, foreignName));
+    fixtureCopy(path.join(MAIN_MIGRATIONS_DIR, mainName), path.join(dir, foreignName));
   }
   return dir;
 }
@@ -840,7 +841,7 @@ test('main-numbered device: reconcile is an all-match no-op report (fast path pr
   const partialDir = path.join(root, 'main-partial');
   fs.mkdirSync(partialDir);
   for (const m of loadMigrations(MAIN_MIGRATIONS_DIR)) {
-    if (m.version <= 25) fs.copyFileSync(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(partialDir, m.name));
+    if (m.version <= 25) fixtureCopy(path.join(MAIN_MIGRATIONS_DIR, m.name), path.join(partialDir, m.name));
   }
   await bootstrapFresh(cliRunner(db), { migrationsDir: partialDir, appVersion: 'main-numbered-fixture' });
   const before = fs.readFileSync(db);

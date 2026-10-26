@@ -87,6 +87,13 @@ grep -qx 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-wat
   exit 1
 }
 
+for module in migration-manifest.js migrations-loader.js; do
+  grep -qx "./lib/osi-migrate/$module" "$listing" || grep -qx "lib/osi-migrate/$module" "$listing" || {
+    echo "bundle missing early manifest module $module" >&2
+    exit 1
+  }
+done
+
 echo "verify bundle is drift-proof against deploy-fetch-list.js..."
 fetch_list="$work/fetch-list.txt"
 node "$script_dir/deploy-fetch-list.js" "$repo_root" | sort > "$fetch_list"

@@ -1081,6 +1081,8 @@ const RUNNER_FETCH_TARGETS = [
   [`database/migrations/ordered/${LAST_MIGRATION}`, LAST_MIGRATION],
   ['database/migrations/ordered/CHECKSUMS.json', 'CHECKSUMS.json'],
   ['lib/osi-migrate/runner.js', 'runner.js'],
+  ['lib/osi-migrate/migration-manifest.js', 'migration-manifest.js'],
+  ['lib/osi-migrate/migrations-loader.js', 'migrations-loader.js'],
 ];
 
 for (const [target, name] of RUNNER_FETCH_TARGETS) {
