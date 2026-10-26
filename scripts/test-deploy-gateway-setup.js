@@ -837,6 +837,33 @@ test('running the service by hand provisions and writes the stamp', () => {
   assert.ok(initCalls(fx).some((c) => c.startsWith('restart-request request-restart chirpstack_bootstrap')), initCalls(fx).join('\n'));
 });
 
+test('service still selects an old ROM bootstrap after deploy updates the fallback copy', () => {
+  const fx = bootstrapFixture({ enabled: true, env: PROVISIONED_ENV });
+  const rom = path.join(fx.dir, 'rom', 'chirpstack-bootstrap.js');
+  const fallback = path.join(fx.dir, 'srv', 'chirpstack-bootstrap.js');
+  fs.mkdirSync(path.dirname(rom), { recursive: true }); fs.mkdirSync(path.dirname(fallback), { recursive: true });
+  fs.writeFileSync(rom, 'old permissive ROM writer'); fs.writeFileSync(fallback, 'updated guarded /srv writer');
+  writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', `printf '%s\n' "$1" >> ${JSON.stringify(fx.log)}`]);
+  writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
+  writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', `echo "restart-request $*" >> ${JSON.stringify(fx.log)}`]);
+  const body = BOOTSTRAP_INIT.slice(BOOTSTRAP_INIT.indexOf('stamp_valid() {'))
+    .split('/etc/osi-bootstrap.done').join(fx.stampFile)
+    .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
+    .split('/usr/share/node-red/chirpstack-bootstrap.js').join(rom)
+    .split('/srv/node-red/chirpstack-bootstrap.js').join(fallback)
+    .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
+    .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
+  const run = runShell('BOOTSTRAP_ROM=' + JSON.stringify(rom) + '\nBOOTSTRAP_FALLBACK=' + JSON.stringify(fallback) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
+  assert.equal(run.status, 0, run.stderr);
+  const calls = fs.readFileSync(fx.log, 'utf8').trim().split('\n');
+  assert.equal(calls[0], rom, 'the old ROM writer remains selected after the fallback is updated');
+  assert.ok(calls.includes('restart-request request-restart chirpstack_bootstrap 60'));
+  assert.equal(calls.filter(call => call === rom).length, 1);
+  assert.ok(fs.existsSync(fx.stampFile));
+});
+
 test('an updated bootstrap failure leaves the stamp absent and does not request a restart', () => {
   const fx = bootstrapFixture({ enabled: true });
   const script = path.join(fx.dir, 'chirpstack-bootstrap.js');
