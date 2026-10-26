@@ -455,7 +455,7 @@ if (process.geteuid() !== 0) {
       }
     } finally { process.umask(old); clean(fx); }
   });
-  test('T2 narrowing', async () => {
+  test('T2 narrowing', async (t) => {
     for (const initial of [0o644, 0o666, 0o600, 0o400, 0o4644]) {
       const fx = fixture(); const bytes = Buffer.from('CHIRPSTACK_API_KEY=' + API_KEY + '\n');
       fs.writeFileSync(fx.envFile, bytes, { mode: initial }); fs.chmodSync(fx.envFile, initial);
