@@ -308,15 +308,15 @@ function makeClient(options = {}) {
   let enqueueIndex = 0;
   const client = {
     calls,
-    async listDeviceQueue(deveui) {
+    async getDeviceQueue(deveui) {
       calls.list.push(deveui);
-      if (options.listDeviceQueue) return options.listDeviceQueue(deveui, calls.list.length - 1);
+      if (options.getDeviceQueue) return options.getDeviceQueue(deveui, calls.list.length - 1);
       return options.queue || [];
     },
-    async enqueueDeviceDownlink(input) {
+    async enqueueDownlink(input) {
       calls.enqueue.push(input);
       const index = enqueueIndex++;
-      if (options.enqueueDeviceDownlink) return options.enqueueDeviceDownlink(input, index);
+      if (options.enqueueDownlink) return options.enqueueDownlink(input, index);
       return { id: 'queue-' + (index + 1) };
     },
     async flushDeviceQueue(deveui) {
@@ -543,7 +543,7 @@ test('two concurrent apply requests cannot both pass the compare-and-set queuein
   const listStarted = new Promise((resolve) => { announceList = resolve; });
   const heldList = new Promise((resolve) => { releaseList = resolve; });
   const client = makeClient({
-    async listDeviceQueue() {
+    async getDeviceQueue() {
       announceList();
       await heldList;
       return [];
@@ -568,8 +568,8 @@ test('applyDesiredRecipe restores not_applied when enqueue accepts zero frames a
   const db = createDb();
   seedReadyDeployment(db);
   const client = makeClient({
-    async enqueueDeviceDownlink() {
-      throw Object.assign(new Error('secret grpc detail'), { code: 'UNAVAILABLE', step: 'enqueueDeviceDownlink' });
+    async enqueueDownlink() {
+      throw Object.assign(new Error('secret grpc detail'), { code: 'UNAVAILABLE', step: 'enqueueDownlink' });
     },
   });
 
@@ -596,7 +596,7 @@ test('partial enqueue retains accepted IDs, degrades, and permits a same-version
   const db = createDb();
   const ready = seedReadyDeployment(db);
   const partialClient = makeClient({
-    async enqueueDeviceDownlink(input, index) {
+    async enqueueDownlink(input, index) {
       if (index === 1) throw Object.assign(new Error('network'), { code: 'DEADLINE_EXCEEDED' });
       return { id: 'accepted-' + index };
     },
@@ -657,7 +657,7 @@ test('a degraded retry preserves all prior queue evidence when queue listing fai
   });
   const before = readDeployment(db);
   const client = makeClient({
-    async listDeviceQueue() {
+    async getDeviceQueue() {
       throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
     },
   });
@@ -759,7 +759,7 @@ test('rollbackCompatibleRecipe also compensates the complete pair when the first
   const deviceBefore = readDevice(db);
   const deploymentBefore = readDeployment(db);
   const client = makeClient({
-    async enqueueDeviceDownlink() {
+    async enqueueDownlink() {
       throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
     },
   });
@@ -794,7 +794,7 @@ test('zero-frame rollback failure leaves the production device trigger and outbo
   seedProductionRollbackReady(db);
   const deviceBefore = readDevice(db);
   const client = makeClient({
-    async enqueueDeviceDownlink() {
+    async enqueueDownlink() {
       throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
     },
   });
@@ -830,7 +830,7 @@ test('partial rollback keeps its target durable but delays the canonical device 
   const db = createDb();
   const state = seedRollbackReady(db);
   const client = makeClient({
-    async enqueueDeviceDownlink(input, index) {
+    async enqueueDownlink(input, index) {
       if (index === 1) throw Object.assign(new Error('transport'), { code: 'UNAVAILABLE' });
       return { id: 'rollback-accepted-' + index };
     },
@@ -871,7 +871,7 @@ test('pollDeployments waits for every stored ID, then records drain despite unre
     commissioning_deadline_at: '2026-08-29T20:00:00.000Z',
   });
   const client = makeClient({
-    listDeviceQueue(deveui, index) {
+    getDeviceQueue(deveui, index) {
       if (index === 0) return [{ id: 'recipe-2' }, { id: 'later-unrelated' }];
       return [{ id: 'later-unrelated' }];
     },
@@ -953,7 +953,7 @@ test('pollDeployments surfaces a bounded queue-list failure without mutating dep
   });
   const before = readDeployment(db);
   const client = makeClient({
-    async listDeviceQueue() {
+    async getDeviceQueue() {
       throw Object.assign(new Error('credential secret'), { code: 'UNAVAILABLE' });
     },
   });
@@ -1157,4 +1157,23 @@ test('projectDeployment exposes only bounded operational state and never recipe 
   assert.equal(JSON.stringify(projected).includes('RECIPE-SECRET-12'), false);
   assert.equal(JSON.stringify(projected).includes('QUEUE-SECRET-12'), false);
   assert.equal(Object.keys(projected).some((key) => key.includes('recipe_json') || key.includes('queue_item_ids')), false);
+});
+
+test('commissioning fixture uses the shipped helper contract', () => {
+  const real = require('../osi-chirpstack-helper').createClient({
+    apiUrl: 'http://127.0.0.1:1', apiKey: 'synthetic-key',
+  });
+  try {
+    const fixture = makeClient();
+    for (const name of ['getDeviceQueue', 'enqueueDownlink', 'flushDeviceQueue']) {
+      assert.equal(typeof real[name], 'function', `real helper: ${name}`);
+      assert.equal(typeof fixture[name], 'function', `fixture: ${name}`);
+    }
+    for (const name of ['listDeviceQueue', 'enqueueDeviceDownlink']) {
+      assert.equal(typeof real[name], 'undefined');
+      assert.equal(typeof fixture[name], 'undefined');
+    }
+  } finally {
+    assert.deepEqual(real.close(), []);
+  }
 });

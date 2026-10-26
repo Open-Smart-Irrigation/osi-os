@@ -34,7 +34,8 @@ const SCRIPT = process.env.OSI_BOOTSTRAP_UNDER_TEST
 const CODEC_DIR = path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/codecs');
 // The DevEUI normalisation is the real helper's, so the tests pin production
 // validation; only the ChirpStack client is faked.
-const { normalizeDevEui } = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'));
+const realHelper = require(path.join(ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper'));
+const { normalizeDevEui } = realHelper;
 const TEKTELIC_CODEC = path.join(CODEC_DIR, 'tektelic_agriculture_decoder.js');
 const ENV_FILE = '/srv/node-red/.chirpstack.env';
 const API_KEY = 'synthetic-api-key-0001';
@@ -67,7 +68,14 @@ function makeWorld(seed = {}) {
     writes: [],
     uciCommands: [],
     cliApiKeyCalls: 0,
+    cliExecOptions: [],
+    realClientValidation: Boolean(seed.realClientValidation),
+    clientApiKeys: [],
+    cliApiKeyOutput: seed.cliApiKeyOutput === undefined ? 'id: x\ntoken: minted-by-cli\n' : seed.cliApiKeyOutput,
+    cliApiKeyError: seed.cliApiKeyError || null,
     logs: [],
+    stdoutLogs: [],
+    stderrLogs: [],
     fsEvents: [],
     exitCode: null,
     tempDir: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-clover-test-')),
@@ -159,7 +167,15 @@ function makeChirpStack(world) {
     },
   };
   return {
-    createClient: () => client,
+    createClient: (options) => {
+      world.clientApiKeys.push(options.apiKey);
+      if (world.realClientValidation) {
+        // Build (and close) a real helper client first, so its API key
+        // validation runs exactly as on a gateway. ChirpStack itself stays fake.
+        realHelper.createClient(options).close();
+      }
+      return client;
+    },
     listItemToObject: (item) => item,
     normalizeDevEui,
   };
@@ -241,10 +257,12 @@ function makeChildProcess(world) {
     throw new Error(`unexpected uci call: ${args.join(' ')}`);
   };
   return {
-    execSync(command) {
+    execSync(command, options) {
       if (/create-api-key/.test(command)) {
         world.cliApiKeyCalls += 1;
-        return Buffer.from('id: x\ntoken: minted-by-cli\n');
+        world.cliExecOptions.push({ command, options });
+        if (world.cliApiKeyError) throw world.cliApiKeyError;
+        return Buffer.from(world.cliApiKeyOutput);
       }
       throw new Error(`unexpected execSync: ${command}`);
     },
@@ -286,9 +304,21 @@ async function runBootstrap(world, { args = [], env = {} } = {}) {
     exit: (code) => { if (world.exitCode === null) world.exitCode = code; },
   };
   const fakeConsole = {
-    log: (...parts) => world.logs.push(parts.join(' ')),
-    error: (...parts) => world.logs.push(parts.join(' ')),
-    warn: (...parts) => world.logs.push(parts.join(' ')),
+    log: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stdoutLogs.push(line);
+    },
+    error: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
+    warn: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
   };
   // eslint-disable-next-line no-new-func
   const run = new Function('require', 'module', 'exports', '__dirname', '__filename', 'process', 'console', source);
@@ -369,6 +399,123 @@ function provisionedGatewaySeed({ kiwiCodec = '' } = {}) {
 }
 
 // ------------------------------------------------------------------ cases --
+
+test('CLI key creation success provisions with the parsed synthetic token', async () => {
+  const world = await runBootstrap(makeWorld(), { env: { CHIRPSTACK_API_KEY: '' } });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.cliApiKeyCalls, 1);
+  assert.deepEqual(world.clientApiKeys, ['minted-by-cli']);
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_API_KEY, 'minted-by-cli');
+});
+
+test('CLI key creation failures do not log output or process errors', async () => {
+  const malformedMarker = 'SYNTHETIC_MALFORMED_OUTPUT_SECRET_522';
+  const malformed = await runBootstrap(makeWorld({
+    cliApiKeyOutput: `warning: ${malformedMarker}\n`,
+  }), { env: { CHIRPSTACK_API_KEY: '' } });
+  const malformedLogs = [...malformed.stdoutLogs, ...malformed.stderrLogs].join('\n');
+  assert.equal(malformed.exitCode, 1);
+  assert.match(malformedLogs, /CLI create-api-key failed \(invalid output\)/);
+  for (const [streamName, logs] of [['stdout', malformed.stdoutLogs], ['stderr', malformed.stderrLogs]]) {
+    assert.ok(!logs.join('\n').includes(malformedMarker), `malformed command output is not logged to ${streamName}`);
+  }
+
+  const messageMarker = 'SYNTHETIC_ERROR_MESSAGE_SECRET_522';
+  const stdoutMarker = 'SYNTHETIC_API_KEY_FIXTURE_522';
+  const stderrMarker = 'SYNTHETIC_ERROR_STDERR_SECRET_522';
+  const commandError = Object.assign(new Error(`command failed: ${messageMarker}`), {
+    status: 23,
+    stdout: Buffer.from(`token: ${stdoutMarker}\n`),
+    stderr: Buffer.from(`command output: ${stderrMarker}`),
+  });
+  const failed = await runBootstrap(makeWorld({ cliApiKeyError: commandError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const failedLogs = [...failed.stdoutLogs, ...failed.stderrLogs].join('\n');
+  assert.equal(failed.exitCode, 1);
+  assert.match(failedLogs, /CLI create-api-key failed \(command error, exit status 23\)/);
+  for (const [streamName, logs] of [['stdout', failed.stdoutLogs], ['stderr', failed.stderrLogs]]) {
+    const output = logs.join('\n');
+    for (const marker of [messageMarker, stdoutMarker, stderrMarker]) {
+      assert.ok(!output.includes(marker), `${marker} is not logged to ${streamName}`);
+    }
+  }
+
+  const invalidStatusError = Object.assign(new Error('synthetic process error'), { status: 256 });
+  const invalidStatus = await runBootstrap(makeWorld({ cliApiKeyError: invalidStatusError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const invalidStatusLogs = [...invalidStatus.stdoutLogs, ...invalidStatus.stderrLogs].join('\n');
+  assert.equal(invalidStatus.exitCode, 1);
+  assert.match(invalidStatusLogs, /CLI create-api-key failed \(command error\)/);
+  assert.doesNotMatch(invalidStatusLogs, /exit status/);
+});
+
+test('CLI key creation captures the child stderr instead of inheriting it', async () => {
+  const world = await runBootstrap(makeWorld(), { env: { CHIRPSTACK_API_KEY: '' } });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.cliExecOptions.length, 1);
+  const { command, options } = world.cliExecOptions[0];
+  assert.deepEqual(options, { stdio: ['ignore', 'pipe', 'pipe'] });
+  assert.doesNotMatch(command, /2>&1/, 'stderr is piped by execSync, not merged by the shell');
+});
+
+// A token gRPC metadata cannot carry: grpc-js would throw an error that quotes
+// the whole `Bearer <token>` header value. Synthetic values only.
+const UNSENDABLE_TOKENS = [
+  ['an ANSI colour code', 'SYNTHETIC_ESC_TOKEN_522', (marker) => `\x1b[32m${marker}\x1b[0m`],
+  ['a tab', 'SYNTHETIC_TAB_TOKEN_522', (marker) => `${marker}\tsuffix`],
+  ['a non-ASCII character', 'SYNTHETIC_NONASCII_TOKEN_522', (marker) => `${marker}é`],
+];
+
+function assertMarkerNotLogged(world, marker) {
+  for (const [streamName, logs] of [['stdout', world.stdoutLogs], ['stderr', world.stderrLogs], ['console', world.logs]]) {
+    assert.ok(!logs.join('\n').includes(marker), `${marker} is not logged to ${streamName}`);
+  }
+}
+
+for (const [label, marker, build] of UNSENDABLE_TOKENS) {
+  test(`CLI key creation rejects a token with ${label} before it reaches the ChirpStack client`, async () => {
+    const world = await runBootstrap(makeWorld({
+      cliApiKeyOutput: `id: x\ntoken: ${build(marker)}\n`,
+      realClientValidation: true,
+    }), { env: { CHIRPSTACK_API_KEY: '' } });
+    assert.equal(world.exitCode, 1);
+    assert.match(world.stderrLogs.join('\n'), /CLI create-api-key failed \(invalid output\)/);
+    assert.deepEqual(world.clientApiKeys, [], 'the token never reaches createClient');
+    assert.equal(world.files.has(ENV_FILE), false, 'the token is never written to the env file');
+    assertMarkerNotLogged(world, marker);
+  });
+
+  test(`a pre-created CHIRPSTACK_API_KEY with ${label} fails without logging the key`, async () => {
+    const world = await runBootstrap(makeWorld({ realClientValidation: true }), {
+      env: { CHIRPSTACK_API_KEY: build(marker) },
+    });
+    assert.equal(world.exitCode, 1);
+    assert.equal(world.cliApiKeyCalls, 0);
+    assert.match(world.stderrLogs.join('\n'), /CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata/);
+    assertMarkerNotLogged(world, marker);
+  });
+
+  test(`--repair-soil-profiles with a CHIRPSTACK_API_KEY containing ${label} fails without logging the key`, async () => {
+    const gw = provisionedGatewaySeed();
+    const world = makeWorld({ ...gw.seed, realClientValidation: true });
+    await runBootstrap(world, {
+      args: ['--repair-soil-profiles'],
+      env: { CHIRPSTACK_API_KEY: build(marker) },
+    });
+    assert.equal(world.exitCode, 1);
+    assert.match(world.stderrLogs.join('\n'), /CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata/);
+    assert.deepEqual(world.writes, []);
+    assertMarkerNotLogged(world, marker);
+  });
+}
+
+test('a well-formed pre-created API key passes the real client validation', async () => {
+  const world = await runBootstrap(makeWorld({ realClientValidation: true }));
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.deepEqual(world.clientApiKeys, [API_KEY]);
+});
 
 test('the Tektelic agriculture codec ships in the codecs directory', () => {
   assert.ok(fs.existsSync(TEKTELIC_CODEC), `missing ${path.relative(ROOT, TEKTELIC_CODEC)}`);

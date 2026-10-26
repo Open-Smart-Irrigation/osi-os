@@ -9,8 +9,21 @@ import {
   requestForViewport,
 } from "../src/history/range";
 import { DAY_MS, HOUR_MS, type Viewport } from "../src/shared/types";
+import { analysisHourlyRangeStrategy, cardHistoryRangeStrategy } from "../src/history/rangeStrategy";
 
 describe("pilot range policy", () => {
+  test("analysis strategy uses exact hourly logical bounds and labels", () => {
+    expect(analysisHourlyRangeStrategy.requestForViewport({ from: 123, to: 123 + DAY_MS })).toEqual({ from: 123, to: 123 + DAY_MS, rangeLabel: "24h", aggregation: "hourly" });
+    expect(analysisHourlyRangeStrategy.requestForViewport({ from: 123, to: 123 + DAY_MS + 1 })).toMatchObject({ rangeLabel: "7d", aggregation: "hourly" });
+    expect(analysisHourlyRangeStrategy.bufferedRequest({ from: 123, to: 123 + DAY_MS }, { from: 0, to: 7 * DAY_MS })).toEqual({ from: 123, to: 123 + DAY_MS, rangeLabel: "24h", aggregation: "hourly" });
+    expect(analysisHourlyRangeStrategy.neighborRequest({ from: DAY_MS, to: 2 * DAY_MS }, "forward", { from: 0, to: 7 * DAY_MS })).not.toBeNull();
+    expect(() => analysisHourlyRangeStrategy.requestForViewport({ from: 0, to: 7 * DAY_MS + 1 })).toThrow();
+  });
+
+  test("card strategy preserves the existing range exports", () => {
+    expect(cardHistoryRangeStrategy.requestForViewport({ from: 0, to: DAY_MS })).toEqual(requestForViewport({ from: 0, to: DAY_MS }));
+    expect(cardHistoryRangeStrategy.bufferedRequest({ from: 10 * DAY_MS, to: 10.5 * DAY_MS }, { from: 0, to: 90 * DAY_MS })).toEqual(bufferedRequest({ from: 10 * DAY_MS, to: 10.5 * DAY_MS }, { from: 0, to: 90 * DAY_MS }));
+  });
   test("separates epoch navigation from the ninety-day viewport cap", () => {
     expect(HISTORY_NAVIGATION_START_MS).toBe(0);
     expect(HISTORY_MAX_VIEWPORT_SPAN_MS).toBe(90 * DAY_MS);

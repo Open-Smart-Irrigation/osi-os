@@ -280,7 +280,7 @@ async function applyDesiredRecipe(db, client, deveuiInput, options) {
   const claim = await claimDesiredRecipe(db, deveui, now, deadline);
   let queue;
   try {
-    queue = await client.listDeviceQueue(deveui);
+    queue = await client.getDeviceQueue(deveui);
   } catch (error) {
     const bounded = chirpStackFailure(error);
     await settleApplyPreflightFailure(db, deveui, claim, now, bounded.code);
@@ -295,7 +295,7 @@ async function applyDesiredRecipe(db, client, deveuiInput, options) {
   const ids = [];
   try {
     for (const frame of claim.recipe.frames) {
-      const accepted = await client.enqueueDeviceDownlink({
+      const accepted = await client.enqueueDownlink({
         devEui: deveui,
         fPort: 2,
         confirmed: true,
@@ -403,7 +403,7 @@ async function rollbackCompatibleRecipe(db, client, deveuiInput, options) {
   const claim = await claimRollback(db, deveui, now, deadline);
   let queue;
   try {
-    queue = await client.listDeviceQueue(deveui);
+    queue = await client.getDeviceQueue(deveui);
   } catch (error) {
     const bounded = chirpStackFailure(error);
     await restoreDeploymentSnapshot(db, deveui, claim);
@@ -418,7 +418,7 @@ async function rollbackCompatibleRecipe(db, client, deveuiInput, options) {
   const ids = [];
   try {
     for (const frame of claim.recipe.frames) {
-      const accepted = await client.enqueueDeviceDownlink({
+      const accepted = await client.enqueueDownlink({
         devEui: deveui,
         fPort: 2,
         confirmed: true,
@@ -496,7 +496,7 @@ async function pollDeployments(db, client, options) {
 
     let queue;
     try {
-      queue = await client.listDeviceQueue(row.deveui);
+      queue = await client.getDeviceQueue(row.deveui);
     } catch (error) {
       if (!pollFailure) pollFailure = chirpStackFailure(error);
       continue;

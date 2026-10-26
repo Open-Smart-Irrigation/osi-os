@@ -282,6 +282,14 @@ byte-identical to `en` and that every `mobileUplot.*` key is listed. A human
 Luganda pass must drop the key from that set and from the table above in the
 same change.
 
+## `history.json` — mobile water-tension history
+
+| Keys | Reason |
+|---|---|
+| `history.mobileTension.*` (52 labels, including the `route.*` states and `seriesLegend.*`) | Added for the internal mobile water-tension history shell. The five European locales carry reviewed translations, while `lg` keeps the English source text until a human Luganda pass. |
+
+Tracked in `web/react-gui/src/history/__tests__/historyLocaleValues.test.ts` (`PENDING_HUMAN_LUGANDA`), which asserts that every `history.mobileTension.*` leaf remains byte-identical to English. A human Luganda pass must remove each leaf from that set and this row together.
+
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.

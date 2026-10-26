@@ -213,6 +213,8 @@ jobs:
       # with rows in them. ~5 min.
       - run: node --test scripts/rehearse-devices-type-migration.test.js
       - run: node --test scripts/rehearse-scoped-access-migration.test.js
+      - name: Zero-user bootstrap, guarded recovery and CLI contract
+        run: node --test scripts/test-auth-bootstrap-policy.js scripts/test-account-recovery.js scripts/test-account-recovery-cli.js
       - run: node --test scripts/rehearse-scoped-trigger-boot-survival.test.js
       - run: node --test scripts/rehearse-irrigation-calibration-sync.test.js
       - run: node --test scripts/rehearse-weather-station-zone-sync.test.js
