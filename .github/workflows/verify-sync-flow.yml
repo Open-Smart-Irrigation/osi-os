@@ -202,6 +202,45 @@ jobs:
         run: |
           node --test scripts/test-chirpstack-bootstrap-clover.js
           node scripts/test-clover-ingest-flow.js
+      # G1: the candidate T0-T10 root suite. The TAP is kept as an artifact;
+      # with pipefail a failing test still fails this step.
+      - name: ChirpStack credential env-file safety
+        id: issue183_g1
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 scripts/test-chirpstack-env-file.js 2>&1 | tee "$RUNNER_TEMP/issue-183-g1-root.tap"
+      - name: Issue 183 base defect qualification (root)
+        id: issue183_b3
+        shell: bash
+        run: |
+          set -o pipefail
+          base_source="$RUNNER_TEMP/issue-183-base-chirpstack-bootstrap.js"
+          git show 63c7a70f8f3b373f162b33b0669b0df89b3763fa:scripts/chirpstack-bootstrap.js > "$base_source"
+          sha256sum "$base_source"
+          set +e
+          OSI_BOOTSTRAP_UNDER_TEST="$base_source" OSI_BOOTSTRAP_B3=1 node --test --test-concurrency=1 scripts/test-chirpstack-env-file.js 2>&1 | tee "$RUNNER_TEMP/issue-183-b3-root.tap"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "Issue 183 B3 outer re-entry exit: $status; expected root child red exit: 1"
+          test "$status" -eq 0
+          grep -Fq 'root child direct exit 1; expected 1' "$RUNNER_TEMP/issue-183-b3-root.tap"
+          grep -Fq '# not ok 1 - B3 expected failure: base writer creates permissive credentials' "$RUNNER_TEMP/issue-183-b3-root.tap"
+          grep -Fq '# not ok 2 - B3 expected failure: base writer retains permissive replacement' "$RUNNER_TEMP/issue-183-b3-root.tap"
+          grep -Fq 'B3 A1 old-source snapshot' "$RUNNER_TEMP/issue-183-b3-root.tap"
+          grep -Fq 'B3 A2 old-source snapshot' "$RUNNER_TEMP/issue-183-b3-root.tap"
+          printf 'outer_reentry_exit=%s\nroot_child_direct_exit=1\nroot_child_expected_named_failures=2\n' "$status" > "$RUNNER_TEMP/issue-183-b3-root.status"
+      # Runs when G1 or B3 ran, so a failing G1 (which skips B3) keeps its TAP.
+      - name: Retain Issue 183 G1 and B3 root qualification evidence
+        if: always() && (steps.issue183_g1.outcome != 'skipped' || steps.issue183_b3.outcome != 'skipped')
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-183-b3-root-qualification
+          path: |
+            ${{ runner.temp }}/issue-183-g1-root.tap
+            ${{ runner.temp }}/issue-183-b3-root.tap
+            ${{ runner.temp }}/issue-183-b3-root.status
+          if-no-files-found: warn
       # Migration 0068 rehearsal (bound applied-command columns, calibration-only
       # outbox triggers, live and tombstone events, readings stay local) and the
       # journal v2 replication flows migration this branch touches.
