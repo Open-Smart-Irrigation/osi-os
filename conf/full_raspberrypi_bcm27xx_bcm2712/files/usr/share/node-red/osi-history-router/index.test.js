@@ -462,6 +462,19 @@ test('shouldUseHistoryRollups with scopeContext', function() {
   assert.strictEqual(HR.shouldUseHistoryRollups({ scope: 'gateway' }, '30d', 'auto'), false);
 });
 
+test('bucketGeometry reports the timezone the daily buckets actually use', function() {
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'Europe/Zurich'), { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' });
+  // The gateway card passes env TZ, which on OpenWrt can be a POSIX TZ string.
+  // Intl rejects it, the helper builds UTC buckets, and the label must say so.
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'CET-1CEST,M3.5.0,M10.5.0/3'), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'Not/AZone'), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', '  Europe/Zurich  '), { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', ''), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', null), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('hourly', 'CET-1CEST,M3.5.0,M10.5.0/3'), { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' });
+  assert.deepStrictEqual(HR.bucketGeometry('weekly', 'Europe/Zurich'), { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' });
+});
+
 test('shouldUseCardRollups bypasses soil rollups only for a plain LSN50 source', function() {
   var ctx = { scope: 'zone' };
   var soil = { cardType: 'soil' };

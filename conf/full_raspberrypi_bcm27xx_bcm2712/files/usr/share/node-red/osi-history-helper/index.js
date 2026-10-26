@@ -4308,6 +4308,7 @@ module.exports = {
   annotateWatermarkEvidence,
   isLsn50Swt3Eligible,
   aggregateDeviceData,
+  normalizeTimezone,
   buildAdvancedMetadataPlaceholder,
   buildAdvancedDiagnostics,
   buildCalendar,
