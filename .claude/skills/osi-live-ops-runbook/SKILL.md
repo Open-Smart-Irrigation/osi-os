@@ -335,6 +335,14 @@ dev workstation unless noted.
      API key, env file rewritten without operator lines, the Clover alias back).
    - Only with `--repair-soil-profiles` (or `--repoint-clover-device`). With
      either flag the script never runs the full pass: it fails instead.
+   - `deploy.sh` pins every bootstrap invocation to
+     `/srv/node-red/.chirpstack.env`, secures that file before provisioning,
+     and stops on credential filesystem status `74`. The CLI's `ENV_FILE`
+     override is for direct use only. Updated and replaced files are
+     root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
+     existing backup is retained. Text repair requires lossless UTF-8. Images
+     that have not received the updated script through deploy may still have
+     the older writer in `/usr/share/node-red/` until then.
    - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
      none (a codec already there is left alone), a new `OSI CLOVER Sensor`
      profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
