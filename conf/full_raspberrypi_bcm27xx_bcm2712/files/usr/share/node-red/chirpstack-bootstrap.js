@@ -94,7 +94,7 @@ function loadChirpStackHelper() {
   throw new Error(`Unable to load osi-chirpstack-helper.\n${failures.join('\n')}`);
 }
 
-const chirpstack = loadChirpStackHelper();
+let chirpstack;
 
 const CFG = {
   url: process.env.CHIRPSTACK_API_URL || process.env.CS_URL || 'http://localhost:8080',
@@ -323,13 +323,481 @@ function detectGatewayEui() {
   return identity ? identity.deviceEui : null;
 }
 
-function writeEnvFile(vars) {
-  const lines = Object.entries(vars)
-    .map(([key, value]) => `${key}=${value}`)
-    .join('\n');
-  fs.writeFileSync(CFG.envFile, lines + '\n', 'utf8');
-  console.log(`\n  ✓ Env file written: ${CFG.envFile}`);
+const CREDENTIAL_ENV_EXIT = 74;
+const CREDENTIAL_ENV_CODES = new Set([
+  'EACCES', 'EPERM', 'ENOENT', 'ELOOP', 'EEXIST', 'ENOTDIR', 'EISDIR', 'EMFILE',
+  'ENFILE', 'ENOMEM', 'ENOSPC', 'EDQUOT', 'EROFS', 'EIO', 'EBADF', 'EINVAL',
+  'ENOTEMPTY', 'EXDEV', 'EINTR', 'ENOSYS'
+]);
+const CREDENTIAL_ENV_PHASES = new Set([
+  'validate', 'metadata', 'read', 'decode', 'encode', 'stage', 'publish',
+  'flush', 'verify', 'cleanup'
+]);
+
+class CredentialEnvError extends Error {
+  constructor(fields = {}) {
+    super('Credential env-file operation failed');
+    this.name = 'CredentialEnvError';
+    this.exitStatus = CREDENTIAL_ENV_EXIT;
+    this.operation = fields.operation || 'credentialEnv';
+    this.phase = CREDENTIAL_ENV_PHASES.has(fields.phase) ? fields.phase : 'validate';
+    this.reason = fields.reason || 'OS_ERROR';
+    this.osCode = fields.osCode || null;
+    this.published = Boolean(fields.published);
+    this.publication = fields.publication === 'rename' || fields.publication === 'link' ? fields.publication : null;
+    this.cleanupErrors = Array.isArray(fields.cleanupErrors) ? fields.cleanupErrors.slice() : [];
+  }
 }
+
+class UsageError extends Error {
+  constructor() {
+    super('Invalid ChirpStack bootstrap arguments');
+    this.name = 'UsageError';
+    this.exitStatus = 2;
+  }
+}
+
+function credentialOsCode(error) {
+  return error && CREDENTIAL_ENV_CODES.has(error.code) ? error.code : 'IO_FAILED';
+}
+
+function credentialError(operation, phase, error, reason, state) {
+  if (error instanceof CredentialEnvError) {
+    if (state && state.published) error.published = true;
+    if (state && state.publication) error.publication = state.publication;
+    return error;
+  }
+  return new CredentialEnvError({
+    operation,
+    phase,
+    reason: reason || 'OS_ERROR',
+    osCode: error ? credentialOsCode(error) : null,
+    published: Boolean(state && state.published),
+    publication: state && state.publication
+  });
+}
+
+function credentialRecord(error, operation, phase, state) {
+  const safe = credentialError(operation, phase, error, 'OS_ERROR', state);
+  return {
+    operation: safe.operation,
+    phase: safe.phase,
+    reason: safe.reason,
+    osCode: safe.osCode,
+    published: safe.published,
+    publication: safe.publication
+  };
+}
+
+function addPublicationState(error, state) {
+  if (error instanceof CredentialEnvError && state) {
+    error.published = error.published || state.published;
+    if (state.publication) error.publication = state.publication;
+  }
+  return error;
+}
+
+function finishCredentialScope(result, primary, cleanupErrors, state, operation) {
+  if (primary) addPublicationState(primary, state);
+  if (cleanupErrors.length) {
+    if (!(primary instanceof CredentialEnvError)) {
+      primary = new CredentialEnvError({
+        operation,
+        phase: 'cleanup',
+        reason: 'OS_ERROR',
+        published: Boolean(state && state.published),
+        publication: state && state.publication,
+        cleanupErrors: primary ? [{ reason: 'NON_CREDENTIAL_FAILURE' }] : []
+      });
+    }
+    primary.cleanupErrors.push(...cleanupErrors);
+    addPublicationState(primary, state);
+    throw primary;
+  }
+  if (primary) throw primary;
+  return result;
+}
+
+function credentialCall(directory, operation, phase, callback, reason) {
+  try {
+    return callback();
+  } catch (error) {
+    throw credentialError(operation, phase, error, reason, directory && directory.state);
+  }
+}
+
+function collectCredentialCleanup(errors, directory, operation, callback) {
+  try {
+    callback();
+  } catch (error) {
+    errors.push(credentialRecord(error, operation, 'cleanup', directory && directory.state));
+  }
+}
+
+function sameIdentity(a, b) {
+  return Boolean(a && b && a.dev === b.dev && a.ino === b.ino);
+}
+
+function regularSingleLink(stat) {
+  return Boolean(stat && stat.isFile() && stat.nlink === 1);
+}
+
+function checkedEnvStat(stat) {
+  return Boolean(regularSingleLink(stat) && stat.uid === 0 && stat.gid === 0 && (stat.mode & 0o7777) === 0o600);
+}
+
+function withEnvDirectory(callback, operation = 'withEnvDirectory') {
+  const state = { published: false, publication: null };
+  const openFds = [];
+  const cleanupErrors = [];
+  let result;
+  let primary = null;
+  let phase = 'validate';
+  try {
+    if (typeof process.geteuid !== 'function' || process.geteuid() !== 0) {
+      throw new CredentialEnvError({ operation, phase: 'validate', reason: 'ROOT_REQUIRED', published: state.published, publication: state.publication });
+    }
+    if (typeof fs.constants.O_NOFOLLOW !== 'number' || typeof fs.constants.O_DIRECTORY !== 'number') {
+      throw new CredentialEnvError({ operation, phase: 'validate', reason: 'PRIMITIVE_UNAVAILABLE' });
+    }
+    const absolute = path.resolve(CFG.envFile);
+    const procStat = credentialCall(null, operation, 'validate', () => fs.statSync('/proc/self/fd'));
+    if (!procStat.isDirectory()) throw new CredentialEnvError({ operation, phase: 'validate', reason: 'PRIMITIVE_UNAVAILABLE' });
+    const parentPath = path.dirname(absolute);
+    const components = parentPath === '/' ? [] : parentPath.slice(1).split(path.sep);
+    let currentFd = credentialCall(null, operation, phase, () => fs.openSync('/', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY));
+    openFds.push(currentFd);
+    const rootStat = credentialCall(null, operation, 'metadata', () => fs.fstatSync(currentFd));
+    if (!rootStat.isDirectory()) throw new CredentialEnvError({ operation, phase: 'metadata', reason: 'UNSAFE_ENTRY' });
+    for (const component of components) {
+      phase = 'validate';
+      const nextFd = credentialCall(null, operation, phase, () =>
+        fs.openSync('/proc/self/fd/' + currentFd + '/' + component,
+          fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW));
+      openFds.push(nextFd);
+      phase = 'metadata';
+      const nextStat = credentialCall(null, operation, phase, () => fs.fstatSync(nextFd));
+      if (!nextStat.isDirectory()) throw new CredentialEnvError({ operation, phase, reason: 'UNSAFE_ENTRY' });
+      const previousFd = currentFd;
+      currentFd = nextFd;
+      phase = 'cleanup';
+      credentialCall(null, operation, phase, () => fs.closeSync(previousFd));
+      const previousIndex = openFds.indexOf(previousFd);
+      if (previousIndex >= 0) openFds.splice(previousIndex, 1);
+    }
+    const directory = {
+      dirFd: currentFd,
+      dirPath: '/proc/self/fd/' + currentFd,
+      name: path.basename(absolute),
+      state
+    };
+    phase = 'validate';
+    result = callback(directory);
+  } catch (error) {
+    primary = error;
+  }
+  for (const fd of openFds.slice().reverse()) {
+    collectCredentialCleanup(cleanupErrors, { state }, operation, () => fs.closeSync(fd));
+    const index = openFds.indexOf(fd);
+    if (index >= 0) openFds.splice(index, 1);
+  }
+  return finishCredentialScope(result, primary, cleanupErrors, state, operation);
+}
+
+function secureExistingEnvFile(directory, name, required = false, operation = 'secureExistingEnvFile') {
+  let fd = null;
+  let primary = null;
+  let snapshot = null;
+  const cleanupErrors = [];
+  let phase = 'validate';
+  try {
+    const target = directory.dirPath + '/' + name;
+    let namedStat;
+    try {
+      namedStat = fs.lstatSync(target);
+    } catch (error) {
+      if (error && error.code === 'ENOENT' && !required) return null;
+      if (error && error.code === 'ENOENT' && required) {
+        throw new CredentialEnvError({ operation, phase: 'validate', reason: 'REQUIRED_FILE_MISSING', published: directory.state.published, publication: directory.state.publication });
+      }
+      throw error;
+    }
+    if (!regularSingleLink(namedStat)) throw new CredentialEnvError({ operation, phase: 'validate', reason: 'UNSAFE_ENTRY' });
+    phase = 'read';
+    fd = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    phase = 'metadata';
+    let stat = fs.fstatSync(fd);
+    if (!regularSingleLink(stat) || !sameIdentity(namedStat, stat)) {
+      throw new CredentialEnvError({ operation, phase, reason: 'UNSAFE_ENTRY' });
+    }
+    let metadataChanged = false;
+    if ((stat.mode & 0o7777) !== 0o600) {
+      fs.fchmodSync(fd, 0o600);
+      metadataChanged = true;
+    }
+    if (stat.uid !== 0 || stat.gid !== 0) {
+      fs.fchownSync(fd, 0, 0);
+      fs.fchmodSync(fd, 0o600);
+      metadataChanged = true;
+    }
+    stat = fs.fstatSync(fd);
+    if (!checkedEnvStat(stat)) throw new CredentialEnvError({ operation, phase: 'metadata', reason: 'UNSAFE_ENTRY' });
+    if (metadataChanged) {
+      phase = 'flush';
+      fs.fsyncSync(fd);
+    }
+    phase = 'verify';
+    const stillNamed = fs.lstatSync(target);
+    if (!sameIdentity(stillNamed, stat) || !checkedEnvStat(stillNamed)) {
+      throw new CredentialEnvError({ operation, phase, reason: 'SNAPSHOT_CHANGED' });
+    }
+    const beforeRead = fs.fstatSync(fd);
+    phase = 'read';
+    const bytes = fs.readFileSync(fd);
+    const afterRead = fs.fstatSync(fd);
+    if (!Buffer.isBuffer(bytes) || bytes.length !== beforeRead.size
+      || beforeRead.dev !== afterRead.dev || beforeRead.ino !== afterRead.ino
+      || beforeRead.size !== afterRead.size || beforeRead.mtimeMs !== afterRead.mtimeMs
+      || beforeRead.ctimeMs !== afterRead.ctimeMs) {
+      throw new CredentialEnvError({ operation, phase, reason: 'SNAPSHOT_CHANGED' });
+    }
+    snapshot = { fd, stat: afterRead, bytes };
+    fd = null;
+  } catch (error) {
+    primary = error instanceof CredentialEnvError ? error : credentialError(operation, phase, error, null, directory.state);
+  }
+  if (fd !== null) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(fd));
+  return finishCredentialScope(snapshot, primary, cleanupErrors, directory.state, operation);
+}
+
+function assertEnvSnapshot(directory, name, snapshot, operation = 'assertEnvSnapshot') {
+  const target = directory.dirPath + '/' + name;
+  let current;
+  try {
+    current = fs.lstatSync(target);
+  } catch (error) {
+    if (error && error.code === 'ENOENT' && snapshot === null) return true;
+    if (error && error.code === 'ENOENT') throw new CredentialEnvError({ operation, phase: 'verify', reason: 'SNAPSHOT_CHANGED', published: directory.state.published, publication: directory.state.publication });
+    throw credentialError(operation, 'verify', error, null, directory.state);
+  }
+  if (snapshot === null || !checkedEnvStat(current) || !sameIdentity(current, snapshot.stat)
+    || current.size !== snapshot.stat.size || current.mtimeMs !== snapshot.stat.mtimeMs
+    || current.ctimeMs !== snapshot.stat.ctimeMs) {
+    throw new CredentialEnvError({ operation, phase: 'verify', reason: 'SNAPSHOT_CHANGED', published: directory.state.published, publication: directory.state.publication });
+  }
+  return true;
+}
+
+function decodeEnvUtf8(bytes) {
+  if (!Buffer.isBuffer(bytes)) throw new CredentialEnvError({ operation: 'decodeEnvUtf8', phase: 'decode', reason: 'CONTENT_TYPE_INVALID' });
+  const text = bytes.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(bytes)) {
+    throw new CredentialEnvError({ operation: 'decodeEnvUtf8', phase: 'decode', reason: 'NON_LOSSLESS_UTF8' });
+  }
+  return text;
+}
+
+function publishEnvContent(directory, name, content, snapshot, publication) {
+  const operation = 'publishEnvContent';
+  const state = directory.state;
+  if (publication !== 'replace' && publication !== 'create-only') {
+    throw new CredentialEnvError({ operation, phase: 'validate', reason: 'CONTENT_TYPE_INVALID', published: state.published, publication: state.publication });
+  }
+  let candidateBytes;
+  if (Buffer.isBuffer(content)) candidateBytes = Buffer.from(content);
+  else if (typeof content === 'string') {
+    candidateBytes = Buffer.from(content, 'utf8');
+    if (candidateBytes.toString('utf8') !== content) throw new CredentialEnvError({ operation, phase: 'encode', reason: 'NON_LOSSLESS_UTF8', published: state.published, publication: state.publication });
+  } else {
+    throw new CredentialEnvError({ operation, phase: 'encode', reason: 'CONTENT_TYPE_INVALID', published: state.published, publication: state.publication });
+  }
+
+  const cleanupErrors = [];
+  let primary = null;
+  let result;
+  let stageDirFd = null;
+  let stageFd = null;
+  let publishedFd = null;
+  let stagePath = null;
+  let stageName = null;
+  let stageIdentity = null;
+  let stageFileIdentity = null;
+  let stageFileOwned = false;
+  let phase = 'stage';
+  try {
+    stagePath = fs.mkdtempSync(directory.dirPath + '/.' + name + '.tmp-');
+    stageName = path.basename(stagePath);
+    stageDirFd = fs.openSync(directory.dirPath + '/' + stageName, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+    const namedStage = fs.lstatSync(directory.dirPath + '/' + stageName);
+    let stageStat = fs.fstatSync(stageDirFd);
+    if (!stageStat.isDirectory() || !sameIdentity(namedStage, stageStat)) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+    stageIdentity = stageStat;
+    fs.fchownSync(stageDirFd, 0, 0);
+    fs.fchmodSync(stageDirFd, 0o700);
+    stageStat = fs.fstatSync(stageDirFd);
+    if (!stageStat.isDirectory() || !sameIdentity(stageIdentity, stageStat)
+      || stageStat.uid !== 0 || stageStat.gid !== 0 || (stageStat.mode & 0o7777) !== 0o700) {
+      throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+    }
+    stageIdentity = stageStat;
+    const stageFdPath = '/proc/self/fd/' + stageDirFd;
+    phase = 'stage';
+    stageFd = fs.openSync(stageFdPath + '/env',
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+      0o600);
+    stageFileOwned = true;
+    let initial = fs.fstatSync(stageFd);
+    stageFileIdentity = initial;
+    if (!regularSingleLink(initial)) {
+      throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+    }
+    fs.fchownSync(stageFd, 0, 0);
+    fs.fchmodSync(stageFd, 0o600);
+    initial = fs.fstatSync(stageFd);
+    if (!regularSingleLink(initial) || !sameIdentity(stageFileIdentity, initial)
+      || initial.uid !== 0 || initial.gid !== 0 || (initial.mode & 0o7777) !== 0o600) {
+      throw new CredentialEnvError({ operation, phase: 'stage', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+    }
+    fs.writeFileSync(stageFd, candidateBytes);
+    const written = fs.fstatSync(stageFd);
+    if (written.size !== candidateBytes.length) throw new CredentialEnvError({ operation, phase: 'stage', reason: 'BYTE_COUNT_MISMATCH', published: state.published, publication: state.publication });
+    phase = 'flush';
+    fs.fsyncSync(stageFd);
+    stageFileIdentity = fs.fstatSync(stageFd);
+    if (!checkedEnvStat(stageFileIdentity) || stageFileIdentity.size !== candidateBytes.length) {
+      throw new CredentialEnvError({ operation, phase: 'verify', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+    }
+    fs.closeSync(stageFd);
+    stageFd = null;
+    assertEnvSnapshot(directory, name, snapshot, operation);
+    const livePath = directory.dirPath + '/' + name;
+    phase = 'publish';
+    if (snapshot !== null) {
+      fs.renameSync(stageFdPath + '/env', livePath);
+      state.published = true;
+      state.publication = 'rename';
+      stageFileOwned = false;
+    } else {
+      fs.linkSync(stageFdPath + '/env', livePath);
+      state.published = true;
+      state.publication = 'link';
+      fs.unlinkSync(stageFdPath + '/env');
+      stageFileOwned = false;
+    }
+    phase = 'verify';
+    publishedFd = fs.openSync(livePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const finalStat = fs.fstatSync(publishedFd);
+    if (!checkedEnvStat(finalStat) || !sameIdentity(finalStat, stageFileIdentity)
+      || finalStat.size !== candidateBytes.length || !fs.readFileSync(publishedFd).equals(candidateBytes)) {
+      throw new CredentialEnvError({ operation, phase, reason: 'BYTE_CONTENT_MISMATCH', published: state.published, publication: state.publication });
+    }
+    phase = 'flush';
+    fs.fsyncSync(directory.dirFd);
+    result = true;
+  } catch (error) {
+    primary = error instanceof CredentialEnvError ? error : credentialError(operation, phase, error, null, state);
+  }
+
+  if (stageFd !== null) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(stageFd));
+  if (publishedFd !== null) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(publishedFd));
+  if (stageFileOwned && stageDirFd !== null) {
+    collectCredentialCleanup(cleanupErrors, directory, operation, () => {
+      const candidate = '/proc/self/fd/' + stageDirFd + '/env';
+      const current = fs.lstatSync(candidate);
+      if (!stageFileIdentity || !sameIdentity(current, stageFileIdentity)) {
+        throw new CredentialEnvError({ operation, phase: 'cleanup', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+      }
+      fs.unlinkSync(candidate);
+    });
+  }
+  if (stageDirFd !== null) {
+    collectCredentialCleanup(cleanupErrors, directory, operation, () => {
+      const named = fs.lstatSync(directory.dirPath + '/' + stageName);
+      const opened = fs.fstatSync(stageDirFd);
+      if (!stageIdentity || !sameIdentity(named, opened)) {
+        throw new CredentialEnvError({ operation, phase: 'cleanup', reason: 'STAGE_CHANGED', published: state.published, publication: state.publication });
+      }
+      fs.closeSync(stageDirFd);
+      stageDirFd = null;
+      fs.rmdirSync(directory.dirPath + '/' + stageName);
+    });
+    if (stageDirFd !== null) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(stageDirFd));
+  }
+  return finishCredentialScope(result, primary, cleanupErrors, state, operation);
+}
+
+function withEnvSnapshots(directory, operation, callback, requireLive = false) {
+  let live = null;
+  let backup = null;
+  let result;
+  let primary = null;
+  const cleanupErrors = [];
+  try {
+    live = secureExistingEnvFile(directory, directory.name, requireLive, operation);
+    backup = secureExistingEnvFile(directory, directory.name + '.pre-gen2', false, operation);
+    result = callback(live, backup);
+  } catch (error) {
+    primary = error;
+  }
+  if (live) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(live.fd));
+  if (backup) collectCredentialCleanup(cleanupErrors, directory, operation, () => fs.closeSync(backup.fd));
+  return finishCredentialScope(result, primary, cleanupErrors, directory.state, operation);
+}
+
+function secureEnvFiles() {
+  return withEnvDirectory(directory => withEnvSnapshots(directory, 'secureEnvFiles', (live, backup) => {
+    return { livePresent: Boolean(live), backupPresent: Boolean(backup) };
+  }), 'secureEnvFiles');
+}
+
+function readEnvFileForMutation(required = false) {
+  return withEnvDirectory(directory => withEnvSnapshots(directory, 'readEnvFileForMutation', live => {
+    if (!live) return null;
+    const bytes = Buffer.from(live.bytes);
+    return { bytes, text: decodeEnvUtf8(bytes) };
+  }, required), 'readEnvFileForMutation');
+}
+
+function writeEnvFile(vars) {
+  return withEnvDirectory(directory => withEnvSnapshots(directory, 'writeEnvFile', live => {
+    const bytes = live ? Buffer.from(live.bytes) : Buffer.alloc(0);
+    const prior = decodeEnvUtf8(bytes);
+    let text;
+    if (!prior) {
+      text = Object.entries(vars).map(([key, value]) => key + '=' + value).join('\n') + '\n';
+    } else {
+      text = prior;
+      for (const [key, value] of Object.entries(vars)) text = setEnvLine(text, key, value);
+    }
+    publishEnvContent(directory, directory.name, text, live, live ? 'replace' : 'create-only');
+    console.log('\n  ✓ Env file written: ' + CFG.envFile);
+  }), 'writeEnvFile');
+}
+
+function writeEnvFileAtomic(text, expectedBytes) {
+  if (!Buffer.isBuffer(expectedBytes)) {
+    throw new CredentialEnvError({ operation: 'writeEnvFileAtomic', phase: 'validate', reason: 'CONTENT_TYPE_INVALID' });
+  }
+  return withEnvDirectory(directory => withEnvSnapshots(directory, 'writeEnvFileAtomic', live => {
+    if (!live || !live.bytes.equals(expectedBytes)) {
+      throw new CredentialEnvError({ operation: 'writeEnvFileAtomic', phase: 'verify', reason: 'SNAPSHOT_CHANGED', published: directory.state.published, publication: directory.state.publication });
+    }
+    decodeEnvUtf8(live.bytes);
+    publishEnvContent(directory, directory.name, text, live, 'replace');
+  }), 'writeEnvFileAtomic');
+}
+
+function backupEnvFile() {
+  return withEnvDirectory(directory => withEnvSnapshots(directory, 'backupEnvFile', (live, backup) => {
+    if (!live) throw new CredentialEnvError({ operation: 'backupEnvFile', phase: 'validate', reason: 'REQUIRED_FILE_MISSING', published: directory.state.published, publication: directory.state.publication });
+    if (backup) return { retained: true };
+    publishEnvContent(directory, directory.name + '.pre-gen2', Buffer.from(live.bytes), null, 'create-only');
+    return { retained: false };
+  }), 'backupEnvFile');
+}
+
+
+
 
 function toUciCloudKey(envKey) {
   const mapping = {
@@ -492,14 +960,6 @@ function assertCloverProfileDistinct(cloverProfileId, rak10701ProfileId) {
 // Never falls through to the full provisioning pass: it creates no tenant,
 // application or API key, and never rewrites the env file wholesale.
 
-function readEnvFileText() {
-  try {
-    return fs.readFileSync(CFG.envFile, 'utf8');
-  } catch (error) {
-    if (error && error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
 
 // First occurrence wins, as in node-red.init's load_chirpstack_env_value.
 function parseEnvText(text) {
@@ -539,18 +999,6 @@ function setEnvLine(text, key, value) {
 // The env file holds the API key: write a temp file, flush it to disk, then
 // rename it over the old one, so a power cut leaves either file, never an
 // empty one.
-function writeEnvFileAtomic(text) {
-  const mode = fs.statSync(CFG.envFile).mode & 0o777;
-  const tmp = `${CFG.envFile}.soil-repair.tmp`;
-  const fd = fs.openSync(tmp, 'w', mode);
-  try {
-    fs.writeSync(fd, text);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, CFG.envFile);
-}
 
 function readUciValue(envKey) {
   const uciKey = toUciCloudKey(envKey);
@@ -568,16 +1016,14 @@ function parseRepairArgs(argv) {
     const arg = String(argv[i]);
     if (arg === REPAIR_FLAG) {
       options.repair = true;
-    } else if (arg === REPOINT_FLAG || arg.startsWith(`${REPOINT_FLAG}=`)) {
+    } else if (arg === REPOINT_FLAG || arg.startsWith(REPOINT_FLAG + '=')) {
       const value = arg.includes('=') ? arg.slice(arg.indexOf('=') + 1) : argv[(i += 1)];
       const parts = String(value === undefined ? '' : value).split(',').map((part) => part.trim()).filter(Boolean);
-      if (!parts.length || parts.some((part) => part.startsWith('--'))) {
-        throw new Error(`${REPOINT_FLAG} needs a DevEUI, e.g. ${REPOINT_FLAG}=<DevEUI>`);
-      }
+      if (!parts.length || parts.some((part) => part.startsWith('--'))) throw new UsageError();
       options.repointDevEuis.push(...parts);
       options.repair = true;
     } else {
-      throw new Error(`Unknown option: ${arg}`);
+      throw new UsageError();
     }
   }
   return options;
@@ -637,7 +1083,7 @@ async function repairKiwiProfile(client, envValues, codecScript) {
   }
 }
 
-async function repairCloverProfile(client, envText, envValues, codecScript) {
+async function repairCloverProfile(client, envText, envValues, codecScript, expectedBytes) {
   const rak10701ProfileId = readUciValue(RAK10701_ENV_KEY) || String(envValues[RAK10701_ENV_KEY] || '').trim();
   const uciClover = readUciValue(CLOVER_ENV_KEY);
   const envClover = String(envValues[CLOVER_ENV_KEY] || '').trim();
@@ -661,7 +1107,7 @@ async function repairCloverProfile(client, envText, envValues, codecScript) {
     changed = true;
   }
   if (envClover !== cloverProfileId) {
-    writeEnvFileAtomic(setEnvLine(envText, CLOVER_ENV_KEY, cloverProfileId));
+    writeEnvFileAtomic(setEnvLine(envText, CLOVER_ENV_KEY, cloverProfileId), expectedBytes);
     console.log(`  ✓ ${CFG.envFile}: ${CLOVER_ENV_KEY}=${cloverProfileId}`);
     changed = true;
   }
@@ -704,12 +1150,10 @@ async function repointCloverDevices(client, devEuis, cloverProfileId, rak10701Pr
   }
 }
 
-async function repairSoilProfiles(options) {
+async function repairSoilProfiles(options, envInput) {
   console.log('\n[ repair ] KIWI and CLOVER device profiles');
-  const envText = readEnvFileText();
-  if (envText === null) {
-    throw new Error(`${CFG.envFile} not found: this gateway is not provisioned; let the osi-bootstrap service provision it`);
-  }
+  const envText = envInput ? envInput.text : null;
+  if (envText === null) throw new CredentialEnvError({ operation: 'repairSoilProfiles', phase: 'validate', reason: 'REQUIRED_FILE_MISSING' });
   const envValues = parseEnvText(envText);
   const apiKey = String(process.env.CHIRPSTACK_API_KEY || envValues.CHIRPSTACK_API_KEY || '').trim();
   if (!apiKey) {
@@ -723,7 +1167,7 @@ async function repairSoilProfiles(options) {
   const client = chirpstack.createClient({ apiUrl, apiKey });
 
   await repairKiwiProfile(client, envValues, codecScript);
-  const { cloverProfileId, rak10701ProfileId } = await repairCloverProfile(client, envText, envValues, codecScript);
+  const { cloverProfileId, rak10701ProfileId } = await repairCloverProfile(client, envText, envValues, codecScript, envInput.bytes);
 
   if (options.repointDevEuis.length) {
     console.log('\n[ repair ] Registered Clover devices');
@@ -732,7 +1176,7 @@ async function repairSoilProfiles(options) {
   console.log('\n  Soil sensor profile repair complete\n');
 }
 
-async function main() {
+async function main(envInput) {
   console.log('\n╔══════════════════════════════════════════════╗');
   console.log('║   OSI OS  —  ChirpStack Bootstrap            ║');
   console.log('╚══════════════════════════════════════════════╝\n');
@@ -841,15 +1285,57 @@ async function main() {
 }
 
 async function run(argv) {
-  const options = parseRepairArgs(argv);
-  if (options.repair) {
-    await repairSoilProfiles(options);
+  const fileOnly = argv.filter((arg) => {
+    const value = String(arg);
+    return value === '--secure-env-file' || value === '--backup-env-file'
+      || value.startsWith('--secure-env-file=') || value.startsWith('--backup-env-file=');
+  });
+  if (fileOnly.length) {
+    if (argv.length !== 1 || fileOnly.length !== 1
+      || (argv[0] !== '--secure-env-file' && argv[0] !== '--backup-env-file')) {
+      throw new UsageError();
+    }
+    if (argv[0] === '--secure-env-file') {
+      secureEnvFiles();
+      return;
+    }
+    backupEnvFile();
     return;
   }
-  await main();
+  const options = parseRepairArgs(argv);
+  secureEnvFiles();
+  const envInput = readEnvFileForMutation(Boolean(options.repair));
+  chirpstack = loadChirpStackHelper();
+  if (options.repair) {
+    await repairSoilProfiles(options, envInput);
+    return;
+  }
+  await main(envInput);
+}
+
+function safeCredentialDiagnostic(error) {
+  return 'Credential env-file operation failed ' + JSON.stringify({
+    operation: error.operation,
+    phase: error.phase,
+    reason: error.reason,
+    osCode: error.osCode,
+    published: Boolean(error.published),
+    publication: error.publication,
+    cleanupErrors: error.cleanupErrors
+  });
 }
 
 run(process.argv.slice(2)).catch((error) => {
+  if (error instanceof CredentialEnvError) {
+    console.error(safeCredentialDiagnostic(error));
+    process.exit(74);
+    return;
+  }
+  if (error instanceof UsageError) {
+    console.error('Invalid ChirpStack bootstrap arguments. Usage: chirpstack-bootstrap.js [--repair-soil-profiles] [--repoint-clover-device=<DevEUI>] [--secure-env-file|--backup-env-file]');
+    process.exit(2);
+    return;
+  }
   console.error('\nBootstrap failed:', error.message);
   process.exit(1);
 });

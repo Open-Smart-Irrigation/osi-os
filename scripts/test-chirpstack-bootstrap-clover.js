@@ -41,6 +41,12 @@ const API_KEY = 'synthetic-api-key-0001';
 const JS_RUNTIME = 2;
 
 let uuidCounter = 0;
+const testWorlds = [];
+process.on('exit', () => {
+  for (const world of testWorlds) {
+    try { fs.rmSync(world.tempDir, { recursive: true, force: true }); } catch (_) {}
+  }
+});
 function nextUuid() {
   uuidCounter += 1;
   return `00000000-0000-4000-8000-${String(uuidCounter).padStart(12, '0')}`;
@@ -62,8 +68,12 @@ function makeWorld(seed = {}) {
     uciCommands: [],
     cliApiKeyCalls: 0,
     logs: [],
+    fsEvents: [],
     exitCode: null,
+    tempDir: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'osi-clover-test-')),
   };
+  world.envFile = path.join(world.tempDir, '.chirpstack.env');
+  testWorlds.push(world);
   return world;
 }
 
@@ -168,53 +178,42 @@ function makeFs(world) {
     const local = path.join(CODEC_DIR, match[1]);
     return fs.existsSync(local) ? fs.readFileSync(local, 'utf8') : null;
   };
-  return {
-    readFileSync(file) {
-      if (world.files.has(file)) return world.files.get(file);
-      const codec = codecFor(file);
-      if (codec !== null) return codec;
-      throw enoent(file);
-    },
-    writeFileSync(file, content, options) {
-      world.files.set(file, String(content));
-      if (options && typeof options === 'object' && options.mode !== undefined) world.fileModes.set(file, options.mode);
-    },
-    existsSync(file) { return world.files.has(file) || codecFor(file) !== null; },
-    statSync(file) {
-      if (!world.files.has(file)) throw enoent(file);
-      return { mode: world.fileModes.has(file) ? world.fileModes.get(file) : 0o100600 };
-    },
-    renameSync(from, to) {
-      if (!world.files.has(from)) throw enoent(from);
-      world.files.set(to, world.files.get(from));
-      world.files.delete(from);
-      if (world.fileModes.has(from)) {
-        world.fileModes.set(to, world.fileModes.get(from));
-        world.fileModes.delete(from);
-      }
-    },
-    unlinkSync(file) { world.files.delete(file); },
-    openSync(file, flags, mode) {
-      const fd = world.nextFd = (world.nextFd || 100) + 1;
-      world.openFds = world.openFds || new Map();
-      world.openFds.set(fd, { file, chunks: [], synced: false });
-      world.files.set(file, '');
-      if (mode !== undefined) world.fileModes.set(file, mode);
-      return fd;
-    },
-    writeSync(fd, text) { world.openFds.get(fd).chunks.push(String(text)); },
-    fsyncSync(fd) {
-      const entry = world.openFds.get(fd);
-      world.files.set(entry.file, entry.chunks.join(''));
-      entry.synced = true;
-      world.fsyncs = (world.fsyncs || 0) + 1;
-    },
-    closeSync(fd) {
-      const entry = world.openFds.get(fd);
-      world.files.set(entry.file, entry.chunks.join(''));
-      world.openFds.delete(fd);
-    },
+  const fakeRootStat = (stat) => {
+    const copy = Object.assign(Object.create(Object.getPrototypeOf(stat)), stat);
+    copy.uid = 0;
+    copy.gid = 0;
+    return copy;
   };
+  return new Proxy(fs, {
+    get(target, key) {
+      if (key === 'readFileSync') return (file, options) => {
+        if (typeof file === 'string') {
+          const codec = codecFor(file);
+          if (codec !== null) return codec;
+        }
+        return target.readFileSync(file, options);
+      };
+      if (key === 'existsSync') return (file) => codecFor(file) !== null || target.existsSync(file);
+      if (key === 'fchownSync') return () => {};
+      if (key === 'fstatSync' || key === 'lstatSync' || key === 'statSync') {
+        return (...args) => fakeRootStat(target[key](...args));
+      }
+      if (key === 'writeFileSync') return (file, content, options) => {
+        world.fsEvents.push(['write', typeof file === 'number' ? 'fd' : String(file), Buffer.isBuffer(content) ? content.length : String(content).length]);
+        return target.writeFileSync(file, content, options);
+      };
+      if (key === 'fsyncSync') return (fd) => {
+        world.fsEvents.push(['fsync', target.fstatSync(fd).isDirectory() ? 'directory' : 'file']);
+        return target.fsyncSync(fd);
+      };
+      if (key === 'renameSync' || key === 'linkSync') return (from, to) => {
+        world.fsEvents.push([key === 'renameSync' ? 'rename' : 'link', String(from), String(to)]);
+        return target[key](from, to);
+      };
+      const value = target[key];
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
 }
 
 function makeChildProcess(world) {
@@ -260,6 +259,12 @@ function makeChildProcess(world) {
 // every side effect redirected into `world`. The fakes resolve synchronously or
 // as already-settled promises, so one macrotask turn drains the whole run.
 async function runBootstrap(world, { args = [], env = {} } = {}) {
+  if (world.files.has(ENV_FILE)) {
+    fs.writeFileSync(world.envFile, world.files.get(ENV_FILE), { mode: world.fileModes.get(ENV_FILE) || 0o600 });
+    fs.chmodSync(world.envFile, world.fileModes.get(ENV_FILE) || 0o600);
+  } else {
+    try { fs.unlinkSync(world.envFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
   const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\n/, '');
   const helper = makeChirpStack(world);
   const fakeFs = makeFs(world);
@@ -269,13 +274,15 @@ async function runBootstrap(world, { args = [], env = {} } = {}) {
     if (name === 'fs') return fakeFs;
     if (name === 'child_process') return fakeCp;
     if (name === 'path') return path;
-    throw new Error(`unexpected require: ${name}`);
+    return require(name);
   };
   const fakeModule = { exports: {} };
   fakeRequire.main = fakeModule;
   const fakeProcess = {
-    env: { ENV_FILE, CHIRPSTACK_API_KEY: API_KEY, ...env },
+    env: { ENV_FILE: world.envFile, CHIRPSTACK_API_KEY: API_KEY, ...env },
     argv: ['node', '/srv/node-red/chirpstack-bootstrap.js', ...args],
+    getuid: () => 0,
+    geteuid: () => 0,
     exit: (code) => { if (world.exitCode === null) world.exitCode = code; },
   };
   const fakeConsole = {
@@ -287,6 +294,12 @@ async function runBootstrap(world, { args = [], env = {} } = {}) {
   const run = new Function('require', 'module', 'exports', '__dirname', '__filename', 'process', 'console', source);
   run(fakeRequire, fakeModule, fakeModule.exports, '/srv/node-red', '/srv/node-red/chirpstack-bootstrap.js', fakeProcess, fakeConsole);
   await new Promise((resolve) => setImmediate(resolve));
+  if (fs.existsSync(world.envFile)) {
+    world.files.set(ENV_FILE, fs.readFileSync(world.envFile, 'utf8'));
+    world.fileModes.set(ENV_FILE, fs.statSync(world.envFile).mode & 0o7777);
+  } else {
+    world.files.delete(ENV_FILE);
+  }
   if (world.exitCode === null) world.exitCode = 0;
   return world;
 }
@@ -590,7 +603,7 @@ test('--repair-soil-profiles refuses to run without the existing API key', async
 test('--repair-soil-profiles refuses a gateway that was never provisioned', async () => {
   const world = makeWorld();
   await runBootstrap(world, { args: ['--repair-soil-profiles'] });
-  assert.equal(world.exitCode, 1);
+  assert.equal(world.exitCode, 74, 'a required missing soil env file is a credential-filesystem failure');
   assert.deepEqual(world.writes, [], 'never creates a tenant or profile on an unprovisioned gateway');
   assert.equal(world.files.has(ENV_FILE), false);
 });
@@ -624,7 +637,7 @@ test('an unknown option (also the unreleased --repair-clover-profile) fails inst
   const gw = provisionedGatewaySeed();
   const world = makeWorld(gw.seed);
   await runBootstrap(world, { args: ['--repair-clover-profile'] });
-  assert.equal(world.exitCode, 1);
+  assert.equal(world.exitCode, 2);
   assert.deepEqual(world.writes, []);
   assert.equal(world.files.get(ENV_FILE), gw.envText);
 });
@@ -638,7 +651,7 @@ test('--repoint-clover-device without a DevEUI fails instead of being ignored', 
     const gw = provisionedGatewaySeed();
     const world = makeWorld(gw.seed);
     await runBootstrap(world, { args });
-    assert.equal(world.exitCode, 1, args.join(' '));
+    assert.equal(world.exitCode, 2, args.join(' '));
     assert.deepEqual(world.writes, [], args.join(' '));
     assert.equal(world.files.get(ENV_FILE), gw.envText, args.join(' '));
   }
@@ -649,7 +662,10 @@ test('--repair-soil-profiles flushes the new env file to disk before it replaces
   const world = makeWorld(gw.seed);
   await runBootstrap(world, { args: ['--repair-soil-profiles'] });
   assert.equal(world.exitCode, 0, world.logs.join('\n'));
-  assert.equal(world.fsyncs, 1, 'the temp env file is fsynced once');
-  assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file keeps its mode');
+  const stagedFlush = world.fsEvents.findIndex((event) => event[0] === 'fsync' && event[1] === 'file');
+  const publish = world.fsEvents.findIndex((event) => event[0] === 'rename' || event[0] === 'link');
+  const directoryFlush = world.fsEvents.findIndex((event) => event[0] === 'fsync' && event[1] === 'directory');
+  assert.ok(stagedFlush >= 0 && publish > stagedFlush && directoryFlush > publish, 'staged file flush precedes publication and parent flush follows it');
+  assert.equal(world.fileModes.get(ENV_FILE), 0o600, 'the env file is forced to exact mode 0600');
   assert.ok(![...world.files.keys()].some((f) => f.endsWith('.tmp')), 'no temp file left behind');
 });
