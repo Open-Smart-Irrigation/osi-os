@@ -5,6 +5,9 @@ import { groupByUnit } from '../../analysis/unitGrouping';
 import { buildSmallMultiplesOption, buildTimeSeriesOption, formatPointNote } from '../../analysis/echartsOptions';
 import type { ChannelMeta } from '../../analysis/channelLabels';
 import type { EChartHandle } from './EChart';
+import { CHART_SIZE_STEP, smallMultiplesColumns, type ChartViewport } from '../../analysis/chartGeometry';
+import { useElementSize } from '../../hooks/useElementSize';
+import { shouldAutoStack } from '../../analysis/axisBands';
 
 const EChart = lazy(() => import('./EChart').then((module) => ({ default: module.EChart })));
 const CorrelationPanel = lazy(() => import('./CorrelationPanel').then((module) => ({ default: module.CorrelationPanel })));
@@ -27,10 +30,10 @@ const SINGLE_PANEL_MIN = 360;
 const STACKED_PANEL_MIN = 240;
 const SMALL_MULTIPLE_CELL_MIN = 220;
 
-export function chartMinHeight(layout: TimelineLayout, panelCount: number): number {
+export function chartMinHeight(layout: TimelineLayout, panelCount: number, width?: number): number {
   const count = Math.max(1, panelCount);
   if (layout === 'small-multiples') {
-    const columns = Math.ceil(Math.sqrt(count));
+    const columns = smallMultiplesColumns(count, width);
     const rows = Math.ceil(count / columns);
     return rows * SMALL_MULTIPLE_CELL_MIN;
   }
@@ -45,6 +48,10 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
   const t = translate as AnalysisTranslate;
   const [editing, setEditing] = useState<{ channelKey: string; x: number; y: number } | null>(null);
   const [draft, setDraft] = useState('');
+  const [frameRef, frameSize] = useElementSize<HTMLDivElement>({ step: CHART_SIZE_STEP });
+  const viewport: ChartViewport | undefined = frameSize ?? undefined;
+  // Session-only: never written to the saved view (this panel cannot write it).
+  const [showOverlaidAnyway, setShowOverlaidAnyway] = useState(false);
 
   const commitAxis = () => {
     if (!editing) return;
@@ -65,38 +72,51 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
     return groupByUnit(series);
   }, [mode, layout, series]);
 
+  // An overlaid chart whose unit axes crowd out the plot renders stacked.
+  const autoStacked = useMemo(() => mode !== 'correlation' && shouldAutoStack({
+    layout,
+    normalize: toggles.normalize,
+    panels: timeSeriesPanels,
+    series,
+    width: viewport?.width,
+  }), [mode, layout, toggles.normalize, timeSeriesPanels, series, viewport?.width]);
+  const effectiveLayout: TimelineLayout = autoStacked && !showOverlaidAnyway ? 'stacked' : layout;
+
   const option = useMemo(() => {
     if (series.length === 0 || mode === 'correlation') return null;
-    if (layout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel, formatPartial);
+    if (effectiveLayout === 'small-multiples') return buildSmallMultiplesOption(series, toggles.normalize, resolveAxisLabel, formatPartial, viewport);
     return buildTimeSeriesOption({
       panels: timeSeriesPanels,
       series,
       normalize: toggles.normalize,
-      multiAxis: layout === 'overlaid',
+      multiAxis: effectiveLayout === 'overlaid',
       resolveAxisLabel,
       formatPartial,
+      viewport,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
+  }, [series, mode, effectiveLayout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial, viewport]);
 
   const exportOption = useMemo(() => {
-    if (series.length === 0 || mode === 'correlation' || layout === 'small-multiples') return undefined;
+    if (series.length === 0 || mode === 'correlation' || effectiveLayout === 'small-multiples') return undefined;
     return buildTimeSeriesOption({
       panels: timeSeriesPanels,
       series,
       normalize: toggles.normalize,
-      multiAxis: layout === 'overlaid',
+      multiAxis: effectiveLayout === 'overlaid',
       includeLegend: true,
       resolveAxisLabel,
       formatPartial,
+      // The export renders off-screen at the live chart's width and at least 320 px tall.
+      viewport: viewport ? { width: viewport.width, height: Math.max(320, viewport.height) } : undefined,
     });
-  }, [series, mode, layout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial]);
+  }, [series, mode, effectiveLayout, toggles.normalize, timeSeriesPanels, resolveAxisLabel, formatPartial, viewport]);
 
-  const heightPanelCount = layout === 'small-multiples'
+  const heightPanelCount = effectiveLayout === 'small-multiples'
     ? series.length
-    : layout === 'stacked'
+    : effectiveLayout === 'stacked'
       ? timeSeriesPanels.length
       : 1;
-  const minHeight = chartMinHeight(layout, heightPanelCount);
+  const minHeight = chartMinHeight(effectiveLayout, heightPanelCount, viewport?.width);
 
   if (series.length === 0) return <div className="analysis-empty">{t('analysis.empty')}</div>;
   if (mode === 'correlation') return (
@@ -105,32 +125,62 @@ export function AnalysisChartPanel({ series, mode, layout, toggles, channelMeta,
     </Suspense>
   );
   return (
-    <div
-      data-testid="analysis-chart-frame"
-      className="analysis-chart-frame h-full"
-      style={{ minHeight, position: 'relative' }}
-    >
-      <Suspense fallback={<div className="analysis-loading">{t('loading')}</div>}>
-        <EChart
-          ref={chartRef}
-          option={option as Record<string, unknown>}
-          exportOption={exportOption as Record<string, unknown> | undefined}
-          className="analysis-chart h-full"
-          onAxisNameClick={(channelKey, pos) => { setEditing({ channelKey, ...pos }); setDraft(''); }}
-        />
-      </Suspense>
-      {editing && (
-        <input
-          autoFocus
-          aria-label={t('analysis.axis.rename')}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => commitAxis()}
-          onKeyDown={(e) => { if (e.key==='Enter') commitAxis(); if (e.key==='Escape') setEditing(null); }}
-          className="absolute z-10 w-48 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)]"
-          style={{ left: editing.x, top: editing.y }}
-        />
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      {autoStacked && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+          {!showOverlaidAnyway && <p role="status" className="min-w-0">{t('analysis.autoStack.note')}</p>}
+          {/* 44 px hit area (min-h-11); -my-3 keeps the note bar as compact as the pill. */}
+          <button
+            type="button"
+            aria-pressed={showOverlaidAnyway}
+            onClick={() => setShowOverlaidAnyway((value) => !value)}
+            className="group -my-3 inline-flex min-h-11 shrink-0 items-center focus:outline-none"
+          >
+            <span
+              data-part="pill"
+              className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 font-semibold group-focus-visible:ring-2 group-focus-visible:ring-[var(--focus)] ${
+                showOverlaidAnyway
+                  ? 'border-[var(--text-secondary)] bg-[var(--secondary-bg)] text-[var(--text)]'
+                  : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] group-hover:bg-[var(--secondary-bg)]'
+              }`}
+            >
+              {showOverlaidAnyway && <span data-part="check" aria-hidden="true">✓</span>}
+              {t('analysis.autoStack.showOverlaid')}
+            </span>
+          </button>
+        </div>
       )}
+      <div
+        ref={frameRef}
+        data-testid="analysis-chart-frame"
+        data-requested-layout={layout}
+        data-effective-layout={effectiveLayout}
+        className="analysis-chart-frame min-h-0 flex-1"
+        style={{ minHeight, position: 'relative' }}
+      >
+        <Suspense fallback={<div className="analysis-loading">{t('loading')}</div>}>
+          <EChart
+            ref={chartRef}
+            option={option as Record<string, unknown>}
+            exportOption={exportOption as Record<string, unknown> | undefined}
+            className="analysis-chart h-full"
+            onAxisNameClick={(channelKey, pos) => { setEditing({ channelKey, ...pos }); setDraft(''); }}
+          />
+        </Suspense>
+        {editing && (
+          <input
+            autoFocus
+            aria-label={t('analysis.axis.rename')}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => commitAxis()}
+            onKeyDown={(e) => { if (e.key==='Enter') commitAxis(); if (e.key==='Escape') setEditing(null); }}
+            className="absolute z-10 w-48 rounded border border-[var(--border)] bg-[var(--surface)] px-1 py-0.5 text-xs text-[var(--text)]"
+            // Keep the 12rem field inside the frame when the clicked title is a right-hand axis.
+            style={{ left: viewport ? Math.max(0, Math.min(editing.x, viewport.width - 196)) : editing.x, top: editing.y }}
+          />
+        )}
+      </div>
     </div>
   );
 }

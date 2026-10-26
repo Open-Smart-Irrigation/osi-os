@@ -60,6 +60,18 @@ describe('SwtStatusIndicator', () => {
     expect(screen.queryByText('Moist')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['wet', 'full', 1], ['moist', 'half', 1], ['dry', 'empty', 0],
+  ] as const)('gives %s a %s dot, so red-green colour blindness cannot merge the states', async (status, fill, filledParts) => {
+    const view = await renderIndicator(status);
+    const dot = view.container.querySelector('[aria-hidden="true"]') as HTMLElement;
+    expect(dot).toHaveAttribute('data-swt-fill', fill);
+    expect(dot.style.borderColor).toBe(`var(--soil-${status})`);
+    const filled = [dot, ...dot.querySelectorAll<HTMLElement>('span')]
+      .filter((part) => part.style.backgroundColor === `var(--soil-${status})`);
+    expect(filled).toHaveLength(filledParts);
+  });
+
   it('renders nothing without a valid status', async () => {
     expect((await renderIndicator(null)).container).toBeEmptyDOMElement();
   });

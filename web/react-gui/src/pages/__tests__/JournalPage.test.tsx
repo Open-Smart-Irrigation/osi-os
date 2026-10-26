@@ -2,7 +2,9 @@ import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const TEST_NOW = new Date('2026-07-16T12:30:00.000Z');
 
 const mocks = vi.hoisted(() => ({
   useJournalCatalog: vi.fn(),
@@ -533,6 +535,8 @@ function ClearCaptureQuery() {
 
 describe('JournalPage', () => {
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(TEST_NOW);
     vi.clearAllMocks();
     mocks.useRealCaptureFlow = false;
     mocks.scopeState.loading = false;
@@ -591,6 +595,10 @@ describe('JournalPage', () => {
       updatePlotGroup: vi.fn(),
       revalidate: mocks.retryGroups,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders the desktop journal workspace instead of the mobile timeline on a desktop browser', () => {

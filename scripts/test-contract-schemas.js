@@ -811,7 +811,7 @@ expectValid(
 );
 
 const sampleWorkRequestEvent = {
-    eventUuid: 'req-0016C001F11715E2-20260708T120000Z',
+    eventUuid: 'req-AABBCCDDEEFF0003-20260708T120000Z',
     aggregateType: 'WORK_REQUEST',
     aggregateKey: '019ff001-1111-7222-8333-aaaaaaaaaaaa',
     op: 'WORK_REQUEST_SUBMITTED',
@@ -829,7 +829,7 @@ const sampleWorkRequestEvent = {
         severity: 'annoying',
         consent_public: true,
         consent_diagnostics: true,
-        gateway_device_eui: '0016C001F11715E2',
+        gateway_device_eui: 'AABBCCDDEEFF0003',
         status_secret_hash: 'sha256:status-secret-fixture',
         contact_email: 'field-user@example.test',
         diagnostics: { sync: { pending_outbox_count: 0 } },
@@ -1281,7 +1281,7 @@ const journalEntry = {
     note: 'Irrigation round',
     context_json: null,
     sync_version: 1,
-    gateway_device_eui: '0016C001F11715E2',
+    gateway_device_eui: 'AABBCCDDEEFF0003',
     created_at: '2026-07-13T08:01:00.000Z',
     updated_at: '2026-07-13T08:01:00.000Z',
     deleted_at: null,
@@ -1314,7 +1314,7 @@ const customVocab = {
     adapt_code: null,
     scope: 'custom',
     owner_user_uuid: COMPACT_UUID,
-    gateway_device_eui: '0016C001F11715E2',
+    gateway_device_eui: 'AABBCCDDEEFF0003',
     custom_field_uuid: UUID,
     active: 1,
     sort_order: 0,
@@ -1345,7 +1345,7 @@ const plot = {
     area_m2: 4,
     active: 1,
     sync_version: 1,
-    gateway_device_eui: '0016C001F11715E2',
+    gateway_device_eui: 'AABBCCDDEEFF0003',
     created_at: '2026-07-13T08:00:00.000Z',
     updated_at: '2026-07-13T08:00:00.000Z',
     deleted_at: null,
@@ -1362,7 +1362,7 @@ const plotGroup = {
     group_uuid: UUID,
     owner_user_uuid: COMPACT_UUID,
     label: 'Barley 2026',
-    gateway_device_eui: '0016C001F11715E2',
+    gateway_device_eui: 'AABBCCDDEEFF0003',
     created_by_principal_uuid: UUID,
     created_at: '2026-07-13T08:00:00.000Z',
     resolved_at: null,
@@ -2298,7 +2298,7 @@ for (const commandType of cmdSchema.properties.command_type.enum.filter((type) =
 expectValid(
     'existing REBOOT command with device_eui',
     cmdSchema,
-    { command_type: 'REBOOT', command_id: UUID, device_eui: '0016C001F11715E2' }
+    { command_type: 'REBOOT', command_id: UUID, device_eui: 'AABBCCDDEEFF0003' }
 );
 
 reportCheck(
@@ -2569,7 +2569,7 @@ for (const command of [
 }
 
 const NAME_ACTOR = '12345678-1234-4234-8234-123456789abc';
-const NAME_GATEWAY = '0016C001F11715E2';
+const NAME_GATEWAY = 'AABBCCDDEEFF0003';
 const NAME_REQUESTED_AT = '2026-09-21T10:00:00.000Z';
 const validDeviceName = {
     command_type: 'UPSERT_DEVICE_NAME',
@@ -2649,7 +2649,7 @@ expectValid(
 expectValid(
     'a Device resource with a 101-character name stays valid',
     resourcesSchema.definitions.Device,
-    { deveui: '0016C001F11715E2', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
+    { deveui: 'AABBCCDDEEFF0003', type_id: 'DRAGINO_LSN50', name: 'a'.repeat(101) },
     resourcesSchema
 );
 

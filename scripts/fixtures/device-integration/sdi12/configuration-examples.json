@@ -1,0 +1,243 @@
+[
+  {
+    "name": "pr2-4",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "DELTAT_PR2_4",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "measurement_mode": "mineral_vwc_percent"
+        },
+        "depths": [
+          10,
+          20,
+          30,
+          40
+        ]
+      },
+      "uplink": {
+        "fPort": 2,
+        "bytes": [
+          12,
+          228,
+          1,
+          43,
+          48,
+          43,
+          50,
+          48,
+          43,
+          51,
+          48,
+          43,
+          52,
+          48
+        ]
+      }
+    },
+    "expected_channels": {
+      "bat_v": 3.3,
+      "vwc_1": 0,
+      "vwc_2": 20,
+      "vwc_3": 30,
+      "vwc_4": 40
+    }
+  },
+  {
+    "name": "pr2-6",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "DELTAT_PR2_6",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "measurement_mode": "mineral_vwc_percent"
+        },
+        "depths": [
+          10,
+          20,
+          30,
+          40,
+          60,
+          100
+        ]
+      },
+      "uplink": {
+        "fPort": 2,
+        "bytes": [
+          12,
+          228,
+          1,
+          43,
+          48,
+          43,
+          50,
+          48,
+          43,
+          51,
+          48,
+          43,
+          52,
+          48,
+          43,
+          53,
+          48,
+          43,
+          54,
+          48
+        ]
+      }
+    },
+    "expected_channels": {
+      "bat_v": 3.3,
+      "vwc_1": 0,
+      "vwc_2": 20,
+      "vwc_3": 30,
+      "vwc_4": 40,
+      "vwc_5": 50,
+      "vwc_6": 60
+    }
+  },
+  {
+    "name": "teros11",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "METER_TEROS_11",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "calibration": "mineral"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "uplink": {
+        "fPort": 2,
+        "bytes": [
+          12,
+          228,
+          1,
+          43,
+          50,
+          48,
+          48,
+          48,
+          45,
+          52,
+          48
+        ]
+      }
+    },
+    "expected_channels": {
+      "bat_v": 3.3,
+      "vwc_1": 8.02,
+      "soil_temp_1": -40
+    }
+  },
+  {
+    "name": "teros12",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "METER_TEROS_12",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {
+          "calibration": "mineral"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "uplink": {
+        "fPort": 2,
+        "bytes": [
+          12,
+          228,
+          1,
+          43,
+          51,
+          48,
+          48,
+          48,
+          45,
+          49,
+          48,
+          43,
+          48
+        ]
+      }
+    },
+    "expected_channels": {
+      "bat_v": 3.3,
+      "vwc_1": 46.81,
+      "soil_temp_1": -10,
+      "soil_ec_1": 0
+    }
+  },
+  {
+    "name": "tensiomark-pf",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "TENSIOMARK",
+        "profile_version": 3,
+        "address": "1",
+        "settings": {
+          "source_unit": "pF",
+          "variant": "1",
+          "field_order": "pf_temperature"
+        },
+        "depths": [
+          30
+        ]
+      },
+      "uplink": {
+        "fPort": 2,
+        "bytes": [
+          12,
+          228,
+          1,
+          43,
+          52,
+          43,
+          50,
+          48
+        ]
+      }
+    },
+    "expected_channels": {
+      "bat_v": 3.3,
+      "swt_1": 1000,
+      "soil_temp_1": 20
+    }
+  },
+  {
+    "name": "hydrascout-blocked",
+    "evidence": "synthetic",
+    "input": {
+      "configuration": {
+        "version": 1,
+        "profile_id": "HYDRASCOUT",
+        "profile_version": 2,
+        "address": "1",
+        "settings": {},
+        "depths": [
+          15,
+          30
+        ]
+      }
+    },
+    "expected_code": "protocol_evidence_required"
+  }
+]

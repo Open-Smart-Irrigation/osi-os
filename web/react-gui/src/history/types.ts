@@ -389,6 +389,8 @@ export interface HistoryCardDataRequest {
   aggregation: HistoryAggregationLevel;
   overlays: readonly HistoryOverlayId[];
   sourceKey?: string | null;
+  /** Abort the request when the history window session or viewport is superseded. */
+  signal?: AbortSignal;
 }
 
 export interface HistoryWorkspaceRange {

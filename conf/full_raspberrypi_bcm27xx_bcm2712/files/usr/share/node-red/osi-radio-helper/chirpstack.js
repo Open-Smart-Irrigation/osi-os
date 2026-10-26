@@ -1,7 +1,9 @@
 'use strict';
 
 // Metadata only. The field tester's existing ten-byte GPS format is decoded
-// exclusively behind the configured tester profile gate; payload bytes never persist.
+// only for a device whose OSI type is RAK10701_FIELD_TESTER; the caller decides
+// (devices.type_id), never the ChirpStack profile, because the Clover profile key
+// aliases the tester profile on bootstrapped gateways. Payload bytes never persist.
 function decodeTesterGps(data, time) {
   if (typeof data !== 'string' || data.length > 4096) return null;
   const b = Buffer.from(data, 'base64');
@@ -16,6 +18,7 @@ function decodeTesterGps(data, time) {
   if (hdop > 2 || satellites < 5) return null;
   const lat = (((b[0] & 63) << 17) + (b[1] << 9) + (b[2] << 1) + (b[3] >> 7));
   const lon = ((b[3] & 127) << 16) + (b[4] << 8) + b[5];
+  if (lat === 0 && lon === 0) return null; // all-zero coordinate bits = no fix, whatever the quality byte says
   const latitude = ((b[0] & 64) ? -1 : 1) * (lat * 108 + 53) / 1e7;
   const longitude = ((b[0] & 128) ? -1 : 1) * (lon * 215 + 107) / 1e7;
   if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
@@ -57,13 +60,7 @@ function fromChirpStack(input, context = {}) {
   const lora = tx.modulation && tx.modulation.lora || {};
   const time = event.time || null;
   const positions = context.gatewayPositions || {};
-  const candidateIds = (context.testerProfileIds || [context.testerProfileId])
-    .filter(Boolean).map(id => String(id).trim().toLowerCase());
-  const namePattern = String(context.testerProfileNamePattern || context.testerProfileName || '').trim().toLowerCase();
-  const profileId = String(device.deviceProfileId || '').trim().toLowerCase();
-  const profileName = String(device.deviceProfileName || '').trim().toLowerCase();
-  const isTester = (profileId && candidateIds.includes(profileId))
-    || (namePattern && profileName.includes(namePattern));
+  const isTester = context.isFieldTester === true;
   return {
     deveui: String(device.devEui || event.devEui || '').trim().toUpperCase(),
     recorded_at: time, deduplication_id: event.deduplicationId || event.deduplication_id || null,

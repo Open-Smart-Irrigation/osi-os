@@ -878,3 +878,94 @@ test('a malformed actor id is refused as malformed in both forms', async (t) => 
     assert.deepEqual(protectedState(state.raw), before, label);
   }
 });
+
+
+const TENSI_LAYOUT = require('../osi-history-helper/__fixtures__/tensiomark-layout.json');
+function tensiFixture(t) {
+  const state = fixture(t);
+  state.raw.prepare('UPDATE devices SET type_id=?,sdi12_probe_profile=?,sdi12_channel_layout_json=? WHERE deveui=?')
+    .run('DRAGINO_SDI12', 'TENSIOMARK', JSON.stringify(TENSI_LAYOUT), DEVICE);
+  state.raw.exec('DELETE FROM sync_outbox');
+  return state;
+}
+function tensiCommand(id, depths, base = 1) {
+  return envelope(id, 'UPSERT_DEVICE_SOIL_DEPTHS', {
+    soil_moisture_probe_depths_json: depths, soil_moisture_probe_depths_configured: true,
+  }, { payload: { base_sync_version: base, effect_key: `device_soil_depths:set:${GATEWAY}:${DEVICE}:${base}` } });
+}
+function tensiRow(raw) { return { ...raw.prepare('SELECT sdi12_channel_layout_json,soil_moisture_probe_depths_json,sync_version FROM devices WHERE deveui=?').get(DEVICE) }; }
+
+test('Tensiomark depth command updates paired layout and map in one event, preserving identity and replay', async (t) => {
+  const { raw, db } = tensiFixture(t);
+  const depths = { swt_1: 30, soil_temp_1: 30, swt_2: 60, soil_temp_2: 60 };
+  const command = tensiCommand(9001, depths);
+  const result = await commands.applyWatermarkCommand(db, command, runtime());
+  assert.equal(result.ack.result, 'APPLIED', JSON.stringify(result.ack) + JSON.stringify(tensiRow(raw)));
+  const saved = tensiRow(raw);
+  const expected = structuredClone(TENSI_LAYOUT);
+  expected.sensors[0].depth_cm = 30; expected.sensors[1].depth_cm = 60;
+  assert.deepEqual(JSON.parse(saved.sdi12_channel_layout_json), expected);
+  assert.deepEqual(JSON.parse(saved.soil_moisture_probe_depths_json), depths);
+  assert.equal(saved.sync_version, 2);
+  const events = raw.prepare("SELECT payload_json FROM sync_outbox WHERE aggregate_type='DEVICE'").all();
+  assert.equal(events.length, 1);
+  const payload = JSON.parse(events[0].payload_json);
+  assert.deepEqual(payload.sdi12_channel_layout_json, expected);
+  assert.deepEqual(payload.soil_moisture_probe_depths_json, depths);
+  assert.equal(payload.sync_version, 2);
+  const validate = require('../osi-sdi12-normalize').validateTensiomarkLayout;
+  assert.notEqual(validate(expected).configurationHash, validate(TENSI_LAYOUT).configurationHash);
+  const normalized = require('../osi-sdi12-normalize/tensiomark-live').normalizeTensiomark(
+    { data_sum: '1+18.00+1.300\r\n4+19.00+1.600\r\n' }, expected, {});
+  assert.equal(normalized.tensiomarkObservation.configurationHash, validate(expected).configurationHash);
+  assert.deepEqual(JSON.parse(normalized.tensiomarkObservation.configurationJson), expected);
+  const replay = await commands.applyWatermarkCommand(db, command, runtime());
+  assert.equal(replay.ack.result, 'APPLIED');
+  assert.deepEqual(replay.ack, result.ack);
+  assert.deepEqual(tensiRow(raw), saved);
+  const cleared = await commands.applyWatermarkCommand(db, tensiCommand(9002, {}, 2), runtime());
+  assert.equal(cleared.ack.result, 'APPLIED');
+  assert.deepEqual(JSON.parse(tensiRow(raw).sdi12_channel_layout_json), TENSI_LAYOUT);
+  assert.deepEqual(JSON.parse(tensiRow(raw).soil_moisture_probe_depths_json), {});
+});
+
+test('Tensiomark depth edits reject stale, unauthorized, mismatched, unknown and invalid layout input without mutation', async (t) => {
+  for (const [id, depths, modify, expected] of [
+    [9010, { swt_1: 30 }, null, 'REJECTED_PERMANENT'],
+    [9011, { swt_1: 30, soil_temp_1: 31 }, null, 'REJECTED_PERMANENT'],
+    [9012, { swt_3: 30, soil_temp_3: 30 }, null, 'REJECTED_PERMANENT'],
+    [9013, { swt_1: 30, soil_temp_1: 30, vwc_1: 30 }, null, 'REJECTED_PERMANENT'],
+    [9014, { swt_1: 1001, soil_temp_1: 1001 }, null, 'REJECTED_PERMANENT'],
+    [9030, { vwc_1: null }, null, 'REJECTED_PERMANENT'],
+    [9031, { vwc_1: 0 }, null, 'REJECTED_PERMANENT'],
+    [9032, { swt_1: null }, null, 'REJECTED_PERMANENT'],
+    [9033, { swt_1: 0 }, null, 'REJECTED_PERMANENT'],
+    [9034, { SWT_1: 30, soil_temp_1: 30 }, null, 'REJECTED_PERMANENT'],
+    [9035, { swt_1: 30, SWT_1: 30, soil_temp_1: 30 }, null, 'REJECTED_PERMANENT'],
+    [9015, {}, state => state.raw.prepare('UPDATE devices SET sync_version=2 WHERE deveui=?').run(DEVICE), 'CONFLICT'],
+    [9016, {}, state => state.raw.prepare('UPDATE devices SET sdi12_channel_layout_json=? WHERE deveui=?').run('{}', DEVICE), 'REJECTED_PERMANENT'],
+    [9017, {}, state => state.raw.prepare('UPDATE devices SET user_id=2 WHERE deveui=?').run(DEVICE), 'REJECTED_PERMANENT'],
+  ]) {
+    const state = tensiFixture(t);
+    if (modify) modify(state);
+    const before = tensiRow(state.raw);
+    const result = await commands.applyWatermarkCommand(state.db, tensiCommand(id, depths), runtime({ scopedMode: false }));
+    assert.equal(result.ack.result, expected, String(id));
+    assert.deepEqual(tensiRow(state.raw), before, String(id));
+  }
+});
+
+test('Tensiomark permits one unknown depth and rolls back layout/map when a database write fails', async (t) => {
+  const { raw, db } = tensiFixture(t);
+  const command = tensiCommand(9020, { swt_2: 55, soil_temp_2: 55 });
+  const before = tensiRow(raw);
+  raw.exec("CREATE TRIGGER fail_tensi_depth BEFORE UPDATE OF sdi12_channel_layout_json ON devices BEGIN SELECT RAISE(ABORT, 'depth write failed'); END");
+  await assert.rejects(commands.applyWatermarkCommand(db, command, runtime()), /depth write failed/);
+  assert.deepEqual(tensiRow(raw), before);
+  assert.equal(raw.prepare('SELECT COUNT(*) AS n FROM sync_outbox').get().n, 0);
+  raw.exec('DROP TRIGGER fail_tensi_depth');
+  const result = await commands.applyWatermarkCommand(db, command, runtime());
+  assert.equal(result.ack.result, 'APPLIED');
+  const sensors = JSON.parse(tensiRow(raw).sdi12_channel_layout_json).sensors;
+  assert.deepEqual(sensors.map(s => s.depth_cm), [null, 55]);
+});

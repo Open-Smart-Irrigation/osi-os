@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const { SEED_DB_PATHS: seedDatabasePaths } = require('./seed-db-paths');
 
 const schemaContract = {
+  tensiomark_observations: ["id", "device_data_id", "deveui", "recorded_at", "received_at", "raw_response", "payload_base64", "configuration_hash", "configuration_json", "disposition", "normalized_json"],
   radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],
   radio_history_bridge: ["history_key", "generation", "status", "claimed_at", "transferred_at", "last_error"],
   device_installation_location_revisions: ["revision_uuid", "device_eui", "installation_uuid", "source_gateway_device_eui", "base_revision_uuid", "revision_no", "latitude", "longitude", "altitude_m", "vertical_reference", "accuracy_m", "antenna_height_agl_m", "coordinate_source", "effective_from", "recorded_at", "actor_user_uuid", "supersedes_revision_uuid", "sync_version", "created_at"],
@@ -1228,6 +1229,7 @@ const schemaContract = {
 };
 
 const requiredIndexes = {
+  tensiomark_observations: ["idx_tensiomark_observations_device_time", "idx_tensiomark_observations_device_data"],
   sync_outbox_recovery_audit: ['idx_sync_outbox_recovery_audit_event'],
   installation_recovery_audit: ['idx_installation_recovery_audit_operation'],
   device_data: ['idx_device_data_deveui_recorded_at'],

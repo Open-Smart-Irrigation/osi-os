@@ -60,20 +60,8 @@
       "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
     },
     {
-      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js",
-      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (the native npm module is not tracked and CI installs only the sqlite3 CLI; CI-run module tests use a node:sqlite adapter instead)"
-    },
-    {
-      "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js",
-      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
-    },
-    {
-      "path": "scripts/test-radio-store.js",
-      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3' (native npm module not tracked; CI installs only the sqlite3 CLI)"
-    },
-    {
-      "path": "scripts/test-radio-restore-guards.js",
-      "reason": "fails on main in a clean checkout (#392): Cannot find module 'sqlite3', required through osi-db-helper (native npm module not tracked; CI installs only the sqlite3 CLI)"
+      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
+      "reason": "production-build Playwright matrix run by npm run test:browser:mobile-history; it uses paired flag-off/flag-on production builds, CDP CPU throttling and frame-timing acceptance, so it remains a controlled local release gate tracked by #516 rather than a shared pull-request runner test"
     },
     {
       "path": "scripts/test-task14-journal-preview.js",
@@ -94,6 +82,10 @@
     {
       "path": "scripts/test-valve-actuation-text-caps.js",
       "reason": "slow (#391): passes (60/60) but took about 23 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
+    },
+    {
+      "pattern": "web/history-zoom-prototypes/**",
+      "reason": "pending owner decision D4: prototype app scope. Chart-library comparison app (uPlot, D3, Chart.js, ECharts) whose unit tests and Playwright browser specs run by hand (npm test, npm run test:browser); whether the app lands on main at all is open. Remove this entry when the app is wired into a workflow or dropped from the branch"
     }
   ]
 }

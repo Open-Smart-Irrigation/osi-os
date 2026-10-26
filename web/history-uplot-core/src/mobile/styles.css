@@ -1,0 +1,46 @@
+.mobile-soil-history { position: relative; width: 100%; color: var(--text, #172033); }
+.mobile-soil-history button,
+.mobile-soil-history select,
+.mobile-soil-history input { font: inherit; }
+.mobile-soil-history button { min-height: 2.75rem; padding: .5rem .75rem; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; background: var(--secondary-bg, #fff); color: inherit; }
+.mobile-soil-history button:active { background: var(--surface, #e2e8f0); }
+.mobile-soil-history .history-ranges { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .75rem; }
+.mobile-soil-history .mobile-history-refresh { min-height: 1.5rem; margin: .5rem 0; }
+.mobile-soil-history .history-metadata { display: flex; flex-wrap: wrap; gap: .35rem .75rem; margin: .5rem 0 .75rem; padding: .5rem .65rem; border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; background: var(--surface, #f8fafc); color: var(--text-secondary, #475569); font-size: .75rem; line-height: 1.35; }
+.mobile-soil-history .mobile-history-unit { display: inline-flex; gap: .5rem; align-items: center; min-height: 2.75rem; margin-bottom: .5rem; font-size: .875rem; font-weight: 600; }
+.mobile-soil-history .mobile-history-unit select { min-height: 2.75rem; padding: .5rem .65rem; border: 1px solid var(--border, #cbd5e1); border-radius: .5rem; background: var(--secondary-bg, #fff); color: inherit; }
+.mobile-soil-history fieldset { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .75rem; padding: .5rem; border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; }
+.mobile-soil-history fieldset legend { padding: 0 .25rem; color: var(--text-secondary, #475569); font-size: .75rem; }
+.mobile-soil-history fieldset label { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; padding: .35rem .55rem; border: 1px solid var(--border, #cbd5e1); border-radius: .45rem; background: var(--secondary-bg, #fff); }
+.mobile-soil-history fieldset input { width: 1.1rem; height: 1.1rem; }
+.mobile-soil-history fieldset small { color: var(--text-secondary, #64748b); }
+.mobile-soil-history .mobile-history-sensors-disclosure { margin-bottom: .75rem; }
+.mobile-soil-history .mobile-history-sensors-disclosure summary { min-height: 2.75rem; padding: .65rem .75rem; border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; cursor: pointer; }
+.mobile-soil-history .mobile-history-sensors-disclosure[open] summary { border-radius: .5rem .5rem 0 0; }
+.mobile-soil-history .mobile-series-legend { margin: 2rem 0 .75rem; }
+.mobile-soil-history .mobile-series-legend:not(.inline) { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.mobile-soil-history .mobile-series-legend-toolbar { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.mobile-soil-history .mobile-series-legend:not(.inline) .mobile-series-legend-toolbar { flex: 1 0 100%; }
+.mobile-soil-history .mobile-series-legend-toolbar > span { color: var(--text-secondary, #475569); font-size: .8rem; }
+.mobile-soil-history .mobile-series-legend-rows { display: flex; flex-wrap: wrap; gap: .4rem; }
+.mobile-soil-history .mobile-series-legend-row { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; max-width: 100%; text-align: left; }
+.mobile-soil-history .mobile-series-legend-row.is-dimmed { opacity: .55; }
+.mobile-soil-history .mobile-series-legend-swatch { width: 2rem; height: 1rem; flex: 0 0 auto; }
+.mobile-soil-history .mobile-series-legend-label { overflow-wrap: anywhere; white-space: normal; }
+.mobile-soil-history .mobile-series-legend-focus { display: flex; flex-basis: 100%; min-width: 0; align-items: flex-start; gap: .4rem; }
+.mobile-soil-history .mobile-series-legend-focused-label { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.mobile-soil-history .mobile-series-legend-panel { flex-basis: 100%; max-height: min(16rem, 45vh); overflow: auto; padding: .35rem; border: 1px solid var(--border, #e2e8f0); border-radius: .5rem; }
+.mobile-soil-history .mobile-series-legend-panel .mobile-series-legend-rows { display: grid; grid-template-columns: 1fr; }
+.mobile-soil-history .mobile-series-legend-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.mobile-soil-history .history-chart-wrapper { position: relative; padding-bottom: 2rem; }
+.mobile-soil-history .chart-host { position: relative; min-height: 16rem; height: 22.5rem; overflow: visible; }
+.mobile-soil-history .renderer-host { position: absolute; inset: 0; }
+.mobile-soil-history .gesture-layer { position: absolute; inset: 0; z-index: 2; touch-action: none; }
+.mobile-soil-history .inspector-guide { position: absolute; top: 1rem; bottom: 2.25rem; width: 1px; background: currentColor; pointer-events: none; z-index: 3; }
+.mobile-soil-history .window-readout { position: absolute; left: 3.25rem; bottom: -1.55rem; z-index: 3; max-width: calc(100% - 3.5rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .7rem; color: var(--text-secondary, #64748b); }
+.mobile-soil-history .inspector { position: absolute; right: .5rem; top: .5rem; z-index: 4; box-sizing: border-box; max-width: min(20rem, calc(100% - 1rem)); max-height: calc(100% - 1rem); overflow: auto; padding: .75rem; background: Canvas; border: 1px solid currentColor; }
+.mobile-soil-history .inspector > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; }
+.mobile-soil-history .not-loaded { position: absolute; top: 1rem; bottom: 2.25rem; z-index: 1; background: color-mix(in srgb, currentColor 12%, transparent); pointer-events: none; }
+.mobile-soil-history .not-loaded-left { left: 0; }
+.mobile-soil-history .not-loaded-right { right: 0; }
+.mobile-soil-history .history-empty { position: absolute; left: 3.25rem; right: .75rem; top: 3rem; pointer-events: none; z-index: 4; }

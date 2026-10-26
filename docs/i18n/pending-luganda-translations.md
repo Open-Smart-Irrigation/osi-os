@@ -12,6 +12,40 @@ for finished translation work. Each entry must be removed once a human
 Luganda pass supplies correct text, and the corresponding test allowlist
 entry (see below) removed in the same change.
 
+
+## Release gate: Luganda before a Luganda-language release
+
+Most pending keys above are new surfaces that never had Luganda. The keys in
+this section are different: they replaced text that **was** human Luganda on
+screen. Before the shared device card footer, the Kiwi and STREGA cards
+rendered their whole last-seen line in Luganda (`kiwiSensor.lastSeen`,
+`kiwiSensor.neverSeen`, `stregaValve.lastSeen`). The footer keeps that human
+text for the minutes age and "never seen", but the tiers below are English in
+`lg`, and a quiet device spends most of its time in them (every age of six
+hours or more is the date line). Shipping them to a gateway whose interface
+runs in Luganda is a visible regression.
+
+**Gate:** an edge release that contains the shared footer is not deployed to
+any gateway whose interface runs in Luganda until a human Luganda pass has
+supplied these keys, or the owner has accepted the English in writing for
+that release. The release checklist (`docs/versioning-workflow.md`,
+Pre-flight) points here. Never fill them by machine translation.
+
+| `devices.json` key | English source | Replaces human Luganda for |
+|---|---|---|
+| `deviceCard.footer.lastSeenJustNow` | "Last seen just now" | an age under one minute |
+| `deviceCard.footer.lastSeenHours` | "Last seen {{count}} h ago" | ages from 1 to 6 hours |
+| `deviceCard.footer.lastSeenAt` | "Last seen {{date}}" | every age of 6 hours or more |
+| `deviceCard.footer.battery` | "Battery" | (spoken label of the battery slot) |
+| `deviceCard.footer.batteryLow` | "Battery low" | (spoken label below 20 %) |
+| `common.batteryEstimated` | "Estimated from battery voltage" | (now also spoken on an estimated percentage) |
+
+When the pass lands, drop the key from `PENDING_HUMAN_LUGANDA` in
+`web/react-gui/tests/soilTensionCardLocales.test.ts` (or `waterCardLocales.test.ts`
+for `common.batteryEstimated`), remove its row here, and delete the old
+`kiwiSensor.lastSeen`, `kiwiSensor.neverSeen` and `stregaValve.lastSeen` keys
+once the reviewer confirms the move.
+
 ## `accountLink.json`
 
 | Key | Reason |
@@ -36,6 +70,7 @@ from that set once corrected.
 | `environment.water.lastSevenDays`, `tooltipDemand`, `stationCredit`, `today`, `legendDemand`, `legendDemandTodayForecast`, `demandCalculated`, `demandForecast`, `demandNoData`, `demandNoLocation`, `demandPending`, `tooltipTodayNote`, `kcLine`, `et0Tier.station_fao56`, `et0Tier.hargreaves_station`, `et0Tier.provider_open_meteo`, `et0Tier.provider_meteoswiss`, `et0Tier.forecast`, `attribution.open_meteo`, `attributionHelpLabel`, `neededTodayHelpLabel`, `neededTodayHelp`, `lastSevenDaysHelpLabel`, `setupRequiredHelpLabel`, `rainSourceHelpLabel`; `zone.water.rainFromStation`, `rainFromWeather`, `drivenByWaterBalanceFromWeather`, `drivenByWaterBalanceFromStation`, `zone.water.reason.rain_unknown`, `demand_unknown` (31 keys in `devices.json`) | Added by the Water tab's Last 7 days plot with per-day crop demand (2026-09-26); no human Luganda pass yet, so `lg` ships the English source text. |
 | `environment.water.demandNoSource`, `demandMixedStation`, `demandUnknownStation`, `demandUnknownToday`, `et0Line`, `kcSourceByCrop` (6 keys in `devices.json`) | Added by the daily agronomy final fix wave (2026-09-26): the reasons a day has no crop demand, the day's ET0 and the crop beside a demand computed by the cloud or by this gateway. No human Luganda pass yet, so `lg` ships the English source text. The same wave rewrote the English `zoneConfig.stageHelp` (dormancy is for deciduous crops and annual rest periods), and `lg` carries the new English text. |
 | `environment.water.kcSource.fao56_curve`, `stageOverrun`, `et0Tier.open_meteo_daily`, `computedBy.edge`, `computedBy.cloud`, `modelAccuracyNote`, `meteoswissCloudNote` (7 keys in `devices.json`) | Added by daily agronomy parity (the FAO-56 Kc curve, the stage-overrun flag and the days OSI Cloud computes in shared mode, 2026-09-27). The values are the cloud's translations, embedded from the cloud plans, so the two GUIs carry one translation of each key; `test-shared-agronomy-locales.js` keeps them equal. No human Luganda pass yet, so `lg` ships the English source text. |
+| `zone.water.soil.depthSuffix`, `zone.water.soil.lastReading`, `zone.water.soil.triggerProbeLastReading`, `zone.water.soil.triggerProbeInvalid` (4 keys in `devices.json`) | Added by the Water card's "Soil now" rework (owner decision 2026-10-21): the depth after the value and its pill, "({{depth}} cm)"; the age line "Last reading {{since}}", which replaces the card's use of `zone.water.soil.noReadingSince` ("No reading since 5 days ago" was ungrammatical; that key is now unused and its `lg` value was not touched); and the line "Trigger probe: last reading …" when current probes supply the figure while the probe on the irrigation-trigger channel has gone quiet. `triggerProbeInvalid` ("Trigger probe: invalid reading") replaces that line when a current probe reports the trigger channel faulted or out of range. No human Luganda pass yet, so `lg` ships the English source text. |
 
 Tracked in code at `web/react-gui/tests/waterCardLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
@@ -121,7 +156,7 @@ here.
 
 | Keys | Reason |
 |---|---|
-| `watermark.*` (48 keys in `devices.json`: section title, probe labels, resistance/offset/temperature/supply readouts, the thirteen status codes, the probe-depth editor and the calibration form) | New keys added for the IRROMETER WATERMARK 200SS soil-tension probes on the LSN50 card — the probe section, the depth editor and the calibration form (`WatermarkProbeSection.tsx`, `WatermarkDepthSection.tsx`, `WatermarkCalibrationSection.tsx`, `DraginoTempCard.tsx`, `DraginoSettingsModal.tsx`). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; "WATERMARK" stays untranslated as the product name, and `status.ok`, `wetUpTo`, and the two Ω-suffixed calibration field labels that are established electronics loanwords (`pullup`, `pulldown`) may legitimately match English since they are units, symbols, or "OK". `seriesFwd`/`seriesRev` ("Series, forward"/"Series, reverse") are plain English prose rather than loanwords and are translated in all five European locales, not exempted. |
+| `watermark.*` (44 keys in `devices.json`: resistance/offset/temperature/supply readouts, the thirteen status codes, the probe-depth editor and the calibration form) | New keys added for the IRROMETER WATERMARK 200SS soil-tension probes on the LSN50 card — the probe status lines, the depth editor and the calibration form (`WatermarkProbeSection.tsx`, `WatermarkDepthSection.tsx`, `WatermarkCalibrationSection.tsx`, `DraginoTempCard.tsx`, `DraginoSettingsModal.tsx`). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; "WATERMARK" stays untranslated as the product name, and `status.ok`, `wetUpTo`, and the two Ω-suffixed calibration field labels that are established electronics loanwords (`pullup`, `pulldown`) may legitimately match English since they are units, symbols, or "OK". `seriesFwd`/`seriesRev` ("Series, forward"/"Series, reverse") are plain English prose rather than loanwords and are translated in all five European locales, not exempted. |
 
 Tracked in code at `web/react-gui/tests/watermarkLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which collects every leaf key under `devices.json`
@@ -146,7 +181,7 @@ same change; the test fails otherwise, so the two cannot drift apart.
 
 | Keys | Reason |
 |---|---|
-| `coverage.title`, `coverage.window`, `coverage.windowLastHour`, `coverage.windowHours`, `coverage.windowDays`, `coverage.export`, `coverage.points_one`, `coverage.points_other`, `coverage.gateway`, `coverage.legendStrong`, `coverage.legendWeak`, `coverage.noPosition`, `coverage.noPoints`, `coverage.captureOff` (14 keys in `network.json`) | New keys for the coverage view NetworkPage gained for the RAK10701 field-test walk: the RSSI legend, the time-window picker, the GeoJSON/CSV export, and the three honest empty states (capture switched off, no gateway position, no positioned observation). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `coverage.gateway` deliberately stays "Gateway" in de-CH/it/pt, matching the loanword those bundles already use, and is "Passerelle" in fr and "Pasarela" in es, matching `network.noDevices` in that bundle. `coverage.points` carries plural forms, so Luganda holds English's two categories (`_one`, `_other`); fr/es/it/pt additionally carry `_many`, which their CLDR rules have and English does not, and which is therefore outside this list. |
+| `coverage.title`, `coverage.window`, `coverage.windowLastHour`, `coverage.windowHours`, `coverage.windowDays`, `coverage.export`, `coverage.points_one`, `coverage.points_other`, `coverage.gateway`, `coverage.legendStrong`, `coverage.legendWeak`, `coverage.noPosition`, `coverage.noPoints`, `coverage.captureOff`, `coverage.noGpsFix`, `coverage.noGpsFixHint` (16 keys in `network.json`) | New keys for the coverage view NetworkPage gained for the RAK10701 field-test walk: the RSSI legend, the time-window picker, the GeoJSON/CSV export, and the three honest empty states (capture switched off, no gateway position, no positioned observation). No native Luganda speaker has translated them yet, so `lg` ships the current English source text rather than an unreviewed machine translation, per the edge lg policy. de-CH/es/fr/it/pt received human-quality translations in the same change; `coverage.gateway` deliberately stays "Gateway" in de-CH/it/pt, matching the loanword those bundles already use, and is "Passerelle" in fr and "Pasarela" in es, matching `network.noDevices` in that bundle. `coverage.points` carries plural forms, so Luganda holds English's two categories (`_one`, `_other`); fr/es/it/pt additionally carry `_many`, which their CLDR rules have and English does not, and which is therefore outside this list. |
 
 Tracked in code at `web/react-gui/tests/coverageLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
@@ -184,6 +219,8 @@ same change; the test fails otherwise, so the two cannot drift apart.
 | Keys | Reason |
 |---|---|
 | `scheduleHelp`, `scheduleHelpLabel` (2 keys in `valves.json`) | The information button beside the valve panel heading and its tooltip ("Weekly schedules run on each valve."). They replace the retired `help` and `helpLabel`, whose English said "All zones." in front of the same sentence and named the button "About valve control". No human Luganda pass has seen the new wording, so `lg` ships the English source text. de-CH/es/fr/it/pt received human-quality translations in the same change. |
+| `planLost`, `scheduleDialog.push.LOST` (2 keys in `valves.json`) | Added by the CMD-04 PR0 containment (owner decision Q02 c): a plan push the valve has not confirmed within 24 hours is no longer re-sent automatically, and the valve tile and the schedule badge say "Device may not hold this plan". The wording is shared with the conditional-scheduling branch and is not yet reviewed in any language, so every edge locale, `lg` included, ships the English source text (`PENDING_TRANSLATION` in the same test file). |
+| `schedulerStatusLost` (1 key in `valves.json`) | Added after the CMD-04 PR0 review: a LOST scheduler-status push (pause, skip today, resume) gets its own tile line, "Device may not hold the latest pause, skip or resume", instead of the plan line. Same status as `planLost`: not yet reviewed in any language, so every edge locale, `lg` included, ships the English source text (`PENDING_TRANSLATION` in the same test file). |
 
 Tracked in code at `web/react-gui/tests/valveControlLocales.test.ts`
 (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
@@ -232,6 +269,80 @@ Tracked in code at `web/react-gui/tests/lorainViewLocales.test.ts`
 byte-identical to `en`. A human Luganda pass must drop the key from that set
 and from the table above in the same change.
 
+## `history.json` — mobile uPlot history
+
+| Keys | Reason |
+|---|---|
+| `mobileUplot.ranges.*` (4), `mobileUplot.back`, `forward`, `latest`, `sensors`, `unitNotReported`, `loading`, `updating`, `noData`, `allHidden`, `unavailable`, `pinnedReading`, `close`, `aggregation`, `points`, `loadedRange`, `truncated`, `showDay`, `retry`, `failure`, `coverage`, `freshness`, `notLoaded`, `rangesGroup`, `visibleWindow`, `mobileUplot.seriesLegend.*` (6) (34 keys in `history.json`) | Added with the default-off mobile soil history preview and its compact series legend; `rangesGroup` and `visibleWindow` (the accessible names of the range buttons and the visible-window readout, formerly English literals in the package) after the #512 review. The `lg` values first shipped on the preview branch were written by implementation agents, not by a human translator, so they were replaced with the English source text. de-CH/es/fr/it/pt carry translations. |
+
+Tracked in code at
+`web/react-gui/src/history/__tests__/historyLocaleValues.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en` and that every `mobileUplot.*` key is listed. A human
+Luganda pass must drop the key from that set and from the table above in the
+same change.
+
+## `history.json` — mobile water-tension history
+
+| Keys | Reason |
+|---|---|
+| `history.mobileTension.*` (52 labels, including the `route.*` states and `seriesLegend.*`) | Added for the internal mobile water-tension history shell. The five European locales carry reviewed translations, while `lg` keeps the English source text until a human Luganda pass. |
+
+Tracked in `web/react-gui/src/history/__tests__/historyLocaleValues.test.ts` (`PENDING_HUMAN_LUGANDA`), which asserts that every `history.mobileTension.*` leaf remains byte-identical to English. A human Luganda pass must remove each leaf from that set and this row together.
+
 The presenter authorized machine-translated Luganda for the isolated
 presentation simulator only; its overrides are under
 `web/react-gui/demo/locales/lg-valves.json` and are excluded from production builds.
+The CMD-04 valve keys listed under `valves.json` above (`planLost`,
+`schedulerStatusLost`, `scheduleDialog.push.LOST`) get no demo override: the simulator shows their
+English source text too. `web/react-gui/demo/tests/valve-locale.test.ts`
+enforces this, and a human Luganda pass removes the key from its pending list
+in the same change.
+
+## `devices.json` — Tensiomark settings and SDI-12 card
+
+| Keys | Reason |
+|---|---|
+| `sdi12.tensiomark.*` (all 27 keys in `devices.json`: `title`, `qualification`, `calibrationRange`, `addSensor`, `confirmation`, `confirmRequired`, `saved`, `address`, `channel`, `identity`, `depthCmLabel`, `addressAria`, `channelAria`, `identityAria`, `depthAria`, `identityExample`, `removeSensor`, `removeSensorAria`, and `errors.sensorCount`, `errors.addressInvalid`, `errors.channelInvalid`, `errors.identityInvalid`, `errors.depthInvalid`, `errors.calibrationInvalid`, `errors.duplicateAddress`, `errors.duplicateIdentity`, `errors.duplicateChannel`) | Added for the Tensiomark layout editor in the SDI-12 settings modal (labels, screen-reader labels, row removal, per-field validation errors and the pF/temperature-order confirmation). The card's address, depth and value labels moved to the shared soil tension keys below. de-CH/es/fr/it/pt carry translations. The confirmation sentence and the error texts carry operational meaning, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/tensiomarkLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
+
+## `devices.json` — shared soil tension card, device card footer, SDI-12 card header
+
+| Keys | Reason |
+|---|---|
+| `soilTension.*` (9 keys: `sectionTitle`, `channel`, `depthCm`, `soilTemp`, `soilTempSeries`, `invalidReading`, `noReadings`, `family.watermark`, `family.tensiomark`), `deviceCard.*` (9 keys pending: `footer.lastSeenJustNow`, `footer.lastSeenHours`, `footer.lastSeenAt`, `footer.battery`, `footer.batteryLow`, `settings`, `closeSettings`, `zones`, `noZones`), `sdi12Soil.badge`, `sdi12Soil.noProfile`, `sdi12Soil.detecting`, `sdi12Soil.invalidLayout`, `sdi12Soil.status.*` (5 keys) | Added when the WATERMARK card (`DraginoTempCard.tsx`, `WatermarkProbeSection.tsx`) and the Tensiomark card (`Sdi12SoilCard.tsx`) moved onto one shared soil tension layout (`SoilTensionReadings.tsx`), the same layout and text as the OSI Cloud cards, and their footers and headers lost their English literals. They replace `watermark.sectionTitle`, `watermark.probe`, `watermark.soilTemp`, `watermark.depthUnset` and `sdi12.tensiomark.addressDepth`/`depthUnknown`/`depthCm`/`swt`/`soilTemperature`, whose `lg` values were English too, so no human Luganda was dropped. de-CH/es/fr/it/pt carry the cloud's translations for the shared keys; the new strings (`soilTempSeries`, `invalidReading`, `deviceCard.settings`/`closeSettings`, the `sdi12Soil` header, notice and status texts) were drafted without a native speaker and need a review. `deviceCard.zones`/`noZones` ("Zones:", "No zones assigned") replaced the weather station card's English literals later, translated the same way. `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/soilTensionCardLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
+
+The shared device card footer (owner decision 2026-10-21: battery and last
+seen on every card) kept the human Luganda that already existed for the same
+English meaning instead of adding English:
+
+| `lg` key | State |
+|---|---|
+| `deviceCard.footer.lastSeenMinutes` | Human text kept: the Kiwi card's `kiwiSensor.lastSeen` ("Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde"; English "Last seen: N minutes ago", now "Last seen N min ago", the same meaning), with `{{minutes}}` renamed to `{{count}}`. |
+| `deviceCard.footer.neverSeen` | Human text kept: `kiwiSensor.neverSeen` ("Tekalabikangako"). |
+| `deviceCard.footer.lastSeenJustNow`, `lastSeenHours`, `lastSeenAt` ("Last seen {{date}}", from six hours on), `battery`, `batteryLow` | English placeholders, pending (rows above). Key names and the other locales' text are the cloud's (osi-server `6296119e5`). |
+| `kiwiSensor.lastSeen`, `kiwiSensor.neverSeen`, `stregaValve.lastSeen` | Human text left in place, untouched. No card reads them any more; delete them only after the Luganda reviewer confirms the move. |
+| `valves.lastSeen.*`, `valves.battery`, `loRain.lastReport` | English in `lg`; no card reads them any more (the valve tile and the LoRain card use the shared footer). |
+
+`soilTensionCardLocales.test.ts` (`HUMAN_LUGANDA_REUSED`) asserts the two
+kept keys still equal their human source strings.
+
+## `common.json` — auto-stacked Data view chart
+
+| Keys | Reason |
+|---|---|
+| `analysis.autoStack.note`, `analysis.autoStack.showOverlaid` (2 keys in `common.json`) | Added when an overlaid Data view chart whose unit axes leave too little room for the plot started to render stacked, with a short note and a session-only "Show overlaid anyway" toggle (ported from the cloud Analysis page, 2026-10-21). de-CH/es/fr/it/pt carry the cloud's translations, which still need a native-speaker review. No human Luganda pass yet, so `lg` ships the English source text. |
+
+Tracked in code at `web/react-gui/tests/analysis-locales.test.ts` in the
+auto-stack test's `PENDING_HUMAN_LUGANDA` set, which asserts each key's `lg`
+value is still byte-identical to `en`. A human Luganda pass must drop each key
+from that set and from this table in the same change.

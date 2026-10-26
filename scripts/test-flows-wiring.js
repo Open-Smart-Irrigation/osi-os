@@ -319,7 +319,8 @@ if (!commandUpdate || !commandApply || !commandPostconditionRoute || !commandPos
     failures.push('command ACK postconditions: required apply/verify/ACK nodes are missing');
 } else if (JSON.stringify(commandUpdate.wires || []) !== JSON.stringify([['78d3d38be30a8741']]) ||
     JSON.stringify(commandApply.wires || []) !== JSON.stringify([['command-postcondition-route']]) ||
-    JSON.stringify(commandPostconditionRoute.wires || []) !== JSON.stringify([['command-postcondition-build'], ['e2e139678c3ddded']]) ||
+    // AUTH-09 PR A: the third output takes UNCLAIM_DEVICE through the valve cleanup to the same ACK.
+    JSON.stringify(commandPostconditionRoute.wires || []) !== JSON.stringify([['command-postcondition-build'], ['e2e139678c3ddded'], ['unclaim-cloud-valve-cleanup-fn']]) ||
     JSON.stringify(commandPostcondition.wires || []) !== JSON.stringify([['command-postcondition-verify-db']]) ||
     JSON.stringify(commandVerify.wires || []) !== JSON.stringify([['command-postcondition-ack']]) ||
     JSON.stringify(commandVerifiedAck.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
@@ -1728,8 +1729,13 @@ if (!valveUnclaimFn) {
     failures.push('delete-device-valve-cleanup-fn is missing: a valve unclaim would leave its weekly plan running inside the valve (F104)');
 } else {
     const cleanupFunc = valveUnclaimFn.func || '';
-    if (!/clearValveOnUnclaim\s*\(/.test(cleanupFunc)) {
-        failures.push('delete-device-valve-cleanup-fn must delegate to osi-valve-control clearValveOnUnclaim() rather than restating what clears a valve');
+    // AUTH-09 PR A: runUnclaimCleanup wraps clearValveOnUnclaim and returns the outcome both
+    // unclaim origins report.
+    if (!/runUnclaimCleanup\s*\(/.test(cleanupFunc)) {
+        failures.push('delete-device-valve-cleanup-fn must delegate to osi-valve-control runUnclaimCleanup() rather than restating what clears a valve');
+    }
+    if (!/valve_cleanup/.test(cleanupFunc)) {
+        failures.push('delete-device-valve-cleanup-fn must report the cleanup outcome as valve_cleanup on the response body (AUTH-09 PR A)');
     }
     if (/'CLOSE'|"CLOSE"/.test(cleanupFunc)) {
         failures.push('delete-device-valve-cleanup-fn must never send a bare CLOSE to a STREGA valve');
@@ -1751,6 +1757,31 @@ if (!valveUnclaimFn) {
     }
     if (!failures.some((f) => f.includes('delete-device-valve-cleanup-fn') || f.includes('delete-device-response must route') || f.includes('scoped-device-delete-router'))) {
         console.log('OK  both device-delete routes clear an unclaimed valve\'s on-valve plan (F104)');
+    }
+}
+
+// AUTH-09 PR A (external review B3): a cloud UNCLAIM_DEVICE used to null the owner and ACK
+// SUCCESS without ever reaching clearValveOnUnclaim, so the valve kept its plan while the
+// cloud recorded success. The cloud path now runs the same cleanup before its ACK.
+const cloudUnclaimFn = byId['unclaim-cloud-valve-cleanup-fn'];
+if (!cloudUnclaimFn) {
+    failures.push('unclaim-cloud-valve-cleanup-fn is missing: a cloud UNCLAIM_DEVICE would leave the valve plan running and ACK success (AUTH-09 / B3)');
+} else {
+    const cloudFunc = cloudUnclaimFn.func || '';
+    if (!/runUnclaimCleanup\s*\(/.test(cloudFunc)) {
+        failures.push('unclaim-cloud-valve-cleanup-fn must delegate to osi-valve-control runUnclaimCleanup()');
+    }
+    if (/'CLOSE'|"CLOSE"/.test(cloudFunc)) {
+        failures.push('unclaim-cloud-valve-cleanup-fn must never send a bare CLOSE to a STREGA valve (D04)');
+    }
+    if (!/valveCleanup/.test(cloudFunc)) {
+        failures.push('unclaim-cloud-valve-cleanup-fn must put the cleanup outcome on the ACK as valveCleanup');
+    }
+    if (JSON.stringify(cloudUnclaimFn.wires) !== JSON.stringify([['e2e139678c3ddded'], ['9fae49d9ba22b793']])) {
+        failures.push('unclaim-cloud-valve-cleanup-fn must forward every ACK to Build Schedule ACK and its clearing downlinks to the ChirpStack mqtt out');
+    }
+    if (!failures.some((f) => f.includes('unclaim-cloud-valve-cleanup-fn'))) {
+        console.log('OK  a cloud UNCLAIM_DEVICE runs the valve plan cleanup before its ACK (AUTH-09 PR A)');
     }
 }
 

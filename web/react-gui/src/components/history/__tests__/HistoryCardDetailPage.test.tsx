@@ -366,7 +366,7 @@ function zoneCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSumma
 
 function gatewayCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSummary {
   return {
-    cardId: '0016C001F11766E7:gateway:hub',
+    cardId: 'AABBCCDDEEFF0004:gateway:hub',
     cardType: 'gateway',
     scope: 'gateway',
     title: 'Gateway',
@@ -378,7 +378,7 @@ function gatewayCard(overrides: Partial<HistoryCardSummary> = {}): HistoryCardSu
     metadata: {
       coveragePct: 100,
       coverageConfidence: 'unknown',
-      gatewayDeviceEui: '0016C001F11766E7',
+      gatewayDeviceEui: 'AABBCCDDEEFF0004',
       syncState: 'synced',
     },
     availability: {
@@ -422,13 +422,13 @@ describe('History card detail route', () => {
       cards: [zoneCard()],
     });
     vi.mocked(historyAPIMock.getGatewayCards).mockResolvedValue({
-      gatewayEui: '0016C001F11766E7',
+      gatewayEui: 'AABBCCDDEEFF0004',
       generatedAt: '2026-05-31T10:00:00Z',
       cards: [
         gatewayCard({
-          title: 'Gateway 0016C001F11766E7',
-          subtitle: 'Hub 0016C001F11766E7',
-          sourceLabels: ['0016C001F11766E7'],
+          title: 'Gateway AABBCCDDEEFF0004',
+          subtitle: 'Hub AABBCCDDEEFF0004',
+          sourceLabels: ['AABBCCDDEEFF0004'],
         }),
       ],
     });
@@ -593,7 +593,7 @@ describe('History card detail route', () => {
   });
 
   it('hides mobile export for gateway cards', async () => {
-    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+    renderAppAtRoute('/history/gateways/AABBCCDDEEFF0004/cards/AABBCCDDEEFF0004%3Agateway%3Ahub');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
@@ -623,7 +623,7 @@ describe('History card detail route', () => {
       generatedAt: '2026-05-31T10:00:00Z',
       cards: [
         zoneCard({
-          cardId: '0016C001F11766E7:gateway:hub',
+          cardId: 'AABBCCDDEEFF0004:gateway:hub',
           cardType: 'gateway',
           scope: 'gateway',
           title: 'Gateway',
@@ -634,7 +634,7 @@ describe('History card detail route', () => {
           metadata: {
             coveragePct: 100,
             coverageConfidence: 'unknown',
-            gatewayDeviceEui: '0016C001F11766E7',
+            gatewayDeviceEui: 'AABBCCDDEEFF0004',
             syncState: 'synced',
           },
         }),
@@ -646,51 +646,51 @@ describe('History card detail route', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
     await waitFor(() => {
       expect(historyAPI.getGatewayCardData).toHaveBeenCalledWith(
-        '0016C001F11766E7',
-        '0016C001F11766E7:gateway:hub',
+        'AABBCCDDEEFF0004',
+        'AABBCCDDEEFF0004:gateway:hub',
         expect.objectContaining({ view: 'status-overview' }),
       );
-      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, '0016C001F11766E7:gateway:hub');
+      expect(historyAPI.markZoneCardOpened).toHaveBeenCalledWith(12, 'AABBCCDDEEFF0004:gateway:hub');
     });
     expect(screen.queryByText(/[A-F0-9]{16}/)).not.toBeInTheDocument();
   });
 
   it('loads a hub-scoped gateway card through the gateway route without requiring a zone', async () => {
-    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+    renderAppAtRoute('/history/gateways/AABBCCDDEEFF0004/cards/AABBCCDDEEFF0004%3Agateway%3Ahub');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Gateway' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Back to history/i })).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(historyAPIMock.getGatewayCards).toHaveBeenCalledWith('0016C001F11766E7');
+      expect(historyAPIMock.getGatewayCards).toHaveBeenCalledWith('AABBCCDDEEFF0004');
       expect(historyAPI.getGatewayCardData).toHaveBeenCalled();
     });
     expect(irrigationZonesAPI.getAll).not.toHaveBeenCalled();
     expect(historyAPI.getZoneCards).not.toHaveBeenCalled();
     expect(historyAPI.markZoneCardOpened).not.toHaveBeenCalled();
-    expect(screen.queryByText('0016C001F11766E7')).not.toBeInTheDocument();
+    expect(screen.queryByText('AABBCCDDEEFF0004')).not.toBeInTheDocument();
   });
 
   it('keeps selected desktop gateway cards on the sanitized data path', async () => {
     mockViewport({ isDesktop: true });
     vi.mocked(historyAPIMock.getGatewayCards).mockResolvedValue({
-      gatewayEui: '0016C001F11766E7',
+      gatewayEui: 'AABBCCDDEEFF0004',
       generatedAt: '2026-05-31T10:00:00Z',
       cards: [
         gatewayCard({
-          cardId: '0016C001F11766E7:gateway:hub',
+          cardId: 'AABBCCDDEEFF0004:gateway:hub',
           title: 'Primary gateway',
           subtitle: 'Hub status',
         }),
         gatewayCard({
-          cardId: '0016C001F11766E7:gateway:secondary',
-          title: 'Gateway 0016C001F11766E7',
-          subtitle: 'Hub 0016C001F11766E7',
-          sourceLabels: ['0016C001F11766E7'],
+          cardId: 'AABBCCDDEEFF0004:gateway:secondary',
+          title: 'Gateway AABBCCDDEEFF0004',
+          subtitle: 'Hub AABBCCDDEEFF0004',
+          sourceLabels: ['AABBCCDDEEFF0004'],
         }),
       ],
     });
 
-    renderAppAtRoute('/history/gateways/0016C001F11766E7/cards/0016C001F11766E7%3Agateway%3Ahub');
+    renderAppAtRoute('/history/gateways/AABBCCDDEEFF0004/cards/AABBCCDDEEFF0004%3Agateway%3Ahub');
 
     await waitFor(() => {
       expect(screen.getAllByText('Primary gateway').length).toBeGreaterThan(0);
@@ -700,7 +700,7 @@ describe('History card detail route', () => {
     await waitFor(() => {
       expect(screen.getAllByText('Gateway').length).toBeGreaterThan(0);
     });
-    expect(screen.queryByText(/0016C001F11766E7/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/AABBCCDDEEFF0004/)).not.toBeInTheDocument();
   });
 
   it('header shows source names without back button or visible History text', async () => {

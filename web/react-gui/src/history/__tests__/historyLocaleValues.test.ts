@@ -141,17 +141,59 @@ const REVIEWED_IDENTICAL_KEYS: Record<Locale, ReadonlySet<string>> = {
   ]),
 };
 
+// Edge `lg` values are human Luganda. These keys were added with the mobile
+// uPlot history surface and have had no human Luganda pass, so `lg` must ship
+// the English source text (docs/i18n/pending-luganda-translations.md). A human
+// pass removes a key here and from that document in the same change.
+const PENDING_HUMAN_LUGANDA: ReadonlySet<string> = new Set([
+  'mobileUplot.ranges.day', 'mobileUplot.ranges.week', 'mobileUplot.ranges.month',
+  'mobileUplot.ranges.ninetyDays', 'mobileUplot.back', 'mobileUplot.forward',
+  'mobileUplot.latest', 'mobileUplot.sensors', 'mobileUplot.unitNotReported',
+  'mobileUplot.loading', 'mobileUplot.updating', 'mobileUplot.noData',
+  'mobileUplot.allHidden', 'mobileUplot.unavailable', 'mobileUplot.pinnedReading',
+  'mobileUplot.close', 'mobileUplot.aggregation', 'mobileUplot.points',
+  'mobileUplot.loadedRange', 'mobileUplot.truncated', 'mobileUplot.showDay',
+  'mobileUplot.retry', 'mobileUplot.failure', 'mobileUplot.coverage',
+  'mobileUplot.freshness', 'mobileUplot.notLoaded', 'mobileUplot.rangesGroup', 'mobileUplot.visibleWindow',
+  'mobileUplot.seriesLegend.legend', 'mobileUplot.seriesLegend.showAll',
+  'mobileUplot.seriesLegend.plottedSeries', 'mobileUplot.seriesLegend.seriesCount',
+  'mobileUplot.seriesLegend.focusAnnouncement', 'mobileUplot.seriesLegend.allSeriesAnnouncement',
+  'history.mobileTension.title', 'history.mobileTension.chart', 'history.mobileTension.waterTension', 'history.mobileTension.controls',
+  'history.mobileTension.time', 'history.mobileTension.timeRange', 'history.mobileTension.range24h', 'history.mobileTension.range7d',
+  'history.mobileTension.latest', 'history.mobileTension.hourlyAverages', 'history.mobileTension.hourlyAverage', 'history.mobileTension.loading',
+  'history.mobileTension.refreshing', 'history.mobileTension.emptyInterval', 'history.mobileTension.showLatest24h',
+  'history.mobileTension.unavailableValue', 'history.mobileTension.notLoaded', 'history.mobileTension.chooseSources',
+  'history.mobileTension.historicalUnverified', 'history.mobileTension.sources', 'history.mobileTension.chartSources',
+  'history.mobileTension.openSources', 'history.mobileTension.sourceDiscoveryIncomplete', 'history.mobileTension.catalogFailed',
+  'history.mobileTension.unavailableSources', 'history.mobileTension.requestTooLarge',
+  'history.mobileTension.fewerSourcesOrShorterWindow', 'history.mobileTension.accessDenied', 'history.mobileTension.incompleteResponse',
+  'history.mobileTension.transientFailure', 'history.mobileTension.retry', 'history.mobileTension.details', 'history.mobileTension.close',
+  'history.mobileTension.sourceCap', 'history.mobileTension.sourceCount', 'history.mobileTension.invalidHourlyAverages',
+  'history.mobileTension.removedSources', 'history.mobileTension.removeSource', 'history.mobileTension.transportCoverage',
+  'history.mobileTension.bucketInterval', 'history.mobileTension.latestBucket', 'history.mobileTension.seriesLegend.legend',
+  'history.mobileTension.seriesLegend.showAll', 'history.mobileTension.seriesLegend.plottedSeries',
+  'history.mobileTension.seriesLegend.seriesCount', 'history.mobileTension.seriesLegend.focusAnnouncement',
+  'history.mobileTension.seriesLegend.allSeriesAnnouncement', 'history.mobileTension.pinnedReading',
+  'history.mobileTension.visibleWindow', 'history.mobileTension.route.zoneLoading', 'history.mobileTension.route.zonesFailed',
+  'history.mobileTension.route.timeZoneUnavailable',
+]);
+
+function isAllowedIdentical(locale: Locale, key: string): boolean {
+  return REVIEWED_IDENTICAL_KEYS[locale].has(key) || (locale === 'lg' && PENDING_HUMAN_LUGANDA.has(key));
+}
+
 describe('history locale value parity', () => {
   it('keeps all six locales translated except reviewed shared technical values', () => {
     const english = localeLeaves('en');
-    // 424, not the AgroLink source arc's 414: main carries four additional
-    // irrigationTimeline.eventLabel keys from the valve-control work
-    // (serviceAction, onValveSchedule, oneTime, unexplained), plus the
-    // history.nav.admin key added for the scoped-access admin nav entry
-    // point, plus the seven source-selection and recovery labels. All twelve are
-    // already translated in every shipped locale, so
-    // only the count moves.
-    expect(Object.keys(english)).toHaveLength(426);
+    // 512 = 453 on main plus 52 history.mobileTension leaves (the mobile
+    // tension shell, its six series-legend labels, and the route labels),
+    // plus seven source-selection and recovery labels:
+    // history.sourceFilter.chooseOne, limitsTitle, recoveryRaw, recoveryPoint,
+    // shorterRange, coarserAggregation and availableSources. The 453 already
+    // covers the mobile uPlot keys, the valve-control
+    // irrigationTimeline.eventLabel keys and history.nav.admin. All keys
+    // exist in every shipped locale, so adding keys only changes this count.
+    expect(Object.keys(english)).toHaveLength(512);
 
     for (const locale of LOCALES) {
       const translated = localeLeaves(locale);
@@ -165,7 +207,7 @@ describe('history locale value parity', () => {
       expect(missingAllowlistKeys, `${locale} allowlisted keys missing from a locale resource`).toEqual([]);
 
       const identicalKeys = Object.keys(english).filter((key) => translated[key] === english[key]);
-      const unexpected = identicalKeys.filter((key) => !REVIEWED_IDENTICAL_KEYS[locale].has(key));
+      const unexpected = identicalKeys.filter((key) => !isAllowedIdentical(locale, key));
       const staleAllowlist = [...REVIEWED_IDENTICAL_KEYS[locale]].filter((key) => translated[key] !== english[key]);
       expect(unexpected, `${locale} unreviewed English-identical values`).toEqual([]);
       expect(staleAllowlist, `${locale} stale identical-value allowlist entries`).toEqual([]);
@@ -174,6 +216,19 @@ describe('history locale value parity', () => {
         placeholders(english[key]).join('|') !== placeholders(translated[key]).join('|'));
       expect(placeholderMismatches, `${locale} placeholder mismatches`).toEqual([]);
     }
+  });
+
+  it('ships English in lg for mobile history keys that have had no human Luganda pass', () => {
+    const english = localeLeaves('en');
+    const luganda = localeLeaves('lg');
+    const unknown = [...PENDING_HUMAN_LUGANDA].filter((key) => !Object.prototype.hasOwnProperty.call(english, key));
+    expect(unknown, 'pending keys missing from en').toEqual([]);
+    const notEnglish = [...PENDING_HUMAN_LUGANDA].filter((key) => luganda[key] !== english[key]);
+    expect(notEnglish, 'pending lg keys must equal the English source text').toEqual([]);
+    const unlisted = Object.keys(english).filter((key) => key.startsWith('mobileUplot.') && !PENDING_HUMAN_LUGANDA.has(key));
+    expect(unlisted, 'new mobileUplot keys need a human Luganda pass or a pending entry').toEqual([]);
+    const unlistedTension = Object.keys(english).filter((key) => key.startsWith('history.mobileTension.') && !PENDING_HUMAN_LUGANDA.has(key));
+    expect(unlistedTension, 'new mobileTension keys need a human Luganda pass or a pending entry').toEqual([]);
   });
 
   it('uses Swiss spelling in de-CH', () => {

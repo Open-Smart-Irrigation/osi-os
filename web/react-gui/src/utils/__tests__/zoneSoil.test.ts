@@ -113,7 +113,7 @@ describe('summarizeZoneSoil', () => {
   });
 
   it('flags an out-of-range tension as invalid rather than plotting it', () => {
-    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900 } })];
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001 } })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.invalid).toBe(true);
     expect(status.value).toBeNull();
@@ -226,7 +226,7 @@ describe('summarizeZoneSoil channel selection', () => {
   });
 
   it('skips a channel with no usable reading rather than reporting nothing', () => {
-    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 900, swt_2: 40 } })];
+    const zone = [device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001, swt_2: 40 } })];
     const status = summarizeZoneSoil(zone, NOW);
     expect(status.value).toBe(40);
     expect(status.channel).toBe('swt_2');
@@ -309,7 +309,7 @@ it('does not establish a last-valid historical value with a non-finite clock', (
   ], Number.NaN)).toMatchObject({ value: null, observedAt: null, stale: true, invalid: false });
 });
 
-it.each([{ swt_1: 301 }, { swt_1: 45, chameleon_timeout: 1 }])(
+it.each([{ swt_1: 1_000_000.1 }, { swt_1: 45, chameleon_timeout: 1 }])(
   'retains actual measurement faults even with an untrusted timestamp: %o', (latestData) => {
     expect(summarizeZoneSoil([device({
       type_id: 'DRAGINO_LSN50', chameleon_enabled: 1,
@@ -593,4 +593,125 @@ it('accepts the three-hour age and five-minute skew boundaries only', () => {
   expect(isSensorObservationFresh('not-a-date', NOW)).toBe(false);
   expect(isSensorObservationFresh(FRESH, Number.NaN)).toBe(false);
   expect(isSensorObservationFresh(FRESH, Number.POSITIVE_INFINITY)).toBe(false);
+});
+
+describe('canonical soil tension across sources', () => {
+  it.each(['wet_offset_clipped', 'unsettled', 'saturated', 'open'] as const)('uses finite canonical SWT without gating on diagnostic status %s', status => {
+    const result = summarizeZoneSoil([device({type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH, latest_data: { swt_1: 30, watermark: watermarkLatest({ status, kpa: 30 }, { status: 'ok', kpa: null }) }})], NOW);
+    expect(result.value).toBe(30);
+    expect(result.invalid).toBe(false);
+  });
+  it.each([0, 500, 1_000_000])('gives KIWI and Tensiomark the same domain and weight at %s kPa', value => {
+    const result = summarizeZoneSoil([
+      device({ type_id: 'KIWI_SENSOR', last_seen: FRESH, latest_data: { swt_1: value } }),
+      device({ type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK', last_seen: FRESH, latest_data: { swt_1: value } }),
+    ], NOW);
+    expect(result.value).toBe(value);
+    expect(result.invalid).toBe(false);
+    expect(result.sensorCount).toBe(2);
+  });
+});
+
+// Owner decision 2026-10-21: current probes win over a stale trigger probe, the
+// stale trigger probe is reported on its own, and the figure names its depth or,
+// when no depth is recorded, the probe it came from.
+describe('summarizeZoneSoil stale trigger probe and probe naming', () => {
+  it('lets a current probe win over a stale probe that alone carries the trigger channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', name: 'South probe', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.value).toBe(18);
+    expect(status.channel).toBe('swt_1');
+    expect(status.stale).toBe(false);
+    expect(status.staleTrigger).toEqual({ channel: 'swt_2', observedAt: STALE });
+  });
+
+  it('reports no stale trigger probe when the trigger channel itself is current', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_2: 30 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_2');
+    expect(status.value).toBe(30);
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('reports no separate stale trigger probe when every probe is stale', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_1: 18, swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.stale).toBe(true);
+    expect(status.channel).toBe('swt_2');
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('reports no stale trigger probe for a mean trigger or no schedule', () => {
+    const zone = [
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ];
+    expect(summarizeZoneSoil(zone, NOW, 'mean').staleTrigger).toBeNull();
+    expect(summarizeZoneSoil(zone, NOW, null).staleTrigger).toBeNull();
+  });
+
+  // A current fault on the trigger channel outranks an older valid reading of it:
+  // the card reports the fault, not the historical reading's age.
+  it('reports a current trigger-channel fault instead of stale history for that channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1, last_seen: FRESH,
+        latest_data: { swt_1: 18, swt_2: 0, chameleon_ch2_open: 1 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.value).toBe(18);
+    expect(status.channel).toBe('swt_1');
+    expect(status.invalid).toBe(false);
+    expect(status.staleTrigger).toBeNull();
+    expect(status.invalidTrigger).toEqual({ channel: 'swt_2', observedAt: FRESH });
+  });
+
+  it('reports a current trigger-channel fault when no other probe ever carried that channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18, swt_2: -5 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_1');
+    expect(status.invalidTrigger).toEqual({ channel: 'swt_2', observedAt: FRESH });
+  });
+
+  it('reports no trigger fault when the trigger channel also has a current usable reading', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'GOOD', last_seen: FRESH, latest_data: { swt_2: 30 } }),
+      device({ deveui: 'BAD', last_seen: FRESH, latest_data: { swt_2: -5 } }),
+    ], NOW, 'swt_2');
+    expect(status.channel).toBe('swt_2');
+    expect(status.invalidTrigger).toBeNull();
+    expect(status.staleTrigger).toBeNull();
+  });
+
+  it('keeps reporting stale history when the trigger channel has no current fault', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 18 } }),
+      device({ deveui: 'OLD', last_seen: STALE, latest_data: { swt_2: 70 } }),
+    ], NOW, 'swt_2');
+    expect(status.invalidTrigger).toBeNull();
+    expect(status.staleTrigger).toEqual({ channel: 'swt_2', observedAt: STALE });
+  });
+
+  it('names the probes behind a single-channel figure, current contributors only', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'A', name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 20 } }),
+      device({ deveui: 'B', name: 'South probe', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'C', name: 'Old probe', last_seen: STALE, latest_data: { swt_1: 90 } }),
+    ], NOW);
+    expect(status.probeNames).toEqual(['North probe', 'South probe']);
+  });
+
+  it('names no probe for a pooled mean or a blank name', () => {
+    expect(summarizeZoneSoil([
+      device({ name: 'North probe', last_seen: FRESH, latest_data: { swt_1: 20, swt_2: 30 } }),
+    ], NOW, 'mean').probeNames).toEqual([]);
+    expect(summarizeZoneSoil([
+      device({ name: '  ', last_seen: FRESH, latest_data: { swt_1: 20 } }),
+    ], NOW).probeNames).toEqual([]);
+  });
 });

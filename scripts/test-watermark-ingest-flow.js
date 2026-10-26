@@ -474,6 +474,32 @@ for (const metric of ['SWT_1', 'SWT_AVG']) {
   });
 }
 
+// The interlock holds for every WATERMARK link, whatever its frame status or
+// conversion: a frame_rejected record and a v3 clipped-bound estimate stored in
+// canonical swt_1 are both kept out of irrigation.
+CASES.push({
+  name: '(f2) scheduler: frame_rejected and clipped-bound WATERMARK rows never count either',
+  async run() {
+    const { native, zoneId } = schedulerDb();
+    const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60e3).toISOString();
+    const insertDd = native.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+    const rejected = Number(insertDd.run(DEVEUI, at(30), 90).lastInsertRowid);
+    const clipped = Number(insertDd.run(DEVEUI, at(10), 11.2).lastInsertRowid);
+    const link = native.prepare(
+      'INSERT INTO watermark_readings (deveui, recorded_at, device_data_id, payload_hex, frame_status, conversion_version) VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    link.run(DEVEUI, at(30), rejected, 'a203', 'frame_rejected', 'wm-lsn50-p3-v3');
+    link.run(DEVEUI, at(10), clipped, 'a203', 'accepted', 'wm-lsn50-p3-v3');
+    for (const metric of ['SWT_1', 'SWT_AVG', 'SWT_WM1']) {
+      const topic = await schedulerTopic(headNode(SCHEDULER_QUERY_ID), { zone_id: zoneId, trigger_metric: metric });
+      const [row] = rows(native, topic);
+      assert.equal(row.n_points, 1, metric + ': n_points');
+      assert.equal(row.mean_kpa, 30, metric + ': mean_kpa');
+    }
+    native.close();
+  },
+});
+
 CASES.push({
   name: '(g) scheduler query: the interlock line is the only change vs ' + BASE_REF + ' for every metric, DENDRO included',
   async run() {

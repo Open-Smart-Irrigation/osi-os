@@ -22,7 +22,7 @@ const FLOW_PATHS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((rel) => path.join(REPO, rel));
 
-const EUI = '0016C001F11766E7';
+const EUI = 'AABBCCDDEEFF0004';
 const SAMPLE_COLUMNS = [
   'id', 'gateway_device_eui', 'sampled_at', 'cpu_temp_c', 'mem_percent',
   'load_1', 'load_5', 'load_15', 'fan_value', 'throttled', 'created_at',

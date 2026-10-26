@@ -22,6 +22,8 @@ interface HistoryVisualizationSurfaceProps {
   rangeLabel?: string;
   aggregationLabel?: string;
   className?: string;
+  disableGestures?: boolean;
+  hideLegacyChrome?: boolean;
   children: React.ReactNode;
 }
 
@@ -39,6 +41,8 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
   onViewSwipe,
   onMonthSwipe,
   className = '',
+  disableGestures = false,
+  hideLegacyChrome = false,
   children,
 }) => {
   const { t: translate } = useTranslation('history');
@@ -59,20 +63,18 @@ export const HistoryVisualizationSurface: React.FC<HistoryVisualizationSurfacePr
 
   return (
     <div
-      ref={gestureProps.ref}
+      ref={disableGestures ? undefined : gestureProps.ref}
       data-testid="history-visualization-surface"
       data-history-visualization-surface="true"
       role="region"
       aria-label={t('history.detail.visualizationLabel')}
-      aria-describedby={helpId}
+      aria-describedby={hideLegacyChrome ? undefined : helpId}
       className={`relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg)] outline-none focus:ring-2 focus:ring-[var(--primary)] ${className}`}
-      onDoubleClick={gestureProps.onDoubleClick}
-      style={gestureProps.style}
+      onDoubleClick={disableGestures ? undefined : gestureProps.onDoubleClick}
+      style={disableGestures ? undefined : gestureProps.style}
       tabIndex={0}
     >
-      <p id={helpId} className="sr-only">
-        {t('history.detail.visualizationHelp')}
-      </p>
+      {!hideLegacyChrome && <p id={helpId} className="sr-only">{t('history.detail.visualizationHelp')}</p>}
       {children}
     </div>
   );

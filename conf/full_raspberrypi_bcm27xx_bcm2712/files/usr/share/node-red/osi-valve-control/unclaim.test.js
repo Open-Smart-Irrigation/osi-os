@@ -9,6 +9,7 @@ const { clearValveOnUnclaim } = require('./unclaim');
 const { handleHttpRequest } = require('./api');
 const crypto = require('node:crypto');
 const push = require('./push');
+const store = require('./store');
 
 const EUI = '0016C001F1000001';
 const EMPTY_DAY_HEX = 'FF'.repeat(24); // encodeGen1Day([]) -- the plan that clears a Gen1 valve
@@ -43,8 +44,8 @@ async function queuedPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' ORDER BY purpose, fport, weekday, payload_hex");
 }
 
-// The seed's one-off CLOCK_SYNC stays QUEUED across a compile (nothing supersedes it), so
-// the plan-shaped assertions look only at the rows that carry the on-valve schedule.
+// The plan-shaped assertions look only at the rows that carry the on-valve schedule (the
+// snapshot also carries a SCHEDULER_STATUS row).
 async function queuedPlanPushes(db) {
   return db.all("SELECT purpose, weekday, fport, payload_hex FROM valve_schedule_pushes WHERE state='QUEUED' AND purpose IN ('WEEKDAY_PLAN','DAYMASK_PLAN') ORDER BY fport, weekday, payload_hex");
 }
@@ -75,8 +76,12 @@ test('unclaiming a valve tombstones every schedule and queues the clearing plan 
     assert.equal(row.payload_hex, EMPTY_DAY_HEX, 'the clearing plan is the all-FF day, not a partial one');
     assert.equal(row.fport, 14 + row.weekday);
   }
-  assert.equal(out.pushes_queued, 7);
-  assert.ok(out.messages.length >= 7, 'the caller must get a downlink message for every queued clearing plan');
+  // CMD-04 PR0 (C): the clearing is a full snapshot (7 empty days + scheduler status) that the
+  // valve tick sends once the debounce window has passed, so the unclaim itself sends nothing.
+  assert.equal(out.pushes_queued, 8);
+  assert.deepEqual(out.messages, []);
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  assert.equal((await store.queuedPushesById(t.db, EUI, marker.push_ids)).length, 8, 'the clearing snapshot is pending for the valve tick');
   t.db.close();
 });
 
@@ -104,8 +109,12 @@ test('unclaiming a valve queues exactly the downlinks the explicit schedule dele
   await unclaim(viaUnclaim.db);
   await clearValveOnUnclaim({ db: viaUnclaim.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
 
+  // CMD-04 PR0 (C): every compile is a full snapshot, so after two deletes the queued rows are
+  // the second delete's complete snapshot -- the same as the unclaim's single compile -- and the
+  // first delete's snapshot is SUPERSEDED, not lost.
   assert.deepEqual(await queuedPushes(viaUnclaim.db), await queuedPushes(viaScheduleDelete.db),
     'the outstanding downlinks after an unclaim must equal the ones the explicit delete leaves');
+  assert.equal((await viaScheduleDelete.db.all("SELECT 1 FROM valve_schedule_pushes WHERE state='FAILED'")).length, 0, 'nothing is LOST');
   viaUnclaim.db.close();
   viaScheduleDelete.db.close();
 });
@@ -130,12 +139,15 @@ test('an in-flight actuation is cancelled through the shared cancel path, never 
   assert.equal(device.target_state, 'CLOSED');
   // Nothing on the wire may be an actuation. STREGA opens and closes ride fPorts 1/2; the
   // only downlinks this path may produce are schedule plans (14..20 Gen1, 25 Gen2) and the
-  // scheduler clock/status ports (12/13, 21) the shared compile re-emits after its flush.
+  // scheduler status port (21) the snapshot carries; clock sync (12/13) comes from the valve tick.
   const allowedPorts = new Set([12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 25]);
-  for (const m of out.messages) {
-    assert.ok(allowedPorts.has(m.payload.fPort), 'unexpected downlink on fPort ' + m.payload.fPort);
-    assert.notEqual(m.payload.fPort, 1, 'a valve action must never leave the unclaim path');
-    assert.notEqual(m.payload.fPort, 2, 'a valve action must never leave the unclaim path');
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  const pendingPorts = (await store.queuedPushesById(t.db, EUI, marker.push_ids)).map((r) => r.fport);
+  assert.ok(pendingPorts.length > 0);
+  for (const fPort of out.messages.map((m) => m.payload.fPort).concat(pendingPorts)) {
+    assert.ok(allowedPorts.has(fPort), 'unexpected downlink on fPort ' + fPort);
+    assert.notEqual(fPort, 1, 'a valve action must never leave the unclaim path');
+    assert.notEqual(fPort, 2, 'a valve action must never leave the unclaim path');
   }
   t.db.close();
 });
@@ -229,7 +241,7 @@ test('an unreachable ChirpStack does not stop the plan from being cleared', asyn
 
   assert.equal(out.applicable, true);
   assert.equal(out.cancelled.ok, false, 'the cancel fails closed when the queue cannot be flushed');
-  assert.equal(out.pushes_queued, 7, 'the clearing plans are still queued and go out when the valve is next reachable');
+  assert.equal(out.pushes_queued, 8, 'the clearing snapshot is still queued and goes out when the valve is next reachable');
   assert.equal((await queuedPlanPushes(t.db)).length, 7);
   t.db.close();
 });
@@ -256,4 +268,153 @@ test('deploy.sh ships unclaim.js, or a deployed gateway cannot load osi-valve-co
   const deploySh = fs.readFileSync(path.resolve(__dirname, '../../../../../../../deploy.sh'), 'utf8');
   assert.ok(deploySh.includes('/srv/node-red/osi-valve-control/unclaim.js'),
     'deploy.sh must carry a fetch_required line for osi-valve-control/unclaim.js');
+});
+
+// AUTH-09 PR A: one outcome contract for both unclaim origins (the local DELETE route and
+// the cloud UNCLAIM_DEVICE ACK). It reports what the cleanup did, never that the valve's
+// plan is gone: the valve has no read-back, so a queued clearing plan is evidence pending,
+// not proof, and plan_clear_confirmed is always false here.
+const { runUnclaimCleanup, unclaimCleanupUnavailable } = require('./unclaim');
+
+function assertNoValveAction(downlinks) {
+  for (const m of downlinks) {
+    assert.notEqual(m.payload.fPort, 1, 'unclaim must never send a valve action');
+    assert.notEqual(m.payload.fPort, 2, 'unclaim must never send a CLOSE or an OPEN');
+  }
+}
+
+test('outcome: a programmed valve reports the clearing as scheduled for the valve tick, the plan as possibly still held, and the whole-queue flush', async () => {
+  const t = await seedProgrammedValve();
+  await unclaim(t.db);
+  const out = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'clearing_scheduled', 'PR0: the snapshot leaves with the valve tick, not with the request');
+  assert.equal(out.cleanup.attempted, true);
+  assert.equal(out.cleanup.device_eui, EUI);
+  assert.equal(out.cleanup.schedules_cleared, 2);
+  assert.equal(out.cleanup.clearing_downlinks_sent, 0);
+  assert.deepEqual(out.downlinks, []);
+  const marker = await store.getSnapshotPending(t.db, EUI);
+  assert.ok(marker && (await store.queuedPushesById(t.db, EUI, marker.push_ids)).length >= 7, 'the clearing snapshot waits for the tick');
+  assert.equal(out.cleanup.may_still_hold_plan, true, 'nothing confirms the valve dropped its plan yet');
+  assert.equal(out.cleanup.plan_clear_confirmed, false);
+  assert.equal(out.cleanup.in_flight_cancel, 'none_active');
+  assert.equal(out.cleanup.whole_queue_flushed, true, 'D19(a): the whole device queue is flushed and that collateral is reported');
+  assertNoValveAction(out.downlinks);
+  t.db.close();
+});
+
+test('outcome: an unset actuator application is reported as clearing not sent, never as success', async () => {
+  const t = await seedProgrammedValve();
+  await unclaim(t.db);
+  const out = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: '', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'clearing_not_sent');
+  assert.equal(out.cleanup.reason, 'actuator_application_unset');
+  assert.equal(out.cleanup.clearing_downlinks_sent, 0);
+  assert.deepEqual(out.downlinks, []);
+  assert.equal(out.cleanup.may_still_hold_plan, true);
+  t.db.close();
+});
+
+test('outcome: a cleanup that throws is reported as failed with its reason', async () => {
+  const t = await seedProgrammedValve();
+  await unclaim(t.db);
+  const broken = Object.assign({}, t.db, { all: () => Promise.reject(new Error('disk I/O error')) });
+  const out = await runUnclaimCleanup({ db: broken, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'failed');
+  assert.match(out.cleanup.reason, /disk I\/O error/);
+  // R1 M3: the valve was found and may already have lost its schedules: say it may hold its plan.
+  assert.equal(out.cleanup.may_still_hold_plan, true, 'a failed cleanup on a known valve may leave its plan in place');
+  assert.deepEqual(out.downlinks, []);
+  t.db.close();
+});
+
+test('outcome: a failed in-flight cancel stays visible next to a sent clearing', async () => {
+  const t = await seedProgrammedValve();
+  await t.db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) " +
+    "VALUES ('e-1', ?, '2026-09-17T05:50:00.000Z', 900, '2026-09-17T06:05:00.000Z', 'unknown', 'PENDING_OBSERVATION', 'manual', '2026-09-17T05:50:00.000Z')", [EUI]);
+  await unclaim(t.db);
+  const out = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: null, now: NOW, warn: noop });
+  assert.equal(out.cleanup.in_flight_cancel, 'failed');
+  assert.equal(out.cleanup.in_flight_cancel_error, 'chirpstack_unavailable');
+  assert.match(out.cleanup.reason, /in_flight_cancel_failed/);
+  assert.equal(out.cleanup.whole_queue_flushed, false);
+  assertNoValveAction(out.downlinks);
+  t.db.close();
+});
+
+test('outcome: a sensor is not applicable, and a still-claimed valve is not attempted', async () => {
+  const t = await seedProgrammedValve();
+  await t.db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000002','Soil probe','DRAGINO_LSN50',NULL,datetime('now'),datetime('now'))");
+  const sensor = await runUnclaimCleanup({ db: t.db, deviceEui: '0016C001F1000002', appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(sensor.cleanup.outcome, 'not_applicable');
+  assert.equal(sensor.cleanup.reason, 'not_a_valve');
+  assert.equal(sensor.cleanup.may_still_hold_plan, false);
+  const claimed = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(claimed.cleanup.outcome, 'not_attempted');
+  assert.equal(claimed.cleanup.reason, 'still_claimed');
+  assert.equal(claimed.cleanup.may_still_hold_plan, true);
+  t.db.close();
+});
+
+test('outcome: a valve with no plan from this gateway reports nothing to clear, not a cleared plan', async () => {
+  const t = await tempDb();
+  await unclaim(t.db);
+  const out = await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'no_plan_to_clear');
+  assert.equal(out.cleanup.may_still_hold_plan, null, 'a plan set another way cannot be ruled out');
+  assert.equal(out.cleanup.plan_clear_confirmed, false);
+  t.db.close();
+});
+
+test('outcome: missing helpers yield the not-attempted shape the flow nodes report', () => {
+  const out = unclaimCleanupUnavailable('Cannot find module osi-valve-control');
+  assert.equal(out.outcome, 'not_attempted');
+  assert.match(out.reason, /^helpers_unavailable/);
+  assert.equal(out.attempted, false);
+  assert.equal(out.may_still_hold_plan, null);
+  assert.equal(out.plan_clear_confirmed, false);
+});
+
+// R1 M3: before the device lookup nothing is known, so a failure there stays "unknown".
+test('outcome: a failure before the device lookup leaves may_still_hold_plan unknown', async () => {
+  const t = await seedProgrammedValve();
+  await unclaim(t.db);
+  const broken = Object.assign({}, t.db, { get: () => Promise.reject(new Error('database is locked')) });
+  const out = await runUnclaimCleanup({ db: broken, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'failed');
+  assert.equal(out.cleanup.may_still_hold_plan, null);
+  t.db.close();
+});
+
+// R1 M1: a claimed device of any type is refused, so the caller can tell the detach did not apply.
+test('outcome: a still-claimed sensor is not attempted and holds no valve plan', async () => {
+  const t = await seedProgrammedValve();
+  await t.db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES ('0016C001F1000002','Soil probe','DRAGINO_LSN50',1,datetime('now'),datetime('now'))");
+  const out = await runUnclaimCleanup({ db: t.db, deviceEui: '0016C001F1000002', appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop });
+  assert.equal(out.cleanup.outcome, 'not_attempted');
+  assert.equal(out.cleanup.reason, 'still_claimed');
+  assert.equal(out.cleanup.may_still_hold_plan, false);
+  t.db.close();
+});
+
+// R1 L1: one key set for every outcome the module produces, including the helpers the flow
+// nodes call when the cleanup could not start.
+test('outcome: every outcome shape carries the same keys', async () => {
+  const { unclaimCleanupFailed } = require('./unclaim');
+  const t = await seedProgrammedValve();
+  await unclaim(t.db);
+  const sent = (await runUnclaimCleanup({ db: t.db, deviceEui: EUI, appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop })).cleanup;
+  const keys = Object.keys(sent).sort();
+  const failed = unclaimCleanupFailed(EUI, new Error('cannot open database'));
+  assert.deepEqual(Object.keys(failed).sort(), keys);
+  assert.equal(failed.outcome, 'failed');
+  assert.equal(failed.device_eui, EUI);
+  assert.match(failed.reason, /cannot open database/);
+  const unavailable = unclaimCleanupUnavailable('db helper missing', EUI);
+  assert.deepEqual(Object.keys(unavailable).sort(), keys);
+  assert.equal(unavailable.device_eui, EUI);
+  const sensor = (await runUnclaimCleanup({ db: t.db, deviceEui: '0016C001F1000009', appId: 'app', flushQueue: countingFlush(), now: NOW, warn: noop })).cleanup;
+  assert.deepEqual(Object.keys(sensor).sort(), keys);
+  t.db.close();
 });

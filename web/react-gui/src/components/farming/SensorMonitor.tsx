@@ -8,9 +8,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useTranslation } from 'react-i18next';
 import { useModalFocus } from '../../hooks/useModalFocus';
+import { rechartsYAxisWidth } from '../../charts/axisLayout';
 import { useDateFormat, type DateFormatter } from '../../utils/datetime';
 import { sensorAPI, type SensorHistoryPoint } from '../../services/api';
+import { canonicalize } from '../../channels/registry';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { kpaToPf } from '../../utils/swt';
 
 interface Props {
   deveui: string;
@@ -38,6 +43,11 @@ const TIME_WINDOWS = [
   { label: '30 d', hours: 720 },
   { label: '90 d', hours: 2160 },
 ];
+const SWT_FIELDS = new Set(['swt_1', 'swt_2', 'swt_3']);
+
+function isCanonicalSwt(field: string, unit: string): boolean {
+  return unit === 'kPa' && SWT_FIELDS.has(canonicalize(field));
+}
 
 function fmtTick(iso: string, hours: number, format: DateFormatter): string {
   if (hours <= 24) return format.time(iso) ?? '—';
@@ -68,15 +78,17 @@ export const SensorMonitor: React.FC<Props> = ({
   initialField,
   onClose,
 }) => {
+  const { t: tCommon } = useTranslation('common');
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(dialogRef, true, onClose);
   const format = useDateFormat();
+  const { swtUnit } = useDisplayPreferences();
   const effectiveSeriesOptions = seriesOptions?.length
     ? seriesOptions
     : [{ field, label, unit, color, decimals }];
   const [selectedField, setSelectedField] = useState(initialField ?? field);
   const [hours, setHours] = useState(24);
-  const [data, setData] = useState<SensorHistoryPoint[]>([]);
+  const [canonicalData, setCanonicalData] = useState<SensorHistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -86,9 +98,16 @@ export const SensorMonitor: React.FC<Props> = ({
 
   const activeSeries = effectiveSeriesOptions.find((option) => option.field === selectedField) ?? effectiveSeriesOptions[0];
   const activeLabel = activeSeries.label;
-  const activeUnit = activeSeries.unit;
+  const presentsSwt = isCanonicalSwt(activeSeries.field, activeSeries.unit);
+  const activeUnit = presentsSwt && swtUnit === 'pF' ? 'pF' : activeSeries.unit;
   const activeColor = activeSeries.color ?? color;
-  const activeDecimals = activeSeries.decimals ?? decimals;
+  const activeDecimals = presentsSwt && swtUnit === 'pF' ? 2 : activeSeries.decimals ?? decimals;
+  const data = useMemo(
+    () => presentsSwt && swtUnit === 'pF'
+      ? canonicalData.map((point) => ({ ...point, value: kpaToPf(point.value) }))
+      : canonicalData,
+    [canonicalData, presentsSwt, swtUnit],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +116,7 @@ export const SensorMonitor: React.FC<Props> = ({
     sensorAPI.getHistory(deveui, selectedField, hours)
       .then((rows) => {
         if (!cancelled) {
-          setData(rows);
+          setCanonicalData(rows);
           setLoading(false);
         }
       })
@@ -123,19 +142,21 @@ export const SensorMonitor: React.FC<Props> = ({
   const maxVal = values.length ? Math.max(...values) : null;
   const latest = values.length ? values[values.length - 1] : null;
   const gradId = `grad-${selectedField}`;
+  // One formatter for the ticks and for the width estimate of the tick labels.
+  const formatAxisTick = (value: number) => value.toFixed(activeDecimals);
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-end" style={{ background: 'rgba(0,0,0,0.55)' }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={activeLabel} tabIndex={-1} className="w-full max-w-2xl bg-[var(--bg)] flex flex-col h-full overflow-y-auto shadow-2xl">
-        <div className="bg-[var(--header-bg)] px-6 py-4 flex items-center justify-between shrink-0">
-          <div>
-            <h2 className="text-2xl font-bold text-[var(--header-text)] high-contrast-text">{activeLabel}</h2>
-            <p className="text-[var(--header-subtext)] text-sm mt-0.5">{deviceName} · {deveui}</p>
+        <div className="bg-[var(--header-bg)] px-4 sm:px-6 py-4 flex items-center justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h2 className="truncate text-xl sm:text-2xl font-bold text-[var(--header-text)] high-contrast-text" title={activeLabel}>{activeLabel}</h2>
+            <p className="truncate text-[var(--header-subtext)] text-sm mt-0.5" title={`${deviceName} · ${deveui}`}>{`${deviceName} · ${deveui}`}</p>
           </div>
-          <button onClick={onClose} className="touch-target text-[var(--header-text)] text-3xl font-light leading-none hover:text-white px-2">×</button>
+          <button onClick={onClose} aria-label={tCommon('close')} className="touch-target shrink-0 text-[var(--header-text)] text-3xl font-light leading-none hover:text-white px-2">×</button>
         </div>
 
-        <div className="px-6 pt-4 flex flex-wrap gap-2 shrink-0">
+        <div className="px-4 sm:px-6 pt-4 flex flex-wrap gap-2 shrink-0">
           {TIME_WINDOWS.map((window) => (
             <button
               key={window.hours}
@@ -152,7 +173,7 @@ export const SensorMonitor: React.FC<Props> = ({
         </div>
 
         {effectiveSeriesOptions.length > 1 && (
-          <div className="px-6 pt-3 flex flex-wrap gap-2 shrink-0">
+          <div className="px-4 sm:px-6 pt-3 flex flex-wrap gap-2 shrink-0">
             {effectiveSeriesOptions.map((option) => (
               <button
                 key={option.field}
@@ -170,23 +191,29 @@ export const SensorMonitor: React.FC<Props> = ({
         )}
 
         {!loading && !error && data.length > 0 && (
-          <div className="px-6 pt-4 grid grid-cols-3 gap-3 shrink-0">
+          <div className="px-4 sm:px-6 pt-4 grid grid-cols-3 gap-2 sm:gap-3 shrink-0">
             {[
               { label: 'CURRENT', value: latest },
               { label: 'MIN', value: minVal },
               { label: 'MAX', value: maxVal },
             ].map((item) => (
-              <div key={item.label} className="bg-[var(--card)] rounded-lg p-3 text-center">
-                <p className="text-[var(--text-tertiary)] text-xs font-semibold">{item.label}</p>
-                <p className="text-xl font-bold text-[var(--text)]">
-                  {item.value !== null ? `${item.value.toFixed(activeDecimals)} ${activeUnit}`.trim() : '—'}
+              <div key={item.label} className="min-w-0 bg-[var(--card)] rounded-lg p-2 sm:p-3 text-center">
+                <p className="truncate text-[var(--text-tertiary)] text-xs font-semibold" title={item.label}>{item.label}</p>
+                {/* The unit may wrap under the number on a phone; the number itself never breaks. */}
+                <p className="flex flex-wrap items-baseline justify-center gap-x-1 text-[var(--text)]">
+                  {item.value !== null ? (
+                    <>
+                      <span className="whitespace-nowrap text-lg sm:text-xl font-bold tabular-nums">{item.value.toFixed(activeDecimals)}</span>
+                      {activeUnit ? <>{' '}<span className="text-xs font-semibold text-[var(--text-tertiary)]">{activeUnit}</span></> : null}
+                    </>
+                  ) : <span className="text-lg sm:text-xl font-bold">—</span>}
                 </p>
               </div>
             ))}
           </div>
         )}
 
-        <div className="flex-1 px-6 py-4 flex flex-col gap-6">
+        <div className="flex-1 px-4 sm:px-6 py-4 flex flex-col gap-6">
           {loading && (
             <div className="flex-1 flex items-center justify-center">
               <div className="animate-spin h-10 w-10 border-4 border-[var(--primary)] border-t-transparent rounded-full" />
@@ -205,7 +232,7 @@ export const SensorMonitor: React.FC<Props> = ({
           {!loading && !error && data.length > 0 && (
             <>
               <div>
-                <h3 className="text-[var(--text)] font-bold mb-3">{activeUnit ? `${activeLabel} (${activeUnit})` : activeLabel}</h3>
+                <h3 className="text-[var(--text)] font-bold mb-3 break-words">{activeUnit ? `${activeLabel} (${activeUnit})` : activeLabel}</h3>
                 <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                     <defs>
@@ -225,11 +252,11 @@ export const SensorMonitor: React.FC<Props> = ({
                     />
                     <YAxis
                       domain={['auto', 'auto']}
-                      tickFormatter={(value) => value.toFixed(activeDecimals)}
+                      tickFormatter={formatAxisTick}
                       tick={{ fontSize: 11, fill: 'var(--text-tertiary)' }}
                       axisLine={false}
                       tickLine={false}
-                      width={52}
+                      width={rechartsYAxisWidth(values, { format: formatAxisTick })}
                     />
                     <Tooltip content={<ChartTooltip format={format} unit={activeUnit} decimals={activeDecimals} hours={hours} />} />
                     <Area

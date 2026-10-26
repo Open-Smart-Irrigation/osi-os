@@ -2069,6 +2069,14 @@ fetch_required "osi-history-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json" \
     "/srv/node-red/osi-history-helper/package.json"
 
+fetch_required "osi-matric-potential package.json" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/package.json" \
+    "/srv/node-red/osi-matric-potential/package.json"
+
+fetch_required "osi-matric-potential index.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.js" \
+    "/srv/node-red/osi-matric-potential/index.js"
+
 fetch_required "osi-history-helper index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js" \
     "/srv/node-red/osi-history-helper/index.js"
@@ -2351,6 +2359,10 @@ fetch_required "osi-sdi12-normalize index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js" \
     "/srv/node-red/osi-sdi12-normalize/index.js"
 
+fetch_required "osi-sdi12-normalize configuration.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.js" \
+    "/srv/node-red/osi-sdi12-normalize/configuration.js"
+
 fetch_required "osi-sdi12-recipe package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/package.json" \
     "/srv/node-red/osi-sdi12-recipe/package.json"
@@ -2358,6 +2370,30 @@ fetch_required "osi-sdi12-recipe package.json" \
 fetch_required "osi-sdi12-recipe index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.js" \
     "/srv/node-red/osi-sdi12-recipe/index.js"
+
+fetch_required "osi-sdi12-normalize tensiomark-live.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js" \
+    "/srv/node-red/osi-sdi12-normalize/tensiomark-live.js"
+
+fetch_required "osi-sdi12-commissioning tensiomark.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/tensiomark.js" \
+    "/srv/node-red/osi-sdi12-commissioning/tensiomark.js"
+
+fetch_required "osi-sdi12-commissioning config-handler.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/config-handler.js" \
+    "/srv/node-red/osi-sdi12-commissioning/config-handler.js"
+
+fetch_required "osi-sdi12-commissioning write-handler.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/write-handler.js" \
+    "/srv/node-red/osi-sdi12-commissioning/write-handler.js"
+
+fetch_required "osi-sdi12-commissioning gate-handler.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/gate-handler.js" \
+    "/srv/node-red/osi-sdi12-commissioning/gate-handler.js"
+
+fetch_required "osi-sdi12-commissioning identify-handler.js" \
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/identify-handler.js" \
+    "/srv/node-red/osi-sdi12-commissioning/identify-handler.js"
 
 fetch_required "osi-sdi12-commissioning package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/package.json" \

@@ -89,7 +89,7 @@ content:
 1. A cloud mutation on a gateway-backed resource creates a `DeviceCommand`
    (**(osi-server)** `backend/.../command/`, `CommandService`) and the mirror
    presents the resource as pending. Command types are listed in
-   [AGENTS.md](../../../AGENTS.md) (zone/schedule/config upserts, device
+   [docs/api/sync-endpoints.md](../../api/sync-endpoints.md) (zone/schedule/config upserts, device
    claim/unclaim, `VALVE_COMMAND`, `SET_*` device settings, `SET_FAN`,
    `REBOOT`, `FORCE_EDGE_SYNC`, `REGISTER_DEVICE`).
 2. The edge polls every 30 s. `CommandLeaseService` leases returned commands

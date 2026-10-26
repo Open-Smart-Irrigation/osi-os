@@ -22,19 +22,46 @@ jobs:
           node-version: '22'
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
-      # The repo's main local gate, promoted to CI after issue #84 proved it can
-      # break on main invisibly (it chains comm-contract, DB-schema consistency,
-      # history schema/worker tests, history API contract, helper tests, and
-      # profile parity). Must end with "All parity checks passed."
+      - name: Reference-tree ownership and valve-router client lifetime
+        run: node --test scripts/test-reference-tree-and-valve-router.js
       - name: Scoped-access endpoint ratchet
         run: node scripts/verify-scoped-access.js
       # The ratchet's own tests: each removes, hides or misplaces a guard's
       # scope decision and expects the ratchet to fail (#389).
       - name: Scoped-access ratchet tests
         run: node --test scripts/verify-scoped-access.test.js
+      # The repo's main local gate, promoted to CI after issue #84 proved it can
+      # break on main invisibly (it chains comm-contract, DB-schema consistency,
+      # history schema/worker tests, history API contract, helper tests, and
+      # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js
+      - name: SDI-12 offline profiles and helper regressions
+        run: >-
+          node --test scripts/preview-sdi12-profile.test.js
+          scripts/test-sdi12-transport-lab.js scripts/replay-sdi12-transport.test.js
+          scripts/test-sdi12-protocol-lab.js scripts/preview-sdi12-exchange.test.js
+          scripts/test-sdi12-converter-lab.js scripts/preview-sdi12-converter.test.js
+          scripts/test-sdi12-sensor-recipes.js scripts/preview-sdi12-recipe.test.js
+          scripts/test-sdi12-bench-capture.js scripts/check-sdi12-capture.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-reassemble/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-recipe/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
+      # Tensiomark storage, sync and precision; the shared matric-potential
+      # conversion; the clipped-WATERMARK and Tensiomark history repair CLIs;
+      # the unified soil-tension scheduler.
+      - name: Tensiomark, matric potential and soil-tension repairs
+        run: >-
+          node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.test.js
+          scripts/test-tensiomark-contract.js scripts/test-tensiomark-precision.js
+          scripts/test-tensiomark-runtime.js scripts/test-tensiomark-schema.js
+          scripts/repair-watermark-clipped.test.js scripts/test-repair-tensiomark-history.js
+          scripts/test-unified-soil-tension-scheduler.js
       # WATERMARK LSN50 profile 3: FPort 11 dispatch in lsn50-decode-fn, the
       # config-query drop and watermark-ingest-fn, run against the real
       # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build
@@ -44,6 +71,9 @@ jobs:
       # scoped-device-config-guard -> watermark-cal-fn), flag off and scoped,
       # plus the soil-depth PUT (-> put-soil-depth-fn) the depth form uses.
       - run: node scripts/test-watermark-calibration-routes.js
+      # AUTH-09 PR A: cloud UNCLAIM_DEVICE runs the valve plan cleanup before its ACK,
+      # and both unclaim origins report the real cleanup outcome.
+      - run: node scripts/test-unclaim-cleanup-flow.js
       # Standalone inventory: each command passed locally within the 60 s cap
       # and is not invoked by another workflow step or npm script.
       - name: Standalone script inventory pass set
@@ -68,6 +98,8 @@ jobs:
           node scripts/test-radio-flow.js
           node scripts/test-radio-history-flow-integration.js
           node scripts/test-radio-history.js
+          node scripts/test-radio-restore-guards.js
+          node scripts/test-radio-store.js
           node scripts/test-sdi12-recipe-flow.js
           node scripts/test-sdi12-recipe-schema.js
           node scripts/test-sdi12-registration.js
@@ -90,6 +122,9 @@ jobs:
           node scripts/verify-lsn50-chameleon-persistence.js
           node scripts/verify-module-file-deploy-coverage.js
           node scripts/verify-s2120-gust-fix.js
+      # Both tests open SQLite through node:sqlite, so they need no native addon (#392).
+      - name: Radio and network API module tests
+        run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-radio-helper/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-network-api/index.test.js
       # Valve command safety through the shipped flow (pending split, gate, real command
       # ledger, Route Command, STREGA downlink builder, valve command bridge): only a
       # bounded timed open reaches a STREGA valve, refused commands are answered, and
@@ -137,6 +172,12 @@ jobs:
       # manifest keeps a queued key in place so a mismatching segment converges.
       - name: History correction queue drain
         run: node --test scripts/test-sync-history-queue-drain.js
+      # The 5-minute history manifest pages through every stored hash v1 segment
+      # (500 per request, cursor in app_settings, wraps after a short page), so a
+      # segment after the first 500 is compared and repaired too; the repair
+      # queue is bounded and new tail rows go out between repair batches.
+      - name: History manifest paging
+        run: node --test scripts/test-sync-history-manifest-paging.js
       # The staged, digest-pinned command-ledger install in deploy.sh (activation
       # after the schema migration, stale stage cleanup), the fetch list and the
       # payload lifecycle. The pin check fails when a ledger, binding or installer

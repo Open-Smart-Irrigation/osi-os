@@ -6,6 +6,8 @@ import { buildCorrelationOption } from '../../analysis/echartsOptions';
 import { axisLabel, type ChannelMeta } from '../../analysis/channelLabels';
 import { canonicalize } from '../../channels/registry';
 import { EChart, type EChartHandle } from './EChart';
+import { useElementSize } from '../../hooks/useElementSize';
+import { CHART_SIZE_STEP } from '../../analysis/chartGeometry';
 
 type AnalysisTranslate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -32,6 +34,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
   const [channelX, setChannelX] = useState(channels[0] ?? '');
   const [channelY, setChannelY] = useState(channels.find((c) => c !== channels[0]) ?? '');
   const [pooled, setPooled] = useState(false);
+  const [chartBoxRef, chartBox] = useElementSize<HTMLDivElement>({ step: CHART_SIZE_STEP });
 
   const canonicalChannelX = canonicalize(channelX);
   const canonicalChannelY = canonicalize(channelY);
@@ -50,8 +53,11 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
       zonePairs: pairs,
       channelXLabel: axisLabel(x, channelMeta),
       channelYLabel: axisLabel(y, channelMeta),
+      channelXUnit: channelMeta.get(x)?.unit,
+      channelYUnit: channelMeta.get(y)?.unit,
+      viewport: chartBox ?? undefined,
     }),
-    [pairs, x, y, channelMeta],
+    [pairs, x, y, channelMeta, chartBox],
   );
 
   if (channels.length < 2) {
@@ -67,20 +73,20 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
   return (
     <div className="analysis-correlation flex h-full min-h-[500px] flex-col gap-4">
       <div className="flex flex-wrap items-end gap-3 rounded-md border border-[var(--border)] bg-[var(--card)] p-3">
-        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
+        <label className="flex min-w-44 max-w-full flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
           {t('analysis.correlation.x')}
           <select
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
+            className="max-w-full truncate rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
             value={x}
             onChange={(e) => setChannelX(canonicalize(e.target.value))}
           >
             {channels.map((c) => <option key={c} value={c}>{axisLabel(c, channelMeta)}</option>)}
           </select>
         </label>
-        <label className="flex min-w-44 flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
+        <label className="flex min-w-44 max-w-full flex-col gap-1 text-xs font-medium text-[var(--text-secondary)]">
           {t('analysis.correlation.y')}
           <select
-            className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
+            className="max-w-full truncate rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm font-normal text-[var(--text)]"
             value={y}
             onChange={(e) => setChannelY(canonicalize(e.target.value))}
           >
@@ -100,7 +106,7 @@ export function CorrelationPanel({ series, channelMeta, zoneNameById, chartRef }
         </label>
       </div>
 
-      <div className="min-h-[320px] flex-1 rounded-md border border-[var(--border)] bg-[var(--card)] p-2">
+      <div ref={chartBoxRef} className="min-h-[320px] flex-1 rounded-md border border-[var(--border)] bg-[var(--card)] p-2">
         <EChart ref={chartRef} option={option} className="h-full min-h-[320px]" />
       </div>
 

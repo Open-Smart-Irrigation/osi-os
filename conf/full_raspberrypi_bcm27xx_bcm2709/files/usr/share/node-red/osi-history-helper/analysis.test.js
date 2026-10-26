@@ -1287,6 +1287,56 @@ test('the 30 000-row cap counts provider, station and device rows together', asy
   }
 });
 
+test('accepts 25 distinct available selectors and rejects 26 before reading rows', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const selected = result.channels.filter((channel) => channel.availability === 'available').slice(0, 25);
+    assert.equal(selected.length, 25, 'fixture must provide 25 available analysis sources');
+    const oneHour = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
+    const output = await series(raw, selected, oneHour, 'hourly');
+    assert.deepEqual(output.series.map((item) => item.seriesId), selected.map((item) => item.seriesId));
+    assert.deepEqual(output.dropped, []);
+    assert.equal(output.aggregation.applied, 'hourly');
+    const noReads = {
+      all() { throw new Error('row read should not occur for an oversized selector list'); },
+    };
+    await assert.rejects(
+      seriesWithFacade(noReads, selected.concat({ ...selected[0], seriesId: 'distinct-selector-26' }), oneHour, 'hourly'),
+      (error) => error && error.statusCode === 413
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+test('aligned hourly requests preserve overlapping device points and range metadata', async () => {
+  const raw = weatherDb();
+  try {
+    const kiwi = raw.prepare("SELECT deveui FROM devices WHERE name = 'Kiwi North'").get().deveui;
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+    insert.run(kiwi, '2026-10-01T10:00:00.000Z', 10);
+    insert.run(kiwi, '2026-10-01T11:00:00.000Z', 20);
+    insert.run(kiwi, '2026-10-01T12:00:00.000Z', 30);
+    const result = await catalog(raw);
+    const swt = result.channels.find((channel) => channel.deviceName === 'Kiwi North' && channel.channelKey === 'swt_1');
+    const first = await series(raw, [swt], { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
+    const second = await series(raw, [swt], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T13:00:00.000Z' }, 'hourly');
+    assert.deepEqual(first.range, { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T12:00:00.000Z' });
+    assert.deepEqual(second.range, { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T13:00:00.000Z' });
+    assert.equal(first.aggregation.applied, 'hourly');
+    assert.equal(second.aggregation.applied, 'hourly');
+    assert.equal(first.series[0].truncated, false);
+    assert.equal(second.series[0].truncated, false);
+    const overlapFirst = first.series[0].points.find((point) => point.t === '2026-10-01T11:00:00.000Z');
+    const overlapSecond = second.series[0].points.find((point) => point.t === '2026-10-01T11:00:00.000Z');
+    assert.deepEqual(overlapFirst, overlapSecond);
+    assert.deepEqual(overlapFirst, { t: '2026-10-01T11:00:00.000Z', value: 20, count: 1, quality: 'derived' });
+  } finally {
+    raw.close();
+  }
+});
+
 test('a failing zoneLocations makes the catalogue reject with its error', async () => {
   const analysis = analysisModule.createAnalysis({
     aggregateRows: () => ({ series: {}, buckets: [] }),
@@ -1521,4 +1571,102 @@ test('benchmark: 399 days, daily, 13 weather series, Europe/Zurich', { skip: pro
   } finally {
     raw.close();
   }
+});
+
+test('WATERMARK soil temperature requires positive evidence and retained calibration in Chameleon mode', async () => {
+  const raw = weatherDb();
+  const cases = [
+    { name: 'calibrated Chameleon', chameleon: 1, calibration: true, soil: true },
+    { name: 'reading only Chameleon', chameleon: 1, reading: true, soil: false },
+    { name: 'deleted calibration Chameleon', chameleon: 1, calibration: true, deleted: true, reading: true, soil: false },
+    { name: 'dendrometer', dendro: 1, reading: true, soil: false },
+    { name: 'rain meter', rain: 1, reading: true, soil: false },
+    { name: 'flow meter', flow: 1, reading: true, soil: false },
+    { name: 'no evidence', soil: false },
+  ];
+  try {
+    for (const [index, item] of cases.entries()) {
+      const eui = `A8404100000002${String(index).padStart(2, '0')}`;
+      raw.prepare(`INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,temp_enabled,chameleon_enabled,dendro_enabled,rain_gauge_enabled,flow_meter_enabled,created_at,updated_at)
+        VALUES(?,?,'DRAGINO_LSN50',1,NULL,1,?,?,?,?,'2026-09-01','2026-09-01')`)
+        .run(eui, item.name, item.chameleon || 0, item.dendro || 0, item.rain || 0, item.flow || 0);
+      if (item.calibration) raw.prepare(`INSERT INTO watermark_calibrations(deveui,pullup_1_ohm,pulldown_1_ohm,series_fwd_1_ohm,series_rev_1_ohm,pullup_2_ohm,pulldown_2_ohm,series_fwd_2_ohm,series_rev_2_ohm,deleted_at)
+        VALUES(?,41670,41260,130,112,42530,42070,46,27,?)`).run(eui, item.deleted ? '2026-09-01' : null);
+      if (item.reading) raw.prepare(`INSERT INTO watermark_readings(deveui,recorded_at,payload_hex,frame_status,conversion_version)
+        VALUES(?,'2026-10-01T10:00:00Z','a2','accepted','wm-lsn50-p3-v1')`).run(eui);
+    }
+    const result = await catalog(raw, { unassignedAccess: 'owner' });
+    for (const item of cases) {
+      const temperatures = result.channels.filter(c => c.deviceName === item.name && c.channelKey === 'ext_temperature_c');
+      assert.equal(temperatures.length, 1, item.name);
+      assert.equal(temperatures[0].cardType, item.soil ? 'soil' : 'environment', item.name);
+      if (item.soil) assert.equal(temperatures[0].configurationState, 'current');
+    }
+    assert.ok(!(await catalog(raw)).channels.some(c => cases.some(item => c.deviceName === item.name)));
+  } finally { raw.close(); }
+});
+
+test('WATERMARK Data exposes canonical soil temperature once, with raw and hourly access', async () => {
+  const raw = weatherDb();
+  const eui = 'A840410000000102';
+  try {
+    raw.prepare(`INSERT INTO devices(deveui,name,type_id,user_id,irrigation_zone_id,temp_enabled,created_at,updated_at)
+      VALUES(?,'Watermark soil','DRAGINO_LSN50',1,1,0,'2026-09-01','2026-09-01')`).run(eui);
+    raw.prepare(`INSERT INTO watermark_readings(deveui,recorded_at,payload_hex,frame_status,conversion_version,soil_temp_c,die_temp_c)
+      VALUES(?,'2026-10-01T10:00:00Z','a2','accepted','wm-lsn50-p3-v1',91,92)`).run(eui);
+    raw.prepare('UPDATE devices SET soil_moisture_probe_depths_json=? WHERE deveui=?')
+      .run(JSON.stringify({ swt_1: 30, ext_temperature_c: 60 }), eui);
+    for (const [minute, temperature] of [[0, 18.125], [20, 20.125]]) {
+      raw.prepare('INSERT INTO device_data(deveui,recorded_at,swt_1,swt_2,ext_temperature_c) VALUES(?,?,?,?,?)')
+        .run(eui, `2026-10-01T10:${String(minute).padStart(2, '0')}:00Z`, 30, 60, temperature);
+    }
+    const result = await catalog(raw);
+    const temperatures = result.channels.filter(c => c.deviceName === 'Watermark soil' && c.channelKey === 'ext_temperature_c');
+    assert.equal(temperatures.length, 1);
+    const temperature = temperatures[0];
+    assert.equal(temperature.cardType, 'soil');
+    assert.equal(temperature.configurationState, 'current');
+    assert.equal(temperature.displayName, 'Watermark soil - Soil temperature');
+    assert.equal(temperature.depthCm, null);
+    assert.equal(temperature.depthReference, null);
+    const range = { from: '2026-10-01T10:00:00Z', to: '2026-10-01T11:00:00Z' };
+    const points = await series(raw, temperatures, range, 'raw');
+    assert.deepEqual(points.series[0].points.map(p => p.value), [18.125, 20.125]);
+    const hourly = await series(raw, temperatures, range, 'hourly');
+    assert.equal(hourly.series[0].points[0].value, 19.125);
+    const denied = await series(raw, temperatures, range, 'raw', { userId: 2 });
+    assert.equal(denied.series.length, 0);
+    for (const hours of [24, 48]) {
+      const history = await hh.legacySensorHistory(facade(raw), {
+        userId: 1, deveui: eui, field: 'ext_temperature_c', hours, nowMs: Date.parse(range.to),
+      });
+      assert.deepEqual(history.map(point => point.value), [18.125, 20.125], `direct history ${hours}h`);
+    }
+  } finally { raw.close(); }
+});
+
+for (const zoneId of [1, null]) test(`Tensiomark Data preserves both configured probe histories with zone ${zoneId}`, async () => {
+  const raw = weatherDb();
+  const eui = 'A840410000000101';
+  const layout = require('./__fixtures__/tensiomark-layout.json');
+  try {
+    raw.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id,
+      sdi12_probe_profile, sdi12_channel_layout_json, created_at, updated_at)
+      VALUES (?, 'Tensiomark pair', 'DRAGINO_SDI12', 1, ?, 'TENSIOMARK', ?, ?, ?)`)
+      .run(eui, zoneId, JSON.stringify(layout),
+        '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z');
+    raw.prepare(`INSERT INTO device_data (deveui, recorded_at, swt_1, soil_temp_1, swt_2, soil_temp_2)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(eui, '2026-10-01T10:00:00Z', 1.97, 13.96, 0.1, 14.92);
+    raw.prepare('INSERT INTO device_data (deveui, recorded_at, bat_v) VALUES (?, ?, ?)')
+      .run(eui, '2026-10-01T10:02:00Z', 3.55);
+    const result = await catalog(raw, { unassignedAccess: 'owner' });
+    const channels = result.channels.filter(channel => channel.deviceName === 'Tensiomark pair'
+      && channel.cardType === 'soil' && channel.configurationState === 'current');
+    assert.deepEqual(channels.map(channel => channel.channelKey).sort(), ['soil_temp_1', 'soil_temp_2', 'swt_1', 'swt_2']);
+    assert.ok(channels.every(channel => channel.depthCm === null && channel.sourceKind === 'device'));
+    const output = await series(raw, channels, { from: '2026-10-01T09:59:00Z', to: '2026-10-01T10:01:00Z' }, 'raw', { unassignedAccess: 'owner' });
+    assert.deepEqual(Object.fromEntries(output.series.map(item => [item.resolved.channelKey, item.points[0].value])),
+      { swt_1: 1.97, swt_2: 0.1, soil_temp_1: 13.96, soil_temp_2: 14.92 });
+  } finally { raw.close(); }
 });

@@ -85,6 +85,10 @@
       "overlaid": "Überlagert",
       "smallMultiples": "Kleine Vielfache"
     },
+    "autoStack": {
+      "note": "Gestapelt angezeigt: Bei dieser Breite lassen die Einheitenachsen zu wenig Platz für das Diagramm.",
+      "showOverlaid": "Trotzdem überlagert anzeigen"
+    },
     "toggle": {
       "normalize": "Normalisieren"
     },

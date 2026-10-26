@@ -7,6 +7,9 @@ function flatten(value: Record<string,unknown>,prefix=''): Record<string,string>
 const read=(locale:string)=>flatten(JSON.parse(readFileSync(`public/locales/${locale}/valves.json`,'utf8')));
 const english=read('en');
 const shared=['openDialog.liters','scheduleDialog.noWindows','scheduleDialog.preview','scheduleDialog.previewLiters','settingsDialog.gen1','settingsDialog.gen2','format.temperature'];
+// CMD-04 PR0 (owner decision Q02 c) containment strings ship the English source text in every
+// edge locale until a reviewed translation lands (lg: docs/i18n/pending-luganda-translations.md).
+const PENDING_TRANSLATION=['planLost','schedulerStatusLost','scheduleDialog.push.LOST'];
 const extra:Record<string,string[]>={
   'de-CH':['scheduleDialog.startTime','trigger.cloud_command'],
   fr:['scheduleDialog.date','serviceDialog.configSection','serviceDialog.timed.unitMinutes'],
@@ -19,7 +22,7 @@ for(const locale of ['de-CH','fr','it','es','pt','lg'])test(`valve locale ${loca
     assert.deepEqual((copy[key].match(/\{\{[^}]+\}\}/g)??[]).sort(),(value.match(/\{\{[^}]+\}\}/g)??[]).sort(),`${locale}:${key}`);
   }
   if(locale==='lg')return; // Production Luganda remains subject to human review.
-  const allowed=new Set([...shared,...extra[locale]]);
+  const allowed=new Set([...shared,...PENDING_TRANSLATION,...extra[locale]]);
   assert.deepEqual(Object.keys(copy).filter(key=>copy[key]===english[key]&&!allowed.has(key)),[]);
 });
 // The panel heading's information button replaced the visible subtitle; the
@@ -27,7 +30,7 @@ for(const locale of ['de-CH','fr','it','es','pt','lg'])test(`valve locale ${loca
 const SCHEDULE_HELP={scheduleHelp:'Weekly schedules run on each valve.',scheduleHelpLabel:'About weekly schedules'};
 // Edge lg is human translation work product: a key without a human pass ships
 // the English source text (docs/i18n/pending-luganda-translations.md).
-const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel'];
+const PENDING_HUMAN_LUGANDA=['scheduleHelp','scheduleHelpLabel',...PENDING_TRANSLATION];
 test('valve panel schedule help: approved English, every locale carries it, retired keys are gone',()=>{
   const raw=(locale:string)=>JSON.parse(readFileSync(`public/locales/${locale}/valves.json`,'utf8')) as Record<string,unknown>;
   assert.deepEqual({scheduleHelp:english.scheduleHelp,scheduleHelpLabel:english.scheduleHelpLabel},SCHEDULE_HELP);

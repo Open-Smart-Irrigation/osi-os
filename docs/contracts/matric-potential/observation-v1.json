@@ -1,0 +1,94 @@
+{
+  "convention": "matric-potential-hpa-v1",
+  "gatewayDeviceEui": "0016C001F1000001",
+  "tableName": "tensiomark_observations",
+  "row": {
+    "id": 1,
+    "device_data_id": null,
+    "deveui": "A840410000000011",
+    "recorded_at": "2026-10-16T12:00:00.000Z",
+    "received_at": "2026-10-16T12:00:01.000Z",
+    "raw_response_hex": "312B31382E3039302B312E373330300D0A342B31392E3132352B302E3136340D0A",
+    "payload_base64": "MSsxOC4wOTArMS43MzAwDQo0KzE5LjEyNSswLjE2NA0K",
+    "configuration_hash": "7c2832cdd726a58fe885b72fe69175a52f0a130bd4f67cfb4a971e038e2bd550",
+    "configuration_json": "{\"version\":1,\"kind\":\"tensiomark\",\"source_unit\":\"pF\",\"field_order\":\"temperature_pf\",\"qualification\":\"bench_observed\",\"sensors\":[{\"address\":\"1\",\"channel\":1,\"identity\":\"111TENSIOMARK_2Vh_10A00001\",\"depth_cm\":null,\"calibration_range\":\"unverified\"},{\"address\":\"4\",\"channel\":2,\"identity\":\"411TENSIOMARK_2Vh_10A00002\",\"depth_cm\":30,\"calibration_range\":\"unverified\"}]}",
+    "disposition": "accepted",
+    "normalized_json": "{\"normalization_version\":2,\"conversion\":\"matric-potential-hpa-v1\",\"native_pf\":{\"swt_1\":\"+1.7300\",\"swt_2\":\"+0.164\"},\"channels\":{\"bat_v\":3.606,\"soil_temp_1\":18.09,\"swt_1\":5.370317963702528,\"soil_temp_2\":19.125,\"swt_2\":0.14588142602753484},\"disposition\":\"accepted\"}"
+  },
+  "canonicalColumns": [
+    [
+      "id",
+      "INTEGER",
+      "1"
+    ],
+    [
+      "device_data_id",
+      "INTEGER",
+      null
+    ],
+    [
+      "deveui",
+      "TEXT",
+      "A840410000000011"
+    ],
+    [
+      "recorded_at",
+      "TIMESTAMP",
+      "2026-10-16T12:00:00.000Z"
+    ],
+    [
+      "received_at",
+      "TIMESTAMP",
+      "2026-10-16T12:00:01.000Z"
+    ],
+    [
+      "raw_response_hex",
+      "TEXT",
+      "312B31382E3039302B312E373330300D0A342B31392E3132352B302E3136340D0A"
+    ],
+    [
+      "payload_base64",
+      "TEXT",
+      "MSsxOC4wOTArMS43MzAwDQo0KzE5LjEyNSswLjE2NA0K"
+    ],
+    [
+      "configuration_hash",
+      "TEXT",
+      "7c2832cdd726a58fe885b72fe69175a52f0a130bd4f67cfb4a971e038e2bd550"
+    ],
+    [
+      "configuration_json",
+      "TEXT",
+      "{\"version\":1,\"kind\":\"tensiomark\",\"source_unit\":\"pF\",\"field_order\":\"temperature_pf\",\"qualification\":\"bench_observed\",\"sensors\":[{\"address\":\"1\",\"channel\":1,\"identity\":\"111TENSIOMARK_2Vh_10A00001\",\"depth_cm\":null,\"calibration_range\":\"unverified\"},{\"address\":\"4\",\"channel\":2,\"identity\":\"411TENSIOMARK_2Vh_10A00002\",\"depth_cm\":30,\"calibration_range\":\"unverified\"}]}"
+    ],
+    [
+      "disposition",
+      "TEXT",
+      "accepted"
+    ],
+    [
+      "normalized_json",
+      "TEXT",
+      "{\"normalization_version\":2,\"conversion\":\"matric-potential-hpa-v1\",\"native_pf\":{\"swt_1\":\"+1.7300\",\"swt_2\":\"+0.164\"},\"channels\":{\"bat_v\":3.606,\"soil_temp_1\":18.09,\"swt_1\":5.370317963702528,\"soil_temp_2\":19.125,\"swt_2\":0.14588142602753484},\"disposition\":\"accepted\"}"
+    ]
+  ],
+  "expected": {
+    "historyKey": "TENSIOMARK_OBSERVATION|0016C001F1000001|1",
+    "naturalKey": "A840410000000011|2026-10-16T12:00:00.000Z|1",
+    "payloadHash": "426c842d57d40b81726b532529cdf068105cac1782df1f1f644ddf0e54630829",
+    "payload": {
+      "id": 1,
+      "device_data_id": null,
+      "deveui": "A840410000000011",
+      "recorded_at": "2026-10-16T12:00:00.000Z",
+      "received_at": "2026-10-16T12:00:01.000Z",
+      "raw_response_hex": "312B31382E3039302B312E373330300D0A342B31392E3132352B302E3136340D0A",
+      "payload_base64": "MSsxOC4wOTArMS43MzAwDQo0KzE5LjEyNSswLjE2NA0K",
+      "configuration_hash": "7c2832cdd726a58fe885b72fe69175a52f0a130bd4f67cfb4a971e038e2bd550",
+      "configuration_json": "{\"version\":1,\"kind\":\"tensiomark\",\"source_unit\":\"pF\",\"field_order\":\"temperature_pf\",\"qualification\":\"bench_observed\",\"sensors\":[{\"address\":\"1\",\"channel\":1,\"identity\":\"111TENSIOMARK_2Vh_10A00001\",\"depth_cm\":null,\"calibration_range\":\"unverified\"},{\"address\":\"4\",\"channel\":2,\"identity\":\"411TENSIOMARK_2Vh_10A00002\",\"depth_cm\":30,\"calibration_range\":\"unverified\"}]}",
+      "disposition": "accepted",
+      "normalized_json": "{\"normalization_version\":2,\"conversion\":\"matric-potential-hpa-v1\",\"native_pf\":{\"swt_1\":\"+1.7300\",\"swt_2\":\"+0.164\"},\"channels\":{\"bat_v\":3.606,\"soil_temp_1\":18.09,\"swt_1\":5.370317963702528,\"soil_temp_2\":19.125,\"swt_2\":0.14588142602753484},\"disposition\":\"accepted\"}"
+    },
+    "quarantineReason": null
+  }
+}

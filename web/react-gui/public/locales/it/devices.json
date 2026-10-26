@@ -287,7 +287,11 @@
         "noReadingSince": "Nessuna lettura da {{since}}",
         "noReadingYet": "Ancora nessuna lettura",
         "invalidReading": "Lettura non valida",
-        "lastValid": "Ultima valida {{value}} · {{time}}"
+        "lastValid": "Ultima valida {{value}} · {{time}}",
+        "depthSuffix": "({{depth}} cm)",
+        "lastReading": "Ultima lettura {{since}}",
+        "triggerProbeLastReading": "Sonda di attivazione: ultima lettura {{since}}",
+        "triggerProbeInvalid": "Sonda di attivazione: lettura non valida"
       },
       "rainFromStation": "Misurata alla stazione MeteoSvizzera {{station}} (a {{distance}} km)",
       "rainFromWeather": "Dai dati meteo (non misurata)",
@@ -726,14 +730,56 @@
     "rollbackRequestAccepted": "Richiesta di ripristino accettata (versione {{version}}; {{status}}).",
     "degraded": "Configurazione di acquisizione degradata",
     "active": "Configurazione di acquisizione attiva",
-    "deploymentStatus": "Configurazione di acquisizione: {{status}}"
+    "deploymentStatus": "Configurazione di acquisizione: {{status}}",
+    "tensiomark": {
+      "title": "Interpretazione Tensiomark",
+      "qualification": "Le letture sono in pF, con la temperatura trasmessa per prima. L'intervallo di calibrazione non è verificato.",
+      "calibrationRange": "Intervallo di calibrazione: non verificato",
+      "addSensor": "Aggiungi sensore",
+      "confirmation": "Confermo che il sensore trasmette prima la temperatura e poi il pF.",
+      "confirmRequired": "Prima di salvare, conferma che il sensore trasmette prima la temperatura e poi il pF.",
+      "saved": "Impostazioni Tensiomark salvate. L'intervallo di calibrazione non è verificato.",
+      "address": "Indirizzo",
+      "channel": "Canale",
+      "identity": "Identità",
+      "depthCmLabel": "Profondità (cm)",
+      "addressAria": "Indirizzo Tensiomark {{row}}",
+      "channelAria": "Canale Tensiomark {{row}}",
+      "identityAria": "Identità Tensiomark {{row}}",
+      "depthAria": "Profondità Tensiomark {{row}} (cm)",
+      "identityExample": "es. {{address}}11TENSIOMARK_2Vh_10A00001",
+      "removeSensor": "Rimuovi",
+      "removeSensorAria": "Rimuovi sensore Tensiomark {{row}}",
+      "errors": {
+        "sensorCount": "Configura uno o due sensori Tensiomark.",
+        "addressInvalid": "Sensore {{row}}: l'indirizzo deve essere una lettera o una cifra.",
+        "channelInvalid": "Sensore {{row}}: scegli il canale 1 o 2.",
+        "identityInvalid": "Sensore {{row}}: l'identità deve essere {{address}}11TENSIOMARK_2Vh_10A seguita da cinque cifre.",
+        "depthInvalid": "Sensore {{row}}: lascia vuota la profondità se è sconosciuta, oppure inserisci centimetri interi da 1 a 1000.",
+        "calibrationInvalid": "Sensore {{row}}: l'intervallo di calibrazione deve restare non verificato.",
+        "duplicateAddress": "Sensore {{row}}: l'indirizzo {{address}} è già usato da un altro sensore.",
+        "duplicateIdentity": "Sensore {{row}}: questa identità è già usata da un altro sensore.",
+        "duplicateChannel": "Sensore {{row}}: il canale {{channel}} è già usato da un altro sensore."
+      }
+    }
   },
   "sdi12Soil": {
     "removeConfirm": "Rimuovere questo dispositivo?",
     "removeSubtitle": "Il dispositivo verrà scollegato dal tuo account.",
     "yesRemove": "Sì, rimuovi",
     "removing": "Rimozione in corso...",
-    "failedToRemove": "Impossibile rimuovere il dispositivo"
+    "failedToRemove": "Impossibile rimuovere il dispositivo",
+    "badge": "SDI-12",
+    "noProfile": "Nessun profilo sonda",
+    "detecting": "Rilevamento sonda (in attesa)",
+    "invalidLayout": "La configurazione dei canali Sentek salvata non è valida. Apri le impostazioni del dispositivo e salva una configurazione valida prima di fare affidamento sulle letture del suolo.",
+    "status": {
+      "pending_identify": "Identificazione in corso",
+      "identified": "Identificata",
+      "unmatched": "Non riconosciuta",
+      "manual": "Impostata manualmente",
+      "unknown": "Stato sconosciuto"
+    }
   },
   "deviceRemoval": {
     "titleZone": "Rimuovere da questa zona?",
@@ -875,15 +921,11 @@
     "chameleonNeedsMod3": "Chameleon SWT può essere attivato solo dopo che MOD3 è attivo."
   },
   "watermark": {
-    "sectionTitle": "Tensione idrica del suolo WATERMARK",
-    "probe": "Sonda {{n}}",
-    "depthUnset": "Profondità non impostata",
     "wet": "Umido",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Resistenza {{value}}",
     "resistanceUpTo": "Resistenza ≤ {{value}}",
     "offset": "Scostamento {{value}} mV",
-    "soilTemp": "Suolo {{value}} °C",
     "soilTempNotMeasured": "Temperatura del suolo non misurata",
     "dieTemp": "Scheda {{value}} °C",
     "supply": "Alimentazione {{value}} V",
@@ -958,5 +1000,33 @@
     "onlyCandidate": "Viene usato l'unico pluviometro di questa zona.",
     "loadFailed": "Non è stato possibile caricare i pluviometri di questa zona.",
     "banner": "Due pluviometri trasmettono per questa zona. Scegline uno nelle impostazioni della zona."
+  },
+  "soilTension": {
+    "sectionTitle": "Tensione idrica del suolo",
+    "channel": "Tensione del suolo {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Suolo {{value}} °C",
+    "soilTempSeries": "Temperatura del suolo {{channel}}",
+    "invalidReading": "Lettura non valida",
+    "noReadings": "Nessuna lettura del suolo disponibile.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Ultimo rilevamento: adesso",
+      "lastSeenMinutes": "Ultimo rilevamento: {{count}} min fa",
+      "lastSeenHours": "Ultimo rilevamento: {{count}} h fa",
+      "lastSeenAt": "Ultimo rilevamento: {{date}}",
+      "neverSeen": "Mai visto",
+      "battery": "Batteria",
+      "batteryLow": "Batteria scarica"
+    },
+    "settings": "Impostazioni dispositivo",
+    "closeSettings": "Chiudi impostazioni dispositivo",
+    "zones": "Zone:",
+    "noZones": "Nessuna zona assegnata"
   }
 }

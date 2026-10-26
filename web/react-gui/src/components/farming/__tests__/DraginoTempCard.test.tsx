@@ -12,12 +12,14 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => STATUS_LABELS[key] ?? key }),
+  useTranslation: () => ({ t: (key: string, options?: { value?: string }) => key === 'soilTension.soilTemp'
+    ? `Soil ${options?.value} °C`
+    : STATUS_LABELS[key] ?? key }),
 }));
 
 const NOW = Date.parse('2026-09-24T08:00:00.000Z');
 const FRESH = new Date(NOW - 30 * 60 * 1000).toISOString();
-const STALE = new Date(NOW - 4 * 60 * 60 * 1000).toISOString();
+const DAYS_OLD = new Date(NOW - 5 * 24 * 60 * 60 * 1000).toISOString();
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(NOW);
   window.localStorage.clear();
@@ -97,7 +99,7 @@ describe('DraginoTempCard SWT unit preference', () => {
     expect(screen.getByText('No valid Chameleon sample')).toBeInTheDocument();
   });
 
-  it('withholds stale LSN50 status and keeps each status inside its one row button', () => {
+  it('keeps the LSN50 status on an old reading and keeps each status inside its one row button', () => {
     const { rerender } = render(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
       last_seen: FRESH,
@@ -112,10 +114,10 @@ describe('DraginoTempCard SWT unit preference', () => {
 
     rerender(<DraginoTempCard removeContext="farm" device={{
       ...chameleonDevice,
-      last_seen: STALE,
+      last_seen: DAYS_OLD,
       latest_data: { swt_1: 10 },
     }} />);
-    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
+    expect(screen.getByText('Wet')).toBeInTheDocument();
   });
 
 });
@@ -126,6 +128,7 @@ const watermarkDevice: Device = {
   type_id: 'DRAGINO_LSN50',
   last_seen: FRESH,
   latest_data: {
+    ext_temperature_c: 16.8,
     watermark: {
       recorded_at: FRESH,
       supply_mv: 3300,
@@ -148,14 +151,16 @@ describe('DraginoTempCard WATERMARK probe section', () => {
 
   it('renders the WATERMARK section and its values when latest_data.watermark is present', () => {
     render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
-    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+    expect(screen.getByText('soilTension.sectionTitle')).toBeInTheDocument();
     expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
     expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
+    expect(screen.getByText(/16\.8/)).toBeInTheDocument();
+    expect(screen.queryByText(/19\.9/)).not.toBeInTheDocument();
   });
 
   it('renders no WATERMARK section when latest_data.watermark is absent', () => {
     render(<DraginoTempCard removeContext="farm" device={chameleonDevice} />);
-    expect(screen.queryByText('watermark.sectionTitle')).not.toBeInTheDocument();
+    expect(screen.queryByText('soilTension.sectionTitle')).not.toBeInTheDocument();
   });
 
   it('hides the Chameleon SWT block on a board reflashed to WATERMARK that still has chameleon_enabled set', () => {
@@ -167,7 +172,7 @@ describe('DraginoTempCard WATERMARK probe section', () => {
       chameleon_swt3_depth_cm: 30,
     }} />);
     expect(screen.queryByText('Chameleon SWT')).not.toBeInTheDocument();
-    expect(screen.getByText('watermark.sectionTitle')).toBeInTheDocument();
+    expect(screen.getByText('soilTension.sectionTitle')).toBeInTheDocument();
   });
 
   it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {
@@ -193,7 +198,7 @@ describe('DraginoTempCard WATERMARK history', () => {
   it('opens the soil temperature series from the measured soil temperature', async () => {
     const { sensorAPI } = await import('../../../services/api');
     render(<DraginoTempCard removeContext="farm" device={watermarkDevice} />);
-    fireEvent.click(screen.getByRole('button', { name: 'watermark.soilTemp' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Soil 16.8 °C' }));
     expect(await screen.findByRole('dialog', { name: 'environment.soil.temperature' })).toBeInTheDocument();
     await waitFor(() => expect(sensorAPI.getHistory).toHaveBeenCalledWith('AA00000000000002', 'ext_temperature_c', 24));
   });

@@ -11,6 +11,25 @@ const REPO_ROOT = path.resolve(__dirname, '../../../../../../..');
 const SEED = fs.readFileSync(path.join(REPO_ROOT, 'database/seed-blank.sql'), 'utf8');
 const GUI_CATALOGUE = fs.readFileSync(path.join(REPO_ROOT, 'web/react-gui/src/types/farming.ts'), 'utf8');
 
+test('Watermark temperature routing respects excluded modes with either flag spelling', () => {
+  for (const flag of ['dendro_enabled', 'dendroEnabled', 'rain_gauge_enabled', 'rainGaugeEnabled', 'flow_meter_enabled', 'flowMeterEnabled']) {
+    const source = describeDeviceSource({ type_id: 'DRAGINO_LSN50', watermark_evidence: 1, [flag]: true });
+    assert.ok(!source.families.find(f => f.cardType === 'soil').channelKeys.includes('ext_temperature_c'), flag);
+  }
+});
+
+test('retained WATERMARK calibration takes priority over a stale Chameleon flag', () => {
+  const source = describeDeviceSource({
+    type_id: 'DRAGINO_LSN50',
+    watermark_evidence: 1,
+    watermark_calibration_retained: 1,
+    chameleon_enabled: 1,
+  });
+  assert.deepEqual(source.currentChannelKeys, ['swt_1', 'swt_2', 'ext_temperature_c', 'bat_v']);
+  // Keep old Chameleon values queryable without presenting SWT3 as current.
+  assert.ok(source.families.find((family) => family.cardType === 'soil').channelKeys.includes('swt_3'));
+});
+
 function seedDeviceTypes() {
   const match = SEED.match(/type_id\s+TEXT NOT NULL CHECK\(type_id IN \(\s*([\s\S]*?)\)\),/);
   assert.ok(match, 'seed devices CHECK must remain discoverable');
@@ -115,4 +134,43 @@ test('every declared source key has manifest metadata and an allowed edge field'
       assert.equal(manifestEntry.edgeField, meta.edgeField, `${key} edge field differs from channels.json`);
     }
   }
+});
+
+const tensiomarkLayout = require('./__fixtures__/tensiomark-layout.json');
+
+test('explicit Tensiomark layout preserves both probe pairs with unknown depths and no latest values', () => {
+  for (const serialized of [tensiomarkLayout, JSON.stringify(tensiomarkLayout)]) {
+    const source = describeDeviceSource({
+      type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_channel_layout_json: serialized,
+      // A leftover depth map must not override the explicit acquisition layout.
+      soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: 10, swt_1: 20 }),
+      latest_data: { bat_v: 3.55 },
+    });
+    assert.deepEqual(source.currentChannelKeys, ['swt_1', 'soil_temp_1', 'swt_2', 'soil_temp_2', 'bat_v']);
+    assert.ok(source.families.find(family => family.cardType === 'soil').channelKeys.includes('swt_2'));
+  }
+});
+
+test('invalid explicit Tensiomark layout cannot become Sentek or profile fallback channels', () => {
+  const invalidLayouts = [
+    { ...tensiomarkLayout, source_unit: 'kPa' },
+    { ...tensiomarkLayout, sensors: [tensiomarkLayout.sensors[0], tensiomarkLayout.sensors[0]] },
+    { ...tensiomarkLayout, sensors: [{ ...tensiomarkLayout.sensors[0], identity: 'wrong' }] },
+  ];
+  for (const layout of invalidLayouts) {
+    const source = describeDeviceSource({ type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK',
+      sdi12_channel_layout_json: layout, soil_moisture_probe_depths_json: { swt_1: 20 } });
+    assert.deepEqual(source.currentChannelKeys, ['bat_v']);
+  }
+});
+
+test('Sentek explicit layouts keep VWC and TriSCAN VIC channels', () => {
+  const source = describeDeviceSource({ type_id: 'DRAGINO_SDI12', sdi12_channel_layout_json: {
+    version: 1, address: '0', sensors: [
+      { channel: 1, response_position: 1, depth_cm: 10, type: 'ENVIROSCAN' },
+      { channel: 2, response_position: 2, depth_cm: 20, type: 'TRISCAN' },
+    ],
+  } });
+  assert.deepEqual(source.currentChannelKeys, ['vwc_1', 'vwc_2', 'soil_vic_2', 'bat_v']);
 });

@@ -1,6 +1,6 @@
 ---
 name: osi-live-ops-runbook
-description: Use when deploying OSI OS to a live or previously provisioned Raspberry Pi gateway, repairing a live Pi's Node-RED/ChirpStack/database state, taking a pre-repair backup, recovering from schema fingerprint drift, SSHing into a live gateway, restarting Node-RED on a farm device, testing STREGA valves on live hardware, or judging whether an operation is safe against a running farm or the production cloud host.
+description: Use when deploying OSI OS to a live or previously provisioned Raspberry Pi gateway, repairing a live Pi's Node-RED/ChirpStack/database state, taking a pre-repair backup, recovering from schema fingerprint drift, SSHing into a live gateway, restarting Node-RED on a farm device, testing STREGA valves on live hardware, or judging whether an operation is safe against a running farm, the production cloud or a customer-hosted instance.
 ---
 
 # OSI Live Ops Runbook
@@ -14,8 +14,8 @@ and a set of concrete live-repair recipes. It does not cover how to design a sch
 migration, how to edit `flows.json` internals, or agronomy semantics — see "When NOT
 to use" below.
 
-Every rule here traces back to `AGENTS.md` ("Live-deploy safety rules", "Production
-cloud access") and `docs/engineering-playbook.md` §1 (Prime directives). If anything
+Every rule here traces back to `AGENTS.md` ("Live-deploy safety rules", "Host
+access gate") and `docs/engineering-playbook.md` §1 (Prime directives). If anything
 in this skill ever conflicts with those files, the repo files win — re-read them.
 
 ## When to use / When NOT to use
@@ -66,6 +66,15 @@ The actual guard, in `seed_db_if_missing()`:
    `sqlite3` if available), re-check the target is still absent (race guard), then
    `mv` the seed into place.
 
+**Why the seed ships stamped** (moved from `AGENTS.md` on 2026-10-22; same
+authority): the bundled seed ships already stamped at the migration head (a full
+`schema_migrations` ledger plus `schema_object_fingerprints`, built by
+`scripts/build-seed-db.js` via `bootstrapFresh`), so the `run_schema_migration()`
+that follows the seed has nothing pending and finishes in seconds. A seed without
+that ledger sends every fresh install into `baseline-existing-db.js`'s 1..head
+reference-chain rebuild instead, which takes over ten minutes on a 16-core
+workstation and is not a viable deploy step on a Pi.
+
 Rationale (from `docs/engineering-playbook.md` §1): **a wrong chart annoys someone;
 a wiped `farming.db` destroys months of irreplaceable field data.** The asymmetry is
 absolute — treat every farming.db as one-way-destructible.
@@ -96,16 +105,30 @@ TS=$(date +%Y%m%d-%H%M%S)
 LABEL="pre-repair"          # e.g. "pre-eui-fix", "pre-fingerprint-restamp"
 BK="/data/db/backups/${LABEL}-${TS}"
 mkdir -p "$BK"
-# Primary DB: prefer a consistent ONLINE backup (safe while Node-RED writes);
-# fall back to a fail-FAST raw copy. Never silence a failed primary backup.
-sqlite3 /data/db/farming.db ".backup '$BK/farming.db'" \
-  || cp -a /data/db/farming.db "$BK/farming.db" \
-  || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
-# For a raw copy of a live DB, stop writers first (/etc/init.d/node-red stop) or
-# accept that the sidecars below are required to make the copy consistent.
-for f in farming.db-wal farming.db-shm farming.db-journal; do
-  [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
-done
+# Raw copy, ONLY with the writer stopped: a raw copy of farming.db and its
+# sidecars taken while Node-RED writes is not a consistent backup.
+raw_copy_stopped() {
+  /etc/init.d/node-red stop
+  trap '/etc/init.d/node-red start' EXIT  # remove if the repair needs it stopped
+  i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
+  pgrep -f '[n]ode-red' >/dev/null 2>&1 && { echo "FATAL: Node-RED still running - no raw copy"; exit 1; }
+  cp -a /data/db/farming.db "$BK/farming.db" \
+    || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
+  for f in farming.db-wal farming.db-shm farming.db-journal; do
+    [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
+  done
+}
+if command -v sqlite3 >/dev/null 2>&1; then
+  # ONLINE backup via sqlite3 .backup (WAL-consistent while Node-RED writes). The
+  # output is one self-contained file: do not copy the live -wal/-shm next to it.
+  sqlite3 -cmd ".timeout 5000" /data/db/farming.db ".backup '$BK/farming.db'" || raw_copy_stopped
+  # Same check as scripts/pi/backup-pre-deploy.sh: the copy must pass integrity_check.
+  INTEG=$(sqlite3 "$BK/farming.db" "PRAGMA integrity_check" 2>&1) || true
+  [ "$INTEG" = "ok" ] || { echo "FATAL: backup integrity_check failed: $INTEG - do NOT proceed"; exit 1; }
+else
+  raw_copy_stopped
+  echo "WARN: no sqlite3 - integrity unchecked"
+fi
 # flows.json is a SYMLINK into /srv/node-red/payloads/<stamp>; -L copies the
 # active payload's contents, not a dangling link.
 cp -aL /srv/node-red/flows.json "$BK/flows.json"
@@ -119,25 +142,26 @@ echo "Backup at $BK"
 ls -la "$BK"
 ```
 
-This matches `AGENTS.md` "Live-deploy safety rules": a timestamped backup under
-`/data/db/backups/osi-os-<timestamp>` covering `/data/db/`, `/srv/node-red/`
-(`flows.json`, `settings.js`), and `/usr/lib/node-red/gui/`. Use a descriptive label
-prefix instead of the literal `osi-os-` if it helps you find the right backup later
-— what matters is that it is timestamped and covers those three areas.
+This matches `AGENTS.md` "Live-deploy safety rules": a timestamped directory under
+`/data/db/backups/` holding the `.backup` copy of `farming.db`, the dereferenced
+`flows.json`, `settings.js`, `flows_cred.json` and `/usr/lib/node-red/gui/`. Use a
+descriptive label prefix instead of the literal `osi-os-` if it helps you find the
+right backup later; what matters is the timestamp, the `.backup` method and the
+integrity check.
 
-### 3. Production-cloud access gate
+### 3. Host access gate
 
-`osicloud.ch` is the production OSI Server. Per `AGENTS.md` "Production cloud
-access":
+Per `AGENTS.md` "Host access gate", the gated hosts are the production OSI Server
+(`osicloud.ch`) and every customer-hosted cloud instance. The private operations
+docs list the customer hosts; this repo never names them.
 
-- Treat any SSH access to that host — including through a local alias or an
-  already-loaded SSH key — as restricted production access.
-- Do not connect to it, inspect its files, read its environment, copy secrets from
-  it, or run commands there **unless the user explicitly asks for production /
-  `osicloud.ch` access in the current turn.**
-- A working SSH key or a successful `ssh` connectivity check is **not** consent.
-- Ambiguous phrasing like "the other server" is not enough — clarify with the user,
+- Before any SSH session, file inspection, environment read, secret copy or command
+  on a gated host, **the user must name that host in the current turn.**
+- A loaded key, a local alias or a successful `ssh` probe is **not** consent.
+- Ambiguous phrasing like "the other server" is not enough. Clarify with the user,
   or default to the test host `server.opensmartirrigation.org` instead.
+- The test host can carry production gateway data (noted 2026-10-22); treat
+  data-changing operations there as production-affecting.
 
 This gate is about the cloud counterpart, not the edge gateways — but it governs the
 same class of decision this skill is otherwise all about, so it is repeated here as
@@ -163,7 +187,7 @@ an unknown credential.
 | Bundle GUI | `tar czf react_gui.tar.gz -C web/react-gui/build .` |
 | Serve repo root | `python3 -m http.server 9876 --bind 127.0.0.1` |
 | Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
-| Restart Node-RED | `/etc/init.d/node-red restart` |
+| Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
 | Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
 | Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
 | Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
@@ -521,6 +545,53 @@ step is, what drift means structurally) is `osi-schema-change-control`'s territo
 
 ---
 
+## Foreign-numbered ledger recovery
+
+`AGENTS.md` ("Live-deploy safety rules") keeps the rule lines; this section holds
+the long form that moved out of it on 2026-10-22 and carries the same authority.
+
+A gateway that ran one of the two customer lines (one valve-focused, one not) has
+`schema_migrations` rows numbered under that branch's own scheme, which can collide
+with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer
+line, `valve_control` on main) — `applyPending` correctly refuses on the checksum
+mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but
+the device is then wedged with no forward path.
+
+`node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply`
+plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row,
+that a foreign-numbered ledger entry's content is exactly what some main migration
+already delivers — either byte-identical, or identical after stripping the leading
+`-- NNNN:` header comment and structurally proving equal schema effect via
+`scripts/semantic-schema-compare.js` — before rewriting that row's
+`version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or
+ambiguous row and touches nothing when it refuses.
+
+`deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger
+inspection and `migrate-cli.js`) whenever any applied ledger row above version 21
+has a checksum that disagrees with main's `CHECKSUMS.json`; a main-numbered
+gateway's checksums already agree there and never triggers it.
+
+`--clear-repair-required` is the narrower, separate recovery for a row already
+stuck `repair_required` whose checksum, at its own current version, already matches
+main (e.g. a prior reconcile run committed the remap but crashed before the status
+flip) — it never clears a row whose checksum still disagrees. Never hand-edit
+`schema_migrations` outside these two sanctioned tools.
+
+### Rehearsing that cutover on a copy
+
+`node scripts/rehearse-ledger-cutover.js --db <pulled copy> --work <scratch directory>`
+runs, on a copy only, the same chain deploy.sh runs for such a gateway (reconcile
+`--report`, `--apply`, `migrate-cli.js`, `verify-head-cli.js`), then the
+devices-rebuild rehearsal twice, the shipped boot node with the gateway's EUI,
+`integrity_check`/`foreign_key_check`, a schema comparison against `seed-blank.sql`,
+and per-table row counts and content hashes before and after; a second pass on the
+result must change nothing. Row changes the migrations make by design are listed in
+its `EXPECTED_CHANGES`; any other change fails. It refuses paths under `/data/db`
+and a non-empty `--work` it did not create, and writes
+`<work>/rehearsal-report.json` with every step's result and duration.
+
+---
+
 ## BusyBox / ash traps on the Pi
 
 The Pi image runs BusyBox `ash`, not `bash`. These are field-verified operator
@@ -672,8 +743,8 @@ in runbooks, docs, or scripts.
 - Sending a bare `CLOSE` to a STREGA valve "to be safe" — it is not part of the
   supported command set; use a short `OPEN_FOR_DURATION` or the cancel endpoint.
 - Resetting a password or token to get unblocked instead of asking the operator.
-- Treating a loaded SSH key or working `ssh` check against `osicloud.ch` as
-  permission to proceed there.
+- Treating a loaded SSH key or working `ssh` check against `osicloud.ch` or a
+  customer-hosted instance as permission to proceed there.
 - Hand-editing `schema_object_fingerprints` instead of using
   `restamp-fingerprints.js`, or running that script without first confirming the
   live schema is actually correct.
@@ -718,7 +789,7 @@ rarely, but do change):
 - package.json helper declarations: `grep -n "file:" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json`.
 - `functionExternalModules` flag: `grep -n functionExternalModules feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`.
 - Prime directives / asymmetry framing: `sed -n '13,32p' docs/engineering-playbook.md`.
-- Production-cloud gate wording: `sed -n '/Production cloud access/,/^---/p' AGENTS.md`.
+- Host access gate wording: `sed -n '/Host access gate/,/^---/p' AGENTS.md`.
 - Cross-check this file still matches `AGENTS.md` "Live-deploy safety rules" verbatim
   intent — if that section is edited, this skill's Prime Safety Rules section needs
   a matching pass.

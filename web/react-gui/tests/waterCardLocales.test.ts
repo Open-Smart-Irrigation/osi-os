@@ -97,6 +97,14 @@ const DEVICES_KEYS = [
   'zone.water.soil.noReadingYet',
   'zone.water.soil.invalidReading',
   'zone.water.soil.lastValid',
+  // Owner decision 2026-10-21: the figure's depth after its pill, the age
+  // line ("Last reading 5 days ago"; "No reading since 5 days ago" was
+  // ungrammatical), and the stale trigger probe on its own line; a current
+  // fault on the trigger channel replaces that line.
+  'zone.water.soil.depthSuffix',
+  'zone.water.soil.lastReading',
+  'zone.water.soil.triggerProbeLastReading',
+  'zone.water.soil.triggerProbeInvalid',
   'common.viewHistory',
   'common.batteryEstimated',
   // Zone environment card, Water tab (WaterTab.tsx). These ten were called
@@ -218,6 +226,12 @@ const PENDING_HUMAN_LUGANDA = new Set<string>([...DEVICES_KEYS, ...NETWORK_KEYS]
 // name, "Action" is the same word in French, and "Balance" is the Spanish
 // term for the water balance tile.
 const REVIEWED_IDENTICAL = new Set<string>([
+  // "({{depth}} cm)" is a placeholder and an SI unit in brackets.
+  'de-CH:zone.water.soil.depthSuffix',
+  'es:zone.water.soil.depthSuffix',
+  'fr:zone.water.soil.depthSuffix',
+  'it:zone.water.soil.depthSuffix',
+  'pt:zone.water.soil.depthSuffix',
   'es:environment.water.balance',
   'de-CH:zone.water.source.shared_server',
   'es:zone.water.source.shared_server',

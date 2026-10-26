@@ -39,7 +39,9 @@ Locations are `tab → node name`.
 ### Authentication (7 function nodes)
 
 Local account registry, independent of the cloud. `POST /auth/register`
-(nodes "Register User", "Insert User") stores bcrypt hashes; `POST
+(nodes "Register User", "Insert User") stores bcrypt hashes and creates an
+account only while the gateway has none (with scoped access on: while it has
+no admin), answering 403 afterwards; `POST
 /auth/login` ("Login User", "Lookup Auth User", "Process Result") issues
 HMAC-signed JWTs. "Set Download Headers" gates `GET /download/database`.
 
@@ -130,7 +132,7 @@ Node groups and cadences:
 
 `GET /api/system/stats` ("System Stats": CPU, memory, load, temperature, fan),
 `POST /api/system/reboot`, `POST /api/system/fan` ("Fan Control", writes PWM
-sysfs under `/sys/class/pwm/pwmchip2/pwm3`; see AGENTS.md for the `pwm-fan`
+sysfs under `/sys/class/pwm/pwmchip2/pwm3`; see `docs/api/sync-endpoints.md` for the `pwm-fan`
 driver caveat), "Command Type Registry" (startup-loaded command catalog),
 "STREGA Reconciliation Monitor" (60 s expectation-vs-observed check), and
 "Improvement Requests API Router" (`/api/improvement-requests*`).

@@ -17,7 +17,7 @@ const { executeFunction, loadNode } = require('./lib/scoped-access-harness');
 
 const ROOT = path.resolve(__dirname, '..');
 const SEED = fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8');
-const GATEWAY = '0016C001F11715E2';
+const GATEWAY = 'AABBCCDDEEFF0003';
 const ZONE_UUID = '44444444-4444-4444-8444-444444444444';
 const USER_UUID = '55555555-5555-4555-8555-555555555555';
 
@@ -178,9 +178,9 @@ const normalizeTimestamps = (topic) => String(topic).replace(ISO_TIMESTAMP, '<TS
 const BASE_COMMIT_TOPIC_FIXTURES = {
   UPSERT_ZONE_CONFIG: "UPDATE irrigation_zones SET crop_type = 'olive', notes = 'n', updated_at = '<TS>', sync_version = 3 WHERE zone_uuid = '44444444-4444-4444-8444-444444444444'",
   DELETE_ZONE: "UPDATE irrigation_zones SET deleted_at = '<TS>', updated_at = '<TS>', sync_version = 4 WHERE zone_uuid = '44444444-4444-4444-8444-444444444444'",
-  UPSERT_DEVICE_FLAGS: "UPDATE devices SET dendro_enabled = 1, temp_enabled = 0, rain_gauge_enabled = 0, flow_meter_enabled = 0, is_reference_tree = 0, gateway_device_eui = '0016C001F11715E2', updated_at = '<TS>', sync_version = 2 WHERE deveui = 'AABBCCDDEEFF0011'",
+  UPSERT_DEVICE_FLAGS: "UPDATE devices SET dendro_enabled = 1, temp_enabled = 0, rain_gauge_enabled = 0, flow_meter_enabled = 0, is_reference_tree = 0, gateway_device_eui = 'AABBCCDDEEFF0003', updated_at = '<TS>', sync_version = 2 WHERE deveui = 'AABBCCDDEEFF0011'",
   UPSERT_SCHEDULE: "INSERT INTO irrigation_schedules (irrigation_zone_id, trigger_metric, threshold_kpa, duration_minutes, enabled, response_mode, sync_version, created_at, updated_at, last_applied_at) SELECT id, 'SWT_WM1', 17.5, 12, 1, 'proportional', 5, '<TS>', '<TS>', '<TS>' FROM irrigation_zones WHERE zone_uuid = '44444444-4444-4444-8444-444444444444' ON CONFLICT(irrigation_zone_id) DO UPDATE SET trigger_metric=excluded.trigger_metric, threshold_kpa=excluded.threshold_kpa, duration_minutes=excluded.duration_minutes, enabled=excluded.enabled, response_mode=excluded.response_mode, sync_version=excluded.sync_version, updated_at=excluded.updated_at, last_applied_at=excluded.last_applied_at WHERE excluded.sync_version >= irrigation_schedules.sync_version",
-  ASSIGN_DEVICE_TO_ZONE: "UPDATE devices SET irrigation_zone_id = (SELECT id FROM irrigation_zones WHERE zone_uuid = '44444444-4444-4444-8444-444444444444' LIMIT 1), gateway_device_eui = '0016C001F11715E2', updated_at = '<TS>', sync_version = 6 WHERE deveui = 'AABBCCDDEEFF0011' AND sync_version <= 6 AND EXISTS (SELECT 1 FROM irrigation_zones WHERE zone_uuid = '44444444-4444-4444-8444-444444444444')",
+  ASSIGN_DEVICE_TO_ZONE: "UPDATE devices SET irrigation_zone_id = (SELECT id FROM irrigation_zones WHERE zone_uuid = '44444444-4444-4444-8444-444444444444' LIMIT 1), gateway_device_eui = 'AABBCCDDEEFF0003', updated_at = '<TS>', sync_version = 6 WHERE deveui = 'AABBCCDDEEFF0011' AND sync_version <= 6 AND EXISTS (SELECT 1 FROM irrigation_zones WHERE zone_uuid = '44444444-4444-4444-8444-444444444444')",
 };
 
 const NON_UPSERT_ZONE_CASES = [

@@ -33,7 +33,7 @@ function freshLinkedDb() {
   db.exec(fs.readFileSync(SEED, 'utf8'));
   db.exec(
     "INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at) " +
-    "VALUES('cloud', 1, 'https://cloud.example', '1', '0016C001F11715E2', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+    "VALUES('cloud', 1, 'https://cloud.example', '1', 'AABBCCDDEEFF0003', strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
   );
   return db;
 }

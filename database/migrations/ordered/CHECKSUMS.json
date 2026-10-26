@@ -71,5 +71,7 @@
   "0070__journal_catalog_v11.sql": "4970ecd34f5e72e0a84576d3b97402edabada863f5784df73cd8b17ddda88260",
   "0071__rain_observations.sql": "aa211aac5ab08175a1842422f24dde80b8725093e4e66617ddf4e22061682c16",
   "0072__rain_instrument_days.sql": "4c2a5ad27d0b264a1e1505bf2b2f4e72c3d16422e1dd33d6793a5b607e4f0bdd",
-  "0073__zone_env_rain_quality_sync.sql": "06f778b9abb2b5a4f6a370535497986490ddeca0121e912a13c434c4c92829df"
+  "0073__zone_env_rain_quality_sync.sql": "06f778b9abb2b5a4f6a370535497986490ddeca0121e912a13c434c4c92829df",
+  "0074__tensiomark_observations.sql": "bfb3690f8639a4589dadb2f5b7d334d2164a3992a7595c974d794ae057e55d37",
+  "0075__tensiomark_observation_history.sql": "7bbb6a92d1deccd764499124fcad13d70eab10f6f08775fc2c3ac9ef7d5decf4"
 }

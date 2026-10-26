@@ -234,9 +234,12 @@ test('shipped history router keeps soil rollups for a zone without a plain LSN50
 });
 
 // Owner rule: an LSN50 with WATERMARK evidence (a retained calibration or any
-// stored reading) is a soil source whatever its temperature flag says, and is
-// also an Environment source when temp_enabled is set. A temperature-only
-// LSN50 without evidence, and a dendrometer LSN50 with an old calibration row,
+// stored reading) is a soil source whatever its temperature flag says. Its
+// temperature is soil temperature on that source, not an Environment leaf
+// (docs/superpowers/plans/2026-10-16-matric-potential-precision.md, Task 4:
+// exclude the WATERMARK temperature from environmental sources to avoid a
+// duplicate leaf). A temperature-only LSN50 without evidence stays an
+// Environment source; it and a dendrometer LSN50 with an old calibration row
 // stay out of the Soil card.
 test('shipped history router keeps a temperature-enabled WATERMARK node as a soil source', async () => {
   const dir = fs.mkdtempSync(path.join('/var/tmp', 'osi-history-soil-watermark-'));
@@ -273,7 +276,7 @@ test('shipped history router keeps a temperature-enabled WATERMARK node as a soi
     const byType = Object.fromEntries(cards.payload.cards.map((card) => [card.cardType, card]));
     assert.deepEqual(byType.soil.sourceDevices.map((device) => device.name), ['Watermark LSN50']);
     assert.deepEqual(byType.environment.sourceDevices.map((device) => device.name).sort(),
-      ['Temperature LSN50', 'Watermark LSN50']);
+      ['Temperature LSN50']);
 
     const data = await runNodeForRoute(readNodeFunc(), dbPath, {
       name: 'watermark-soil', method: 'GET',

@@ -7,10 +7,13 @@ import { DeviceCardFooter } from './shared/DeviceCardFooter';
 import { EditableName } from './shared/EditableName';
 import { DeviceRemoveConfirm, deviceRemoveButtonLabel } from './DeviceRemoveConfirm';
 import { useDeviceRemoval, type DeviceRemoveContext } from './useDeviceRemoval';
-import { classifySwtWaterStatus, formatSwtCardValue, formatSwtValue } from '../../utils/swt';
-import { isSensorObservationFresh } from '../../utils/zoneSoil';
+import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
+import type { TFunction } from 'i18next';
+import { useDisplayPreferences } from '../../utils/displayPreferences';
+import { useFormatNumber } from '../../utils/number';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { SensorMonitor } from './SensorMonitor';
+import { SoilTensionReadings, type SoilTensionProbe } from './shared/SoilTensionReadings';
 import {
   FOCUS_VISIBLE_RING,
   HISTORY_VALUE_CUE,
@@ -35,6 +38,11 @@ interface Sdi12SoilCardProps {
 }
 
 type SoilChannel = 'vwc' | 'soil_vic' | 'soil_temp' | 'soil_ec' | 'swt';
+interface SoilRow {
+  index: number;
+  depthCm: number | null;
+  values: Array<{ kind: SoilChannel; value: number | null }>;
+}
 
 const CHANNELS: Array<{ kind: SoilChannel; unit: string; decimals: number }> = [
   { kind: 'vwc', unit: '%', decimals: 1 },
@@ -80,26 +88,72 @@ const HISTORY_COLORS: Record<SoilChannel, string> = {
 
 // One series of the history view: `${kind}_${channel}` in device_data. SWT
 // history is kPa whatever the display unit, as on the other soil cards.
-function historySeries(kind: SoilChannel, index: number, depthText: string): CardHistorySeries {
+function historySeries(kind: SoilChannel, index: number, depthText: string, label = channelLabel(kind)): CardHistorySeries {
   const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
   return {
     field: `${kind}_${index}`,
-    label: `${channelLabel(kind)} · ${depthText}`,
+    label: `${label} · ${depthText}`,
     unit: channel?.unit ?? '',
     color: HISTORY_COLORS[kind],
     decimals: channel?.decimals ?? 1,
   };
 }
 
-function formatChannelValue(kind: SoilChannel, value: number): string | null {
+function formatChannelValue(kind: SoilChannel, value: number, swtUnit: 'kPa' | 'pF'): string | null {
   if (kind === 'swt') {
-    const kpa = formatSwtCardValue(value, 'kPa');
-    if (kpa === null) return null;
-    const pf = formatSwtValue(value, 'pF');
-    return pf ? `${kpa} · ${pf}` : kpa;
+    return formatSwtCardValue(value, swtUnit);
   }
   const channel = CHANNELS.find(({ kind: candidate }) => candidate === kind);
   return `${formatNumber(value, channel?.decimals ?? 1)} ${channel?.unit ?? ''}`.trim();
+}
+
+interface TensiomarkProbe {
+  channel: number;
+  depthCm: number | null;
+}
+
+function positiveDepth(value: unknown): number | null {
+  const depth = Number(value);
+  return value != null && Number.isFinite(depth) && depth > 0 ? depth : null;
+}
+
+// The probes of a Tensiomark node: the saved layout, or, before one is saved, each of the two
+// channels that has a reading or a mirrored depth (as the OSI Cloud card does).
+function tensiomarkProbes(device: Device, data: NonNullable<Device['latest_data']>): TensiomarkProbe[] {
+  const layout = device.sdi12_channel_layout_json;
+  if (layout && 'kind' in layout && layout.kind === 'tensiomark') {
+    return layout.sensors.map((sensor) => ({ channel: sensor.channel, depthCm: sensor.depth_cm }));
+  }
+  const depths = device.soil_moisture_probe_depths_json ?? {};
+  return [1, 2].flatMap((channel) => {
+    const depthCm = positiveDepth(depths[`swt_${channel}`] ?? depths[`soil_temp_${channel}`]);
+    const hasReading = finiteValue(data[`swt_${channel}` as keyof typeof data]) != null
+      || finiteValue(data[`soil_temp_${channel}` as keyof typeof data]) != null;
+    return depthCm != null || hasReading ? [{ channel, depthCm }] : [];
+  });
+}
+
+// History series of one Tensiomark probe, labelled like its tile: kPa whatever the display unit.
+function tensiomarkSeries(t: TFunction<'devices'>, { channel, depthCm }: TensiomarkProbe): CardHistorySeries[] {
+  const swt: CardHistorySeries = {
+    field: `swt_${channel}`,
+    label: depthCm === null
+      ? t('soilTension.channel', { channel })
+      : `${t('soilTension.channel', { channel })} ${t('soilTension.depthCm', { depth: depthCm })}`,
+    unit: 'kPa',
+    color: HISTORY_COLORS.swt,
+    decimals: 1,
+  };
+  const temperature: CardHistorySeries = {
+    field: `soil_temp_${channel}`,
+    label: depthCm === null
+      ? t('soilTension.soilTempSeries', { channel })
+      : `${t('soilTension.soilTempSeries', { channel })} ${t('soilTension.depthCm', { depth: depthCm })}`,
+    unit: '°C',
+    color: HISTORY_COLORS.soil_temp,
+    decimals: 1,
+  };
+  return [swt, temperature].filter((series) => isCardHistorySeriesKey(series.field));
 }
 
 function minutesSince(value: string | null | undefined): number | null {
@@ -118,7 +172,8 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   removeContext,
 }) => {
   const { t } = useTranslation('devices');
-  const swtIsCurrent = isSensorObservationFresh(device.last_seen);
+  const { swtUnit } = useDisplayPreferences();
+  const formatLocaleNumber = useFormatNumber();
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -129,8 +184,8 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
   const historyTitle = t('common.viewHistory', { defaultValue: 'View history' });
   const data = device.latest_data ?? {};
   const status = device.sdi12_probe_status ?? 'unknown';
-  const statusLabel = status === 'pending_identify' ? 'identifying' : status;
-  const profile = device.sdi12_probe_profile || 'No probe profile';
+  const statusLabel = t(`sdi12Soil.status.${status}`);
+  const profile = device.sdi12_probe_profile || null;
   const pendingMinutesAgo = status === 'pending_identify' ? minutesSince(device.updated_at) : null;
   const pendingNoResponse = pendingMinutesAgo != null && pendingMinutesAgo > SDI12_IDENTIFY_TIMEOUT_MINUTES;
   const deployment = device.sdi12_recipe_deployment;
@@ -138,8 +193,30 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
     ? t('sdi12.active')
     : deployment ? t('sdi12.deploymentStatus', { status: deployment.status }) : null;
 
-  const configuredSensors = device.sdi12_channel_layout_json?.sensors ?? [];
-  const rows = configuredSensors.length > 0
+  const layout = device.sdi12_channel_layout_json;
+  const configuredSensors = layout && !('kind' in layout) ? layout.sensors : [];
+  const tensiomark = profile === 'TENSIOMARK' || (layout != null && 'kind' in layout && layout.kind === 'tensiomark');
+  const soilTensionProbes: SoilTensionProbe[] = tensiomark
+    ? tensiomarkProbes(device, data).map((probe) => {
+      const seriesOptions = tensiomarkSeries(t, probe);
+      const open = (field: string) => {
+        const series = seriesOptions.find((option) => option.field === field);
+        return series ? () => setSensorMonitor({ ...series, initialField: field, seriesOptions }) : undefined;
+      };
+      const temperature = finiteValue(data[`soil_temp_${probe.channel}` as keyof typeof data]);
+      return {
+        channel: probe.channel,
+        depthCm: probe.depthCm,
+        kpa: data[`swt_${probe.channel}` as keyof typeof data],
+        onOpenHistory: open(`swt_${probe.channel}`),
+        secondary: temperature === null ? null : {
+          text: t('soilTension.soilTemp', { value: formatLocaleNumber(temperature, 1) }),
+          onOpenHistory: open(`soil_temp_${probe.channel}`),
+        },
+      };
+    })
+    : [];
+  const rows: SoilRow[] = configuredSensors.length > 0
     ? [...configuredSensors]
       .sort((left, right) => left.depth_cm - right.depth_cm)
       .map((sensor) => ({
@@ -160,10 +237,9 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
       })).filter(({ value }) => value != null) as Array<{ kind: SoilChannel; value: number | null }>;
       return { index, depthCm: null, values };
     }).filter(({ values }) => values.length > 0);
-  const minutesAgo = minutesSince(device.last_seen);
 
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
+    <div className="flex h-full flex-col rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-sm transition-colors hover:border-[var(--focus)]">
       <div className="flex flex-col gap-1 mb-2">
         <EditableName
           name={device.name}
@@ -174,15 +250,20 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
           headingClassName="flex-1 text-base font-semibold text-[var(--text)] leading-snug [overflow-wrap:anywhere]"
         />
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-auto bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
-            SDI-12
+          <span className="mr-auto flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md text-xs font-semibold tracking-wide">
+              {t('sdi12Soil.badge')}
+            </span>
+            <span className="rounded-full bg-[var(--secondary-bg)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">
+              {statusLabel}
+            </span>
           </span>
           {!readOnly && (
             <button
               type="button"
               onClick={onOpenSettings}
-              aria-label="Device settings"
-              title="Device settings"
+              aria-label={t('deviceCard.settings')}
+              title={t('deviceCard.settings')}
               className="touch-target p-1.5 rounded-md text-[var(--text-tertiary)] hover:bg-[var(--card)] hover:text-[var(--text)] transition-colors"
             >
               ⚙
@@ -202,13 +283,10 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
           )}
         </div>
       </div>
-      <p className="text-xs text-[var(--text-tertiary)] font-mono mb-2 truncate">{device.deveui}</p>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-sm text-[var(--text-secondary)] truncate">{profile}</span>
-        <span className="rounded-full bg-[var(--secondary-bg)] px-2 py-0.5 text-xs font-semibold text-[var(--text-secondary)]">
-          {statusLabel}
-        </span>
-      </div>
+      <p className={`text-xs text-[var(--text-tertiary)] font-mono truncate ${tensiomark ? 'mb-3' : 'mb-2'}`}>{device.deveui}</p>
+      {!tensiomark && (
+        <p className="mb-3 truncate text-sm text-[var(--text-secondary)]">{profile ?? t('sdi12Soil.noProfile')}</p>
+      )}
 
       {removal.error && (
         <div className="bg-[var(--error-bg)] border border-[var(--error-text)] text-[var(--error-text)] px-3 py-2 rounded-lg mb-3 text-sm">
@@ -227,13 +305,13 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
 
       {status === 'pending_identify' && (
         <p className="mb-3 rounded-lg bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
-          {pendingNoResponse ? t('sdi12.noResponse') : 'Detecting probe (pending)'}
+          {pendingNoResponse ? t('sdi12.noResponse') : t('sdi12Soil.detecting')}
         </p>
       )}
 
       {device.sdi12_layout_status === 'invalid' && (
         <p className="mb-3 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm text-[var(--error-text)]">
-          The saved Sentek channel layout is invalid. Open device settings and save a valid layout before relying on soil readings.
+          {t('sdi12Soil.invalidLayout')}
         </p>
       )}
 
@@ -245,36 +323,39 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         </p>
       )}
 
-      {rows.length > 0 ? (
+      {tensiomark ? (
+        <SoilTensionReadings family={t('soilTension.family.tensiomark')} probes={soilTensionProbes} />
+      ) : rows.length > 0 ? (
         <div className="space-y-2">
           {rows.map(({ index, depthCm, values }) => {
             const depthText = depthCm == null ? depthLabel(device, index) : `${depthCm} cm`;
+            const valueLabel = channelLabel;
             const seriesOptions = values
               .filter(({ kind }) => isCardHistorySeriesKey(`${kind}_${index}`))
-              .map(({ kind }) => historySeries(kind, index, depthText));
+              .map(({ kind }) => historySeries(kind, index, depthText, valueLabel(kind)));
             return (
               <div key={index} className="rounded-lg bg-[var(--card)] p-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1">
-                  Depth {depthText}
+                  {`Depth ${depthText}`}
                 </p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--text)]">
                   {values.map(({ kind, value }) => {
-                    const formatted = value == null ? null : formatChannelValue(kind, value);
+                    const formatted = value == null ? null : formatChannelValue(kind, value, swtUnit);
                     const opensHistory = formatted != null && isCardHistorySeriesKey(`${kind}_${index}`);
                     return (
                       <span key={kind} className="inline-flex flex-wrap items-center gap-2">
                         <span>
-                          <span className="text-[var(--text-tertiary)]">{channelLabel(kind)}: </span>
+                          <span className="text-[var(--text-tertiary)]">{valueLabel(kind)}: </span>
                           {opensHistory ? (
                             <button
                               type="button"
                               onClick={() => setSensorMonitor({
-                                ...historySeries(kind, index, depthText),
+                                ...historySeries(kind, index, depthText, valueLabel(kind)),
                                 initialField: `${kind}_${index}`,
                                 seriesOptions,
                               })}
                               title={historyTitle}
-                              aria-label={`${channelLabel(kind)}, ${depthText}: ${formatted}`}
+                              aria-label={`${valueLabel(kind)}, ${depthText}: ${formatted}`}
                               className={`text-left tabular-nums ${HISTORY_VALUE_CUE} ${FOCUS_VISIBLE_RING}`}
                             >
                               {formatted}
@@ -283,8 +364,8 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
                             <span className="tabular-nums">{formatted ?? '—'}</span>
                           )}
                         </span>
-                        {kind === 'swt' && value != null && (
-                          <SwtStatusIndicator status={swtIsCurrent ? classifySwtWaterStatus(value) : null} />
+                        {kind === 'swt' && (
+                          <SwtStatusIndicator status={classifySwtWaterStatus(value)} />
                         )}
                       </span>
                     );
@@ -296,12 +377,12 @@ export const Sdi12SoilCard: React.FC<Sdi12SoilCardProps> = ({
         </div>
       ) : (
         <p className="rounded-lg bg-[var(--card)] px-3 py-4 text-sm text-[var(--text-tertiary)]">
-          No soil readings available.
+          {t('soilTension.noReadings')}
         </p>
       )}
 
       <DeviceCardFooter
-        lastSeenLabel={minutesAgo !== null ? `Last seen: ${minutesAgo} minutes ago` : 'Never seen'}
+        lastSeen={device.last_seen}
         batteryPercent={data.bat_pct}
         batteryVoltage={data.bat_v}
       />

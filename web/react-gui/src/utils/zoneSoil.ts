@@ -1,4 +1,5 @@
 import type { Device } from '../types/farming';
+import { SWT_KPA_RANGE } from './swt';
 
 /**
  * Soil-sensor presence and freshness for a zone.
@@ -28,8 +29,6 @@ export function isSensorObservationFresh(
     && ageMs <= SENSOR_FRESHNESS_WINDOW_MS;
 }
 
-/** Chameleon's resistance→kPa conversion clamps to [0, 300]; readings outside it are a fault, not a dry soil. */
-const SWT_KPA_RANGE: readonly [number, number] = [0, 300];
 const VWC_PCT_RANGE: readonly [number, number] = [0, 100];
 const VWC_CHANNEL_COUNT = 10;
 
@@ -62,6 +61,25 @@ export interface ZoneSoilStatus {
   stale: boolean;
   /** No eligible value is available, and at least one measurement is invalid or faulted. */
   invalid: boolean;
+  /**
+   * Names of the devices behind a single-channel figure, in device order;
+   * empty for a pooled mean, a volumetric figure, or blank names. The Water
+   * card shows them when no depth is recorded.
+   */
+  probeNames: string[];
+  /**
+   * The scheduler's trigger channel when current probes supplied the figure
+   * but only stale probes carry that channel (owner decision 2026-10-21:
+   * current probes win; the stale trigger probe is reported on its own).
+   */
+  staleTrigger: { channel: SoilChannel; observedAt: string | null } | null;
+  /**
+   * The scheduler's trigger channel when current probes supplied the figure
+   * while a current probe reports that channel faulted or out of range. It
+   * outranks `staleTrigger`: a current fault is news, an older valid reading of
+   * the same channel is not.
+   */
+  invalidTrigger: { channel: SoilChannel; observedAt: string | null } | null;
 }
 
 const ABSENT: ZoneSoilStatus = {
@@ -74,6 +92,9 @@ const ABSENT: ZoneSoilStatus = {
   observedAt: null,
   stale: false,
   invalid: false,
+  probeNames: [],
+  staleTrigger: null,
+  invalidTrigger: null,
 };
 
 const TENSION_CHANNELS: readonly SoilChannel[] = ['swt_1', 'swt_2', 'swt_3'];
@@ -214,6 +235,9 @@ function summarizeVolumetric(devices: Device[], nowMs: number): ZoneSoilStatus {
     observedAt,
     stale: !Number.isFinite(observedMs) || nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS,
     invalid: reportedCount > 0 && usableValues.length === 0,
+    probeNames: [],
+    staleTrigger: null,
+    invalidTrigger: null,
   };
 }
 
@@ -233,10 +257,11 @@ interface TensionBucket {
   values: Map<SoilChannel, number[]>;
   observedAt: Map<SoilChannel, string | null>;
   depths: Map<SoilChannel, number | null>;
+  names: Map<SoilChannel, string[]>;
 }
 
 function emptyTensionBucket(): TensionBucket {
-  return { values: new Map(), observedAt: new Map(), depths: new Map() };
+  return { values: new Map(), observedAt: new Map(), depths: new Map(), names: new Map() };
 }
 
 function chameleonChannelFaulted(device: Device, channel: SoilChannel): boolean {
@@ -278,8 +303,12 @@ function appendTension(
   value: number,
   observedAt: string | null | undefined,
   depth: number | null,
+  name: string | null | undefined,
 ) {
   bucket.values.set(channel, [...(bucket.values.get(channel) ?? []), value]);
+  const trimmed = typeof name === 'string' ? name.trim() : '';
+  const names = bucket.names.get(channel) ?? [];
+  if (trimmed && !names.includes(trimmed)) bucket.names.set(channel, [...names, trimmed]);
   bucket.observedAt.set(channel, newerInstant(bucket.observedAt.get(channel) ?? null, observedAt));
   if (depth != null) {
     const known = bucket.depths.get(channel);
@@ -297,6 +326,8 @@ function summarizeTension(
   const historical = emptyTensionBucket();
   let hasInvalidReading = false;
   let anyObservedAt: string | null = null;
+  // Newest current (fresh) uplink per channel whose reading is faulted or out of range.
+  const currentInvalidAt = new Map<SoilChannel, string | null>();
 
   for (const device of devices) {
     const row = device.latest_data as Record<string, unknown> | null | undefined;
@@ -308,15 +339,17 @@ function summarizeTension(
     for (const channel of TENSION_CHANNELS) {
       const legacy = LEGACY_ALIAS[channel];
       const raw = row?.[channel] ?? (legacy ? row?.[legacy] : undefined);
-      const faulted = chameleonChannelFaulted(device, channel) || watermarkChannelFaulted(device, channel);
+      const faulted = chameleonChannelFaulted(device, channel)
+        || ((raw === null || raw === undefined) && watermarkChannelFaulted(device, channel));
       if ((raw === null || raw === undefined) && !faulted) continue;
       if (fresh || isHistorical) anyObservedAt = newerInstant(anyObservedAt, device.last_seen);
       if (faulted || typeof raw !== 'number' || !Number.isFinite(raw) || raw < min || raw > max) {
         hasInvalidReading = true;
+        if (fresh) currentInvalidAt.set(channel, newerInstant(currentInvalidAt.get(channel) ?? null, device.last_seen));
         continue;
       }
       if (!fresh && !isHistorical) continue;
-      appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel));
+      appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel), device.name);
     }
   }
 
@@ -335,6 +368,13 @@ function summarizeTension(
       ? bucket.observedAt.get(channel) ?? null
       : anyObservedAt;
   const resolvedObservedAt = observedAt ?? anyObservedAt;
+  const triggerElsewhere = usingCurrent && requested !== null && requested !== 'mean' && channel !== requested;
+  const invalidTrigger = triggerElsewhere && currentInvalidAt.has(requested)
+    ? { channel: requested, observedAt: currentInvalidAt.get(requested) ?? null }
+    : null;
+  const staleTrigger = triggerElsewhere && !invalidTrigger && historicalAvailable.includes(requested)
+    ? { channel: requested, observedAt: historical.observedAt.get(requested) ?? null }
+    : null;
 
   return {
     hasSensor: true,
@@ -346,6 +386,9 @@ function summarizeTension(
     observedAt: resolvedObservedAt,
     stale: !usingCurrent,
     invalid: hasInvalidReading && currentAvailable.length === 0 && historicalAvailable.length === 0,
+    probeNames: channel && channel !== 'mean' ? bucket.names.get(channel) ?? [] : [],
+    staleTrigger,
+    invalidTrigger,
   };
 }
 

@@ -109,6 +109,52 @@ describe('buildTimeSeriesOption', () => {
       expect(formatter?.(null)).toBe('–');
     }
   });
+
+  it('formats pF tooltips to two decimals without rounding chart points', () => {
+    const s = [series('a', 'pF', [1.294466226161593])];
+    const options = [
+      buildTimeSeriesOption({ panels: groupByUnit(s), series: s, normalize: false, multiAxis: false }),
+      buildSmallMultiplesOption(s, false),
+    ];
+    for (const option of options) {
+      const formatter = tooltipValueFormatter(option);
+      expect(formatter?.(1.294466226161593)).toBe('1.29');
+      expect((option.series as Array<{ data: [string, number][] }>)[0].data[0][1]).toBe(1.294466226161593);
+    }
+    const correlation = buildCorrelationOption({
+      zonePairs: [{ groupId: 'zone:1', zoneId: 1, label: 'Zone 1', points: [[1.294466226161593, 2]] }],
+      channelXLabel: 'Soil tension', channelYLabel: 'Temperature', channelXUnit: 'pF', channelYUnit: 'C',
+    });
+    expect((correlation.tooltip as { formatter: (param: unknown) => string }).formatter({ value: [1.294466226161593, 2] })).toContain('1.29');
+  });
+
+  it('escapes catalog-derived correlation labels while retaining the zone name', () => {
+    const option = buildCorrelationOption({
+      zonePairs: [], channelXLabel: '<img src=x>', channelYLabel: 'Temperature', channelXUnit: 'pF', channelYUnit: 'C',
+    });
+    const html = (option.tooltip as { formatter: (param: unknown) => string }).formatter({ value: [1.2, 13], seriesName: 'Zone <b>1</b>' });
+    expect(html).toContain('Zone &lt;b&gt;1&lt;/b&gt;');
+    expect(html).toContain('&lt;img src=x&gt;');
+    expect(html).not.toContain('<img');
+  });
+
+  it('keeps per-series pF precision in a mixed SWT and temperature timeline', () => {
+    const swt = series('swt', 'pF', [1.294466226161593]);
+    const temp = series('temp', 'C', [13.96]);
+    const option = buildTimeSeriesOption({
+      panels: groupByUnit([swt, temp]), series: [swt, temp], normalize: false, multiAxis: false,
+      formatPartial: () => '',
+    });
+    const items = option.series as Array<{ tooltip: { valueFormatter: (value: number) => string } }>;
+    expect(items[0].tooltip.valueFormatter(1.294466226161593)).toBe('1.29');
+    expect(items[1].tooltip.valueFormatter(13.96)).toBe('14.0');
+    const tooltip = (option.tooltip as { formatter: (params: unknown) => string }).formatter([
+      { seriesIndex: 0, dataIndex: 0, seriesName: 'SWT', value: ['t', 1.294466226161593] },
+      { seriesIndex: 1, dataIndex: 0, seriesName: 'Temperature', value: ['t', 13.96] },
+    ]);
+    expect(tooltip).toContain('1.29');
+    expect(tooltip).toContain('14.0');
+  });
 });
 
 describe('time axis date labels', () => {
@@ -215,7 +261,10 @@ describe('axisNameSpec via buildSmallMultiplesOption', () => {
     const opt = buildSmallMultiplesOption(s, false, resolve);
     const y = (opt.yAxis as any[])[0];
     expect(y.name).toBe('Q:swt_1 (kPa)');
-    expect(y.nameRotate).toBe(90);
+    // Cells are narrow: the title sits horizontally above the plot, not rotated
+    // beside it, where it overlapped the neighbouring cell.
+    expect(y.nameRotate).toBe(0);
+    expect(y.nameLocation).toBe('end');
     expect(y.id).toBe('swt_1#0');
     expect(y.triggerEvent).toBe(true);
   });

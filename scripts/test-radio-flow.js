@@ -155,9 +155,11 @@ test('Process STREGA: an unset CHIRPSTACK_APP_FIELD_TESTER fences nothing',async
 // downlink through the chirpstack lib BEFORE store.capture runs, and before the
 // recovery-state gate -- not after, and with no queue flush first. RAK's own
 // reference server (field-tester-server/server/server.js) never flushes either:
-// a Class A device drains one queue item per uplink so staleness cannot build
-// up, and every bootstrapped profile sets flush_queue_on_activate so a rejoin
-// clears leftovers anyway. A flush ahead of a late enqueue could otherwise
+// a Class A device drains one queue item per uplink, and every reply carries an
+// expiry (700 ms, see the expiry test below) so ChirpStack drops a reply that
+// missed its window instead of letting it go stale; one cached client serves
+// all replies. Every bootstrapped profile also sets flush_queue_on_activate so
+// a rejoin clears leftovers anyway. A flush ahead of a late enqueue could otherwise
 // delete the pending reply outright inside ChirpStack's own ~100ms queue-read
 // window. The mock chirpstack client below does not even expose
 // flushDeviceQueue, so a regression that reintroduces the call would surface as
@@ -178,15 +180,20 @@ test('radio-capture-fn declares the chirpstack lib binding it now calls',()=>{
 // also clears the port/length gate added for the 2026-09-22 rehearsal-loop fix below --
 // every pre-existing test that expects a reply depends on this shape now, same as the
 // real RAK10701's standard field-test frame does.
-function testerUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'AC1F09FFFE000001',applicationId:FIELD_TESTER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
-function otherAppUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'70B3D57ED0060001',applicationId:OTHER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
-function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,identity,fieldTesterApp=FIELD_TESTER_APP}){
+const TESTER_EUI='A840410000000001';// the device typed RAK10701_FIELD_TESTER in the fake devices table
+function testerUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
+function otherAppUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000002',applicationId:OTHER_APP},fPort:1,data:TESTER_FRAME_DATA}};}
+function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,identity,fieldTesterApp=FIELD_TESTER_APP,testerEuis=[TESTER_EUI],testerLookupError=null,enqueueFailsOnce=false}){
  // `order` records the sequence of side-effecting calls (enqueue vs capture) so
  // Finding 1's reordering can be pinned directly, not just inferred from which
  // calls happened at all.
- const calls={capture:[],enqueue:[],statusSet:[],warn:[],order:[]};
+ const calls={capture:[],enqueue:[],statusSet:[],warn:[],order:[],fromChirpStackContexts:[],testerQueries:[],clientsCreated:0};
+ // Node-RED's default in-memory node context: persists across runs of one node.
+ const contextStore=new Map();
+ const context={get:(k)=>contextStore.get(k),set:(k,v)=>{contextStore.set(k,v);}};
+ let enqueueFailuresLeft=enqueueFailsOnce?1:0;
  const fakeRow={
-  deveui:'AC1F09FFFE000001',
+  deveui:'A840410000000001',
   recorded_at:'2026-09-25T10:00:00Z',
   deduplication_id:'dedupe-1',
   metadata:{receivers:receivers,reported_position:reportedPosition,device_location:null}
@@ -194,7 +201,7 @@ function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,
  const fakeRadio={
   // The real helper takes the DevEUI from the uplink it was handed, which is exactly
   // why an unfenced reply would be addressed to whichever device just transmitted.
-  fromChirpStack:(payload)=>({...fakeRow,deveui:String((payload&&payload.deviceInfo&&payload.deviceInfo.devEui)||fakeRow.deveui).toUpperCase()}),
+  fromChirpStack:(payload,context)=>{calls.fromChirpStackContexts.push(context);return {...fakeRow,deveui:String((payload&&payload.deviceInfo&&payload.deviceInfo.devEui)||fakeRow.deveui).toUpperCase()};},
   normalizeUplink:(row,opts)=>({installation_uuid:opts.installationUuid,deveui:row.deveui,recorded_at:row.recorded_at,deduplication_id:row.deduplication_id,metadata_json:'{}'}),
   getSharedStore:async()=>({capture:async(normalized)=>{
    calls.order.push('capture');
@@ -208,25 +215,33 @@ function makeCaptureSandbox({receivers,reportedPosition,enqueueImpl,captureImpl,
   return{ok:false,error:name+' unavailable in this fixture'};
  }};
  const osiDb={Database:function(){return{
-  get:async()=>identity||{installation_uuid:'11111111-1111-4111-8111-111111111111',recovery_state:'ACTIVE'},
+  // Two different queries reach get(): installation identity and the device-type lookup.
+  get:async(sql,params)=>{
+   if(String(sql).includes('FROM devices')){
+    calls.testerQueries.push({sql:String(sql),params});
+    if(testerLookupError)throw testerLookupError;
+    return String(sql).includes("type_id='RAK10701_FIELD_TESTER'")&&testerEuis.includes(params[0])?{present:1}:undefined;
+   }
+   return identity||{installation_uuid:'11111111-1111-4111-8111-111111111111',recovery_state:'ACTIVE'};
+  },
   all:async()=>[],
   close:()=>{}
  };}};
  const env=makeEnv({OSI_RADIO_CAPTURE_ENABLED:'1',DEVICE_EUI:'0016C001F1000002',CHIRPSTACK_PROFILE_RAK10701:'tester-profile',CHIRPSTACK_PROFILE_CLOVER:'clover-profile',CHIRPSTACK_APP_FIELD_TESTER:fieldTesterApp});
  const node={warn:(m)=>{calls.warn.push(m);},status:()=>{},error:()=>{}};
  const global_={set:(k,v)=>{calls.statusSet.push({key:k,value:v});},get:()=>undefined};
- const chirpstack={createProvisioningClientFromEnv:()=>({
+ const chirpstack={createProvisioningClientFromEnv:()=>{calls.clientsCreated++;return {
   // No flushDeviceQueue here (Finding 1): radio-capture-fn must never call it, so
   // a regression that reintroduces the call fails with 'not a function', caught
   // by the reply's own try/catch and surfacing as an unexpected warn below.
-  enqueueDownlink:async(opts)=>{calls.order.push('enqueue');calls.enqueue.push(opts);if(enqueueImpl)return enqueueImpl(opts);return{id:'q-1'};}
- })};
+  enqueueDownlink:async(opts)=>{calls.order.push('enqueue');calls.enqueue.push(opts);if(enqueueFailuresLeft>0){enqueueFailuresLeft--;throw new Error('401 invalid api key');}if(enqueueImpl)return enqueueImpl(opts);return{id:'q-1'};}
+ };}};
  // Node-RED's real function-node sandbox provides Buffer as a global (86 existing
  // function nodes already rely on this); radio-capture-fn's new port/length gate is
  // the first thing in this test file's own vm sandbox to need it, so it must be
  // supplied explicitly -- vm.runInNewContext, unlike Node-RED's own function.js,
  // does not inherit the host's globals.
- return{sandbox:{env,node,osiLib,osiDb,global:global_,chirpstack,Buffer},calls};
+ return{sandbox:{env,node,osiLib,osiDb,global:global_,context,chirpstack,Buffer},calls};
 }
 
 test('a tester uplink with receivers enqueues a fPort 2 six-byte reply before capture is even attempted',async()=>{
@@ -238,7 +253,7 @@ test('a tester uplink with receivers enqueues a fPort 2 six-byte reply before ca
  assert.equal(result,null);
  assert.equal(calls.capture.length,1,'the observation must still be captured');
  assert.equal(calls.enqueue.length,1);
- assert.equal(calls.enqueue[0].devEui,'AC1F09FFFE000001');
+ assert.equal(calls.enqueue[0].devEui,'A840410000000001');
  assert.equal(calls.enqueue[0].fPort,2);
  assert.equal(calls.enqueue[0].confirmed,false);
  const dataBuf=Buffer.from(calls.enqueue[0].data,'base64');
@@ -249,6 +264,38 @@ test('a tester uplink with receivers enqueues a fPort 2 six-byte reply before ca
  assert.equal(calls.warn.length,0,'no stray flushDeviceQueue call: the mock chirpstack client does not even expose one');
 });
 
+test('no reply when the uplink device in the tester application is not a field tester',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},testerEuis:[]});
+ await runNode('radio-capture-fn',testerUplink(4),sandbox);
+ assert.equal(calls.enqueue.length,0);
+ assert.equal(calls.capture.length,1,'the observation is still captured');
+ assert.equal(calls.fromChirpStackContexts[0].isFieldTester,false);
+});
+test('reply and GPS decode when the device is typed as a field tester',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},testerEuis:[TESTER_EUI]});
+ await runNode('radio-capture-fn',testerUplink(4),sandbox);
+ assert.equal(calls.enqueue.length,1);
+ assert.equal(calls.fromChirpStackContexts[0].isFieldTester,true);
+ assert.equal(calls.testerQueries[0].params[0],TESTER_EUI);
+ assert.equal(Object.hasOwn(calls.fromChirpStackContexts[0],'testerProfileIds'),false,'profile ids no longer take part');
+});
+test('a typed tester outside the tester application is captured but not answered',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},testerEuis:[TESTER_EUI]});
+ const msg=testerUplink(4);msg.payload.deviceInfo.applicationId=OTHER_APP;
+ await runNode('radio-capture-fn',msg,sandbox);
+ assert.equal(calls.enqueue.length,0);
+ assert.equal(calls.capture.length,1);
+});
+test('a failing tester lookup warns, sends no reply and still captures',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},testerLookupError:new Error('database is locked')});
+ await runNode('radio-capture-fn',testerUplink(4),sandbox);
+ assert.equal(calls.warn.filter(m=>m.includes('field tester lookup failed')).length,1);
+ assert.equal(calls.warn.length,1);
+ assert.equal(calls.enqueue.length,0);
+ assert.equal(calls.capture.length,1,'a failed lookup must not pause capture');
+ assert.equal(calls.fromChirpStackContexts[0].isFieldTester,false);
+ assert.equal(calls.statusSet.some(s=>s.key==='radio_capture_status'&&s.value.state==='active'),true);
+});
 test('no receiver heard the uplink: no reply is queued, but the observation still captures',async()=>{
  const {sandbox,calls}=makeCaptureSandbox({receivers:[],reportedPosition:{latitude:46.5,longitude:6.5}});
  const result=await runNode('radio-capture-fn',testerUplink(1),sandbox);
@@ -385,9 +432,9 @@ test('an uplink carrying no deviceInfo at all is captured and not answered',asyn
 // "Filter wrong messages by length"; parser_cs34(): `if ((port != 1) && (port != 11))
 // return null`). Only the standard fPort-1/10-byte shape is implemented -- it is the only
 // shape this fleet has ever sent; the extended fPort-11 format is rejected explicitly.
-function macCommandUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'AC1F09FFFE000001',applicationId:FIELD_TESTER_APP},fPort:0,data:''}};}
-function extendedUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'AC1F09FFFE000001',applicationId:FIELD_TESTER_APP},fPort:11,data:Buffer.alloc(11).toString('base64')}};}
-function wrongLengthStandardUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'AC1F09FFFE000001',applicationId:FIELD_TESTER_APP},fPort:1,data:Buffer.alloc(9).toString('base64')}};}
+function macCommandUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:0,data:''}};}
+function extendedUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:11,data:Buffer.alloc(11).toString('base64')}};}
+function wrongLengthStandardUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:1,data:Buffer.alloc(9).toString('base64')}};}
 
 test('a fPort 0 (LoRaWAN MAC-command) uplink from the field-tester application produces no enqueue -- this is the exact rehearsal loop bug',async()=>{
  const {sandbox,calls}=makeCaptureSandbox({
@@ -447,7 +494,7 @@ test('an extended-format uplink (fPort 11) is recognized as a field-test frame a
 // radio_capture_status and skips store.capture entirely, silently losing the
 // observation. A payload this malformed is definitionally not a field-test frame, so
 // the fix degrades to that classification instead of aborting the whole capture.
-function malformedDataUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'AC1F09FFFE000001',applicationId:FIELD_TESTER_APP},fPort:1,data:12345}};}
+function malformedDataUplink(fCnt){return {payload:{fCnt,deviceInfo:{devEui:'A840410000000001',applicationId:FIELD_TESTER_APP},fPort:1,data:12345}};}
 
 test('a field-tester-application uplink whose data is a non-string truthy value still captures the observation and still does not reply',async()=>{
  const {sandbox,calls}=makeCaptureSandbox({
@@ -485,7 +532,7 @@ test('a RAK10701 field tester registers instead of 503ing as an unsupported type
    db,
    flowState:{
     new_device_user_id:1,
-    new_device_deveui:'AC1F09FFFE000001',
+    new_device_deveui:'A840410000000001',
     new_device_name:'Field tester',
     new_device_type:'RAK10701_FIELD_TESTER',
     new_device_appkey:'000000000000000000000000000000AB'
@@ -497,7 +544,7 @@ test('a RAK10701 field tester registers instead of 503ing as an unsupported type
   assert.equal(registration.applicationId,'app-field-tester-uuid','the tester must land in the field-tester application -- radio-capture-fn fences its reply on exactly this id');
   assert.equal(registration.deviceProfileId,'profile-rak10701-uuid');
   db.exec(response.result[0].topic);
-  const row=db.prepare("SELECT type_id,chirpstack_app_id FROM devices WHERE deveui='AC1F09FFFE000001'").get();
+  const row=db.prepare("SELECT type_id,chirpstack_app_id FROM devices WHERE deveui='A840410000000001'").get();
   assert.equal(row.type_id,'RAK10701_FIELD_TESTER','the devices CHECK constraint must accept the row that the registration path writes');
   assert.equal(row.chirpstack_app_id,'app-field-tester-uuid');
  } finally { db.close(); }
@@ -509,4 +556,30 @@ test('catalog-response offers the field tester to the add-device modal',async()=
  assert.ok(entry,'the add-device modal renders exactly what this node returns; a type missing here cannot be picked at all');
  assert.equal(typeof entry.name,'string');
  assert.ok(entry.name.length>0);
+});
+
+test('the reply carries an expiry 700 ms ahead',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5}});
+ const before=Date.now();
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ const after=Date.now();
+ assert.equal(calls.enqueue.length,1);
+ // The node runs in its own vm realm, so instanceof Date against the host's Date is false.
+ assert.equal(Object.prototype.toString.call(calls.enqueue[0].expiresAt),'[object Date]','the reply must carry an expiresAt Date');
+ const at=calls.enqueue[0].expiresAt.getTime();
+ assert.ok(at>=before+700&&at<=after+700,'expiry must be now + 700 ms, got '+(at-before)+' ms');
+});
+test('an enqueue error drops the cached client',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5},enqueueFailsOnce:true});
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ await runNode('radio-capture-fn',testerUplink(2),sandbox);
+ assert.equal(calls.clientsCreated,2);
+ assert.equal(calls.enqueue.length,2);
+});
+test('one ChirpStack client serves consecutive replies',async()=>{
+ const {sandbox,calls}=makeCaptureSandbox({receivers:[{rssi_dbm:-93,position:{latitude:46.5045,longitude:6.5}}],reportedPosition:{latitude:46.5,longitude:6.5}});
+ await runNode('radio-capture-fn',testerUplink(1),sandbox);
+ await runNode('radio-capture-fn',testerUplink(2),sandbox);
+ assert.equal(calls.clientsCreated,1);
+ assert.equal(calls.enqueue.length,2);
 });

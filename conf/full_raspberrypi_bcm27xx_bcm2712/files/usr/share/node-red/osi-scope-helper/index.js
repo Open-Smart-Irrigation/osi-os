@@ -7,7 +7,12 @@ const WEATHER_TYPE_IDS = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
 // Soil sensors whose depth and calibration settings their owner or an admin
 // may still change after the sensor has left every zone (allowUnassignedOwner
 // below).
-const SOIL_DEPTH_TYPE_IDS = new Set(['KIWI_SENSOR', 'TEKTELIC_CLOVER', 'DRAGINO_LSN50']);
+const SOIL_DEPTH_TYPE_IDS = new Set([
+  'KIWI_SENSOR',
+  'TEKTELIC_CLOVER',
+  'DRAGINO_LSN50',
+  'DRAGINO_SDI12',
+]);
 
 function isScopedMode(envValue) {
   return String(

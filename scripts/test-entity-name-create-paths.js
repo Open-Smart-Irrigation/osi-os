@@ -28,7 +28,7 @@ const REAL_SCOPE_MODULE = require(path.join(
 
 const AUTH_SECRET = 'entity-name-create-paths-test-secret';
 const FLAG_OFF = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' };
-const FLAG_ON = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '1', DEVICE_EUI: '0016C001F11715E2' };
+const FLAG_ON = { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '1', DEVICE_EUI: 'AABBCCDDEEFF0003' };
 const OWNER = { userId: 2, username: 'res1' };
 const BAD_NAMES = [
   ['empty', '', 'name_empty'],
@@ -209,7 +209,7 @@ test('T4-W1(a): REGISTER_DEVICE with scoped access off sends ChirpStack the name
     };
     const env = {
       OSI_SCOPED_ACCESS: '0',
-      DEVICE_EUI: '0016C001F11715E2',
+      DEVICE_EUI: 'AABBCCDDEEFF0003',
       CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
       CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
     };
@@ -262,7 +262,7 @@ test('T4-W1(b): REGISTER_DEVICE with scoped access on updates an allowed existin
     };
     const env = {
       OSI_SCOPED_ACCESS: '1',
-      DEVICE_EUI: '0016C001F11715E2',
+      DEVICE_EUI: 'AABBCCDDEEFF0003',
       CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
       CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
     };
@@ -312,7 +312,7 @@ test('T4-W1(c): a ChirpStack rejection for a brand-new device leaves no device r
     };
     const env = {
       OSI_SCOPED_ACCESS: '0',
-      DEVICE_EUI: '0016C001F11715E2',
+      DEVICE_EUI: 'AABBCCDDEEFF0003',
       CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
       CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
     };
@@ -360,7 +360,7 @@ test('T4-W1: a rule-breaking command name still falls back to the DevEUI and nev
     };
     const env = {
       OSI_SCOPED_ACCESS: '0',
-      DEVICE_EUI: '0016C001F11715E2',
+      DEVICE_EUI: 'AABBCCDDEEFF0003',
       CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
       CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
     };
@@ -398,7 +398,7 @@ test('T4-W1: a rule-breaking command name still falls back to the DevEUI and nev
 function registerDeviceEnv() {
   return {
     OSI_SCOPED_ACCESS: '0',
-    DEVICE_EUI: '0016C001F11715E2',
+    DEVICE_EUI: 'AABBCCDDEEFF0003',
     CHIRPSTACK_APP_SENSORS: 'app-sensors-uuid',
     CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi-uuid',
   };

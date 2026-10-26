@@ -63,6 +63,32 @@
                 }
             }
         },
+        "TensiomarkChannelLayout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["version", "kind", "source_unit", "field_order", "qualification", "sensors"],
+            "properties": {
+                "version": {"type": "integer", "const": 1},
+                "kind": {"type": "string", "const": "tensiomark"},
+                "source_unit": {"type": "string", "const": "pF"},
+                "field_order": {"type": "string", "const": "temperature_pf"},
+                "qualification": {"type": "string", "const": "bench_observed"},
+                "sensors": {
+                    "type": "array", "minItems": 1, "maxItems": 2,
+                    "items": {
+                        "type": "object", "additionalProperties": false,
+                        "required": ["address", "channel", "identity", "depth_cm", "calibration_range"],
+                        "properties": {
+                            "address": {"type": "string", "pattern": "^[0-9A-Za-z]$"},
+                            "channel": {"type": "integer", "minimum": 1, "maximum": 2},
+                            "identity": {"type": "string", "pattern": "^[0-9A-Za-z]11TENSIOMARK_2Vh_10A[0-9]{5}$"},
+                            "depth_cm": {"type": ["integer", "null"], "minimum": 1, "maximum": 1000},
+                            "calibration_range": {"type": "string", "const": "unverified"}
+                        }
+                    }
+                }
+            }
+        },
         "Zone": {
             "type": "object",
             "required": ["zone_id", "name"],
@@ -108,6 +134,7 @@
                 "sdi12_channel_layout_json": {
                     "oneOf": [
                         {"$ref": "#/definitions/SentekChannelLayout"},
+                        {"$ref": "#/definitions/TensiomarkChannelLayout"},
                         {"type": "null"}
                     ]
                 },
@@ -723,6 +750,8 @@
                         "queued": {"type": "integer", "minimum": 0},
                         "acked": {"type": "integer", "minimum": 0},
                         "failed": {"type": "integer", "minimum": 0},
+                        "lost": {"type": "integer", "minimum": 0, "description": "CMD-04 PR0 (owner decision Q02 c), optional and additive: plan slots whose newest push (a row of the latest plan snapshot) is LOST and is not re-sent automatically. A push becomes LOST at once when the transport refuses it or a whole-queue flush removes it (edge-side error not_resent_q02c), or when it stays unacknowledged past the 24 h sweep (error stale_unconfirmed); both are stored edge-side as state FAILED. A subset of `failed`, so a consumer that ignores this key still counts them as failed. Rendered as \"device may not hold this plan\"."},
+                        "scheduler_status_lost": {"type": "boolean", "description": "CMD-04 PR0, optional and additive: the newest SCHEDULER_STATUS push (pause, skip today, resume) is LOST the same way as `lost` (refused by the transport or removed by a whole-queue flush, at once, or unacknowledged past the 24 h sweep) and is not re-sent automatically, so the valve may still run the previous scheduler state."},
                         "last_plan_acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
                         "weekday_states": {
                             "type": "array",
@@ -733,7 +762,8 @@
                                 "properties": {
                                     "weekday": {"type": "integer", "minimum": 0, "maximum": 6},
                                     "state": {"type": "string", "enum": ["QUEUED", "ACKED", "FAILED"]},
-                                    "acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"}
+                                    "acked_at": {"$ref": "#/definitions/NullableCanonicalUtcTimestamp"},
+                                    "lost": {"type": "boolean", "description": "CMD-04 PR0, optional: present and true when this weekday's newest push is LOST: refused by the transport or removed by a whole-queue flush (at once), or unacknowledged past the 24 h sweep. The state is then FAILED, which keeps the enum an older cloud renders."}
                                 }
                             }
                         }

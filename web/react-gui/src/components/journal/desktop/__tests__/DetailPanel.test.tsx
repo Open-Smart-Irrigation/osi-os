@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const TEST_NOW = new Date('2026-07-16T12:30:00.000Z');
 
 import type { EntryAggregate, JournalCatalog, JournalPlot } from '../../../../types/journal';
 import { formatOccurredDate } from '../../JournalEntryRow';
@@ -227,12 +229,18 @@ function renderPanel(overrides: {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(TEST_NOW);
   mocks.useJournalEntries.mockReset();
   mocks.createEntry.mockReset();
   mocks.updateEntry.mockReset();
   mocks.voidEntry.mockReset();
   mocks.discardDraft.mockReset();
   mocks.listEntries.mockReset().mockResolvedValue({ entries: [], next_cursor: null });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('DetailPanel — read-back states', () => {

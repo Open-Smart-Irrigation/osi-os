@@ -49,7 +49,28 @@ const MODULE_DB_CALLER_POLICIES = Object.freeze({
     // caller list -- it is a live, wired DRAGINO_LSN50 ingest node.
     // 'watermark-ingest-fn': WATERMARK profile 3 ingest; writes device_data
     // through the helper's transaction scope via an awaited callback.
-    reviewedCallerNodeIds: Object.freeze(['460e0bfd95f89e67', '6b28e0d879808dd9', 'sdi12-write-fn', 'watermark-ingest-fn']),
+    // 'sdi12-write-fn' left this list when its body moved into
+    // osi-sdi12-commissioning/write-handler.js, which still awaits
+    // writeDeviceData (pinned by delegatedCallerFiles below).
+    reviewedCallerNodeIds: Object.freeze(['460e0bfd95f89e67', '6b28e0d879808dd9', 'watermark-ingest-fn']),
+    // Module files that call this module on behalf of a flow node, each with
+    // its reviewed number of call sites. Every `.writeDeviceData(` call in
+    // such a file must match delegatedAwaitedCall, so one awaited call cannot
+    // hide an unawaited second one, and a changed count needs review here.
+    // Any other module file that calls `.writeDeviceData(` fails the guard
+    // until it is listed (see unlistedDelegatedCallers).
+    //   write-handler.js: SDI-12 uplink path for every unversioned profile.
+    //   tensiomark.js: the configured Tensiomark canonical write inside
+    //     writeTensiomarkObservation's facade transaction.
+    //   osi-watermark-helper/ingest.js: deps.writeDeviceData, the
+    //     watermark-ingest-fn writer callback, on the helper's transaction.
+    delegatedCallerFiles: Object.freeze([
+      Object.freeze({ file: 'osi-sdi12-commissioning/write-handler.js', calls: 1 }),
+      Object.freeze({ file: 'osi-sdi12-commissioning/tensiomark.js', calls: 1 }),
+      Object.freeze({ file: 'osi-watermark-helper/ingest.js', calls: 1 }),
+    ]),
+    delegatedCallPattern: /\.writeDeviceData\s*\(/g,
+    delegatedAwaitedCall: /await\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.writeDeviceData\s*\(/g,
     // The facade-contract test must actually touch these exported
     // functions through the facade, or it isn't proving the real contract.
     requiredFacadeExports: Object.freeze(['writeDeviceData', 'quarantineOnly']),
@@ -133,6 +154,50 @@ function awaitsPolicyCall(node, policy) {
   return policy.awaitedCall.test(node.func);
 }
 
+// Comments are removed first so a call quoted in a comment does not count.
+// The line-comment rule skips `://` so URLs in strings survive.
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+}
+
+function countMatches(source, pattern) {
+  return (stripComments(source).match(new RegExp(pattern.source, 'g')) || []).length;
+}
+
+// Returns null when every call in a delegated caller file is awaited and the
+// count equals the reviewed count; otherwise a description of the problem.
+function delegatedCallProblem(source, entry, policy) {
+  const calls = countMatches(source, policy.delegatedCallPattern);
+  const awaited = countMatches(source, policy.delegatedAwaitedCall);
+  if (calls !== entry.calls) {
+    return `has ${calls} call(s), reviewed ${entry.calls} -- review the change and update its count`;
+  }
+  if (awaited !== calls) {
+    return `awaits ${awaited} of ${calls} call(s) -- an unawaited call drops its result silently (the PR-M bug)`;
+  }
+  return null;
+}
+
+// Module source files (outside the module itself, tests and node_modules) that
+// call the module but are not listed as delegated callers.
+function unlistedDelegatedCallers(nodeRedDir, policy) {
+  const listed = new Set((policy.delegatedCallerFiles || []).map((entry) => entry.file));
+  const found = [];
+  const walk = (dir) => {
+    for (const dirent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (dirent.name === 'node_modules') continue;
+      const full = path.join(dir, dirent.name);
+      if (dirent.isDirectory()) { walk(full); continue; }
+      if (!dirent.name.endsWith('.js') || dirent.name.endsWith('.test.js')) continue;
+      const rel = path.relative(nodeRedDir, full).split(path.sep).join('/');
+      if (rel.startsWith(policy.moduleDir + '/') || listed.has(rel)) continue;
+      if (countMatches(fs.readFileSync(full, 'utf8'), policy.delegatedCallPattern) > 0) found.push(rel);
+    }
+  };
+  walk(nodeRedDir);
+  return found.sort();
+}
+
 function run() {
   const failures = [];
   const oks = [];
@@ -170,6 +235,28 @@ function run() {
         }
       }
       oks.push(`OK [${profile}] ${moduleName}: caller set matches reviewed ${JSON.stringify(actualCallerIds)}`);
+      const nodeRedDir = path.join(REPO_ROOT, profile, 'files/usr/share/node-red');
+      for (const entry of policy.delegatedCallerFiles || []) {
+        const filePath = path.join(nodeRedDir, entry.file);
+        if (!fs.existsSync(filePath)) {
+          failures.push(`[${profile}] ${moduleName}: delegated caller ${entry.file} is missing; update delegatedCallerFiles`);
+          continue;
+        }
+        const problem = delegatedCallProblem(fs.readFileSync(filePath, 'utf8'), entry, policy);
+        if (problem) {
+          failures.push(`[${profile}] ${moduleName}: delegated caller ${entry.file} ${problem}`);
+        } else {
+          oks.push(`OK [${profile}] ${moduleName}: delegated caller ${entry.file} awaits all ${entry.calls} call(s)`);
+        }
+      }
+      if (policy.delegatedCallPattern) {
+        for (const rel of unlistedDelegatedCallers(nodeRedDir, policy)) {
+          failures.push(
+            `[${profile}] ${moduleName}: ${rel} calls the module but is not in delegatedCallerFiles ` +
+            `-- review it and add it with its call count`
+          );
+        }
+      }
     }
 
     const nodeRedRoot = path.join(REPO_ROOT, PROFILES[0], 'files/usr/share/node-red');
@@ -216,4 +303,4 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { MODULE_DB_CALLER_POLICIES, findDbCallerNodes, hasOsiDbLibBinding, callsOsiLibRequire };
+module.exports = { MODULE_DB_CALLER_POLICIES, findDbCallerNodes, hasOsiDbLibBinding, callsOsiLibRequire, delegatedCallProblem, unlistedDelegatedCallers };

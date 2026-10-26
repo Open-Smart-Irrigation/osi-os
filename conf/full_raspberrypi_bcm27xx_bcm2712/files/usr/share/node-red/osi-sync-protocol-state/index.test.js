@@ -156,7 +156,7 @@ function validNegotiatedGeneration() {
       databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
       identitySha256: 'b'.repeat(64),
       normalizedServerBase: 'https://cloud.example.com',
-      gatewayDeviceEui: '0016C001F11715E2',
+      gatewayDeviceEui: 'AABBCCDDEEFF0003',
       capabilityProofSha256: null,
     },
   };
@@ -428,9 +428,9 @@ test('normalizedServerBase rejects a malformed URL', () => {
 });
 
 test('identitySha256 is deterministic and uppercases the gateway EUI', () => {
-  const args = { peerNode: 'peer-1', serverBase: 'https://cloud.example.com', cloudUserId: 'user-1', gatewayDeviceEui: '0016c001f11715e2' };
+  const args = { peerNode: 'peer-1', serverBase: 'https://cloud.example.com', cloudUserId: 'user-1', gatewayDeviceEui: 'aabbccddeeff0003' };
   const h1 = codecs.identitySha256(args);
-  const h2 = codecs.identitySha256(Object.assign({}, args, { gatewayDeviceEui: '0016C001F11715E2' }));
+  const h2 = codecs.identitySha256(Object.assign({}, args, { gatewayDeviceEui: 'AABBCCDDEEFF0003' }));
   assert.equal(h1, h2);
   assert.match(h1, /^[0-9a-f]{64}$/);
 });
@@ -916,7 +916,7 @@ function buildGen1(previousSha256, overrides) {
         databaseRestore: { status: 'CLEAR', restoreEpoch: 0 },
         identitySha256: 'b'.repeat(64),
         normalizedServerBase: 'https://cloud.example.com',
-        gatewayDeviceEui: '0016C001F11715E2',
+        gatewayDeviceEui: 'AABBCCDDEEFF0003',
         capabilityProofSha256: null,
       },
     },

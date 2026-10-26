@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 
@@ -29,6 +29,8 @@ const { translateForTest } = vi.hoisted(() => {
     'state.closing': 'Closing',
     'state.failed': 'Failed',
     planIncomplete: 'Not yet confirmed on the valve for {{count}} day(s) — resend the plan',
+    planLost: 'Device may not hold this plan',
+    schedulerStatusLost: 'Device may not hold the latest pause, skip or resume',
     enclosure: 'Valve enclosure',
     'format.temperature': '{{value}} °C',
     'format.humidity': '{{value}} % RH',
@@ -201,6 +203,57 @@ describe("ValveTile plan line", () => {
     expect(screen.getByText("Not yet confirmed on the valve for 1 day(s) — resend the plan")).toBeInTheDocument();
   });
 
+  // CMD-04 PR0 (owner decision Q02 c): a plan the valve did not confirm within 24 h is LOST, not re-sent,
+  // and the tile says so instead of the generic not-yet-confirmed line.
+  it("says the device may not hold this plan when plan slots are LOST", () => {
+    renderTile({
+      pushState: { queued: 1, acked: 0, failed: 6, lost: 6, schedulerStatusLost: false, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("Device may not hold this plan")).toBeInTheDocument();
+    expect(screen.queryByText(/Not yet confirmed/)).not.toBeInTheDocument();
+  });
+
+  // A LOST scheduler-status push is not a lost plan: the tile names the pause, skip or resume
+  // the valve may not hold, under the status line it qualifies.
+  it("says the device may not hold the latest pause, skip or resume when only that push is LOST", () => {
+    renderTile({
+      schedulerStatus: 'DEACTIVATED',
+      pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("Device may not hold the latest pause, skip or resume")).toBeInTheDocument();
+    expect(screen.queryByText("Device may not hold this plan")).not.toBeInTheDocument();
+  });
+
+  // The warning lands in a polite live region that is mounted before it appears, so a screen
+  // reader announces it when a poll turns the push LOST.
+  it("announces a newly lost scheduler-status push through a mounted status region", () => {
+    const view = renderTile({
+      pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: false, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    const region = view.getByTestId('valve-scheduler-status-lost');
+    expect(region).toHaveAttribute('role', 'status');
+    expect(region).toBeEmptyDOMElement();
+    view.rerender(
+      <ValveTile
+        valve={makeValve({ pushState: { queued: 0, acked: 7, failed: 0, lost: 0, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null } })}
+        nowMs={Date.now()}
+        onOpen={vi.fn()} onSchedule={vi.fn()} onCancel={vi.fn()} onSkipToday={vi.fn()} onPause={vi.fn()}
+        onResume={vi.fn()} onResend={vi.fn()} onSettings={vi.fn()} onService={vi.fn()} onDelete={vi.fn()}
+        canEdit onRename={vi.fn()} busy={false}
+      />,
+    );
+    expect(view.getByTestId('valve-scheduler-status-lost')).toBe(region);
+    expect(region).toHaveTextContent('Device may not hold the latest pause, skip or resume');
+  });
+
+  it("keeps both warnings when plan slots and the scheduler status are LOST", () => {
+    renderTile({
+      pushState: { queued: 0, acked: 1, failed: 6, lost: 6, schedulerStatusLost: true, lastPlanQueuedAt: null, lastPlanAckedAt: null },
+    });
+    expect(screen.getByText("Device may not hold this plan")).toBeInTheDocument();
+    expect(screen.getByText("Device may not hold the latest pause, skip or resume")).toBeInTheDocument();
+  });
+
   it("shows no plan line at all when every downlink is acknowledged", () => {
     const { container } = renderTile({
       pushState: { queued: 0, acked: 7, failed: 0, lastPlanQueuedAt: null, lastPlanAckedAt: null },
@@ -311,60 +364,41 @@ describe('ValveTile #171 disclosures', () => {
 // OSI Server cloud's ValveTile.tsx placement. Tier logic itself (describeLastSeen) is unit
 // tested directly in valveCardHelpers.test.ts; these assert the tile actually renders what
 // that helper produces, and that the battery line is honestly omitted rather than "—".
-describe('ValveTile last-seen label (I6)', () => {
-  it('shows the "never" tier when the valve has no lastUplinkAt', () => {
+// The tile ends in the footer every device card shares (owner decision 2026-10-21); the
+// footer's own tiers and thresholds are covered by DeviceCardFooter.test.tsx.
+describe('ValveTile shared device card footer', () => {
+  const lastSeen = () => screen.getByTestId('device-card-last-seen');
+  const battery = () => screen.getByTestId('device-card-battery');
+
+  it('shows "never" when the valve has no lastUplinkAt', () => {
     renderTile({ lastUplinkAt: null });
-    expect(screen.getByText('Last seen: never')).toBeInTheDocument();
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.neverSeen');
   });
 
-  it('shows the "just now" tier for a contact under a minute old', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 10_000).toISOString() });
-    expect(screen.getByText('Last seen: just now')).toBeInTheDocument();
-  });
-
-  it('shows the singular minutes tier for a one-minute-old contact', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 60_000).toISOString() });
-    expect(screen.getByText('Last seen: 1 minute ago')).toBeInTheDocument();
-  });
-
-  it('shows the plural minutes tier for a contact several minutes old', () => {
-    renderTile({ lastUplinkAt: new Date(Date.now() - 5 * 60_000).toISOString() });
-    expect(screen.getByText('Last seen: 5 minutes ago')).toBeInTheDocument();
-  });
-
-  it('shows the hours tier for a contact several hours old', () => {
+  it('shows a relative age under six hours and the date from six hours on', () => {
     renderTile({ lastUplinkAt: new Date(Date.now() - 3 * 3_600_000).toISOString() });
-    expect(screen.getByText('Last seen: 3 hours ago')).toBeInTheDocument();
-  });
-
-  it('shows the days tier for a contact several days old', () => {
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.lastSeenHours');
+    cleanup();
     renderTile({ lastUplinkAt: new Date(Date.now() - 2 * 86_400_000).toISOString() });
-    expect(screen.getByText('Last seen: 2 days ago')).toBeInTheDocument();
+    expect(lastSeen()).toHaveTextContent('deviceCard.footer.lastSeenAt');
   });
-});
 
-describe('ValveTile battery footer (I6)', () => {
-  it('shows nothing at all when no battery data is available', () => {
-    const { container } = renderTile();
-    expect(container.textContent).not.toMatch(/Battery:/);
+  it('has no last-seen line at the top of the tile any more', () => {
+    renderTile({ lastUplinkAt: new Date(Date.now() - 60_000).toISOString() });
+    expect(screen.queryByTestId('valve-last-seen')).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('device-card-footer')).toHaveLength(1);
+  });
+
+  it('keeps an empty battery slot when no battery data is available', () => {
+    renderTile();
+    expect(battery()).toBeEmptyDOMElement();
   });
 
   it('shows the battery percent when bat_pct is present', () => {
     renderTile({}, { batteryPercent: 72 });
-    expect(screen.getByText('Battery: 72 %')).toBeInTheDocument();
+    expect(battery()).toHaveTextContent('72%');
   });
 
-  it('falls back to the voltage-derived percent when bat_pct is absent', () => {
-    // LSN50 usable range is 2.1V-3.6V (deviceCardBattery.ts) -- 3.6V is a full battery.
-    renderTile({}, { batteryVoltage: 3.6 });
-    expect(screen.getByText('Battery: 100 %')).toBeInTheDocument();
-  });
-
-  it('prefers bat_pct over the voltage fallback when both are present', () => {
-    renderTile({}, { batteryPercent: 40, batteryVoltage: 3.6 });
-    expect(screen.getByText('Battery: 40 %')).toBeInTheDocument();
-    expect(screen.queryByText('Battery: 100 %')).not.toBeInTheDocument();
-  });
 });
 
 // M-2 (final fix wave review): the pending-state primary action used to share the

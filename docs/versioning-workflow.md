@@ -61,6 +61,11 @@ git log -S'## [<OLD>]' --format=%h -- CHANGELOG.md | tail -1
       ```
       `verify-sync-op-parity: OK` means that revision has an applier for
       every event op this edge emits; `FAIL` lists the ops it is missing.
+- [ ] Luganda release gate: if the release goes to any gateway whose
+      interface runs in Luganda (`lg`), every key in the "Release gate"
+      section of `docs/i18n/pending-luganda-translations.md` has human
+      Luganda, or the owner has accepted the English in writing for this
+      release. Never fill a key by machine translation.
 - [ ] Maintainers: the doc-hygiene pre-push guard is installed in this clone
       (see AGENTS.md, "No deployment identities in public text"). It scans the
       release commit and its message before the push.
@@ -293,8 +298,8 @@ Cloud environments:
 | Production | `osicloud.ch` |
 | Test | `server.opensmartirrigation.org` (`<test-host-address>`) |
 
-Production access needs explicit consent in the current conversation; see
-AGENTS.md, "Production cloud access". Do not store production SSH
+Production access needs the user to name the host in the current turn; see
+AGENTS.md, "Host access gate". Do not store production SSH
 credentials, private keys, or host aliases in this repo or local agent
 memory. Use an ephemeral SSH key supplied for the specific rollout.
 
@@ -399,6 +404,7 @@ On each Pi after the deploy:
 ```
 [ ] Pre-flight — mains merged, CI green (all workflows), contract change decided,
                  matching osi-server revision found with verify-sync-op-parity
+                 Luganda release gate checked (docs/i18n/pending-luganda-translations.md)
 [ ] Step 1  — Bump every version location; run the verifiers
 [ ] Step 1a — Do not bundle Chameleon calibrations
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]

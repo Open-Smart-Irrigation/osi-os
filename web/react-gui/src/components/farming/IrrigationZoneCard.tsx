@@ -183,9 +183,9 @@ function formatDisplayMode(t: Translate, mode: string | null | undefined): strin
 
 /**
  * Which soil channel the zone's scheduler compares. `threshold_kpa` carries an
- * encoded 1-4 stress level when the metric is DENDRO, and VWC has no edge
- * telemetry column at all, so neither is a tension the soil reading can be
- * judged against.
+ * encoded 1-4 stress level when the metric is DENDRO, and a VWC trigger compares
+ * volumetric percent (SDI-12 `vwc_N`), so neither is a tension the soil
+ * reading can be judged against.
  */
 function triggerChannelOf(metric: string | null | undefined): SoilChannelSelection | null {
   switch (metric) {
@@ -195,13 +195,6 @@ function triggerChannelOf(metric: string | null | undefined): SoilChannelSelecti
     case 'SWT_AVG': return 'mean';
     default: return null;
   }
-}
-
-const CHANNEL_METRIC: Record<string, string> = { swt_1: 'SWT_1', swt_2: 'SWT_2', swt_3: 'SWT_3' };
-
-function formatSoilChannel(t: Translate, channel: SoilChannelSelection): string {
-  const metric = CHANNEL_METRIC[channel] ?? 'SWT_AVG';
-  return t(`schedule.metric.${metric}`, { defaultValue: metric === 'SWT_AVG' ? 'Mean (all sensors)' : `Sensor ${metric.slice(-1)}` });
 }
 
 function formatScheduleMetric(t: Translate, metric: string): string {
@@ -359,24 +352,18 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     : soilNow.quantity === 'tension'
       ? formatSwtCardValue(soilNow.value, swtUnit)
       : `${soilNow.value.toFixed(1)} %`;
-  // Which channel the number came from: its depth when the installation
-  // recorded one, otherwise the channel's own name. A cross-depth mean names
-  // nothing, which is why it is no longer reported.
-  const soilTitle = soilNow.depthCm != null
-    ? t('zone.water.soil.titleAtDepth', {
-        depth: soilNow.depthCm,
-        defaultValue: 'Soil now · {{depth}} cm',
-      })
-    : soilNow.channel != null && soilNow.channel !== 'mean'
-      ? t('zone.water.soil.titleChannel', {
-          channel: formatSoilChannel(t, soilNow.channel),
-          defaultValue: 'Soil now · {{channel}}',
-        })
-      : t('zone.water.soil.title', { defaultValue: 'Soil now' });
+  const soilTitle = t('zone.water.soil.title', { defaultValue: 'Soil now' });
+  // Where the number came from, after the value and its pill (owner decision
+  // 2026-10-21): "15.0 kPa [Wet] (20 cm)", or the probe's name when no depth
+  // is recorded. A pooled mean names nothing.
+  const soilSource = soilNow.depthCm != null
+    ? t('zone.water.soil.depthSuffix', { depth: soilNow.depthCm, defaultValue: '({{depth}} cm)' })
+    : soilNow.probeNames.length > 0
+      ? `(${soilNow.probeNames.join(', ')})`
+      : null;
   // Fixed soil status and the zone-specific trigger comparison are separate facts.
   const soilWaterStatus = soilNow.quantity === 'tension'
     && soilNow.value !== null
-    && !soilNow.stale
     && !soilNow.invalid
     ? classifySwtWaterStatus(soilNow.value)
     : null;
@@ -398,19 +385,30 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     ? t('zone.water.soil.invalidReading', { defaultValue: 'Invalid reading' })
     : soilNow.stale
       ? soilObservedRelative
-        ? t('zone.water.soil.noReadingSince', {
+        ? t('zone.water.soil.lastReading', {
             since: soilObservedRelative,
-            defaultValue: 'No reading since {{since}}',
+            defaultValue: 'Last reading {{since}}',
           })
         : t('zone.water.soil.noReadingYet', { defaultValue: 'No reading yet' })
       : null;
-  const soilLastValid = soilStatusLine !== null && soilValue !== null && soilNow.observedAt
-    ? t('zone.water.soil.lastValid', {
-        value: soilValue,
-        time: dateFormat.dateTime(soilNow.observedAt) ?? soilNow.observedAt,
-        defaultValue: 'Last valid {{value}} · {{time}}',
-      })
+  // Owner ruling 2026-10-18 (#500): the latest stored reading keeps its value
+  // and water-status pill when it is older than three hours; the "Last reading"
+  // line carries its age. An invalid reading shows no value and no pill.
+  const soilShowsValue = !soilNow.invalid && soilValue !== null;
+  // Current probes supplied the figure while the probe on the trigger channel
+  // has gone quiet: say so on its own line rather than let it lead.
+  const staleTriggerSince = soilNow.staleTrigger
+    ? dateFormat.relativeToNow(soilNow.staleTrigger.observedAt)
     : null;
+  // A current fault on the trigger channel outranks an older reading of it.
+  const soilTriggerProbeLine = soilNow.invalidTrigger
+    ? t('zone.water.soil.triggerProbeInvalid', { defaultValue: 'Trigger probe: invalid reading' })
+    : staleTriggerSince
+      ? t('zone.water.soil.triggerProbeLastReading', {
+          since: staleTriggerSince,
+          defaultValue: 'Trigger probe: last reading {{since}}',
+        })
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -741,9 +739,12 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">
                   <p className="text-lg font-semibold text-[var(--text)]">
-                    {soilStatusLine === null ? soilValue ?? '—' : '—'}
+                    {soilShowsValue ? soilValue : '—'}
                   </p>
-                  {soilStatusLine === null && <SwtStatusIndicator status={soilWaterStatus} />}
+                  {soilShowsValue && <SwtStatusIndicator status={soilWaterStatus} />}
+                  {soilShowsValue && soilSource && (
+                    <span className="text-sm text-[var(--text-secondary)]">{soilSource}</span>
+                  )}
                 </div>
                 {soilDescriptor && soilStatusLine === null && (
                   <p className="text-sm text-[var(--text-secondary)]">{soilDescriptor}</p>
@@ -751,8 +752,8 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 {soilStatusLine && (
                   <p className="text-sm font-semibold text-[var(--warn-text)]">{soilStatusLine}</p>
                 )}
-                {soilLastValid && (
-                  <p className="text-xs text-[var(--text-secondary)]">{soilLastValid}</p>
+                {soilTriggerProbeLine && (
+                  <p className="text-sm font-semibold text-[var(--warn-text)]">{soilTriggerProbeLine}</p>
                 )}
               </div>
             )}

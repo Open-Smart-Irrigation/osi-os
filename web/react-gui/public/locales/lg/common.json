@@ -85,6 +85,10 @@
       "overlaid": "Ebiteekeddwa wamu",
       "smallMultiples": "Ebifaananyi ebitono ebingi"
     },
+    "autoStack": {
+      "note": "Shown stacked: at this width the unit axes leave too little room for the chart.",
+      "showOverlaid": "Show overlaid anyway"
+    },
     "toggle": {
       "normalize": "Kiteekemu omutindo"
     },

@@ -275,7 +275,7 @@ INSERT INTO users(username, password_hash, created_at, updated_at, user_uuid)
 VALUES ('sync-op-test-user', 'hash', '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z', 'sync-op-user-uuid');
 
 INSERT INTO sync_link_state(peer_node, linked, server_url, cloud_user_id, gateway_device_eui, updated_at)
-VALUES ('cloud', 1, 'https://sync.test.invalid', 'cloud-user-1', '0016C001F11715E2', '2026-07-06T00:00:00Z')
+VALUES ('cloud', 1, 'https://sync.test.invalid', 'cloud-user-1', 'AABBCCDDEEFF0003', '2026-07-06T00:00:00Z')
 ON CONFLICT(peer_node) DO UPDATE SET
   linked = excluded.linked,
   server_url = excluded.server_url,
@@ -296,7 +296,7 @@ INSERT INTO irrigation_zones(
 )
 VALUES (
   'Zone ${safeLabel}', 1, '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z', 'UTC',
-  'zone-${safeLabel}', '0016C001F11715E2', 1, 1000, 85, 'local',
+  'zone-${safeLabel}', 'AABBCCDDEEFF0003', 1, 1000, 85, 'local',
   47.0001, 8.0001, 'default', 'default', 'wheat',
   'standard', 'loam', 'drip', 'initial notes', 0
 );

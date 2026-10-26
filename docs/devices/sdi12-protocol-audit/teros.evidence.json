@@ -1,0 +1,610 @@
+{
+ "package": "teros",
+ "accessed": "2026-10-04",
+ "sources": [
+  {
+   "id": "IG12",
+   "title": "TEROS 11/12 Integrator Guide 18224-12",
+   "edition": "6.2025, fw 3.00+",
+   "publisher": "METER Group",
+   "host_type": "manufacturer",
+   "url": "https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+   "sha256": "917938d8cacb6bb7b6b98e63726144ccd03eca168b8c91b72cd0135954579a24",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "UM",
+   "title": "TEROS 11/12 manual 18225-16",
+   "edition": "11.2025",
+   "publisher": "METER Group",
+   "host_type": "manufacturer",
+   "url": "https://publications.metergroup.com/Manuals/20587_TEROS11-12_Manual_Web.pdf",
+   "sha256": "b49fcf8130d07bcd397db61848ed844838256d7d201ccf6f5a1e69c4cc7a894d",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "IG05",
+   "title": "TEROS 11/12 Integrator Guide 18224-05",
+   "edition": "12.18.2020, fw 1.14+",
+   "publisher": "METER Group",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20210506035124id_/https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+   "sha256": "df9627916e888de9226d6d4f8cf270b486b03a61f8df53fc02e81493fd2b8934",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "IG04",
+   "title": "TEROS 11/12 Integrator Guide 18224-04",
+   "edition": "11.30.2019, fw 1.07+",
+   "publisher": "METER Group",
+   "host_type": "manufacturer",
+   "url": "https://web.archive.org/web/20200923012020id_/https://publications.metergroup.com/Integrator%20Guide/18224%20TEROS%2011-12%20Integrator%20Guide.pdf",
+   "sha256": "127b1a0c59be428e102f49119129cd35eb117909c7d95b1a084c01327f4f1f9d",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "IG02",
+   "title": "TEROS 11/12 Integrator Guide 18224-02",
+   "edition": "2.15.2019, fw 1.07+",
+   "publisher": "METER Group",
+   "host_type": "third_party",
+   "url": "https://www.labcell.com/media/146685/teros%2011%20integrator%20guide.pdf",
+   "sha256": "fc531678306a70085c69441b19a917a9f9c0125db4345e8ed02bbb3b831b4aee",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "IG00",
+   "title": "TEROS 12 Integrator Guide 18224-00",
+   "edition": "3.1.2018, fw 1.00+",
+   "publisher": "METER Group",
+   "host_type": "third_party",
+   "url": "https://www.labcell.com/media/140638/teros%2012%20integrators%20guide.pdf",
+   "sha256": "54331583143f4fba001a1696bccbbec6a05fcb7bfcb171d9006eebbcb9cd81ac",
+   "retrieved": "2026-10-03"
+  },
+  {
+   "id": "DRAGINO",
+   "title": "SDI-12-LB/LS documentation, 2.6.4 Example 4 Connect to TEROS-12",
+   "edition": "web page accessed 2026-10-04 (screenshots dated 2023-06 in file names)",
+   "publisher": "Dragino",
+   "host_type": "third_party",
+   "url": "https://wiki.dragino.com/docs/LoRaWAN-End-Node/io-controllers-sensor-nodes/sdi-12-lb/",
+   "sha256": "85e1de29b7a11cdffd63e0e6fe28e8264f5a57f459df350f67576c65e9e780c6",
+   "retrieved": "2026-10-03"
+  }
+ ],
+ "claims": [
+  {
+   "id": "T-AM-1",
+   "model": "TEROS 11/12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "p.8 Table 2",
+   "quote": "aM! atttn ; aD0! a+<calibratedCountsVWC>±<temperature>+<electricalConductivity>",
+   "derived_rule": "aD0! has 3 values for TEROS 12, 2 for TEROS 11 (EC TEROS 12 only)",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "no sample string, ttt and n values not printed"
+  },
+  {
+   "id": "T-TTT-1",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 serial console image",
+   "quote": "3M! -> 30013",
+   "derived_rule": "a=3 ttt=001 n=3 for TEROS 12 fw 1.12 on Dragino bench",
+   "category": "vendor_example",
+   "test": {
+    "input": "reply 30013",
+    "expected": "address 3, ttt 001 s, n 3"
+   },
+   "confidence": "medium",
+   "limitation": "single screenshot, one sensor, firmware 1.12 only"
+  },
+  {
+   "id": "T-AI-1",
+   "model": "TEROS 11/12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "pp.6-7 Examples 1,2",
+   "quote": "1I!113METER␣␣␣TER12␣114631800001",
+   "derived_rule": "aI! reply = addr + '13' + 'METER   ' + 'TER11 '|'TER12 ' + 3-digit version/100 + serial <=13 chars",
+   "category": "vendor_example",
+   "test": {
+    "input": "1I!113METER   TER12 114631800001",
+    "expected": "addr 1, sdi 1.3, model TER12, fw 1.14, serial 631800001"
+   },
+   "confidence": "high",
+   "limitation": "firmware 3.00 guide prints version 114; serial format varies (Dragino fw 1.12 shows T12-00024895)"
+  },
+  {
+   "id": "T-AI-2",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 debug image",
+   "quote": "313METER   TER12 112T12-00024895",
+   "derived_rule": "version field 112 = fw 1.12; serial alphanumeric with hyphen",
+   "category": "vendor_example",
+   "test": {
+    "input": "313METER   TER12 112T12-00024895",
+    "expected": "addr 3, TER12, version 112, serial T12-00024895"
+   },
+   "confidence": "medium",
+   "limitation": "Dragino bench, fw 1.12"
+  },
+  {
+   "id": "T-D0-1",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 serial console image",
+   "quote": "3D0! -> 3+1818.98+30.3+0",
+   "derived_rule": "field 1 has two decimals, temp one decimal, EC integer on fw 1.12",
+   "category": "vendor_example",
+   "test": {
+    "input": "3+1818.98+30.3+0",
+    "expected": "[1818.98, 30.3, 0]"
+   },
+   "confidence": "medium",
+   "limitation": "do not assume the same decimals for fw 3.00"
+  },
+  {
+   "id": "T-D0-2",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 debug/TTN images",
+   "quote": "3+1828.88+29.6+1 and 3+1828.69+29.6+0",
+   "derived_rule": "same",
+   "category": "vendor_example",
+   "test": {
+    "input": "3+1828.88+29.6+1",
+    "expected": "[1828.88, 29.6, 1]"
+   },
+   "confidence": "medium",
+   "limitation": "bench condition unknown"
+  },
+  {
+   "id": "T-PAY-1",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 debug image payload hex",
+   "quote": "Payload = 0D C8 01 33 31 33 4D ...",
+   "derived_rule": "derived decode: 0DC8=3528 mV battery, 01 payver, then 34 ASCII bytes aI! reply incl CRLF, then 18 bytes aD0! reply incl CRLF (DATACUT1=34, DATACUT2=18)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "0DC8 01 + ascii",
+    "expected": "BatV 3.528, Payver 1, '313METER   TER12 112T12-00024895\\r\\n3+1828.88+29.6+1\\r\\n'"
+   },
+   "confidence": "high",
+   "limitation": "identification text is in payload only because COMMAND1=3I! was configured"
+  },
+  {
+   "id": "T-CFG-1",
+   "model": "TEROS 12",
+   "firmware": "1.12",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 config image",
+   "quote": "AT+COMMAND1=3I!,0,0,0 AT+DATACUT1=34,2,1~34 AT+COMMAND2=3M!,1,1,0 AT+DATACUT2=18,2,1~18 AT+12VT=1000",
+   "derived_rule": "bench config",
+   "category": "vendor_example",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "12VT 1000 ms; Example 5 uses 13000 ms due to other sensors"
+  },
+  {
+   "id": "T-NAME-1",
+   "model": "TEROS 11/12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "p.10 Table 11",
+   "quote": "<calibratedCountsVWC> Calibrated ADC counts for volumetric water content",
+   "derived_rule": "field 1 name; no range given",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "unit none, no range, no resolution for counts"
+  },
+  {
+   "id": "T-RAW-1",
+   "model": "TEROS 11/12",
+   "firmware": "UM 11.2025",
+   "source_id": "UM",
+   "locator": "p.19 sec 4.1",
+   "quote": "RAW is the raw sensor output, when read with a METER or third-party data logger.",
+   "derived_rule": "RAW defined as raw sensor output; never equated with calibratedCountsVWC",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "link between the two names is not stated"
+  },
+  {
+   "id": "T-RAW-2",
+   "model": "TEROS 11/12",
+   "firmware": "UM 11.2025",
+   "source_id": "UM",
+   "locator": "p.2 Table 1 Preparation",
+   "quote": "should read 0.332 (2650 raw) to 0.363 (2730 raw) m3/m3 on the verification clip",
+   "derived_rule": "verification clip RAW 2650 and 2730 map to 0.3323 and 0.3634 via Eq.6",
+   "category": "vendor_specification",
+   "test": {
+    "input": "RAW 2650 / 2730",
+    "expected": "0.3323 / 0.3634 (mineral)"
+   },
+   "confidence": "high",
+   "limitation": "clip numbers are on printed p.2, not p.9"
+  },
+  {
+   "id": "T-EQ6",
+   "model": "TEROS 11/12",
+   "firmware": "UM 11.2025",
+   "source_id": "UM",
+   "locator": "p.19 Eq.6 (image)",
+   "quote": "Theta = 3.879e-4 * RAW - 0.6956",
+   "derived_rule": "mineral VWC",
+   "category": "vendor_specification",
+   "test": {
+    "input": "RAW=3000",
+    "expected": "0.4681"
+   },
+   "confidence": "high",
+   "limitation": "zero at RAW 1793.246; 0.70 at 3597.83"
+  },
+  {
+   "id": "T-EQ6b",
+   "model": "TEROS 11/12",
+   "firmware": "UM",
+   "source_id": "UM",
+   "locator": "derived",
+   "quote": "",
+   "derived_rule": "VWC for RAW 1793.3,1797.7,1806.5,2000,2650,2730,2749,3000,3596.5 = 0.00002,0.0017,0.0051,0.0802,0.3323,0.3634,0.3707,0.4681,0.6995",
+   "category": "derived_expectation",
+   "test": {
+    "input": "[1793.3,1797.7,1806.5,2000,2650,2730,2749.0,3000,3596.5]",
+    "expected": "[0.00002,0.0017,0.0051,0.0802,0.3323,0.3634,0.3707,0.4681,0.6995]"
+   },
+   "confidence": "high",
+   "limitation": "arithmetic in calc.py"
+  },
+  {
+   "id": "T-EQ7",
+   "model": "TEROS 11/12",
+   "firmware": "UM",
+   "source_id": "UM",
+   "locator": "p.19 Eq.7 (image)",
+   "quote": "Theta = 6.771e-10 RAW^3 - 5.105e-6 RAW^2 + 1.302e-2 RAW - 10.848",
+   "derived_rule": "soilless VWC",
+   "category": "vendor_specification",
+   "test": {
+    "input": "RAW 2000/2650/3000",
+    "expected": "0.1888/0.4057/0.5487"
+   },
+   "confidence": "high",
+   "limitation": "validity range of RAW not stated"
+  },
+  {
+   "id": "T-EQ8",
+   "model": "TEROS 11/12",
+   "firmware": "UM",
+   "source_id": "UM",
+   "locator": "p.20 Eq.8 (image)",
+   "quote": "e = (2.887e-9 RAW^3 - 2.080e-5 RAW^2 + 5.276e-2 RAW - 43.39)^2",
+   "derived_rule": "apparent permittivity",
+   "category": "vendor_specification",
+   "test": {
+    "input": "RAW 1797.7/2650/3596.5",
+    "expected": "1.0187/16.6626/135.04"
+   },
+   "confidence": "high",
+   "limitation": "3596.5 gives 135.04 > documented 80; eps=80 at RAW 3393.6"
+  },
+  {
+   "id": "T-EQ1",
+   "model": "TEROS 12",
+   "firmware": "UM",
+   "source_id": "UM",
+   "locator": "p.16 Eq.1 (image)",
+   "quote": "EC25 = EC_T / (1 + 0.019 (T - 25))",
+   "derived_rule": "EC temp normalisation, sensor reports EC25",
+   "category": "vendor_specification",
+   "test": {
+    "input": "EC_T 1000 at 15 C",
+    "expected": "1234.57"
+   },
+   "confidence": "high",
+   "limitation": "normalisation is applied inside the sensor per guide Table 11"
+  },
+  {
+   "id": "T-EQ2",
+   "model": "TEROS 12",
+   "firmware": "UM",
+   "source_id": "UM",
+   "locator": "p.16-17 Eq.2,3",
+   "quote": "sigma_p = eps_p sigma_b/(eps_b - eps_sigma_b=0); eps_p = 80.3-0.37(T-20); offset 4.1",
+   "derived_rule": "pore-water EC; do not use below VWC 0.10",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "manual mislabels equation number in text"
+  },
+  {
+   "id": "T-ERR-1",
+   "model": "TEROS 11/12",
+   "firmware": "1.14+ (IG05), 3.00+",
+   "source_id": "IG12",
+   "locator": "p.5",
+   "quote": "-9999 ... measurement function compromised ... -9992 ... corrupt or lost calibrations ... -9991 ... insufficient voltage",
+   "derived_rule": "error values replace the measured value",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "scope (field vs whole observation) not stated; formatting not printed; absent in 1.07 guides"
+  },
+  {
+   "id": "T-META-1",
+   "model": "TEROS 11/12",
+   "firmware": "1.14+",
+   "source_id": "IG12",
+   "locator": "p.11 Table 12",
+   "quote": "64 thermistor broken, backup measurement; 128 firmware corrupt; 256 calibrations lost",
+   "derived_rule": "aV! then aD0! gives a±<meta> sum of flags",
+   "category": "vendor_specification",
+   "test": {
+    "input": "meta 384",
+    "expected": "256+128"
+   },
+   "confidence": "high",
+   "limitation": "other bits undefined"
+  },
+  {
+   "id": "T-ADDR-1",
+   "model": "TEROS 11/12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "p.5",
+   "quote": "The TEROS 11/12 will omit the DDI Serial startup string (sensor identification) when the SDI-12 address is nonzero. Changing the address to a nonzero address is recommended",
+   "derived_rule": "nonzero address suppresses DDI string",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "high",
+   "limitation": "conflicts with UM p.9 and p.20"
+  },
+  {
+   "id": "T-ADDR-2",
+   "model": "TEROS 11/12",
+   "firmware": "UM 11.2025",
+   "source_id": "UM",
+   "locator": "p.9, p.20",
+   "quote": "The sensor SDI-12 address must be returned to 0 to work with ZENTRA loggers. / Sensor only works if address is zero",
+   "derived_rule": "address 0 required for ZENTRA",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "scope probably METER loggers; not stated"
+  },
+  {
+   "id": "T-PWR-1",
+   "model": "TEROS 11/12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "pp.2-3",
+   "quote": "Power Up Time (SDI-12) Typical 245 ms; (SDI-12, DDI Serial disabled) 145/155/165 ms; Measurement Duration max 150 ms",
+   "derived_rule": "derived: after switching power, wait >=165 ms at nonzero address, more at address 0; measurement <=150 ms",
+   "category": "derived_expectation",
+   "test": {
+    "input": "power on at nonzero address",
+    "expected": "first command not before 165 ms; response after aM! wait ttt"
+   },
+   "confidence": "medium",
+   "limitation": "address-0 maximum not printed"
+  },
+  {
+   "id": "T-EC-1",
+   "model": "TEROS 12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "p.2, p.10",
+   "quote": "Range 0-20,000 uS/cm (bulk) Resolution 1 uS/cm ; <electricalConductivity> uS/cm",
+   "derived_rule": "EC on the wire in uS/cm integer",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "guide rev 02 says dS/m, rev 03-05 print mS/cm; fw 1.12 example shows integer values"
+  },
+  {
+   "id": "T-REV-1",
+   "model": "TEROS 11/12",
+   "firmware": "1.07-1.14",
+   "source_id": "IG05",
+   "locator": "rev table p.15",
+   "quote": "03 9.11.2019 1.07 Converted specification units to microsiemens",
+   "derived_rule": "EC unit change is documentation-only (firmware column unchanged)",
+   "category": "vendor_specification",
+   "test": null,
+   "confidence": "medium",
+   "limitation": "interpretation"
+  },
+  {
+   "id": "T-CRC-1",
+   "model": "TEROS 12",
+   "firmware": "3.00+",
+   "source_id": "IG12",
+   "locator": "p.13",
+   "quote": "CRC6 checksum example input is <TAB>2749.0 23.8 660<CR>g8 and the resulting checksum output is O (uppercase O).",
+   "derived_rule": "printed code computes lowercase o; TEROS 11 example printed with 1797.2 computes V not 2 (1797.7 gives 2)",
+   "category": "derived_expectation",
+   "test": {
+    "input": "\\t2749.0 23.8 660\\rg8",
+    "expected": "computed 'o', printed 'O'"
+   },
+   "confidence": "medium",
+   "limitation": "affects only R3/R4/DDI, not aM!/aD0!"
+  }
+ ],
+ "transcripts": [
+  {
+   "id": "X-DRAGINO-CONSOLE",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 serial console screenshot",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "?!"
+    },
+    {
+     "dir": "reply",
+     "text": "0"
+    },
+    {
+     "dir": "command",
+     "text": "0A3!"
+    },
+    {
+     "dir": "reply",
+     "text": "3"
+    },
+    {
+     "dir": "command",
+     "text": "3M!"
+    },
+    {
+     "dir": "reply",
+     "text": "30013"
+    },
+    {
+     "dir": "reply",
+     "text": "3"
+    },
+    {
+     "dir": "command",
+     "text": "3D0!"
+    },
+    {
+     "dir": "reply",
+     "text": "3+1818.98+30.3+0"
+    }
+   ],
+   "notes": "vendor_example, TEROS 12 fw 1.12 (from the aI! in the debug screenshot), Dragino bench. The lone reply 3 is the service request."
+  },
+  {
+   "id": "X-DRAGINO-DEBUG",
+   "source_id": "DRAGINO",
+   "locator": "Example 4 AT+DEBUG screenshot",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "3I!"
+    },
+    {
+     "dir": "reply",
+     "text": "313METER   TER12 112T12-00024895"
+    },
+    {
+     "dir": "command",
+     "text": "3M!"
+    },
+    {
+     "dir": "reply",
+     "text": "30013"
+    },
+    {
+     "dir": "reply",
+     "text": "3"
+    },
+    {
+     "dir": "reply",
+     "text": "3+1828.88+29.6+1"
+    }
+   ],
+   "notes": "vendor_example; payload 0D C8 01 33 31 33 4D 45 54 45 52 20 20 20 54 45 52 31 32 20 31 31 32 54 31 32 2D 30 30 30 32 34 38 39 35 0D 0A 33 2B 31 38 32 38 2E 38 38 2B 32 39 2E 36 2B 31 0D 0A ; TTN data_sum 313METER   TER12 112T12-00024895\\r\\n3+1828.69+29.6+0\\r\\n"
+  },
+  {
+   "id": "X-IG12-AI",
+   "source_id": "IG12",
+   "locator": "p.6 Example 1/2",
+   "exchange": [
+    {
+     "dir": "command",
+     "text": "1I!"
+    },
+    {
+     "dir": "reply",
+     "text": "113METER   TER11 114631800001"
+    }
+   ],
+   "notes": "vendor_example as printed; the guide prints the command and reply on one line"
+  },
+  {
+   "id": "X-IG12-DDI",
+   "source_id": "IG12",
+   "locator": "p.12 checksum examples",
+   "exchange": [
+    {
+     "dir": "reply",
+     "text": "\\t1797.7 21.8\\rhD2"
+    },
+    {
+     "dir": "reply",
+     "text": "\\t2749.0 23.8 660\\rg8O"
+    }
+   ],
+   "notes": "vendor_example; TEROS 11 and TEROS 12 DDI strings; CRC char of the TEROS 12 one disagrees with the printed C code (computes o)"
+  }
+ ],
+ "unknowns": [
+  {
+   "id": "U1",
+   "question": "ttt and n values for aM!/aC!/aV! on TEROS 11 and TEROS 12 for each firmware",
+   "why_it_matters": "timeout and number of values a converter configures"
+  },
+  {
+   "id": "U2",
+   "question": "Is calibratedCountsVWC identical to the RAW used in Eq.6-8, and what is its numeric range",
+   "why_it_matters": "VWC and permittivity conversion correctness"
+  },
+  {
+   "id": "U3",
+   "question": "Scope and wire format of -9999/-9992/-9991 (one field or all fields; sign formatting)",
+   "why_it_matters": "parser must not store sentinel values as measurements"
+  },
+  {
+   "id": "U4",
+   "question": "Error code behaviour in firmware 1.12 (no guide covers it)",
+   "why_it_matters": "fleet sensors may run 1.12"
+  },
+  {
+   "id": "U5",
+   "question": "EC wire unit for firmware 1.07-1.12 (dS/m vs uS/cm)",
+   "why_it_matters": "factor 1000 error"
+  },
+  {
+   "id": "U6",
+   "question": "Decimal format of aD0! under fw 3.00 and 1.14",
+   "why_it_matters": "parser strictness"
+  },
+  {
+   "id": "U7",
+   "question": "Whether aXO1! persists across power cycles; meaning of 'DDI Serial disabled' power-up row",
+   "why_it_matters": "power-switched cycle timing"
+  },
+  {
+   "id": "U8",
+   "question": "Max power-up time at address 0 (only typ 245 ms printed)",
+   "why_it_matters": "wait before first command"
+  },
+  {
+   "id": "U9",
+   "question": "Whether aC!/aR0! work (guide p.5 excludes them while tables document them)",
+   "why_it_matters": "command choice"
+  },
+  {
+   "id": "U10",
+   "question": "Any real TEROS 11 exchange",
+   "why_it_matters": "TEROS 11 field count and sensorType"
+  }
+ ]
+}

@@ -30,6 +30,22 @@ export interface SentekChannelLayout {
   address: string;
   sensors: SentekChannelSensor[];
 }
+export interface TensiomarkChannelSensor {
+  address: string;
+  channel: 1 | 2;
+  identity: string;
+  depth_cm: number | null;
+  calibration_range: 'unverified';
+}
+export interface TensiomarkChannelLayout {
+  version: 1;
+  kind: 'tensiomark';
+  source_unit: 'pF';
+  field_order: 'temperature_pf';
+  qualification: 'bench_observed';
+  sensors: TensiomarkChannelSensor[];
+}
+export type Sdi12ChannelLayout = SentekChannelLayout | TensiomarkChannelLayout;
 export type Lsn50Mode = 'MOD1' | 'MOD2' | 'MOD3' | 'MOD4' | 'MOD5' | 'MOD6' | 'MOD7' | 'MOD8' | 'MOD9';
 export type StregaModel = 'STANDARD' | 'MOTORIZED';
 export type DendroModeUsed = 'legacy_single_adc' | 'ratio_mod3';
@@ -103,7 +119,7 @@ export interface Device {
   sdi12_probe_status?: Sdi12ProbeStatus | null;
   sdi12_identity?: string | null;
   sdi12_value_count?: number | null;
-  sdi12_channel_layout_json?: SentekChannelLayout | null;
+  sdi12_channel_layout_json?: Sdi12ChannelLayout | null;
   sdi12_recipe_deployment?: Sdi12RecipeDeployment | null;
   sdi12_discovered_address?: string | null;
   sdi12_layout_status?: 'legacy_count' | 'configured' | 'active_vwc' | 'vic_framing_unverified' | 'invalid' | null;
@@ -939,6 +955,16 @@ export interface ValvePushState {
   queued: number;
   acked: number;
   failed: number;
+  /**
+   * CMD-04 PR0 (owner decision Q02 c): plan slots of the latest snapshot that are LOST, never
+   * re-sent automatically (a subset of `failed`): refused by the transport or removed by a
+   * whole-queue flush (at once), or not confirmed by the valve within 24 hours. The valve may
+   * not hold this plan. The service normaliser always sets it; optional only so fixtures from
+   * older gateways stay valid.
+   */
+  lost?: number;
+  /** The newest scheduler-status push (pause / skip today / resume) is LOST the same way. */
+  schedulerStatusLost?: boolean;
   lastPlanQueuedAt: string | null;
   lastPlanAckedAt: string | null;
 }
@@ -1007,7 +1033,8 @@ export interface ValvePlanError {
 export interface ValveWeekdayPush {
   purpose: string;
   weekday: number | null;
-  state: 'QUEUED' | 'ACKED' | 'FAILED';
+  /** 'LOST' (CMD-04 PR0): refused by the transport or flushed (at once), or unconfirmed after 24 hours; not re-sent automatically. */
+  state: 'QUEUED' | 'ACKED' | 'FAILED' | 'LOST';
   queuedAt: string;
   ackedAt: string | null;
   error: string | null;

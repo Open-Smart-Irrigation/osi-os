@@ -67,6 +67,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | GUI unit tests | `cd web/react-gui && npm run test:unit` | npm exits 0. |
 | GUI build | `cd web/react-gui && npm run build` | npm exits 0. |
 | Whitespace/diff sanity | `git diff --check` | No output, exit 0. |
+| AGENTS.md size and heading positions | `node scripts/verify-agents-size.js` | Ends `verify-agents-size: OK (<bytes> bytes, limit 30720)`, exit 0. |
 | Documentation hygiene | `node scripts/verify-doc-hygiene.js` | Ends `verify-doc-hygiene: OK (...)`, exit 0. Maintainers add `--require-terms` with the name list in `OSI_DOC_HYGIENE_TERMS`. |
 
 ## Surface Selection
@@ -80,6 +81,29 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | React GUI | `npm run test:unit` and `npm run build` from `web/react-gui`; add contract/edge verifiers if GUI semantics depend on changed edge fields. |
 | Sync contract docs or payload schemas | `verify-communication-contract.js` plus the edge/server tests named by the contract change. |
 | Server/backend companion work | Use the sister `osi-server` repo gates for backend changes. OSI OS edge verifiers do not prove cloud Java/Postgres behavior. |
+
+## Base ref for a stacked branch
+
+`AGENTS.md` keeps the one-line rule; this section holds the long form that
+moved out of it on 2026-10-22 and carries the same authority.
+
+`scripts/verify-flows-size-ratchet.js`, `scripts/verify-no-stray-ddl.js`, and
+`scripts/verify-migrations.js` each compare HEAD against a base ref that
+defaults to `origin/main`, overridable with `OSI_FLOWS_SIZE_BASE_REF`,
+`OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively.
+`scripts/verify-live-gateway-identity.js` carries no `git show` call of its
+own; it cross-checks the same size pins by reading
+`scripts/verify-flows-size-ratchet-allowances.json`, and names its own base
+with `OSI_IDENTITY_BASE_REF` (also defaulting to `origin/main`) for its
+messages.
+
+A branch built as a multi-commit stack can sit unmerged through several
+unrelated merges into `origin/main`. Each merge moves the default base out
+from under the stack's own committed size/DDL/migration pins without the
+stack itself changing, so a pin correct at write time later reads as false
+growth. When that happens, pin the stack against the commit it actually
+branched from and set all four env vars to that commit for every verifier run
+until the stack is rebased onto the current `origin/main`.
 
 ## Common Mistakes
 

@@ -2,7 +2,8 @@
 
 const crypto = require('crypto');
 const { createAnalysis } = require('./analysis');
-const { deviceSourceId, describeDeviceSource } = require('./device-sources');
+const { deviceSourceId, describeDeviceSource, isWatermarkSoilTemperatureSource } = require('./device-sources');
+const { kpaToPf } = require('../osi-matric-potential');
 // The sibling module resolves the same way on the gateway (/srv/node-red/<name>)
 // as in the repo; osi-weather-provider and osi-rain require nothing back, so
 // there is no cycle.
@@ -263,20 +264,6 @@ function roundTo(value, decimals = 3) {
   return Math.round(number * factor) / factor;
 }
 
-// Tension at or below which pF takes its floor of 0 (log10(0.1 * 10) = 0).
-const PF_FLOOR_KPA = 0.1;
-
-// pF = log10(tension in hPa); 1 kPa = 10 hPa. pF is never written below 0:
-// a finite tension at or below 0.1 kPa (where the formula gives 0, a negative
-// or no value, e.g. a saturated probe at 0 kPa) derives the 0 pF floor.
-// A missing or non-finite reading stays null and gets no pF row.
-function kpaToPf(kpa) {
-  const value = toFiniteNumber(kpa);
-  if (value === null) return null;
-  if (value <= PF_FLOOR_KPA) return 0;
-  return Math.log10(value * 10);
-}
-
 function isSwtKpaChannel(channel) {
   return Boolean(channel) && channel.unit === 'kPa' && /^swt_/.test(String(channel.id || ''));
 }
@@ -289,7 +276,7 @@ function pfExportRow(kpaRow, channel) {
     series_label: `${kpaRow.series_label} (pF)`,
     channel_key: `${channel.id}_pf`,
     unit: 'pF',
-    value: roundTo(pf, 4),
+    value: pf,
   };
 }
 
@@ -569,14 +556,19 @@ async function annotateWatermarkEvidence(db, devices) {
   if (!lsn50Euis.length) return rows;
   const found = await dbAll(db,
     'WITH ids(eui) AS (VALUES ' + lsn50Euis.map(() => '(?)').join(',') + ') ' +
-    'SELECT eui FROM ids WHERE EXISTS (SELECT 1 FROM watermark_calibrations c WHERE c.deveui = ids.eui AND c.deleted_at IS NULL) ' +
+    'SELECT eui, EXISTS (SELECT 1 FROM watermark_calibrations c WHERE c.deveui = ids.eui AND c.deleted_at IS NULL) AS calibration_retained ' +
+    'FROM ids WHERE EXISTS (SELECT 1 FROM watermark_calibrations c WHERE c.deveui = ids.eui AND c.deleted_at IS NULL) ' +
     'OR EXISTS (SELECT 1 FROM watermark_readings r WHERE r.deveui = ids.eui)',
     lsn50Euis);
-  const evidence = new Set(found.map((row) => normalizeDeveui(row && row.eui)).filter(Boolean));
+  // A returned row is the evidence (a retained calibration or any stored
+  // reading); calibration_retained only says which kind it is.
+  const evidence = new Map(found.map(row => [normalizeDeveui(row && row.eui), row]));
   return rows.map((device) => {
     if (deviceTypeId(device) !== 'DRAGINO_LSN50') return device;
     const eui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
-    return { ...device, watermark_evidence: eui && evidence.has(eui) ? 1 : 0 };
+    const retained = eui ? evidence.get(eui) : undefined;
+    const calibration = Number(retained && retained.calibration_retained) === 1;
+    return { ...device, watermark_evidence: retained ? 1 : 0, watermark_calibration_retained: calibration ? 1 : 0 };
   });
 }
 
@@ -588,6 +580,7 @@ const ENVIRONMENT_SOURCE_TYPES = new Set([
 ]);
 
 function isEnvironmentSource(device, options = {}) {
+  if (isWatermarkSoilTemperatureSource(device)) return false;
   const type = deviceTypeId(device);
   return ENVIRONMENT_SOURCE_TYPES.has(type)
     || (type === 'DRAGINO_LSN50' && Number(device && device.temp_enabled || 0) === 1)
@@ -952,7 +945,7 @@ function bucketStartFor(ms, startMs, bucketSeconds) {
   return startMs + Math.max(0, offset);
 }
 
-function statsForValues(values) {
+function statsForValues(values, preservePrecision = false) {
   const numeric = values
     .map((entry) => ({ value: toFiniteNumber(entry.value), recordedAtMs: entry.recordedAtMs }))
     .filter((entry) => entry.value !== null)
@@ -960,14 +953,15 @@ function statsForValues(values) {
   if (numeric.length === 0) return null;
   const onlyValues = numeric.map((entry) => entry.value);
   const sum = onlyValues.reduce((total, value) => total + value, 0);
+  const present = preservePrecision ? (value) => value : roundTo;
   return {
-    min: roundTo(Math.min(...onlyValues)),
-    max: roundTo(Math.max(...onlyValues)),
-    mean: roundTo(sum / onlyValues.length),
-    median: roundTo(median(onlyValues)),
-    latest: roundTo(numeric[numeric.length - 1].value),
+    min: present(Math.min(...onlyValues)),
+    max: present(Math.max(...onlyValues)),
+    mean: present(sum / onlyValues.length),
+    median: present(median(onlyValues)),
+    latest: present(numeric[numeric.length - 1].value),
     sampleCount: numeric.length,
-    sum: roundTo(sum),
+    sum: present(sum),
   };
 }
 
@@ -1399,7 +1393,10 @@ function aggregateRowsPooled(rows, options = {}) {
       rowCursor += 1;
     }
     for (const channel of channels) {
-      const stats = statsForValues(bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })));
+      const stats = statsForValues(
+        bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })),
+        isSwtKpaChannel(channel),
+      );
       bucket.series[channel.id] = stats ? { ...stats, unit: channel.unit || null } : {
         min: null,
         max: null,
@@ -2841,6 +2838,70 @@ async function legacyRainDailyHistory(db, options = {}) {
     .map((day) => ({ day: day.day, total_mm: day.total_mm, samples: day.samples }));
 }
 
+// The decimal digits and exponent that Java (JDK 19+) Double.toString picks:
+// the shortest decimal that rounds back to x, except that when one digit
+// would do, Java takes the closest decimal of one or two digits.
+function javaDoubleDecimal(x) {
+  const magnitude = Math.abs(x);
+  let [mantissa, exponent] = magnitude.toExponential().split('e');
+  if (mantissa.length === 1) {
+    const twoDigits = magnitude.toExponential(1);
+    if (Number(twoDigits) === magnitude) [mantissa, exponent] = twoDigits.split('e');
+  }
+  // A two-digit pick such as "2.0e-2" means the digit string "2"; the
+  // leading digit is never 0, so stripping trailing zeros leaves one digit.
+  const digits = mantissa.replace('.', '').replace(/0+$/, '');
+  return { digits, exponent: Number(exponent) };
+}
+
+// Java Double.toString(x): plain notation with at least one fractional digit
+// for 1e-3 <= |x| < 1e7, otherwise "d.dddE<n>". The cloud writes derived pF
+// cells this way (osi-server SoilTensionPf.exportValue).
+function javaDoubleText(x) {
+  if (x === 0) return Object.is(x, -0) ? '-0.0' : '0.0';
+  const sign = x < 0 ? '-' : '';
+  const { digits, exponent } = javaDoubleDecimal(x);
+  const magnitude = Math.abs(x);
+  if (magnitude >= 1e-3 && magnitude < 1e7) {
+    if (exponent < 0) return `${sign}0.${'0'.repeat(-exponent - 1)}${digits}`;
+    const whole = digits.slice(0, exponent + 1).padEnd(exponent + 1, '0');
+    return `${sign}${whole}.${digits.slice(exponent + 1) || '0'}`;
+  }
+  return `${sign}${digits[0]}.${digits.slice(1) || '0'}E${exponent}`;
+}
+
+// Java BigDecimal.valueOf(x).stripTrailingZeros().toPlainString(): the same
+// digits as Double.toString, never in exponent notation and without trailing
+// zeros. The cloud writes CSV number cells this way (HistoryExportService.number).
+function javaPlainDecimalText(x) {
+  if (x === 0) return '0';
+  const sign = x < 0 ? '-' : '';
+  const { digits, exponent } = javaDoubleDecimal(x);
+  if (exponent < 0) return `${sign}0.${'0'.repeat(-exponent - 1)}${digits}`;
+  if (exponent + 1 >= digits.length) return `${sign}${digits}${'0'.repeat(exponent + 1 - digits.length)}`;
+  return `${sign}${digits.slice(0, exponent + 1)}.${digits.slice(exponent + 1)}`;
+}
+
+// Soil-tension cells of history CSV v1 carry full precision and are written as
+// the cloud writes them, so a farm exported from either side reads the same
+// (matric-potential contract v1, owner ruling 2026-10-18): kPa as a plain
+// decimal, derived pF as Java Double.toString. Other cells are unchanged.
+function swtCsvValueText(row) {
+  if (!row || typeof row.value !== 'number' || !Number.isFinite(row.value)) return null;
+  const channelKey = String(row.channel_key || '');
+  if (row.unit === 'pF' && /^swt_.*_pf$/.test(channelKey)) return javaDoubleText(row.value);
+  if (row.unit === 'kPa' && /^swt_/.test(channelKey)) return javaPlainDecimalText(row.value);
+  return null;
+}
+
+function csvRowCell(row, column) {
+  if (column === 'value') {
+    const text = swtCsvValueText(row);
+    if (text !== null) return text;
+  }
+  return csvCell(row && row[column]);
+}
+
 function csvCell(value) {
   if (value === null || value === undefined) return '';
   // A text cell a spreadsheet would run as a formula (=, +, -, @, tab, CR)
@@ -2853,7 +2914,7 @@ function toCsv(columns, rows) {
   const safeColumns = Array.isArray(columns) ? columns : [];
   const safeRows = Array.isArray(rows) ? rows : [];
   return [safeColumns.join(',')]
-    .concat(safeRows.map((row) => safeColumns.map((column) => csvCell(row && row[column])).join(',')))
+    .concat(safeRows.map((row) => safeColumns.map((column) => csvRowCell(row, column)).join(',')))
     .join('\n') + '\n';
 }
 
@@ -2994,17 +3055,28 @@ async function resolveZoneExportScope(db, options = {}) {
   return { zone, timezone, from, to, start, end, devices, cards, site, requestedChannelKeys: normalizeExportChannels(options.channels), granularity: normalizeExportGranularity(options.granularity), nowMs: options.nowMs ?? Date.now() };
 }
 
-function seriesLabel(sourceName, channel) {
-  return [sourceName, channel && (channel.label || channel.id)].filter(Boolean).join(' - ');
+// VWC and VIC rows name their depth the way the cloud export does
+// (osi-server ChannelRegistry.displayName: "VWC 20cm", "VIC 12.5cm").
+const DEPTH_LABEL_FAMILIES = Object.freeze({ vwc: 'VWC', soil_vic: 'VIC' });
+
+function soilChannelLabel(channel, depthCm) {
+  const match = /^(vwc|soil_vic)_\d+$/.exec(String(channel.id || ''));
+  // A zero or negative depth is not a depth: keep the channel name rather than print "VWC 0cm".
+  if (match && typeof depthCm === 'number' && depthCm > 0) return `${DEPTH_LABEL_FAMILIES[match[1]]} ${depthCm}cm`;
+  return channel.label || channel.id;
+}
+
+function seriesLabel(sourceName, channel, depthCm = null) {
+  return [sourceName, channel && soilChannelLabel(channel, depthCm)].filter(Boolean).join(' - ');
 }
 
 // A raw rain row is what one report collected; a bucket is a summed amount
 // (channel label "Rainfall amount"). The GUI's rainfallLabel() uses the same words.
 const RAW_SERIES_LABELS = Object.freeze({ rain_mm_delta: 'Rainfall this interval' });
 
-function rawSeriesLabel(sourceName, channel) {
+function rawSeriesLabel(sourceName, channel, depthCm = null) {
   const rawLabel = channel && RAW_SERIES_LABELS[channel.id];
-  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel);
+  return seriesLabel(sourceName, rawLabel ? { ...channel, label: rawLabel } : channel, depthCm);
 }
 
 function sourceKeyForCsv(card, device) {
@@ -3089,18 +3161,19 @@ async function rawZoneExportRows(db, scope) {
         for (const channel of channels) {
           const value = channelValue(row, channel);
           if (value === null) continue;
+          const depthCm = soilDepthCm(device, channel.id);
           const csvRow = {
             timestamp,
             site: scope.site,
             zone: zoneName,
-            series_label: rawSeriesLabel(sourceName, channel),
+            series_label: rawSeriesLabel(sourceName, channel, depthCm),
             card_type: card.cardType,
             source_key: sourceKeyForCsv(card, device),
             channel_key: channel.id,
-            depth_cm: soilDepthCm(device, channel.id),
+            depth_cm: depthCm,
             array_id: arrayId,
             unit: channel.unit || null,
-            value: roundTo(value),
+            value: isSwtKpaChannel(channel) ? value : roundTo(value),
           };
           rows.push(csvRow);
           if (isSwtKpaChannel(channel)) {
@@ -3278,7 +3351,7 @@ async function buildAllZonesExportCsv(db, options = {}) {
       : await aggregateZoneExportRows(db, scope);
     assertExportRowBudget(rows, scope);
     if (rows.length) {
-      chunks.push(rows.map((row) => RAW_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')).join('\n') + '\n');
+      chunks.push(rows.map((row) => RAW_CSV_COLUMNS.map((column) => csvRowCell(row, column)).join(',')).join('\n') + '\n');
     }
     rowCount += rows.length;
   }
@@ -3312,7 +3385,7 @@ async function writeZoneCsv(options = {}) {
   }
   const dailyBody = [AGG_CSV_COLUMNS.join(',')]
     .concat(keptLines)
-    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvCell(row[column])).join(',')));
+    .concat(nextDailyRows.map((row) => AGG_CSV_COLUMNS.map((column) => csvRowCell(row, column)).join(',')));
   fs.writeFileSync(dailyPath, dailyBody.join('\n') + '\n');
 }
 
@@ -3446,6 +3519,9 @@ function parseDepthJson(value) {
   return null;
 }
 
+// VWC/VIC channel keys, which take a mapped depth only when it is positive.
+const VWC_DEPTH_CHANNEL = /^(?:vwc|soil_vic)_\d+$/;
+
 function soilDepthCm(device, channelId) {
   if (channelId === 'swt_3' && !isLsn50Swt3Eligible(device)) {
     return null;
@@ -3463,9 +3539,27 @@ function soilDepthCm(device, channelId) {
     return index === undefined ? null : toFiniteNumber(configured[index]);
   }
   if (configured && typeof configured === 'object') {
-    return toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
+    const mapped = toFiniteNumber(configured[channelId] ?? configured[channelId.replace('_', '')] ?? configured[channelId.toUpperCase()]);
+    // A zero or negative VWC/VIC depth is no depth: the Sentek layout supplies
+    // it instead (docs/contracts/vwc-display/).
+    if (mapped !== null && (mapped > 0 || !VWC_DEPTH_CHANNEL.test(String(channelId)))) return mapped;
   }
-  return null;
+  return sdi12LayoutDepthCm(device, channelId);
+}
+
+// A Sentek channel layout records each VWC/VIC channel's depth; the depth map
+// wins when it has one. Mirrors vwcChannelDepthCm in the GUI (contract
+// docs/contracts/vwc-display/): DRAGINO_SDI12 only, no Tensiomark layout
+// (it carries a "kind"), positive finite depth only.
+function sdi12LayoutDepthCm(device, channelId) {
+  if (deviceTypeId(device) !== 'DRAGINO_SDI12') return null;
+  const match = /^(?:vwc|soil_vic)_(\d+)$/.exec(String(channelId || ''));
+  const layout = parseDepthJson(device && device.sdi12_channel_layout_json);
+  if (!match || !layout || Array.isArray(layout) || layout.kind !== undefined || !Array.isArray(layout.sensors)) return null;
+  const channel = Number(match[1]);
+  const sensor = layout.sensors.find((entry) => entry && Number(entry.channel) === channel);
+  const depth = toFiniteNumber(sensor && sensor.depth_cm);
+  return depth !== null && depth > 0 ? depth : null;
 }
 
 async function resolveDeviceArrayIds(db, deveuis, start, end) {
@@ -3500,15 +3594,16 @@ function csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arr
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
+      const depthCm = soilDepthCm(device, channel.id);
       const csvRow = {
         timestamp: bucket.bucketStart,
         site: context.site || '',
         zone: context.zone || '',
-        series_label: seriesLabel(sourceName, channel),
+        series_label: seriesLabel(sourceName, channel, depthCm),
         card_type: card.cardType,
         source_key: sourceKeyForCsv(card, device),
         channel_key: channel.id,
-        depth_cm: soilDepthCm(device, channel.id),
+        depth_cm: depthCm,
         array_id: arrayId == null ? null : arrayId,
         unit: channel.unit || stats.unit || null,
         value: valueForChannel(stats, channel),
@@ -4047,6 +4142,8 @@ module.exports = {
   RAW_CSV_COLUMNS,
   AGG_CSV_COLUMNS,
   toCsv,
+  javaDoubleText,
+  javaPlainDecimalText,
   writeZoneCsv,
   rotateZoneCsv,
   aggregateRows,

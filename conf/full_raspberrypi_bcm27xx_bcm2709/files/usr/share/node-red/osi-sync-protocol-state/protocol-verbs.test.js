@@ -839,7 +839,7 @@ function makeResetFixture() {
         activeIdentitySha256: fromIdentity, mode: 'V3_PINNED', historicalV2Disposition: 'CLEAR',
         historicalV2DispositionReceiptSha256: clear.capability.generations.at(-1).generation.state.historicalV2DispositionReceiptSha256,
         databaseRestore: { status: 'CLEAR', restoreEpoch: 0 }, identitySha256: fromIdentity,
-        normalizedServerBase: 'https://cloud.example', gatewayDeviceEui: '0016C001F11715E2', capabilityProofSha256: SHA_B,
+        normalizedServerBase: 'https://cloud.example', gatewayDeviceEui: 'AABBCCDDEEFF0003', capabilityProofSha256: SHA_B,
       },
       receipt: { format: 1, receiptKind: 'test-negotiation' },
       receiptPath: path.join(tmp, 'negotiation-test-receipt.json'),

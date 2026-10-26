@@ -138,7 +138,8 @@ curl -X POST http://localhost:1880/auth/register \
   -d '{"username":"testuser","password":"test123"}'
 ```
 
-**Response:** `{"success":true}`
+**Response:** `{"success":true}` (201) for the gateway's first account. Once an
+account exists the route answers 403 and creates nothing.
 
 ### Login:
 

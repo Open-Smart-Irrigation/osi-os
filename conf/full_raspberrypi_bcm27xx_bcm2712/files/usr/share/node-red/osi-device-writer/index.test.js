@@ -70,6 +70,7 @@ describe('osi-device-writer', () => {
     assert.ok(result.columns.includes('ambient_temperature'));
 
     const row = db.prepare('SELECT * FROM device_data WHERE deveui = ?').get('AABBCCDDEE001122');
+    assert.equal(result.deviceDataId, row.id, 'return the exact canonical row id');
     assert.equal(row.swt_1, 42.5);
     assert.equal(row.ambient_temperature, 23.1);
   });

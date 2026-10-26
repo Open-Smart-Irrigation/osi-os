@@ -151,7 +151,7 @@ test('a correction batch is sent in ascending row id order whatever the queue or
   cursor.run('device_data', '6129', null, '6129', null);
   link(db);
   [[6129, 1], [1001, 2], [999, 3], [1000, 4]].forEach(([id, s]) => dirty(db, 'device_data', key(id), 'repair', `2026-08-14T23:50:0${s}.000Z`));
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
   const built = await h.invoke('sync-history-build', {});
   assert.ok(built, 'a batch is built');
   assert.deepEqual(Array.from(built.payload.rows, (row) => Number(row.payload.id)), [999, 1000, 1001, 6129]);
@@ -184,16 +184,16 @@ for (const profile of PROFILES) {
     for (const id of [584, 1000, 1001, 1002, 1200]) insert.run(id, SENSOR, `2026-08-13T00:${String(id % 60).padStart(2, '0')}:00.000Z`);
     cursor.run('device_data', '1000', null, '1000', null);
     link(db);
-    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    const h = createHarness({ db, profile, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
     dirty(db, 'device_data', key(584), 'repair', T_DEAD);
     await h.tick();
     assert.equal(cursorRow(db, 'device_data').last_acked_id, 1000, 'a repair ACK below the cursor does not rewind it');
     dirty(db, 'device_data', key(1200), 'correction', '2026-10-05T09:00:00.000Z');
-    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    h.memory.set('history_sync_last_table', 'tensiomark_observations');
     await h.tick();
     assert.equal(cursorRow(db, 'device_data').last_acked_id, 1000, 'a correction ACK above the cursor does not advance it');
     assert.deepEqual(statusCounts(db, 'device_data'), { done: 2 });
-    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    h.memory.set('history_sync_last_table', 'tensiomark_observations');
     await h.tick();
     const batches = h.cloud.batches.filter((batch) => batch.tableName === 'device_data');
     assert.deepEqual(batches.map((batch) => batch.phase), ['repair', 'correction', 'tail']);
@@ -234,7 +234,7 @@ for (const profile of PROFILES) {
     // Seeded in the tail query's cursor form (deveui|date); the cloud answers the prefixed history key.
     cursor.run('dendrometer_daily', null, `${DENDROS[0]}|2026-07-01`, null, `${DENDROS[0]}|2026-07-01`);
     link(db);
-    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    const h = createHarness({ db, profile, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
     await h.tick();
     assert.equal(cursorRow(db, 'device_data').last_acked_id, 1002);
     await h.invoke('sync-history-mark', lateAck('device_data', 'tail', { ackedThroughId: 1000, ackedThroughKey: key(1000) }));
@@ -255,7 +255,7 @@ for (const profile of PROFILES) {
     for (const id of [1001, 1002]) insert.run(id, SENSOR, `2026-08-13T00:${String(id % 60).padStart(2, '0')}:00.000Z`);
     db.prepare("INSERT INTO sync_history_cursors(peer_node,table_name,state,shadow_completed_at,durable_enabled_at,snapshot_high_id,last_acked_id) VALUES('cloud','device_data','backfill','2026-08-05T00:00:00.000Z','2026-08-05T00:00:00.000Z','1002','1000')").run();
     link(db);
-    const h = createHarness({ db, profile, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+    const h = createHarness({ db, profile, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
     await h.tick();
     assert.deepEqual(h.cloud.batches.map((batch) => [batch.tableName, batch.phase]), [['device_data', 'backfill']]);
     const after = cursorRow(db, 'device_data');
@@ -296,7 +296,7 @@ test('a queued key whose row no longer exists is dropped with a counted, logged 
   dirty(db, 'device_data', key(3), 'repair', T_DEAD, 4000);
   dirty(db, 'device_data', key(4), 'repair', T_DEAD);
   dirty(db, 'device_data', key(10), 'repair', '2026-08-15T00:00:00.000Z');
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
   const built = await h.invoke('sync-history-build', {});
   assert.deepEqual(Array.from(built.payload.rows, (row) => Number(row.payload.id)), [10]);
   const dead = db.prepare("SELECT row_key, status, last_error, next_attempt_at FROM sync_history_dirty_keys WHERE row_key IN (?,?) ORDER BY row_key").all(key(3), key(4));
@@ -346,7 +346,7 @@ test('a key re-queued between the row lookup and the drop is not dropped', async
   dirty(db, 'device_data', key(42), 'repair', T_DEAD);
   const h = createHarness({
     db,
-    lastTable: 'valve_actuation_expectations',
+    lastTable: 'tensiomark_observations',
     env: { DEVICE_EUI: GATEWAY },
     afterAll: (sql, params, rows, raw) => {
       // Row 41 is written again right after its lookup came back empty; its
@@ -376,7 +376,7 @@ test('a failed row lookup drops nothing more, and drops made earlier in that tur
   dirty(db, 'device_data', key(5), 'repair', T_DEAD);
   const h = createHarness({
     db,
-    lastTable: 'valve_actuation_expectations',
+    lastTable: 'tensiomark_observations',
     env: { DEVICE_EUI: GATEWAY },
     afterAll: (sql, params) => {
       if (/FROM device_data WHERE id = \?/.test(sql) && String(params[0]) === '4') {
@@ -404,7 +404,7 @@ test('a row-level permanent rejection sets that key aside and does not block the
   cursor.run('device_data', '13', null, '13', null);
   link(db);
   for (const id of [11, 12, 13]) dirty(db, 'device_data', key(id), 'correction', '2026-10-05T09:00:00.000Z');
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { hashMismatch: new Set([key(12)]) } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY }, cloud: { hashMismatch: new Set([key(12)]) } });
   await h.tick();
   assert.deepEqual(statusCounts(db, 'device_data'), { done: 1, pending: 2 });
   const aside = db.prepare('SELECT status, attempts, last_error, next_attempt_at FROM sync_history_dirty_keys WHERE row_key=?').get(key(12));
@@ -415,7 +415,7 @@ test('a row-level permanent rejection sets that key aside and does not block the
   assert.ok(cur.next_attempt_at === null || cur.next_attempt_at < '9999', 'the table is not parked: ' + cur.next_attempt_at);
   assert.equal(cur.retry_count, 0);
   // Next visit sends the key behind it.
-  h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+  h.memory.set('history_sync_last_table', 'tensiomark_observations');
   const next = await h.invoke('sync-history-build', {});
   assert.deepEqual(Array.from(next.payload.rows, (row) => Number(row.payload.id)), [13]);
   // After three permanent rejections the key is terminal and counted.
@@ -437,7 +437,7 @@ test('a retryable answer mid-batch completes the rows before it and leaves the r
   link(db);
   for (const id of [31, 32, 33]) dirty(db, 'device_data', key(id), 'correction', '2026-10-05T09:00:00.000Z');
   const retryable = new Set([key(32)]);
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { retryable } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY }, cloud: { retryable } });
   await h.tick();
   const row = (id) => db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(id));
   assert.equal(row(31).status, 'done');
@@ -447,7 +447,7 @@ test('a retryable answer mid-batch completes the rows before it and leaves the r
   assert.deepEqual([cur.next_attempt_at, cur.retry_count, cur.last_error], [null, 0, null], 'the table is not backed off or parked');
   // The cloud recovers: the next visit sends the two keys and both complete.
   retryable.clear();
-  h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+  h.memory.set('history_sync_last_table', 'tensiomark_observations');
   await h.tick();
   assert.deepEqual(h.cloud.batches.map((b) => b.keys), [[key(31), key(32), key(33)], [key(32), key(33)]]);
   assert.deepEqual(statusCounts(db, 'device_data'), { done: 3 });
@@ -461,7 +461,7 @@ test('a systemic rejection keeps the table backed off and sets no key aside', as
   cursor.run('device_data', '21', null, '21', null);
   link(db);
   dirty(db, 'device_data', key(21), 'correction', '2026-10-05T09:00:00.000Z');
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY }, cloud: { systemicReason: 'unsupported_protocol_version' } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY }, cloud: { systemicReason: 'unsupported_protocol_version' } });
   const sentAt = h.now();
   await h.tick();
   const row = db.prepare('SELECT status, attempts, last_error FROM sync_history_dirty_keys WHERE row_key=?').get(key(21));
@@ -583,7 +583,7 @@ test('a key stored under an old gateway EUI completes, and a row queued under bo
   dirty(db, 'device_data', key(52), 'correction', '2026-10-05T09:00:01.000Z');
   dirty(db, 'device_data', `DEVICE_DATA|${OLD_GATEWAY}|52`, 'correction', '2026-10-05T09:00:02.000Z');
   dirty(db, 'device_data', key(53), 'correction', '2026-10-05T09:00:03.000Z');
-  const h = createHarness({ db, lastTable: 'valve_actuation_expectations', env: { DEVICE_EUI: GATEWAY } });
+  const h = createHarness({ db, lastTable: 'tensiomark_observations', env: { DEVICE_EUI: GATEWAY } });
   await h.tick();
   assert.deepEqual(h.cloud.batches.map((b) => [b.keys, b.rejected]), [[[key(51), key(52), key(53)], null]]);
   assert.deepEqual(statusCounts(db, 'device_data'), { done: 4 });
@@ -634,7 +634,7 @@ test('radio_uplinks: dead keys are dropped, a rejected key is set aside, an old-
   }
   const h = createHarness({ db, radio, env: { DEVICE_EUI: GATEWAY, OSI_RADIO_CAPTURE_ENABLED: '1' }, cloud: { hashMismatch: new Set([radioKey(3)]) } });
   for (let i = 0; i < 12 && db.prepare("SELECT COUNT(*) AS n FROM sync_history_dirty_keys WHERE table_name='radio_uplinks' AND status='pending'").get().n; i += 1) {
-    h.memory.set('history_sync_last_table', 'valve_actuation_expectations');
+    h.memory.set('history_sync_last_table', 'tensiomark_observations');
     await h.tick();
     h.advance(300000);
   }

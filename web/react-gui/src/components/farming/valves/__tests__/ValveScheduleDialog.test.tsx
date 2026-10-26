@@ -46,6 +46,7 @@ const { translateForTest } = vi.hoisted(() => {
     'scheduleDialog.push.QUEUED': 'waiting for valve',
     'scheduleDialog.push.ACKED': 'acknowledged {{when}}',
     'scheduleDialog.push.FAILED': 'failed',
+    'scheduleDialog.push.LOST': 'device may not hold this plan',
     bluetoothNote: 'Changes made on the valve over Bluetooth are not visible here.',
     noSchedule: 'No schedule',
     cancel: 'Cancel',
@@ -290,6 +291,19 @@ describe('ValveScheduleDialog', () => {
     const monday = await screen.findByRole('group', { name: 'Mon' });
     expect(await within(monday).findByText('waiting for valve')).toBeInTheDocument();
     expect(within(monday).queryByText(/acknowledged/)).not.toBeInTheDocument();
+  });
+
+  it('badges a LOST weekday as "device may not hold this plan" (CMD-04 PR0, Q02 c)', async () => {
+    schedulesMock.mockResolvedValueOnce({
+      ...emptyResponse(),
+      pushState: [
+        { purpose: 'WEEKDAY_PLAN', weekday: 3, state: 'LOST', queuedAt: '2026-09-17 14:00:00', ackedAt: null, error: 'not_resent_q02c' },
+      ],
+    });
+    renderDialog(makeValve());
+    const wednesday = await screen.findByRole('group', { name: 'Wed' });
+    expect(await within(wednesday).findByText('device may not hold this plan')).toBeInTheDocument();
+    expect(within(wednesday).queryByText('waiting for valve')).not.toBeInTheDocument();
   });
 
   it('shows the window count for a weekday with two compiled windows', async () => {

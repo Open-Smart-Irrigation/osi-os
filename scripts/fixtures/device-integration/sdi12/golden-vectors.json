@@ -1,6 +1,6 @@
 [
   {
-    "name": "Tensiomark tension and temperature",
+    "name": "unqualified Tensiomark tension and temperature",
     "fPort": 2,
     "probeProfile": "TENSIOMARK",
     "bytes": [
@@ -19,11 +19,14 @@
       53
     ],
     "expected": {
-      "swt_1": 30.2,
-      "soil_temp_1": 21.5,
       "bat_v": 3.3
     },
-    "expectedQuarantine": []
+    "expectedQuarantine": [
+      {
+        "channel": "sdi12_tensiomark_unqualified",
+        "reason": "unknown_channel"
+      }
+    ]
   },
   {
     "name": "generic VWC three values",
@@ -102,7 +105,7 @@
     ]
   },
   {
-    "name": "Tensiomark cardinality mismatch is atomic",
+    "name": "unqualified Tensiomark cardinality mismatch is atomic",
     "fPort": 2,
     "probeProfile": "TENSIOMARK",
     "bytes": [
@@ -129,7 +132,7 @@
     },
     "expectedQuarantine": [
       {
-        "channel": "sdi12_value_count",
+        "channel": "sdi12_tensiomark_unqualified",
         "reason": "unknown_channel"
       }
     ]

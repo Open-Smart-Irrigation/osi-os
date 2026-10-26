@@ -16,7 +16,7 @@ import {
   StregaValveCard,
   shouldShowStregaTargetState,
 } from '../src/components/farming/StregaValveCard.tsx';
-import { buildDeviceFooterMeta } from '../src/components/farming/shared/deviceCardBattery.ts';
+import { footerBattery } from '../src/components/farming/shared/deviceCardFooterModel.ts';
 import type { Device } from '../src/types/farming.ts';
 
 function buildDevice(overrides: Partial<Device> = {}): Device {
@@ -64,6 +64,17 @@ async function renderStregaCard(device: Device): Promise<string> {
             lastSeen: 'Last seen: {{minutes}} minutes ago',
             neverSeen: 'Never seen',
           },
+          deviceCard: {
+            footer: {
+              lastSeenJustNow: 'Last seen just now',
+              lastSeenMinutes: 'Last seen {{count}} min ago',
+              lastSeenHours: 'Last seen {{count}} h ago',
+              lastSeenAt: 'Last seen {{date}}',
+              neverSeen: 'Never seen',
+              battery: 'Battery',
+              batteryLow: 'Battery low',
+            },
+          },
         },
       },
     },
@@ -108,10 +119,7 @@ test('battery footer renders when STREGA battery percent is available', () => {
     },
   });
 
-  assert.equal(
-    buildDeviceFooterMeta({ batPct: device.latest_data?.bat_pct, lastSeenLabel: '5 min ago' }),
-    '🔋 88% · 5 min ago',
-  );
+  assert.deepEqual(footerBattery(device.latest_data?.bat_pct), { percent: 88, low: false, derived: false });
 });
 
 test('renders a battery footer when STREGA battery percent is 100', async () => {
@@ -123,7 +131,8 @@ test('renders a battery footer when STREGA battery percent is 100', async () => 
     }),
   );
 
-  assert.ok(getRenderedText(html).includes('🔋 100% · Never seen'));
+  assert.ok(getRenderedText(html).includes('100%'));
+  assert.ok(getRenderedText(html).includes('Never seen'));
 });
 
 test('renders Never seen when STREGA last_seen is null', async () => {
@@ -147,7 +156,7 @@ test('renders the translated last-seen label when STREGA last_seen is valid', as
       }),
     );
 
-    assert.ok(getRenderedText(html).includes('Last seen: 5 minutes ago'));
+    assert.ok(getRenderedText(html).includes('Last seen 5 min ago'));
   } finally {
     Date.now = originalDateNow;
   }

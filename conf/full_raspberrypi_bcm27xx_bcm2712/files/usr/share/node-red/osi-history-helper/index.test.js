@@ -6,34 +6,51 @@ const crypto = require('crypto');
 const hh = require('./index.js');
 
 test('normalizeDeveui accepts valid hex EUIs and cleans separators', () => {
-  assert.equal(hh.normalizeDeveui('0016c001f11715e2'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('00-16-C0-01-F1-17-15-E2'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('00:16:C0:01:F1:17:15:E2'), '0016C001F11715E2');
+  assert.equal(hh.normalizeDeveui('aabbccddeeff0003'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AA-BB-CC-DD-EE-FF-00-03'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AA:BB:CC:DD:EE:FF:00:03'), 'AABBCCDDEEFF0003');
   assert.equal(hh.normalizeDeveui('not-a-valid-eui'), null);
   assert.equal(hh.normalizeDeveui('ABCD'), null);
   assert.equal(hh.normalizeDeveui(null), null);
   assert.equal(hh.normalizeDeveui(undefined), null);
-  assert.equal(hh.normalizeDeveui('zz0016C001F11715E2zz'), '0016C001F11715E2');
-  assert.equal(hh.normalizeDeveui('0016C001F11715E20016C001F11715E2'), null);
+  assert.equal(hh.normalizeDeveui('zzAABBCCDDEEFF0003zz'), 'AABBCCDDEEFF0003');
+  assert.equal(hh.normalizeDeveui('AABBCCDDEEFF0003AABBCCDDEEFF0003'), null);
   assert.equal(hh.normalizeDeveui(12345), null);
 });
 
-// pF is never below 0: finite kPa at or below 0.1 derives the 0 pF floor
-// (0 and -5 kPa returned null before this rule, 0.05 kPa returned -0.30).
-test('kpaToPf converts kPa to pF, floors at 0 pF for 0.1 kPa and below, and rejects missing/invalid input', () => {
+test('kpaToPf converts signed kPa magnitude using the shared matric-potential contract', () => {
   assert.equal(hh.kpaToPf(10), 2);
   assert.equal(hh.kpaToPf(1), 1);
-  assert.equal(hh.kpaToPf('10'), 2);
+  assert.equal(hh.kpaToPf(-10), 2);
   assert.ok(Math.abs(hh.kpaToPf(0.11) - Math.log10(1.1)) < 1e-12);
   assert.equal(hh.kpaToPf(0.1), 0);
-  assert.equal(hh.kpaToPf(0.05), 0);
-  assert.equal(hh.kpaToPf(0), 0);
-  assert.equal(hh.kpaToPf(-5), 0);
+  assert.ok(Math.abs(hh.kpaToPf(0.05) - Math.log10(0.05) - 1) < 1e-12);
+  assert.equal(hh.kpaToPf(0), null);
+  assert.equal(hh.kpaToPf(-5), Math.log10(5) + 1);
   assert.equal(hh.kpaToPf(null), null);
   assert.equal(hh.kpaToPf(undefined), null);
   assert.equal(hh.kpaToPf(''), null);
+  assert.equal(hh.kpaToPf('10'), null);
+  assert.equal(hh.kpaToPf(true), null);
   assert.equal(hh.kpaToPf(NaN), null);
   assert.equal(hh.kpaToPf(Infinity), null);
+});
+
+test('SWT aggregation retains full canonical kPa precision', () => {
+  const result = hh.aggregateRows([
+    { recorded_at: '2026-07-10T00:00:00.000Z', swt_1: 0.12345678901234567 },
+    { recorded_at: '2026-07-10T00:05:00.000Z', swt_1: 30.987654321098765 },
+  ], {
+    aggregation: 'hourly',
+    start: '2026-07-10T00:00:00.000Z',
+    end: '2026-07-10T01:00:00.000Z',
+    channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+  });
+  const stats = result.buckets[0].series.swt_1;
+  assert.equal(stats.min, 0.12345678901234567);
+  assert.equal(stats.max, 30.987654321098765);
+  assert.equal(stats.latest, 30.987654321098765);
+  assert.equal(stats.sum, 31.11111111011111);
 });
 
 test('resolveAggregation honors explicit levels and rejects unsupported ones', () => {
@@ -175,13 +192,13 @@ test('deriveCardId builds zone-scoped, gateway, and dendro card ids', () => {
   assert.equal(hh.deriveCardId({ zoneUuid: 'zone-1', cardType: 'irrigation' }), 'zone-1:irrigation:zone-valves');
   assert.equal(hh.deriveCardId('zone-1', 'irrigation'), 'zone-1:irrigation:zone-valves');
 
-  const deveui = '0016C001F11715E2';
+  const deveui = 'AABBCCDDEEFF0003';
   const expectedDendroKey = `dendro-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
   assert.equal(hh.deriveCardId({ zoneUuid: 'zone-1', cardType: 'dendro', deveui }), `zone-1:dendro:${expectedDendroKey}`);
 
   assert.equal(
-    hh.deriveCardId({ zoneUuid: 'GW1', cardType: 'gateway', gatewayEui: '0016c001f11715e2' }),
-    '0016C001F11715E2:gateway:hub'
+    hh.deriveCardId({ zoneUuid: 'GW1', cardType: 'gateway', gatewayEui: 'aabbccddeeff0003' }),
+    'AABBCCDDEEFF0003:gateway:hub'
   );
 
   assert.equal(hh.deriveCardId({}), null);
@@ -189,11 +206,11 @@ test('deriveCardId builds zone-scoped, gateway, and dendro card ids', () => {
 });
 
 test('deriveGatewayCard builds a card for a valid EUI and null for invalid input', () => {
-  assert.deepEqual(hh.deriveGatewayCard('0016c001f11715e2'), {
-    id: '0016C001F11715E2:gateway:hub',
+  assert.deepEqual(hh.deriveGatewayCard('aabbccddeeff0003'), {
+    id: 'AABBCCDDEEFF0003:gateway:hub',
     cardType: 'gateway',
     logicalSourceKey: 'hub',
-    gatewayEui: '0016C001F11715E2',
+    gatewayEui: 'AABBCCDDEEFF0003',
   });
   assert.equal(hh.deriveGatewayCard('not-valid'), null);
 });
@@ -307,6 +324,10 @@ test('annotateWatermarkEvidence marks LSN50 rows from retained calibrations and 
   assert.equal(queries.length, 1, 'one query for the whole device list');
   const byEui = Object.fromEntries(annotated.map((row) => [row.deveui.toUpperCase(), row]));
   assert.equal(byEui.A840410000000001.watermark_evidence, 1, 'retained calibration');
+  assert.equal(byEui.A840410000000001.watermark_calibration_retained, 1);
+  assert.equal(byEui.A840410000000002.watermark_calibration_retained, 0);
+  assert.equal(byEui.A840410000000003.watermark_calibration_retained, 0);
+  assert.equal(hh.isEnvironmentSource({ ...byEui.A840410000000001, ext_temperature_c: 18 }), false);
   assert.equal(byEui.A840410000000002.watermark_evidence, 1, 'stored reading');
   assert.equal(byEui.A840410000000003.watermark_evidence, 0, 'a deleted calibration is no evidence');
   assert.equal(byEui.A840410000000004.watermark_evidence, 1, 'dendrometer with an old calibration row');
@@ -434,7 +455,7 @@ test('buildZoneExportCsv accepts et0_mm but never queries it and exports no rows
       if (sql.includes('FROM irrigation_zones')) return [{ id: 12, name: 'Zone B', zone_uuid: 'zb', timezone: 'UTC' }];
       if (sql.includes('FROM devices')) return [{ deveui: 'AA00000000000001', name: 'Kiwi', type_id: 'KIWI_SENSOR', irrigation_zone_id: 12 }];
       if (sql.includes('FROM device_data')) {
-        return [{ deveui: 'AA00000000000001', recorded_at: '2026-06-01T06:00:00.000Z', swt_1: 12.5 }];
+        return [{ deveui: 'AA00000000000001', recorded_at: '2026-06-01T06:00:00.000Z', swt_1: 12.345678901234567 }];
       }
       return [];
     },
@@ -452,7 +473,9 @@ test('buildZoneExportCsv accepts et0_mm but never queries it and exports no rows
     nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
   });
   assert.deepEqual(result.columns, hh.RAW_CSV_COLUMNS);
-  assert.ok(result.rows.some((row) => row.channel_key === 'swt_1' && row.value === 12.5));
+  const swtRows = result.rows.filter((row) => row.channel_key === 'swt_1' || row.channel_key === 'swt_1_pf');
+  assert.equal(swtRows.find((row) => row.unit === 'kPa').value, 12.345678901234567);
+  assert.equal(swtRows.find((row) => row.unit === 'pF').value, Math.log10(12.345678901234567) + 1);
   assert.ok(!result.rows.some((row) => row.channel_key === 'et0_mm'));
   const deviceDataQueries = queries.filter((sql) => sql.includes('FROM device_data'));
   assert.ok(deviceDataQueries.length > 0, 'a real device_data query ran, not skipped entirely');
@@ -650,6 +673,53 @@ test('toCsv generates rows and escapes commas, quotes, and formula-injection pre
   assert.equal(csv, 'a,b\nplain,text\n"has,comma","has""quote"\n\'=cmd,\n');
 });
 
+// Expected strings are what osi-server writes on JDK 21: Double.toString for pF
+// (SoilTensionPf.exportValue) and BigDecimal.valueOf(v).stripTrailingZeros()
+// .toPlainString() for number cells (HistoryExportService.number).
+test('javaDoubleText writes pF as Java Double.toString does', () => {
+  const cases = [
+    [0, '0.0'], [-0, '-0.0'], [1, '1.0'], [2, '2.0'], [7, '7.0'], [-6, '-6.0'], [22, '22.0'],
+    [1.792391689498254, '1.792391689498254'], [-0.30102999566398125, '-0.30102999566398125'],
+    [2.5340261060561353, '2.5340261060561353'], [4.176091259055681, '4.176091259055681'],
+    [0.001, '0.001'], [0.02, '0.02'], [9.999999e-4, '9.999999E-4'], [8.685021164889228e-5, '8.685021164889228E-5'],
+    [4.342942647728165e-7, '4.342942647728165E-7'], [1e7, '1.0E7'], [12345678.9, '1.23456789E7'],
+    [9999999.5, '9999999.5'], [5e-324, '4.9E-324'], [-1e-4, '-1.0E-4'],
+  ];
+  for (const [value, expected] of cases) assert.equal(hh.javaDoubleText(value), expected, String(value));
+});
+
+test('javaPlainDecimalText writes kPa as the cloud CSV number cell does', () => {
+  const cases = [
+    [0, '0'], [-0, '0'], [43, '43'], [-2, '-2'], [6.2, '6.2'], [38.5, '38.5'], [1500, '1500'], [1e6, '1000000'],
+    [0.05, '0.05'], [1e-7, '0.0000001'], [12.345678901234567, '12.345678901234567'],
+    [1e21, '1000000000000000000000'], [2.5e22, '25000000000000000000000'], [1.5e-10, '0.00000000015'],
+  ];
+  for (const [value, expected] of cases) assert.equal(hh.javaPlainDecimalText(value), expected, String(value));
+});
+
+test('toCsv writes soil-tension kPa and derived pF cells as the cloud does and leaves other cells alone', () => {
+  const columns = ['channel_key', 'unit', 'value'];
+  const csv = hh.toCsv(columns, [
+    { channel_key: 'swt_1', unit: 'kPa', value: 1e-7 },
+    { channel_key: 'swt_1_pf', unit: 'pF', value: -6 },
+    { channel_key: 'swt_2', unit: 'kPa', value: 10 },
+    { channel_key: 'swt_2_pf', unit: 'pF', value: 2 },
+    { channel_key: 'swt_3_pf', unit: 'pF', value: 8.685021164889228e-5 },
+    { channel_key: 'rain_mm_delta', unit: 'mm', value: 1e-7 },
+    { channel_key: 'dendro_ratio', unit: '', value: 2 },
+  ]);
+  assert.equal(csv, [
+    'channel_key,unit,value',
+    'swt_1,kPa,0.0000001',
+    'swt_1_pf,pF,-6.0',
+    'swt_2,kPa,10',
+    'swt_2_pf,pF,2.0',
+    'swt_3_pf,pF,8.685021164889228E-5',
+    'rain_mm_delta,mm,1e-7',
+    'dendro_ratio,,2',
+  ].join('\n') + '\n');
+});
+
 test('toCsv handles empty rows and non-array input defensively', () => {
   assert.equal(hh.toCsv(['a', 'b'], []), 'a,b\n');
   assert.equal(hh.toCsv(['a'], null), 'a\n');
@@ -682,4 +752,140 @@ test('buildAdvancedDiagnostics reports structure and availability for a soil car
     result.placeholder.sections.map((section) => section.id),
     ['source-devices', 'radio-diagnostics', 'raw-payloads']
   );
+});
+
+// VWC/VIC CSV parity with the cloud export (docs/contracts/vwc-display/):
+// a Sentek layout depth fills depth_cm when the depth map lacks it, and the
+// series label names the depth the way ChannelRegistry.displayName does.
+// The EUI below is the synthetic fixture id the other export tests use.
+const VWC_EXPORT_EUI = 'AA00000000000001';
+const SENTEK_LAYOUT_CH2 = '{"version":1,"address":"0","sensors":[{"channel":2,"response_position":2,"depth_cm":20,"type":"TRISCAN"}]}';
+
+function vwcExport(device, dataRow, { channels = 'vwc_1,vwc_2,soil_vic_2', granularity = 'raw' } = {}) {
+  const db = {
+    all: async (sql) => {
+      if (sql.includes('FROM irrigation_zones')) return [{ id: 12, name: 'Zone B', zone_uuid: 'zb', timezone: 'UTC' }];
+      if (sql.includes('FROM devices')) {
+        return [{ deveui: VWC_EXPORT_EUI, name: 'Probe', type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'SENTEK_ENVIROSCAN', irrigation_zone_id: 12, ...device }];
+      }
+      if (sql.includes('FROM device_data')) return [{ deveui: VWC_EXPORT_EUI, recorded_at: '2026-06-01T06:00:00.000Z', ...dataRow }];
+      return [];
+    },
+  };
+  return hh.buildZoneExportCsv(db, {
+    zoneId: 12,
+    from: '2026-06-01',
+    to: '2026-06-01',
+    granularity,
+    channels,
+    nowMs: Date.parse('2026-06-03T00:00:00.000Z'),
+  });
+}
+
+function rowFor(result, channelKey) {
+  return result.rows.find((row) => row.channel_key === channelKey && row.value !== '' && row.value != null);
+}
+
+test('exports a Sentek VWC depth from the channel layout when the depth map lacks it', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5, soil_vic_2: 0.12 },
+  );
+  assert.equal(rowFor(result, 'vwc_2').depth_cm, 20);
+  assert.equal(rowFor(result, 'soil_vic_2').depth_cm, 20);
+});
+
+test('keeps the depth map ahead of the layout', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_2":25}', sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(result, 'vwc_2').depth_cm, 25);
+});
+
+test('ignores a Tensiomark layout for VWC depth', async () => {
+  const result = await vwcExport(
+    {
+      soil_moisture_probe_depths_json: null,
+      sdi12_channel_layout_json: '{"kind":"tensiomark","version":1,"address":"0","sensors":[{"channel":1,"response_position":1,"depth_cm":10}]}',
+    },
+    { vwc_1: 30 },
+  );
+  assert.equal(rowFor(result, 'vwc_1').depth_cm, null);
+});
+
+test('names the depth in a VWC series label', async () => {
+  const atLayoutDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5, soil_vic_2: 0.12 },
+  );
+  assert.equal(rowFor(atLayoutDepth, 'vwc_2').series_label, 'Probe - VWC 20cm');
+  assert.equal(rowFor(atLayoutDepth, 'soil_vic_2').series_label, 'Probe - VIC 20cm');
+
+  const atFractionalDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_2":12.5}', sdi12_channel_layout_json: null },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(atFractionalDepth, 'vwc_2').series_label, 'Probe - VWC 12.5cm');
+
+  const withoutDepth = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: null },
+    { vwc_2: 24.5 },
+  );
+  assert.equal(rowFor(withoutDepth, 'vwc_2').series_label, 'Probe - VWC 2');
+
+  const daily = await vwcExport(
+    { soil_moisture_probe_depths_json: null, sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+    { vwc_2: 24.5 },
+    { granularity: 'daily' },
+  );
+  const dailyRow = rowFor(daily, 'vwc_2');
+  assert.equal(dailyRow.series_label, 'Probe - VWC 20cm');
+  assert.equal(dailyRow.depth_cm, 20);
+});
+
+test('exports a stored zero VWC', async () => {
+  const result = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_1":10}', sdi12_channel_layout_json: null },
+    { vwc_1: 0 },
+  );
+  const row = result.rows.find((candidate) => candidate.channel_key === 'vwc_1');
+  assert.ok(row, 'a vwc_1 row');
+  assert.equal(row.value, 0);
+});
+
+// A zero or negative depth is not a depth (docs/contracts/vwc-display/):
+// the label keeps the channel name instead of printing "VWC 0cm".
+test('never names a zero or negative depth in a VWC series label', async () => {
+  for (const depth of [0, -10]) {
+    const result = await vwcExport(
+      { soil_moisture_probe_depths_json: JSON.stringify({ vwc_1: depth }), sdi12_channel_layout_json: null },
+      { vwc_1: 30 },
+      { channels: 'vwc_1' },
+    );
+    assert.equal(rowFor(result, 'vwc_1').series_label, 'Probe - VWC 1', `depth ${depth}`);
+  }
+});
+
+// Only a positive mapped depth wins; a zero or negative one falls back to the
+// Sentek layout depth, or to no depth at all (docs/contracts/vwc-display/).
+test('falls back from a zero or negative mapped VWC depth to the layout depth', async () => {
+  for (const granularity of ['raw', 'daily']) {
+    for (const depth of [0, -10]) {
+      const result = await vwcExport(
+        { soil_moisture_probe_depths_json: JSON.stringify({ vwc_2: depth, soil_vic_2: depth }), sdi12_channel_layout_json: SENTEK_LAYOUT_CH2 },
+        { vwc_2: 24.5, soil_vic_2: 0.12 },
+        { granularity },
+      );
+      assert.equal(rowFor(result, 'vwc_2').depth_cm, 20, `${granularity} depth ${depth}`);
+      assert.equal(rowFor(result, 'vwc_2').series_label, 'Probe - VWC 20cm', `${granularity} depth ${depth}`);
+      assert.equal(rowFor(result, 'soil_vic_2').depth_cm, 20, `${granularity} VIC depth ${depth}`);
+    }
+  }
+  const withoutLayout = await vwcExport(
+    { soil_moisture_probe_depths_json: '{"vwc_1":0}', sdi12_channel_layout_json: null },
+    { vwc_1: 30 },
+    { channels: 'vwc_1' },
+  );
+  assert.equal(rowFor(withoutLayout, 'vwc_1').depth_cm, null);
 });

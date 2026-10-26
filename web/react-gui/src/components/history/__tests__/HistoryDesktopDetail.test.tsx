@@ -526,7 +526,7 @@ describe('HistoryDesktopDetail', () => {
       views: ['line-chart'],
     });
     const gateway = makeCard({
-      cardId: '0016C001F11766E7:gateway:hub',
+      cardId: 'AABBCCDDEEFF0004:gateway:hub',
       cardType: 'gateway',
       scope: 'gateway',
       title: 'Gateway',
@@ -534,7 +534,7 @@ describe('HistoryDesktopDetail', () => {
       views: ['status-overview'],
       metadata: {
         coverageConfidence: 'unknown',
-        gatewayDeviceEui: '0016C001F11766E7',
+        gatewayDeviceEui: 'AABBCCDDEEFF0004',
       },
     });
     renderDesktopDetail([soil, gateway], soil, 'Zone A', { type: 'zone', zoneId: 12 });
@@ -547,7 +547,7 @@ describe('HistoryDesktopDetail', () => {
 
     expect(compareRequests).toEqual(expect.arrayContaining([
       expect.objectContaining({ cardId: soil.cardId, scope: { type: 'zone', zoneId: 12 } }),
-      expect.objectContaining({ cardId: gateway.cardId, scope: { type: 'gateway', gatewayEui: '0016C001F11766E7' } }),
+      expect.objectContaining({ cardId: gateway.cardId, scope: { type: 'gateway', gatewayEui: 'AABBCCDDEEFF0004' } }),
     ]));
   });
 

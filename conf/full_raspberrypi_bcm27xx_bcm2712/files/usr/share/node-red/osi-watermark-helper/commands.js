@@ -6,6 +6,7 @@
 // through the same calibration seams used by the HTTP routes.
 const ledger = require('../osi-command-ledger');
 const calibration = require('./calibration');
+const tensiomark = require('../osi-sdi12-commissioning/tensiomark');
 
 const COMMAND_TYPES = [
   'SET_WATERMARK_CALIBRATION',
@@ -81,7 +82,7 @@ async function authorizeDevice(tx, identity, type, runtime) {
   if (!device) throw error('device_not_found', 'Device not found');
   if (upperEui(device.gateway_device_eui) !== identity.gateway) throw error('binding_mismatch', 'device belongs to another gateway', 'CONFLICT');
   if ((type === 'SET_WATERMARK_CALIBRATION' || type === 'DELETE_WATERMARK_CALIBRATION' || type === 'SET_CHAMELEON_CONFIG') && device.type_id !== 'DRAGINO_LSN50') throw error('unsupported_device_type', 'WATERMARK configuration is only supported on DRAGINO_LSN50');
-  if (type === 'UPSERT_DEVICE_SOIL_DEPTHS' && !TYPES.has(device.type_id)) throw error('unsupported_device_type', 'soil moisture depths are not supported on this device');
+  if (type === 'UPSERT_DEVICE_SOIL_DEPTHS' && !TYPES.has(device.type_id) && !(device.type_id === 'DRAGINO_SDI12' && device.sdi12_probe_profile === 'TENSIOMARK')) throw error('unsupported_device_type', 'soil moisture depths are not supported on this device');
   const actor = await tx.get('SELECT id,user_uuid,role,disabled_at FROM users WHERE user_uuid=? LIMIT 1', [identity.actorUuid]);
   if (!actor || actor.disabled_at) throw error('actor_missing_or_disabled', 'actor account is missing or disabled');
   if (!scopedAccessEnabled(runtime)) {
@@ -176,7 +177,11 @@ async function applyMutation(scoped, envelope, runtime, type, identity) {
     const values = envelope.payload.values || {};
     const depths = normalizeDepths(values.soil_moisture_probe_depths_json);
     if (values.soil_moisture_probe_depths_configured !== true) throw error('invalid_values', 'soil_moisture_probe_depths_configured must be true');
+    if (row.type_id === 'DRAGINO_SDI12') {
+      await tensiomark.updateTensiomarkDepthsTx(tx, row, depths, identity.base);
+    } else {
     await tx.run("UPDATE devices SET soil_moisture_probe_depths_json=?, soil_moisture_probe_depths_configured=1, sync_version=COALESCE(sync_version,0)+1, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE deveui=? AND sync_version=?", [JSON.stringify(depths), identity.device, identity.base]);
+    }
   }
   const updated = await tx.get('SELECT sync_version FROM devices WHERE deveui=?', [identity.device]);
   if (!updated || Number(updated.sync_version) !== identity.base + 1) throw error('stale_sync_version', 'Device changed during configuration', 'CONFLICT');
@@ -204,6 +209,14 @@ async function applyWatermarkCommand(db, envelope, runtime = {}) {
     throw cause;
   }
   try {
+    if (type === 'UPSERT_DEVICE_SOIL_DEPTHS') {
+      const target = await db.get('SELECT type_id FROM devices WHERE deveui=?', [preflightIdentity.device]);
+      if (target && target.type_id === 'DRAGINO_SDI12') {
+        // Check raw syntax before the generic normalizer drops null/zero keys,
+        // and before a normalized intent could replay a previous clear-all.
+        tensiomark.validateTensiomarkDepthMap(payload.values && payload.values.soil_moisture_probe_depths_json);
+      }
+    }
     normalizedValues = normalizeCommandValues(type, payload);
   } catch (cause) {
     const reason = cause && (cause.reason || cause.code);

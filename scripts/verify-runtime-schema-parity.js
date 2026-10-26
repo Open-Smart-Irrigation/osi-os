@@ -93,6 +93,9 @@ const MIGRATION_OWNED_TRIGGERS = new Map([
   ['trg_dp_zone_agronomy_outbox_au', '0067__zone_daily_agronomy_sync.sql'],
   ['trg_watermark_calibrations_outbox_ai', '0068__watermark_cloud_parity.sql'],
   ['trg_watermark_calibrations_outbox_au', '0068__watermark_cloud_parity.sql'],
+  // 0075__tensiomark_observation_history.sql queues raw observation corrections
+  // for the durable history worker; it is migration-owned, not boot DDL.
+  ['trg_sync_tensiomark_observations_dirty_au', '0075__tensiomark_observation_history.sql'],
 ]);
 
 function q(db, sql) {

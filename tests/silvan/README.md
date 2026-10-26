@@ -115,7 +115,7 @@ case, plus `summary.md` / `summary.json`, and `ui/` for screenshots.
 | `--gateway NAME` | Which allow-listed test gateway to target: `silvan` (default) or `rpi4-test`. `SILVAN_GATEWAY` sets the same thing. |
 | `--cases A1,Z1` | Run only these. Default: all. |
 | `--out DIR` | Evidence directory. Default: `./<gateway>-run-<timestamp>`. |
-| `--user NAME` | Authenticate as an existing gateway account (token minted on the Pi) instead of registering a throwaway one. |
+| `--user NAME` | Authenticate as an existing gateway account (token minted on the Pi) instead of registering a throwaway one. Required on any gateway that already has an account: since osi-os#468, `POST /auth/register` only creates a gateway's first account, and the default path stops with a message saying so. |
 | `--keep` | Skip cleanup. Debugging only — it leaves zones, devices and schedules behind. |
 | `--list` | Print the case list and exit. |
 
@@ -226,10 +226,14 @@ Write assertion names as the sentence you want to read in a report:
 Each case releases what it created. Two things survive on purpose, because no
 API can remove them:
 
-- **Accounts.** There is no `DELETE /api/users` route. `A1` and `U1` each
-  register one throwaway account per run; the runner prints the name. Use
-  `--user NAME` for the other cases to authenticate as an existing account and
-  leave no new rows at all.
+- **Accounts.** There is no `DELETE /api/users` route. Since osi-os#468,
+  `POST /auth/register` only creates a gateway's first account, so a run
+  registers at most one account: the runner's own, on a gateway with an empty
+  users table. `A1` then asserts that a further registration is refused and
+  runs its login and token checks with that account; `A2` stops before its
+  cross-user section, which needs a second account; `U1` logs in with the
+  runner's account. With `--user NAME` no row is written; `A1` stops after the
+  refusal check and `U1` cannot run, because the account's password is unknown.
 - **Device rows and their telemetry.** `DELETE /api/devices/:deveui` *unclaims*
   a device (`user_id = NULL`); it does not set `deleted_at` and does not remove
   `device_data`. A stable simulated DevEUI is therefore dirty on the second run,

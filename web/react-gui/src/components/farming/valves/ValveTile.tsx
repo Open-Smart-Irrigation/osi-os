@@ -3,8 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
 import { ValveGlyph, valveGlyphLabel, type Translate } from './ValveGlyph';
-import { describeLastSeen, renderLastSeen } from './valveCardHelpers';
-import { getBatteryPercentFromVoltage, getValidBatteryPercent } from '../shared/deviceCardBattery';
+import { DeviceCardFooter } from '../shared/DeviceCardFooter';
 import { useDismissOnPointerDown } from '../../../hooks/useDismissOnPointerDown';
 import { formatTime } from '../../../utils/datetime';
 import { EditableName } from '../shared/EditableName';
@@ -33,13 +32,12 @@ export interface ValveTileProps {
   /** Renames the valve's device. Rejects so EditableName can show the reason. */
   onRename: (name: string) => Promise<void>;
   busy: boolean;
-  // I6: battery footer line, ported from the OSI Server cloud's ValveTile.tsx. `ValveSummary`
-  // (GET /api/valves) carries no battery field -- only `Device.latest_data` does -- so the
-  // caller (ValveControlPanel, fed by FarmingDashboard's `batteryByEui`, built from the
-  // device list it already polls) passes both raw fields through. `batteryVoltage` is an
-  // edge-only addition over the cloud's prop (LSN50-style devices sometimes report only
-  // `bat_v`, never `bat_pct`) -- see deviceCardBattery.ts. Loose-typed (`unknown`) to match
-  // those helpers: a raw sensor value is never assumed clean.
+  // Battery for the shared footer, as on the cloud's ValveTile. `ValveSummary` (GET /api/valves)
+  // carries no battery field -- only `Device.latest_data` does -- so the caller
+  // (ValveControlPanel, fed by FarmingDashboard's `batteryByEui`) passes `bat_pct` and `bat_v` through. A
+  // Gen1 valve reports a percentage; a Gen2 valve stores `bat_pct` null and only its voltage,
+  // which the footer shows raw (the LSN50 curve does not fit a valve). Loose-typed
+  // (`unknown`): a raw sensor value is never assumed clean.
   batteryPercent?: unknown;
   batteryVoltage?: unknown;
 }
@@ -88,10 +86,6 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const menuRef = useRef<HTMLDivElement>(null);
   useDismissOnPointerDown(menuRef, () => setMenuOpen(false));
 
-  // I6: top-right, subtle -- shared by every ValveTile placement automatically since it is
-  // derived straight from `valve.lastUplinkAt`, not a caller-supplied prop.
-  const lastSeenLabel = renderLastSeen(describeLastSeen(valve.lastUplinkAt), t as Translate);
-  const battery = getValidBatteryPercent(batteryPercent) ?? getBatteryPercentFromVoltage(batteryVoltage);
 
   const glyph = deriveValveGlyphState(valve, nowMs);
   const isPendingCommand = valve.activeActuation?.reconciliationState === 'PENDING_OBSERVATION';
@@ -149,8 +143,15 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   // Shown only when part of the plan genuinely did not reach the valve, and phrased as the
   // consequence the farmer can act on rather than as transport bookkeeping. Deliberately not
   // an alarm: see deriveValveGlyphState.
+  // CMD-04 PR0 (owner decision Q02 c): a plan or scheduler-status push that is LOST (refused
+  // by the transport, flushed, or not confirmed within 24 hours) is not re-sent automatically.
+  // Say plainly that the valve may not hold it; this outranks the generic not-yet-confirmed
+  // line, whose count already includes the lost slots. A lost scheduler-status push has its
+  // own line, so a pause, skip or resume shown above is not read as confirmed.
   const planLine: string | null =
-    valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
+    (valve.pushState.lost ?? 0) > 0 ? t('planLost')
+    : valve.pushState.failed > 0 ? t('planIncomplete', { count: valve.pushState.failed }) : null;
+  const schedulerStatusLine: string | null = valve.pushState.schedulerStatusLost ? t('schedulerStatusLost') : null;
 
   const isPaused = valve.schedulerStatus === 'DEACTIVATED';
   const alreadySkipped = valve.schedulerStatus === 'SKIP_TODAY';
@@ -165,8 +166,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
     : { label: t('open'), onClick: onOpen };
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
-      <p data-testid="valve-last-seen" className="text-right text-xs text-[var(--text-tertiary)]">{lastSeenLabel}</p>
+    <div className="flex h-full flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex items-start gap-3">
         <ValveGlyph state={glyph.state} size={48} />
         <div className="min-w-0 flex-1">
@@ -203,6 +203,14 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             )}
           </p>
           <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">{nextRunLine}</p>
+          {/* Mounted before its text appears, so a poll that turns the push LOST is announced. */}
+          <p
+            role="status"
+            data-testid="valve-scheduler-status-lost"
+            className={schedulerStatusLine ? 'mt-0.5 text-xs text-[var(--text-tertiary)]' : undefined}
+          >
+            {schedulerStatusLine}
+          </p>
           {planLine && (
             <p className="mt-0.5 text-xs text-[var(--text-tertiary)]">
               {planLine}
@@ -311,13 +319,8 @@ export const ValveTile: React.FC<ValveTileProps> = ({
         </div>
       )}
 
-      {/* I6: battery footer -- omitted entirely (not "—") when absent, never fabricated
-          from a missing/invalid sensor value. */}
-      {battery !== null && (
-        <p className="border-t border-[var(--border)] pt-2 text-xs text-[var(--text-tertiary)]">
-          {t('battery', { percent: battery })}
-        </p>
-      )}
+      {/* The footer every device card shares: battery (never fabricated) and last uplink. */}
+      <DeviceCardFooter lastSeen={valve.lastUplinkAt} batteryPercent={batteryPercent} rawBatteryVoltage={batteryVoltage} nowMs={nowMs} />
     </div>
   );
 };

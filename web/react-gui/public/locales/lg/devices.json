@@ -287,7 +287,11 @@
         "noReadingSince": "No reading since {{since}}",
         "noReadingYet": "No reading yet",
         "invalidReading": "Invalid reading",
-        "lastValid": "Last valid {{value}} · {{time}}"
+        "lastValid": "Last valid {{value}} · {{time}}",
+        "depthSuffix": "({{depth}} cm)",
+        "lastReading": "Last reading {{since}}",
+        "triggerProbeLastReading": "Trigger probe: last reading {{since}}",
+        "triggerProbeInvalid": "Trigger probe: invalid reading"
       },
       "rainFromStation": "Measured at MeteoSwiss {{station}} ({{distance}} km away)",
       "rainFromWeather": "From weather data (not measured)",
@@ -726,14 +730,56 @@
     "rollbackRequestAccepted": "Okusaba okuzzaayo kukkiriziddwa (enkyusa {{version}}; {{status}}).",
     "degraded": "Enteekateeka y'okufuna eriko obuzibu",
     "active": "Enteekateeka y'okufuna ekola",
-    "deploymentStatus": "Enteekateeka y'okufuna: {{status}}"
+    "deploymentStatus": "Enteekateeka y'okufuna: {{status}}",
+    "tensiomark": {
+      "title": "Tensiomark interpretation",
+      "qualification": "Readings are pF, with temperature reported first. The calibration range is not verified.",
+      "calibrationRange": "Calibration range: unverified",
+      "addSensor": "Add sensor",
+      "confirmation": "I confirm the sensor reports temperature first, then pF.",
+      "confirmRequired": "Before saving, confirm that the sensor reports temperature first, then pF.",
+      "saved": "Tensiomark settings saved. The calibration range is not verified.",
+      "address": "Address",
+      "channel": "Channel",
+      "identity": "Identity",
+      "depthCmLabel": "Depth (cm)",
+      "addressAria": "Tensiomark address {{row}}",
+      "channelAria": "Tensiomark channel {{row}}",
+      "identityAria": "Tensiomark identity {{row}}",
+      "depthAria": "Tensiomark depth {{row}} (cm)",
+      "identityExample": "e.g. {{address}}11TENSIOMARK_2Vh_10A00001",
+      "removeSensor": "Remove",
+      "removeSensorAria": "Remove Tensiomark sensor {{row}}",
+      "errors": {
+        "sensorCount": "Configure one or two Tensiomark sensors.",
+        "addressInvalid": "Sensor {{row}}: the address must be one letter or digit.",
+        "channelInvalid": "Sensor {{row}}: choose channel 1 or 2.",
+        "identityInvalid": "Sensor {{row}}: the identity must be {{address}}11TENSIOMARK_2Vh_10A followed by five digits.",
+        "depthInvalid": "Sensor {{row}}: leave the depth empty if it is unknown, or enter whole centimeters from 1 to 1000.",
+        "calibrationInvalid": "Sensor {{row}}: the calibration range must stay unverified.",
+        "duplicateAddress": "Sensor {{row}}: address {{address}} is already used by another sensor.",
+        "duplicateIdentity": "Sensor {{row}}: this identity is already used by another sensor.",
+        "duplicateChannel": "Sensor {{row}}: channel {{channel}} is already used by another sensor."
+      }
+    }
   },
   "sdi12Soil": {
     "removeConfirm": "Ggyawo ekyuma kino?",
     "removeSubtitle": "Ekyuma kiggyibwako ku akawunti yo.",
     "yesRemove": "Yee, Ggyawo",
     "removing": "Tikuggyawo...",
-    "failedToRemove": "Okuggyawo ekyuma kugaanye"
+    "failedToRemove": "Okuggyawo ekyuma kugaanye",
+    "badge": "SDI-12",
+    "noProfile": "No probe profile",
+    "detecting": "Detecting probe (pending)",
+    "invalidLayout": "The saved Sentek channel layout is invalid. Open device settings and save a valid layout before relying on soil readings.",
+    "status": {
+      "pending_identify": "Identifying",
+      "identified": "Identified",
+      "unmatched": "Not recognised",
+      "manual": "Set manually",
+      "unknown": "Status unknown"
+    }
   },
   "deviceRemoval": {
     "titleZone": "Remove from this zone?",
@@ -875,15 +921,11 @@
     "chameleonNeedsMod3": "Chameleon SWT can only be enabled after MOD3 is active."
   },
   "watermark": {
-    "sectionTitle": "WATERMARK soil tension",
-    "probe": "Probe {{n}}",
-    "depthUnset": "Depth unset",
     "wet": "Wet",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Resistance {{value}}",
     "resistanceUpTo": "Resistance ≤ {{value}}",
     "offset": "Offset {{value}} mV",
-    "soilTemp": "Soil {{value}} °C",
     "soilTempNotMeasured": "Soil temperature not measured",
     "dieTemp": "Board {{value}} °C",
     "supply": "Supply {{value}} V",
@@ -958,5 +1000,33 @@
     "onlyCandidate": "The only rain gauge of this zone is used.",
     "loadFailed": "The rain gauges of this zone could not be loaded.",
     "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
+  },
+  "soilTension": {
+    "sectionTitle": "Soil tension",
+    "channel": "Soil tension {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Soil {{value}} °C",
+    "soilTempSeries": "Soil temperature {{channel}}",
+    "invalidReading": "Invalid reading",
+    "noReadings": "No soil readings available.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Last seen just now",
+      "lastSeenMinutes": "Bwagulibwa omulundi gw'omuliko: {{count}} edakiika ewedde",
+      "lastSeenHours": "Last seen {{count}} h ago",
+      "lastSeenAt": "Last seen {{date}}",
+      "neverSeen": "Tekalabikangako",
+      "battery": "Battery",
+      "batteryLow": "Battery low"
+    },
+    "settings": "Device settings",
+    "closeSettings": "Close device settings",
+    "zones": "Zones:",
+    "noZones": "No zones assigned"
   }
 }
