@@ -90,8 +90,8 @@ function assertCliFailure183(world, expected, outcome, markers = []) {
     'no env content write or publication');
   assert.equal(world.uciCommands.some(command => /^(?:set|commit)(?:\s|$)/.test(command)), false,
     'no UCI mutation');
-  const diagnostics = world.stderrLogs.filter(line => line.includes('Bootstrap failed:'));
-  assert.deepEqual(diagnostics.map(line => line.trim()), [`Bootstrap failed: ${expected}`]);
+  assert.deepEqual(world.stderrLogs.flatMap(line => line.split('\n').map(part => part.trim()).filter(Boolean)),
+    [`Bootstrap failed: ${expected}`]);
   for (const [stream, lines] of [['stdout', world.stdoutLogs], ['stderr', world.stderrLogs]]) {
     const output = lines.join('\n');
     for (const marker of markers) {
@@ -277,7 +277,7 @@ try {
 await assertDirectRootCliFailure183(t);
 ```
 
-Define this entire helper immediately before the T7 declaration. It uses the real root process and real fixture metadata. The explicit environment does not inherit either host API-key variable. It contains every `ISSUE183_*`, codec, settings and flows binding needed by the copied full source and preload. It reads the completed trace only after an observed `close` with direct exit 1. If the bounded TERM/KILL path never gets `close`, it records `UNREAPED.txt`, reports the PID and fixture path, retains the fixture, and credits no trace or exit result. The same retention applies to a spawn error, signal, timeout, output bound or wrong exit. The helper never removes a still-open child's fixture.
+Define this entire helper immediately before the T7 declaration. It uses the real root process and real fixture metadata. The explicit environment does not inherit either host API-key variable. It contains every `ISSUE183_*`, codec, settings and flows binding needed by the copied full source and preload. It reads the completed trace only after an observed `close` with direct exit 1. If the bounded TERM/KILL path never gets `close`, it records `UNREAPED.txt`, reports the PID and fixture path, destroys both piped streams, unrefs the child, retains the fixture, and credits no trace or exit result. The assertion then fails without leaving the harness held by those handles; a late close cannot change `closeObserved` or earn trace credit. The same retention applies to a spawn error, signal, timeout, output bound or wrong exit. The helper never removes a still-open child's fixture.
 
 ```js
 async function assertDirectRootCliFailure183(t) {
@@ -378,6 +378,9 @@ async function assertDirectRootCliFailure183(t) {
       fs.writeFileSync(path.join(fx.dir, 'UNREAPED.txt'),
         'direct CLI child had no close after TERM/KILL; pid=' + String(child.pid) + '\n');
       t.diagnostic('UNREAPED direct CLI child pid=' + String(child.pid) + '; fixture=' + fx.dir);
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
       assert.fail('direct CLI child did not close; fixture and trace retained without credit');
     }
     closeObserved = true;
@@ -395,7 +398,8 @@ async function assertDirectRootCliFailure183(t) {
     assert.equal(fs.existsSync(fx.backup), false, 'failure did not publish a backup');
     const stdoutText = stdout.toString('utf8');
     const stderrText = stderr.toString('utf8');
-    assert.match(stderrText, /Bootstrap failed: CLI create-api-key failed \(command error, exit status 23\)/);
+    assert.deepEqual(stderrText.split('\n').map(line => line.trim()).filter(Boolean),
+      ['Bootstrap failed: CLI create-api-key failed (command error, exit status 23)']);
     for (const marker of [
       'SYNTHETIC_CLI_MESSAGE_183', 'SYNTHETIC_CLI_STDOUT_183',
       'SYNTHETIC_CLI_STDERR_183', 'SYNTHETIC_CLI_CMD_183',
