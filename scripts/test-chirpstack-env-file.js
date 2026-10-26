@@ -289,19 +289,44 @@ function publisherPreloadSource(fx, fault, operation, traceFile) {
   ].join('\n');
 }
 
-function assertRootTap(output, expectedFailures = []) {
+const ROOT_CANDIDATE_TESTS = [
+  'T0 TAP oracle', 'T1 creation', 'T2 narrowing', 'T3 full merge', 'T4 soil repair',
+  'T5 raw backup', 'T6 hostile paths and CLI', 'T7 deploy routing', 'T8 failure preservation',
+  'T9 interruption', 'T10 mirrors and actual runtime consumers'
+];
+const ROOT_B3_FAILURES = [
+  'B3 expected failure: base writer creates permissive credentials',
+  'B3 expected failure: base writer retains permissive replacement'
+];
+
+function assertRootTap(output, profile = 'candidate') {
+  assert.ok(profile === 'candidate' || profile === 'B3', 'root TAP profile is explicit');
+  const expected = profile === 'B3' ? ROOT_B3_FAILURES.map(name => ({ name, failed: true })) : ROOT_CANDIDATE_TESTS.map(name => ({ name, failed: false }));
+  assert.match(output, /^TAP version 13\r?\n/, 'root output starts with Node TAP version 13');
+  const plans = [...output.matchAll(/^1\.\.(\d+)\s*$/gm)].map(match => Number(match[1]));
+  assert.deepEqual(plans, [expected.length], 'root TAP has one plan matching the required suite size');
+  const records = [...output.matchAll(/^(not )?ok ([1-9]\d*) - ([^\r\n]+?)(?:\s+#\s*(.*))?$/gm)].map(match => ({
+    failed: Boolean(match[1]), index: Number(match[2]), name: match[3], directive: match[4] || ''
+  }));
+  assert.equal(records.length, expected.length, 'root TAP has every required named result record');
+  assert.deepEqual(records.map(record => record.index), expected.map((_, i) => i + 1), 'root TAP result numbers are contiguous');
+  assert.deepEqual(records.map(({ name, failed }) => ({ name, failed })), expected, 'root TAP result names and statuses exactly match the qualification profile');
+  for (const record of records) assert.doesNotMatch(record.directive, /\b(?:SKIP|TODO|CANCELLED)\b/i, 'root TAP result has no directives');
   const count = name => {
-    const match = output.match(new RegExp('^# ' + name + ' (\\d+)\\s*$', 'm'));
-    assert.ok(match, 'root TAP summary includes ' + name + ' count');
-    return Number(match[1]);
+    const matches = [...output.matchAll(new RegExp('^# ' + name + ' (\\d+)\\s*$', 'gm'))];
+    assert.equal(matches.length, 1, 'root TAP has one ' + name + ' summary');
+    return Number(matches[0][1]);
   };
-  assert.equal(count('tests') > 0, true, 'root TAP ran its named suite');
-  assert.equal(count('fail'), expectedFailures.length, 'root TAP failure count matches the explicit expectation');
-  const failedNames = [...output.matchAll(/^not ok \d+ - (.+)$/gm)].map(match => match[1]);
-  assert.deepEqual(failedNames, expectedFailures, 'root TAP has only the named behavioral failures');
-  assert.equal(count('cancelled'), 0, 'root TAP has zero cancelled tests');
-  assert.equal(count('skipped'), 0, 'root TAP has zero skipped tests');
-  assert.doesNotMatch(output, /^\s*(?:ok|not ok)\s+\d+\b.*#\s*(?:SKIP|TODO|CANCELLED)\b/im, 'root TAP has no skip/cancel directives');
+  const summary = Object.fromEntries(['tests', 'suites', 'pass', 'fail', 'cancelled', 'skipped', 'todo'].map(name => [name, count(name)]));
+  assert.equal(summary.tests, expected.length, 'root TAP test total matches the named records');
+  assert.equal(summary.suites, 0, 'root TAP has no nested test suites');
+  assert.equal(summary.pass, expected.filter(record => !record.failed).length, 'root TAP pass total matches result records');
+  assert.equal(summary.fail, expected.filter(record => record.failed).length, 'root TAP fail total matches result records');
+  assert.equal(summary.cancelled, 0, 'root TAP has zero cancelled tests');
+  assert.equal(summary.skipped, 0, 'root TAP has zero skipped tests');
+  assert.equal(summary.todo, 0, 'root TAP has zero TODO tests');
+  assert.equal(summary.pass + summary.fail + summary.cancelled + summary.skipped + summary.todo, summary.tests, 'root TAP summary totals are consistent');
+  return summary;
 }
 
 if (process.geteuid() !== 0) {
@@ -315,14 +340,12 @@ if (process.geteuid() !== 0) {
     assert.equal(result.error && result.error.code, undefined, 'root child did not time out or fail to spawn');
     assert.equal(result.signal, null);
     const b3 = process.env.OSI_BOOTSTRAP_B3 === '1';
-    const requiredNames = b3
-      ? ['B3 expected failure: base writer creates permissive credentials', 'B3 expected failure: base writer retains permissive replacement']
-      : ['T0 TAP oracle', 'T1 creation', 'T2 narrowing', 'T3 full merge', 'T4 soil repair', 'T5 raw backup', 'T6 hostile paths and CLI', 'T7 deploy routing', 'T8 failure preservation', 'T9 interruption', 'T10 mirrors and actual runtime consumers'];
+    const requiredNames = b3 ? ROOT_B3_FAILURES : ROOT_CANDIDATE_TESTS;
     const expectedStatus = b3 ? 1 : 0;
     t.diagnostic('root child direct exit ' + result.status + '; expected ' + expectedStatus);
     assert.equal(result.status, expectedStatus);
     for (const name of requiredNames) assert.ok((result.stdout || '').includes(name));
-    assertRootTap(result.stdout || '', b3 ? requiredNames : []);
+    assertRootTap(result.stdout || '', b3 ? 'B3' : 'candidate');
   });
 } else if (process.env.OSI_BOOTSTRAP_B3 === '1') {
   test('B3 expected failure: base writer creates permissive credentials', t => {
@@ -350,14 +373,39 @@ if (process.geteuid() !== 0) {
   });
 } else {
   test('T0 TAP oracle', () => {
-    const success = 'TAP version 13\n1..2\nok 1 - inner one\nok 2 - inner two\n# tests 2\n# pass 2\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
-    assert.doesNotThrow(() => assertRootTap(success));
-    assert.throws(() => assertRootTap(success.replace('# cancelled 0', '# cancelled 1')));
-    assert.throws(() => assertRootTap(success.replace('# skipped 0', '# skipped 1')));
-    assert.throws(() => assertRootTap(success.replace('ok 2 - inner two', 'ok 2 - inner two # SKIP absent')));
-    assert.throws(() => assertRootTap(success.replace('ok 2 - inner two', 'ok 2 - inner two # TODO absent')));
-    assert.throws(() => assertRootTap(success.replace('ok 2 - inner two', 'ok 2 - inner two # CANCELLED')));
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-issue-183-tap-'));
+    const child = path.join(scratch, 'qualification.test.cjs');
+    const runNodeTests = (names, failing = false) => {
+      const definitions = names.map((name, index) => 'test(' + JSON.stringify(name) + ', () => ' + (failing ? 'assert.fail(' + JSON.stringify('synthetic B3 red ' + index) + ')' : '{}') + ');').join('\n');
+      fs.writeFileSync(child, 'const test=require("node:test");const assert=require("node:assert/strict");\n' + definitions + '\n');
+      return cp.spawnSync(process.execPath, ['--test', '--test-concurrency=1', child], { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+    };
+    try {
+      const candidate = runNodeTests(ROOT_CANDIDATE_TESTS);
+      assert.equal(candidate.status, 0, candidate.stderr);
+      assertRootTap(candidate.stdout, 'candidate');
+      const b3 = runNodeTests(ROOT_B3_FAILURES, true);
+      assert.equal(b3.status, 1, 'synthetic B3 child has the expected direct failing exit');
+      assertRootTap(b3.stdout, 'B3');
+      const oldOracle = (output, failures, names) => {
+        const count = name => Number(output.match(new RegExp('^# ' + name + ' (\\d+)\\s*$', 'm'))[1]);
+        assert.ok(count('tests') > 0);
+        assert.equal(count('fail'), failures.length);
+        assert.deepEqual([...output.matchAll(/^not ok \d+ - (.+)$/gm)].map(match => match[1]), failures);
+        assert.equal(count('cancelled'), 0); assert.equal(count('skipped'), 0);
+        for (const name of names) assert.ok(output.includes(name));
+      };
+      const commentsOnly = 'TAP version 13\n1..1\nok 1 - unrelated result\n# diagnostics: ' + ROOT_CANDIDATE_TESTS.join(' | ') + '\n# tests 1\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
+      const todoSummary = candidate.stdout.replace('# todo 0', '# todo 1');
+      const wrongNames = candidate.stdout.replace(/^(?:not )?ok (\d+) - .*$/gm, (_, index) => 'ok ' + index + ' - unrelated result');
+      const truncated = candidate.stdout.split('\n').filter(line => !line.startsWith('ok 11 -')).join('\n').replace('1..11', '1..10').replace('# tests 11', '# tests 10').replace('# pass 11', '# pass 10');
+      for (const malformed of [commentsOnly, todoSummary, wrongNames, truncated]) assert.throws(() => assertRootTap(malformed, 'candidate'));
+      assert.doesNotThrow(() => oldOracle(commentsOnly, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old comments-only acceptance');
+      assert.doesNotThrow(() => oldOracle(todoSummary, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old TODO acceptance');
+      assert.doesNotThrow(() => oldOracle(truncated, [], ROOT_CANDIDATE_TESTS), 'negative control reproduces the old partial-suite acceptance');
+    } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
   });
+
   test('T1 creation', async () => {
     const fx = fixture(); const old = process.umask(0o022); const events = [];
     const traced = new Proxy(fs, { get(target, key) {
@@ -692,10 +740,10 @@ if (process.geteuid() !== 0) {
         'node() {',
         '  printf "%s|%s\\n" "$ENV_FILE" "$*" >> "$COMMAND_LOG"',
         '  case "$*" in',
-        '    *--secure-env-file*) SECURE_COUNT=$((SECURE_COUNT + 1)); if [ "$SECURE_FAIL_AT" -eq "$SECURE_COUNT" ]; then return "$SECURE_STATUS"; fi; "$REAL_NODE" "$SOURCE" --secure-env-file ;;',
-        '    *--repair-soil-profiles*) if [ "$PUBLISHER_FAULT" = link ] || [ "$PUBLISHER_FAULT" = private-unlink ]; then rm -f "$CHIRPSTACK_ENV_FILE"; fi; "$REAL_NODE" "$SOURCE" --repair-soil-profiles $SOIL_EXTRA_ARGS ;;',
-        '    *--backup-env-file*) if [ "$BACKUP_STATUS" -ne 0 ]; then return "$BACKUP_STATUS"; fi; "$REAL_NODE" "$SOURCE" --backup-env-file ;;',
-        '    *) if [ "$GEN2_STATUS" -ne 0 ]; then return "$GEN2_STATUS"; fi; if [ "$PUBLISHER_FAULT" = link ] || [ "$PUBLISHER_FAULT" = private-unlink ]; then rm -f "$CHIRPSTACK_ENV_FILE"; fi; "$REAL_NODE" "$SOURCE" ;;',
+        '    *--secure-env-file*) SECURE_COUNT=$((SECURE_COUNT + 1)); if [ "$SECURE_FAIL_AT" -eq "$SECURE_COUNT" ]; then return "$SECURE_STATUS"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE" --secure-env-file ;;',
+        '    *--repair-soil-profiles*) if [ "$REMOVE_TARGET_BEFORE_BOOTSTRAP" = 1 ]; then rm -f "$CHIRPSTACK_ENV_FILE"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE" --repair-soil-profiles $SOIL_EXTRA_ARGS ;;',
+        '    *--backup-env-file*) if [ "$BACKUP_STATUS" -ne 0 ]; then return "$BACKUP_STATUS"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE" --backup-env-file ;;',
+        '    *) if [ "$GEN2_STATUS" -ne 0 ]; then return "$GEN2_STATUS"; fi; if [ "$REMOVE_TARGET_BEFORE_BOOTSTRAP" = 1 ]; then rm -f "$CHIRPSTACK_ENV_FILE"; fi; ENV_FILE="$CHIRPSTACK_ENV_FILE" "$REAL_NODE" "$SOURCE"; cli_status=$?; if [ "$STOP_AFTER_BOOTSTRAP" = 1 ]; then exit "$cli_status"; fi; return "$cli_status" ;;',
         '  esac',
         '}',
         'export -f node',
@@ -710,7 +758,7 @@ if (process.geteuid() !== 0) {
           COMMAND_LOG: commandLog, PUBLISHER_MODE: String(opts.publisherMode || ''),
           GEN2_STATUS: String(opts.gen2Status ?? 1), SOIL_EXTRA_ARGS: String(opts.soilExtraArgs || ''),
           SECURE_FAIL_AT: String(opts.secureFailAt ?? 0), SECURE_STATUS: String(opts.secureStatus ?? 74),
-          BACKUP_STATUS: String(opts.backupStatus ?? 0), PUBLISHER_FAULT: String(opts.publisherFault || ''), NODE_OPTIONS: '--require ' + preload,
+          BACKUP_STATUS: String(opts.backupStatus ?? 0), PUBLISHER_FAULT: String(opts.publisherFault || ''), REMOVE_TARGET_BEFORE_BOOTSTRAP: opts.removeTargetBeforeBootstrap ? '1' : '0', STOP_AFTER_BOOTSTRAP: opts.stopAfterBootstrap ? '1' : '0', NODE_OPTIONS: '--require ' + preload,
           ISSUE183_FIXTURE: fx.dir, ISSUE183_SOURCE: SOURCE,
           ISSUE183_OPERATION: String(opts.publisherMode || ''), ISSUE183_FAULT: String(opts.publisherFault || ''),
           ISSUE183_UCI_STATE: JSON.stringify(opts.uci || {}), ISSUE183_TRACE: trace, ISSUE183_SOIL_API_FAILURE: String(opts.soilApiFailure || ''), ISSUE183_VIRTUAL_ROOT: String(opts.virtualRoot || process.env.OSI_ISSUE183_SHADOW_ROOT || ''),
@@ -727,6 +775,24 @@ if (process.geteuid() !== 0) {
       const traceEvents = fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').split('\n').filter(Boolean).flatMap(line => { try { return JSON.parse(line); } catch { return []; } }) : [];
       return { result, canonical, decoy, log, trace, traceEvents, preload, source: sourceCopy, migration: path.join(fx.dir, 'migration') };
     };
+    const assertSnapshot = (file, expectedBytes, expectedMode, expectedLinks, label) => {
+      assert.deepEqual(fs.readFileSync(file), expectedBytes, label + ': exact retained bytes');
+      const st = fs.statSync(file);
+      assert.equal(st.mode & 0o7777, expectedMode, label + ': retained mode');
+      assert.equal(st.nlink, expectedLinks, label + ': retained link count');
+    };
+    const control = fixture();
+    try {
+      const expected = Buffer.from('CONTROL=known\n');
+      fs.writeFileSync(control.envFile, expected, { mode: 0o600 });
+      assertSnapshot(control.envFile, expected, 0o600, 1, 'snapshot oracle control');
+      fs.writeFileSync(control.envFile, Buffer.from('CONTROL=corrupt\n'));
+      assert.throws(() => assertSnapshot(control.envFile, expected, 0o600, 1, 'corrupted retained-file control'), /exact retained bytes/);
+      fs.writeFileSync(control.backup, expected, { mode: 0o600 });
+      assertSnapshot(control.backup, expected, 0o600, 1, 'backup snapshot oracle control');
+      fs.writeFileSync(control.backup, Buffer.from('CONTROL=corrupt-backup\n'));
+      assert.throws(() => assertSnapshot(control.backup, expected, 0o600, 1, 'corrupted backup control'), /exact retained bytes/);
+    } finally { clean(control); }
     const sensors = 'CHIRPSTACK_APP_SENSORS=00000000-0000-4000-8000-000000000001\n';
     for (const [label, initial] of [
       ['Gen2 present and no-op soil', sensors + 'CHIRPSTACK_PROFILE_STREGA_GEN2=id\n'],
@@ -828,6 +894,21 @@ if (process.geteuid() !== 0) {
         assert.equal(st.uid, 0); assert.equal(st.gid, 0); assert.equal(st.nlink, 1); assert.equal(st.mode & 0o7777, 0o600);
       } finally { clean(fx); }
     }
+    const fullInitial = sensors + 'CHIRPSTACK_API_KEY=' + API_KEY + '\n';
+    const soilInitial = sensors + 'CHIRPSTACK_PROFILE_STREGA_GEN2=id\nCHIRPSTACK_API_KEY=' + API_KEY + '\n';
+    const successfulCandidate = (operation, initial, removeTarget = false) => {
+      const fx = fixture();
+      try {
+        const run = runFragments(fx, initial, { publisherMode: operation, gen2Status: operation === 'full' ? 0 : 1, removeTargetBeforeBootstrap: removeTarget, stopAfterBootstrap: operation === 'full' });
+        assert.equal(run.result.status, 0, operation + ' successful baseline captures a complete expected candidate: ' + JSON.stringify({stdout:run.result.stdout,stderr:run.result.stderr,trace:run.traceEvents,calls:fs.existsSync(run.log)?fs.readFileSync(run.log,'utf8'):''}));
+        assert.equal(fs.existsSync(run.canonical), true, operation + ' successful baseline publishes canonical file');
+        assert.equal(mode(run.canonical), 0o600, operation + ' successful baseline mode');
+        return fs.readFileSync(run.canonical);
+      } finally { clean(fx); }
+    };
+    const expectedFullExisting = successfulCandidate('full', fullInitial);
+    const expectedFullCreate = successfulCandidate('full', fullInitial, true);
+    const expectedSoil = successfulCandidate('soil', soilInitial);
     for (const operation of ['full', 'soil']) {
       const faultMatrix = ['open','fchown','fchmod','write','file-fsync','stage-close','rename','link','verify-read','dir-fsync','private-unlink','published-close','rmdir','outer-close'];
       // Soil repair replaces an existing expected snapshot by rename; create-only links are covered by full provisioning and backup cases.
@@ -836,6 +917,7 @@ if (process.geteuid() !== 0) {
         const fx = fixture();
         const initial = sensors + (operation === 'soil' ? 'CHIRPSTACK_PROFILE_STREGA_GEN2=id\n' : '') + 'CHIRPSTACK_API_KEY=' + API_KEY + '\n';
         try {
+          const removesTarget = ['link','private-unlink'].includes(fault) && operation === 'full';
           const env = ['link','private-unlink'].includes(fault) && operation === 'soil'
             ? {
               CHIRPSTACK_APP_SENSORS: '00000000-0000-4000-8000-000000000001',
@@ -844,7 +926,7 @@ if (process.geteuid() !== 0) {
               CHIRPSTACK_PROFILE_CLOVER: '00000000-0000-4000-8000-000000000012'
             }
             : {};
-          const run = runFragments(fx, initial, { publisherMode: operation, publisherFault: fault, gen2Status: operation === 'full' ? 0 : 1, env });
+          const run = runFragments(fx, initial, { publisherMode: operation, publisherFault: fault, gen2Status: operation === 'full' ? 0 : 1, removeTargetBeforeBootstrap: removesTarget, env });
           assert.equal(run.result.status, 74, operation + '/' + fault + ' classified by actual CLI handler');
           assert.match(run.result.stderr, /Credential env-file operation failed/);
           assert.doesNotMatch(run.result.stderr, /synthetic stage|synthetic verify|CHIRPSTACK_API_KEY=/);
@@ -857,20 +939,28 @@ if (process.geteuid() !== 0) {
             : run.traceEvents.some(event => Array.isArray(event) && ['client','createApplication','createProfile','api-key'].includes(event[0]));
           assert.ok(priorSideEffect, operation + '/' + fault + ' side-effect trace: ' + JSON.stringify({trace:run.traceEvents,calls:fs.existsSync(run.log)?fs.readFileSync(run.log, 'utf8'): ''}));
           const postPublication = ['verify-read','dir-fsync','private-unlink','published-close','rmdir','outer-close'].includes(fault);
+          const targetAbsentAfterCreateLinkFailure = operation === 'full' && fault === 'link';
+          const expectedRetainedBytes = operation === 'soil'
+            ? (postPublication ? expectedSoil : Buffer.from(initial))
+            : (postPublication ? (removesTarget ? expectedFullCreate : expectedFullExisting) : Buffer.from(initial));
+          if (targetAbsentAfterCreateLinkFailure) {
+            assert.equal(fs.existsSync(run.canonical), false, operation + '/' + fault + ' failed create-only publication leaves target absent');
+          } else {
+            assertSnapshot(run.canonical, expectedRetainedBytes, 0o600, fault === 'private-unlink' ? 2 : 1, operation + '/' + fault + ' retained canonical before metadata probe');
+          }
+          if (operation === 'full') assertSnapshot(run.canonical + '.pre-gen2', Buffer.from(initial), 0o600, 1, operation + '/' + fault + ' retained raw backup');
           const metadataFx = { ...fx, envFile: run.canonical };
-          const retainedExists = fs.existsSync(run.canonical);
-          const retainedBytes = retainedExists ? fs.readFileSync(run.canonical) : null;
           const metadata = cli(['--secure-env-file'], metadataFx, {
             source: run.source,
             preload: run.preload,
             env: process.env.OSI_ISSUE183_SHADOW_ROOT === '1' ? { ISSUE183_VIRTUAL_ROOT: '1' } : {}
           });
           assert.equal(metadata.status, fault === 'private-unlink' ? 74 : 0, operation + '/' + fault + ' follow-up metadata probe status');
-          assert.equal(fs.existsSync(run.canonical), retainedExists, operation + '/' + fault + ' metadata probe preserves file presence');
-          if (retainedExists) {
-            assert.deepEqual(fs.readFileSync(run.canonical), retainedBytes, operation + '/' + fault + ' metadata probe preserves canonical bytes');
-            assert.equal(fs.statSync(run.canonical).nlink, fault === 'private-unlink' ? 2 : 1);
+          assert.equal(fs.existsSync(run.canonical), !targetAbsentAfterCreateLinkFailure, operation + '/' + fault + ' metadata probe preserves expected file presence');
+          if (!targetAbsentAfterCreateLinkFailure) {
+            assertSnapshot(run.canonical, expectedRetainedBytes, 0o600, fault === 'private-unlink' ? 2 : 1, operation + '/' + fault + ' retained canonical after metadata probe');
           }
+          if (operation === 'full') assertSnapshot(run.canonical + '.pre-gen2', Buffer.from(initial), 0o600, 1, operation + '/' + fault + ' raw backup remains exact after metadata probe');
           const diagnosticMatch = run.result.stderr.match(/Credential env-file operation failed (\{[^\n]+\})/);
           assert.ok(diagnosticMatch, operation + '/' + fault + ' emitted the safe credential diagnostic');
           const diagnostic = JSON.parse(diagnosticMatch[1]);

@@ -870,7 +870,7 @@ test('an updated bootstrap failure leaves the stamp absent and does not request 
   fs.writeFileSync(script, '');
   writeExecutable(path.join(fx.binDir, 'curl'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'logger'), ['#!/bin/sh', 'exit 0']);
-  writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', 'exit 74']);
+  writeExecutable(path.join(fx.binDir, 'node'), ['#!/bin/sh', 'trap \'rc=$?; echo bootstrap-exit:$rc >> ' + JSON.stringify(fx.log) + '\' EXIT', 'echo bootstrap-invoked >> ' + JSON.stringify(fx.log), 'exit 74']);
   writeExecutable(path.join(fx.binDir, 'identityd-init'), ['#!/bin/sh', 'exit 0']);
   writeExecutable(path.join(fx.binDir, 'identityd.sh'), ['#!/bin/sh', 'echo "restart-request $*" >> ' + JSON.stringify(fx.log)]);
   const body = BOOTSTRAP_INIT
@@ -879,9 +879,18 @@ test('an updated bootstrap failure leaves the stamp absent and does not request 
     .split('/srv/node-red/.chirpstack.env').join(fx.envFile)
     .split('/etc/init.d/osi-identityd').join(path.join(fx.binDir, 'identityd-init'))
     .split('/usr/libexec/osi-identityd.sh').join(path.join(fx.binDir, 'identityd.sh'));
-  const result = runShell('BOOTSTRAP_ROM=/nonexistent-rom.js\\nBOOTSTRAP_FALLBACK=' + JSON.stringify(script) + '\\n' + body + '\\nstart', { PATH: childPath(fx.binDir) });
-  assert.equal(fs.existsSync(fx.stampFile), false);
-  assert.ok(!initCalls(fx).some(call => call.startsWith('restart-request')), initCalls(fx).join('\\n'));
+  const result = runShell('BOOTSTRAP_ROM=/nonexistent-rom.js\nBOOTSTRAP_FALLBACK=' + JSON.stringify(script) + '\n' + body + '\nstart', { PATH: childPath(fx.binDir) });
+  const calls = initCalls(fx);
+  const assertFailedBootstrap = evidence => {
+    assert.ok(evidence.calls.includes('bootstrap-invoked'), 'start() invoked the failing bootstrap command');
+    assert.equal(evidence.calls.find(call => call.startsWith('bootstrap-exit:')), 'bootstrap-exit:74', 'bootstrap command failed with the intended CLI status');
+    assert.equal(evidence.status, 0, 'start() handles bootstrap failure as a retryable service outcome');
+    assert.equal(evidence.stampExists, false, 'failed bootstrap leaves completion stamp absent');
+    assert.equal(evidence.restartRequested, false, 'failed bootstrap does not request Node-RED restart');
+  };
+  const evidence = { status: result.status, calls, stampExists: fs.existsSync(fx.stampFile), restartRequested: calls.some(call => call.startsWith('restart-request')) };
+  assertFailedBootstrap(evidence);
+  assert.throws(() => assertFailedBootstrap({ ...evidence, calls: evidence.calls.filter(call => call !== 'bootstrap-invoked') }), /invoked the failing bootstrap/, 'negative control rejects missing invocation evidence');
 });
 
 test('the closing banner calls print_bootstrap_note and hard-codes no bootstrap path', () => {
