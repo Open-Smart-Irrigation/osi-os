@@ -445,6 +445,8 @@ for (const profile of PROFILES) {
       end: '2026-10-02T00:00:00Z',
       aggregation: 'raw',
       maxPointsPerSeries: 2000,
+      // The interactive card route opts in to the raw-row sentinel.
+      rawRowLimit: true,
     });
     assert.deepEqual(overflow.availability, {
       available: false,
@@ -986,6 +988,43 @@ for (const profile of PROFILES) {
     };
     assert.deepEqual(recoveryOverflow.availability, expectedAvailability);
     assert.deepEqual(liveOverflow.availability, expectedAvailability);
+  });
+
+  test(`${profile}: daily export keeps a month with more than 30000 raw rows`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'busy-export', 'fixture', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', 'busy-export-user');
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, created_at, updated_at)
+      VALUES (1, 'Busy export', 1, 'busy-zone', 'UTC', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A8404100000000A1', 'Busy Kiwi', 'KIWI_SENSOR', 1, 1, '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z');
+    `);
+    try {
+      // 30,001 rows, one a minute from 1 June: about 20.8 days of June.
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+      const startMs = Date.parse('2026-06-01T00:00:00Z');
+      raw.exec('BEGIN');
+      for (let index = 0; index < 30001; index += 1) {
+        insert.run('A8404100000000A1', new Date(startMs + index * 60000).toISOString(), 20);
+      }
+      raw.exec('COMMIT');
+      const result = await helper.buildZoneExportCsv(facade(raw), {
+        zoneId: 1,
+        from: '2026-06-01',
+        to: '2026-06-30',
+        granularity: 'daily',
+        nowMs: Date.parse('2026-07-02T00:00:00Z'),
+      });
+      const swt1Days = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => row.timestamp);
+      assert.equal(swt1Days.length, 21);
+      assert.equal(swt1Days[0], '2026-06-01T00:00:00.000Z');
+      assert.equal(swt1Days[20], '2026-06-21T00:00:00.000Z');
+    } finally {
+      raw.close();
+    }
   });
 
   test(`${profile}: legacy 24h and 48h boundaries stay source isolated`, async () => {

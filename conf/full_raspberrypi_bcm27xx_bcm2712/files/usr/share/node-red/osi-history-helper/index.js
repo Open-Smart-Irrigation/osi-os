@@ -2317,14 +2317,16 @@ async function aggregateDeviceData(db, rawQuery = {}) {
   const placeholders = readDeveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const range = recordedAtRangeSql('recorded_at', start, end, { endInclusive: true });
-  // Raw fallback is bounded for every aggregation level.  A missing rollup
-  // bucket must recover a bounded interval, never turn a long-range request
-  // into an unbounded device_data scan.
-  const rawLimitSql = ` LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
+  // The interactive card route and legacy history opt in to the raw-row
+  // sentinel, so a long-range request becomes an actionable 'unavailable'
+  // answer instead of an unbounded device_data scan. Export and rollup
+  // maintenance keep reading every row of their bounded windows.
+  const rawRowLimit = query.rawRowLimit === true;
+  const rawLimitSql = rawRowLimit ? ` LIMIT ${RAW_HISTORY_MAX_ROWS + 1}` : '';
   const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC${rawLimitSql}`;
   const params = readDeveuis.concat(range.params);
   const rows = await dbAll(db, sql, params);
-  if (rows.length > RAW_HISTORY_MAX_ROWS) {
+  if (rawRowLimit && rows.length > RAW_HISTORY_MAX_ROWS) {
     const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
     return {
       ...unavailable,
@@ -2660,6 +2662,7 @@ async function legacySensorHistory(db, options = {}) {
     aggregation,
     channels: key.channels,
     sourceDevices: [key.device || { deveui: requestedDeveui }],
+    rawRowLimit: true,
     timezone: key.timezone,
     nowMs: endMs,
   });
@@ -3279,6 +3282,11 @@ async function aggregateZoneExportRows(db, scope) {
           nowMs: scope.nowMs,
           useRollups: deviceTypeId(device) === 'AQUASCOPE_LORAIN' ? false : undefined,
         });
+        // csvRowsFromAggregate reads buckets only; an unavailable window
+        // would otherwise drop the month from the CSV without an error.
+        if (aggregate && aggregate.availability && aggregate.availability.available === false) {
+          throw exportWindowUnavailable(aggregate.availability.reasons);
+        }
         for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
           site: scope.site,
           zone: zoneName,
@@ -3317,6 +3325,15 @@ function exportTooLarge(maxRows) {
   const error = new Error(`export exceeds ${maxRows} rows`);
   error.code = 'EXPORT_TOO_LARGE';
   error.statusCode = 413;
+  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
+  return error;
+}
+
+function exportWindowUnavailable(reasons) {
+  const error = new Error('export window could not be aggregated');
+  error.code = 'EXPORT_TOO_LARGE';
+  error.statusCode = 413;
+  error.reasons = Array.isArray(reasons) ? reasons.slice() : [];
   error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
   return error;
 }
