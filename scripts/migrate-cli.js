@@ -100,6 +100,12 @@ async function runMigrateCli({
     throw new Error('refusing: --backup-dir is required (persistent pre-migration backup)');
   }
 
+  // Loaded before the --prune-only branch on purpose: the issue 397 plan
+  // requires a valid corpus before any backup creation or pruning, and
+  // scripts/migration-caller-corpus.test.js pins that an invalid corpus
+  // prunes nothing. Pruning itself never reads the corpus. deploy.sh calls
+  // --prune-only only after fetch_migration_runner has validated the corpus,
+  // and tolerates its failure (`|| true`).
   const corpus = loadMigrationCorpus(migrationsDir);
   const keep = resolveKeep();
 
