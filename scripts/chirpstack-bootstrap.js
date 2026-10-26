@@ -276,7 +276,11 @@ async function createApiKeyViaCLI() {
   console.log('  + Creating API key via CLI (chirpstack create-api-key) ...');
   let out;
   try {
-    out = execSync('chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered 2>&1').toString();
+    // stderr is captured, never inherited: without an explicit pipe the child's
+    // stderr would go straight to this process's stderr, past the redaction.
+    out = execSync('chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered', {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).toString();
   } catch (error) {
     const status = error && Number.isInteger(error.status) && error.status >= 1 && error.status <= 255
       ? `, exit status ${error.status}`
@@ -285,11 +289,15 @@ async function createApiKeyViaCLI() {
   }
 
   const match = out.match(/^token:\s*(.+)$/m);
-  if (!match) {
+  const token = match ? match[1].trim() : '';
+  // A token is printable ASCII with no spaces. Anything else (an ANSI colour
+  // code, a tab, a non-ASCII byte) would make grpc-js reject the authorization
+  // header with an error message that quotes the whole token.
+  if (!/^[\x21-\x7e]+$/.test(token)) {
     throw new Error('CLI create-api-key failed (invalid output)');
   }
   console.log('  ✓ API key created via CLI');
-  return match[1].trim();
+  return token;
 }
 
 function normalizeGatewayEui(value) {
