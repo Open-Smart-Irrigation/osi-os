@@ -618,7 +618,11 @@ async function main() {
 // canonical"). 1 = REFUSE-AND-HOLD - a known precondition failed (drift
 // signature mismatch, or a per-table orphan/NULL/drift data guard) BEFORE
 // any DDL ran; the DB is untouched and the fix is to repair the data or
-// re-run the audit, not to restore a backup. 2 = an unexpected failure
+// re-run the audit, not to restore a backup. A migration-corpus refusal
+// (ERR_MIGRATION_CORPUS: CHECKSUMS.json or the ordered SQL failed
+// validation) is also exit 1: every corpus load happens before the first
+// DDL statement, so the DB is untouched and the fix is to restore the
+// payload's migration corpus, not the database. 2 = an unexpected failure
 // (e.g. a crash mid-DDL, caught by SQLite's own transaction rollback rather
 // than one of this tool's own preflight guards) - the window script treats
 // this as a signal to stop and have an operator restore the pre-rebuild
@@ -628,7 +632,7 @@ async function main() {
 if (require.main === module) {
   main().catch((e) => {
     console.error(`[uganda-rebuild] FAILED: ${e.message}`);
-    process.exit(e.refuseAndHold ? 1 : 2);
+    process.exit(e.refuseAndHold || e.code === 'ERR_MIGRATION_CORPUS' ? 1 : 2);
   });
 }
 

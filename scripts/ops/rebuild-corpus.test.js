@@ -4,6 +4,7 @@ const test = require('node:test'),
   fs = require('node:fs'),
   os = require('node:os'),
   path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { loadMigrationCorpus, materializeMigrations } = require('../../lib/osi-migrate/migrations-loader');
 const repo = path.resolve(__dirname, '../..');
 const oldDefault = 'chameleon_enabled                     INTEGER DEFAULT 0,',
@@ -101,6 +102,33 @@ test('generate and repeated verification references retain the accepted source',
     assert.deepEqual(await G.apply(db, () => {}), { ran: [] });
   } finally {
     fs.mkdtempSync = mk;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('CLI exits 1 (refuse and hold) for a corpus refusal and 2 for an unexpected failure', () => {
+  const { root, file, raw } = fixture();
+  const script = path.join(root, 'scripts/ops/generate-uganda-schema-rebuild-20260911.js');
+  const absentDb = path.join(root, 'absent.db');
+  const run = (mode) => spawnSync(process.execPath, [script, mode, absentDb], { encoding: 'utf8' });
+  try {
+    // Valid corpus, missing database: an error that is not one of the tool's
+    // own refusals keeps exit 2.
+    for (const mode of ['--dry-run', '--apply']) {
+      const child = run(mode);
+      assert.equal(child.status, 2, `${mode} with a valid corpus: ${child.stderr}`);
+      assert.match(child.stderr, /database file does not exist/);
+    }
+    // Changed migration bytes: the corpus is refused before the database is
+    // opened, so the database is untouched and no backup restore is needed.
+    fs.writeFileSync(file, raw.toString().replace(oldDefault, changedDefault));
+    for (const mode of ['--dry-run', '--apply']) {
+      const child = run(mode);
+      assert.equal(child.status, 1, `${mode} with a changed corpus: ${child.stderr}`);
+      assert.match(child.stderr, /migration corpus: .*checksum mismatch for 0001__baseline\.sql/);
+    }
+    assert.equal(fs.existsSync(absentDb), false);
+  } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
