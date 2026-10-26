@@ -219,18 +219,21 @@ test('backfill fills UUID and positive version and promotes the lowest active us
   empty.close();
 });
 
-test('conditional bootstrap insert creates exactly one admin', () => {
+test('conditional zero-user bootstrap creates one admin and refuses every existing account', () => {
   const db = freshDb();
-  const insert = db.prepare(`INSERT INTO users (username, password_hash, created_at, role)
-    SELECT ?, ?, ?, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`);
-  insert.run('first', 'h', '2026-01-01');
-  insert.run('second', 'h', '2026-01-01');
-  assert.equal(db.prepare("SELECT COUNT(*) count FROM users WHERE role = 'admin'").get().count, 1);
-  assert.equal(db.prepare("SELECT COUNT(*) count FROM users WHERE username = 'second'").get().count, 0);
-  db.exec(`UPDATE users
-              SET disabled_at = '2026-01-02', sync_version = sync_version + 1
-            WHERE role = 'admin'`);
-  insert.run('third', 'h', '2026-01-01');
-  assert.equal(db.prepare("SELECT COUNT(*) count FROM users WHERE username = 'third'").get().count, 0);
+  const insert = db.prepare("INSERT INTO users (username,password_hash,created_at,role) SELECT ?,?,?,'admin' WHERE NOT EXISTS (SELECT 1 FROM users)");
+  assert.equal(insert.run('first','h','2026-01-01').changes, 1);
+  assert.equal(insert.run('second','h','2026-01-01').changes, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM users WHERE role='admin'").get().n, 1);
+  db.exec("UPDATE users SET disabled_at='2026-01-02',sync_version=sync_version+1 WHERE role='admin'");
+  assert.equal(insert.run('third','h','2026-01-01').changes, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n, 1);
   db.close();
+  const existing = freshDb();
+  existing.prepare('INSERT INTO users(username,password_hash,created_at) VALUES(?,?,?)').run('researcher','h','2026-01-01');
+  const closedInsert = existing.prepare("INSERT INTO users (username,password_hash,created_at,role) SELECT ?,?,?,'admin' WHERE NOT EXISTS (SELECT 1 FROM users)");
+  assert.equal(closedInsert.run('public','h','2026-01-01').changes, 0);
+  assert.equal(existing.prepare('SELECT COUNT(*) n FROM users').get().n, 1);
+  assert.equal(existing.prepare("SELECT COUNT(*) n FROM users WHERE role='admin'").get().n, 0);
+  existing.close();
 });
