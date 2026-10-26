@@ -63,19 +63,29 @@ function buildLedgerDb(rows) {
 }
 
 // Runs the extracted probe fragment against a fixture DB with real sqlite3 +
-// node, and returns the decided recon_probe_version ('' when the probe finds
-// no mismatch and falls through the fast path untouched).
-function runProbe(dbPath) {
+// node and returns { version, failed }: the decided recon_probe_version (''
+// when the probe finds no mismatch and falls through the fast path untouched)
+// and recon_probe_failed ('' unless the ledger read or the comparison failed).
+// TMP_DIR is the deploy staging root; the probe loads the fetched
+// lib/osi-migrate/migrations-loader.js from it, which here is the repo's own.
+function runProbeFragment(dbPath, migrationsDir = MIGRATIONS_DIR) {
   const fragment = extractProbeFragment();
-  const script = `${fragment}\nprintf 'RECON_PROBE_VERSION=%s\\n' "$recon_probe_version"\n`;
+  const script = `${fragment}\nprintf 'RECON_PROBE_VERSION=%s\\nRECON_PROBE_FAILED=%s\\n' "$recon_probe_version" "$recon_probe_failed"\n`;
   const result = spawnSync('sh', ['-c', script], {
     encoding: 'utf8',
-    env: { ...process.env, DB_PATH: dbPath, migrations_dir: MIGRATIONS_DIR },
+    env: { ...process.env, DB_PATH: dbPath, migrations_dir: migrationsDir, TMP_DIR: REPO },
   });
   assert.equal(result.status, 0, `probe fragment exited nonzero (${result.status}): stderr=${result.stderr}`);
-  const match = /RECON_PROBE_VERSION=(.*)/.exec(result.stdout);
-  assert.ok(match, `probe fragment did not print RECON_PROBE_VERSION: stdout=${JSON.stringify(result.stdout)}`);
-  return match[1].trim();
+  const version = /RECON_PROBE_VERSION=(.*)/.exec(result.stdout);
+  const failed = /RECON_PROBE_FAILED=(.*)/.exec(result.stdout);
+  assert.ok(version && failed, `probe fragment did not print its result: stdout=${JSON.stringify(result.stdout)}`);
+  return { version: version[1].trim(), failed: failed[1].trim(), stderr: result.stderr };
+}
+
+function runProbe(dbPath) {
+  const { version, failed, stderr } = runProbeFragment(dbPath);
+  assert.equal(failed, '', `probe must complete its comparison: stderr=${stderr}`);
+  return version;
 }
 
 test('reconcile probe: Bovey lineage (0022-0024 byte-match main, only 0025 differs) decides to reconcile at v25', () => {
@@ -117,4 +127,29 @@ test('reconcile probe: a mismatch anywhere past the first row is still caught (n
   const dbPath = buildLedgerDb(rows);
   const decided = runProbe(dbPath);
   assert.equal(decided, String(rows[lastIdx].version), 'a mismatch on the LAST applied row must still be found and decided upon');
+});
+
+test('reconcile probe: reads CHECKSUMS.json through the validated manifest reader and aborts on a malformed manifest', () => {
+  // JSON.parse accepts every one of these manifests; the shared strict parser
+  // (lib/osi-migrate/migration-manifest.js) refuses each, so the probe must
+  // report a comparison failure instead of deciding from them.
+  const name = '0025__valve_settings_sync_triggers.sql';
+  const checksum = MAIN_MANIFEST[name];
+  const malformed = {
+    'duplicate key': `{"${name}":"${checksum}","${name}":"${'0'.repeat(64)}"}`,
+    'uppercase hash': `{"${name}":"${checksum.toUpperCase()}"}`,
+    'unsafe name': `{"../${name}":"${checksum}"}`,
+  };
+  const dbPath = buildLedgerDb([{ version: 25, name, checksum: 'deadbeef'.repeat(8) }]);
+  for (const [label, raw] of Object.entries(malformed)) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-recon-probe-manifest-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'CHECKSUMS.json'), raw);
+      const { version, failed } = runProbeFragment(dbPath, dir);
+      assert.equal(failed, 'compare', `${label}: the probe must refuse a manifest the validated reader rejects`);
+      assert.equal(version, '', `${label}: a refused manifest must not produce a reconcile decision`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });

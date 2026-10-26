@@ -207,6 +207,18 @@ test('deploy migration wiring probes for a foreign-numbered ledger only after SK
   assert.match(deploy, /ORDER BY version/, 'the whole-ledger probe query must read rows in ascending version order (first mismatch wins)');
 });
 
+test('deploy migration wiring: the reconcile probe reads CHECKSUMS.json only through the validated manifest reader', () => {
+  const probe = deploy.slice(indexOf('# reconcile probe begin'), indexOf('# reconcile probe end'));
+  assert.match(probe, /require\(process\.argv\[1\]\)\.readMigrationManifest\(process\.argv\[2\]\)/,
+    'the probe must parse the manifest with lib/osi-migrate readMigrationManifest');
+  assert.match(probe, /"\$TMP_DIR\/lib\/osi-migrate\/migrations-loader\.js" "\$migrations_dir"/,
+    'the probe must load the fetched loader and pass it the migrations directory');
+  assert.doesNotMatch(probe, /JSON\.parse/, 'the probe must not parse CHECKSUMS.json raw');
+  assert.doesNotMatch(probe, /CHECKSUMS\.json/, 'the probe must not open CHECKSUMS.json by path itself');
+  assert.ok(indexOf('    if ! fetch_migration_runner; then') < indexOf('# reconcile probe begin'),
+    'run_schema_migration fetches and checks the loader before the probe requires it');
+});
+
 test('deploy migration wiring: a main-numbered gateway (checksums already match) takes the untouched fast path', () => {
   // Static proof that nothing beyond one read-only sqlite3 query and one
   // node invocation runs when the ledger is already main-numbered: the ONLY
