@@ -597,9 +597,12 @@ for (const profile of PROFILES) {
   test(`${profile}: interactive aggregate point budget counts source-channel grid before reads`, async () => {
     const helper = loadHelper(profile);
     const channel = (id) => ({ id, field: id, unit: 'kPa' });
+    // Chameleon Kiwis: SWT3 is a supported channel, so each device fills the
+    // full three-channel grid.
     const devices = Array.from({ length: 6 }, (_, index) => ({
       deveui: `A84041000000${String(index + 1).padStart(4, '0')}`,
       type_id: 'KIWI_SENSOR',
+      chameleon_enabled: 1,
     }));
     const start = Date.parse('2026-01-01T00:00:00Z');
     const hours = 1667;
@@ -651,6 +654,94 @@ for (const profile of PROFILES) {
     assert.equal(exact.availability, undefined);
     assert.equal(exact.sourceAggregates.length, 15);
     assert.equal(exact.sourceAggregates[0].buckets.length, 2000);
+  });
+
+  test(`${profile}: interactive point budget counts only channels each device type supports`, async () => {
+    const helper = loadHelper(profile);
+    const environmentChannels = [
+      { id: 'ambient_temperature', field: 'ambient_temperature', unit: 'C' },
+      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' },
+      { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
+      { id: 'light_lux', field: 'light_lux', unit: 'lux' },
+      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
+    ];
+    const gauges = Array.from({ length: 9 }, (_, index) => ({
+      deveui: `A84041000000C${String(index + 1).padStart(3, '0')}`,
+      type_id: 'AQUASCOPE_LORAIN',
+    }));
+    // 30 days hourly = 720 buckets. 9 gauges x 2 LoRain channels x 720 =
+    // 12,960 points fits the 30,000 budget; 9 x 5 card channels x 720 =
+    // 32,400 does not.
+    const query = {
+      zoneId: 1,
+      cardType: 'environment',
+      logicalSourceKey: 'microclimate',
+      deveuis: gauges.map((device) => device.deveui),
+      sourceDevices: gauges,
+      start: '2026-09-01T00:00:00Z',
+      end: '2026-10-01T00:00:00Z',
+      aggregation: 'hourly',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: environmentChannels,
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    };
+    const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, query);
+    assert.equal(aggregate.availability, undefined);
+    assert.equal(aggregate.sourceAggregates.length, 18);
+    for (const device of gauges) {
+      const channelKeys = aggregate.sourceAggregates
+        .filter((entry) => entry.sourceKey === device.deveui)
+        .map((entry) => entry.channelKey)
+        .sort();
+      assert.deepEqual(channelKeys, ['ambient_temperature', 'rain_mm_per_hour']);
+    }
+    assert.ok(aggregate.sourceAggregates.every((entry) => entry.buckets.length === 720));
+
+    // Rollup maintenance, export and Analysis call without a point budget and
+    // keep today's channel set; so does a device row that carries no type.
+    const unbudgeted = await helper.aggregateDeviceData({ all() { return []; } }, {
+      ...query,
+      maxPointsPerSeries: undefined,
+      maxPointsTotal: undefined,
+    });
+    assert.equal(unbudgeted.sourceAggregates.length, 45);
+    const untyped = await helper.aggregateDeviceData({ all() { return []; } }, {
+      ...query,
+      sourceDevices: [{ deveui: gauges[0].deveui }],
+      deveuis: [gauges[0].deveui],
+    });
+    assert.equal(untyped.sourceAggregates.length, 5);
+  });
+
+  test(`${profile}: a Kiwi without Chameleon gets no SWT3 series on the interactive path`, async () => {
+    const helper = loadHelper(profile);
+    const plain = { deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR', chameleon_enabled: 0 };
+    const chameleon = { deveui: 'A8404100000000B1', type_id: 'KIWI_SENSOR', chameleon_enabled: 1 };
+    const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [plain.deveui, chameleon.deveui],
+      sourceDevices: [plain, chameleon],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: ['swt_1', 'swt_2', 'swt_3'].map((id) => ({ id, field: id, unit: 'kPa' })),
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    });
+    const pairs = aggregate.sourceAggregates.map((entry) => `${entry.sourceKey}|${entry.channelKey}`).sort();
+    assert.deepEqual(pairs, [
+      `${plain.deveui}|swt_1`,
+      `${plain.deveui}|swt_2`,
+      `${chameleon.deveui}|swt_1`,
+      `${chameleon.deveui}|swt_2`,
+      `${chameleon.deveui}|swt_3`,
+    ].sort());
   });
 
   test(`${profile}: raw point budget counts deduplicated valid points`, async () => {

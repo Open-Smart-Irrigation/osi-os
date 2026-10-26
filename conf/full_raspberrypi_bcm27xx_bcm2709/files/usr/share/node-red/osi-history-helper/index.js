@@ -987,11 +987,26 @@ function sourceChannelKey(sourceKey, channel) {
   return `${sourceKey}|${channel.id}`;
 }
 
+// Card types whose interactive grid is checked against the per-device channel
+// policy in device-sources.js. Other cards keep the card-wide channel list.
+const SOURCE_FAMILY_CARD_TYPES = new Set(['soil', 'environment']);
+
+function deviceFamilySupportsChannel(device, cardType, channel) {
+  // A device row without a type keeps the card-wide channel list.
+  if (!deviceTypeId(device)) return true;
+  const family = describeDeviceSource(device).families.find((entry) => entry.cardType === cardType);
+  return Boolean(family && family.channelKeys.includes(channel.id));
+}
+
 function sourceSupportsChannel(sourceKey, channel, options = {}) {
-  if (!channel || channel.id !== 'swt_3' || !Array.isArray(options.sourceDevices) || !options.sourceDevices.length) return true;
+  if (!channel || !Array.isArray(options.sourceDevices) || !options.sourceDevices.length) return true;
+  const eligibilityCardType = SOURCE_FAMILY_CARD_TYPES.has(options.eligibilityCardType) ? options.eligibilityCardType : null;
+  if (channel.id !== 'swt_3' && !eligibilityCardType) return true;
   const normalized = normalizeDeveui(sourceKey);
   const source = options.sourceDevices.find((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)) === normalized);
-  return !source || isLsn50Swt3Eligible(source);
+  if (!source) return true;
+  if (channel.id === 'swt_3' && !isLsn50Swt3Eligible(source)) return false;
+  return !eligibilityCardType || deviceFamilySupportsChannel(source, eligibilityCardType, channel);
 }
 
 function normalizeSourceKey(value) {
@@ -1824,7 +1839,7 @@ function sourceRollupResults(rows, query, channels, sourceDevices) {
     const sourceRows = byLogicalKey.get(logicalKey) || [];
     const result = rollupRowsToResult(sourceRows, { ...query, logicalSourceKey: logicalKey }, channels);
     for (const channel of channels) {
-      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] })) continue;
+      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })) continue;
       aggregates.push({
         sourceKey,
         channelKey: channel.id,
@@ -1852,7 +1867,7 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
     const logicalKey = sourceLogicalKeyForDevice(query.cardType || query.card_type, device);
     if (!sourceKey || !logicalKey) continue;
     for (const channel of channels) {
-      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] })) continue;
+      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })) continue;
       const existingStarts = new Set((rollupRows || [])
         .filter((row) => row.logical_source_key === logicalKey && row.channel_id === channel.id)
         .map((row) => String(row.bucket_start)));
@@ -1917,6 +1932,7 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
       aggregation,
       aggregationRequested: query.aggregationRequested || aggregation,
       channels: [pair.channel],
+      eligibilityCardType: query.eligibilityCardType,
       sourceDevices: [pair.device],
       sourceKeys: [pair.sourceKey],
       start: pair.gapStart,
@@ -1973,12 +1989,12 @@ function mergeSourceAggregates(completed, live) {
   return Array.from(merged.values());
 }
 
-function unavailableSourceAggregates(sourceDevices, channels, cardType) {
+function unavailableSourceAggregates(sourceDevices, channels, cardType, eligibilityCardType) {
   return (sourceDevices || []).flatMap((device) => {
     const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
     if (!sourceKey) return [];
     return (channels || [])
-      .filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] }))
+      .filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType }))
       .map((channel) => ({
         sourceKey,
         channelKey: channel.id,
@@ -2076,7 +2092,14 @@ function queryDeviceEuis(query = {}) {
   return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
 }
 
-async function aggregateDeviceData(db, query = {}) {
+async function aggregateDeviceData(db, rawQuery = {}) {
+  // Only the interactive card route sets a point budget. On that path a
+  // source/channel pair counts, and gets a series, only when the device's
+  // type supports the channel for this card. Rollup maintenance, export,
+  // legacy and Analysis callers keep the card-wide channel list.
+  const interactiveBudget = [rawQuery.maxPointsPerSeries, rawQuery.max_points_per_series, rawQuery.maxPointsTotal, rawQuery.max_points_total]
+    .some((value) => { const number = toFiniteNumber(value); return number !== null && number > 0; });
+  const query = { ...rawQuery, eligibilityCardType: interactiveBudget ? firstDefinedValue([rawQuery.cardType, rawQuery.card_type]) : undefined };
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
   const channels = normalizeQueryChannels(filterSoilChannelsForSources(query.channels, query.sourceDevices));
@@ -2144,7 +2167,7 @@ async function aggregateDeviceData(db, query = {}) {
         aggregationRequested: aggregationInfo.requested,
         bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
         source: 'device_data',
-        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType),
+        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType, query.eligibilityCardType),
         sourceIdentityVersion: 2,
         maxPointsTotal: maxPointsTotal !== null && maxPointsTotal > 0 ? maxPointsTotal : null,
         coverageConfidence: 'unknown',
@@ -2161,7 +2184,7 @@ async function aggregateDeviceData(db, query = {}) {
     const eligibleSourceChannelCount = sourceDevices.reduce((count, device) => {
       const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
       if (!sourceKey) return count;
-      return count + channels.filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device] })).length;
+      return count + channels.filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })).length;
     }, 0);
     const estimatedPointCount = (preflightBuckets || []).length * eligibleSourceChannelCount;
     if (estimatedPointCount > maxPointsTotal) {
@@ -2170,7 +2193,7 @@ async function aggregateDeviceData(db, query = {}) {
         aggregationRequested: aggregationInfo.requested,
         bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
         source: 'device_data',
-        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType),
+        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType, query.eligibilityCardType),
         sourceIdentityVersion: 2,
         maxPointsTotal,
         coverageConfidence: 'unknown',
@@ -2256,7 +2279,7 @@ async function aggregateDeviceData(db, query = {}) {
     if (rollupRows.length || recoveredSources.length || live) {
       const rawBudgetRejected = recoveredResult.rawScanOverflow || liveOverflow;
       const sourceAggregates = rawBudgetRejected
-        ? unavailableSourceAggregates(rollupDevices, channels, cardType)
+        ? unavailableSourceAggregates(rollupDevices, channels, cardType, query.eligibilityCardType)
         : mergeSourceAggregates(
           [...completedSources, ...recoveredSources],
           live && live.sourceAggregates

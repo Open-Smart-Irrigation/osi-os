@@ -286,8 +286,9 @@ for (const profile of PROFILES) {
     const db = seedScopedDb();
     for (let index = 0; index < 6; index += 1) {
       const deveui = `A84042000000${String(index + 1).padStart(4, '0')}`;
-      db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
-        VALUES (?, ?, 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01')`).run(deveui, `Grid source ${index + 1}`);
+      // Chameleon Kiwis support SWT3, so each fills the three-channel grid.
+      db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+        VALUES (?, ?, 'KIWI_SENSOR', 2, 1, 1, '2026-01-01', '2026-01-01')`).run(deveui, `Grid source ${index + 1}`);
     }
     const cardId = helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' });
     try {
