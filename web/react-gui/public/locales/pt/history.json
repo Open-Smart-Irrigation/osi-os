@@ -530,7 +530,7 @@
     "sourceFilter": {
       "label": "Fonte",
       "all": "Todas",
-      "chooseOne": "Escolha uma fonte para ver este calendário.",
+      "chooseOne": "Escolha uma fonte para ver este histórico.",
       "limitsTitle": "Este pedido precisa de menos dados.",
       "recoveryRaw": "Este pedido inclui demasiadas leituras brutas. Escolha uma fonte ou reduza o intervalo.",
       "recoveryPoint": "Este resultado é demasiado grande. Escolha uma fonte ou use dados mais agregados.",

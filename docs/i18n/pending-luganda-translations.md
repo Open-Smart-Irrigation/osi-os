@@ -299,6 +299,14 @@ English source text too. `web/react-gui/demo/tests/valve-locale.test.ts`
 enforces this, and a human Luganda pass removes the key from its pending list
 in the same change.
 
+## `history.json` — source choice and recovery
+
+| Keys | Reason |
+|---|---|
+| `history.sourceFilter.chooseOne`, `limitsTitle`, `recoveryRaw`, `recoveryPoint`, `shorterRange`, `coarserAggregation`, `availableSources` (7 keys) | Added with source-preserving history (#502): the prompt to choose one source on a multi-source calendar or soil-profile view, and the recovery panel shown when a request exceeds the point or raw-row budget. No human Luganda pass is on record for the `lg` values first written on the branch, so `lg` ships the English source text. de-CH/es/fr/it/pt carry translations. |
+
+Tracked in `web/react-gui/src/history/__tests__/historyLocaleValues.test.ts` (`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still byte-identical to `en`. A human Luganda pass removes each key from that set and from this row together.
+
 ## `devices.json` — Tensiomark settings and SDI-12 card
 
 | Keys | Reason |

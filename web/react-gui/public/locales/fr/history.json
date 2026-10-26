@@ -530,7 +530,7 @@
     "sourceFilter": {
       "label": "Source",
       "all": "Toutes",
-      "chooseOne": "Choisissez une source pour voir ce calendrier.",
+      "chooseOne": "Choisissez une source pour voir cet historique.",
       "limitsTitle": "Cette requête nécessite moins de données.",
       "recoveryRaw": "Cette requête contient trop de mesures brutes. Choisissez une source ou réduisez la période.",
       "recoveryPoint": "Ce résultat est trop volumineux. Choisissez une source ou utilisez des données plus agrégées.",

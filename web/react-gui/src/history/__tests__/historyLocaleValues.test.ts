@@ -176,6 +176,9 @@ const PENDING_HUMAN_LUGANDA: ReadonlySet<string> = new Set([
   'history.mobileTension.seriesLegend.allSeriesAnnouncement', 'history.mobileTension.pinnedReading',
   'history.mobileTension.visibleWindow', 'history.mobileTension.route.zoneLoading', 'history.mobileTension.route.zonesFailed',
   'history.mobileTension.route.timeZoneUnavailable',
+  'history.sourceFilter.chooseOne', 'history.sourceFilter.limitsTitle', 'history.sourceFilter.recoveryRaw',
+  'history.sourceFilter.recoveryPoint', 'history.sourceFilter.shorterRange', 'history.sourceFilter.coarserAggregation',
+  'history.sourceFilter.availableSources',
 ]);
 
 function isAllowedIdentical(locale: Locale, key: string): boolean {
@@ -229,6 +232,17 @@ describe('history locale value parity', () => {
     expect(unlisted, 'new mobileUplot keys need a human Luganda pass or a pending entry').toEqual([]);
     const unlistedTension = Object.keys(english).filter((key) => key.startsWith('history.mobileTension.') && !PENDING_HUMAN_LUGANDA.has(key));
     expect(unlistedTension, 'new mobileTension keys need a human Luganda pass or a pending entry').toEqual([]);
+  });
+
+  it('keeps the source-choice prompt view-neutral and the German comparative spelled correctly', () => {
+    // chooseOne is shown on the calendar and soil-profile views and on the
+    // desktop detail, so it must not name one view.
+    const calendarWord = /calend|kalend/i;
+    const viewSpecific = (['en', ...LOCALES] as const).filter((locale) => calendarWord.test(localeLeaves(locale)['history.sourceFilter.chooseOne']));
+    expect(viewSpecific, 'chooseOne names the calendar view').toEqual([]);
+    const german = localeLeaves('de-CH');
+    expect(Object.entries(german).filter(([, value]) => /\bGrobere\b/.test(value)).map(([key]) => key)).toEqual([]);
+    expect(german['history.sourceFilter.coarserAggregation']).toBe('Gröbere Daten verwenden');
   });
 
   it('uses Swiss spelling in de-CH', () => {
