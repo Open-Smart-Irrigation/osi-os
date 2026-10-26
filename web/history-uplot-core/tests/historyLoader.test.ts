@@ -64,6 +64,57 @@ const deferred = <T>() => {
 };
 
 describe("pilot whole-response history loader", () => {
+  test('keeps equal range coverage separate by read policy', async () => {
+    const loader = createHistoryLoader();
+    const load = vi.fn(async () => data());
+    await loader.foreground(demand({ request: { ...request, readPolicy: 'cloud-rollup-hourly' }, readPolicy: 'cloud-rollup-hourly' }), load).result;
+    await loader.foreground(demand({ request: { ...request, readPolicy: 'cloud-raw-hourly' }, readPolicy: 'cloud-raw-hourly' }), load).result;
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  test('serves a selected subset from a cached superset and evicts denied series', async () => {
+    const loader = createHistoryLoader();
+    const superset = data({ series: [{ id: 'a', label: 'A', unit: 'kPa', points: [{ t: 1, value: 1 }] }, { id: 'b', label: 'B', unit: 'kPa', points: [{ t: 1, value: 2 }] }] });
+    const load = vi.fn(async () => superset);
+    const full = demand({ selectedIds: ['a', 'b'], selectionKey: '["a","b"]' });
+    await loader.foreground(full, load).result;
+    const subset = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), load);
+    expect(subset.source).toBe('cache');
+    expect((await subset.result).data.series.map((item) => item.id)).toEqual(['a']);
+    loader.evictSeries(['b']);
+    const after = loader.foreground(full, load);
+    expect(after.source).toBe('network');
+  });
+
+  test('eviction aborts an in-flight demand containing a denied series', async () => {
+    const loader = createHistoryLoader();
+    const pending = deferred<HistoryAcceptedData>();
+    const handle = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => pending.promise);
+    loader.evictSeries(['a']);
+    await expect(handle.result).rejects.toMatchObject({ name: 'AbortError', reason: 'superseded' });
+    pending.resolve(data());
+  });
+  test('does not admit an ignored-abort response after selection eviction', async () => {
+    const loader = createHistoryLoader();
+    const pending = deferred<HistoryAcceptedData>();
+    const handle = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => pending.promise);
+    loader.evictSeries(['a']);
+    await expect(handle.result).rejects.toMatchObject({ name: 'AbortError' });
+    pending.resolve(data({ series: [{ ...data().series[0], id: 'a' }] }));
+    await Promise.resolve();
+    const next = loader.foreground(demand({ selectedIds: ['a'], selectionKey: '["a"]' }), () => Promise.resolve(data({ series: [{ ...data().series[0], id: 'a' }] })));
+    expect(next.source).toBe('network');
+  });
+
+  test('passes ordered selection context to the transport', async () => {
+    const loader = createHistoryLoader();
+    const seen: unknown[] = [];
+    const load = vi.fn(async (_signal: AbortSignal) => data({ series: [{ ...data().series[0], id: 'a' }, { ...data().series[0], id: 'b' }] }));
+    const selected = ['b', 'a'];
+    await loader.foreground(demand({ selectedIds: selected, selectionKey: '["a","b"]', request: { ...request, selectionKey: '["a","b"]' }, requestRevision: 3 }), (signal) => { seen.push(signal.aborted); return load(signal); }).result;
+    expect(seen).toEqual([false]);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
   test("returns a covering cache hit while preserving original response age", async () => {
     let clock = 1_000;
     const loader = createHistoryLoader({ now: () => clock });
@@ -203,6 +254,26 @@ describe("pilot whole-response history loader", () => {
     const loader = createHistoryLoader();
     await expect(loader.prefetch(demand(), async () => data({ limits: { maxPointsPerSeries: 2_000, truncated: true } }))).resolves.toBe("skipped");
     await expect(loader.prefetch(demand(), async () => data({ aggregation: { level: "15m", pointCount: 2 } }))).resolves.toBe("skipped");
+  });
+
+  test.each([
+    ['short coverage', data({ coverage: { from: 0, to: 99 }, readPolicy: 'edge-hourly' })],
+    ['mismatched read policy', data({ readPolicy: 'cloud-rollup-hourly' })],
+    ['missing selected series', data({ readPolicy: 'edge-hourly', series: [], unitGroups: [] })],
+  ])('does not cache a prefetch response with %s', async (_label, invalid) => {
+    const loader = createHistoryLoader();
+    const neighbor = demand({
+      selectedIds: ['s'],
+      selectionKey: '["s"]',
+      visible: { from: request.from, to: request.to },
+      readPolicy: 'edge-hourly',
+      request: { ...request, readPolicy: 'edge-hourly' },
+    });
+    await loader.prefetch(neighbor, async () => invalid);
+    expect(loader.diagnostics().entries).toBe(0);
+    const foreground = loader.foreground(neighbor, async () => data({ readPolicy: 'edge-hourly' }));
+    expect(foreground.source).toBe('network');
+    await foreground.result;
   });
 
   test("joins a covering request but does not join an overlapping partial request", async () => {

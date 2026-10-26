@@ -1287,6 +1287,56 @@ test('the 30 000-row cap counts provider, station and device rows together', asy
   }
 });
 
+test('accepts 25 distinct available selectors and rejects 26 before reading rows', async () => {
+  const raw = weatherDb();
+  try {
+    const result = await catalog(raw);
+    const selected = result.channels.filter((channel) => channel.availability === 'available').slice(0, 25);
+    assert.equal(selected.length, 25, 'fixture must provide 25 available analysis sources');
+    const oneHour = { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T11:00:00.000Z' };
+    const output = await series(raw, selected, oneHour, 'hourly');
+    assert.deepEqual(output.series.map((item) => item.seriesId), selected.map((item) => item.seriesId));
+    assert.deepEqual(output.dropped, []);
+    assert.equal(output.aggregation.applied, 'hourly');
+    const noReads = {
+      all() { throw new Error('row read should not occur for an oversized selector list'); },
+    };
+    await assert.rejects(
+      seriesWithFacade(noReads, selected.concat({ ...selected[0], seriesId: 'distinct-selector-26' }), oneHour, 'hourly'),
+      (error) => error && error.statusCode === 413
+    );
+  } finally {
+    raw.close();
+  }
+});
+
+test('aligned hourly requests preserve overlapping device points and range metadata', async () => {
+  const raw = weatherDb();
+  try {
+    const kiwi = raw.prepare("SELECT deveui FROM devices WHERE name = 'Kiwi North'").get().deveui;
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+    insert.run(kiwi, '2026-10-01T10:00:00.000Z', 10);
+    insert.run(kiwi, '2026-10-01T11:00:00.000Z', 20);
+    insert.run(kiwi, '2026-10-01T12:00:00.000Z', 30);
+    const result = await catalog(raw);
+    const swt = result.channels.find((channel) => channel.deviceName === 'Kiwi North' && channel.channelKey === 'swt_1');
+    const first = await series(raw, [swt], { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T12:00:00.000Z' }, 'hourly');
+    const second = await series(raw, [swt], { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T13:00:00.000Z' }, 'hourly');
+    assert.deepEqual(first.range, { from: '2026-10-01T10:00:00.000Z', to: '2026-10-01T12:00:00.000Z' });
+    assert.deepEqual(second.range, { from: '2026-10-01T11:00:00.000Z', to: '2026-10-01T13:00:00.000Z' });
+    assert.equal(first.aggregation.applied, 'hourly');
+    assert.equal(second.aggregation.applied, 'hourly');
+    assert.equal(first.series[0].truncated, false);
+    assert.equal(second.series[0].truncated, false);
+    const overlapFirst = first.series[0].points.find((point) => point.t === '2026-10-01T11:00:00.000Z');
+    const overlapSecond = second.series[0].points.find((point) => point.t === '2026-10-01T11:00:00.000Z');
+    assert.deepEqual(overlapFirst, overlapSecond);
+    assert.deepEqual(overlapFirst, { t: '2026-10-01T11:00:00.000Z', value: 20, count: 1, quality: 'derived' });
+  } finally {
+    raw.close();
+  }
+});
+
 test('a failing zoneLocations makes the catalogue reject with its error', async () => {
   const analysis = analysisModule.createAnalysis({
     aggregateRows: () => ({ series: {}, buckets: [] }),

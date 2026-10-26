@@ -28,19 +28,87 @@ vi.mock('uplot/dist/uPlot.min.css', () => ({}));
 
 import { markerPaths, mountUplot } from '../src/adapters/uplot';
 
+type AxisConfig = {
+  size: number | ((u: unknown, values?: string[] | null) => number);
+  values: (u: { scales: { x: { min?: number; max?: number } } }, values: number[]) => string[];
+};
+type PaddingConfig = [number, number | ((u: unknown, side: number, sidesWithAxes: unknown, cycleNum: number) => number), number, number];
+
+function capturedAxis(): AxisConfig {
+  return (plots.at(-1)?.options.axes as AxisConfig[])[0];
+}
+
+function capturedRightPadding(): Exclude<PaddingConfig[1], number> {
+  const right = (plots.at(-1)?.options.padding as PaddingConfig)[1];
+  expect(typeof right).toBe('function');
+  return right as Exclude<PaddingConfig[1], number>;
+}
+
 describe('uPlot adapter', () => {
+  test('qualifies repeated Zurich rollback ticks through the captured axis callback', () => {
+    const host = document.createElement('div');
+    mountUplot(host, { from: Date.parse('2026-10-25T00:00:00Z'), to: Date.parse('2026-10-25T01:00:00Z') }, vi.fn(), { locale: 'en-GB', timeZone: 'Europe/Zurich' });
+    const axis = capturedAxis();
+    const values = [Date.parse('2026-10-25T00:00:00Z') / 1_000, Date.parse('2026-10-25T01:00:00Z') / 1_000];
+    const labels = axis.values({ scales: { x: { min: values[0], max: values[1] } } }, values);
+    expect(labels[0]).toContain('02:00');
+    expect(labels[0]).toContain('GMT+2');
+    expect(labels[1]).toContain('02:00');
+    expect(labels[1]).toContain('GMT+1');
+    expect(typeof axis.size === 'function' ? axis.size({}, labels) : axis.size).toBe(52);
+
+    const rightPadding = capturedRightPadding();
+    expect(rightPadding({}, 1, [], 0)).toBe(12);
+    expect(rightPadding({}, 1, [], 1)).toBe(28);
+
+    const ordinaryLabels = axis.values({ scales: { x: { min: values[0] + 86_400, max: values[1] + 86_400 } } }, values.map((value) => value + 86_400));
+    expect(ordinaryLabels.every((label) => !label.includes('\n'))).toBe(true);
+    expect(rightPadding({}, 1, [], 2)).toBe(28);
+    expect(rightPadding({}, 1, [], 1)).toBe(12);
+  });
+
+  test('keeps ordinary Kampala ticks and wide ranges in their legacy forms', () => {
+    const host = document.createElement('div');
+    mountUplot(host, { from: 0, to: 86_400_000 }, vi.fn(), { locale: 'en-GB', timeZone: 'Africa/Kampala' });
+    const axis = capturedAxis();
+    const narrow = [Date.parse('2026-10-25T00:00:00Z') / 1_000, Date.parse('2026-10-25T01:00:00Z') / 1_000];
+    const narrowLabels = axis.values({ scales: { x: { min: narrow[0], max: narrow[1] } } }, narrow);
+    expect(narrowLabels).toEqual(['03:00', '04:00']);
+    expect(typeof axis.size === 'function' ? axis.size({}, narrowLabels) : axis.size).toBe(36);
+    expect(typeof axis.size === 'function' ? axis.size({}, null) : axis.size).toBe(36);
+    const wide = [Date.parse('2026-10-01T00:00:00Z') / 1_000, Date.parse('2026-10-04T00:00:00Z') / 1_000];
+    const wideLabels = axis.values({ scales: { x: { min: wide[0], max: wide[1] } } }, wide);
+    expect(wideLabels).toEqual(['01 Oct', '04 Oct']);
+
+    const rightPadding = capturedRightPadding();
+    expect(rightPadding({}, 1, [], 0)).toBe(12);
+    expect(rightPadding({}, 1, [], 1)).toBe(12);
+  });
+
+  test('does not qualify equal wall times on different calendar days', () => {
+    const host = document.createElement('div');
+    mountUplot(host, { from: Date.parse('2026-10-24T00:00:00Z'), to: Date.parse('2026-10-25T00:00:00Z') }, vi.fn(), { locale: 'en-GB', timeZone: 'Europe/Zurich' });
+    const axis = capturedAxis();
+    const values = [Date.parse('2026-10-24T00:00:00Z') / 1_000, Date.parse('2026-10-25T00:00:00Z') / 1_000];
+    const labels = axis.values({ scales: { x: { min: values[0], max: values[1] } } }, values);
+    expect(labels).toEqual(['02:00', '02:00']);
+    expect(labels.every((label) => !label.includes('\n'))).toBe(true);
+    expect(typeof axis.size === 'function' ? axis.size({}, labels) : axis.size).toBe(36);
+  });
+
   test('encodes supplied appearance and focuses by stable series id', () => {
     const host = document.createElement('div');
     const adapter = mountUplot(host, { from: 0, to: 10_000 }, vi.fn());
     const appearance = { color: '#123456', dash: [3, 2] as const, marker: 'diamond' as const };
     adapter.setData([{ id: 'a', label: 'A', unit: 'kPa', appearance, points: [{ t: 1_000, value: 4 }] }]);
     adapter.setFocusedSeries?.('a');
-    expect(plots[0].series[1]).toMatchObject({ stroke: '#123456', dash: [3, 2] });
-    expect(plots[0].series[1].points).toMatchObject({ fill: '#123456', stroke: '#123456', width: 0 });
-    expect((plots[0].series[1].points as { paths: unknown }).paths).toEqual(expect.any(Function));
-    expect(plots[0].setSeries).toHaveBeenLastCalledWith(1, { focus: true });
+    const plot = plots.at(-1)!;
+    expect(plot.series[1]).toMatchObject({ stroke: '#123456', dash: [3, 2] });
+    expect(plot.series[1].points).toMatchObject({ fill: '#123456', stroke: '#123456', width: 0 });
+    expect((plot.series[1].points as { paths: unknown }).paths).toEqual(expect.any(Function));
+    expect(plot.setSeries).toHaveBeenLastCalledWith(1, { focus: true });
     adapter.setFocusedSeries?.(null);
-    expect(plots[0].setSeries).toHaveBeenLastCalledWith(null, { focus: false });
+    expect(plot.setSeries).toHaveBeenLastCalledWith(null, { focus: false });
   });
 
   test('returns a finite DPR-scaled marker path and skips null samples', () => {

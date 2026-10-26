@@ -60,6 +60,10 @@
       "reason": "Playwright browser test against the built demo (npm run demo:test:browser); needs browsers and a production build"
     },
     {
+      "path": "web/react-gui/tests/browser/mobile-tension-real-data.spec.ts",
+      "reason": "production-build Playwright matrix run by npm run test:browser:mobile-history; it uses paired flag-off/flag-on production builds, CDP CPU throttling and frame-timing acceptance, so it remains a controlled local release gate tracked by #516 rather than a shared pull-request runner test"
+    },
+    {
       "path": "scripts/test-task14-journal-preview.js",
       "reason": "needs a production GUI build (web/react-gui/build/index.html); all 16 tests fail without one, and CI builds no GUI"
     },

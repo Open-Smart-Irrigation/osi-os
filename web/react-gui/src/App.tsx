@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProviders } from './AppProviders';
 import { PrivateRoute } from './components/PrivateRoute';
@@ -16,6 +17,10 @@ import { GrantsPage } from './pages/admin/GrantsPage';
 import { ScopeStatusBanner } from './components/ScopeStatusBanner';
 import { NetworkPage } from './pages/NetworkPage';
 import { AnalysisRoute } from './pages/AnalysisRoute';
+
+const MobileTensionHistoryRoute = import.meta.env.VITE_MOBILE_HISTORY_INTERNAL === 'true'
+  ? lazy(() => import('./pages/MobileTensionHistoryRoute').then((module) => ({ default: module.MobileTensionHistoryRoute })))
+  : null;
 
 function App() {
   return (
@@ -81,6 +86,19 @@ function App() {
             element={
               <PrivateRoute>
                 <AnalysisRoute />
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/internal/mobile-history/zones/:zoneId"
+            element={
+              <PrivateRoute>
+                {MobileTensionHistoryRoute ? (
+                  <Suspense fallback={null}><MobileTensionHistoryRoute /></Suspense>
+                ) : (
+                  <Navigate to="/history" replace />
+                )}
               </PrivateRoute>
             }
           />

@@ -88,7 +88,7 @@ export interface AnalysisSeries {
   resolved: AnalysisResolved;
   label: string;
   unit: string | null;
-  coveragePct: number | null;
+  coveragePct?: number | null;
   points: AnalysisPoint[];
   truncated: boolean;
   /** 'daily' when each point stands for one zone-local day. */
