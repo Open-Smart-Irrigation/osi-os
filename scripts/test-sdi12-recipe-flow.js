@@ -9,6 +9,7 @@ const {
   executeFunction,
   loadNode,
   seedTestDb,
+  facadeDb,
 } = require('./lib/flow-node-harness');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -1320,3 +1321,267 @@ test('the recipe poll, apply and rollback close the real ChirpStack client witho
     });
   }
 });
+
+const RECIPE_EUI = 'A840410000000043';
+const RECIPE_SERVICES = [
+  'deviceClient', 'applicationClient', 'tenantClient', 'deviceProfileClient', 'gatewayClient',
+];
+
+function recipeModules(profile) {
+  const directory = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share`);
+  const helperPath = path.join(directory, 'node-red/osi-chirpstack-helper/index.js');
+  const localRequire = require('node:module').createRequire(helperPath);
+  return {
+    flowPath: path.join(directory, 'flows.json'),
+    commissioning: require(path.join(directory, 'node-red/osi-sdi12-commissioning')),
+    helper: require(helperPath),
+    pb: localRequire('@chirpstack/chirpstack-api/api/device_pb'),
+  };
+}
+
+function recipeTransport(modules, scenario) {
+  const client = modules.helper.createClient({
+    apiUrl: 'http://127.0.0.1:1', apiKey: 'synthetic-key',
+  });
+  const rpc = [];
+  const frames = [];
+  const accepted = [];
+  const closed = [];
+  let queueIds = scenario === 'nonempty' ? ['unrelated'] : [];
+  let creations = 0;
+  client.deviceClient.close();
+  for (const name of RECIPE_SERVICES.slice(1)) {
+    const close = client[name].close.bind(client[name]);
+    client[name].close = () => { closed.push(name); return close(); };
+  }
+  function record(method, request, options) {
+    rpc.push({
+      method, eui: method === 'getQueue' ? request.getDevEui() : request.getQueueItem().getDevEui(),
+      budget: options.deadline.getTime() - Date.now(),
+    });
+  }
+  function unavailable(callback) {
+    callback(Object.assign(new Error('private transport detail'), { code: 14 }));
+  }
+  client.deviceClient = {
+    close() { closed.push('deviceClient'); },
+    flushQueue() { throw new Error('recipe must never flush the device queue'); },
+    getQueue(request, metadata, options, callback) {
+      record('getQueue', request, options);
+      if (scenario === 'get_error' || scenario === 'rpc_error') return unavailable(callback);
+      const response = new modules.pb.GetDeviceQueueItemsResponse();
+      response.setResultList(queueIds.map((id) => {
+        const item = new modules.pb.DeviceQueueItem();
+        item.setId(id);
+        item.setFPort(2);
+        item.setData(Buffer.from([0, 255, 65]));
+        item.setConfirmed(true);
+        return item;
+      }));
+      callback(null, response);
+    },
+    enqueue(request, metadata, options, callback) {
+      record('enqueue', request, options);
+      const item = request.getQueueItem();
+      frames.push({
+        eui: item.getDevEui(), port: item.getFPort(), confirmed: item.getConfirmed(),
+        buffer: Buffer.isBuffer(item.getData()), bytes: Buffer.from(item.getData_asU8()),
+        expires: item.hasExpiresAt(),
+      });
+      if (scenario === 'enqueue_zero' || (scenario === 'enqueue_partial' && frames.length === 4)) {
+        return unavailable(callback);
+      }
+      const response = new modules.pb.EnqueueDeviceQueueItemResponse();
+      const id = scenario === 'missing_id' ? '' : `recipe-${frames.length}`;
+      response.setId(id);
+      if (id) accepted.push(id);
+      callback(null, response);
+    },
+  };
+  if (scenario === 'missing_queue_method') client.getDeviceQueue = undefined;
+  if (scenario === 'missing_enqueue_method') client.enqueueDownlink = undefined;
+  return {
+    client, rpc, frames, accepted, closed,
+    setQueue(ids) { queueIds = ids; },
+    factory: { createProvisioningClientFromEnv() { creations += 1; return client; } },
+    assertClosed() {
+      assert.equal(creations, 1);
+      assert.deepEqual(closed.slice().sort(), RECIPE_SERVICES.slice().sort());
+    },
+  };
+}
+
+function recipeRow(db) {
+  return { ...db.prepare('SELECT * FROM sdi12_recipe_deployments WHERE deveui = ?').get(RECIPE_EUI) };
+}
+
+function recipeDevice(db) {
+  return { ...db.prepare('SELECT * FROM devices WHERE deveui = ?').get(RECIPE_EUI) };
+}
+
+async function seedRealRecipe(db, commissioning, rollback) {
+  insertDevice(db, { deveui: RECIPE_EUI });
+  const layout = {
+    version: 1, address: '0',
+    sensors: [
+      { channel: 2, response_position: 2, depth_cm: 30, type: 'ENVIROSCAN' },
+      { channel: 1, response_position: 1, depth_cm: 10, type: 'TRISCAN' },
+    ],
+  };
+  const save = (value) => commissioning.saveSentekLayout(facadeDb(db), {
+    deveui: RECIPE_EUI, profileId: 'SENTEK_ENVIROSCAN', layout: value,
+    depths: { vwc_1: 10, soil_vic_1: 10, vwc_2: 30 },
+  });
+  await save(layout);
+  const target = JSON.parse(recipeRow(db).desired_recipe_json);
+  if (rollback) {
+    db.prepare('UPDATE sdi12_recipe_deployments SET compatible_recipe_json = desired_recipe_json, ' +
+      'compatible_layout_json = ?, compatible_at = ? WHERE deveui = ?')
+      .run(recipeDevice(db).sdi12_channel_layout_json, new Date().toISOString(), RECIPE_EUI);
+    await save({ ...layout, address: 'C' });
+  }
+  assert.equal(target.frames.length, 12);
+  return target;
+}
+
+function assertRecipeRpc(transport, target) {
+  const configured = Number(process.env.OSI_CHIRPSTACK_GRPC_DEADLINE_MS);
+  const expected = Number.isFinite(configured) && configured > 0 ? Math.min(configured, 120000) : 20000;
+  for (const call of transport.rpc) {
+    assert.equal(call.eui, RECIPE_EUI);
+    assert.ok(Number.isFinite(call.budget) && call.budget > 0);
+    assert.ok(call.budget <= expected && call.budget >= expected - 1000);
+  }
+  for (const [index, frame] of transport.frames.entries()) {
+    assert.equal(frame.eui, RECIPE_EUI);
+    assert.equal(frame.port, 2);
+    assert.equal(frame.confirmed, true);
+    assert.equal(frame.buffer, true);
+    assert.equal(frame.expires, false);
+    assert.deepEqual(frame.bytes, Buffer.from(target.frames[index].base64, 'base64'));
+  }
+}
+
+for (const profile of ['bcm2712', 'bcm2709']) {
+  for (const operation of ['apply', 'rollback']) {
+    for (const scenario of [
+      'success', 'nonempty', 'get_error', 'enqueue_zero', 'enqueue_partial', 'missing_id',
+      'missing_queue_method', 'missing_enqueue_method',
+    ]) {
+      test(`real composition ${profile} ${operation} ${scenario}`, async () => {
+        const modules = recipeModules(profile);
+        const db = seedTestDb();
+        const transport = recipeTransport(modules, scenario);
+        try {
+          const target = await seedRealRecipe(db, modules.commissioning, operation === 'rollback');
+          const before = recipeRow(db);
+          const deviceBefore = recipeDevice(db);
+          const execution = await executeFunction(loadNode(`sdi12-recipe-${operation}-action-fn`, modules.flowPath), {
+            msg: { deviceRow: { deveui: RECIPE_EUI.toLowerCase() }, req: { body: {} } }, db,
+            osiLibModules: { 'sdi12-commissioning': modules.commissioning, chirpstack: transport.factory },
+          });
+          const success = scenario === 'success';
+          const expectedStatus = success ? 202 : scenario === 'nonempty' ? 409 : 500;
+          assert.equal(execution.result.statusCode, expectedStatus);
+          assert.deepEqual(execution.errors, []);
+          assert.deepEqual(execution.warnings, []);
+          transport.assertClosed();
+          assertRecipeRpc(transport, target);
+          const expectedRpc = scenario === 'missing_queue_method' ? [] : ['getQueue'];
+          const attempts = success ? 12 : scenario === 'enqueue_partial' ? 4 :
+            ['enqueue_zero', 'missing_id'].includes(scenario) ? 1 : 0;
+          assert.deepEqual(transport.rpc.map((call) => call.method), expectedRpc.concat(Array(attempts).fill('enqueue')));
+          const row = recipeRow(db);
+          if (success) {
+            assert.equal(row.status, 'queued');
+            assert.equal(row.desired_version, before.desired_version + (operation === 'rollback' ? 1 : 0));
+            assert.deepEqual(JSON.parse(row.queue_item_ids_json), transport.accepted);
+            assert.equal(transport.accepted.length, 12);
+            assert.equal(row.queue_drained_at, null);
+            assert.equal(row.last_error_code, null);
+            assert.equal(Date.parse(row.commissioning_deadline_at) - Date.parse(row.queued_at), 12 * 3600000);
+            assert.deepEqual(execution.result.payload, modules.commissioning.projectDeployment(row));
+            assert.equal(recipeDevice(db).sdi12_channel_layout_json, operation === 'rollback' ? before.compatible_layout_json : deviceBefore.sdi12_channel_layout_json);
+            assert.equal(recipeDevice(db).sync_version, deviceBefore.sync_version + (operation === 'rollback' ? 1 : 0));
+          } else {
+            assert.deepEqual(execution.result.payload, {
+              message: 'SDI-12 recipe deployment failed',
+              code: scenario === 'nonempty' ? 'device_queue_not_empty' : 'chirpstack_unknown',
+            });
+            assert.equal(JSON.stringify(execution.result.payload).includes('private transport detail'), false);
+            assert.deepEqual(recipeDevice(db), deviceBefore);
+            if (operation === 'rollback' && scenario !== 'enqueue_partial') {
+              assert.deepEqual(row, before);
+            } else {
+              const partial = scenario === 'enqueue_partial';
+              assert.equal(row.status, partial ? 'degraded' : 'not_applied');
+              assert.equal(row.last_error_code, scenario === 'nonempty' ? 'device_queue_not_empty' : 'chirpstack_unknown');
+              assert.deepEqual(row.queue_item_ids_json && JSON.parse(row.queue_item_ids_json), partial ? transport.accepted : null);
+              assert.equal(transport.accepted.length, partial ? 3 : 0);
+              assert.equal(row.queue_drained_at, null);
+              if (partial) assert.equal(Date.parse(row.commissioning_deadline_at) - Date.parse(row.queued_at), 12 * 3600000);
+              else assert.equal(row.commissioning_deadline_at, null);
+            }
+          }
+        } finally {
+          transport.client.close();
+          db.close();
+        }
+      });
+    }
+  }
+  for (const scenario of ['retained', 'unrelated', 'empty', 'rpc_error', 'deadline']) {
+    test(`real composition ${profile} queued poll ${scenario}`, async () => {
+      const modules = recipeModules(profile);
+      const db = seedTestDb();
+      const transport = recipeTransport(modules, scenario);
+      try {
+        const target = await seedRealRecipe(db, modules.commissioning, false);
+        const now = new Date().toISOString();
+        const deadline = new Date(Date.parse(now) + 12 * 3600000).toISOString();
+        db.prepare('UPDATE sdi12_recipe_deployments SET status = ?, queue_item_ids_json = ?, ' +
+          'queued_at = ?, commissioning_deadline_at = ? WHERE deveui = ?')
+          .run('queued', '["recipe-1","recipe-2"]', now, deadline, RECIPE_EUI);
+        const before = recipeRow(db);
+        transport.setQueue(['retained', 'deadline'].includes(scenario) ? ['recipe-2', 'unrelated'] : scenario === 'unrelated' ? ['unrelated'] : []);
+        if (scenario === 'deadline') {
+          await modules.commissioning.pollDeployments(facadeDb(db), transport.client, { now: deadline });
+          transport.client.close();
+          assert.deepEqual(transport.closed.slice().sort(), RECIPE_SERVICES.slice().sort());
+        } else {
+          const execution = await executeFunction(loadNode('sdi12-recipe-poll-fn', modules.flowPath), {
+            msg: {}, db,
+            osiLibModules: { 'sdi12-commissioning': modules.commissioning, chirpstack: transport.factory },
+          });
+          assert.equal(execution.result, null);
+          assert.deepEqual(execution.errors, []);
+          assert.deepEqual(execution.warnings, scenario === 'rpc_error' ? ['SDI12 recipe poll failed code=chirpstack_unknown'] : []);
+          transport.assertClosed();
+        }
+        assertRecipeRpc(transport, target);
+        assert.deepEqual(transport.rpc.map((call) => call.method), ['getQueue']);
+        assert.deepEqual(transport.frames, []);
+        const row = recipeRow(db);
+        assert.equal(row.queue_item_ids_json, before.queue_item_ids_json);
+        assert.equal(row.commissioning_deadline_at, deadline);
+        assert.equal(row.desired_version, before.desired_version);
+        assert.equal(row.compatible_recipe_json, before.compatible_recipe_json);
+        if (['retained', 'rpc_error'].includes(scenario)) assert.deepEqual(row, before);
+        else if (scenario === 'deadline') {
+          assert.equal(row.status, 'degraded');
+          assert.equal(row.last_error_code, 'queue_delivery_timeout');
+          assert.equal(row.queue_drained_at, null);
+        } else {
+          assert.equal(row.status, 'queued');
+          assert.ok(Number.isFinite(Date.parse(row.queue_drained_at)));
+          assert.ok(Date.parse(row.queue_drained_at) >= Date.parse(now));
+          assert.equal(row.last_error_code, null);
+          assert.equal(row.observed_count, 0);
+        }
+      } finally {
+        transport.client.close();
+        db.close();
+      }
+    });
+  }
+}
