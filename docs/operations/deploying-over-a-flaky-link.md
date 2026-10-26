@@ -1,5 +1,7 @@
 # Deploying over a flaky link
 
+Follow the mandatory [migration source and SSH prerequisites](migration-manifest-trust.md#required-deployment-prerequisites) before either tunnel or offline delivery.
+
 `deploy.sh` normally fetches every file it needs via `curl $BASE/<path>`,
 where `$BASE` is an SSH reverse tunnel (`ssh -R 9876:localhost:9876 ...`)
 back to a `python3 -m http.server` on your workstation (see

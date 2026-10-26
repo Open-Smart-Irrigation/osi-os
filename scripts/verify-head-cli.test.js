@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,7 +14,7 @@ function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'verify-head-c
 function tinyMigrationsDir(root) {
   const dir = path.join(root, 'm');
   fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0001__b.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
   return dir;
 }
 
@@ -32,7 +33,7 @@ test('exits 1 and prints ok:false for a DB with pending migrations', async () =>
   const dir = tinyMigrationsDir(root);
   const db = path.join(root, 't.db');
   await applyPending(cliRunner(db), { migrationsDir: dir, appVersion: 'x' });
-  fs.writeFileSync(path.join(dir, '0002__c.sql'), '-- risk: additive\nCREATE TABLE t2 (id INTEGER PRIMARY KEY);\n');
+  fixtureWrite(path.join(dir, '0002__c.sql'), '-- risk: additive\nCREATE TABLE t2 (id INTEGER PRIMARY KEY);\n');
 
   let status = 0;
   let out = '';

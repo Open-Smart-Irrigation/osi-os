@@ -8,7 +8,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
 const { applyPending } = require('../lib/osi-migrate');
-const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
+const { loadMigrationCorpus, resolveCorpus } = require('../lib/osi-migrate/migrations-loader');
 const { ensureLedger, getApplied } = require('../lib/osi-migrate/ledger');
 const { pruneByPrefix } = require('../lib/osi-migrate/backup');
 
@@ -40,13 +40,14 @@ function offDeviceBackup(dbPath, backupDir) {
   return dest;
 }
 
-async function pendingRisksAfterApplied(dbPath, migrationsDir) {
+async function pendingRisksAfterApplied(dbPath, migrationsDir, corpus) {
+  corpus = resolveCorpus(migrationsDir, corpus);
   const runner = cliRunner(dbPath);
   await ensureLedger(runner);
   const appliedOk = new Set(
     (await getApplied(runner)).filter((m) => m.status === 'applied').map((m) => m.version)
   );
-  return loadMigrations(migrationsDir)
+  return corpus.migrations
     .filter((m) => !appliedOk.has(m.version))
     .map((m) => m.risk);
 }
@@ -99,6 +100,13 @@ async function runMigrateCli({
     throw new Error('refusing: --backup-dir is required (persistent pre-migration backup)');
   }
 
+  // Loaded before the --prune-only branch on purpose: the issue 397 plan
+  // requires a valid corpus before any backup creation or pruning, and
+  // scripts/migration-caller-corpus.test.js pins that an invalid corpus
+  // prunes nothing. Pruning itself never reads the corpus. deploy.sh calls
+  // --prune-only only after fetch_migration_runner has validated the corpus,
+  // and tolerates its failure (`|| true`).
+  const corpus = loadMigrationCorpus(migrationsDir);
   const keep = resolveKeep();
 
   if (pruneOnly) {
@@ -117,7 +125,7 @@ async function runMigrateCli({
 
   fs.mkdirSync(backupDir, { recursive: true });
 
-  const risks = await pendingRisksAfterApplied(dbPath, migrationsDir);
+  const risks = await pendingRisksAfterApplied(dbPath, migrationsDir, corpus);
   const needsBackup = risks.some((r) => r === 'destructive' || r === 'data');
   let offDevice = null;
   if (needsBackup) {
@@ -135,6 +143,7 @@ async function runMigrateCli({
   try {
     const res = await applyPending(cliRunner(dbPath), {
       migrationsDir,
+      corpus,
       appVersion: 'stage1-deploy',
       writersStopped: true,
     });

@@ -199,6 +199,8 @@ an unknown credential.
 
 ## Deploy runbook (reverse-tunnel flow)
 
+The [migration source and SSH prerequisites](../../../docs/operations/migration-manifest-trust.md#required-deployment-prerequisites) are mandatory: select and protect a stable source, authenticate the host/user, own the loopback listener and forwarding port, and confirm forwarding succeeded.
+
 This is the standard way to push a new build to a live gateway without exposing the
 Pi to the internet or needing a registry. Numbered, copy-pasteable, run from your
 dev workstation unless noted.
@@ -228,7 +230,7 @@ dev workstation unless noted.
 4. **Open a reverse tunnel and run the deploy script on the Pi**, downloading first
    instead of piping into `sh`:
    ```bash
-   ssh -R 9876:localhost:9876 root@<pi-ip> \
+   ssh -o ExitOnForwardFailure=yes -R 9876:localhost:9876 root@<pi-ip> \
      'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
    ```
    **Why download-then-run instead of `curl ... | sh`:** in a pipe, the shell's exit

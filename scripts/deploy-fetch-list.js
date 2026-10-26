@@ -23,6 +23,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { loadMigrationCorpus } = require('../lib/osi-migrate/migrations-loader');
 
 const QSTR = '"((?:\\\\.|[^"\\\\])*)"';
 // Optional backslash-newline continuation (with following indentation) between args.
@@ -48,9 +49,7 @@ function findForLoopList(deployText, varName) {
 }
 
 function findLineageFixtures(repoRoot, lineage) {
-  const checksumsPath = path.join(repoRoot, 'scripts/fixtures/lineages', lineage, 'CHECKSUMS.json');
-  const manifest = JSON.parse(fs.readFileSync(checksumsPath, 'utf8'));
-  return Object.keys(manifest).sort();
+  return loadMigrationCorpus(path.join(repoRoot, 'scripts/fixtures/lineages', lineage)).migrations.map((m) => m.name);
 }
 
 function findSeedDbCandidates(deployText) {
@@ -72,11 +71,7 @@ function findSeedDbCandidates(deployText) {
 }
 
 function findMigrationFiles(repoRoot) {
-  const checksumsPath = path.join(repoRoot, 'database/migrations/ordered/CHECKSUMS.json');
-  const manifest = JSON.parse(fs.readFileSync(checksumsPath, 'utf8'));
-  return Object.keys(manifest)
-    .sort()
-    .map((name) => `database/migrations/ordered/${name}`);
+  return loadMigrationCorpus(path.join(repoRoot, 'database/migrations/ordered')).migrations.map((m) => `database/migrations/ordered/${m.name}`);
 }
 
 // Extracts every `fetch "src" "dest"` and `fetch_required "label" "src" "dest"`
@@ -193,10 +188,40 @@ function computeFetchList(repoRoot) {
   return Array.from(paths).sort();
 }
 
-module.exports = { computeFetchList, extractCallSites, countCallSiteTokens };
-
+function collectCorpusIdentities(repoRoot) {
+  const text = fs.readFileSync(path.join(repoRoot, 'deploy.sh'), 'utf8');
+  const dirs = ['database/migrations/ordered', ...findForLoopList(text, 'lineage').map((n) => `scripts/fixtures/lineages/${n}`)];
+  return Object.fromEntries(dirs.sort().map((dir) => [dir, loadMigrationCorpus(path.join(repoRoot, dir)).identity]));
+}
+function parseCli(argv) {
+  const repoRoot = argv.length && !argv[0].startsWith('--') ? path.resolve(argv.shift()) : path.resolve(__dirname, '..');
+  const opts = { repoRoot, identitiesOut: null, verify: null };
+  while (argv.length) {
+    const flag = argv.shift(), value = argv.shift();
+    if (!value || value.startsWith('--')) throw new Error('missing value for ' + flag);
+    if (flag === '--corpus-identities-out' && !opts.identitiesOut) opts.identitiesOut = value;
+    else if (flag === '--verify-corpus-identities' && !opts.verify) opts.verify = value;
+    else throw new Error('unknown or repeated option: ' + flag);
+  }
+  if (opts.identitiesOut && opts.verify) throw new Error('choose one identity mode');
+  return opts;
+}
+function runCli(argv) {
+  const opts = parseCli([...argv]);
+  const identities = collectCorpusIdentities(opts.repoRoot);
+  if (opts.verify) {
+    const expected = JSON.parse(fs.readFileSync(opts.verify, 'utf8'));
+    if (!expected || Array.isArray(expected) || typeof expected !== 'object') throw new Error('invalid source identities');
+    const sorted = Object.fromEntries(Object.keys(expected).sort().map((k) => [k, expected[k]]));
+    if (JSON.stringify(sorted) !== JSON.stringify(identities)) throw new Error('staged migration corpus differs from accepted source identities');
+    return;
+  }
+  const list = computeFetchList(opts.repoRoot);
+  if (opts.identitiesOut) fs.writeFileSync(opts.identitiesOut, JSON.stringify(identities, null, 2) + '\n');
+  for (const name of list) console.log(name);
+}
+module.exports = { computeFetchList, extractCallSites, countCallSiteTokens, collectCorpusIdentities, parseCli, runCli };
 if (require.main === module) {
-  const repoRoot = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve(__dirname, '..');
-  const list = computeFetchList(repoRoot);
-  for (const p of list) console.log(p);
+  try { runCli(process.argv.slice(2)); }
+  catch (e) { console.error('deploy-fetch-list: ' + e.message); process.exit(1); }
 }

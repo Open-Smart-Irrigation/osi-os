@@ -1353,47 +1353,19 @@ ensure_sqlite3_cli() {
 # them) in directory $2; $3 is the repo path printed in each ERROR line.
 check_fetched_manifest() {
     node -e '
-        const crypto = require("crypto");
-        const fs = require("fs");
-        const path = require("path");
-        const [mode, dir, label] = process.argv.slice(1);
-        let manifest;
+        const [modulePath, mode, dir, label] = process.argv.slice(1);
         try {
-            manifest = JSON.parse(fs.readFileSync(path.join(dir, "CHECKSUMS.json"), "utf8"));
+            const loader = require(modulePath);
+            if (mode === "manifest") {
+                for (const entry of loader.readMigrationManifest(dir)) console.log(entry.name);
+            } else if (mode === "files") {
+                loader.loadMigrationCorpus(dir);
+            } else { throw new Error("unknown manifest validation mode"); }
         } catch (error) {
-            console.error("ERROR: " + label + "/CHECKSUMS.json is missing, empty or not valid JSON: " + error.message);
+            console.error("ERROR: " + label + ": " + error.message);
             process.exit(1);
         }
-        const names = manifest && typeof manifest === "object" && !Array.isArray(manifest) ? Object.keys(manifest).sort() : [];
-        const malformed = names.filter((name) => name.includes("/") || !/^[0-9a-f]{64}$/.test(String(manifest[name])));
-        if (names.length === 0 || malformed.length > 0) {
-            console.error("ERROR: " + label + "/CHECKSUMS.json names no files or has malformed entries " + malformed.join(" "));
-            process.exit(1);
-        }
-        if (mode !== "files") process.exit(0);
-        let failed = false;
-        for (const name of names) {
-            let actual;
-            try {
-                actual = crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, name))).digest("hex");
-            } catch (error) {
-                console.error("ERROR: " + label + "/" + name + " is named in CHECKSUMS.json but missing (" + (error.code || error.message) + ")");
-                failed = true;
-                continue;
-            }
-            if (actual !== manifest[name]) {
-                console.error("ERROR: " + label + "/" + name + " does not match its SHA-256 in CHECKSUMS.json (truncated or altered download)");
-                failed = true;
-            }
-        }
-        for (const name of fs.readdirSync(dir)) {
-            if (name.endsWith(".sql") && !Object.prototype.hasOwnProperty.call(manifest, name)) {
-                console.error("ERROR: " + label + "/" + name + " is not named in CHECKSUMS.json");
-                failed = true;
-            }
-        }
-        process.exit(failed ? 1 : 0);
-    ' "$1" "$2" "$3"
+    ' "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$1" "$2" "$3"
 }
 
 # Fails, naming the file, when a fetched JavaScript file is missing, empty or
@@ -1435,19 +1407,25 @@ fetch_migration_runner() {
         return 1
     fi
 
+    fetch_required "Migration manifest parser" \
+        "lib/osi-migrate/migration-manifest.js" \
+        "$TMP_DIR/lib/osi-migrate/migration-manifest.js" || return 1
+    fetch_required "Migration corpus loader" \
+        "lib/osi-migrate/migrations-loader.js" \
+        "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+    check_fetched_js_files "$TMP_DIR/lib/osi-migrate/migration-manifest.js" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" || return 1
+
     fetch_required "Migration checksum manifest" \
         "database/migrations/ordered/CHECKSUMS.json" \
         "$migrations_dir/CHECKSUMS.json" || return 1
-    check_fetched_manifest manifest "$migrations_dir" database/migrations/ordered || return 1
+    migration_names="$(check_fetched_manifest manifest "$migrations_dir" database/migrations/ordered)" || return 1
 
-    for migration in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$migrations_dir/CHECKSUMS.json"); do
+    for migration in $migration_names; do
         fetch_required "Migration $migration" \
             "database/migrations/ordered/$migration" \
             "$migrations_dir/$migration" || return 1
     done
-    # migrate-cli.js and verify-head-cli.js read this directory, not
-    # CHECKSUMS.json: a migration missing here would be skipped without an
-    # error, so the fetched set must be exactly the manifest's.
+    # Keep the early transfer guard; runtime independently validates the same corpus.
     check_fetched_manifest files "$migrations_dir" database/migrations/ordered || return 1
 
     # The positional parameters collect every fetched runner file for the
@@ -1473,7 +1451,6 @@ fetch_migration_runner() {
         fingerprints.js \
         index.js \
         ledger.js \
-        migrations-loader.js \
         runner-iface.js \
         runner.js \
         sql-normalize.js
@@ -1502,8 +1479,8 @@ fetch_reconciliation_assets() {
         fetch_required "Lineage fixture manifest ($lineage)" \
             "scripts/fixtures/lineages/$lineage/CHECKSUMS.json" \
             "$lineage_fixtures_dir/$lineage/CHECKSUMS.json" || return 1
-        check_fetched_manifest manifest "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage" || return 1
-        for fixture in $(node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); for (const name of Object.keys(manifest).sort()) console.log(name);" "$lineage_fixtures_dir/$lineage/CHECKSUMS.json"); do
+        fixture_names="$(check_fetched_manifest manifest "$lineage_fixtures_dir/$lineage" "scripts/fixtures/lineages/$lineage")" || return 1
+        for fixture in $fixture_names; do
             fetch_required "Lineage fixture $lineage/$fixture" \
                 "scripts/fixtures/lineages/$lineage/$fixture" \
                 "$lineage_fixtures_dir/$lineage/$fixture" || return 1
@@ -1677,7 +1654,7 @@ run_schema_migration() {
         # reconcile probe begin
         recon_probe_failed=""
         recon_ledger_rows="$(sqlite3 "$DB_PATH" "SELECT version, checksum FROM schema_migrations WHERE version > 21 ORDER BY version;")" || recon_probe_failed="ledger"
-        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const name=Object.keys(manifest).find((n) => n.startsWith(padded + '__')); const mainChecksum=name ? manifest[name] : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$migrations_dir/CHECKSUMS.json")" || recon_probe_failed="${recon_probe_failed:-compare}"
+        recon_probe_version="$(printf '%s\n' "$recon_ledger_rows" | node -e "const fs=require('fs'); const manifest=require(process.argv[1]).readMigrationManifest(process.argv[2]); const lines=fs.readFileSync(0, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); for (const line of lines) { const sep=line.indexOf('|'); if (sep===-1) continue; const version=line.slice(0, sep); const ledgerChecksum=line.slice(sep + 1); const padded=String(Number(version)).padStart(4,'0'); const entry=manifest.find((e) => e.name.startsWith(padded + '__')); const mainChecksum=entry ? entry.checksum : ''; if (mainChecksum && mainChecksum !== ledgerChecksum) { process.stdout.write(version); process.exit(0); } }" "$TMP_DIR/lib/osi-migrate/migrations-loader.js" "$migrations_dir")" || recon_probe_failed="${recon_probe_failed:-compare}"
         # reconcile probe end
         case "$recon_probe_failed" in
             ledger)

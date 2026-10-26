@@ -21,6 +21,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { cliRunner } = require('../../lib/osi-migrate/runner-iface');
 const { bootstrapFresh } = require('../../lib/osi-migrate');
+const { resolveCorpus, loadMigrationCorpus, materializeMigrations } = require('../../lib/osi-migrate/migrations-loader');
 const { snapshotSchema, compareSchemas, FAILING_CLASSES } = require('../semantic-schema-compare');
 
 const REPO = path.resolve(__dirname, '..', '..');
@@ -86,13 +87,13 @@ function sha256File(p) {
   return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 }
 
-async function buildReference1(scratchRoot) {
+async function buildReference1(scratchRoot, migrationsDir, corpus) {
+  corpus = resolveCorpus(migrationsDir, corpus);
   const dir = fs.mkdtempSync(path.join(scratchRoot, 'uganda-audit-ref1-'));
   const subset = path.join(dir, 'migrations');
-  fs.mkdirSync(subset);
-  fs.copyFileSync(SOURCE_MIGRATION, path.join(subset, path.basename(SOURCE_MIGRATION)));
+  const selected = materializeMigrations(subset, [{ corpus, name: '0001__baseline.sql' }]);
   const dbPath = path.join(dir, 'ref1.db');
-  await bootstrapFresh(cliRunner(dbPath), { migrationsDir: subset, appVersion: 'uganda-audit-ref1' });
+  await bootstrapFresh(cliRunner(dbPath), { migrationsDir: subset, corpus: selected, appVersion: 'uganda-audit-ref1' });
   return dbPath;
 }
 
@@ -152,10 +153,11 @@ async function runAudit({ dbPath, migrationsDir = DEFAULT_MIGRATIONS_DIR, log = 
   if (!dbPath) throw new Error('usage: uganda-schema-audit.js <path-to-farming.db> [--out <file>]');
   if (!fs.existsSync(dbPath)) throw new Error(`refusing: database file does not exist: ${dbPath}`);
 
+  const corpus = loadMigrationCorpus(migrationsDir);
   const shaBefore = sha256File(dbPath);
   const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-audit-'));
   const liveRunner = cliRunner(dbPath);
-  const ref1Path = await buildReference1(scratchRoot);
+  const ref1Path = await buildReference1(scratchRoot, migrationsDir, corpus);
   const ref1Runner = cliRunner(ref1Path);
 
   log('[audit] snapshotting live schema and reference(1)...');
@@ -204,7 +206,7 @@ async function runAudit({ dbPath, migrationsDir = DEFAULT_MIGRATIONS_DIR, log = 
     db: path.resolve(dbPath),
     sha256: shaAfter,
     generatedAt: new Date().toISOString(),
-    referenceMigration: path.relative(REPO, SOURCE_MIGRATION),
+    referenceMigration: path.relative(REPO, path.join(corpus.dir, '0001__baseline.sql')),
     rebuildTables: REBUILD_TABLES,
     rowCounts: tables,
     diffs,

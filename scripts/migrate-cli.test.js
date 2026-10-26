@@ -1,4 +1,5 @@
 'use strict';
+const { fixtureWrite, fixtureCopy } = require('../lib/osi-migrate/__tests__/helpers/migration-fixture');
 // Stage 1 migrate-cli: persistent fsync'd backup before destructive/data apply,
 // applyPending under writersStopped, and byte-image restore on failure.
 // Spec: docs/superpowers/specs/2026-07-08-option-b-stage1-deploy-runner-design.md
@@ -45,7 +46,7 @@ async function deviceAtVersion(dir, version) {
   for (const f of fs.readdirSync(MIGRATIONS_DIR)) {
     const match = f.match(/^(\d{4})__/);
     if (match && Number(match[1]) <= version) {
-      fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(sub, f));
+      fixtureCopy(path.join(MIGRATIONS_DIR, f), path.join(sub, f));
     }
   }
   const db = path.join(dir, `device-v${version}.db`);
@@ -96,17 +97,17 @@ test('injected migration failure: byte-image restored, DB unchanged', async () =
   const poisoned = path.join(dir, 'poisoned');
   fs.mkdirSync(poisoned);
   for (const f of fs.readdirSync(MIGRATIONS_DIR)) {
-    fs.copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(poisoned, f));
+    fixtureCopy(path.join(MIGRATIONS_DIR, f), path.join(poisoned, f));
   }
   const bad = '-- risk: data\nPRAGMA foreign_keys=ON;\n'
     + "INSERT INTO device_data (deveui, recorded_at) VALUES ('NO_SUCH_DEVICE_EUI', '2020-01-01T00:00:00Z');\n";
-  fs.writeFileSync(path.join(poisoned, '0008__bad.sql'), bad);
+  fixtureWrite(path.join(poisoned, '0008__bad.sql'), bad);
   const manifest = JSON.parse(fs.readFileSync(path.join(poisoned, 'CHECKSUMS.json'), 'utf8'));
   const crypto = require('node:crypto');
   manifest['0008__bad.sql'] = crypto.createHash('sha256')
     .update(fs.readFileSync(path.join(poisoned, '0008__bad.sql')))
     .digest('hex');
-  fs.writeFileSync(path.join(poisoned, 'CHECKSUMS.json'), JSON.stringify(manifest, null, 2) + '\n');
+  fixtureWrite(path.join(poisoned, 'CHECKSUMS.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   const before = fs.readFileSync(db);
   const res = await runMigrateCli({ dbPath: db, backupDir, migrationsDir: poisoned, log: () => {} })
@@ -142,7 +143,7 @@ test('refuses a missing backup-dir argument', async () => {
 function writeStalePremigrateFiles(backupDir, dbBasename, stamps) {
   fs.mkdirSync(backupDir, { recursive: true });
   for (const s of stamps) {
-    fs.writeFileSync(path.join(backupDir, `${dbBasename}.premigrate-2020-01-${s}`), 'stale');
+    fixtureWrite(path.join(backupDir, `${dbBasename}.premigrate-2020-01-${s}`), 'stale');
   }
 }
 
@@ -160,18 +161,18 @@ async function deviceWithPendingDataMigration(dir) {
   fs.mkdirSync(migDir);
   const baseline = '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\n';
   const pending = '-- risk: data\nALTER TABLE t ADD COLUMN w TEXT;\n';
-  fs.writeFileSync(path.join(migDir, '0001__baseline.sql'), baseline);
-  fs.writeFileSync(path.join(migDir, '0002__addcol.sql'), pending);
+  fixtureWrite(path.join(migDir, '0001__baseline.sql'), baseline);
+  fixtureWrite(path.join(migDir, '0002__addcol.sql'), pending);
   const manifest = {
     '0001__baseline.sql': crypto.createHash('sha256').update(baseline).digest('hex'),
     '0002__addcol.sql': crypto.createHash('sha256').update(pending).digest('hex'),
   };
-  fs.writeFileSync(path.join(migDir, 'CHECKSUMS.json'), JSON.stringify(manifest, null, 2) + '\n');
+  fixtureWrite(path.join(migDir, 'CHECKSUMS.json'), JSON.stringify(manifest, null, 2) + '\n');
 
   const sub = path.join(dir, 'sub');
   fs.mkdirSync(sub);
-  fs.copyFileSync(path.join(migDir, '0001__baseline.sql'), path.join(sub, '0001__baseline.sql'));
-  fs.writeFileSync(
+  fixtureCopy(path.join(migDir, '0001__baseline.sql'), path.join(sub, '0001__baseline.sql'));
+  fixtureWrite(
     path.join(sub, 'CHECKSUMS.json'),
     JSON.stringify({ '0001__baseline.sql': manifest['0001__baseline.sql'] }, null, 2) + '\n'
   );
@@ -226,8 +227,8 @@ test('retention: runs on the !needsBackup (additive-only) path too, with no new 
   const migDir = path.join(dir, 'mig');
   fs.mkdirSync(migDir);
   const baseline = '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);\n';
-  fs.writeFileSync(path.join(migDir, '0001__baseline.sql'), baseline);
-  fs.writeFileSync(
+  fixtureWrite(path.join(migDir, '0001__baseline.sql'), baseline);
+  fixtureWrite(
     path.join(migDir, 'CHECKSUMS.json'),
     JSON.stringify({
       '0001__baseline.sql': require('node:crypto').createHash('sha256').update(baseline).digest('hex'),
@@ -288,14 +289,14 @@ test('deploy prune step: side files do not count as backups (default keep 3)', (
   const { spawnSync } = require('node:child_process');
   const dir = scratch();
   const db = path.join(dir, 'farming.db');
-  fs.writeFileSync(db, 'live');
+  fixtureWrite(db, 'live');
   const backupDir = path.join(dir, 'migrate');
   fs.mkdirSync(backupDir);
   const pm = 'farming.db.premigrate-';
   const backups = ['2026-01-05T10-50-05-720Z', '2026-01-09T22-48-02-472Z', '2026-01-17T20-54-56-162Z']
     .map((s) => pm + s);
   const names = [...backups, `${backups[2]}-shm`, `${backups[2]}-wal`];
-  for (const n of names) fs.writeFileSync(path.join(backupDir, n), 'b');
+  for (const n of names) fixtureWrite(path.join(backupDir, n), 'b');
   const env = { ...process.env };
   delete env.MIGRATE_BACKUP_KEEP;
   const cli = path.join(__dirname, 'migrate-cli.js');
@@ -310,7 +311,7 @@ test('deploy prune step: side files do not count as backups (default keep 3)', (
 
   // A fourth backup arrives: only the oldest backup goes, the newest one and its side files stay.
   const fourth = `${pm}2026-01-20T08-00-00-000Z`;
-  fs.writeFileSync(path.join(backupDir, fourth), 'b');
+  fixtureWrite(path.join(backupDir, fourth), 'b');
   r = run();
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(

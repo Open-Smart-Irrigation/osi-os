@@ -50,7 +50,7 @@ echo "Repo:   $REPO_ROOT"
 echo "GUI:    $REACT_GUI_TARBALL"
 
 fetch_list_file="$stage_dir/.fetch-list.txt"
-node "$REPO_ROOT/scripts/deploy-fetch-list.js" "$REPO_ROOT" > "$fetch_list_file"
+node "$REPO_ROOT/scripts/deploy-fetch-list.js" "$REPO_ROOT" --corpus-identities-out "$stage_dir/.corpus-identities.json" > "$fetch_list_file"
 
 path_count=0
 while IFS= read -r rel_path; do
@@ -86,7 +86,8 @@ cp "$REPO_ROOT/scripts/deploy-local-server.js" "$stage_dir/scripts/deploy-local-
 # `fetch "react_gui.tar.gz" ...` request.
 cp "$REACT_GUI_TARBALL" "$stage_dir/react_gui.tar.gz"
 
-rm -f "$fetch_list_file"
+node "$REPO_ROOT/scripts/deploy-fetch-list.js" "$stage_dir" --verify-corpus-identities "$stage_dir/.corpus-identities.json"
+rm -f "$fetch_list_file" "$stage_dir/.corpus-identities.json"
 
 bundle_name="deploy-bundle-${BUNDLE_SHA}-${BUNDLE_TS}.tar.gz"
 bundle_path="$OUT_DIR/$bundle_name"

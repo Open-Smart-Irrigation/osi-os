@@ -2,7 +2,7 @@
 'use strict';
 // Thin CLI wrapper over lib/osi-migrate's verifyHead (previously test-only).
 // Prints the JSON result and exits 0 when ok:true, 1 when ok:false, 2 on
-// usage/fatal error. Read-only: never mutates the database.
+// usage/fatal error. Valid-corpus fingerprint grace may restamp; corpus errors never mutate.
 const fs = require('node:fs');
 const path = require('node:path');
 const { verifyHead } = require('../lib/osi-migrate');

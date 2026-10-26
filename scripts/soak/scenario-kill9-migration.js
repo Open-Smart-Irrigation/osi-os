@@ -6,11 +6,20 @@ const path = require('node:path');
 const { fork, execFileSync } = require('node:child_process');
 const { cliRunner } = require('../../lib/osi-migrate/runner-iface');
 const { applyPending, verifyHead } = require('../../lib/osi-migrate');
+const crypto = require('node:crypto');
 const { emitArtifact, scratchDir } = require('./rig');
 
 function seedMigrationsDir(dir) {
-  fs.writeFileSync(path.join(dir, '0001__base.sql'), '-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n');
-  fs.writeFileSync(path.join(dir, '0002__addcol.sql'), '-- risk: additive\nALTER TABLE t ADD COLUMN v TEXT;\n');
+  const files = {
+    '0001__base.sql': Buffer.from('-- risk: additive\nCREATE TABLE t (id INTEGER PRIMARY KEY);\n'),
+    '0002__addcol.sql': Buffer.from('-- risk: additive\nALTER TABLE t ADD COLUMN v TEXT;\n'),
+  };
+  const expected = {};
+  for (const [name, raw] of Object.entries(files)) {
+    fs.writeFileSync(path.join(dir, name), raw);
+    expected[name] = crypto.createHash('sha256').update(raw).digest('hex');
+  }
+  fs.writeFileSync(path.join(dir, 'CHECKSUMS.json'), JSON.stringify(expected) + '\n');
   return dir;
 }
 

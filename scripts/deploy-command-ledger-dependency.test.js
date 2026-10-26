@@ -644,6 +644,10 @@ ${shellFunction('restart_node_red').replaceAll(initPath, '"$NODE_RED_INIT"')}
 ${shellFunction('fetch_reconciliation_assets')}
 ${options.realRunner ? shellFunction('fetch_migration_runner') : `fetch_migration_runner() {
     migrations_dir="$REPO_ROOT/database/migrations/ordered"
+    # The reconcile probe requires the loader from the deploy staging root,
+    # where the real fetch_migration_runner places it.
+    mkdir -p "$TMP_DIR/lib/osi-migrate" || return 1
+    cp "$REPO_ROOT/lib/osi-migrate/migration-manifest.js" "$REPO_ROOT/lib/osi-migrate/migrations-loader.js" "$TMP_DIR/lib/osi-migrate/" || return 1
     MIGRATION_RUNNER_AVAILABLE=1
 }`}
 ${migration}
@@ -1081,6 +1085,8 @@ const RUNNER_FETCH_TARGETS = [
   [`database/migrations/ordered/${LAST_MIGRATION}`, LAST_MIGRATION],
   ['database/migrations/ordered/CHECKSUMS.json', 'CHECKSUMS.json'],
   ['lib/osi-migrate/runner.js', 'runner.js'],
+  ['lib/osi-migrate/migration-manifest.js', 'migration-manifest.js'],
+  ['lib/osi-migrate/migrations-loader.js', 'migrations-loader.js'],
 ];
 
 for (const [target, name] of RUNNER_FETCH_TARGETS) {
