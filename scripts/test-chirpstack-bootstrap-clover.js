@@ -61,7 +61,12 @@ function makeWorld(seed = {}) {
     writes: [],
     uciCommands: [],
     cliApiKeyCalls: 0,
+    clientApiKeys: [],
+    cliApiKeyOutput: seed.cliApiKeyOutput === undefined ? 'id: x\ntoken: minted-by-cli\n' : seed.cliApiKeyOutput,
+    cliApiKeyError: seed.cliApiKeyError || null,
     logs: [],
+    stdoutLogs: [],
+    stderrLogs: [],
     exitCode: null,
   };
   return world;
@@ -149,7 +154,10 @@ function makeChirpStack(world) {
     },
   };
   return {
-    createClient: () => client,
+    createClient: (options) => {
+      world.clientApiKeys.push(options.apiKey);
+      return client;
+    },
     listItemToObject: (item) => item,
     normalizeDevEui,
   };
@@ -245,7 +253,8 @@ function makeChildProcess(world) {
     execSync(command) {
       if (/create-api-key/.test(command)) {
         world.cliApiKeyCalls += 1;
-        return Buffer.from('id: x\ntoken: minted-by-cli\n');
+        if (world.cliApiKeyError) throw world.cliApiKeyError;
+        return Buffer.from(world.cliApiKeyOutput);
       }
       throw new Error(`unexpected execSync: ${command}`);
     },
@@ -260,7 +269,7 @@ function makeChildProcess(world) {
 // every side effect redirected into `world`. The fakes resolve synchronously or
 // as already-settled promises, so one macrotask turn drains the whole run.
 async function runBootstrap(world, { args = [], env = {} } = {}) {
-  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\n/, '');
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\r?\n/, '');
   const helper = makeChirpStack(world);
   const fakeFs = makeFs(world);
   const fakeCp = makeChildProcess(world);
@@ -279,9 +288,21 @@ async function runBootstrap(world, { args = [], env = {} } = {}) {
     exit: (code) => { if (world.exitCode === null) world.exitCode = code; },
   };
   const fakeConsole = {
-    log: (...parts) => world.logs.push(parts.join(' ')),
-    error: (...parts) => world.logs.push(parts.join(' ')),
-    warn: (...parts) => world.logs.push(parts.join(' ')),
+    log: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stdoutLogs.push(line);
+    },
+    error: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
+    warn: (...parts) => {
+      const line = parts.join(' ');
+      world.logs.push(line);
+      world.stderrLogs.push(line);
+    },
   };
   // eslint-disable-next-line no-new-func
   const run = new Function('require', 'module', 'exports', '__dirname', '__filename', 'process', 'console', source);
@@ -305,7 +326,7 @@ function profileByName(world, name) {
 }
 
 function tektelicCodec() {
-  return fs.readFileSync(TEKTELIC_CODEC, 'utf8');
+  return fs.readFileSync(TEKTELIC_CODEC, 'utf8').replace(/\r\n/g, '\n');
 }
 
 // A gateway provisioned by an earlier bootstrap: every profile present, the
@@ -356,6 +377,57 @@ function provisionedGatewaySeed({ kiwiCodec = '' } = {}) {
 }
 
 // ------------------------------------------------------------------ cases --
+
+test('CLI key creation success provisions with the parsed synthetic token', async () => {
+  const world = await runBootstrap(makeWorld(), { env: { CHIRPSTACK_API_KEY: '' } });
+  assert.equal(world.exitCode, 0, world.logs.join('\n'));
+  assert.equal(world.cliApiKeyCalls, 1);
+  assert.deepEqual(world.clientApiKeys, ['minted-by-cli']);
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_API_KEY, 'minted-by-cli');
+});
+
+test('CLI key creation failures do not log output or process errors', async () => {
+  const malformedMarker = 'SYNTHETIC_MALFORMED_OUTPUT_SECRET_522';
+  const malformed = await runBootstrap(makeWorld({
+    cliApiKeyOutput: `warning: ${malformedMarker}\n`,
+  }), { env: { CHIRPSTACK_API_KEY: '' } });
+  const malformedLogs = [...malformed.stdoutLogs, ...malformed.stderrLogs].join('\n');
+  assert.equal(malformed.exitCode, 1);
+  assert.match(malformedLogs, /CLI create-api-key failed \(invalid output\)/);
+  for (const [streamName, logs] of [['stdout', malformed.stdoutLogs], ['stderr', malformed.stderrLogs]]) {
+    assert.ok(!logs.join('\n').includes(malformedMarker), `malformed command output is not logged to ${streamName}`);
+  }
+
+  const messageMarker = 'SYNTHETIC_ERROR_MESSAGE_SECRET_522';
+  const stdoutMarker = 'SYNTHETIC_API_KEY_FIXTURE_522';
+  const stderrMarker = 'SYNTHETIC_ERROR_STDERR_SECRET_522';
+  const commandError = Object.assign(new Error(`command failed: ${messageMarker}`), {
+    status: 23,
+    stdout: Buffer.from(`token: ${stdoutMarker}\n`),
+    stderr: Buffer.from(`command output: ${stderrMarker}`),
+  });
+  const failed = await runBootstrap(makeWorld({ cliApiKeyError: commandError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const failedLogs = [...failed.stdoutLogs, ...failed.stderrLogs].join('\n');
+  assert.equal(failed.exitCode, 1);
+  assert.match(failedLogs, /CLI create-api-key failed \(command error, exit status 23\)/);
+  for (const [streamName, logs] of [['stdout', failed.stdoutLogs], ['stderr', failed.stderrLogs]]) {
+    const output = logs.join('\n');
+    for (const marker of [messageMarker, stdoutMarker, stderrMarker]) {
+      assert.ok(!output.includes(marker), `${marker} is not logged to ${streamName}`);
+    }
+  }
+
+  const invalidStatusError = Object.assign(new Error('synthetic process error'), { status: 256 });
+  const invalidStatus = await runBootstrap(makeWorld({ cliApiKeyError: invalidStatusError }), {
+    env: { CHIRPSTACK_API_KEY: '' },
+  });
+  const invalidStatusLogs = [...invalidStatus.stdoutLogs, ...invalidStatus.stderrLogs].join('\n');
+  assert.equal(invalidStatus.exitCode, 1);
+  assert.match(invalidStatusLogs, /CLI create-api-key failed \(command error\)/);
+  assert.doesNotMatch(invalidStatusLogs, /exit status/);
+});
 
 test('the Tektelic agriculture codec ships in the codecs directory', () => {
   assert.ok(fs.existsSync(TEKTELIC_CODEC), `missing ${path.relative(ROOT, TEKTELIC_CODEC)}`);

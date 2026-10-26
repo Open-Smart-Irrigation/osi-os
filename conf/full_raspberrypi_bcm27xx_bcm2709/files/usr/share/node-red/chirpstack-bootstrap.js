@@ -274,17 +274,22 @@ async function getOrCreateProfile(client, tenantId, name, description) {
 
 async function createApiKeyViaCLI() {
   console.log('  + Creating API key via CLI (chirpstack create-api-key) ...');
+  let out;
   try {
-    const out = execSync('chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered 2>&1').toString();
-    const match = out.match(/^token:\s*(.+)$/m);
-    if (!match) {
-      throw new Error('No token in CLI output: ' + out);
-    }
-    console.log('  ✓ API key created via CLI');
-    return match[1].trim();
+    out = execSync('chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered 2>&1').toString();
   } catch (error) {
-    throw new Error('CLI create-api-key failed: ' + error.message);
+    const status = error && Number.isInteger(error.status) && error.status >= 1 && error.status <= 255
+      ? `, exit status ${error.status}`
+      : '';
+    throw new Error(`CLI create-api-key failed (command error${status})`);
   }
+
+  const match = out.match(/^token:\s*(.+)$/m);
+  if (!match) {
+    throw new Error('CLI create-api-key failed (invalid output)');
+  }
+  console.log('  ✓ API key created via CLI');
+  return match[1].trim();
 }
 
 function normalizeGatewayEui(value) {
