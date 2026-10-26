@@ -127,7 +127,7 @@ export function MobileSoilHistory({ model, contextKey, mountAdapter = mountUplot
       <button type="button" onClick={() => model.selectPreset('90d')}>{labels.ranges.ninetyDays}</button>
       <button type="button" onClick={() => model.moveWindow('back')}>{labels.back}</button>
       <button type="button" onClick={() => model.moveWindow('forward')}>{labels.forward}</button>
-      <button type="button" onClick={model.showLatest}>{labels.latest}</button>
+      <button type="button" onClick={() => model.showLatest()}>{labels.latest}</button>
     </div>
     {model.status === 'loading' && !accepted && <p role="status">{labels.loading}</p>}
     <p className="mobile-history-refresh" role="status" aria-live="off" aria-hidden={!model.refreshing || !accepted}>{model.refreshing && accepted ? labels.updating : '\u00a0'}</p>

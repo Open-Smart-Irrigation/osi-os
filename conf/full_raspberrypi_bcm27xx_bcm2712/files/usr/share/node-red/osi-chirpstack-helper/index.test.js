@@ -871,6 +871,35 @@ function channelState(serviceClient) {
   return grpc.getClientChannel(serviceClient).getConnectivityState(false);
 }
 
+// #522: grpc-js rejects a header value with control or non-ASCII characters and
+// quotes the whole `Bearer <token>` value in its error. The helper must replace
+// that message so a malformed key never reaches a log. Synthetic markers only.
+for (const [label, apiKey, marker] of [
+  ['an ANSI colour code', '\x1b[32mSYNTHETIC_ESC_KEY_522\x1b[0m', 'SYNTHETIC_ESC_KEY_522'],
+  ['a tab', 'SYNTHETIC_TAB_KEY_522\tsuffix', 'SYNTHETIC_TAB_KEY_522'],
+  ['a non-ASCII character', 'SYNTHETIC_NONASCII_KEY_522é', 'SYNTHETIC_NONASCII_KEY_522'],
+]) {
+  test(`createClient rejects an API key with ${label} without quoting the key`, () => {
+    let caught = null;
+    try {
+      createClient({ apiUrl: 'http://127.0.0.1:1', apiKey });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught, 'createClient must throw');
+    assert.equal(caught.message, 'CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata');
+    assert.equal(caught.cause, undefined, 'the grpc-js error is not attached');
+    assert.ok(!caught.stack.includes(marker), 'the key is not in the stack');
+    assert.ok(!JSON.stringify(caught).includes(marker), 'the key is not in any own property');
+  });
+}
+
+test('createClient still accepts a printable ASCII API key', () => {
+  const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'eyJhbGciOiJIUzI1NiJ9.synthetic.key-522_x' });
+  assert.deepEqual(client.metadata.get('authorization'), ['Bearer eyJhbGciOiJIUzI1NiJ9.synthetic.key-522_x']);
+  assert.deepEqual(client.close(), []);
+});
+
 test('close() shuts down the channel of every gRPC service client and reports no errors', () => {
   const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'test-key' });
   for (const field of SERVICE_CLIENT_FIELDS) {

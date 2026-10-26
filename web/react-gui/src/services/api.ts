@@ -1983,11 +1983,11 @@ export const analysisAPI = {
     return response.data;
   },
 
-  getSeries: async (request: AnalysisSeriesRequest): Promise<AnalysisSeriesResponse> => {
+  getSeries: async (request: AnalysisSeriesRequest, options: { signal?: AbortSignal } = {}): Promise<AnalysisSeriesResponse> => {
     const response = await api.post<AnalysisSeriesResponse>('/api/analysis/series', {
       ...request,
       range: resolveAnalysisRangeForRequest(request.range),
-    });
+    }, { signal: options.signal });
     return response.data;
   },
 

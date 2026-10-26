@@ -78,12 +78,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   "Registration is closed: this gateway already has an account. Sign in with
   an existing account." afterwards; the register screen shows that message.
   A fresh image still sets up its first account the same way, and login is
-  unchanged. With the flag on, registration behaves as before. With the flag
-  off there is no route for a second local account: the account recovery
-  runbook (`docs/operations/account-recovery-runbook.md`) describes how an
-  operator adds one on the gateway, and turning scoped access on gives admins
-  account management. The live test harness now needs `--user NAME` on a
+  unchanged. With the flag on, the same empty-table rule applies since #519
+  (next entry). With the flag off there is no route for a second local
+  account: the account recovery runbook
+  (`docs/operations/account-recovery-runbook.md`) describes how an operator
+  adds one on the gateway, and turning scoped access on gives admins account
+  management. The live test harness now needs `--user NAME` on a
   gateway that already has an account.
+- **Scoped self-registration no longer creates an admin on a gateway that
+  has accounts (#519).** With `OSI_SCOPED_ACCESS` on, `POST /auth/register`
+  created an admin whenever no admin row existed, even if `users` held other
+  accounts. A gateway with only researcher or viewer accounts, for example
+  one whose first account was registered with the flag off, gave admin to
+  the first client that reached port 1880. Registration now
+  requires an empty `users` table in both modes; disabled and linked
+  accounts count. A refused request gets 403 with "Public registration is
+  closed. Ask an administrator to create your account, or contact the
+  gateway operator for account recovery." A fresh image still makes its
+  first account an admin. Before turning scoped access on for a gateway that
+  already has accounts, follow the account recovery runbook: the new
+  `scripts/account-recovery.js`, run on the gateway, changes the role or
+  disabled state of one selected account, or creates a named recovery
+  admin, in a single checked transaction.
 
 ---
 

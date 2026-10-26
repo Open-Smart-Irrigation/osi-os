@@ -4,6 +4,8 @@ import { StrictMode, useState, type ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const TEST_NOW = new Date('2026-07-16T12:30:00.000Z');
+
 const apiMocks = vi.hoisted(() => ({
   listEntries: vi.fn(),
   createEntry: vi.fn(),
@@ -1193,6 +1195,8 @@ function mockRepeatAuthority(): void {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(TEST_NOW);
   window.localStorage.clear();
   consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
     reportConsoleError(...args);
@@ -1230,6 +1234,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   const actWarnings = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
     args.some((value: unknown) => ACT_WARNING.test(String(value))));

@@ -63,7 +63,13 @@ function createMetadata(apiKey) {
     throw new Error('CHIRPSTACK_API_KEY is required');
   }
   const metadata = new grpc.Metadata();
-  metadata.set('authorization', `Bearer ${token}`);
+  try {
+    metadata.set('authorization', `Bearer ${token}`);
+  } catch (_) {
+    // grpc-js quotes the whole header value in this error, so the original
+    // message and the error object itself are dropped on purpose.
+    throw new Error('CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata');
+  }
   return metadata;
 }
 

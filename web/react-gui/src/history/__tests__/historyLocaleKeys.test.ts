@@ -7,6 +7,30 @@ const SRC_ROOT = path.join(GUI_ROOT, 'src');
 const LOCALES_ROOT = path.join(GUI_ROOT, 'public/locales');
 const LOCALES = ['de-CH', 'en', 'es', 'fr', 'it', 'lg', 'pt'];
 const NEW_KEYS = ['history.export.open', 'history.export.title', 'history.desktop.railLabel'];
+const MOBILE_TENSION_KEYS = [
+  'history.mobileTension.title', 'history.mobileTension.chart', 'history.mobileTension.waterTension',
+  'history.mobileTension.controls', 'history.mobileTension.time', 'history.mobileTension.timeRange',
+  'history.mobileTension.range24h', 'history.mobileTension.range7d', 'history.mobileTension.latest',
+  'history.mobileTension.hourlyAverages', 'history.mobileTension.hourlyAverage', 'history.mobileTension.loading',
+  'history.mobileTension.refreshing', 'history.mobileTension.emptyInterval', 'history.mobileTension.showLatest24h',
+  'history.mobileTension.unavailableValue', 'history.mobileTension.notLoaded', 'history.mobileTension.chooseSources',
+  'history.mobileTension.historicalUnverified', 'history.mobileTension.sources', 'history.mobileTension.chartSources',
+  'history.mobileTension.openSources', 'history.mobileTension.sourceDiscoveryIncomplete',
+  'history.mobileTension.catalogFailed', 'history.mobileTension.unavailableSources',
+  'history.mobileTension.requestTooLarge', 'history.mobileTension.fewerSourcesOrShorterWindow',
+  'history.mobileTension.accessDenied', 'history.mobileTension.incompleteResponse',
+  'history.mobileTension.transientFailure', 'history.mobileTension.retry', 'history.mobileTension.details',
+  'history.mobileTension.close', 'history.mobileTension.sourceCap', 'history.mobileTension.sourceCount',
+  'history.mobileTension.invalidHourlyAverages', 'history.mobileTension.removedSources',
+  'history.mobileTension.removeSource', 'history.mobileTension.transportCoverage',
+  'history.mobileTension.bucketInterval', 'history.mobileTension.latestBucket',
+  'history.mobileTension.seriesLegend.legend', 'history.mobileTension.seriesLegend.showAll',
+  'history.mobileTension.seriesLegend.plottedSeries', 'history.mobileTension.seriesLegend.seriesCount',
+  'history.mobileTension.seriesLegend.focusAnnouncement', 'history.mobileTension.seriesLegend.allSeriesAnnouncement',
+  'history.mobileTension.pinnedReading', 'history.mobileTension.visibleWindow',
+  'history.mobileTension.route.zoneLoading', 'history.mobileTension.route.zonesFailed',
+  'history.mobileTension.route.timeZoneUnavailable',
+];
 
 function sourceFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -50,6 +74,14 @@ describe('history locale key coverage', () => {
     for (const locale of LOCALES) {
       const defined = localeKeys(locale);
       const missing = NEW_KEYS.filter((key) => !defined.has(key));
+      expect(missing, `locale ${locale}`).toEqual([]);
+    }
+  });
+
+  it('defines every mobile tension key in every locale', () => {
+    for (const locale of LOCALES) {
+      const defined = localeKeys(locale);
+      const missing = MOBILE_TENSION_KEYS.filter((key) => !defined.has(key));
       expect(missing, `locale ${locale}`).toEqual([]);
     }
   });

@@ -1,5 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
+const { lazyTransport } = require('./push');
 
 function liveDeleteValveCleanup({ msg, node, env, chirpstack, osiLib }) {
 // F104 / exploratory X-04: a device "delete" is an unclaim, and an unclaimed STREGA valve
@@ -427,25 +428,29 @@ if (!dbLoad.ok || !vcLoad.ok) {
 }
 const dbHelper = dbLoad.value; const VC = vcLoad.value;
 const appId = String(env.get('CHIRPSTACK_APP_ACTUATORS') || '').trim();
-let flushQueue = null;
-let transport = null;
-function unavailableTransport() {
-  const fail = function () { const e = new Error('chirpstack_transport_unavailable'); e.code = 'transport_unavailable'; return Promise.reject(e); };
-  return { getDeviceQueue: fail, getQueue: fail, flushDeviceQueue: fail, enqueueDownlink: fail, enqueue: fail };
-}
-try { const client = chirpstack.createProvisioningClientFromEnv(env); transport = client; flushQueue = function(eui) { return client.flushDeviceQueue(eui); }; }
-catch (e) {
-  transport = unavailableTransport();
-  flushQueue = function(eui) { return transport.flushDeviceQueue(eui); };
-  if (!context.get('csWarned')) {
-    node.warn('valve-api: chirpstack client unavailable, plan pushes will not flush the queue: ' + (e && e.message ? e.message : e));
-    context.set('csWarned', true);
+// (osi-os #470) The ChirpStack client is built lazily, on the first transport call. The valve
+// API makes that call only after the session and valve authorization checks pass, so a
+// rejected or read-only request builds no client. The finally handler below closes it once
+// the API promise, including every awaited enqueue and queue flush, has settled. A client
+// that cannot be built fails STREGA writes closed, as before (warned once per node context).
+const transportFactory = function () {
+  try { return chirpstack.createProvisioningClientFromEnv(env); }
+  catch (e) {
+    if (!context.get('csWarned')) {
+      node.warn('valve-api: chirpstack client unavailable, plan pushes will not flush the queue: ' + (e && e.message ? e.message : e));
+      context.set('csWarned', true);
+    }
+    throw e;
   }
-}
-return VC.handleHttpRequest({
-  msg: msg, Database: dbHelper.Database, appId: appId, flushQueue: flushQueue, transport: transport,
-  environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI') },
-  warn: function(m) { node.warn(m); }
+};
+const transport = lazyTransport(transportFactory, function(m) { node.warn(m); });
+const flushQueue = function(eui) { return transport.flushDeviceQueue(eui); };
+return Promise.resolve().then(function() {
+  return VC.handleHttpRequest({
+    msg: msg, Database: dbHelper.Database, appId: appId, flushQueue: flushQueue, transport: transport,
+    environment: { authTokenSecret: env.get('AUTH_TOKEN_SECRET'), jwtSecret: env.get('JWT_SECRET'), deviceEui: env.get('DEVICE_EUI') },
+    warn: function(m) { node.warn(m); }
+  });
 }).then(function(out) {
   const pushes = Array.isArray(out.valvePushMessages) ? out.valvePushMessages : [];
   delete out.valvePushMessages;
@@ -455,6 +460,14 @@ return VC.handleHttpRequest({
 }).catch(function(e) {
   node.error('valve-api: ' + (e && e.message ? e.message : e), msg);
   return [Object.assign(msg, { statusCode: 500, payload: { error: 'internal_error', message: 'Valve request failed' } }), null];
+}).finally(function() {
+  if (!transport.built()) return;
+  try {
+    const errors = transport.close();
+    for (const error of (Array.isArray(errors) ? errors : [])) node.warn('valve-api: chirpstack client close failed: ' + (error && error.message ? error.message : error));
+  } catch (error) {
+    node.warn('valve-api: chirpstack client close failed: ' + (error && error.message ? error.message : error));
+  }
 });
 }
 
