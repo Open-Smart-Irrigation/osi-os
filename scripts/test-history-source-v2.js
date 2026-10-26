@@ -1367,6 +1367,85 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: explicit source devices bound both device_data reads, whatever device_euis lists`, async () => {
+    const helper = loadHelper(profile);
+    const requested = { deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' };
+    const other = 'A8404100000000B1';
+    const readsFor = async (useRollups) => {
+      const reads = [];
+      await helper.aggregateDeviceData({
+        all(sql, params) {
+          if (/FROM device_data/.test(sql)) reads.push({ sql, params: params || [] });
+          return [];
+        },
+      }, {
+        zoneId: 1,
+        cardType: 'soil',
+        logicalSourceKey: 'root-zone',
+        // device_euis names a second card device; sourceDevices is authoritative.
+        device_euis: [requested.deveui, other],
+        sourceDevices: [requested],
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-03T12:00:00Z',
+        aggregation: 'hourly',
+        useRollups,
+        timezone: 'UTC',
+        nowMs: Date.parse('2026-10-03T12:00:00Z'),
+        channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      });
+      return reads;
+    };
+    const rawFallback = (await readsFor(false)).filter((entry) => /ORDER BY deveui ASC/.test(entry.sql));
+    assert.equal(rawFallback.length, 1);
+    // The rollup path reads the live tail after today's local midnight.
+    const liveTail = (await readsFor(true)).filter((entry) => /ORDER BY recorded_at ASC, id ASC LIMIT/.test(entry.sql));
+    assert.equal(liveTail.length, 1);
+    for (const entry of [...rawFallback, ...liveTail]) {
+      assert.ok(entry.params.includes(requested.deveui), entry.sql);
+      assert.ok(!entry.params.includes(other), `device_data read must not include the unrequested device: ${entry.sql}`);
+    }
+  });
+
+  test(`${profile}: legacy rollup key carries the requested device's annotated zone row`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'legacy-key', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'legacy-key-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Legacy key', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, temp_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000C1', 'WATERMARK node', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C2', 'Zone Kiwi', 'KIWI_SENSOR', 1, 1, 0, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO watermark_readings (deveui, recorded_at, payload_hex, frame_status, conversion_version)
+      VALUES ('A8404100000000C1', '2026-10-02T00:00:00Z', '00', 'accepted', 'fixture');
+    `);
+    try {
+      const key = await helper.resolveDeviceFieldRollupKey(facade(raw), 'A8404100000000C1', 'swt_1');
+      assert.equal(key.cardType, 'soil');
+      // The typed row with its WATERMARK annotation, not a bare { deveui }.
+      assert.equal(key.device.deveui, 'A8404100000000C1');
+      assert.equal(key.device.type_id, 'DRAGINO_LSN50');
+      assert.equal(key.device.watermark_evidence, 1);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy aggregate passes only the requested, typed device row`, () => {
+    // Source pin, not a behaviour test. aggregateDeviceData reads device_data
+    // for the explicit sourceDevices only, and key resolution already drops a
+    // plain LSN50's SWT3, so neither the device_euis narrowing nor the typed
+    // row changes legacySensorHistory's output today. Both stay pinned so the
+    // legacy caller does not rely on the helper-side bound alone.
+    const source = loadHelper(profile).legacySensorHistory.toString();
+    const call = source.slice(source.indexOf('aggregateDeviceData(db, {'));
+    assert.match(call, /^aggregateDeviceData\(db, \{[\s\S]*?\n {4}device_euis: \[requestedDeveui\],\n/);
+    assert.match(call, /^aggregateDeviceData\(db, \{[\s\S]*?\n {4}sourceDevices: \[key\.device \|\| \{ deveui: requestedDeveui \}\],\n/);
+  });
+
   test(`${profile}: legacy raw history omits rows whose value is missing`, async () => {
     const helper = loadHelper(profile);
     const raw = databaseForLegacyBoundaries();

@@ -316,6 +316,9 @@ for (const profile of PROFILES) {
       }
       assert.equal(calls.length, 2);
       assert.ok(calls.every((query) => query.timezone === 'Europe/Zurich'), JSON.stringify(calls.map((query) => query.timezone)));
+      // The interactive card route opts in to the 30,000-row raw sentinel;
+      // export does not.
+      assert.ok(calls.every((query) => query.rawRowLimit === true), JSON.stringify(calls.map((query) => query.rawRowLimit)));
       assert.deepEqual(geometry, {
         daily: { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' },
         hourly: { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' },
