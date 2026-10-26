@@ -267,7 +267,7 @@
     },
     "dendro-ref-tree-fn": {
       "delta": 354,
-      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: dendro-ref-tree-fn 6700 -> 7054 = 354 chars in each byte-identical maintained profile. Reference-tree ownership is bound in flag-off read and write; valve client creation is lazy and its close follows the settled API/flush promise. Supersedes any consumed allowance for this node."
+      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: dendro-ref-tree-fn 6700 -> 7054 = 354 chars in each byte-identical maintained profile. With the flag off, the handler keeps the verified session's user id and binds it next to the EUI in both the SELECT and the UPDATE, so a foreign, unclaimed or missing device gets the same 404 and no write; if ownership changes between the read and the write, the UPDATE matches no row and the request also gets 404. The JSON-parse catch in the token check gains a fixed warning. Supersedes any consumed allowance for this node."
     },
     "lsn50-zone-agg-fn": {
       "delta": 290,
@@ -671,7 +671,7 @@
     },
     "valve-api-router-fn": {
       "delta": 519,
-      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: valve-api-router-fn 1866 -> 2385 = 519 chars in each byte-identical maintained profile. Reference-tree ownership is bound in flag-off read and write; valve client creation is lazy and its close follows the settled API/flush promise. Supersedes any consumed allowance for this node."
+      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: valve-api-router-fn 1866 -> 2385 = 519 chars in each byte-identical maintained profile. The router used to create a ChirpStack client for every request and never close it. Now flushQueue creates one per request on first use, which the valve API reaches only after the session and valve authorization checks pass, and a finally handler closes it after the API promise, including its awaited queue flush, has settled. Close errors are logged as warnings without replacing the response. Supersedes any consumed allowance for this node."
     }
   },
   "total_allowance": {
