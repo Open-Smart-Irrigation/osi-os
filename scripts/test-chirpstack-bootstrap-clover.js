@@ -269,7 +269,7 @@ function makeChildProcess(world) {
 // every side effect redirected into `world`. The fakes resolve synchronously or
 // as already-settled promises, so one macrotask turn drains the whole run.
 async function runBootstrap(world, { args = [], env = {} } = {}) {
-  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\r?\n/, '');
+  const source = fs.readFileSync(SCRIPT, 'utf8').replace(/^#!.*\n/, '');
   const helper = makeChirpStack(world);
   const fakeFs = makeFs(world);
   const fakeCp = makeChildProcess(world);
@@ -326,7 +326,7 @@ function profileByName(world, name) {
 }
 
 function tektelicCodec() {
-  return fs.readFileSync(TEKTELIC_CODEC, 'utf8').replace(/\r\n/g, '\n');
+  return fs.readFileSync(TEKTELIC_CODEC, 'utf8');
 }
 
 // A gateway provisioned by an earlier bootstrap: every profile present, the
