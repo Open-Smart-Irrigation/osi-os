@@ -851,7 +851,14 @@ for (const [label, apiKey, marker] of [
     assert.equal(caught.message, 'CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata');
     assert.equal(caught.cause, undefined, 'the grpc-js error is not attached');
     assert.ok(!caught.stack.includes(marker), 'the key is not in the stack');
-    assert.ok(!JSON.stringify(caught).includes(marker), 'the key is not in any own property');
+    for (const key of Reflect.ownKeys(caught)) {
+      const descriptor = Object.getOwnPropertyDescriptor(caught, key);
+      assert.ok(descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value'), 'error has no own accessor');
+      const value = descriptor.value;
+      if (typeof value === 'string' || Buffer.isBuffer(value)) {
+        assert.ok(!String(value).includes(marker), 'marker absent from direct own error data');
+      }
+    }
   });
 }
 
