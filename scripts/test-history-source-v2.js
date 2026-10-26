@@ -803,6 +803,81 @@ for (const profile of PROFILES) {
     ].sort());
   });
 
+  test(`${profile}: every fixture keeps the same series set on the budgeted card path`, async () => {
+    const helper = loadHelper(profile);
+    const soilChannels = ['swt_1', 'swt_2', 'swt_3', 'vwc_1', 'soil_temp_1'];
+    const environmentChannels = ['ambient_temperature', 'ext_temperature_c', 'relative_humidity', 'light_lux', 'rain_mm_per_hour'];
+    // A device type with no family for the card keeps the card-wide channel
+    // list: TEKTELIC_CLOVER has no soil family in device-sources.js, but it is
+    // a soil source (isSoilSource) and Process Data writes SWT for it.
+    const fixtures = [
+      ['Kiwi', 'soil', { type_id: 'KIWI_SENSOR' }, ['swt_1', 'swt_2']],
+      ['Chameleon Kiwi', 'soil', { type_id: 'KIWI_SENSOR', chameleon_enabled: 1 }, ['swt_1', 'swt_2', 'swt_3']],
+      ['plain LSN50', 'soil', { type_id: 'DRAGINO_LSN50' }, ['swt_1', 'swt_2']],
+      ['Chameleon LSN50', 'soil', { type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 }, ['swt_1', 'swt_2', 'swt_3']],
+      ['WATERMARK LSN50 with temperature', 'soil', { type_id: 'DRAGINO_LSN50', temp_enabled: 1, watermark_evidence: 1 }, ['swt_1', 'swt_2']],
+      ['SDI-12 Tensiomark', 'soil', { type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK' }, ['swt_1', 'swt_2', 'vwc_1', 'soil_temp_1']],
+      ['Clover', 'soil', { type_id: 'TEKTELIC_CLOVER' }, soilChannels],
+      ['Kiwi', 'environment', { type_id: 'KIWI_SENSOR' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
+      ['temperature LSN50', 'environment', { type_id: 'DRAGINO_LSN50', temp_enabled: 1 }, ['ext_temperature_c', 'rain_mm_per_hour']],
+      ['S2120', 'environment', { type_id: 'SENSECAP_S2120' }, ['ambient_temperature', 'relative_humidity', 'light_lux', 'rain_mm_per_hour']],
+      ['LoRain', 'environment', { type_id: 'AQUASCOPE_LORAIN' }, ['ambient_temperature', 'rain_mm_per_hour']],
+      ['Clover', 'environment', { type_id: 'TEKTELIC_CLOVER' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
+    ];
+    const seriesSet = async (device, cardType, budget) => {
+      const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, {
+        zoneId: 1,
+        cardType,
+        logicalSourceKey: cardType === 'soil' ? 'root-zone' : 'microclimate',
+        deveuis: [device.deveui],
+        sourceDevices: [device],
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-03T00:00:00Z',
+        aggregation: 'daily',
+        useRollups: true,
+        nowMs: Date.parse('2026-10-04T00:00:00Z'),
+        channels: (cardType === 'soil' ? soilChannels : environmentChannels).map((id) => ({ id, field: id, unit: 'u' })),
+        ...(budget ? { maxPointsPerSeries: 2000, maxPointsTotal: 30000 } : {}),
+      });
+      return aggregate.sourceAggregates.map((entry) => entry.channelKey);
+    };
+    for (const [name, cardType, extra, expected] of fixtures) {
+      const device = { deveui: 'A8404100000000F1', ...extra };
+      assert.deepEqual(await seriesSet(device, cardType, true), expected, `${name} on the ${cardType} card`);
+    }
+    const clover = { deveui: 'A8404100000000F1', type_id: 'TEKTELIC_CLOVER' };
+    assert.deepEqual(await seriesSet(clover, 'soil', true), await seriesSet(clover, 'soil', false));
+
+    // Reviewer probe: 48 h of Clover SWT1/SWT2 uplinks, hourly, on the budgeted path.
+    const startMs = Date.parse('2026-10-01T00:00:00Z');
+    const rows = Array.from({ length: 48 }, (_, index) => ({
+      id: index + 1,
+      deveui: clover.deveui,
+      recorded_at: new Date(startMs + index * 60 * 60 * 1000 + 60 * 1000).toISOString(),
+      swt_1: 30,
+      swt_2: 40,
+    }));
+    const probe = await helper.aggregateDeviceData({ all(sql) { return /FROM device_data/.test(sql) ? rows : []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [clover.deveui],
+      sourceDevices: [clover],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'hourly',
+      useRollups: false,
+      channels: ['swt_1', 'swt_2'].map((id) => ({ id, field: id, unit: 'kPa' })),
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    });
+    const filled = Object.fromEntries(probe.sourceAggregates.map((entry) => [
+      entry.channelKey,
+      entry.buckets.filter((bucket) => Number(bucket.series[entry.channelKey].sampleCount || 0) > 0).length,
+    ]));
+    assert.deepEqual(filled, { swt_1: 48, swt_2: 48 });
+  });
+
   test(`${profile}: raw point budget counts deduplicated valid points`, async () => {
     const helper = loadHelper(profile);
     const source = 'A8404100000000A1';

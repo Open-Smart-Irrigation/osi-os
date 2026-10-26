@@ -988,11 +988,14 @@ function sourceChannelKey(sourceKey, channel) {
 }
 
 // Card types whose interactive grid is checked against the per-device channel
-// policy in device-sources.js. Other cards keep the card-wide channel list.
+// policy in device-sources.js. Other cards keep the card-wide channel list, and
+// so does a device type with no family for the card (TEKTELIC_CLOVER on the
+// soil card: a soil source whose SWT the policy does not list).
 const SOURCE_FAMILY_CARD_TYPES = new Set(['soil', 'environment']);
 
 // sourcePartitions asks once per row and channel, so the family channel set is
-// computed once per device row object and card type.
+// computed once per device row object and card type. null means the device
+// type has no family for the card type.
 const deviceFamilyChannelCache = new WeakMap();
 
 function deviceFamilyChannelKeys(device, cardType) {
@@ -1003,7 +1006,7 @@ function deviceFamilyChannelKeys(device, cardType) {
   }
   if (!byCardType.has(cardType)) {
     const family = describeDeviceSource(device).families.find((entry) => entry.cardType === cardType);
-    byCardType.set(cardType, new Set(family ? family.channelKeys : []));
+    byCardType.set(cardType, family ? new Set(family.channelKeys) : null);
   }
   return byCardType.get(cardType);
 }
@@ -1011,7 +1014,9 @@ function deviceFamilyChannelKeys(device, cardType) {
 function deviceFamilySupportsChannel(device, cardType, channel) {
   // A device row without a type keeps the card-wide channel list.
   if (!deviceTypeId(device)) return true;
-  return deviceFamilyChannelKeys(device, cardType).has(channel.id);
+  const familyChannelKeys = deviceFamilyChannelKeys(device, cardType);
+  // So does a device type without a family for this card type.
+  return familyChannelKeys === null || familyChannelKeys.has(channel.id);
 }
 
 function sourceSupportsChannel(sourceKey, channel, options = {}) {
@@ -2178,8 +2183,9 @@ function queryDeviceEuis(query = {}) {
 async function aggregateDeviceData(db, rawQuery = {}) {
   // Only the interactive card route sets a point budget. On that path a
   // source/channel pair counts, and gets a series, only when the device's
-  // type supports the channel for this card. Rollup maintenance, export,
-  // legacy and Analysis callers keep the card-wide channel list.
+  // type supports the channel for this card; a type with no family for the
+  // card keeps every card channel. Rollup maintenance, export, legacy and
+  // Analysis callers keep the card-wide channel list.
   const interactiveBudget = [rawQuery.maxPointsPerSeries, rawQuery.max_points_per_series, rawQuery.maxPointsTotal, rawQuery.max_points_total]
     .some((value) => { const number = toFiniteNumber(value); return number !== null && number > 0; });
   let query = { ...rawQuery, eligibilityCardType: interactiveBudget ? firstDefinedValue([rawQuery.cardType, rawQuery.card_type]) : undefined };
