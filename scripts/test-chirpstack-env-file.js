@@ -72,8 +72,21 @@ function childProcess(events, options = {}) {
   const committed = new Map(Object.entries(options.uci || {}));
   const pending = new Map(committed);
   return {
-    execSync(command) {
-      if (/create-api-key/.test(command)) { events.push(['api-key']); return Buffer.from('id: synthetic\ntoken: ' + API_KEY + '\n'); }
+    execSync(command, execOptions) {
+      if (/create-api-key/.test(command)) {
+        events.push(['api-key', command, execOptions]);
+        if (process.env.ISSUE183_CLI_THROW === '1') {
+          events.push(['api-key-throw']);
+          const error = new Error('SYNTHETIC_CLI_MESSAGE_183');
+          error.status = 23;
+          error.stdout = Buffer.from('token:SYNTHETIC_CLI_STDOUT_183\n');
+          error.stderr = Buffer.from('SYNTHETIC_CLI_STDERR_183');
+          error.cmd = 'SYNTHETIC_CLI_CMD_183';
+          error.output = ['SYNTHETIC_CLI_OUTPUT_183'];
+          throw error;
+        }
+        return Buffer.from('id: synthetic\ntoken: ' + API_KEY + '\n');
+      }
       throw new Error('unexpected synthetic execSync');
     },
     execFileSync(file, args) {
@@ -283,8 +296,24 @@ function publisherPreloadSource(fx, fault, operation, traceFile) {
     "if(key==='closeSync')return fd=>{const st=nativeFs.fstatSync(fd),name=nativeFs.readlinkSync('/proc/self/fd/'+fd).replace(/ \(deleted\)$/,'');if(operation===process.env.ISSUE183_OPERATION&&activeOperation===operation&&fault==='stage-close'&&st.isFile()&&stageEnv(fd)){faultFired=true;nativeFs.closeSync(fd);note('fault',{fault,phase:'cleanup'});const e=new Error('synthetic stage close');e.code='EIO';throw e;}if(operation===process.env.ISSUE183_OPERATION&&activeOperation===operation&&fault==='published-close'&&published&&st.isFile()&&path.resolve(name)===TARGET){faultFired=true;nativeFs.closeSync(fd);note('fault',{fault,phase:'cleanup'});const e=new Error('synthetic published close');e.code='EIO';throw e;}if(operation===process.env.ISSUE183_OPERATION&&activeOperation===operation&&fault==='outer-close'&&published&&!closedOuter&&st.isDirectory()&&path.resolve(name)===path.dirname(TARGET)){closedOuter=true;nativeFs.closeSync(fd);faultFired=true;note('fault',{fault,phase:'cleanup'});const e=new Error('synthetic outer close');e.code='EIO';throw e;}return value.call(target,fd);};",
     "if(key==='rmdirSync')return dir=>{if(operation===process.env.ISSUE183_OPERATION&&activeOperation===operation&&fault==='rmdir'&&path.basename(String(dir)).startsWith('.'+path.basename(TARGET)+'.tmp-')){faultFired=true;note('fault',{fault,phase:'cleanup'});const e=new Error('synthetic rmdir');e.code='EIO';throw e;}return value.call(target,dir);};",
     "return value;}});",
+    "const traceCli=process.env.ISSUE183_CLI_THROW==='1';",
+    "const tracedFs=new Proxy(productFs,{get(target,key){",
+    " const value=target[key]; if(!traceCli||typeof value!=='function')return value;",
+    " return (...args)=>{",
+    "  const result=value(...args);",
+    "  if(key==='fchmodSync'&&resolvedFsPath(args[0],nativeFs)===TARGET){",
+    "   const st=nativeFs.fstatSync(args[0]);note('preflight-chmod',{uid:st.uid,gid:st.gid,mode:st.mode&0o7777});",
+    "  }",
+    "  if(key==='readFileSync'&&typeof args[0]==='number'&&resolvedFsPath(args[0],nativeFs)===TARGET){",
+    "   note('preflight-read',{bytesHex:Buffer.from(result).toString('hex')});",
+    "  }",
+    "  if(key==='writeFileSync'||key==='writeSync')note('env-content-write',{path:resolvedFsPath(args[0],nativeFs)});",
+    "  if(key==='renameSync'||key==='linkSync')note('env-content-publish',{path:resolvedFsPath(args[1],nativeFs)});",
+    "  return result;",
+    " };",
+    "}});",
     "const fakeCp=childProcessFactory(events,{uci:JSON.parse(process.env.ISSUE183_UCI_STATE||'{}')});",
-    "const originalLoad=Module._load;Module._load=function(request,parent,isMain){if(parent&&path.resolve(parent.filename||'')===SOURCE_PATH){if(request==='fs')return productFs;if(request==='child_process')return fakeCp;if(String(request).endsWith('osi-chirpstack-helper'))return helperFactory(events);}return originalLoad.apply(this,arguments);};",
+    "const originalLoad=Module._load;Module._load=function(request,parent,isMain){if(parent&&path.resolve(parent.filename||'')===SOURCE_PATH){if(request==='fs')return tracedFs;if(request==='child_process')return fakeCp;if(String(request).endsWith('osi-chirpstack-helper'))return helperFactory(events);}return originalLoad.apply(this,arguments);};",
     "process.on('exit',()=>{events.push({kind:'fault-summary',fault,operation,faultFired,published});nativeFs.appendFileSync(TRACE,JSON.stringify(events)+'\\n');});"
   ].join('\n');
 }
@@ -828,7 +857,177 @@ if (process.geteuid() !== 0) {
       } finally { clean(collision); }
     } finally { clean(fx); }
   });
-  test('T7 deploy routing', () => {
+  async function assertDirectRootCliFailure183(t) {
+    assert.equal(process.geteuid(), 0, 'T7 requires actual root');
+    const fx = fixture();
+    let closeObserved = false;
+    let exitOne = false;
+    let timedOut = false;
+    let spawnError = null;
+    let outputTooLarge = false;
+    try {
+      const initial = Buffer.from('OPERATOR=keep\n');
+      const sourceCopy = path.join(fx.dir, 'candidate-chirpstack-bootstrap.js');
+      const preload = path.join(fx.dir, 'publisher-preload.cjs');
+      const trace = path.join(fx.dir, 'direct-cli-events.jsonl');
+      const codecs = path.join(fx.dir, 'codecs');
+      fs.mkdirSync(codecs, { mode: 0o700 });
+      for (const name of ['strega.js', 'strega-gen2.js', 'lsn50.js', 's2120.js',
+        'lorain.js', 'uc512.js', 'sdi12.js']) {
+        fs.writeFileSync(path.join(codecs, name), 'module.exports = {};\n', { mode: 0o600 });
+      }
+      fs.copyFileSync(SOURCE, sourceCopy);
+      fs.writeFileSync(fx.settingsJs, "'use strict';\n", { mode: 0o600 });
+      fs.writeFileSync(fx.flowsJson, '[]\n', { mode: 0o600 });
+      fs.writeFileSync(fx.envFile, initial, { mode: 0o644 });
+      fs.chownSync(fx.envFile, 0, 0);
+      fs.chmodSync(fx.envFile, 0o644);
+      const before = fs.statSync(fx.envFile);
+      assert.equal(before.uid, 0); assert.equal(before.gid, 0);
+      assert.equal(before.mode & 0o7777, 0o644); assert.equal(before.nlink, 1);
+      assert.deepEqual(fs.readFileSync(fx.envFile), initial);
+      assert.doesNotMatch(initial.toString('utf8'), /^CHIRPSTACK_API_KEY=|^CS_API_KEY=/m);
+      assert.equal(fs.existsSync(trace), false);
+      fs.writeFileSync(preload, publisherPreloadSource(
+        { ...fx, sourceFile: sourceCopy }, '', 'full', trace
+      ), { mode: 0o600 });
+      const childEnv = {
+        PATH: '/usr/bin:/bin', ENV_FILE: fx.envFile,
+        CHIRPSTACK_API_KEY: '', CS_API_KEY: '',
+        NODE_OPTIONS: '--require ' + preload,
+        ISSUE183_CLI_THROW: '1', ISSUE183_FIXTURE: fx.dir,
+        ISSUE183_SOURCE: sourceCopy, ISSUE183_TRACE: trace,
+        ISSUE183_OPERATION: 'full', ISSUE183_FAULT: '',
+        ISSUE183_UCI_STATE: '{}', ISSUE183_SOIL_API_FAILURE: '',
+        ISSUE183_VIRTUAL_ROOT: '', OSI_BOOTSTRAP_PATCH_SETTINGS: '0',
+        SETTINGS_JS: fx.settingsJs, FLOWS_JSON: fx.flowsJson,
+        TEKTELIC_CODEC_PATH: TEKTELIC_CODEC,
+        STREGA_CODEC_PATH: path.join(codecs, 'strega.js'),
+        STREGA_GEN2_CODEC_PATH: path.join(codecs, 'strega-gen2.js'),
+        LSN50_CODEC_PATH: path.join(codecs, 'lsn50.js'),
+        S2120_CODEC_PATH: path.join(codecs, 's2120.js'),
+        LORAIN_CODEC_PATH: path.join(codecs, 'lorain.js'),
+        UC512_CODEC_PATH: path.join(codecs, 'uc512.js'),
+        SDI12_CODEC_PATH: path.join(codecs, 'sdi12.js')
+      };
+      let stdout = Buffer.alloc(0);
+      let stderr = Buffer.alloc(0);
+      const child = cp.spawn(process.execPath, [sourceCopy], {
+        env: childEnv, stdio: ['ignore', 'pipe', 'pipe']
+      });
+      const closed = new Promise(resolve => {
+        child.once('error', error => { spawnError = error; });
+        child.once('close', (code, signal) => resolve({ code, signal }));
+      });
+      for (const [stream, set] of [
+        [child.stdout, value => { stdout = value; }],
+        [child.stderr, value => { stderr = value; }]
+      ]) {
+        stream.on('data', chunk => {
+          const prior = stream === child.stdout ? stdout : stderr;
+          const next = Buffer.concat([prior, chunk]);
+          if (next.length > 2 * 1024 * 1024) {
+            outputTooLarge = true;
+            child.kill('SIGTERM');
+          } else set(next);
+        });
+      }
+      const awaitClose = async ms => {
+        let timer;
+        try {
+          return await Promise.race([
+            closed,
+            new Promise(resolve => { timer = setTimeout(() => resolve(null), ms); })
+          ]);
+        } finally { clearTimeout(timer); }
+      };
+      let outcome = await awaitClose(5000);
+      if (!outcome) {
+        timedOut = true;
+        child.kill('SIGTERM');
+        outcome = await awaitClose(1000);
+        if (!outcome) {
+          child.kill('SIGKILL');
+          outcome = await awaitClose(2000);
+        }
+      }
+      if (!outcome) {
+        fs.writeFileSync(path.join(fx.dir, 'UNREAPED.txt'),
+          'direct CLI child had no close after TERM/KILL; pid=' + String(child.pid) + '\n');
+        t.diagnostic('UNREAPED direct CLI child pid=' + String(child.pid) + '; fixture=' + fx.dir);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        assert.fail('direct CLI child did not close; fixture and trace retained without credit');
+      }
+      closeObserved = true;
+      assert.equal(timedOut, false, 'no deadline signal was needed');
+      assert.equal(spawnError, null, 'direct CLI child spawned');
+      assert.equal(outputTooLarge, false, 'child output stayed within 2 MiB per stream');
+      assert.equal(outcome.signal, null, 'child ended without a signal');
+      assert.equal(outcome.code, 1, 'direct full-bootstrap child exits 1');
+      exitOne = true;
+
+      const after = fs.statSync(fx.envFile);
+      assert.equal(after.uid, 0); assert.equal(after.gid, 0);
+      assert.equal(after.mode & 0o7777, 0o600); assert.equal(after.nlink, 1);
+      assert.deepEqual(fs.readFileSync(fx.envFile), initial, 'preflight changed metadata, not bytes');
+      assert.equal(fs.existsSync(fx.backup), false, 'failure did not publish a backup');
+      const stdoutText = stdout.toString('utf8');
+      const stderrText = stderr.toString('utf8');
+      assert.deepEqual(stderrText.split('\n').map(line => line.trim()).filter(Boolean),
+        ['Bootstrap failed: CLI create-api-key failed (command error, exit status 23)']);
+      for (const marker of [
+        'SYNTHETIC_CLI_MESSAGE_183', 'SYNTHETIC_CLI_STDOUT_183',
+        'SYNTHETIC_CLI_STDERR_183', 'SYNTHETIC_CLI_CMD_183',
+        'SYNTHETIC_CLI_OUTPUT_183'
+      ]) {
+        assert.equal(stdoutText.includes(marker), false, marker + ' absent from child stdout');
+        assert.equal(stderrText.includes(marker), false, marker + ' absent from child stderr');
+      }
+
+      const lines = fs.readFileSync(trace, 'utf8').trimEnd().split('\n').filter(Boolean);
+      assert.equal(lines.length, 1, 'one completed process-exit trace');
+      const events = JSON.parse(lines[0]);
+      assert.ok(Array.isArray(events), 'trace is an event array');
+      const kind = event => Array.isArray(event) ? event[0] : event.kind;
+      const positions = name => events.flatMap((event, index) => kind(event) === name ? [index] : []);
+      const chmod = positions('preflight-chmod');
+      const reads = positions('preflight-read');
+      const api = positions('api-key');
+      const thrown = positions('api-key-throw');
+      assert.equal(chmod.length, 1, 'one successful canonical mode narrowing');
+      assert.ok(reads.length >= 1, 'canonical descriptor bytes were read');
+      assert.equal(api.length, 1, 'one CLI command');
+      assert.equal(thrown.length, 1, 'one CLI throw');
+      assert.ok(chmod[0] < reads[0] && reads[0] < api[0], 'narrow, read, then CLI');
+      assert.equal(thrown[0], api[0] + 1, 'the fake threw at that CLI call');
+      assert.deepEqual(events[chmod[0]], { kind: 'preflight-chmod', uid: 0, gid: 0, mode: 0o600 });
+      for (const index of reads) {
+        assert.ok(index < api[0], 'every canonical read precedes CLI failure');
+        assert.deepEqual(events[index], { kind: 'preflight-read', bytesHex: initial.toString('hex') });
+      }
+      assert.deepEqual(events[api[0]], [
+        'api-key', 'chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered',
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      ]);
+      for (const event of events) {
+        assert.equal(['client', 'env-content-write', 'env-content-publish', 'uci-write'].includes(kind(event)),
+          false, 'no client, env content or UCI mutation anywhere in this failed run');
+      }
+      assert.deepEqual(events[events.length - 1], {
+        kind: 'fault-summary', fault: '', operation: 'full', faultFired: false, published: false
+      });
+    } finally {
+      if (closeObserved && exitOne && !timedOut && !spawnError && !outputTooLarge) {
+        clean(fx);
+      } else {
+        t.diagnostic('retained direct CLI fixture for failed or unreaped child: ' + fx.dir);
+      }
+    }
+  }
+
+  test('T7 deploy routing', async t => {
     const deploy = fs.readFileSync(DEPLOY, 'utf8');
     const marked = (begin, end) => {
       const a = deploy.indexOf('# issue-183 ' + begin + ' begin');
@@ -1106,6 +1305,15 @@ if (process.geteuid() !== 0) {
       assert.equal(fs.existsSync(run.migration), true);
       assert.equal(fs.statSync(run.canonical).mode & 0o7777, 0o600);
     } finally { clean(noSensors); }
+
+    const gen2Warning = fixture();
+    try {
+      const run = runFragments(gen2Warning, sensors + 'CHIRPSTACK_API_KEY=' + API_KEY + '\n', { gen2Status: 1 });
+      assert.equal(run.result.status, 0, 'deploy continues after a Gen2 API status 1 warning');
+      assert.match(run.result.stdout || '', /WARN: Gen2 profile provisioning failed; valves will register on the Gen1 profile/);
+      assert.equal(fs.existsSync(run.migration), true, 'shell continuation reaches the marker');
+    } finally { clean(gen2Warning); }
+    await assertDirectRootCliFailure183(t);
 
   });
   test('T8 failure preservation', async () => {

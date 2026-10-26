@@ -69,6 +69,7 @@ function makeWorld(seed = {}) {
     uciCommands: [],
     cliApiKeyCalls: 0,
     cliExecOptions: [],
+    cliApiKeyOutcomes: [],
     realClientValidation: Boolean(seed.realClientValidation),
     clientApiKeys: [],
     cliApiKeyOutput: seed.cliApiKeyOutput === undefined ? 'id: x\ntoken: minted-by-cli\n' : seed.cliApiKeyOutput,
@@ -261,8 +262,12 @@ function makeChildProcess(world) {
       if (/create-api-key/.test(command)) {
         world.cliApiKeyCalls += 1;
         world.cliExecOptions.push({ command, options });
-        if (world.cliApiKeyError) throw world.cliApiKeyError;
-        return Buffer.from(world.cliApiKeyOutput);
+        if (world.cliApiKeyError) {
+          world.cliApiKeyOutcomes.push('threw');
+          throw world.cliApiKeyError;
+        }
+        world.cliApiKeyOutcomes.push('returned');
+        return world.cliApiKeyOutput;
       }
       throw new Error(`unexpected execSync: ${command}`);
     },
@@ -458,6 +463,162 @@ test('CLI key creation captures the child stderr instead of inheriting it', asyn
   const { command, options } = world.cliExecOptions[0];
   assert.deepEqual(options, { stdio: ['ignore', 'pipe', 'pipe'] });
   assert.doesNotMatch(command, /2>&1/, 'stderr is piped by execSync, not merged by the shell');
+});
+
+const CLI_COMMAND_183 = 'chirpstack -c /var/etc/chirpstack create-api-key --name osi-nodered';
+const CLI_OPTIONS_183 = { stdio: ['ignore', 'pipe', 'pipe'] };
+const CLI_ENV_183 = { CHIRPSTACK_API_KEY: '', CS_API_KEY: '' };
+const COMMAND_ERROR_183 = 'CLI create-api-key failed (command error)';
+const INVALID_OUTPUT_183 = 'CLI create-api-key failed (invalid output)';
+const ERROR_MARKERS_183 = [
+  'SYNTHETIC_MESSAGE_183', 'SYNTHETIC_STDOUT_183', 'SYNTHETIC_STDERR_183',
+  'SYNTHETIC_CMD_183', 'SYNTHETIC_STACK_183', 'SYNTHETIC_OUTPUT_183'
+];
+
+function assertCliInvocation183(world, outcome) {
+  assert.equal(world.cliApiKeyCalls, 1, 'one CLI attempt');
+  assert.deepEqual(world.cliExecOptions, [{ command: CLI_COMMAND_183, options: CLI_OPTIONS_183 }]);
+  assert.deepEqual(world.cliApiKeyOutcomes, [outcome], 'fake provenance is explicit');
+}
+
+function assertCliFailure183(world, expected, outcome, markers = []) {
+  assertCliInvocation183(world, outcome);
+  assert.equal(world.exitCode, 1, 'generic CLI exit, distinct from 74 and 2');
+  assert.deepEqual(world.clientApiKeys, [], 'no client after failed CLI');
+  assert.deepEqual(world.writes, [], 'no ChirpStack API mutation after failed CLI');
+  assert.equal(world.files.has(ENV_FILE), false, 'no env content appeared');
+  assert.equal(world.fsEvents.some(event => ['write', 'rename', 'link'].includes(event[0])), false,
+    'no env content write or publication');
+  assert.equal(world.uciCommands.some(command => /^(?:set|commit)(?:\s|$)/.test(command)), false,
+    'no UCI mutation');
+  assert.deepEqual(world.stderrLogs.flatMap(line => line.split('\n').map(part => part.trim()).filter(Boolean)),
+    [`Bootstrap failed: ${expected}`]);
+  for (const [stream, lines] of [['stdout', world.stdoutLogs], ['stderr', world.stderrLogs]]) {
+    const output = lines.join('\n');
+    for (const marker of markers) {
+      assert.equal(output.includes(marker), false, `${marker} absent from ${stream}`);
+    }
+  }
+}
+
+function hostileCliError183() {
+  const error = new Error(ERROR_MARKERS_183[0]);
+  error.stdout = Buffer.from(ERROR_MARKERS_183[1]);
+  error.stderr = Buffer.from(ERROR_MARKERS_183[2]);
+  error.cmd = ERROR_MARKERS_183[3];
+  error.stack = ERROR_MARKERS_183[4];
+  error.output = [ERROR_MARKERS_183[5]];
+  return error;
+}
+
+for (const [label, value, expected] of [
+  ['own 1', 1, 'CLI create-api-key failed (command error, exit status 1)'],
+  ['own 255', 255, 'CLI create-api-key failed (command error, exit status 255)'],
+  ['own zero', 0, COMMAND_ERROR_183],
+  ['own negative', -1, COMMAND_ERROR_183],
+  ['own 256', 256, COMMAND_ERROR_183],
+  ['own fraction', 1.5, COMMAND_ERROR_183],
+  ['own numeric string', '23', COMMAND_ERROR_183],
+  ['own null', null, COMMAND_ERROR_183]
+]) {
+  test(`CLI command failure with ${label} status uses only fixed diagnostics`, async () => {
+    const error = hostileCliError183();
+    Object.defineProperty(error, 'status', { value, configurable: true });
+    const world = await runBootstrap(makeWorld({ cliApiKeyError: error }), { env: CLI_ENV_183 });
+    assertCliFailure183(world, expected, 'threw', ERROR_MARKERS_183);
+  });
+}
+
+test('CLI command failure with absent status omits exit metadata', async () => {
+  const world = await runBootstrap(makeWorld({ cliApiKeyError: hostileCliError183() }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, COMMAND_ERROR_183, 'threw', ERROR_MARKERS_183);
+});
+
+test('CLI command failure ignores inherited status', async () => {
+  const error = hostileCliError183();
+  Object.setPrototypeOf(error, Object.create(Error.prototype, { status: { value: 23, enumerable: true } }));
+  const world = await runBootstrap(makeWorld({ cliApiKeyError: error }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, COMMAND_ERROR_183, 'threw', ERROR_MARKERS_183);
+});
+
+for (const [label, getter] of [
+  ['changing', count => count === 1 ? 1 : 255],
+  ['throwing', () => { throw new Error('SYNTHETIC_STATUS_GETTER_183'); }]
+]) {
+  test(`CLI command failure never invokes an own ${label} status getter`, async () => {
+    let calls = 0;
+    const error = hostileCliError183();
+    Object.defineProperty(error, 'status', { get() { calls += 1; return getter(calls); } });
+    const world = await runBootstrap(makeWorld({ cliApiKeyError: error }), { env: CLI_ENV_183 });
+    assertCliFailure183(world, COMMAND_ERROR_183, 'threw', [...ERROR_MARKERS_183, 'SYNTHETIC_STATUS_GETTER_183']);
+    assert.equal(calls, 0, 'status getter was not invoked');
+  });
+}
+
+test('CLI command failure contains a throwing descriptor trap', async () => {
+  let descriptorCalls = 0;
+  const error = new Proxy(hostileCliError183(), {
+    getOwnPropertyDescriptor(target, key) {
+      if (key === 'status') {
+        descriptorCalls += 1;
+        throw new Error('SYNTHETIC_DESCRIPTOR_TRAP_183');
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    }
+  });
+  const world = await runBootstrap(makeWorld({ cliApiKeyError: error }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, COMMAND_ERROR_183, 'threw', [...ERROR_MARKERS_183, 'SYNTHETIC_DESCRIPTOR_TRAP_183']);
+  assert.equal(descriptorCalls, 1, 'one guarded descriptor lookup');
+});
+
+test('CLI return conversion throw is invalid output, not a command error', async () => {
+  const marker = 'SYNTHETIC_CONVERSION_THROW_183';
+  const output = { toString() { throw new Error(marker); } };
+  const world = await runBootstrap(makeWorld({ cliApiKeyOutput: output }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, INVALID_OUTPUT_183, 'returned', [marker]);
+});
+
+test('CLI return conversion to a nonstring is invalid output', async () => {
+  const marker = 'SYNTHETIC_NONSTRING_RETURN_183';
+  const output = { toString() { return { marker }; } };
+  const world = await runBootstrap(makeWorld({ cliApiKeyOutput: output }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, INVALID_OUTPUT_183, 'returned', [marker]);
+});
+
+test('CLI nonstring return cannot forge a successful match or client key', async () => {
+  const marker = 'SYNTHETIC_FORGED_TOKEN_183';
+  let matchCalls = 0;
+  const forged = {
+    match() {
+      matchCalls += 1;
+      return [null, { trim() { return { toString() { return marker; } }; } }];
+    }
+  };
+  const output = { toString() { return forged; } };
+  const world = await runBootstrap(makeWorld({ cliApiKeyOutput: output }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, INVALID_OUTPUT_183, 'returned', [marker]);
+  assert.equal(matchCalls, 0, 'parser rejects the nonstring before match');
+});
+
+test('CLI rejects the first regex capture with an internal tab despite a valid later line', async () => {
+  const marker = 'SYNTHETIC_BAD\tKEY_183';
+  const output = `token:${marker}\ntoken:good-key\n`;
+  assert.equal(output.match(/^token:\s*(.+)$/m)[1], marker, 'fixture binds the first capture');
+  const world = await runBootstrap(makeWorld({ cliApiKeyOutput: output }), { env: CLI_ENV_183 });
+  assertCliFailure183(world, INVALID_OUTPUT_183, 'returned', [marker, 'good-key']);
+});
+
+test('CLI selects the first of two valid regex matches', async () => {
+  const output = 'token:first-key\ntoken:second-key\n';
+  assert.equal(output.match(/^token:\s*(.+)$/m)[1], 'first-key');
+  const world = await runBootstrap(makeWorld({ cliApiKeyOutput: output }), { env: CLI_ENV_183 });
+  assertCliInvocation183(world, 'returned');
+  assert.equal(world.exitCode, 0);
+  assert.deepEqual(world.clientApiKeys, ['first-key']);
+  assert.equal(parseEnv(world.files.get(ENV_FILE)).CHIRPSTACK_API_KEY, 'first-key');
+  for (const lines of [world.stdoutLogs, world.stderrLogs]) {
+    assert.equal(lines.join('\n').includes('second-key'), false, 'later token never appears on a stream');
+  }
 });
 
 // A token gRPC metadata cannot carry: grpc-js would throw an error that quotes
