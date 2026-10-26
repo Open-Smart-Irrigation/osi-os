@@ -62,7 +62,7 @@ Create a mode-0600 JSON specification in the private maintenance directory. Copy
 
 `undo-backfill` uses the current complete expected identity and an additional `originalRole` of researcher or viewer from the pre-upgrade record. Use it only for a proven, unintended 0045 promotion. It refuses unless another enabled admin exists. This is a deliberately selected account mutation, never broad demotion SQL.
 
-Run the chosen specification from the directory holding the two reviewed scripts:
+Run the chosen specification from the directory that contains the staged `scripts/` folder, so that `scripts/account-recovery.js` resolves:
 
 ```sh
 node scripts/account-recovery.js /data/db/farming.db /root/osi-account-maintenance/spec.json </dev/null
