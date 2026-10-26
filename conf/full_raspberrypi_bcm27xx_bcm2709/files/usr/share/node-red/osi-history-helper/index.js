@@ -991,11 +991,27 @@ function sourceChannelKey(sourceKey, channel) {
 // policy in device-sources.js. Other cards keep the card-wide channel list.
 const SOURCE_FAMILY_CARD_TYPES = new Set(['soil', 'environment']);
 
+// sourcePartitions asks once per row and channel, so the family channel set is
+// computed once per device row object and card type.
+const deviceFamilyChannelCache = new WeakMap();
+
+function deviceFamilyChannelKeys(device, cardType) {
+  let byCardType = deviceFamilyChannelCache.get(device);
+  if (!byCardType) {
+    byCardType = new Map();
+    deviceFamilyChannelCache.set(device, byCardType);
+  }
+  if (!byCardType.has(cardType)) {
+    const family = describeDeviceSource(device).families.find((entry) => entry.cardType === cardType);
+    byCardType.set(cardType, new Set(family ? family.channelKeys : []));
+  }
+  return byCardType.get(cardType);
+}
+
 function deviceFamilySupportsChannel(device, cardType, channel) {
   // A device row without a type keeps the card-wide channel list.
   if (!deviceTypeId(device)) return true;
-  const family = describeDeviceSource(device).families.find((entry) => entry.cardType === cardType);
-  return Boolean(family && family.channelKeys.includes(channel.id));
+  return deviceFamilyChannelKeys(device, cardType).has(channel.id);
 }
 
 function sourceSupportsChannel(sourceKey, channel, options = {}) {
