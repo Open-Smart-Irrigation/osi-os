@@ -22,16 +22,18 @@ jobs:
           node-version: '22'
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
-      # The repo's main local gate, promoted to CI after issue #84 proved it can
-      # break on main invisibly (it chains comm-contract, DB-schema consistency,
-      # history schema/worker tests, history API contract, helper tests, and
-      # profile parity). Must end with "All parity checks passed."
+      - name: Reference-tree ownership and valve-router client lifetime
+        run: node --test scripts/test-reference-tree-and-valve-router.js
       - name: Scoped-access endpoint ratchet
         run: node scripts/verify-scoped-access.js
       # The ratchet's own tests: each removes, hides or misplaces a guard's
       # scope decision and expects the ratchet to fail (#389).
       - name: Scoped-access ratchet tests
         run: node --test scripts/verify-scoped-access.test.js
+      # The repo's main local gate, promoted to CI after issue #84 proved it can
+      # break on main invisibly (it chains comm-contract, DB-schema consistency,
+      # history schema/worker tests, history API contract, helper tests, and
+      # profile parity). Must end with "All parity checks passed."
       - run: node scripts/verify-sync-flow.js
       - name: Sync outbox JSON guard
         run: node scripts/test-sync-outbox-json-guard.js

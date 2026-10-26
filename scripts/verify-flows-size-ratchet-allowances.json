@@ -262,8 +262,8 @@
       "reason": "Supersedes the previous entry (175). port/wave3-auth-flaggate (fix(auth): flag-gate the shared scope resolver across all auth nodes + hermetic flag-off verifier, follow-up to PR #200 / commit 2c4fa9a5f): measured with verify-flows-size-ratchet's nodeSizes over both maintained profiles (byte-identical bcm2712/bcm2709): origin/main 5139 -> HEAD 7116 = +1977. getAuthSecret() previously called osiLib.require('scope') unconditionally, violating the default-off contract (a lost osi-lib helper file would 500 every auth endpoint on a flag-off gateway). Fixed per the history-api-router-fn/zone-env-fn reference pattern: getAuthSecret() now checks a freshly-recomputed OSI_SCOPED_ACCESS flag first (recomputed locally rather than closing over any outer scopedOn, avoiding TDZ risk uniformly across every node regardless of its own structure) and only resolves osiLib inside the flag-on branch; the flag-off branch inlines the exact pre-refactor secret-resolution logic (same file paths, same ENOENT-quiet read/generate/write behavior), byte-equivalent to the pre-port route."
     },
     "dendro-ref-tree-fn": {
-      "delta": 5209,
-      "reason": "fix(export): PUT /api/devices/:deveui/reference-tree requires a signed-in session in both flag states; it accepted any header starting with 'Bearer ' when the flag was off. origin/main 1491 -> HEAD 6700 = +5209. Both byte-identical maintained profiles (bcm2712/bcm2709) measure the same with verify-flows-size-ratchet nodeSizes (func.length). The growth is the session check copied verbatim from sensor-history-fn (getAuthSecret, toBase64Url, fromBase64Url, verifyBearer with its _osiAuthFailure tags, sourceId substituted): flag off it resolves the token secret inline (env, then the stored secret file) and never loads the scope helper; flag on it resolves it through osi-scope-helper resolveAuthSecret like every other gated route. Also converts the node's empty close() catch to a node.warn (silent-catch ratchet), and the node gains the crypto and osiLib libs the block needs. Supersedes the prior +46 entry (issue #15 sync_version bump), which origin/main already measures in full."
+      "delta": 354,
+      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: dendro-ref-tree-fn 6700 -> 7054 = 354 chars in each byte-identical maintained profile. With the flag off, the handler keeps the verified session's user id and binds it next to the EUI in both the SELECT and the UPDATE, so a foreign, unclaimed or missing device gets the same 404 and no write; if ownership changes between the read and the write, the UPDATE matches no row and the request also gets 404. The JSON-parse catch in the token check gains a fixed warning. Supersedes any consumed allowance for this node."
     },
     "lsn50-zone-agg-fn": {
       "delta": 290,
@@ -664,6 +664,10 @@
     "command-postcondition-route": {
       "delta": 143,
       "reason": "AUTH-09 PR A, measured with verify-flows-size-ratchet nodeSizes over both byte-identical bcm2712/bcm2709 profiles: origin/main 646 -> HEAD 789 = +143. Route command ACK verification sends UNCLAIM_DEVICE to a third output (unclaim-cloud-valve-cleanup-fn) instead of straight to Build Schedule ACK, so the cloud unclaim runs the valve plan cleanup before it is acknowledged."
+    },
+    "valve-api-router-fn": {
+      "delta": 519,
+      "reason": "osi-os #470, measured against 63c7a70f8f3b373f162b33b0669b0df89b3763fa: valve-api-router-fn 1866 -> 2385 = 519 chars in each byte-identical maintained profile. The router used to create a ChirpStack client for every request and never close it. Now flushQueue creates one per request on first use, which the valve API reaches only after the session and valve authorization checks pass, and a finally handler closes it after the API promise, including its awaited queue flush, has settled. Close errors are logged as warnings without replacing the response. Supersedes any consumed allowance for this node."
     }
   },
   "total_allowance": {
