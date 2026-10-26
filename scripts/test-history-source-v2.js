@@ -1006,6 +1006,38 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: legacy aggregate reads only the requested device's rows`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      // B is busy: 30,001 rows inside the 48 h window. A, the requested
+      // device, has three. Before the fix, B's rows filled A's raw budget.
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+      const busyStart = Date.parse('2026-10-02T13:00:00Z');
+      raw.exec('BEGIN');
+      for (let index = 0; index < 30001; index += 1) {
+        insert.run('A8404100000000B1', new Date(busyStart + index * 5000).toISOString(), 70);
+      }
+      raw.exec('COMMIT');
+      const sqls = [];
+      const recording = {
+        all(sql, params) {
+          sqls.push({ sql, params: params || [] });
+          return raw.prepare(sql).all(...(params || []));
+        },
+      };
+      const points = await helper.legacySensorHistory(recording, {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 48, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(points.map((point) => point.value), [48, 24, 23]);
+      const dataReads = sqls.filter((entry) => /FROM device_data/.test(entry.sql));
+      assert.ok(dataReads.length > 0);
+      assert.ok(dataReads.every((entry) => !entry.params.includes('A8404100000000B1')), 'device_data reads must not include the unrequested device');
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${profile}: legacy raw entry rejects the 30001st row`, async () => {
     const helper = loadHelper(profile);
     const oversized = (dendro) => helper.legacySensorHistory({

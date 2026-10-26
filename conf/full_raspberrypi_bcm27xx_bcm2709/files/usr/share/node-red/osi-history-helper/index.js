@@ -2121,6 +2121,9 @@ async function aggregateDeviceData(db, rawQuery = {}) {
     ? query.sourceDevices
     : (Array.isArray(query.source_devices) ? query.source_devices : []);
   const sourceDevices = hasExplicitSourceDevices ? explicitSourceDevices : deveuis.map((deveui) => ({ deveui }));
+  // An explicit source list is authoritative for the device_data reads too:
+  // rows of other card devices must not consume the shared raw-row budget.
+  const readDeveuis = hasExplicitSourceDevices ? uniqueDeveuis(sourceDevices) : deveuis;
   if (hasExplicitSourceDevices && sourceDevices.length === 0) {
     const unavailable = aggregateRows([], {
       ...query,
@@ -2256,9 +2259,9 @@ async function aggregateDeviceData(db, rawQuery = {}) {
     let live = null;
     let liveOverflow = false;
     const hasTrailingWindow = splitMs < endMs;
-    if (hasTrailingWindow && deveuis.length > 0) {
+    if (hasTrailingWindow && readDeveuis.length > 0) {
       const remainingRawBudget = Math.max(0, RAW_HISTORY_MAX_ROWS - recoveredResult.rawRowsRead);
-      const livePlaceholders = deveuis.map(() => '?').join(',');
+      const livePlaceholders = readDeveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
       const range = recordedAtRangeSql('recorded_at', splitIso, end);
       if (remainingRawBudget === 0) {
@@ -2266,7 +2269,7 @@ async function aggregateDeviceData(db, rawQuery = {}) {
         live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
       } else {
         const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${remainingRawBudget + 1}`;
-        const fetchedRows = await dbAll(db, sql, deveuis.concat(range.params));
+        const fetchedRows = await dbAll(db, sql, readDeveuis.concat(range.params));
         const rows = fetchedRows.filter(recordedAtRangeFilter(splitIso, end));
         if (fetchedRows.length > remainingRawBudget) {
           liveOverflow = true;
@@ -2310,8 +2313,8 @@ async function aggregateDeviceData(db, rawQuery = {}) {
     }
   }
 
-  if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
-  const placeholders = deveuis.map(() => '?').join(',');
+  if (readDeveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
+  const placeholders = readDeveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const range = recordedAtRangeSql('recorded_at', start, end, { endInclusive: true });
   // Raw fallback is bounded for every aggregation level.  A missing rollup
@@ -2319,7 +2322,7 @@ async function aggregateDeviceData(db, rawQuery = {}) {
   // into an unbounded device_data scan.
   const rawLimitSql = ` LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
   const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC${rawLimitSql}`;
-  const params = deveuis.concat(range.params);
+  const params = readDeveuis.concat(range.params);
   const rows = await dbAll(db, sql, params);
   if (rows.length > RAW_HISTORY_MAX_ROWS) {
     const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
@@ -2453,6 +2456,9 @@ async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
       channel,
       channels: [channel],
       deveuis: sourceDeveuis,
+      // The zone row carries the LSN50 watermark annotation; the joined
+      // lookup row above does not.
+      device: sourceDevices.find((candidate) => normalizeDeveui(candidate && candidate.deveui) === normalizedDeveui) || device,
       timezone: zone.timezone || 'UTC',
     };
   }
@@ -2643,16 +2649,17 @@ async function legacySensorHistory(db, options = {}) {
   const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
   if (!key) return rawLegacySensorHistory(db, scopedOptions);
   const aggregation = legacyAggregationForHours(hours);
+  const requestedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   const result = await aggregateDeviceData(db, {
     zoneId: key.zoneId,
     cardType: key.cardType,
     logicalSourceKey: key.logicalSourceKey,
-    device_euis: key.deveuis,
+    device_euis: [requestedDeveui],
     start,
     end,
     aggregation,
     channels: key.channels,
-    sourceDevices: [{ deveui: normalizeDeveui(options.deveui || options.deviceEui || options.device_eui) }],
+    sourceDevices: [key.device || { deveui: requestedDeveui }],
     timezone: key.timezone,
     nowMs: endMs,
   });
