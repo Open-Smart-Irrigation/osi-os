@@ -1859,6 +1859,72 @@ function sourceRollupResults(rows, query, channels, sourceDevices) {
   return aggregates;
 }
 
+// A retained rollup row covers the request bucket that contains its
+// bucket_start. The rollup job anchors hourly and weekly rows at its own
+// todayStart - window and keys the upsert on bucket_start, so a request
+// anchored elsewhere, or two job runs on consecutive days, never match bucket
+// starts exactly.
+function bucketContainsStart(bucket, startMs) {
+  const bucketStartMs = parseTime(bucket.bucketStart);
+  const bucketEndMs = parseTime(bucket.bucketEnd);
+  return startMs !== null && bucketStartMs !== null && bucketEndMs !== null
+    && startMs >= bucketStartMs && startMs < bucketEndMs;
+}
+
+function betterRetainedRollup(candidate, current) {
+  if (!current) return true;
+  const candidateHasSamples = Number(candidate.sample_count || 0) > 0;
+  const currentHasSamples = Number(current.sample_count || 0) > 0;
+  if (candidateHasSamples !== currentHasSamples) return candidateHasSamples;
+  const candidateCoverage = toFiniteNumber(candidate.coverage_pct);
+  const currentCoverage = toFiniteNumber(current.coverage_pct);
+  if (candidateCoverage !== currentCoverage) {
+    if (currentCoverage === null) return true;
+    if (candidateCoverage === null) return false;
+    return candidateCoverage > currentCoverage;
+  }
+  const candidateWritten = parseTime(candidate.computed_at);
+  const currentWritten = parseTime(current.computed_at);
+  if (candidateWritten !== currentWritten) {
+    if (currentWritten === null) return true;
+    if (candidateWritten === null) return false;
+    return candidateWritten > currentWritten;
+  }
+  return (toFiniteNumber(candidate.id) ?? -1) > (toFiniteNumber(current.id) ?? -1);
+}
+
+// Keeps at most one retained row per source/channel and request bucket. The
+// kept row keeps its own bucket_start/bucket_end: the response exposes the
+// interval the stored statistics actually cover.
+function selectRetainedRollupRows(rollupRows, skeleton) {
+  const groups = new Map();
+  for (const row of rollupRows || []) {
+    const key = `${row.logical_source_key}|${row.channel_id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const selected = [];
+  for (const rows of groups.values()) {
+    for (const bucket of skeleton || []) {
+      let best = null;
+      for (const row of rows) {
+        if (bucketContainsStart(bucket, parseTime(row.bucket_start)) && betterRetainedRollup(row, best)) best = row;
+      }
+      if (best) selected.push(best);
+    }
+  }
+  return selected;
+}
+
+async function resolveRollupTimezone(db, query, zoneId) {
+  const explicit = query.timezone || query.time_zone;
+  if (explicit) return explicit;
+  if (zoneId === undefined || zoneId === null) return 'UTC';
+  const zoneRows = await dbAll(db, 'SELECT timezone FROM irrigation_zones WHERE id = ?', [zoneId]);
+  const zoneTimezone = zoneRows[0] && typeof zoneRows[0].timezone === 'string' ? zoneRows[0].timezone.trim() : '';
+  return zoneTimezone ? normalizeTimezone(zoneTimezone) : 'UTC';
+}
+
 async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, channels, rollupRows, start, end, aggregation) {
   const recovered = [];
   const missingPairs = [];
@@ -1868,9 +1934,10 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
     if (!sourceKey || !logicalKey) continue;
     for (const channel of channels) {
       if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })) continue;
-      const existingStarts = new Set((rollupRows || [])
+      const retainedStartsMs = (rollupRows || [])
         .filter((row) => row.logical_source_key === logicalKey && row.channel_id === channel.id)
-        .map((row) => String(row.bucket_start)));
+        .map((row) => parseTime(row.bucket_start))
+        .filter((value) => value !== null);
       const skeleton = aggregateRowsPooled([], {
         aggregation,
         channels: [channel],
@@ -1881,7 +1948,7 @@ async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, chann
         timezone: query.timezone || query.time_zone || 'UTC',
         nowMs: query.nowMs,
       });
-      const missing = (skeleton.buckets || []).filter((bucket) => !existingStarts.has(String(bucket.bucketStart)));
+      const missing = (skeleton.buckets || []).filter((bucket) => !retainedStartsMs.some((startMs) => bucketContainsStart(bucket, startMs)));
       if (!missing.length) continue;
       missingPairs.push({
         sourceKey,
@@ -2099,7 +2166,7 @@ async function aggregateDeviceData(db, rawQuery = {}) {
   // legacy and Analysis callers keep the card-wide channel list.
   const interactiveBudget = [rawQuery.maxPointsPerSeries, rawQuery.max_points_per_series, rawQuery.maxPointsTotal, rawQuery.max_points_total]
     .some((value) => { const number = toFiniteNumber(value); return number !== null && number > 0; });
-  const query = { ...rawQuery, eligibilityCardType: interactiveBudget ? firstDefinedValue([rawQuery.cardType, rawQuery.card_type]) : undefined };
+  let query = { ...rawQuery, eligibilityCardType: interactiveBudget ? firstDefinedValue([rawQuery.cardType, rawQuery.card_type]) : undefined };
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
   const channels = normalizeQueryChannels(filterSoilChannelsForSources(query.channels, query.sourceDevices));
@@ -2212,6 +2279,9 @@ async function aggregateDeviceData(db, rawQuery = {}) {
   const shouldUseRollups =
     (!hasSourceFilter || (hasExplicitSourceDevices && sourceDevices.length > 0))
     && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
+  // Retained rollups are written in the zone timezone (runRollupJob). A
+  // caller that omits the timezone reads them in that same timezone, not UTC.
+  if (shouldUseRollups) query = { ...query, timezone: await resolveRollupTimezone(db, query, zoneId) };
   if (shouldUseRollups && !hasExplicitSourceDevices && logicalSourceKey) {
     const compatibility = await aggregatePooledRollupCompatibility(db, query, channels, aggregationInfo, logicalSourceKey, deveuis, start, end);
     if (compatibility) return compatibility;
@@ -2235,7 +2305,15 @@ async function aggregateDeviceData(db, rawQuery = {}) {
       const channelPlaceholders = channelIds.map(() => '?').join(',');
       const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key IN (${keyPlaceholders}) AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${channelPlaceholders}) ORDER BY logical_source_key ASC, bucket_start ASC, channel_id ASC`;
       const params = [zoneId, cardType].concat(sourceLogicalKeys, [aggregation, rollupStartIso, splitIso], channelIds);
-      rollupRows = await dbAll(db, sql, params);
+      const requestSkeleton = aggregateRowsPooled([], {
+        aggregation,
+        channels: [channels[0]],
+        start,
+        end: splitIso,
+        timezone: query.timezone,
+        nowMs: query.nowMs,
+      }).buckets || [];
+      rollupRows = selectRetainedRollupRows(await dbAll(db, sql, params), requestSkeleton);
     }
     const completedSources = sourceRollupResults(
       rollupRows,

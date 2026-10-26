@@ -281,6 +281,50 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`${profile}: HTTP card data aggregates in the zone timezone and labels the bucket geometry`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    db.prepare("UPDATE irrigation_zones SET timezone = 'Europe/Zurich' WHERE id = 1").run();
+    db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A840420000000101', 'Zone Kiwi', 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01')`).run();
+    const cardId = helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' });
+    const calls = [];
+    const recordingHelper = Object.assign({}, helper, {
+      aggregateDeviceData(database, query) {
+        calls.push(query);
+        return helper.aggregateDeviceData(database, query);
+      },
+    });
+    try {
+      const geometry = {};
+      for (const aggregation of ['daily', 'hourly']) {
+        const response = await executeFunction(node, {
+          msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${cardId}/data`, { zoneId: '1', cardId }, {
+            from: '2026-01-01T10:23:00.000Z',
+            to: '2026-01-08T10:23:00.000Z',
+            aggregation,
+          }),
+          env: ENV,
+          db,
+          libOverrides: { osiHistory: recordingHelper, HR: router },
+        });
+        assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+        geometry[aggregation] = {
+          bucketTimezone: response.result.payload.aggregation.bucketTimezone,
+          bucketAlignment: response.result.payload.aggregation.bucketAlignment,
+        };
+      }
+      assert.equal(calls.length, 2);
+      assert.ok(calls.every((query) => query.timezone === 'Europe/Zurich'), JSON.stringify(calls.map((query) => query.timezone)));
+      assert.deepEqual(geometry, {
+        daily: { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' },
+        hourly: { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test(`${profile}: HTTP interactive grid over 30000 returns descriptors without traces`, async () => {
     const { helper, router, node } = historyProfile(profile);
     const db = seedScopedDb();

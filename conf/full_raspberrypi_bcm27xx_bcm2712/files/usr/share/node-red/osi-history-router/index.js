@@ -637,6 +637,16 @@ function shouldUseHistoryRollups(scopeContext, rangeLabel, aggregationRequested)
 // a merged bucket cannot be separated again, so a soil card with such a source
 // reads raw device_data. Every other card, and every soil card without such a
 // source, follows the range/aggregation rule above.
+// Describes the bucket grid aggregateDeviceData builds for the card route.
+// Daily buckets end at the zone's local midnights (the first one starts at
+// the request start). Fixed-second levels, including weekly's seven-day
+// steps, are anchored to the request start and independent of the timezone.
+function bucketGeometry(level, timezone) {
+  return level === 'daily'
+    ? { bucketTimezone: String(timezone || 'UTC'), bucketAlignment: 'zone_calendar' }
+    : { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' };
+}
+
 function shouldUseCardRollups(card, sourceDevices, scopeContext, rangeLabel, aggregationRequested, options = {}) {
   // An explicit merged-card source selection has source-keyed rollups, so it
   // is safe to use them even when another selected source is a plain LSN50.
@@ -987,6 +997,7 @@ module.exports = {
   summaryScore,
   shouldUseHistoryRollups,
   shouldUseCardRollups,
+  bucketGeometry,
   rowHasSoilProfileValue,
   latestSeriesPoint,
   pointValueForCalendar,

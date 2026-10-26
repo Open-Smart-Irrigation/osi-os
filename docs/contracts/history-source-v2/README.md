@@ -36,11 +36,18 @@ not broaden the query to pooled or all-device history.
 
 Raw values retain their stored precision. Fixed buckets retain the host's
 existing boundaries and expose the actual covered interval. The edge HTTP card
-route omits a timezone option, so its helper uses UTC; edge exports and analysis
-calls may pass the farm timezone. Edge fixed-second buckets can be anchored to
-the request. Cloud typed rollups use UTC. Weekly alignment follows the host's
-current call options. The requested display timezone is metadata and does not
-redefine bucket geometry.
+route passes the zone timezone, which is also the timezone the edge rollup job
+writes in. Its daily buckets end at the zone's local midnights
+(`bucketAlignment: zone_calendar`, `bucketTimezone` is the zone). Its
+fixed-second buckets, weekly seven-day steps included, are anchored to the
+request (`bucketTimezone: UTC`, `bucketAlignment: request_anchored`). A
+retained edge rollup row serves the request bucket that contains its
+`bucket_start` and keeps its stored interval; when several rows fall in one
+bucket, the edge keeps the one with samples, then the higher coverage, then
+the latest write. Edge exports and analysis calls may pass the farm timezone.
+Cloud typed rollups use UTC. Weekly alignment follows the host's current call
+options. The requested display timezone is metadata and does not redefine
+bucket geometry.
 
 Timestamp placement follows each existing path. Cloud raw aggregates use the
 bucket start for `t`; cloud persisted rollups use `latestRecordedAt` when it is

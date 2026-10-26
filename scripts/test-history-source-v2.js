@@ -209,6 +209,49 @@ function alternatingRollupDatabase() {
   };
 }
 
+function retainedRollup(logicalSourceKey, bucketStartMs, bucketEndMs, value, extra = {}) {
+  return {
+    logical_source_key: logicalSourceKey,
+    channel_id: 'swt_1',
+    bucket_start: new Date(bucketStartMs).toISOString(),
+    bucket_end: new Date(bucketEndMs).toISOString(),
+    min_value: value,
+    max_value: value,
+    mean_value: value,
+    median_value: value,
+    latest_value: value,
+    coverage_pct: 100,
+    coverage_confidence: 'configured',
+    sample_count: 1,
+    event_count: 0,
+    threshold_crossing_count: 0,
+    unit: 'kPa',
+    computed_at: '2026-10-01T00:00:00Z',
+    ...extra,
+  };
+}
+
+// Answers the zone timezone lookup, returns retained rollups, and counts every
+// other (device_data) read.
+function geometryDatabase(rollups, zoneTimezone) {
+  let rawQueries = 0;
+  return {
+    facade: {
+      all(sql) {
+        if (sql.includes('irrigation_zones')) return zoneTimezone ? [{ timezone: zoneTimezone }] : [];
+        if (sql.includes('history_channel_rollups')) return rollups;
+        rawQueries += 1;
+        return [];
+      },
+    },
+    rawQueryCount: () => rawQueries,
+  };
+}
+
+function zurichDateKey(iso) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+}
+
 function syntheticRows(count, startMs, spanMs, sourceKeys, channelKeys) {
   return Array.from({ length: count }, (_, index) => {
     const source = sourceKeys[index % sourceKeys.length];
@@ -791,12 +834,158 @@ for (const profile of PROFILES) {
       end: database.range.end,
       aggregation: 'daily',
       useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
       nowMs: Date.parse('2026-10-04T00:00:00Z'),
       channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
     });
     assert.equal(database.rawQueryCount(), 1);
     assert.equal(aggregate.sourceAggregates[0].buckets.length, 2000);
     assert.equal(aggregate.availability, undefined);
+  });
+
+  test(`${profile}: daily zone rollups keep one bucket per local day for an unaligned range`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const dayMs = 24 * 60 * 60 * 1000;
+    // Zurich local midnights for 4 Sep .. 2 Oct 2026 (CEST, 22:00Z).
+    const firstLocalMidnightMs = Date.parse('2026-09-03T22:00:00Z');
+    const rollups = Array.from({ length: 29 }, (_, index) => retainedRollup(
+      logicalSourceKey,
+      firstLocalMidnightMs + index * dayMs,
+      firstLocalMidnightMs + (index + 1) * dayMs,
+      10,
+    ));
+    const database = geometryDatabase(rollups, 'Europe/Zurich');
+    // No timezone option: the helper resolves the zone's own timezone.
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start: '2026-09-03T10:23:00.000Z',
+      end: '2026-10-03T10:23:00.000Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-03T10:23:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    const localDays = buckets.map((bucket) => zurichDateKey(bucket.bucketStart));
+    assert.equal(new Set(localDays).size, localDays.length, `one bucket per local day, got ${localDays.join(',')}`);
+    assert.equal(buckets.length, 31);
+    assert.equal(localDays[0], '2026-09-03');
+    assert.equal(localDays[30], '2026-10-03');
+    const retainedValues = buckets.slice(1, 30).map((bucket) => bucket.series.swt_1.latest);
+    assert.ok(retainedValues.every((value) => value === 10), `retained days keep their rollup value, got ${retainedValues.join(',')}`);
+    assert.ok(database.rawQueryCount() <= 2, `raw reads stay bounded, got ${database.rawQueryCount()}`);
+  });
+
+  test(`${profile}: weekly season reads one bucket per week from rollups at two anchors`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const start = '2026-04-01T00:00:00.000Z';
+    const end = '2026-09-30T23:59:59.999Z';
+    const startMs = Date.parse(start);
+    const endMs = Date.parse(end);
+    // The rollup job anchors weekly buckets at todayStart - 370 d and keys the
+    // upsert on bucket_start, so runs on two consecutive days leave two grids
+    // one day apart. The newer run (anchor B) has the better coverage.
+    const anchors = [
+      { firstMs: Date.parse('2026-03-29T22:00:00Z'), value: 10, coverage: 50, computedAt: '2026-10-25T02:00:00Z' },
+      { firstMs: Date.parse('2026-03-30T22:00:00Z'), value: 20, coverage: 100, computedAt: '2026-10-26T02:00:00Z' },
+    ];
+    const rollups = [];
+    for (const anchor of anchors) {
+      for (let bucketStartMs = anchor.firstMs; bucketStartMs < endMs; bucketStartMs += weekMs) {
+        if (bucketStartMs < startMs) continue;
+        rollups.push(retainedRollup(logicalSourceKey, bucketStartMs, bucketStartMs + weekMs, anchor.value, {
+          coverage_pct: anchor.coverage,
+          computed_at: anchor.computedAt,
+        }));
+      }
+    }
+    const database = geometryDatabase(rollups, 'Europe/Zurich');
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start,
+      end,
+      range: 'season',
+      aggregation: 'weekly',
+      timezone: 'Europe/Zurich',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-26T12:00:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    const expectedWeeks = Math.ceil((endMs - startMs) / weekMs);
+    assert.equal(buckets.length, expectedWeeks, `one bucket per request week, got ${buckets.length}`);
+    const starts = buckets.map((bucket) => bucket.bucketStart);
+    assert.equal(new Set(starts).size, starts.length);
+    assert.deepEqual(starts, starts.slice().sort());
+    const values = buckets.map((bucket) => bucket.series.swt_1.latest);
+    const retained = values.filter((value) => value !== null);
+    assert.ok(retained.length >= expectedWeeks - 1, `weeks covered by a retained rollup keep it, got ${values.join(',')}`);
+    assert.ok(retained.every((value) => value === 20), `the better-covered retained row wins, got ${values.join(',')}`);
+    assert.ok(database.rawQueryCount() <= 1, `raw reads stay bounded, got ${database.rawQueryCount()}`);
+  });
+
+  test(`${profile}: hourly rollups at :00 cover a request anchored at :23`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const hourMs = 60 * 60 * 1000;
+    const start = '2026-09-03T10:23:00.000Z';
+    const end = '2026-10-03T10:23:00.000Z';
+    const firstRetainedMs = Date.parse('2026-09-03T11:00:00Z');
+    const rollups = Array.from({ length: 720 }, (_, index) => retainedRollup(
+      logicalSourceKey,
+      firstRetainedMs + index * hourMs,
+      firstRetainedMs + (index + 1) * hourMs,
+      10,
+    ));
+    const database = geometryDatabase(rollups, 'UTC');
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start,
+      end,
+      aggregation: 'hourly',
+      timezone: 'UTC',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-10T00:00:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    assert.equal(buckets.length, 720, `one bucket per request hour, got ${buckets.length}`);
+    // A retained bucket keeps the interval its statistics cover.
+    assert.equal(buckets[0].bucketStart, '2026-09-03T11:00:00.000Z');
+    assert.ok(buckets.every((bucket) => bucket.series.swt_1.latest === 10));
+    assert.equal(database.rawQueryCount(), 0);
   });
 
   test(`${profile}: live-tail raw overflow returns actionable availability`, async () => {
@@ -824,6 +1013,9 @@ for (const profile of PROFILES) {
       end: '2026-10-05T00:00:00Z',
       aggregation: 'daily',
       useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
       nowMs: Date.parse('2026-10-04T12:00:00Z'),
       channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
     });
@@ -899,6 +1091,9 @@ for (const profile of PROFILES) {
       end: '2026-10-03T00:00:00Z',
       aggregation: 'daily',
       useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
       nowMs: Date.parse('2026-10-04T00:00:00Z'),
       channels: channelKeys.map((id) => ({ id, field: id, unit: 'kPa' })),
     });
@@ -933,6 +1128,9 @@ for (const profile of PROFILES) {
       end: '2026-10-05T00:00:00Z',
       aggregation: 'daily',
       useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
       nowMs: Date.parse('2026-10-03T12:00:00Z'),
       channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
     });
@@ -968,6 +1166,9 @@ for (const profile of PROFILES) {
       sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
       aggregation: 'daily',
       useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
       channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
     };
     const recoveryOverflow = await helper.aggregateDeviceData(query(boundaryRows(Date.parse('2026-10-01T00:00:00Z'))), {
