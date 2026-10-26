@@ -1,24 +1,24 @@
 # Issue 469: align SDI-12 commissioning with the shipped ChirpStack client
 
-This plan repairs recipe apply, rollback and queued-deployment polling by changing commissioning callers to the helper's existing API. It is a design deliverable awaiting fresh independent plan review. Do not implement it until the coordinator accepts that review and assigns execution.
+This plan repairs recipe apply, rollback and queued-deployment polling by changing commissioning callers to the helper's existing API. It is implemented in PR #525. Apply and rollback on a test gateway remain pending.
 
 ## Base, evidence and scope
 
 Runtime base: `63c7a70f8f3b373f162b33b0669b0df89b3763fa`. The design branch `t3/sdi12-helper-alignment-plan` began clean at `c37207b30b002fb79da8ae57253d78c04613b6a5`, zero commits ahead and 103 behind that base. It was advanced with `git merge --ff-only` to the requested SHA; no other checkout was changed. Local `origin/main` also resolved to the runtime base. This design did not fetch or claim a fresh remote-head comparison.
 
-Read the current [issue and acceptance criteria](https://github.com/Open-Smart-Irrigation/osi-os/issues/469) and [campaign comment](https://github.com/Open-Smart-Irrigation/osi-os/issues/469#issuecomment-6404022198), refreshed on October 26. The issue remains open, P1. Campaign references are `COORDINATION.md`, `PLAN.md`, `reports/issue-469-finder.md` and `reports/issue-469-coordinator-evidence.md` under `/home/phil/projects/osi-release-campaign-2026-10-25`.
+Read the current [issue and acceptance criteria](https://github.com/Open-Smart-Irrigation/osi-os/issues/469) and [triage comment](https://github.com/Open-Smart-Irrigation/osi-os/issues/469#issuecomment-6404022198), refreshed on October 26. The issue remains open, P1.
 
 At the base, commissioning calls `listDeviceQueue` three times and `enqueueDeviceDownlink` twice. The real helper exposes `getDeviceQueue` and `enqueueDownlink`. The flow action nodes pass that helper directly. Queue retrieval already exists, so adding another retrieval implementation or duplicate public aliases has no demonstrated need.
 
-The finder reports that temporary in-memory adapters enabled 12 fake-gRPC enqueues each for apply and rollback, and a queued poll stamped `queue_drained_at`. Its report supplies no saved reproduction-script path. The designer requested that artifact; the separate design probe in the campaign evidence directory is independent evidence, not a claim to have read the missing script. Fresh plan review must inspect the finder script if supplied, or explicitly accept this evidence limitation before execution.
+A probe built from the fixture definitions in the existing commissioning tests ran unmodified commissioning code and the real helper over fake device RPC methods. With temporary in-memory adapters that supply the missing method names, apply and rollback each reached 12 fake-gRPC enqueues and a queued poll stamped `queue_drained_at`.
 
-The designer's wrapped `reports/issue-469-design-evidence/baseline.cjs` extracts only fixture definitions from the existing commissioning tests, then uses unmodified commissioning and the real helper over fake device RPC methods. All three operations throw internal `502 chirpstack_unknown` with zero RPC calls. Apply settles to `not_applied`; rollback restores its `observed_once` snapshot; poll retains `queued`. The existing focused suite passes 105 tests and profile parity passes on the same base. Those passes miss the composition defect.
+Without those adapters, all three operations throw internal `502 chirpstack_unknown` with zero RPC calls. Apply settles to `not_applied`; rollback restores its `observed_once` snapshot; poll retains `queued`. The existing focused suite passes 105 tests and profile parity passes on the same base. Those passes miss the composition defect.
 
 The HTTP action wrappers currently turn the internal 502 into HTTP 500 with bounded text. Preserve that behavior. Real gRPC errors carry numeric `error.code` plus `grpcStatus`; commissioning currently recognizes string names only, so the real-transport error fixtures below also expect `chirpstack_unknown`. Changing that mapping is separate work.
 
 ## File ownership
 
-The executor claims exactly these product/test files, subject to coordinator confirmation that no other task owns them:
+The change touches exactly these product/test files:
 
 - `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.js`
 - `conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-commissioning/index.js`
@@ -26,7 +26,7 @@ The executor claims exactly these product/test files, subject to coordinator con
 - `conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js`
 - `scripts/test-sdi12-recipe-flow.js`
 
-This plan also remains in the execution branch. Record execution evidence in the campaign report directory. The coordinator owns ledger updates; this design does not mutate the ledger.
+This plan is committed with the change.
 
 No helper implementation/test change, shared test-harness change, package/lockfile change, schema/seed change, GUI change, server companion, or `flows.json` edit is required. PR #473 already supplied client cleanup; PR #503 already supplied current commissioning behavior. Both are in the runtime base. If a failing regression requires a flow edit, stop for a reviewed scope amendment with exact node ownership, script-only editing and the flow gate set from `osi-flows-json-editing`; do not expand this plan during execution.
 
@@ -40,19 +40,19 @@ Keep `client.close()` in each action/poll `finally`. The tests retain the actual
 
 ## Execution preflight
 
-Read `AGENTS.md`, `docs/engineering-playbook.md` and the common-pitfalls, flows-json-editing, verification-commands, agronomy-sensors-reference and anti-slop-writing skills. The campaign's restrictions apply: no installs, push, PR/GitHub writes, live/production access or children during this assignment. Hardware acceptance stays pending.
+Read `AGENTS.md`, `docs/engineering-playbook.md` and the common-pitfalls, flows-json-editing, verification-commands, agronomy-sensors-reference and anti-slop-writing skills. Hardware acceptance stays pending.
 
-All commands below run from the assigned isolated checkout. Resolve binaries before admission with the shell builtin `command -v python3 git node`. Every test, probe, checker and extraction uses the wrapper. Wait for the lock; a hold or fault is a stop/report result. Never delete admission/registration files or run a command outside the wrapper to evade a refusal.
+Run all commands below from an isolated checkout of the runtime base.
 
 ```bash
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py git status --short --branch
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py git rev-parse HEAD
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py git rev-list --left-right --count HEAD...63c7a70f8f3b373f162b33b0669b0df89b3763fa
+git status --short --branch
+git rev-parse HEAD
+git rev-list --left-right --count HEAD...63c7a70f8f3b373f162b33b0669b0df89b3763fa
 ```
 
-Expected: clean assigned branch, with the reviewed plan as the only additional commit(s) above the runtime base. Verify the explicit base-to-head diff contains only that plan before starting. Record base, plan SHA, checkout, environment overrides and command exit statuses in `reports/issue-469-execution.md`. Any different runtime base needs a drift assessment and fresh plan review. Refresh the issue/comments and existing PR overlap through read-only GitHub tools before execution; do not adopt a competing implementation silently.
+Expected: a clean branch whose only commits above the runtime base are this plan. Any different runtime base needs a drift assessment before execution. Check the issue and open PRs for overlapping work first.
 
-Run the base gates in the gate section before editing. The existing focused command must report 105 passing tests; any unrelated red base gate stops that surface for coordinator disposition. Missing dependencies are a prerequisite failure, not authorization to install.
+Run the gates in Step 3 before editing. The existing focused command must report 105 passing tests; an unrelated red base gate stops the work until it is understood. Missing dependencies are a prerequisite failure.
 
 ## Step 1: add regressions while keeping the runtime broken
 
@@ -347,11 +347,11 @@ for (const profile of ['bcm2712', 'bcm2709']) {
 }
 ```
 
-Mirror the canonical commissioning test file to bcm2709 using the wrapper around `python3` and `shutil.copyfile`, or the repository editor. Run the focused tests below. On the broken runtime, the new fixture-contract test fails at `fixture: getDeviceQueue`. Real apply/rollback success tests return 500 instead of 202 before RPC. Real queued-poll success tests warn `chirpstack_unknown` before RPC; the direct exact-deadline poll throws the same bounded error. Tests must fail for those contract reasons, with valid seeds and imports. A syntax/import/fixture failure is a plan defect: stop and report it.
+Mirror the canonical commissioning test file to bcm2709 byte-for-byte. Run the focused tests below. On the broken runtime, the new fixture-contract test fails at `fixture: getDeviceQueue`. Real apply/rollback success tests return 500 instead of 202 before RPC. Real queued-poll success tests warn `chirpstack_unknown` before RPC; the direct exact-deadline poll throws the same bounded error. Tests must fail for those contract reasons, with valid seeds and imports. A syntax/import/fixture failure is a plan defect: stop and report it.
 
 Negative controls explicitly remove each new method from the real instance. They must keep returning bounded 500 after the repair, with zero RPCs for missing queue lookup and only `getQueue` for missing enqueue. The permanent tests cannot pass by restoring legacy adapters in their normal fixture.
 
-The designer extracted these exact additions into campaign-only runners without changing any tracked test or runtime file. Baseline results were commissioning 32 tests, 31 pass, one contract failure; flow 76 tests, 38 pass, 38 fail, no cancellations/skips. For each profile, every apply/rollback case except `missing_queue_method` failed (14 failures), and all five queued-poll cases failed. This is 19 failures per profile. The four `missing_queue_method` controls passed; the existing flow cases also passed. Logs are `reports/issue-469-design-evidence/commissioning-planned-red.tap` and `flow-planned-red.tap`. No candidate runtime was tested in this design stage.
+These exact additions were first run in temporary runners without changing any tracked test or runtime file. Baseline results were commissioning 32 tests, 31 pass, one contract failure; flow 76 tests, 38 pass, 38 fail, no cancellations/skips. For each profile, every apply/rollback case except `missing_queue_method` failed (14 failures), and all five queued-poll cases failed. This is 19 failures per profile. The four `missing_queue_method` controls passed; the existing flow cases also passed. Logs are `reports/issue-469-design-evidence/commissioning-planned-red.tap` and `flow-planned-red.tap`. No candidate runtime was tested in this design stage.
 
 ## Step 2: align callers and their unit fixtures
 
@@ -368,9 +368,9 @@ source = source.replace('client.enqueueDeviceDownlink(', 'client.enqueueDownlink
 p.write_text(source)
 ```
 
-Run that edit via `python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py python3` with the block on stdin. In the canonical commissioning test file, replace `listDeviceQueue` with `getDeviceQueue` and `enqueueDeviceDownlink` with `enqueueDownlink` only in the original pre-existing source preceding the appended contract test. This updates fixture definitions, option hooks and error-step labels while retaining the contract test's assertions that the old names are absent. Do not alter any assertion about persisted state, trigger/outbox effects, observations, compensation or concurrent claims.
+Run that edit via `python3` with the block on stdin. In the canonical commissioning test file, replace `listDeviceQueue` with `getDeviceQueue` and `enqueueDeviceDownlink` with `enqueueDownlink` only in the original pre-existing source preceding the appended contract test. This updates fixture definitions, option hooks and error-step labels while retaining the contract test's assertions that the old names are absent. Do not alter any assertion about persisted state, trigger/outbox effects, observations, compensation or concurrent claims.
 
-Use this complete fixture/mirror edit through the same wrapped Python invocation:
+Use this complete fixture/mirror edit with `python3`, passing the block on stdin:
 
 ```python
 from pathlib import Path
@@ -394,33 +394,31 @@ The runtime diff must contain only three queue-call renames and two enqueue-call
 
 ## Step 3: gates and commit
 
-Use these commands on base before editing and on the candidate after Step 2. They run sequentially through the campaign wrapper; capture each command's actual status and full output file. The canonical helper suite covers its existing expiry, deadline configuration and five-client-close behavior; the new flow cases cover composition, so no helper-test edit is needed.
+Use these commands on base before editing and on the candidate after Step 2. Run them sequentially and capture each command's status and full output. The canonical helper suite covers its existing expiry, deadline configuration and five-client-close behavior; the new flow cases cover composition, so no helper-test edit is needed.
 
 ```bash
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js scripts/test-sdi12-recipe-flow.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node scripts/verify-profile-parity.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node scripts/verify-sync-flow.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node scripts/verify-no-new-silent-catch.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node .claude/skills/anti-slop-writing/slop-check.js docs/superpowers/plans/2026-10-26-issue-469-sdi12-helper-alignment.md
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py node scripts/verify-doc-hygiene.js
-python3 /home/phil/projects/osi-release-campaign-2026-10-25/run-heavy.py git diff --check
+node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js scripts/test-sdi12-recipe-flow.js
+node --test conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
+node scripts/verify-profile-parity.js
+node scripts/verify-sync-flow.js
+node scripts/verify-no-new-silent-catch.js
+node .claude/skills/anti-slop-writing/slop-check.js docs/superpowers/plans/2026-10-26-issue-469-sdi12-helper-alignment.md
+node scripts/verify-doc-hygiene.js
+git diff --check
 ```
 
 Expected: Node tests exit 0; profile parity ends `All parity checks passed.`; sync verification prints `Sync flow verification passed` and chained parity success; silent-catch exits 0; prose checker prints `slop-check: PASS (no tier-1 findings)`; documentation hygiene exits 0; diff check has no output. Inspect tier-2 prose warnings individually. Documentation hygiene without the private term list covers built-in identifier rules only; record that limit.
 
 No GUI build, migration replay, decoder gate or live check is justified by these method-name changes. Flow content remains unchanged, so the full set of mutation-specific flow gates is conditional on an approved amendment. Both profile paths are exercised by the new tests and their test files are mirrored; `verify-profile-parity` also covers the payload tree.
 
-After green gates, stage exactly the five claimed files and the reviewed plan if it is not already committed. Commit once as `fix: align SDI-12 commissioning with ChirpStack helper`. Capture candidate SHA with wrapped `git rev-parse HEAD`. Run wrapped `git diff --check 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD`, `git diff --stat 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD`, `git diff 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD --` with the five file paths, and `git status --short --branch`. A post-commit empty working-tree diff does not prove the committed patch.
+After green gates, stage exactly the five listed files and the reviewed plan if it is not already committed. Commit once as `fix: align SDI-12 commissioning with ChirpStack helper`. Capture the candidate SHA with `git rev-parse HEAD`. Run `git diff --check 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD`, `git diff --stat 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD`, `git diff 63c7a70f8f3b373f162b33b0669b0df89b3763fa HEAD --` with the five file paths, and `git status --short --branch`. A post-commit empty working-tree diff does not prove the committed patch.
 
-Record the red regression output, final gate logs, expected assertions, exact base/head, file claims, private-term-list availability and hardware limit in the execution report. Do not push or create a PR from the executor assignment.
+Record the red regression output, final gate results, exact base/head, private-term-list availability and the hardware limit in the PR description.
 
-## Review and acceptance handoff
+## Review and acceptance
 
-A fresh independent Sol reviewer must challenge this plan against the base, seeds, helper/protobuf APIs and scope before implementation. The author cannot approve it. Review must resolve the unavailable finder-script artifact and inspect the proposed regression code for false passes, including empty-queue mocks, missing-ID responses and callback errors.
+An independent reviewer challenges this plan against the base, seeds, helper/protobuf APIs and scope before implementation. Review must inspect the proposed regression code for false passes, including empty-queue mocks, missing-ID responses and callback errors.
 
-After execution, a fresh Sol verifier reruns the named gates at the exact candidate SHA, checks every base-to-head hunk, and proves the normal real-helper cases go red when the two call-name repairs are reverted in an isolated verification copy. It must also see the missing-method controls return bounded failures and both profile cases exercise the intended modules. Restore no files in another task's checkout. Any repair invalidates affected reviews and needs fresh verification.
+After execution, an independent verifier reruns the named gates at the candidate SHA, checks every base-to-head hunk, and confirms the normal real-helper cases go red when the two call-name repairs are reverted in an isolated copy. It also checks that the missing-method controls return bounded failures and that both profile cases exercise the intended modules.
 
-Then obtain independent Claude Opus review at that same SHA, after Sol verification, through the coordinator. Campaign selection is `claudeAgent`, `claude-opus-5-5`, `effort=high`, `fastMode=false`; recheck live capability and subscription availability. The recorded quota hold forbids repeated failed dispatches or paid fallback. Keep the candidate pending until review capacity returns. This plan author spawns no children.
-
-Offline acceptance proves caller/helper composition, request bytes and state handling through fake RPC callbacks. It does not prove grpc-js wire transport, a deployed ChirpStack service, radio reception, sensor firmware execution or field incidence. Apply and rollback on a test gateway with an SDI-12 node remain an explicit outstanding issue acceptance item. No live gateway operation is authorized by this plan or campaign. The coordinator must retain that limit in any later draft PR and disposition of issue #469.
+Offline acceptance proves caller/helper composition, request bytes and state handling through fake RPC callbacks. It does not prove grpc-js wire transport, a deployed ChirpStack service, radio reception, sensor firmware execution or field incidence. Apply and rollback on a test gateway with an SDI-12 node remain an explicit outstanding issue acceptance item. Issue #469 stays open until that acceptance passes.
