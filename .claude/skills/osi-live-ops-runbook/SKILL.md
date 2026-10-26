@@ -340,9 +340,10 @@ dev workstation unless noted.
      and stops on credential filesystem status `74`. The CLI's `ENV_FILE`
      override is for direct use only. Updated and replaced files are
      root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
-     existing backup is retained. Text repair requires lossless UTF-8. Images
-     that have not received the updated script through deploy may still have
-     the older writer in `/usr/share/node-red/` until then.
+     existing backup is retained. Text repair requires lossless UTF-8.
+   - Deploy updates `/srv/node-red/` but does not replace the image's ROM
+     `/usr/share/node-red/` writer. `osi-bootstrap` continues to prefer that
+     ROM file whenever it exists; only a new image supplies an updated ROM copy.
    - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
      none (a codec already there is left alone), a new `OSI CLOVER Sensor`
      profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`

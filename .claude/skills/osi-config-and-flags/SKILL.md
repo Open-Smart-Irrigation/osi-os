@@ -360,9 +360,11 @@ updates retain unrelated valid UTF-8 lines; malformed UTF-8 stops text
 mutation before ChirpStack API or UCI work. A credential filesystem failure
 exits deploy with status `74`; API/profile failure status `1` may still warn
 when the later safety check succeeds. Direct CLI use may set `ENV_FILE` for a
-separate file, while deploy always pins the canonical path. A previously built
-image's `/usr/share/node-red/chirpstack-bootstrap.js` may retain the older
-writer until a deploy installs the updated `/srv/node-red/` copy. These checks
+separate file, while deploy always pins the canonical path. An older image can keep selecting its ROM
+`/usr/share/node-red/chirpstack-bootstrap.js` even after deploy installs the
+updated `/srv/node-red/` copy. `osi-bootstrap` prefers the ROM path whenever it
+exists; only a new image supplies the updated ROM writer. Deploy's file checks
+cover its own `/srv/node-red/` invocations. These checks
 cover file handling only; they do not change key lifecycle or secret redaction
 in diagnostics (tracked separately under issue 522).
 
