@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { cliRunner } = require('../../lib/osi-migrate/runner-iface');
 const { bootstrapFresh } = require('../../lib/osi-migrate');
 const {
@@ -17,6 +18,54 @@ function tmpDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-catchup-test-'));
   return path.join(dir, 'test.db');
 }
+
+test('verify library leaves process exit state to caller; CLI maps results', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uganda-catchup-exit-'));
+  const missing = path.join(dir, 'missing.db');
+  const complete = path.join(dir, 'complete.db');
+  const script = path.join(__dirname, 'generate-uganda-catchup-20260911.js');
+  try {
+    await cliRunner(missing).exec('PRAGMA user_version=0;');
+    const ddl = [
+      'CREATE TABLE probe (value INTEGER);',
+      ...TABLES.map((name) => `CREATE TABLE "${name}" (value INTEGER);`),
+      ...INDEXES.map((name) => `CREATE INDEX "${name}" ON probe(value);`),
+      ...TRIGGERS.map((name) => `CREATE TRIGGER "${name}" AFTER INSERT ON probe BEGIN SELECT 1; END;`),
+    ];
+    await cliRunner(complete).exec(ddl.join('\n'));
+
+    const apiProbe = `
+      const assert = require('node:assert/strict');
+      const { verify } = require(${JSON.stringify(script)});
+      (async () => {
+        const expected = process.argv[3] === 'preset' ? 7 : undefined;
+        if (expected !== undefined) process.exitCode = expected;
+        assert.equal(await verify(process.argv[1]), false);
+        assert.equal(process.exitCode, expected);
+        assert.equal(await verify(process.argv[2]), true);
+        assert.equal(process.exitCode, expected);
+      })().catch((error) => { console.error(error); process.exit(2); });
+    `;
+    for (const [label, expectedStatus] of [['unset', 0], ['preset', 7]]) {
+      const child = spawnSync(process.execPath, ['-e', apiProbe, missing, complete, label], { encoding: 'utf8' });
+      assert.equal(child.status, expectedStatus, child.stderr);
+      assert.match(child.stderr, /--verify FAILED/);
+      assert.match(child.stderr, /--verify PASSED/);
+    }
+
+    for (const [mode, db, expectedStatus] of [
+      ['--verify', missing, 1],
+      ['--verify', complete, 0],
+      ['--verify', path.join(dir, 'absent.db'), 2],
+      ['--apply', path.join(dir, 'absent.db'), 2],
+    ]) {
+      const child = spawnSync(process.execPath, [script, mode, db], { encoding: 'utf8' });
+      assert.equal(child.status, expectedStatus, `${mode} ${db}: ${child.stderr}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('generate() emits valid, additive-only SQL sourced from 0001__baseline.sql', () => {
   generate();

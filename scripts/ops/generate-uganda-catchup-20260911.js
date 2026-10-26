@@ -247,7 +247,6 @@ async function verify(dbPath) {
   for (const tr of TRIGGERS) if (!snap.triggers[tr]) missing.push(`trigger:${tr}`);
   if (missing.length) {
     console.error(`[uganda-catchup] --verify FAILED: still missing: ${missing.join(', ')}`);
-    process.exitCode = 1;
     return false;
   }
   console.error(`[uganda-catchup] --verify PASSED: all ${TABLES.length} tables, ${INDEXES.length} indexes, ${TRIGGERS.length} triggers present.`);
