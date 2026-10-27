@@ -165,6 +165,20 @@ failure, auth failure, not-found, and exception paths all terminate in one
 response is a silent hang; a route that sends twice becomes a Node-RED runtime
 error.
 
+Two clusters are explicitly hot/frozen and need a blast-radius check before
+any touch:
+- The **heartbeat cluster** (`Build Heartbeat` / `062a0f9bf66d9789` and its
+  MQTT wiring) — read for precedent, do not modify without checking who else
+  reads/writes it.
+- The **`sync-init-fn`** boot-DDL node ("Sync Init Schema + Triggers") — fully
+  FROZEN for new schema behavior. Policy and the narrow sanctioned exception
+  (guarded `devices` rebuild) live in `osi-schema-change-control`; this skill
+  only tells you to route there.
+
+Before editing any shared node, run a blast-radius grep:
+
+The script is in `references/function-node-conventions.md`.
+
 ## References
 
 - `references/edit-script.md`: Read when writing the one-shot edit script: expected roundtrip output and the complete skeleton. Sections: "Expected roundtrip-check output"; "Complete script skeleton".

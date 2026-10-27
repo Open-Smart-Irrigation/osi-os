@@ -88,6 +88,16 @@ descriptive label prefix instead of the literal `osi-os-` if it helps you find t
 right backup later; what matters is the timestamp, the `.backup` method and the
 integrity check.
 
+ChirpStack's SQLite, from `references/repair.md` ("ChirpStack v4 has no plain REST API"):
+
+- **Write:** stop ChirpStack first (the DB is locked while it runs), modify via
+  `sqlite3`, then start it again:
+  ```bash
+  /etc/init.d/chirpstack stop
+  sqlite3 /srv/chirpstack/chirpstack.sqlite "UPDATE ... ;"
+  /etc/init.d/chirpstack start
+  ```
+
 ### 3. Host access gate
 
 Per `AGENTS.md` "Host access gate", the gated hosts are the production OSI Server
@@ -246,6 +256,15 @@ No writer means the `74` came from somewhere else; stop.
    node "$S" --secure-env-file; echo "exit=$?"   # exit=0
    ```
    The published file and its bytes stay in place; only the second name goes.
+
+From `references/repair.md` (same section):
+
+A staging directory that is empty, or whose `env` has link count 1, comes from
+an interruption before publication or after a rename. It does not block later
+runs, and the writer leaves its contents root-owned mode `0600` inside a mode
+`0700` directory. An unpublished `env` from a first-boot run can hold the only
+copy of the key that run created, so keep it until the gateway provisions
+cleanly, then remove it the same way.
 
 ---
 

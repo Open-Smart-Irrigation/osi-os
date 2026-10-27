@@ -20,7 +20,7 @@
     },
     {
       "path": ".claude/skills/osi-flows-json-editing/SKILL.md",
-      "max": 2,
+      "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
     },
