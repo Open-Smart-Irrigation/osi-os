@@ -1,6 +1,6 @@
 ---
 name: osi-agronomy-sensors-reference
-description: Use when interpreting sensor values or payloads: SWT kPa/pF, Chameleon, dendrometer TWD/MDS, rain gauges, ET0, which device_data column a sensor writes, STREGA/UC512 valve semantics, or any decoder. Covers every supported device type.
+description: "Use when interpreting sensor values or payloads: SWT kPa/pF, Chameleon, dendrometer TWD/MDS, rain gauges, ET0, which device_data column a sensor writes, STREGA/UC512 valve semantics, or any decoder. Covers every supported device type."
 ---
 
 # OSI Agronomy & Sensors Reference

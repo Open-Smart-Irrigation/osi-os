@@ -1,6 +1,6 @@
 ---
 name: osi-debugging-playbook
-description: Use when triaging an edge symptom of unknown cause: missing SWT, I2C_MISSING, verifier "duplicate column", fan EBUSY, export 401/404, history gaps, stale cloud mirror or growing sync_outbox, Node-RED 404s after deploy, curl hangs.
+description: "Use when triaging an edge symptom of unknown cause: missing SWT, I2C_MISSING, verifier \"duplicate column\", fan EBUSY, export 401/404, history gaps, stale cloud mirror or growing sync_outbox, Node-RED 404s after deploy, curl hangs."
 ---
 
 # OSI Debugging Playbook

@@ -1,6 +1,6 @@
 ---
 name: osi-flows-json-editing
-description: Use before any edit to flows.json (either profile): function nodes, HTTP endpoints, injects, MQTT IN nodes, REST routes, scheduler or sync orchestration, or wiring a helper module into a function node.
+description: "Use before any edit to flows.json (either profile): function nodes, HTTP endpoints, injects, MQTT IN nodes, REST routes, scheduler or sync orchestration, or wiring a helper module into a function node."
 ---
 
 # OSI Flows.json Editing

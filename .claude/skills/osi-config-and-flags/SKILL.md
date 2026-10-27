@@ -1,6 +1,6 @@
 ---
 name: osi-config-and-flags
-description: Use when looking up or changing gateway configuration: UCI osi-server.cloud.*, DEVICE_EUI resolution, CHIRPSTACK_* env vars, retention overrides, settings.js options, deploy.sh tunables, /api/system/features flags, or adding a config knob.
+description: "Use when looking up or changing gateway configuration: UCI osi-server.cloud.*, DEVICE_EUI resolution, CHIRPSTACK_* env vars, retention overrides, settings.js options, deploy.sh tunables, /api/system/features flags, or adding a config knob."
 ---
 
 # OSI Config and Flags
