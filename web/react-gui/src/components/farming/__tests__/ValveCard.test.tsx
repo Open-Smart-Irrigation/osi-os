@@ -48,7 +48,7 @@ vi.mock('../../../services/api', () => ({
 
 const mockDevice: Device = {
     id: 1,
-    deveui: 'AABBCCDDEEFF0005',
+    deveui: '0016C001F1000001',
     name: 'Valve White',
     type_id: 'STREGA_VALVE',
     current_state: 'CLOSED',
