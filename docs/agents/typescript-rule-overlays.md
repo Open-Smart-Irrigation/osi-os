@@ -6,7 +6,7 @@ This repo uses OSI-owned `architect.yaml` and `RULES.yaml` files, both at the re
 
 1. Before editing TypeScript in `web/react-gui`, match the target file against `architect.yaml`.
 2. Read the matching `RULES.yaml` section and apply it as a local overlay on `code-quality-principles`.
-3. Use Superpowers TDD, debugging, review, and verification as the execution authority.
+3. Use the `docs/engineering-playbook.md` §2 loop (TDD, review, verification) as the execution authority.
 4. After meaningful edits, review changed files against the matched `must_do`, `should_do`, and `must_not_do` rules.
 
 ## Finding severity

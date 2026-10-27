@@ -264,8 +264,8 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 The 14 skills above load in Claude Code (`.claude/skills/`), Codex (through the
 `.agents/skills` symlink, which is load-bearing) and OpenCode (both roots; its
 `duplicate skill name` warnings are cosmetic). Keep the single symlink; never
-add a second real copy. A harness without the superpowers skills applies the
-same loop by hand from `docs/engineering-playbook.md`. Read
+add a second real copy. Process: `docs/engineering-playbook.md` §2 (standard
+and risk-class loops); harnesses without workflow skills apply it by hand. Read
 [docs/agents/cross-harness-skills.md](docs/agents/cross-harness-skills.md)
 before changing that layout.
 

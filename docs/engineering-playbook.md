@@ -32,14 +32,35 @@ of Ugandan sensor data.
 
 ## 2. The working loop
 
-Every non-trivial change follows the same loop. Do not skip stages because a change
-"looks small" — the smallest diffs of 2026-07 (a one-line cap check, a URL guard)
-were the ones reviews caught real bugs in.
+Every change gets reality verification, a failing test where behaviour changes,
+review by a non-author, and evidence in the PR. Do not skip review because a change
+"looks small": the smallest diffs of 2026-07 (a one-line cap check, a URL guard)
+were the ones reviews caught real bugs in. How much ceremony comes before the code
+depends on the risk class.
+
+**Risk classes** are changes whose diff or intent touches: schema or migrations
+(ordered migrations, seed or bundled DBs, `lib/osi-migrate`, the `sync-init-fn` boot
+node, osi-server Flyway); a non-trivial `flows.json` change; the sync contract (outbox/inbox/cursor, contract schemas,
+pending commands, paired edge/cloud payloads); `deploy.sh`, deploy or repair
+scripts, bootstrap or gateway identity; auth, tokens, redirects or secrets; actuator
+commands; or anything that writes or deletes `farming.db` / `device_data` history.
+When unsure, it is a risk class.
 
 ```
-VERIFY REALITY → PLAN (written) → ADVERSARIAL REVIEW → EXECUTE (TDD, exact)
-      → INDEPENDENT VERIFICATION → SHIP (PR + evidence) → RECORD
+Standard:   VERIFY REALITY → EXECUTE (TDD, smallest change) → NON-AUTHOR REVIEW
+                  of the diff, re-running doubtful gates → SHIP (PR + evidence) → RECORD
+Risk class: VERIFY REALITY → PLAN (written) → ADVERSARIAL REVIEW → EXECUTE (TDD, exact)
+                  → INDEPENDENT VERIFICATION → SHIP (PR + evidence) → RECORD
 ```
+
+The standard loop's review is a cross-model reviewer looped until it approves the
+current head (on the maintainer workstation: the user-level `sol-loop` skill). Risk
+classes are reviewed by three models from different providers (`council`, capped at
+five rounds), and an unattended agent never merges them: the PR stops ready for a
+maintainer. Severity is impact times reachability, not frequency: retries, offline
+recovery, restarts and interrupted migrations are ordinary paths on a gateway, so a
+data-loss bug on one of them is a blocker, never a nit. The stages below describe the
+full risk-class loop; the standard loop uses the ones it names.
 
 **Verify reality first.** Issues and docs go stale; code moves under you. Before
 planning, prove the problem still exists on the current base: reproduce the failure,
@@ -250,9 +271,9 @@ down where the next person will trip.
 
 ## 8. Definition of done
 
-A change is done when: the issue's claim was re-verified against reality; the plan
-and its review live in the repo while the work is in progress or another file
-refers to them (a finished plan moves to the maintainers' archive under the
+A change is done when: the issue's claim was re-verified against reality; for a
+risk class, the plan and its review live in the repo while the work is in progress
+or another file refers to them (a finished plan moves to the maintainers' archive under the
 rules in `docs/superpowers/README.md`);
 tests exist that fail without the change; every
 gate is green *as re-run by a non-author*; **a user can actually reach the
