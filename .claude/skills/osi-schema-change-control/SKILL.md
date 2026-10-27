@@ -83,6 +83,54 @@ outside the one sanctioned exception.
 | Idempotent additive repair needed on live Pis at deploy time (e.g. a new column) | New ordered migration delivered by `deploy.sh` `run_schema_migration()` | Do not add `ensure_*` functions. The deploy runner fetches `CHECKSUMS.json`, all ordered migrations, Stage 0 baseline helpers, and `lib/osi-migrate`, then applies pending migrations once writers are stopped. |
 | Any other on-device schema mutation | Ordered migration runner path, or no change | If the runner cannot express it safely, stop and design the schema project first; do not add inline DDL to `deploy.sh`, `flows.json`, or init scripts. |
 
+## Migration manifest and verifier gates
+
+From `references/migration-model.md`, "Ordered migrations: format and risk-class declaration":
+
+Every runtime corpus requires a strict CHECKSUMS.json, including selected references and synthetic fixtures. Preserve the accepted parent checksums when constructing a prefix. Operator authority and corruption recovery are defined in [migration manifest authority](../../../docs/operations/migration-manifest-trust.md); never regenerate expected hashes from suspect files.
+
+Use the next contiguous four-digit version after the highest `NNNN` present; do
+not copy an example version from this skill. `CHECKSUMS.json` is mandatory for runtime loading. Keep it consistent when authoring a new migration; never edit already-recorded migration bytes or regenerate expected hashes from suspect files.
+
+From `references/walkthrough.md`, "Walkthrough: adding a column end-to-end" (the verifier set is the merge gate for every schema change):
+
+7. **Run the verifier set** and confirm each prints its OK line:
+   ```bash
+   node scripts/verify-migrations.js
+   node scripts/verify-seed-replay.js
+   node scripts/verify-runtime-schema-parity.js
+   node scripts/verify-db-schema-consistency.js
+   node scripts/verify-no-stray-ddl.js
+   node scripts/verify-profile-parity.js
+   node scripts/test-journal-schema.js   # MANDATORY for journal-catalog changes
+   node scripts/verify-agroscope-linkage.js   # MANDATORY for journal-catalog changes: guards the catalog against partner-institute-template drift; CI-gated via .github/workflows/field-journal.yml
+   ```
+   `test-journal-schema.js` is the **only** gate that compares the 7 bundled DBs'
+   journal-catalog **row content** (`journal_templates`/`layouts`/`vocab`
+   `definition_json` etc.) against the seed-built reference. The others check
+   schema/DDL and fingerprints, not row bytes — so a bundled DB carrying a stale
+   catalog row (e.g. built from an in-progress draft, then never re-baked against
+   the final migration) passes every other gate silently. If you touched
+   `journal-catalog-core.js`, a catalog migration, or any bundled `farming.db`,
+   this must print `test-journal-schema: OK`. (This gap shipped a real
+   `full_record@6` drift in `be363f89`; see the git history of the 7 seed DBs.)
+   If your change also touches `sync-init-fn` or the `devices` CHECK, add:
+   ```bash
+   node scripts/verify-devices-rebuild-fence.js
+   node --test scripts/rehearse-devices-rebuild.test.js
+   ```
+
+From `references/parity-and-deploy-runner.md`, "Parity surfaces":
+
+Do not treat a historical green run as current evidence. Re-run the relevant
+commands after changing schema, flow DDL, deploy repair, seed, or bundled DB
+surfaces.
+
+From `references/boot-ddl-freeze.md`, "Merge gate for any further touch to this block", on `scripts/verify-sync-flow.js`:
+
+Do not rely on historical baseline notes; rerun it in the branch you are
+changing and treat a RED result as a real regression until proven otherwise.
+
 ## References
 
 - `references/migration-model.md`: Read before writing or reviewing an ordered migration. Sections: "The model: ownership, migrations, risk classes"; "Ownership (ADR 2026-06-30)"; "Ordered migrations: format and risk-class declaration"; "Risk-class semantics, verified against `lib/osi-migrate/runner.js`"; "Key fact: deploy-time runner, not boot-time runner".

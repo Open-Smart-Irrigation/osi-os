@@ -116,6 +116,137 @@ offline verifier repair in "Live-repair recipes" below — that regenerates a ve
 that is *supposed* to change because the EUI itself was wrong, not a shortcut around
 an unknown credential.
 
+That recipe is in `references/repair.md`, "Changing DEVICE_EUI breaks linked login".
+
+### 5. Deploy prerequisites and stop conditions
+
+The [migration source and SSH prerequisites](../../../docs/operations/migration-manifest-trust.md#required-deployment-prerequisites) are mandatory: select and protect a stable source, authenticate the host/user, own the loopback listener and forwarding port, and confirm forwarding succeeded.
+
+**Read the deploy verdict — do not restart by hand.** There is nothing left for you to restart on a normal deploy.
+
+   Restarting Node-RED by hand right after a green deploy doesn't make it any
+   safer — it only obscures which restart (migration, flip, or yours) produced
+   the state you're looking at. If something looks wrong, re-read the deploy
+   output before touching the service.
+
+On a failing post-flip self-check (`references/deploy.md`, "Deploy runbook (reverse-tunnel flow)", step 5):
+
+   On a failing self-check it instead prints:
+   ```text
+   ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI
+   ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair
+   NOTE: any committed DB migration is NOT auto-undone (DD10); restore is an operator call via 1.B1 backup.
+   NOTE: run deploy-canary-gate.js from your operator machine for the full cloud verdict.
+   ```
+   and exits 1. The flows+GUI pair rolls back automatically; a schema migration
+   that already committed earlier in this same deploy does **not** roll back
+   with it (DD10) — restoring it is an operator decision, from the backup
+   `migrate-cli.js` took under `/data/backups/migrate` (or `$MIGRATE_BACKUP_DIR`
+   if set), not something the script undoes for you. Before it restarts on the
+   previous pair it proves Node-RED is stopped and the retained payload fits the
+   database, and a refusal at any of those points prints an `ERROR` and leaves
+   Node-RED stopped (exit 1). If there is no previous payload to roll back to
+   (e.g. the very first deploy), it prints
+   `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
+   and exits 1 — treat that as a stop, with the service down.
+
+In the migration step (`references/deploy.md`, "What `deploy.sh` actually does end-to-end", step 8): Node-RED is restarted on success and on an ordinary migration failure; the one exception is `migrate-cli.js` exiting 3 (backup-restore integrity failure), which deliberately leaves Node-RED stopped for the operator.
+
+**When `deploy.sh` refuses to proceed:** a missing/empty communication-preflight
+artifact or a failed `verify-communication-contract.js` run; `/srv/node-red/payloads`
+on a different filesystem than `/srv/node-red` (the symlink flip can't be atomic);
+integrity-check failure on the seed DB; `farming.db` absent while WAL/SHM/journal
+sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and not
+installable via `opkg`; Node-RED failing to stop within 30s before a migration;
+a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
+is restarted before the script exits — except `migrate-cli.js` exit code 3, a
+backup-restore integrity failure, which leaves Node-RED stopped); a failed
+download or verification of the migration runner, an uncreatable migration
+backup directory, or an unreadable database size (refused before Node-RED is
+stopped); a failed ledger-reconciliation download or probe (the previous
+payload is restarted); a failed command-ledger staging run (before anything is
+stopped); a failed command-ledger activation after the migration (see below);
+and a failed post-flip self-check, which either auto-rolls back the flows+GUI
+pair and exits 1, or — when there is no previous payload — removes the
+first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
+
+After a failed command-ledger activation (`references/deploy.md`, "Failed command-ledger activation"), the fourth outcome is a hold:
+
+- otherwise: Node-RED and identityd are held **stopped**, as in the script's
+  other holds. Nothing is disabled, so a reboot or a manual start runs the
+  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
+  records the reason, the time and the copy.
+
+Way out: re-run the deploy. If it fails again, the load error printed by the
+installer or the probe names the cause.
+
+The post-deploy verification checklist is in `references/deploy.md`, "Post-deploy verification checklist":
+
+Run these after every live deploy. Each has an expected "healthy" output — treat any
+deviation as a signal to stop and investigate before telling the operator it's done.
+
+### 6. Bootstrap invocation and credential-file recovery
+
+   ChirpStack reprovisioning happens automatically — `osi-bootstrap`
+   (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap`, `START=99`)
+   runs on every boot, checks a stamp file (`/etc/osi-bootstrap.done` plus a
+   `CHIRPSTACK_APP_SENSORS=` line in `/srv/node-red/.chirpstack.env`), and only
+   re-runs `chirpstack-bootstrap.js` when that stamp is invalid or ChirpStack's
+   gRPC port isn't answering yet. No manual bootstrap step is needed after a normal
+   restart on an already-provisioned gateway. Never run `chirpstack-bootstrap.js`
+   directly: it writes no stamp, so the service runs it again at the next boot,
+   mints a second API key and rewrites `.chirpstack.env`. Provision a gateway
+   that is not provisioned yet with `/etc/init.d/osi-bootstrap start`. Manual
+   re-provision, if ever needed (reuses the existing API key; the env file keeps
+   only the `CHIRPSTACK_*` keys):
+   ```bash
+   rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
+   ```
+
+   **One exception: the Kiwi/Clover profile repair.** `deploy.sh` runs it
+   itself; rerun it by hand only when the deploy printed its WARN, and only as
+   this exact command:
+   ```bash
+   node /srv/node-red/chirpstack-bootstrap.js --repair-soil-profiles
+   ```
+   Add `--repoint-clover-device=<DevEUI>` (repeatable) to move a Clover
+   registered before the repair off the field-tester profile.
+   - Only the `/srv/node-red/` copy, which this deploy installed. Never
+     `/usr/share/node-red/chirpstack-bootstrap.js`: an image built before the
+     repair existed ignores the flag and runs a full provisioning pass (second
+     API key, env file rewritten without operator lines, the Clover alias back).
+   - Only with `--repair-soil-profiles` (or `--repoint-clover-device`). With
+     either flag the script never runs the full pass: it fails instead.
+   - `deploy.sh` pins every bootstrap invocation to
+     `/srv/node-red/.chirpstack.env`, secures that file before provisioning,
+     and stops on credential filesystem status `74` (recovery for
+     `UNSAFE_ENTRY`: "Credential env-file refusal" under Live-repair recipes).
+     The CLI's `ENV_FILE` override is for direct use only. Updated and replaced files are
+     root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
+     existing backup is retained. Text repair requires lossless UTF-8.
+
+"Credential env-file refusal" is `references/repair.md`, "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`". Its fail-closed steps:
+
+No writer means the `74` came from somewhere else; stop.
+
+3. Delete nothing unless all of these hold for the entry with two links:
+   it is a regular file (`-rw-------`, owner root); its link count is exactly
+   2; exactly one staging directory exists for that entry
+   (`..chirpstack.env.tmp-*` for `.chirpstack.env`,
+   `..chirpstack.env.pre-gen2.tmp-*` for `.chirpstack.env.pre-gen2`); and that
+   directory holds only `env`, with the same inode number as the entry. A
+   symlink, a directory, a link count above 2, or a second link outside a
+   staging directory is not an interrupted publication: leave the gateway
+   refusing and escalate. When the checks hold, remove the staging link and
+   its directory, never a globbed `rm -rf`:
+   ```sh
+   D=/srv/node-red/..chirpstack.env.tmp-XXXXXX   # the directory found in step 2
+   rm "$D/env" && rmdir "$D"
+   ls -li /srv/node-red/.chirpstack.env          # link count back to 1
+   node "$S" --secure-env-file; echo "exit=$?"   # exit=0
+   ```
+   The published file and its bytes stay in place; only the second name goes.
+
 ---
 
 ## SSH access pattern

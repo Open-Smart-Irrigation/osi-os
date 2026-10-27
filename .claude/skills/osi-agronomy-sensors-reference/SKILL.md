@@ -45,6 +45,70 @@ and carries its authority. The rest of this skill expands on those, it does
 not override them. If they ever disagree, AGENTS.md and the moved section
 win; file an issue to reconcile rather than silently trusting either.
 
+## Binding rules kept here
+
+These paragraphs are also in the reference files named after each block; the copies here carry the same authority.
+
+From `references/device-catalog.md`, "Device catalog (edge reference)":
+
+**Conditional irrigation:** `osi-irrigation-policy` owns SWT, VWC and DENDRO
+conditions evaluated at scheduled opportunities. Without selected schedules, the
+farmer chooses a daily start time. Crossing a threshold never starts an immediate
+run. SWT preferences are Wet = 20 kPa, Moist = 30 kPa, Dry = 50 kPa; Custom retains
+precision and the Moist help contains “Recommended”. Explanations use the existing
+help disclosures.
+
+Conversion clears the valve's fixed plan through the normal push path. Dispatch
+waits for all required clear ACKs and the evidence, interval, allowance and
+qualification checks; since the owner decision of 2026-10-24 it no longer needs an
+NTP sync since boot (only a clock behind stored data is refused). A valve-scheduled open while conditionally managed records an
+incident and blocks further conditional dispatch. Pause does not restore the fixed
+plan; converting back to Always does. Legacy DENDRO hold and below-threshold days
+skip after conversion, which the conversion preview explains.
+
+The local resource is `/api/irrigation-zones/:id/irrigation-policy`, with `pause`,
+`retry-valve` and `decisions` subroutes. Cloud edits use
+`UPSERT_IRRIGATION_POLICY`, `PAUSE_IRRIGATION_POLICY` and
+`RETRY_IRRIGATION_VALVE`; they stay pending until the edge applies them. Both peers
+must advertise `conditional_irrigation_v1` for conditional replication. Unsupported
+peers receive no conditional resource keys or conditional schedule rows; guarded
+requests never fall back to legacy endpoints.
+
+Production qualification remains false. Software fixtures cannot qualify a valve.
+Release requires separate Gen1/Gen2 clear-ACK, expiry, delivery-latency, physical
+close, clock-recovery and firmware-identity evidence. Shared STREGA transport
+changes also affect ordinary commands. The SWT preference controls can ship
+independently of conditional activation. See the
+[execution report](../../../docs/superpowers/plans/2026-10-13-conditional-irrigation-execution-report.md)
+for software evidence and unrun hardware gates.
+
+LoRain rainfall is interval rainfall, not cumulative; duplicate or out-of-order timestamps must not aggregate twice.
+
+From `references/strega-valves.md`, "STREGA valve semantics":
+
+**Estimated vs measured volume — kept separate:** `zone_irrigation_calibration`
+stores a per-zone `measured_flow_rate_lpm` (from a real flow-meter
+measurement) used only to *estimate* `valve_actuation_expectations.estimated_gross_liters`
+for a given commanded duration. `zone_daily_environment.flow_liters` is
+reserved for actually-measured flow-meter data — the two must never be
+merged into one column, so a farm without a flow meter never gets a
+volume number that looks measured but isn't.
+
+From `references/soil-water-tension.md`, "Soil water tension (SWT)" and "Chameleon sensor stack":
+
+- `irrigation_schedules.threshold_kpa` is validated `0 < x ≤ 300` for
+  non-DENDRO trigger metrics (`flows.json`, "Verify Zone Ownership" node); for
+  `trigger_metric = 'DENDRO'` the same column instead holds an **encoded
+  1-4 stress level** (1=mild … 4=severe), not a kPa value — do not treat
+  `threshold_kpa` as kPa when the metric is DENDRO.
+
+**Wiring rule (one line; the field incident summary lives elsewhere):** power the VIA
+Chameleon I2C reader from the LSN50's own `VDD` rail (3.3-3.6 V) when SDA/SCL
+are wired directly to the LSN50 STM32 I2C pins. Do not power it from switched
+5 V without a proper bidirectional I2C level shifter plus power isolation —
+the reader's pull-ups follow VCC and a switched-off 5 V rail can back-power
+the board through SDA/SCL.
+
 ## Common mistakes
 
 - Assuming SWT is negative or that lower kPa means drier — it is the

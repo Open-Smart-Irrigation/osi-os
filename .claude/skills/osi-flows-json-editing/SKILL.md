@@ -121,6 +121,50 @@ a risk class and goes through the full risk-class loop
 independent verification by a non-author); §8 defines done, not a green
 checklist.
 
+## Function-node rules
+
+Each rule below is also in `references/function-node-conventions.md`, under the section named before it, with its code precedent.
+
+"In-repo seam modules: bind `osiLib`, load with `osiLib.require()`":
+
+`osiLib.require(name)` never throws. It always returns either
+`{ ok: true, value }` or `{ ok: false, error, quarantined? }` — check `.ok`
+before touching `.value`, and on `ok: false` call `node.error(...)` and
+return, exactly as above.
+
+"Guarded shared-module locals: `global.get(...)`, not `libs`":
+
+Do not add `fs`/`os`/`cp` to a node's `libs` array — that binding mechanism is
+for npm modules declared in `settings.js`'s external-modules allowlist, and
+mixing the two patterns on the same variable is confusing and redundant.
+
+"Every opened DB handle must be closed":
+
+Any function node that does `new osiDb.Database(...)` must also call
+`.close(` somewhere in the same function body.
+
+"Function nodes must never crash the flow":
+
+Wrap every sysfs/file/subprocess read in its own `try/catch` that resolves to
+`null` for that one reading — a sampler failing to read one sysfs path must
+never take down the rest of the function or the flow.
+
+Always declare-with-default before the `try`, assign inside it, and never
+`const`/`let` a name inside `try{}` that anything outside the block needs.
+
+"Authenticated HTTP endpoints":
+
+For a gated HTTP endpoint, copy the auth block verbatim from the newest shipped
+endpoint with the same auth mode, then diff your block against that precedent.
+Do not retype timing-safe HMAC checks, expiry checks, or token parsing from
+memory.
+
+Every code path must send exactly one HTTP response: success, validation
+failure, auth failure, not-found, and exception paths all terminate in one
+`http response` node or one response send. A route that sometimes returns no
+response is a silent hang; a route that sends twice becomes a Node-RED runtime
+error.
+
 ## References
 
 - `references/edit-script.md`: Read when writing the one-shot edit script: expected roundtrip output and the complete skeleton. Sections: "Expected roundtrip-check output"; "Complete script skeleton".

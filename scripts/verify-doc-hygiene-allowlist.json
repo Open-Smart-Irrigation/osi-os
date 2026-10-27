@@ -55,6 +55,12 @@
       "issue": 384
     },
     {
+      "path": ".claude/skills/osi-schema-change-control/SKILL.md",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
+      "issue": 384
+    },
+    {
       "path": ".claude/skills/osi-schema-change-control/references/pitfalls-and-maintenance.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",

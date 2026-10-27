@@ -65,6 +65,27 @@ marked otherwise. The live identity daemon notes in section 2 were verified on
 | `deploy.sh` | Repo root | Run manually on-Pi — see `osi-live-ops-runbook` deploy runbook (download-then-run, not `curl \| sh`) | n/a (script itself) |
 | `/api/system/features` | flows.json, node `history-api-router-fn` | `web/react-gui/src/history/useFeatureFlags.ts` | `curl http://127.0.0.1:1880/api/system/features` |
 
+## Binding rules
+
+From `references/runtime-and-flags.md`, "7. Feature flags: `/api/system/features`" (section 8 is `references/adding-a-flag.md`):
+
+**How to toggle:** there is no runtime toggle. Changing a flag means editing
+the literal object inside flows.json's `history-api-router-fn` node — a normal
+code change subject to review, the `osi-flows-json-editing` mechanics, and the
+bcm2709 profile-parity mirror requirement (section 8). There is no sanctioned
+procedure for live-patching this block on a running Pi; if an emergency ever
+forces it, coordinate with the operator, take a backup first, and re-deploy
+properly through review afterward — it is never the path to ship a flag change.
+
+From `references/uci-and-identity.md`, "1. UCI `osi-server.cloud.*`": `mqtt_password` is a secret. **Never print, log, or commit this value.**
+
+**Live inspection:** `uci show osi-server` on the Pi. This prints
+`mqtt_password`, `openagri_weather_password`, and
+`openagri_weather_bearer_token` in **plaintext** — treat that output as
+sensitive and never paste it into a chat, issue, or log you don't control.
+
+From `references/runtime-and-flags.md`, "5. Node-RED `settings.js`": `functionGlobalContext` exposes `os`, `fs`, `cp` (child_process) to every function node; flows.json function nodes rely on `global.get('fs')`/`global.get('cp')` — do not remove these without auditing every consumer.
+
 ---
 
 ## Common mistakes
