@@ -1704,13 +1704,24 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
     ? normalizeDeveui(scope.sourceDevices[0] && (scope.sourceDevices[0].deveui || scope.sourceDevices[0].device_eui || scope.sourceDevices[0].deviceEui))
     : null;
   // A multi-source scope writes the pooled buckets and a single-source scope
-  // its own source aggregate, so run only the reducer the scope reads.
-  const sourceResult = singleSource
-    ? sourceAggregatesForRows(rows, aggregateOptions).sourceAggregates.find((aggregate) => aggregate.sourceKey === singleSource)
-    : null;
-  const buckets = sourceResult ? sourceResult.buckets : aggregateRowsPooled(rows, aggregateOptions).buckets;
-  for (const bucket of buckets || []) {
+  // its own source aggregates, so run only the reducer the scope reads. A
+  // source aggregate holds one channel, so each channel reads its own.
+  const sourceResults = singleSource
+    ? sourceAggregatesForRows(rows, aggregateOptions).sourceAggregates.filter((aggregate) => aggregate.sourceKey === singleSource)
+    : [];
+  const channelBuckets = new Map(sourceResults.map((aggregate) => [
+    aggregate.channelKey,
+    new Map((aggregate.buckets || []).map((bucket) => [bucket.bucketStart, bucket])),
+  ]));
+  const buckets = sourceResults.length
+    ? sourceResults[0].buckets
+    : aggregateRowsPooled(rows, aggregateOptions).buckets;
+  for (const gridBucket of buckets || []) {
     for (const channel of channels) {
+      const bucket = sourceResults.length
+        ? (channelBuckets.get(channel.id) || new Map()).get(gridBucket.bucketStart)
+        : gridBucket;
+      if (!bucket) continue;
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
       out.push({

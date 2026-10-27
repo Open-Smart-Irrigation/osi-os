@@ -651,6 +651,66 @@ for (const profile of PROFILES) {
       `checks ${partitionStats.checks} exceed ${rows.length} rows`);
   });
 
+  // A single-source rollup scope reads the per-source aggregates, which hold
+  // one channel each. Every channel the device reports needs its own rows in
+  // both the pooled and the source-keyed namespace.
+  test(`${profile}: rollup job writes every channel for single-source and multi-source scopes`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-channels', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-channels-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES
+        (1, 'One Source', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        (2, 'Two Sources', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000C1', 'Chameleon One', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C2', 'Chameleon Two', 'DRAGINO_LSN50', 1, 2, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C3', 'Chameleon Three', 'DRAGINO_LSN50', 1, 2, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2, swt_3) VALUES (?, ?, ?, ?, ?)');
+    for (const [index, deveui] of ['A8404100000000C1', 'A8404100000000C2', 'A8404100000000C3'].entries()) {
+      for (let hour = 0; hour < 48; hour += 1) {
+        const recordedAt = new Date(Date.parse('2026-10-01T00:30:00Z') + hour * 3_600_000).toISOString();
+        insert.run(deveui, recordedAt, 10 + index + hour, 40 + index + hour, 70 + index + hour);
+      }
+    }
+    const db = {
+      all(sql, params) { return raw.prepare(sql).all(...(params || [])); },
+      run(sql, params) { return raw.prepare(sql).run(...(params || [])); },
+    };
+    try {
+      const summary = await helper.runRollupJob(db, { nowMs: Date.parse('2026-10-03T02:00:00Z'), exportDir: null, levels: ['daily'] });
+      assert.deepEqual(summary.errors, []);
+      const channelsByKey = new Map();
+      for (const row of raw.prepare("SELECT zone_id, logical_source_key, channel_id FROM history_channel_rollups WHERE card_type = 'soil' AND bucket_level = 'daily'").all()) {
+        const key = `${row.zone_id}:${row.logical_source_key}`;
+        if (!channelsByKey.has(key)) channelsByKey.set(key, new Set());
+        channelsByKey.get(key).add(row.channel_id);
+      }
+      const expectedKeys = [
+        '1:root-zone',
+        `1:${sourceKey('soil', 'A8404100000000C1')}`,
+        '2:root-zone',
+        `2:${sourceKey('soil', 'A8404100000000C2')}`,
+        `2:${sourceKey('soil', 'A8404100000000C3')}`,
+      ];
+      assert.deepEqual(Array.from(channelsByKey.keys()).sort(), expectedKeys.slice().sort());
+      for (const key of expectedKeys) {
+        assert.deepEqual(Array.from(channelsByKey.get(key)).sort(), ['swt_1', 'swt_2', 'swt_3'], key);
+      }
+      const swt2 = raw.prepare(`SELECT min_value, max_value, sample_count FROM history_channel_rollups
+        WHERE zone_id = 1 AND logical_source_key = ? AND channel_id = 'swt_2' AND bucket_start = '2026-10-02T00:00:00.000Z'`)
+        .get(sourceKey('soil', 'A8404100000000C1'));
+      assert.deepEqual({ ...swt2 }, { min_value: 64, max_value: 87, sample_count: 24 });
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${profile}: partial source rollups recover older buckets and retain null gaps`, async () => {
     const helper = loadHelper(profile);
     const router = loadRouter(profile);
