@@ -262,9 +262,8 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
               id="zone-device-deveui"
               type="text"
               value={deveui}
-              onChange={(e) => setDeveui(e.target.value.toUpperCase())}
+              onChange={(e) => setDeveui(e.target.value.replace(/\s/g, '').toUpperCase())}
               required
-              maxLength={16}
               placeholder={t('addModal.deveuiPlaceholder')}
               className={`${INPUT_CLASS} font-mono`}
             />
@@ -278,8 +277,7 @@ export const ZoneDeviceModal: React.FC<ZoneDeviceModalProps> = ({
               id="zone-device-appkey"
               type="text"
               value={appkey}
-              onChange={(e) => setAppkey(e.target.value.toUpperCase())}
-              maxLength={32}
+              onChange={(e) => setAppkey(e.target.value.replace(/\s/g, '').toUpperCase())}
               placeholder={t('addModal.appkeyPlaceholder', 'AABBCCDDEEFF00112233445566778899')}
               className={`${INPUT_CLASS} font-mono`}
             />
