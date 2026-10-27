@@ -433,8 +433,13 @@ function runDiff(root, input, terms = 'zebrafarm') {
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-test('SCOPE is exported for the pre-push hook', () => {
-  assert.deepEqual(SCOPE, ['README.md', 'AGENTS.md', 'CLAUDE.md', 'CHANGELOG.md', 'docs', '.claude/skills', '.github', 'analysis', 'web/react-gui/src/components/farming/__tests__/ValveCard.test.tsx']);
+test('scanner and pre-push hook share scope for export and history scans', () => {
+  const hook = fs.readFileSync(path.join(__dirname, 'hooks/pre-push-doc-hygiene.sh'), 'utf8');
+  const hookScope = hook.match(/^SCOPE_PATHS='([^']*)'$/m);
+  assert.ok(hookScope, 'pre-push hook must declare SCOPE_PATHS');
+  assert.deepEqual(hookScope[1].split(/\s+/), SCOPE);
+  assert.match(hook, /for p in \$SCOPE_PATHS \$ALLOWLIST_PATH; do[\s\S]*?set -- "\$@" "\$p"/);
+  assert.match(hook, /log -p[\s\S]*?-- \$SCOPE_PATHS \\\s*\n/);
 });
 
 test('--stdin-diff reports a name added in one commit and removed in the next, for the adding commit', (t) => {
