@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useId, useRef } from 'react';
+import React, { useState, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { IrrigationZone } from '../../types/farming';
@@ -56,6 +56,16 @@ interface Props {
 
 type Translate = TFunction<'devices'>;
 type SavedStage = 'config' | 'calibration' | 'location';
+
+interface ResolvedStageSignatures {
+  zoneId: number;
+  configBaseline: string;
+  calibrationBaseline: string;
+  locationBaseline: string;
+  config?: string;
+  calibration?: string;
+  location?: string;
+}
 
 /**
  * Option lists as `{ value, key, fallback }`: the value is what the API
@@ -141,12 +151,24 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [partialSaveStages, setPartialSaveStages] = useState<SavedStage[]>([]);
-  const resolvedStageSignatures = useRef<{
-    zoneId: number;
-    config?: string;
-    calibration?: string;
-    location?: string;
-  }>({ zoneId: zone.id });
+  const configBaseline = JSON.stringify([
+    formCropValue(zone.cropType), zone.variety ?? '', zone.soilType ?? '', zone.irrigationMethod ?? '',
+    zone.areaM2 != null ? String(zone.areaM2) : '',
+    zone.irrigationEfficiencyPct != null ? String(zone.irrigationEfficiencyPct) : '',
+    zone.notes ?? '', zone.timezone ?? 'UTC', normalizeStage(zone.phenologicalStage) ?? '',
+    storedStageStartedOn(zone), zone.calibrationKey ?? 'default', zone.weatherSource ?? 'auto',
+  ]);
+  const calibrationBaseline = JSON.stringify([
+    zone.measuredFlowRateLpm != null ? String(zone.measuredFlowRateLpm) : '', zone.measurementMethod ?? '',
+  ]);
+  const locationBaseline = JSON.stringify([zone.latitude ?? null, zone.longitude ?? null]);
+  const resolvedStageSignatures = useRef<ResolvedStageSignatures>({
+    zoneId: zone.id, configBaseline, calibrationBaseline, locationBaseline,
+  });
+  const saveAttemptId = useRef(0);
+  const modalLifecycle = useRef({ generation: 0, zoneId: zone.id, isOpen });
+  const requestedIsOpen = useRef(isOpen);
+  requestedIsOpen.current = isOpen;
   const [deviceLocationSupport, setDeviceLocationSupport] = useState<DeviceLocationSupport | null>(null);
   const [deviceLocationSupportLoading, setDeviceLocationSupportLoading] = useState(false);
   const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
@@ -181,10 +203,53 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setDeviceLocationMeta(null);
   }, [zone]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    resolvedStageSignatures.current = { zoneId: zone.id };
-  }, [isOpen, zone.id]);
+  useLayoutEffect(() => {
+    const previous = modalLifecycle.current;
+    const lifecycleChanged = previous.isOpen !== isOpen || previous.zoneId !== zone.id;
+    const configChanged = resolvedStageSignatures.current.configBaseline !== configBaseline;
+    const calibrationChanged = resolvedStageSignatures.current.calibrationBaseline !== calibrationBaseline;
+    const locationChanged = resolvedStageSignatures.current.locationBaseline !== locationBaseline;
+
+    if (lifecycleChanged) {
+      modalLifecycle.current = { generation: previous.generation + 1, zoneId: zone.id, isOpen };
+      saveAttemptId.current += 1;
+      resolvedStageSignatures.current = { zoneId: zone.id, configBaseline, calibrationBaseline, locationBaseline };
+      setSaving(false);
+      setError(null);
+      setPartialSaveStages([]);
+      return;
+    }
+
+    if (configChanged || calibrationChanged || locationChanged) {
+      modalLifecycle.current = { ...previous, generation: previous.generation + 1 };
+      saveAttemptId.current += 1;
+      const current = resolvedStageSignatures.current;
+      resolvedStageSignatures.current = {
+        zoneId: zone.id,
+        configBaseline,
+        calibrationBaseline,
+        locationBaseline,
+        ...(configChanged ? {} : current.config ? { config: current.config } : {}),
+        ...(calibrationChanged ? {} : current.calibration ? { calibration: current.calibration } : {}),
+        ...(locationChanged ? {} : current.location ? { location: current.location } : {}),
+      };
+      setSaving(false);
+      setError(null);
+      setPartialSaveStages([]);
+    }
+  }, [isOpen, zone.id, configBaseline, calibrationBaseline, locationBaseline]);
+
+  useLayoutEffect(() => {
+    // React StrictMode runs setup, cleanup, then setup again in development.
+    // Restore the current prop in setup so that simulated cleanup is not a
+    // permanent close; a real unmount leaves this instance fenced as closed.
+    modalLifecycle.current = { ...modalLifecycle.current, isOpen: requestedIsOpen.current };
+    return () => {
+      const current = modalLifecycle.current;
+      modalLifecycle.current = { ...current, generation: current.generation + 1, isOpen: false };
+      saveAttemptId.current += 1;
+    };
+  }, []);
 
   const refreshDeviceLocationSupport = async () => {
     setDeviceLocationSupportLoading(true);
@@ -322,6 +387,13 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   };
 
   const handleSave = async () => {
+    const attemptId = ++saveAttemptId.current;
+    const generation = modalLifecycle.current.generation;
+    const attemptZoneId = zone.id;
+    const isCurrentAttempt = () => modalLifecycle.current.isOpen
+      && modalLifecycle.current.zoneId === attemptZoneId
+      && modalLifecycle.current.generation === generation
+      && saveAttemptId.current === attemptId;
     setSaving(true);
     setError(null);
     setPartialSaveStages([]);
@@ -342,34 +414,44 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       const locationSignature = locationChanged ? JSON.stringify(locationPayload) : null;
 
       if (hasConfigChanges && resolvedStageSignatures.current.config !== configSignature) {
+        if (!isCurrentAttempt()) return;
         activeStage = 'config';
         await irrigationZonesAPI.updateConfig(zone.id, configPayload);
+        if (!isCurrentAttempt()) return;
         resolvedStageSignatures.current.config = configSignature ?? undefined;
       }
       if (calibrationPayload && resolvedStageSignatures.current.calibration !== calibrationSignature) {
+        if (!isCurrentAttempt()) return;
         sessionFence();
         activeStage = 'calibration';
         await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
+        if (!isCurrentAttempt()) return;
         resolvedStageSignatures.current.calibration = calibrationSignature ?? undefined;
       }
       if (locationChanged && locationPayload
         && resolvedStageSignatures.current.location !== locationSignature) {
+        if (!isCurrentAttempt()) return;
         sessionFence();
         activeStage = 'location';
         await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
+        if (!isCurrentAttempt()) return;
         resolvedStageSignatures.current.location = locationSignature ?? undefined;
       }
       // Only an operator's change is written: an untouched select never
       // confirms the suggestion by itself (D1).
       if (rainSource && rainGauge !== initialRainGaugeChoice(rainSource)) {
+        if (!isCurrentAttempt()) return;
         sessionFence();
         activeStage = 'rain';
         await zoneRainSourceAPI.set(zone.id, rainGauge || null);
+        if (!isCurrentAttempt()) return;
       }
+      if (!isCurrentAttempt()) return;
       activeStage = null;
       onSaved();
       onClose();
     } catch (err: any) {
+      if (!isCurrentAttempt()) return;
       if (activeStage === 'rain') {
         const savedStages: SavedStage[] = [];
         if (configPayload && Object.keys(configPayload).length > 0
@@ -392,7 +474,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
         setError(err.response?.data?.detail ?? err.message ?? t('zoneConfig.errors.saveFailed', { defaultValue: 'Failed to save' }));
       }
     } finally {
-      setSaving(false);
+      if (isCurrentAttempt()) setSaving(false);
     }
   };
 
