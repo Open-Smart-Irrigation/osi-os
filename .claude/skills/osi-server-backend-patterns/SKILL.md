@@ -13,11 +13,11 @@ but should not be added to the Stage 1 forge index.
 
 Verified sources to re-check before server work:
 
-- `/home/phil/Repos/osi-server/AGENTS.md`.
-- `/home/phil/Repos/osi-server/backend/build.gradle.kts`.
-- `/home/phil/Repos/osi-server/backend/src/main/resources/application.yml`.
-- `/home/phil/Repos/osi-server/architect.yaml` and `RULES.yaml`.
-- `/home/phil/Repos/osi-server/docs/agents/typescript-rule-overlays.md`.
+- `../osi-server/AGENTS.md`.
+- `../osi-server/backend/build.gradle.kts`.
+- `../osi-server/backend/src/main/resources/application.yml`.
+- `../osi-server/architect.yaml` and `RULES.yaml`.
+- `../osi-server/docs/agents/typescript-rule-overlays.md`.
 
 ## Stack Facts
 
@@ -62,15 +62,15 @@ Postgres pitfalls already hit in this repo:
 - Backend test command:
 
 ```bash
-cd /home/phil/Repos/osi-server/backend && ./gradlew test
+cd ../osi-server/backend && ./gradlew test
 ```
 
 Other surfaces:
 
 ```bash
-cd /home/phil/Repos/osi-server/frontend && npm run test:unit
-cd /home/phil/Repos/osi-server/terra-intelligence && npm test
-cd /home/phil/Repos/osi-server/prediction-service && pytest
+cd ../osi-server/frontend && npm run test:unit
+cd ../osi-server/terra-intelligence && npm test
+cd ../osi-server/prediction-service && pytest
 ```
 
 ## Build Commands
@@ -78,13 +78,13 @@ cd /home/phil/Repos/osi-server/prediction-service && pytest
 Full build:
 
 ```bash
-cd /home/phil/Repos/osi-server/backend && ./gradlew build
+cd ../osi-server/backend && ./gradlew build
 ```
 
 Backend-only JAR without tests or frontend rebuilds:
 
 ```bash
-cd /home/phil/Repos/osi-server/backend && ./gradlew bootJar --no-daemon -x test -x buildFrontend -x buildTerraIntelligenceFrontend
+cd ../osi-server/backend && ./gradlew bootJar --no-daemon -x test -x buildFrontend -x buildTerraIntelligenceFrontend
 ```
 
 If Terra changed, do not skip `buildTerraIntelligenceFrontend` unless the task

@@ -5,7 +5,7 @@ How the project skills reach each supported agent harness. This moved out of
 read this page before changing the skill layout. This page carries the same
 authority as `AGENTS.md`.
 
-The 14 project skills listed in `AGENTS.md` ("Agent skills") load in all three
+The 14 project skills in `.claude/skills/` load in all three
 supported harnesses from one source. Claude Code reads `.claude/skills/`
 directly. Codex reads the same files through the `.agents/skills` symlink (its
 `.agents` convention); it does not read `.claude/skills`, so that symlink is

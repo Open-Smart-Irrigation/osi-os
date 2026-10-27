@@ -117,7 +117,7 @@ node scripts/verify-sync-flow.js
 When an `osi-server` mirror or Java/cloud behavior changes too:
 
 ```bash
-cd /home/phil/Repos/osi-server/backend && ./gradlew test
+cd ../osi-server/backend && ./gradlew test
 ```
 
 For mirror-byte checks, locate the server repo and compare the actual files

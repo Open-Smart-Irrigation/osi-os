@@ -60,7 +60,7 @@ The registry should be written when, and only when, a candidate plugin exists th
 
 ### Short-term (now → next 1–2 device additions)
 
-- Nothing changes operationally. MClimate T-Valve and any other near-term device additions follow the 8-step list in [AGENTS.md § "Adding a new device type"](../../AGENTS.md#adding-a-new-device-type) by hand.
+- Nothing changes operationally. MClimate T-Valve and any other near-term device additions follow the 8-step list in [the device-type checklist](../architecture/adding-a-device-type.md) by hand.
 - AGENTS.md is updated to reference this ADR so the next agent or contributor sees the deferred-registry rationale before re-proposing one.
 
 ### Long-term (when a second-party plugin appears)
@@ -95,5 +95,5 @@ Restructure `conf/...` and `web/...` so each device type lives in `plugins/<devi
 ## How to apply this decision
 
 - When considering a "plugin system" proposal, point at this ADR and ask: "is there a concrete plugin candidate that is genuinely external to the OSI OS image build?" If no, the answer is "follow the 8-step integration."
-- When adding a device type, follow [AGENTS.md § "Adding a new device type"](../../AGENTS.md#adding-a-new-device-type) and extend the relevant verifier scripts.
+- When adding a device type, follow [the device-type checklist](../architecture/adding-a-device-type.md) and extend the relevant verifier scripts.
 - When a second-party plugin candidate does appear, open a new ADR that supersedes this one. Use this ADR's "scope of a future plugin" list as the starting point for the registry schema.

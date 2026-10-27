@@ -1,6 +1,6 @@
 ---
 name: osi-live-ops-runbook
-description: Use when deploying OSI OS to a live or previously provisioned Raspberry Pi gateway, repairing a live Pi's Node-RED/ChirpStack/database state, taking a pre-repair backup, recovering from schema fingerprint drift, SSHing into a live gateway, restarting Node-RED on a farm device, testing STREGA valves on live hardware, or judging whether an operation is safe against a running farm, the production cloud or a customer-hosted instance.
+description: Use before deploying to, repairing, backing up, SSHing into, or restarting services on a live or previously provisioned gateway, testing valves on hardware, or judging whether an operation is safe against a farm, production cloud, or customer instance.
 ---
 
 # OSI Live Ops Runbook
