@@ -4,6 +4,7 @@ import { zoneRainSourceAPI } from '../../../services/api';
 
 interface Props {
   zoneId: number;
+  canWrite: boolean;
   className?: string;
   /** A change reads the selection again (a saved choice, a refreshed summary). */
   refreshKey?: string | number;
@@ -16,7 +17,7 @@ interface Props {
  * nothing while loading, once a gauge is chosen, or when the selection cannot
  * be read.
  */
-export const RainGaugeAmbiguityBanner: React.FC<Props> = ({ zoneId, className = '', refreshKey }) => {
+export const RainGaugeAmbiguityBanner: React.FC<Props> = ({ zoneId, canWrite, className = '', refreshKey }) => {
   const { t } = useTranslation('devices');
   const [ambiguous, setAmbiguous] = useState(false);
 
@@ -38,7 +39,11 @@ export const RainGaugeAmbiguityBanner: React.FC<Props> = ({ zoneId, className = 
   if (!ambiguous) return null;
   return (
     <div role="status" className={`rounded-xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)] ${className}`}>
-      {t('zoneRainGauge.banner', { defaultValue: 'Two rain gauges report for this zone. Choose one in the zone settings.' })}
+      {canWrite
+        ? t('zoneRainGauge.banner', { defaultValue: 'Two rain gauges report for this zone. Choose one in the zone settings.' })
+        : t('zoneRainGauge.bannerReadOnly', {
+          defaultValue: 'Ask someone who can edit this zone to choose a rain gauge in zone settings.',
+        })}
     </div>
   );
 };

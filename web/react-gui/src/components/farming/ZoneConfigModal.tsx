@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { IrrigationZone } from '../../types/farming';
@@ -55,6 +55,7 @@ interface Props {
 }
 
 type Translate = TFunction<'devices'>;
+type SavedStage = 'config' | 'calibration' | 'location';
 
 /**
  * Option lists as `{ value, key, fallback }`: the value is what the API
@@ -139,6 +140,13 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const [longitude, setLongitude] = useState(zone.longitude != null ? String(zone.longitude) : '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [partialSaveStages, setPartialSaveStages] = useState<SavedStage[]>([]);
+  const resolvedStageSignatures = useRef<{
+    zoneId: number;
+    config?: string;
+    calibration?: string;
+    location?: string;
+  }>({ zoneId: zone.id });
   const [deviceLocationSupport, setDeviceLocationSupport] = useState<DeviceLocationSupport | null>(null);
   const [deviceLocationSupportLoading, setDeviceLocationSupportLoading] = useState(false);
   const [deviceLocationLoading, setDeviceLocationLoading] = useState(false);
@@ -172,6 +180,11 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     setDeviceLocationError(null);
     setDeviceLocationMeta(null);
   }, [zone]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    resolvedStageSignatures.current = { zoneId: zone.id };
+  }, [isOpen, zone.id]);
 
   const refreshDeviceLocationSupport = async () => {
     setDeviceLocationSupportLoading(true);
@@ -311,35 +324,73 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
   const handleSave = async () => {
     setSaving(true);
     setError(null);
+    setPartialSaveStages([]);
+    let activeStage: 'config' | 'calibration' | 'location' | 'rain' | null = null;
+    let configPayload: ReturnType<typeof buildConfigPayload> | null = null;
+    let locationPayload: ReturnType<typeof parseLocationPayload> = null;
+    let calibrationPayload: ReturnType<typeof parseCalibrationPayload> = null;
+    let locationChanged = false;
     try {
-      const configPayload = buildConfigPayload();
-      const locationPayload = parseLocationPayload();
-      const calibrationPayload = parseCalibrationPayload();
+      configPayload = buildConfigPayload();
+      locationPayload = parseLocationPayload();
+      calibrationPayload = parseCalibrationPayload();
       const hasConfigChanges = Object.keys(configPayload).length > 0;
-      const locationChanged = locationPayload != null
+      locationChanged = locationPayload != null
         && (locationPayload.latitude !== zone.latitude || locationPayload.longitude !== zone.longitude);
+      const configSignature = hasConfigChanges ? JSON.stringify(configPayload) : null;
+      const calibrationSignature = calibrationPayload ? JSON.stringify(calibrationPayload) : null;
+      const locationSignature = locationChanged ? JSON.stringify(locationPayload) : null;
 
-      if (hasConfigChanges) {
+      if (hasConfigChanges && resolvedStageSignatures.current.config !== configSignature) {
+        activeStage = 'config';
         await irrigationZonesAPI.updateConfig(zone.id, configPayload);
+        resolvedStageSignatures.current.config = configSignature ?? undefined;
       }
-      if (calibrationPayload) {
+      if (calibrationPayload && resolvedStageSignatures.current.calibration !== calibrationSignature) {
         sessionFence();
+        activeStage = 'calibration';
         await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
+        resolvedStageSignatures.current.calibration = calibrationSignature ?? undefined;
       }
-      if (locationChanged) {
+      if (locationChanged && locationPayload
+        && resolvedStageSignatures.current.location !== locationSignature) {
         sessionFence();
+        activeStage = 'location';
         await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
+        resolvedStageSignatures.current.location = locationSignature ?? undefined;
       }
       // Only an operator's change is written: an untouched select never
       // confirms the suggestion by itself (D1).
       if (rainSource && rainGauge !== initialRainGaugeChoice(rainSource)) {
         sessionFence();
+        activeStage = 'rain';
         await zoneRainSourceAPI.set(zone.id, rainGauge || null);
       }
+      activeStage = null;
       onSaved();
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.detail ?? err.message ?? t('zoneConfig.errors.saveFailed', { defaultValue: 'Failed to save' }));
+      if (activeStage === 'rain') {
+        const savedStages: SavedStage[] = [];
+        if (configPayload && Object.keys(configPayload).length > 0
+          && resolvedStageSignatures.current.config === JSON.stringify(configPayload)) {
+          savedStages.push('config');
+        }
+        if (calibrationPayload
+          && resolvedStageSignatures.current.calibration === JSON.stringify(calibrationPayload)) {
+          savedStages.push('calibration');
+        }
+        if (locationChanged && locationPayload
+          && resolvedStageSignatures.current.location === JSON.stringify(locationPayload)) {
+          savedStages.push('location');
+        }
+        setError(t('zoneConfig.errors.rainChoiceSaveFailed', {
+          defaultValue: 'Rain gauge choice was not saved. Review the selection and retry Save.',
+        }));
+        setPartialSaveStages(savedStages);
+      } else {
+        setError(err.response?.data?.detail ?? err.message ?? t('zoneConfig.errors.saveFailed', { defaultValue: 'Failed to save' }));
+      }
     } finally {
       setSaving(false);
     }
@@ -415,7 +466,19 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
 
         <div className="p-5 flex flex-col gap-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 text-sm">{error}</div>
+            <div className="bg-red-50 border border-red-200 text-red-800 rounded-lg px-3 py-2 text-sm">
+              <p>{error}</p>
+              {partialSaveStages.length > 0 && (
+                <p className="mt-1">
+                  {t('zoneConfig.partialSave.saved', { defaultValue: 'Saved:' })}{' '}
+                  {partialSaveStages.map((stage) => t(`zoneConfig.partialSave.${stage}`, {
+                    defaultValue: stage === 'config'
+                      ? 'Zone settings'
+                      : stage === 'calibration' ? 'Irrigation calibration' : 'Zone location',
+                  })).join(', ')}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/70 p-4">

@@ -640,6 +640,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
           {hasRainTile && (
             <RainGaugeAmbiguityBanner
               zoneId={zone.id}
+              canWrite={canWrite}
               className="mt-3"
               refreshKey={`${environmentSummary.generatedAt ?? ''}|${settingsVersion}`}
             />
