@@ -3714,6 +3714,117 @@ describe('JournalCaptureFlow', () => {
     expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument();
   });
 
+  it.each([
+    {
+      now: '2026-10-25T00:29:00.000Z',
+      local: '2026-10-25T02:29',
+      offset: 120,
+      instant: '2026-10-25T00:29:00.000Z',
+    },
+    {
+      now: '2026-10-25T01:29:00.000Z',
+      local: '2026-10-25T02:29',
+      offset: 60,
+      instant: '2026-10-25T01:29:00.000Z',
+    },
+    {
+      now: '2026-07-16T08:30:00.000Z',
+      local: '2026-07-16T10:30',
+      offset: 120,
+      instant: '2026-07-16T08:30:00.000Z',
+    },
+  ])('preserves the automatic capture default instant at $now', async ({ now, local, offset, instant }) => {
+    vi.setSystemTime(new Date(now));
+    render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    const occurrenceInput = screen.getByLabelText(START_OCCURRENCE_LABEL);
+    expect(occurrenceInput).toHaveValue(local);
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+
+    const payload = apiMocks.updateEntry.mock.calls
+      .map(([, updatePayload]) => updatePayload)
+      .find((updatePayload) => updatePayload.status === 'final');
+    expect(payload).toBeDefined();
+    expect(payload).toMatchObject({
+      occurred_start_local: local,
+      occurred_timezone: 'Europe/Zurich',
+      occurred_utc_offset_minutes: offset,
+    });
+    const localAsUtc = Date.parse(`${local}:00Z`);
+    expect(new Date(localAsUtc - offset * 60_000).toISOString()).toBe(instant);
+  });
+
+  it('clears the capture default offset after a manual fold-time edit', async () => {
+    vi.setSystemTime(new Date('2026-10-25T01:29:00.000Z'));
+    render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-10-25T02:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.ambiguousLocalTime');
+    const offset = screen.getByRole('combobox', { name: 'capture.validation.chooseUtcOffset' });
+    fireEvent.change(offset, { target: { value: '120' } });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const payload = apiMocks.updateEntry.mock.calls
+      .map(([, updatePayload]) => updatePayload)
+      .find((updatePayload) => updatePayload.status === 'final');
+    expect(payload).toMatchObject({
+      occurred_start_local: '2026-10-25T02:30',
+      occurred_utc_offset_minutes: 120,
+    });
+  });
+
+  it('clears the capture default offset after a manual timezone edit', async () => {
+    vi.setSystemTime(new Date('2026-10-25T01:29:00.000Z'));
+    render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText('capture.where.timezone'), {
+      target: { value: 'Europe/London' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'capture.confirm.title' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'capture.finish' }));
+    await waitFor(() => expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(true));
+    const payload = apiMocks.updateEntry.mock.calls
+      .map(([, updatePayload]) => updatePayload)
+      .find((updatePayload) => updatePayload.status === 'final');
+    expect(payload).toMatchObject({
+      occurred_start_local: '2026-10-25T02:29',
+      occurred_timezone: 'Europe/London',
+      occurred_utc_offset_minutes: 0,
+    });
+  });
+
+  it('rejects a manual capture time in the Zurich spring-forward gap', async () => {
+    vi.setSystemTime(new Date('2026-03-29T00:30:00.000Z'));
+    render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
+    await waitFor(() => expect(apiMocks.listEntries).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'irrigation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+    fireEvent.change(screen.getByLabelText(START_OCCURRENCE_LABEL), {
+      target: { value: '2026-03-29T02:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'capture.next' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('capture.validation.nonexistentLocalTime'));
+    expect(apiMocks.updateEntry.mock.calls.some(([, payload]) => payload.status === 'final')).toBe(false);
+  });
+
   it('retries a failed final receipt with the same UUID and keeps the editable warning', async () => {
     apiMocks.updateEntry.mockRejectedValueOnce(new Error('gateway unavailable'));
     render(<JournalCaptureFlow {...baseProps} initialPlot={plot} />);
