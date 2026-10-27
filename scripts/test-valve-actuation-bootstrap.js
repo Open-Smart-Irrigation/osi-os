@@ -18,7 +18,7 @@ const NODE_IDS = ['sync-bootstrap-build', 'sync-force-build'];
 const EUI = '0016C001F1000001';
 
 function extractBlock(func) {
-  const startMarker = 'const valveActuationRows = await q(';
+  const startMarker = 'const valveActuationRows = valveHistoryTable.length ? await q(';
   const start = func.indexOf(startMarker);
   if (start < 0) throw new Error('valveActuationRows query not found in node func');
   const endMarker = '})).filter((a) => a.status != null);';
@@ -39,10 +39,14 @@ function loadBlock(profile, nodeId) {
 // array. The block only references `q` (an async SELECT runner) and produces `valveActuations`
 // as its last statement's binding -- both source nodes bind it identically, so this harness
 // needs nothing else from their surrounding closures.
-async function runBlock(block, raw) {
+async function runBlock(block, raw, profile) {
   const q = (sql) => Promise.resolve(raw.prepare(sql).all());
-  const runner = new Function('q', `return (async () => {\n${block}\n  return valveActuations;\n})();`);
-  return runner(q);
+  const base = path.resolve(__dirname, `../conf/full_raspberrypi_${profile}/files/usr/share/node-red`);
+  const historyHelper = require(path.join(base, 'osi-history-sync-helper/index.js'));
+  const valveControl = require(path.join(base, 'osi-valve-control/index.js'));
+  const valveHistoryTable = [{ name: 'valve_actuation_expectations' }];
+  const runner = new Function('q', 'historyHelper', 'valveControl', 'valveHistoryTable', `return (async () => {\n${block}\n  return valveActuations;\n})();`);
+  return runner(q, historyHelper, valveControl, valveHistoryTable);
 }
 
 async function tempDb() {
@@ -58,12 +62,12 @@ async function tempDb() {
 
 function insertExpectation(raw, row) {
   raw.prepare(
-    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, cancel_reason, trigger, created_at) ' +
-    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, zone_id, command_id, commanded_at, commanded_duration_seconds, expected_close_at, observed_open_at, observed_close_at, volume_source, reconciliation_state, cancel_reason, trigger, transport_json, created_at) ' +
+    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).run(
     row.expectation_id, row.device_eui || EUI, row.zone_id || null, row.command_id || null, row.commanded_at, row.commanded_duration_seconds || 900,
     row.expected_close_at, row.observed_open_at || null, row.observed_close_at || null, row.volume_source || 'unknown',
-    row.reconciliation_state, row.cancel_reason || null, row.trigger || null, row.commanded_at
+    row.reconciliation_state, row.cancel_reason || null, row.trigger || null, row.transport_json == null ? null : row.transport_json, row.commanded_at
   );
 }
 
@@ -87,7 +91,7 @@ async function main() {
         insertExpectation(raw, { expectation_id: 'e-pending', reconciliation_state: 'PENDING_OBSERVATION', commanded_at: '2026-08-24T10:00:00.000Z', expected_close_at: '2026-08-24T10:15:00.000Z' });
         insertExpectation(raw, { expectation_id: 'e-running', reconciliation_state: 'OBSERVED_RUNNING', commanded_at: '2026-08-24T11:00:00.000Z', expected_close_at: '2026-08-24T11:15:00.000Z', observed_open_at: '2026-08-24T11:00:05.000Z' });
 
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         const ids = rows.map((r) => r.expectation_id).sort();
         assert.deepEqual(ids, ['e-cancelled', 'e-close-timeout', 'e-complete', 'e-open-timeout'], 'active PENDING_OBSERVATION/OBSERVED_RUNNING rows must never appear');
         raw.close();
@@ -99,10 +103,43 @@ async function main() {
           const at = new Date(Date.UTC(2026, 0, 1) + i * 3600000).toISOString();
           insertExpectation(raw, { expectation_id: 'e-' + String(i).padStart(4, '0'), reconciliation_state: 'CANCELLED', commanded_at: at, expected_close_at: at });
         }
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         assert.equal(rows.length, 200, 'must cap at 200 rows');
         assert.equal(rows[0].expectation_id, 'e-0204', 'newest commanded_at first');
         assert.equal(rows[199].expectation_id, 'e-0005', 'the 5 oldest rows must be dropped by the cap');
+        raw.close();
+      });
+
+      await test(`[${profile}/${nodeId}] filters the full v1 population before LIMIT and preserves validated legacy rows`, async () => {
+        const raw = await tempDb();
+        for (let i = 0; i < 3; i += 1) {
+          const at = new Date(Date.UTC(2025, 0, 1) + i * 3600000).toISOString();
+          insertExpectation(raw, { expectation_id: 'ordinary-' + i, command_id: 'command-' + i, reconciliation_state: 'CANCELLED', commanded_at: at, expected_close_at: at });
+        }
+        for (let i = 0; i < 205; i += 1) {
+          const at = new Date(Date.UTC(2026, 0, 1) + i * 3600000).toISOString();
+          insertExpectation(raw, {
+            expectation_id: 'local-' + String(i).padStart(4, '0'), reconciliation_state: 'CANCELLED',
+            commanded_at: at, commanded_duration_seconds: -1, expected_close_at: '',
+            transport_json: '{not-json'
+          });
+        }
+        insertExpectation(raw, {
+          expectation_id: 'legacy-v1', reconciliation_state: 'CANCELLED', trigger: 'on_valve_schedule',
+          commanded_at: '2024-08-20T10:00:00Z', commanded_duration_seconds: 900,
+          expected_close_at: '2024-08-20T10:15:00Z', transport_json: JSON.stringify({ physical_run: {
+            version: 1, source: 'explicit_report', earliest_possible_start_at: null,
+            latest_possible_end_at: null, legacy_v1_compatibility: {
+              version: 1, source: 'preexisting_on_valve_schedule', expectation_id: 'legacy-v1',
+              commanded_at: '2024-08-20T10:00:00Z', commanded_duration_seconds: 900,
+              expected_close_at: '2024-08-20T10:15:00Z'
+            }
+          } })
+        });
+        const rows = await runBlock(block, raw, profile);
+        const ids = rows.map((row) => row.expectation_id);
+        assert.deepEqual(ids.sort(), ['legacy-v1', 'ordinary-0', 'ordinary-1', 'ordinary-2'].sort());
+        assert.equal(ids.filter((id) => id.startsWith('local-')).length, 0);
         raw.close();
       });
 
@@ -122,7 +159,7 @@ async function main() {
           commanded_at: '2026-08-21T10:00:00.000Z', expected_close_at: '2026-08-21T10:15:00.000Z',
         });
 
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         const byId = Object.fromEntries(rows.map((r) => [r.expectation_id, r]));
 
         assert.deepEqual(byId.e1, {
@@ -160,7 +197,7 @@ async function main() {
           expectation_id: 'e1', command_id: 'cmd-1', reconciliation_state: 'STALE_NO_OBSERVATION', trigger: 'cloud_command',
           commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
         });
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         assert.equal(rows.length, 1);
         assert.equal(rows[0].status, 'COMMAND_FAILED');
         raw.close();
@@ -173,7 +210,7 @@ async function main() {
           commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
           observed_open_at: null, observed_close_at: '2026-08-20T10:15:03.000Z',
         });
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         assert.equal(rows.length, 1);
         assert.equal(rows[0].status, 'OPEN_TIMEOUT');
         assert.equal(rows[0].observed_open_at, null);
@@ -186,7 +223,7 @@ async function main() {
           expectation_id: 'e1', device_eui: EUI.toLowerCase(), reconciliation_state: 'CANCELLED',
           commanded_at: '2026-08-20T10:00:00.000Z', expected_close_at: '2026-08-20T10:15:00.000Z',
         });
-        const rows = await runBlock(block, raw);
+        const rows = await runBlock(block, raw, profile);
         assert.equal(rows.length, 1);
         assert.equal(rows[0].device_eui, EUI, 'must uppercase, matching the contract Eui64 pattern and the event path');
         raw.close();

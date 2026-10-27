@@ -1,0 +1,11 @@
+command: node scripts/build-seed-db.js
+exit: 0
+output:
+wrote conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db
+wrote conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db
+wrote conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db
+wrote conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db
+wrote conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db
+wrote database/farming.db
+wrote web/react-gui/farming.db
+build-seed-db: OK (7 image(s), 219s)

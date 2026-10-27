@@ -19,6 +19,10 @@
         "ZONE_IRRIGATION_CALIBRATION_UPSERTED": {"aggregate_key_path": "payload.zone_uuid", "sync_version_path": "payload.sync_version"},
         "WEATHER_STATION_ZONES_REPLACED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"},
         "ZONE_AGRONOMY_UPSERTED": {"sync_version_path": "payload.sync_version"}
+        ,"IRRIGATION_POLICY_UPSERTED": {"aggregate_key_path": "payload.policy_uuid", "sync_version_path": "payload.sync_version"}
+        ,"IRRIGATION_POLICY_RUNTIME_CHANGED": {"aggregate_key_path": "payload.zone_uuid", "sync_version_path": "payload.projection_revision"}
+        ,"IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.projection_revision"}
+        ,"IRRIGATION_POLICY_DECISION_UPSERTED": {"aggregate_key_path": "payload.decision_key", "sync_version_path": "payload.projection_revision"}
         ,"WATERMARK_CALIBRATION_UPSERTED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"}
         ,"WATERMARK_CALIBRATION_DELETED": {"aggregate_key_path": "payload.device_eui", "sync_version_path": "payload.sync_version"}
     },
@@ -62,6 +66,10 @@
                 "WEATHER_STATION_ZONES_REPLACED",
                 "WORK_REQUEST_SUBMITTED",
                 "ZONE_AGRONOMY_UPSERTED",
+                "IRRIGATION_POLICY_UPSERTED",
+                "IRRIGATION_POLICY_RUNTIME_CHANGED",
+                "IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED",
+                "IRRIGATION_POLICY_DECISION_UPSERTED",
                 "WATERMARK_CALIBRATION_UPSERTED",
                 "WATERMARK_CALIBRATION_DELETED",
                 "ZONE_CONFIG_UPSERTED",
@@ -290,6 +298,10 @@
                     "payload": {"$ref": "resources.schema.json#/definitions/JournalCropCycleAggregate"}
                 }
             }
-        }
+        },
+        {"if": {"properties": {"op": {"const": "IRRIGATION_POLICY_UPSERTED"}}, "required": ["op"]}, "then": {"properties": {"aggregateType": {"const": "IRRIGATION_POLICY"}, "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}, "payload": {"$ref": "resources.schema.json#/definitions/IrrigationPolicy"}}}},
+        {"if": {"properties": {"op": {"const": "IRRIGATION_POLICY_RUNTIME_CHANGED"}}, "required": ["op"]}, "then": {"properties": {"aggregateType": {"const": "IRRIGATION_POLICY_RUNTIME"}, "aggregateKey": {"$ref": "resources.schema.json#/definitions/CanonicalUuid"}, "payload": {"$ref": "resources.schema.json#/definitions/IrrigationPolicyRuntime"}}}},
+        {"if": {"properties": {"op": {"const": "IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED"}}, "required": ["op"]}, "then": {"properties": {"aggregateType": {"const": "IRRIGATION_POLICY_VALVE_RUNTIME"}, "aggregateKey": {"$ref": "resources.schema.json#/definitions/Eui64"}, "payload": {"$ref": "resources.schema.json#/definitions/IrrigationPolicyValveRuntime"}}}},
+        {"if": {"properties": {"op": {"const": "IRRIGATION_POLICY_DECISION_UPSERTED"}}, "required": ["op"]}, "then": {"properties": {"aggregateType": {"const": "IRRIGATION_POLICY_DECISION"}, "aggregateKey": {"type": "string", "minLength": 1}, "payload": {"$ref": "resources.schema.json#/definitions/IrrigationPolicyDecision"}}}}
     ]
 }

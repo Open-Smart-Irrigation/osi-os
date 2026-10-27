@@ -324,6 +324,7 @@ async function applyDirtyAck(dirtyRowKeys) {
     }),
     shouldApplyDurableAck: () => true,
     rowRejection: () => null,
+    normalizeCursor: (tableName, cursor) => cursor,
     isCursorComplete: () => false
   };
   const execute = new Function(

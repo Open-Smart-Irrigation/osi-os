@@ -57,6 +57,15 @@ test('buildRuntimePayload: the newest of several PENDING_OBSERVATION/OBSERVED_RU
   assert.equal(payload.active_actuation.expectation_id, 'e-new');
 });
 
+test('buildRuntimePayload: a newer report-only run does not hide an older command owner', async () => {
+  const { db } = await tempDb();
+  await insertExpectation(db, { id: 'command-owner', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T09:00:00.000Z', expectedCloseAt: '2026-08-25T09:15:00.000Z', commandId: 'cmd-owner' });
+  await insertExpectation(db, { id: 'report-newer', state: 'OBSERVED_RUNNING', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '', commandId: null });
+  await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null } }), 'report-newer']);
+  const payload = await buildRuntimePayload(db, EUI);
+  assert.equal(payload.active_actuation.expectation_id, 'command-owner');
+});
+
 test('buildRuntimePayload: CANCELLED/OBSERVED_COMPLETE rows are not an active_actuation', async () => {
   const { db } = await tempDb();
   await insertExpectation(db, { id: 'e1', state: 'CANCELLED', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:15:00.000Z' });
@@ -93,7 +102,8 @@ test('buildRuntimePayload: GEN1 weekday_states mirrors the raw WEEKDAY_PLAN push
     // A CLOCK_SYNC row must not leak into weekday_states -- it is not a plan-push purpose.
     { push_id: 'p3', device_eui: EUI, purpose: 'CLOCK_SYNC', weekday: null, fport: 12, payload_hex: '00', plan_hash: null },
   ]);
-  await store.ackPush(db, EUI, 'WEEKDAY_PLAN', 17, 3, '00', '2026-08-25T09:00:00.000Z');
+  await db.run("UPDATE valve_schedule_pushes SET transport_json=? WHERE push_id='p1'", [JSON.stringify({ phase: 'ATTEMPTED', attempted_at: '2026-08-25T08:59:00.000Z' })]);
+  await store.ackPush(db, EUI, 'WEEKDAY_PLAN', 17, 3, 0, '2026-08-25T09:00:00.000Z');
   const payload = await buildRuntimePayload(db, EUI);
   assert.deepEqual(
     payload.push_state.weekday_states.slice().sort((a, b) => a.weekday - b.weekday),
@@ -243,6 +253,32 @@ test('buildActuationPayload: null for a non-terminal reconciliation_state (nothi
   assert.equal(await buildActuationPayload(db, 'e1'), null);
   await insertExpectation(db, { id: 'e2', state: 'PENDING_OBSERVATION', commandedAt: '2026-08-25T10:00:00.000Z', expectedCloseAt: '2026-08-25T10:30:00.000Z' });
   assert.equal(await buildActuationPayload(db, 'e2'), null);
+});
+
+test('buildActuationPayload and emitActuationArchived: local sentinel is excluded, ordinary command and validated legacy remain archiveable', async () => {
+  const { db } = await tempDb();
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, transport_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    ['local-run', EUI, '2026-08-25T10:00:00.000Z', -1, '', 'unknown', 'OBSERVED_CLOSED', null, JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null } }), '2026-08-25T10:00:00.000Z']
+  );
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    ['ordinary-run', EUI, 'cmd-ordinary', '2026-08-25T10:00:00.000Z', 900, '2026-08-25T10:15:00.000Z', 'unknown', 'OBSERVED_COMPLETE', 'manual', '2026-08-25T10:00:00.000Z']
+  );
+  const legacyTransport = JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null, legacy_v1_compatibility: { version: 1, source: 'preexisting_on_valve_schedule', expectation_id: 'legacy-run', commanded_at: '2026-08-25T10:00:00.000Z', commanded_duration_seconds: 900, expected_close_at: '2026-08-25T10:15:00.000Z' } } });
+  await db.run(
+    'INSERT INTO valve_actuation_expectations(expectation_id, device_eui, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, trigger, transport_json, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    ['legacy-run', EUI, '2026-08-25T10:00:00.000Z', 900, '2026-08-25T10:15:00.000Z', 'unknown', 'OBSERVED_COMPLETE', 'on_valve_schedule', legacyTransport, '2026-08-25T10:00:00.000Z']
+  );
+  assert.equal(await buildActuationPayload(db, 'local-run'), null);
+  assert.equal((await buildActuationPayload(db, 'ordinary-run')).expectation_id, 'ordinary-run');
+  assert.equal((await buildActuationPayload(db, 'legacy-run')).expectation_id, 'legacy-run');
+  await linkCloud(db);
+  assert.equal(await emitActuationArchived(db, EUI, 'local-run'), null);
+  assert.ok(await emitActuationArchived(db, EUI, 'ordinary-run'));
+  assert.ok(await emitActuationArchived(db, EUI, 'legacy-run'));
+  const outbox = await db.all("SELECT aggregate_key FROM sync_outbox WHERE op='VALVE_ACTUATION_ARCHIVED' ORDER BY aggregate_key");
+  assert.deepEqual(outbox.map((row) => row.aggregate_key), ['legacy-run', 'ordinary-run']);
 });
 
 test('buildActuationPayload: OBSERVED_COMPLETE shapes to status=COMPLETED, field-for-field, zone_id resolved to zone_uuid, device_eui uppercased', async () => {

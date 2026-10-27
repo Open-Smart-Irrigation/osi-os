@@ -12,6 +12,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Contract-gate dependencies installed by `npm ci --prefix scripts`
+/scripts/node_modules
+
 # Hidden files
 /.*
 

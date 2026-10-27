@@ -110,6 +110,53 @@ function annotateError(error, step) {
   return wrapped;
 }
 
+function enqueueFailure(code, message, details) {
+  const error = annotateError(new Error(message || code), 'enqueueDownlink');
+  error.code = code;
+  error.classification = code;
+  error.accepted = false;
+  error.queue_id = null;
+  error.provenance = code === 'enqueue_failed_before_acceptance' ? 'local_preflight' : (code === 'enqueue_rejected' ? 'chirpstack_enqueue_preacceptance' : 'post_start_unknown');
+  if (details && details.grpcCode !== undefined) error.grpcCode = details.grpcCode;
+  if (details && details.provenance) error.provenance = details.provenance;
+  return error;
+}
+
+const STRICT_EXPIRY_ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/;
+
+function expiryEpochMs(value) {
+  // Function nodes run in a separate vm context, so `instanceof Date` rejects
+  // a perfectly valid Date supplied by a Node-RED caller.
+  if (Object.prototype.toString.call(value) === '[object Date]') {
+    try {
+      const ms = Date.prototype.getTime.call(value);
+      return Number.isFinite(ms) ? ms : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+  if (typeof value !== 'string' || !STRICT_EXPIRY_ISO.test(value)) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && new Date(ms).toISOString() === value ? ms : null;
+}
+
+function attachExpiry(item, expiresAt, nowMs = Date.now()) {
+  const ms = expiryEpochMs(expiresAt);
+  if (!Number.isFinite(ms)) {
+    throw enqueueFailure('enqueue_failed_before_acceptance', 'expiresAt must be a valid Date or strict ISO timestamp', { reason: 'invalid_expiry' });
+  }
+  if (ms <= nowMs) {
+    throw enqueueFailure('enqueue_failed_before_acceptance', 'Command expired', { reason: 'command_expired' });
+  }
+  const { Timestamp } = require('google-protobuf/google/protobuf/timestamp_pb');
+  item.setExpiresAt(Timestamp.fromDate(new Date(ms)));
+}
+
+function queueId(value) {
+  const id = String(value == null ? '' : value).trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? id : null;
+}
+
 // A ChirpStack that accepts the connection and never answers (it does that while it
 // restarts) left these promises pending for ever, and with them every HTTP route that
 // awaits one: the valve cancel, the valve API router, the device delete clean-up. With a
@@ -663,14 +710,23 @@ class ChirpStackClient {
     const request = new devicePb.GetDeviceQueueItemsRequest();
     request.setDevEui(normalizedDevEui);
     const response = await grpcInvoke(this.deviceClient, 'getQueue', request, this.metadata, 'getDeviceQueue');
-    return response.getResultList().map((item) => ({
-      id: item.getId(),
-      fPort: item.getFPort(),
-      data: item.getData_asB64(),
-      confirmed: item.getConfirmed(),
-      isPending: item.getIsPending(),
-      isEncrypted: item.getIsEncrypted(),
-    }));
+    return response.getResultList().map((item) => {
+      const value = {
+        id: item.getId(),
+        fPort: item.getFPort(),
+        data: item.getData_asB64(),
+        confirmed: item.getConfirmed(),
+        isPending: item.getIsPending(),
+        isEncrypted: item.getIsEncrypted(),
+      };
+      if (item.getExpiresAt && item.getExpiresAt()) {
+        const timestamp = item.getExpiresAt();
+        const seconds = Number(timestamp.getSeconds());
+        const nanos = Number(timestamp.getNanos());
+        if (Number.isFinite(seconds) && Number.isFinite(nanos)) value.expiresAt = new Date(seconds * 1000 + Math.floor(nanos / 1e6)).toISOString();
+      }
+      return value;
+    });
   }
 
   // Enqueues one item on the device's downlink queue. `data` is bytes for the
@@ -679,44 +735,63 @@ class ChirpStackClient {
   // same convention getData_asB64()/getData_asU8() read back with), so a
   // caller may pass either -- every call site in this repo so far passes the
   // base64 string a Buffer#toString('base64') already produced.
-  // `expiresAt` drops the item if ChirpStack has not sent it by then (supported
-  // since ChirpStack 4.x; gateways run 4.16).
   async enqueueDownlink({ devEui, fPort, data, confirmed, expiresAt }) {
     const normalizedDevEui = normalizeDevEui(devEui);
-    if (!normalizedDevEui) {
-      throw annotateError(new Error('DevEUI is required'), 'enqueueDownlink');
+    if (!/^[0-9A-F]{16}$/.test(normalizedDevEui)) {
+      throw enqueueFailure('enqueue_failed_before_acceptance', 'DevEUI must be a 16-character hexadecimal EUI');
     }
     const port = Number(fPort);
     if (!Number.isInteger(port) || port < 1 || port > 255) {
-      throw annotateError(new Error('fPort must be an integer between 1 and 255'), 'enqueueDownlink');
+      throw enqueueFailure('enqueue_failed_before_acceptance', 'fPort must be an integer between 1 and 255');
     }
     if (data === undefined || data === null) {
-      throw annotateError(new Error('data is required'), 'enqueueDownlink');
+      throw enqueueFailure('enqueue_failed_before_acceptance', 'data is required');
     }
-    const queueItem = new devicePb.DeviceQueueItem();
-    queueItem.setDevEui(normalizedDevEui);
-    queueItem.setFPort(port);
-    queueItem.setConfirmed(Boolean(confirmed));
-    queueItem.setData(data);
-    if (expiresAt !== undefined && expiresAt !== null) {
-      // Not `instanceof Date`: Node-RED function nodes run in their own vm realm,
-      // whose Date is not this module's Date.
-      if (Object.prototype.toString.call(expiresAt) !== '[object Date]' || !Number.isFinite(expiresAt.getTime())) {
-        throw annotateError(new Error('expiresAt must be a valid Date'), 'enqueueDownlink');
+    let request;
+    try {
+      const queueItem = new devicePb.DeviceQueueItem();
+      queueItem.setDevEui(normalizedDevEui);
+      queueItem.setFPort(port);
+      queueItem.setConfirmed(Boolean(confirmed));
+      queueItem.setData(data);
+      if (expiresAt !== undefined && expiresAt !== null) attachExpiry(queueItem, expiresAt, Date.now());
+      request = new devicePb.EnqueueDeviceQueueItemRequest();
+      request.setQueueItem(queueItem);
+      // jspb's bytes setter defers malformed base64 failures until serialization.
+      request.serializeBinary();
+    } catch (error) {
+      if (error && error.classification) throw error;
+      throw enqueueFailure('enqueue_failed_before_acceptance', error && error.message || 'enqueue request construction failed');
+    }
+    let response;
+    try {
+      response = await grpcInvoke(this.deviceClient, 'enqueue', request, this.metadata, 'enqueueDownlink');
+    } catch (error) {
+      const grpcCode = Number(error && error.code);
+      if (grpcCode === grpc.status.INVALID_ARGUMENT || grpcCode === grpc.status.UNAUTHENTICATED) {
+        throw enqueueFailure('enqueue_rejected', error.message, { grpcCode });
       }
-      // Lazy: resolves through @chirpstack/chirpstack-api's hoisted google-protobuf, so a failed load only affects a reply with an expiry.
-      const timestampPb = require('google-protobuf/google/protobuf/timestamp_pb');
-      const ts = new timestampPb.Timestamp();
-      ts.fromDate(expiresAt);
-      queueItem.setExpiresAt(ts);
+      const unknown = enqueueFailure('enqueue_unknown', error && error.message || 'enqueue result is unknown', { grpcCode: Number.isFinite(grpcCode) ? grpcCode : null });
+      unknown.classification = 'UNKNOWN';
+      throw unknown;
     }
-    const request = new devicePb.EnqueueDeviceQueueItemRequest();
-    request.setQueueItem(queueItem);
-    const response = await grpcInvoke(this.deviceClient, 'enqueue', request, this.metadata, 'enqueueDownlink');
+    let id;
+    try {
+      id = response && typeof response.getId === 'function' ? response.getId() : null;
+    } catch (error) {
+      const unknown = enqueueFailure('enqueue_unknown', error && error.message || 'enqueue returned an invalid queue id');
+      unknown.classification = 'UNKNOWN';
+      throw unknown;
+    }
+    if (!queueId(id)) {
+      const unknown = enqueueFailure('enqueue_unknown', 'enqueue returned an invalid queue id');
+      unknown.classification = 'UNKNOWN';
+      throw unknown;
+    }
     return {
       devEui: normalizedDevEui,
       fPort: port,
-      id: response.getId(),
+      id,
       method: 'DeviceService.Enqueue'
     };
   }
@@ -793,6 +868,7 @@ module.exports = {
   normalizeDevEui,
   normalizeHexKey,
   listItemToObject,
+  attachExpiry,
   enums: {
     Region: commonPb.Region,
     MacVersion: commonPb.MacVersion,

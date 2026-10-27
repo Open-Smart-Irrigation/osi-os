@@ -42,6 +42,8 @@ const EXACT_SCOPED_ACCESS_COMMANDS = [
 // port, so the cloud side is not required to issue them yet.
 // UPSERT_JOURNAL_ENTRY_BATCH left this list when the osi-journal batch applier
 // was wired into the command registry.
+// Task 7b's conditional command registry/appliers are active. Keep the command
+// staging axis explicit and closed so a newly added command cannot silently defer.
 const EXACT_EDGE_DEFERRED_COMMANDS = [];
 const EXACT_CLOUD_DEFERRED_COMMANDS = [
   ...EXACT_STAGED_COMMANDS,
@@ -163,6 +165,11 @@ const EXACT_EDGE_STAGED_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
   // Edge-deferred, not yet module-emitted: the cloud applier may land first.
   'JOURNAL_CROP_CYCLE_UPSERTED',
+  // Task 7b owns edge projection emitters; 7a only lands cloud readers/appliers.
+  'IRRIGATION_POLICY_DECISION_UPSERTED',
+  'IRRIGATION_POLICY_RUNTIME_CHANGED',
+  'IRRIGATION_POLICY_UPSERTED',
+  'IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED',
 ];
 const FLOW_SOURCES = [
   {
@@ -996,7 +1003,16 @@ function validateStagingManifest(manifest) {
     // it can only sanction an op that is actually a recognized edge journal op (module-owned
     // or edge-deferred), never an arbitrary string, so it must stay a subset of that union.
     if (Array.isArray(eventOps.edgeStaged)) {
-      const staleStaged = eventOps.edgeStaged.filter((op) => !edgeUnion.includes(op));
+      // Conditional projection events are a reviewed cloud-before-edge exception:
+      // Task 7b owns the edge emitters and will move them into the active producer
+      // union when guarded publication lands.
+      const stagedOnlyAllowed = new Set([
+        'IRRIGATION_POLICY_DECISION_UPSERTED',
+        'IRRIGATION_POLICY_RUNTIME_CHANGED',
+        'IRRIGATION_POLICY_UPSERTED',
+        'IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED',
+      ]);
+      const staleStaged = eventOps.edgeStaged.filter((op) => !edgeUnion.includes(op) && !stagedOnlyAllowed.has(op));
       if (staleStaged.length) {
         errors.push(`staging eventOps.edgeStaged must be a subset of edgeModuleOwned union edgeDeferred: ${staleStaged.join(', ')}`);
       }
@@ -1667,7 +1683,7 @@ function checkSyncOpParity(options = {}) {
     lines.push(`  edgeDeferred ops already appear in deployed edge sources: ${deployedDeferred.join(', ')}`);
   }
 
-  const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred));
+  const expectedSchemaOps = sortedUnique(deployedEdgeOps.concat(staging.edgeDeferred, staging.edgeStaged));
   const schemaDiffLines = formatDiff('schema', 'deployed edge plus staged union', diffSets(expectedSchemaOps, schemaResult.ops));
   if (schemaDiffLines.length) {
     ok = false;

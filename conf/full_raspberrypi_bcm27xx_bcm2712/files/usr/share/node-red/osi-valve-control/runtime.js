@@ -16,6 +16,7 @@
 // on `as_of` -- and this module deliberately does not debounce/coalesce them itself.
 const crypto = require('node:crypto');
 const store = require('./store');
+const dispatch = require('./dispatch');
 
 function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -253,6 +254,7 @@ async function buildActuationPayload(db, expectationId) {
     'SELECT vae.expectation_id, vae.device_eui, vae.reconciliation_state, vae.trigger, ' +
       'vae.commanded_at, vae.observed_open_at, vae.observed_close_at, vae.expected_close_at, ' +
       'vae.commanded_duration_seconds, vae.estimated_gross_liters, vae.volume_source, vae.cancel_reason, ' +
+      'vae.command_id, vae.transport_json, ' +
       '(SELECT zone_uuid FROM irrigation_zones WHERE id = vae.zone_id AND deleted_at IS NULL) AS zone_uuid, ' +
       'ac.result AS command_result, ac.result_detail AS command_result_detail ' +
       'FROM valve_actuation_expectations vae LEFT JOIN applied_commands ac ON ac.command_id = vae.command_id ' +
@@ -261,6 +263,7 @@ async function buildActuationPayload(db, expectationId) {
   );
   if (!row) return null;
   if (!TERMINAL_RECONCILIATION_STATES.has(row.reconciliation_state)) return null;
+  if (dispatch.projectObservationExpectation(row) === null) return null;
   const status = deriveArchiveStatus(row);
   return {
     contract_version: 1,

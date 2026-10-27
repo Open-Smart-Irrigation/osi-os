@@ -238,6 +238,9 @@ const bootstrapRun = spawnSync(process.execPath, ['--test', bootstrapTests], {
   timeout: 180000,
 });
 assert.equal(bootstrapRun.status, 0, bootstrapRun.stderr || bootstrapRun.stdout);
-assert.match(bootstrapRun.stdout, /# pass 62/);
+// 62 cases on main plus the 38 this branch adds for the conditional irrigation snapshot, plus
+// the 4 R19-7 bootstrap policy shape cases.
+assert.match(bootstrapRun.stdout, /# pass 104\n/);
+assert.match(bootstrapRun.stdout, /# fail 0\n/);
 
 console.log('protected configuration dispatch checks passed');

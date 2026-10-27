@@ -19,8 +19,129 @@ const flowsPath = path.resolve(
 );
 const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
 const byId = Object.fromEntries(flows.filter((n) => n.id).map((n) => [n.id, n]));
+const valveControlRoot = path.resolve(
+    __dirname, '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control'
+);
+const stregaClaimSource = stripJavaScriptComments(fs.readFileSync(path.join(valveControlRoot, 'claim.js'), 'utf8'));
 
 let failures = [];
+
+// write-strega-expectation is a deliberately thin Node-RED wrapper. Its
+// authorization, calibration fallback, and trigger forwarding live in the
+// profile-local osi-valve-control/live-authorize.js module. Resolve the
+// wrapper before checking those contracts so the guard follows the code path
+// that production actually executes in each Pi profile.
+function stripJavaScriptComments(source) {
+    // These helper sources contain no URL or regex literals with `//`; remove
+    // comments so contract matches cannot be comment-only.
+    return source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+}
+
+function extractDispatchObject(source) {
+    const assignment = source.indexOf('msg._stregaDispatchCommand');
+    const assignCall = source.indexOf('Object.assign({}, raw,', assignment);
+    const open = source.indexOf('{', assignCall + 'Object.assign({}, raw,'.length);
+    if (assignment < 0 || assignCall < 0 || open < 0) return null;
+
+    let depth = 0;
+    let quote = null;
+    let escaped = false;
+    for (let index = open; index < source.length; index += 1) {
+        const char = source[index];
+        if (quote) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === quote) quote = null;
+            continue;
+        }
+        if (char === '\'' || char === '"' || char === '`') {
+            quote = char;
+            continue;
+        }
+        if (char === '{') depth += 1;
+        else if (char === '}' && --depth === 0) {
+            const after = source.slice(index + 1);
+            if (!/^\s*\);\s*msg\.expectation\s*=/.test(after)) return null;
+            return source.slice(open + 1, index);
+        }
+    }
+    return null;
+}
+
+function hasTopLevelTriggerForward(source) {
+    let braces = 0;
+    let brackets = 0;
+    let parentheses = 0;
+    let quote = null;
+    let escaped = false;
+    for (let index = 0; index < source.length; index += 1) {
+        const char = source[index];
+        if (quote) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === quote) quote = null;
+            continue;
+        }
+        if (char === '\'' || char === '"' || char === '`') {
+            quote = char;
+            continue;
+        }
+        if (char === '{') { braces += 1; continue; }
+        if (char === '}') { braces -= 1; continue; }
+        if (char === '[') { brackets += 1; continue; }
+        if (char === ']') { brackets -= 1; continue; }
+        if (char === '(') { parentheses += 1; continue; }
+        if (char === ')') { parentheses -= 1; continue; }
+        if (braces !== 0 || brackets !== 0 || parentheses !== 0 ||
+            !source.startsWith('trigger', index) ||
+            (index > 0 && /[A-Za-z0-9_$]/.test(source[index - 1])) ||
+            /[A-Za-z0-9_$]/.test(source[index + 'trigger'.length])) continue;
+        let cursor = index + 'trigger'.length;
+        while (/\s/.test(source[cursor] || '')) cursor += 1;
+        if (source[cursor] !== ':') continue;
+        cursor += 1;
+        while (/\s/.test(source[cursor] || '')) cursor += 1;
+        if (!source.startsWith('trigger', cursor) ||
+            /[A-Za-z0-9_$]/.test(source[cursor + 'trigger'.length] || '')) continue;
+        cursor += 'trigger'.length;
+        while (/\s/.test(source[cursor] || '')) cursor += 1;
+        if (source[cursor] === ',') return true;
+    }
+    return false;
+}
+
+function resolveLiveWriteExpectation(profile) {
+    const profileRoot = path.resolve(
+        __dirname,
+        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/node-red`
+    );
+    const flowFile = path.resolve(profileRoot, '..', 'flows.json');
+    const profileFlows = JSON.parse(fs.readFileSync(flowFile, 'utf8'));
+    const wrapper = profileFlows.find((node) => node.id === 'write-strega-expectation');
+    const wrapperSource = wrapper && typeof wrapper.func === 'string' ? wrapper.func : '';
+    const delegateRe = /const\s+live\s*=\s*osiLib\.require\('osi-valve-control'\);[\s\S]*return\s+live\.value\.liveWriteExpectation\(\{msg,node,env,flow,osiDb,crypto,osiLib\}\);/;
+    if (!wrapper || !delegateRe.test(stripJavaScriptComments(wrapperSource))) {
+        return { error: 'write-strega-expectation no longer delegates to liveWriteExpectation' };
+    }
+
+    const helperPath = path.join(profileRoot, 'osi-valve-control', 'live-authorize.js');
+    const packagePath = path.join(profileRoot, 'osi-valve-control', 'index.js');
+    let packageExport;
+    let helperExport;
+    try {
+        packageExport = require(packagePath).liveWriteExpectation;
+        helperExport = require(helperPath).liveWriteExpectation;
+    } catch (error) {
+        return { error: `cannot load ${packagePath}: ${error.message}` };
+    }
+    if (typeof packageExport !== 'function' || typeof helperExport !== 'function' || packageExport !== helperExport) {
+        return { error: `${packagePath} liveWriteExpectation is not the live-authorize.js export` };
+    }
+    const writeSource = stripJavaScriptComments(Function.prototype.toString.call(packageExport));
+    const dispatchSource = extractDispatchObject(writeSource);
+    if (!dispatchSource) return { error: `${packagePath} has no bounded _stregaDispatchCommand handoff` };
+    return { wrapper, writeSource, dispatchSource };
+}
 
 const journalBootstrapResult = spawnSync(
     process.execPath,
@@ -319,8 +440,7 @@ if (!commandUpdate || !commandApply || !commandPostconditionRoute || !commandPos
     failures.push('command ACK postconditions: required apply/verify/ACK nodes are missing');
 } else if (JSON.stringify(commandUpdate.wires || []) !== JSON.stringify([['78d3d38be30a8741']]) ||
     JSON.stringify(commandApply.wires || []) !== JSON.stringify([['command-postcondition-route']]) ||
-    // AUTH-09 PR A: the third output takes UNCLAIM_DEVICE through the valve cleanup to the same ACK.
-    JSON.stringify(commandPostconditionRoute.wires || []) !== JSON.stringify([['command-postcondition-build'], ['e2e139678c3ddded'], ['unclaim-cloud-valve-cleanup-fn']]) ||
+    JSON.stringify(commandPostconditionRoute.wires || []) !== JSON.stringify([['command-postcondition-build'], ['e2e139678c3ddded']]) ||
     JSON.stringify(commandPostcondition.wires || []) !== JSON.stringify([['command-postcondition-verify-db']]) ||
     JSON.stringify(commandVerify.wires || []) !== JSON.stringify([['command-postcondition-ack']]) ||
     JSON.stringify(commandVerifiedAck.wires || []) !== JSON.stringify([['command-ack-queue-rest']])) {
@@ -630,12 +750,24 @@ for (const nodeId of ['sync-outbox-build', 'sync-force-build']) {
         failures.push(`sync outbox: ${nodeId} must fail closed before event delivery`);
     }
 }
-const stregaExpectation = byId['write-strega-expectation'];
-if (!stregaExpectation ||
-    !/no such table:\\s\*zone_irrigation_calibration\\b\/i/.test(stregaExpectation.func || '') ||
-    !/node\.warn\('STREGA calibration unavailable/.test(stregaExpectation.func || '') ||
-    !/throw error;/.test(stregaExpectation.func || '')) {
-    failures.push('STREGA expectation: only a missing zone_irrigation_calibration table may be downgraded');
+const liveWriteExpectationByProfile = new Map(
+    ['bcm2712', 'bcm2709'].map((profile) => [profile, resolveLiveWriteExpectation(profile)])
+);
+for (const profile of ['bcm2712', 'bcm2709']) {
+    const resolved = liveWriteExpectationByProfile.get(profile);
+    const calibrationLoader = resolved && resolved.writeSource
+        ? resolved.writeSource.match(/async function loadZoneIrrigationCalibration\(db, zoneId\) \{[\s\S]*?\n    \}/)
+        : null;
+    if (!resolved || resolved.error || !calibrationLoader ||
+        !/if\s*\(\/no such table:\\s\*zone_irrigation_calibration\\b\/i\.test\(detail\)\)/.test(calibrationLoader && calibrationLoader[0] || '') ||
+        !/node\.warn\('STREGA calibration unavailable/.test(calibrationLoader && calibrationLoader[0] || '') ||
+        !/throw error;/.test(calibrationLoader && calibrationLoader[0] || '')) {
+        failures.push(
+            `STREGA expectation ${profile}: liveWriteExpectation must downgrade only a missing zone_irrigation_calibration table`
+        );
+    } else {
+        console.log(`OK  STREGA expectation ${profile}: liveWriteExpectation preserves only the missing calibration-table downgrade`);
+    }
 }
 
 function makeSupportHttpClient(responseBody, capturedRequests) {
@@ -1047,7 +1179,7 @@ assertWires('write-strega-expectation',
 assertWires('934bf2bc19a8ce22',
     [
         ['745b6db588017e56'],
-        ['4f4a765f36cee6f3'],
+        ['conditional-lifecycle-command-adapter'],
         ['9d5e3035c3d069c4', 'command-ack-queue-rest'],
         ['cs-reg-cloud-fn'],
         ['lsn50-mode-link-out-sync'],
@@ -1055,6 +1187,13 @@ assertWires('934bf2bc19a8ce22',
         ['d4b7fd0b0422426f'],
     ],
     'C5b: Route Command output 0 reaches write-strega-expectation only via link-out (no double-invoke)');
+const lifecycleCommandAdapter = byId['conditional-lifecycle-command-adapter'];
+if (!lifecycleCommandAdapter || !/routes\.conditionalLifecycleCommand/.test(lifecycleCommandAdapter.func || '') ||
+    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest']])) {
+    failures.push('lifecycle command adapter must own schedule/device mutations and durable ACKs before the legacy SQL builder');
+} else {
+    console.log('OK  lifecycle command adapter delegates canonical mutation and durable ACK atomically');
+}
 
 // C5c: behavioral single-invocation guard. Counts how many times a single
 // message dispatched from Route Command output 0 actually arrives at
@@ -1103,25 +1242,21 @@ if (cloudStregaDispatchCount !== 1) {
     console.log('OK  C5c: Route Command output 0 reaches write-strega-expectation exactly once per cloud-dispatched command (no double-invoke)');
 }
 
-// H2: reconciliation monitor must handle OBSERVED_RUNNING stale timeout
+// H2: the shipped reconciliation node is a thin wrapper around the durable worker.
 const reconcNode = byId['strega-reconciliation-monitor'];
 if (!reconcNode) {
     failures.push('H2: strega-reconciliation-monitor not found');
-} else if (!reconcNode.func.includes('STALE_OPEN_OBSERVED')) {
-    failures.push('H2: strega-reconciliation-monitor missing STALE_OPEN_OBSERVED transition');
+} else if (!reconcNode.func.includes('runReconciliationTick')) {
+    failures.push('H2: strega-reconciliation-monitor must delegate to runReconciliationTick');
+} else if (!reconcNode.func.includes("new osiDb.Database('/data/db/farming.db')")) {
+    failures.push('H2: strega-reconciliation-monitor must open the local database');
 } else {
-    console.log('OK  H2: STALE_OPEN_OBSERVED present in reconciliation monitor');
+    console.log('OK  H2: reconciliation monitor delegates to the durable observation worker');
 }
 
-// H2b: reconciliation monitor must not treat a missing uplink as an observation.
-// The uplink query LEFT JOINs devices to device_data, so a device that has
-// never uplinked still returns one row with dd.recorded_at = NULL and
-// d.current_state = the stale devices.current_state default. State
-// derivation must be gated on a real uplink row (uplink.recorded_at truthy),
-// not just on `uplink` being non-null, or a never-uplinked valve gets
-// falsely marked OBSERVED_COMPLETE/OBSERVED_RUNNING with a null observed_*_at.
-const RECONCILIATION_UPLINK_GUARD_RE =
-    /if\s*\(\s*uplink\s*&&\s*uplink\.recorded_at\s*\)\s*\{\s*\n\s*const stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\)/;
+// H2b/H2c/H2e: the worker owns explicit-observation freshness and immutable
+// command deadlines. The flow node must not retain the removed current_state or
+// raw device_data inference joins.
 for (const profile of ['bcm2712', 'bcm2709']) {
     const profilePath = path.resolve(
         __dirname,
@@ -1130,51 +1265,11 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
     const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
     if (!profileReconcNode) {
-        failures.push(`H2b ${profile}: strega-reconciliation-monitor not found`);
-    } else if (!RECONCILIATION_UPLINK_GUARD_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2b ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
-            `'uplink && uplink.recorded_at' (a missing uplink must not be treated as an observation)`
-        );
+        failures.push(`H2b/c/e ${profile}: strega-reconciliation-monitor not found`);
+    } else if (!profileReconcNode.func.includes('runReconciliationTick') || profileReconcNode.func.includes('d.current_state') || profileReconcNode.func.includes('LEFT JOIN device_data dd')) {
+        failures.push(`H2b/c/e ${profile}: monitor must use the durable worker without generic state/device_data inference`);
     } else {
-        console.log(`OK  H2b ${profile}: reconciliation monitor gates state derivation on uplink.recorded_at`);
-    }
-}
-
-// H2c: reconciliation monitor must also require the paired devices.current_state
-// to be FRESH (state_updated_at >= commanded_at) before treating it as an
-// observation. devices.current_state is a live column only rewritten by
-// strega-sql-fn when a state-bearing uplink CHANGES it; the FIRST uplink
-// after commanded_at for a real valve (Class A, still reporting the OLD
-// state) pairs a fresh dd.recorded_at with a stale current_state, which
-// without this gate falsely completes the expectation instantly. Comparison
-// must be epoch-millis (Date.parse + Number.isFinite), never a string/lexical
-// compare — devices.updated_at and commanded_at may differ in ISO-'T' vs
-// space-form and a lexical compare is a known repo bug class.
-const RECONCILIATION_FRESHNESS_GATE_RE =
-    /const\s+stateUpdatedMs\s*=\s*Date\.parse\(uplink\.state_updated_at\);\s*\n\s*const\s+commandedMs\s*=\s*Date\.parse\(exp\.commanded_at\);\s*\n\s*const\s+stateIsFresh\s*=\s*Number\.isFinite\(stateUpdatedMs\)\s*&&\s*Number\.isFinite\(commandedMs\)\s*&&\s*stateUpdatedMs\s*>=\s*commandedMs;/;
-const RECONCILIATION_STATE_UPDATED_COLUMN_RE = /d\.updated_at\s+AS\s+state_updated_at/;
-for (const profile of ['bcm2712', 'bcm2709']) {
-    const profilePath = path.resolve(
-        __dirname,
-        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
-    );
-    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
-    if (!profileReconcNode) {
-        failures.push(`H2c ${profile}: strega-reconciliation-monitor not found`);
-    } else if (!RECONCILIATION_STATE_UPDATED_COLUMN_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2c ${profile}: strega-reconciliation-monitor query must select d.updated_at AS state_updated_at`
-        );
-    } else if (!RECONCILIATION_FRESHNESS_GATE_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2c ${profile}: strega-reconciliation-monitor must gate state derivation on ` +
-            `state_updated_at (devices.updated_at) being >= commanded_at via epoch-millis comparison ` +
-            `(a stale current_state paired with a fresh uplink row must not be treated as an observation)`
-        );
-    } else {
-        console.log(`OK  H2c ${profile}: reconciliation monitor gates state derivation on state_updated_at >= commanded_at`);
+        console.log(`OK  H2b/c/e ${profile}: monitor delegates freshness and timeout classification to the worker`);
     }
 }
 
@@ -1211,35 +1306,6 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
-// H2e: the reconciliation grace must be widened to 1800s (30 min). STREGA
-// valves are LoRaWAN Class A with a default 600s uplink interval: the OPEN
-// downlink itself only reaches the valve at the next uplink, and the
-// state-bearing CLOSE confirmation arrives at the uplink after the run ends,
-// so a genuine run can confirm 600-1500s after expected_close_at. The old
-// 300s grace turned real runs into the terminal STALE_NO_OBSERVATION, which
-// (per H2d above) is excluded from litres sums - i.e. real irrigation water
-// silently vanished from the zone water balance. Both STALE transitions
-// share the one constant, so a single change covers both.
-const RECONCILIATION_GRACE_VALUE_RE = /const\s+RECONCILIATION_GRACE_SEC\s*=\s*1800\s*;/;
-for (const profile of ['bcm2712', 'bcm2709']) {
-    const profilePath = path.resolve(
-        __dirname,
-        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
-    );
-    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-    const profileReconcNode = profileFlows.find((node) => node.id === 'strega-reconciliation-monitor');
-    if (!profileReconcNode) {
-        failures.push(`H2e ${profile}: strega-reconciliation-monitor not found`);
-    } else if (!RECONCILIATION_GRACE_VALUE_RE.test(profileReconcNode.func || '')) {
-        failures.push(
-            `H2e ${profile}: strega-reconciliation-monitor's RECONCILIATION_GRACE_SEC must be 1800 ` +
-            `(a full Class-A uplink cycle plus margin on both the OPEN-delivery and CLOSE-confirmation legs)`
-        );
-    } else {
-        console.log(`OK  H2e ${profile}: RECONCILIATION_GRACE_SEC = 1800`);
-    }
-}
-
 // H2f: the Recent-irrigations display grace (get-actuations-response) must match the
 // reconciler's RECONCILIATION_GRACE_SEC (1800s). The reconciler was widened to 1800s (H2e)
 // precisely because a Class-A STREGA valve's OPEN/CLOSE confirmation each ride the next uplink
@@ -1266,31 +1332,24 @@ for (const profile of ['bcm2712', 'bcm2709']) {
     }
 }
 
-// H2g: write-strega-expectation must persist the trigger the command payload carries (the
-// one-time-open builder in workers.js sets data.trigger='one_time'; a cloud command may set
-// raw.trigger) so the FW-T4 TriggerChip can ever render for an operator/one-time open.
-const WRITE_EXPECTATION_TRIGGER_COLUMN_RE = /created_at,\s*trigger\)\s*'\s*\+\s*\n\s*'VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?, \?\)'/;
+// H2g: the live authorization helper must retain the trigger carried by the
+// one-time-open builder (`data.trigger='one_time'`) or a cloud command
+// (`raw.trigger`) while handing the command to the module-owned writer.
 const WRITE_EXPECTATION_TRIGGER_VALUE_RE = /const\s+trigger\s*=\s*raw\.trigger\s*\|\|\s*data\.trigger\s*\|\|\s*null\s*;/;
 for (const profile of ['bcm2712', 'bcm2709']) {
-    const profilePath = path.resolve(
-        __dirname,
-        `../conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`
-    );
-    const profileFlows = JSON.parse(fs.readFileSync(profilePath, 'utf8'));
-    const profileWriteExpNode = profileFlows.find((node) => node.id === 'write-strega-expectation');
-    if (!profileWriteExpNode) {
-        failures.push(`H2g ${profile}: write-strega-expectation not found`);
-    } else if (!WRITE_EXPECTATION_TRIGGER_VALUE_RE.test(profileWriteExpNode.func || '')) {
+    const resolved = liveWriteExpectationByProfile.get(profile);
+    if (!resolved || resolved.error) {
+        failures.push(`H2g ${profile}: ${resolved && resolved.error ? resolved.error : 'write-strega-expectation not found'}`);
+    } else if (!WRITE_EXPECTATION_TRIGGER_VALUE_RE.test(resolved.writeSource || '')) {
         failures.push(
-            `H2g ${profile}: write-strega-expectation must derive trigger from raw.trigger || data.trigger || null`
+            `H2g ${profile}: liveWriteExpectation must derive trigger from raw.trigger || data.trigger || null`
         );
-    } else if (!WRITE_EXPECTATION_TRIGGER_COLUMN_RE.test(profileWriteExpNode.func || '')) {
+    } else if (!hasTopLevelTriggerForward(resolved.dispatchSource || '')) {
         failures.push(
-            `H2g ${profile}: write-strega-expectation's INSERT must include the trigger column ` +
-            `(command payload trigger, e.g. 'one_time', is otherwise silently dropped)`
+            `H2g ${profile}: _stregaDispatchCommand must forward the derived trigger to the module-owned writer`
         );
     } else {
-        console.log(`OK  H2g ${profile}: write-strega-expectation INSERT includes trigger, sourced from the payload`);
+        console.log(`OK  H2g ${profile}: liveWriteExpectation derives and forwards trigger from the payload`);
     }
 }
 
@@ -1606,12 +1665,16 @@ function assertPromotionOnlyValveSettingsUpsert(node, label) {
         return;
     }
     const func = node.func || '';
-    if (!/valve_settings/.test(func)) {
-        failures.push(label + ' must seed valve_settings.strega_generation after successful provisioning');
-    } else if (!PROMOTION_ONLY_VALVE_SETTINGS_RE.test(func)) {
-        failures.push(label + " valve_settings upsert must be promotion-only (ON CONFLICT ... WHERE ... excluded.strega_generation = 'GEN2'), not a plain upsert -- a plain upsert would silently demote an already-promoted GEN2 valve back to GEN1 on any re-registration");
+    if (!/applyStregaClaim/.test(func) || !/VC\s*&&\s*VC\.claim/.test(func)) {
+        failures.push(label + ' must delegate the STREGA owner write to osi-valve-control.claim.applyStregaClaim');
+    } else if (!PROMOTION_ONLY_VALVE_SETTINGS_RE.test(stregaClaimSource)) {
+        failures.push('osi-valve-control/claim.js must keep the promotion-only valve_settings upsert (GEN1->GEN2 only)');
+    } else if (!/stregaGeneration/.test(func)) {
+        // The node owns provisioning and claim-fence assembly; the module owns the SQL
+        // transaction. Require the adapter to pass the resolved generation into it.
+        failures.push(label + ' must pass the resolved stregaGeneration to the claim owner');
     } else {
-        console.log('OK  ' + label + ' seeds valve_settings via a promotion-only (GEN1->GEN2 only) upsert');
+        console.log('OK  ' + label + ' delegates its generation to the promotion-only claim owner');
     }
 }
 
@@ -1729,13 +1792,8 @@ if (!valveUnclaimFn) {
     failures.push('delete-device-valve-cleanup-fn is missing: a valve unclaim would leave its weekly plan running inside the valve (F104)');
 } else {
     const cleanupFunc = valveUnclaimFn.func || '';
-    // AUTH-09 PR A: runUnclaimCleanup wraps clearValveOnUnclaim and returns the outcome both
-    // unclaim origins report.
-    if (!/runUnclaimCleanup\s*\(/.test(cleanupFunc)) {
-        failures.push('delete-device-valve-cleanup-fn must delegate to osi-valve-control runUnclaimCleanup() rather than restating what clears a valve');
-    }
-    if (!/valve_cleanup/.test(cleanupFunc)) {
-        failures.push('delete-device-valve-cleanup-fn must report the cleanup outcome as valve_cleanup on the response body (AUTH-09 PR A)');
+    if (!/clearValveOnUnclaim\s*\(/.test(cleanupFunc)) {
+        failures.push('delete-device-valve-cleanup-fn must delegate to osi-valve-control clearValveOnUnclaim() rather than restating what clears a valve');
     }
     if (/'CLOSE'|"CLOSE"/.test(cleanupFunc)) {
         failures.push('delete-device-valve-cleanup-fn must never send a bare CLOSE to a STREGA valve');
@@ -1745,8 +1803,9 @@ if (!valveUnclaimFn) {
         failures.push('delete-device-response must route its formatted 200 through delete-device-valve-cleanup-fn, not straight to device-response');
     }
     const scoped = byId['scoped-device-delete-router'];
-    if (!scoped || !Array.isArray(scoped.wires) || JSON.stringify(scoped.wires[1]) !== JSON.stringify(['delete-device-valve-cleanup-fn'])) {
-        failures.push('scoped-device-delete-router\'s response output must route through delete-device-valve-cleanup-fn (the scoped route unclaims devices on its own, without the legacy chain)');
+    if (!scoped || !Array.isArray(scoped.wires) || JSON.stringify(scoped.wires[1]) !== JSON.stringify(['device-response']) ||
+        !/osiLib\.require\('osi-irrigation-policy'\)/.test(scoped.func || '') || !/routes\.scopedDeviceDelete/.test(scoped.func || '')) {
+        failures.push('scoped-device-delete-router must delegate unclaim to the lifecycle service and answer directly after its atomic mutation');
     }
     const outs = Array.isArray(valveUnclaimFn.wires) ? valveUnclaimFn.wires : [];
     if (JSON.stringify(outs[0]) !== JSON.stringify(['device-response'])) {
@@ -1756,32 +1815,7 @@ if (!valveUnclaimFn) {
         failures.push('delete-device-valve-cleanup-fn must emit its clearing downlinks on a second output wired to an mqtt out node');
     }
     if (!failures.some((f) => f.includes('delete-device-valve-cleanup-fn') || f.includes('delete-device-response must route') || f.includes('scoped-device-delete-router'))) {
-        console.log('OK  both device-delete routes clear an unclaimed valve\'s on-valve plan (F104)');
-    }
-}
-
-// AUTH-09 PR A (external review B3): a cloud UNCLAIM_DEVICE used to null the owner and ACK
-// SUCCESS without ever reaching clearValveOnUnclaim, so the valve kept its plan while the
-// cloud recorded success. The cloud path now runs the same cleanup before its ACK.
-const cloudUnclaimFn = byId['unclaim-cloud-valve-cleanup-fn'];
-if (!cloudUnclaimFn) {
-    failures.push('unclaim-cloud-valve-cleanup-fn is missing: a cloud UNCLAIM_DEVICE would leave the valve plan running and ACK success (AUTH-09 / B3)');
-} else {
-    const cloudFunc = cloudUnclaimFn.func || '';
-    if (!/runUnclaimCleanup\s*\(/.test(cloudFunc)) {
-        failures.push('unclaim-cloud-valve-cleanup-fn must delegate to osi-valve-control runUnclaimCleanup()');
-    }
-    if (/'CLOSE'|"CLOSE"/.test(cloudFunc)) {
-        failures.push('unclaim-cloud-valve-cleanup-fn must never send a bare CLOSE to a STREGA valve (D04)');
-    }
-    if (!/valveCleanup/.test(cloudFunc)) {
-        failures.push('unclaim-cloud-valve-cleanup-fn must put the cleanup outcome on the ACK as valveCleanup');
-    }
-    if (JSON.stringify(cloudUnclaimFn.wires) !== JSON.stringify([['e2e139678c3ddded'], ['9fae49d9ba22b793']])) {
-        failures.push('unclaim-cloud-valve-cleanup-fn must forward every ACK to Build Schedule ACK and its clearing downlinks to the ChirpStack mqtt out');
-    }
-    if (!failures.some((f) => f.includes('unclaim-cloud-valve-cleanup-fn'))) {
-        console.log('OK  a cloud UNCLAIM_DEVICE runs the valve plan cleanup before its ACK (AUTH-09 PR A)');
+        console.log('OK  legacy device-delete cleanup remains available and scoped lifecycle delete delegates atomically');
     }
 }
 

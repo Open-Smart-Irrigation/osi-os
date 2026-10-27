@@ -334,7 +334,9 @@ const expectedNodeLibs = {
   // installation_identity singleton before advertising it in the bootstrap
   // payload's gatewayIdentity.installationUuid/recoveryState fields.
   'sync-bootstrap-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
-  'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
+  // Task 7b2 conditional replication is optional at runtime: the builder
+  // loads the policy helper and omits conditional resources when it is absent.
+  'sync-outbox-build': [{ var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiLib', module: 'osi-lib' }],
   'sync-pending-build': [{ var: 'osiDb', module: 'osi-db-helper' }],
   'sync-force-build': [{ var: 'crypto', module: 'crypto' }, { var: 'osiDb', module: 'osi-db-helper' }, { var: 'osiCloudHttp', module: 'osi-cloud-http' }, { var: 'osiLib', module: 'osi-lib' }],
   'command-ack-build-batch': [{ var: 'osiDb', module: 'osi-db-helper' }],
@@ -1114,9 +1116,9 @@ if (silentCatchBaseline) {
   // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
   // 81: zone-day projection -- lsn50-zone-agg-fn's silent close() catch is replaced by a
   // close in finally: 82 -> 81.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 81 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 81,
-    'silent-catch baseline records 81 for both maintained profiles',
-    'silent-catch baseline must be 81 for both maintained profiles');
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 80 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 80,
+    'silent-catch baseline records 80 for both maintained profiles',
+    'silent-catch baseline must be 80 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1163,7 +1165,9 @@ if (sizeAllowances) {
     // baked into origin/main, 47031 chars). The zoneEnvironments snapshot SELECT names the
     // five rain quality columns and a map parses rain_quality_reasons to a JSON array.
     // Re-measured fresh: origin/main 47031 -> HEAD 48120 = +1089.
-    'sync-bootstrap-build': 1089,
+    // +99: sync without the conditional irrigation helper (owner decision 2026-10-22).
+    // R13 housekeeping: the conditional capability is dropped by name: +6438.
+    'sync-bootstrap-build': 6438,
     // 2026-09-17 overnight stabilization T13l (F96): re-pinned from 1885 to +1426 for the
     // same capFreeTextFields() addition (this node's copy of sanitizeSyncRow/
     // normalizeOutboxPayload). The prior 1885 (F81's normalizeIsoTimestamp/
@@ -1175,7 +1179,8 @@ if (sizeAllowances) {
     // and claimed in one synchronous turn so the 30 s inject and the event-driven gate
     // cannot both POST the same rows, released again on every path that decides not to
     // POST. Re-measured fresh: origin/main 21367 -> HEAD 23362 = +1995.
-    'sync-outbox-build': 1995,
+    // +26: sync without the conditional irrigation helper (owner decision 2026-10-22).
+    'sync-outbox-build': 3564,
     'sync-pending-build': 1344,
     // W58 Stop 16 Force Sync recovery response classification and summary counts. The
     // maintained profiles remain byte-identical; re-measured fresh against origin/main:
@@ -1191,7 +1196,9 @@ if (sizeAllowances) {
     // Zone-day rain quality sync (migration 0073): re-pinned from 819 to +1089 (the 819 is
     // baked into origin/main, 70063 chars), the same snapshot change as sync-bootstrap-build.
     // Re-measured fresh: origin/main 70063 -> HEAD 71152 = +1089.
-    'sync-force-build': 1089,
+    // +99: sync without the conditional irrigation helper (owner decision 2026-10-22).
+    // R13 housekeeping: the conditional capability is dropped by name: +11202.
+    'sync-force-build': 11202,
     // Re-pinned from 975 to +2235 (the 975 is baked into origin/main, 4071 chars): the
     // batch now groups queued rows by commandId and withholds rows that disagree. The
     // restart-sentinel guard above is unchanged. Re-measured fresh:
@@ -1209,7 +1216,10 @@ if (sizeAllowances) {
     // WATERMARK cloud parity: re-pinned from 68 to +81 (the 68 is baked into origin/main,
     // 6777 chars); syncCapabilities gains the three WATERMARK tokens. Re-measured fresh:
     // origin/main 6777 -> HEAD 6858 = +81.
-    'al-link-build-req': 81,
+    // Conditional irrigation (pinned 55b3d4b7b, 6858 -> 8016 = +1158), then CI sweep F4: linking
+    // without the conditional helper takes the legacy route: 6858 -> 8343 = +1485.
+    // R13 housekeeping: the conditional capability is dropped by name: +1576.
+    'al-link-build-req': 1576,
     'al-link-restart-node-red': 1761,
     'al-unlink-restart-node-red': 1773,
   };

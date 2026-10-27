@@ -56,4 +56,11 @@ describe('AdvancedScheduleDrawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'About growth stages' }));
     expect(screen.getByText(/FAO-56 growth stages set the crop coefficient Kc/)).toBeInTheDocument();
   });
+
+  it('keeps policy creation reachable when no legacy schedule exists', () => {
+    const onEditPolicy = vi.fn();
+    render(<AdvancedScheduleDrawer isOpen zone={zone} onClose={vi.fn()} onEditPolicy={onEditPolicy} />);
+    fireEvent.click(screen.getByRole('button', { name: /configure conditional irrigation/i }));
+    expect(onEditPolicy).toHaveBeenCalledTimes(1);
+  });
 });

@@ -175,7 +175,12 @@ function assertCurrentContract(canonical, mirror) {
   }
   assertDeliveryMapping(requiredNode(byId, 'sync-outbox-build').func, 'sync-outbox-build');
   assertDeliveryMapping(requiredNode(byId, 'sync-force-build').func, 'sync-force-build');
-  return assertCalibrationFallback(requiredNode(byId, 'write-strega-expectation').func);
+  // The node is a thin wrapper now: it delegates to osi-valve-control's liveWriteExpectation,
+  // whose source (live-authorize.js, same profile) carries the guarded calibration helper.
+  const wrapper = requiredNode(byId, 'write-strega-expectation').func;
+  assert.match(wrapper, /live\.value\.liveWriteExpectation\(/, 'write-strega-expectation delegates to liveWriteExpectation');
+  const moduleSource = fs.readFileSync(path.join(__dirname, '..', 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-authorize.js'), 'utf8');
+  return assertCalibrationFallback(moduleSource);
 }
 
 function assertMutationIsRejected(canonical) {

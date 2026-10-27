@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { ValveScheduleOverview } from '../ValveScheduleOverview';
@@ -13,6 +13,7 @@ const { translateForTest } = vi.hoisted(() => {
     noSchedule: 'No schedule yet',
     unassignedZone: 'Unassigned',
     'scheduleDialog.loadFailed': 'Could not load schedules',
+    'irrigationPolicy.openEditor': 'Edit conditional policy',
     'weekdays.0': 'Sun', 'weekdays.1': 'Mon', 'weekdays.3': 'Wed',
     'weekdays.4': 'Thu', 'weekdays.6': 'Sat',
   };
@@ -86,6 +87,21 @@ describe('ValveScheduleOverview', () => {
     };
     render(<ValveScheduleOverview valves={[valve('AAA', 'North valve')]} onOpenValve={vi.fn()} />);
     expect(screen.getByText(/off/)).toBeInTheDocument();
+  });
+
+  it('routes conditional rows to the policy editor without opening ordinary CRUD', async () => {
+    const onOpenPolicyEditor = vi.fn();
+    const onOpenValve = vi.fn();
+    const conditional = sched('conditional-1', 0x7f, '06:00', 30, {
+      conditionPolicyUuid: 'policy-1',
+      execution: 'conditional',
+    });
+    (globalThis as any).__swr = { '/api/valves/AAA/schedules': resp([conditional]) };
+    render(<ValveScheduleOverview valves={[valve('AAA', 'North valve')]} onOpenValve={onOpenValve} onOpenPolicyEditor={onOpenPolicyEditor} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit conditional policy' }));
+    expect(onOpenPolicyEditor).toHaveBeenCalledWith(expect.objectContaining({ deviceEui: 'AAA' }), expect.objectContaining({ scheduleUuid: 'conditional-1' }));
+    expect(onOpenValve).not.toHaveBeenCalled();
   });
 
   it('surfaces a load failure instead of implying the valve has no schedule', () => {

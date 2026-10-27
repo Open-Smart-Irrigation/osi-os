@@ -1392,7 +1392,9 @@ function recipeTransport(modules, scenario) {
         return unavailable(callback);
       }
       const response = new modules.pb.EnqueueDeviceQueueItemResponse();
-      const id = scenario === 'missing_id' ? '' : `recipe-${frames.length}`;
+      // ChirpStack v4 queue item ids are UUIDs; #515's helper refuses any other id as
+      // enqueue_unknown (osi-chirpstack-helper index.test.js 'not-a-uuid').
+      const id = scenario === 'missing_id' ? '' : `00000000-0000-4000-8000-${String(frames.length).padStart(12, '0')}`;
       response.setId(id);
       if (id) accepted.push(id);
       callback(null, response);

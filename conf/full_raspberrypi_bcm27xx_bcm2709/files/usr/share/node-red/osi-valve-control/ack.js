@@ -3,7 +3,11 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const { WEEKDAY_FPORT_BASE, GEN2_SCHEDULER_FPORT, STATUS_FPORT, CLOCK_FPORT, CLOCK_REQ_FPORT } = require('./plan');
 
-function statusInt(v) { const n = parseInt(String(v == null ? '' : v), 16); return Number.isFinite(n) ? n : null; }
+function statusInt(v) {
+  if (typeof v !== 'string' || !/^[0-9A-Fa-f]{2}$/.test(v)) return null;
+  const n = Number.parseInt(v, 16);
+  return Number.isInteger(n) ? n : null;
+}
 
 // decoded = the object handed back by the STREGA codec (data.object from ChirpStack, or the
 // decodeGen1Fallback() result below). Field names below are verified against the vendor
@@ -56,7 +60,7 @@ function interpretUplink(decoded, fPort, rawBytes) {
   if (Number.isInteger(d.Ack_Port) && d.Ack_Port > 0) {
     generationHint = 'GEN2';
     const g2port = d.Ack_Port;
-    const status = Number.isFinite(Number(d.Ack_Value)) ? Number(d.Ack_Value) : null;
+    const status = Number.isInteger(d.Ack_Value) && d.Ack_Value >= 0 && d.Ack_Value <= 255 ? d.Ack_Value : null;
     if (g2port === GEN2_SCHEDULER_FPORT) acks.push({ purpose: 'DAYMASK_PLAN', fport: g2port, weekday: null, status });
     else if (g2port === STATUS_FPORT) acks.push({ purpose: 'SCHEDULER_STATUS', fport: g2port, weekday: null, status });
     else if (g2port === CLOCK_FPORT || g2port === CLOCK_REQ_FPORT) acks.push({ purpose: 'CLOCK_SYNC', fport: g2port, weekday: null, status });
@@ -83,7 +87,6 @@ function interpretUplink(decoded, fPort, rawBytes) {
   return { acks, generationHint };
 }
 
-function isAsciiDigit(byte) { return byte >= 0x30 && byte <= 0x39; }
 function isAsciiHexChar(byte) {
   return (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x46) || (byte >= 0x61 && byte <= 0x66);
 }
@@ -113,7 +116,7 @@ function parseAsciiHexPair(hiByte, loByte) {
 function interpretRawGen2Ack(rawBytes) {
   if (!rawBytes || rawBytes.length <= 5) return null;
   if (rawBytes[5] !== 0x06) return null;
-  if (!isAsciiDigit(rawBytes[0]) || !isAsciiDigit(rawBytes[1]) || !isAsciiDigit(rawBytes[2])) return null;
+  if (!isAsciiHexChar(rawBytes[0]) || !isAsciiHexChar(rawBytes[1]) || !isAsciiHexChar(rawBytes[2])) return null;
 
   const acks = [];
   if (rawBytes.length >= 8) {

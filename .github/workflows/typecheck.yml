@@ -26,9 +26,20 @@ jobs:
           node-version: '22'
       - run: node --version && npm --version
       - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('web/react-gui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - name: Install Chromium for conditional irrigation browser tests
+        run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm run test:unit
       - run: npm run demo:test
+      - name: Conditional irrigation browser tests
+        run: npm run test:browser:conditional
   # Upgrade lane: does the same lockfile still install on the next Node LTS
   # (npm 11)? Informational: with job-level continue-on-error a failure
   # shows this job red in the checks list while the workflow run stays

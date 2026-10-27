@@ -62,8 +62,8 @@ Built identically by `sync-bootstrap-build`, `al-link-build-req` and
 `force_edge_sync_v1`, `installation_recovery_v1`, `installation_locations_v1`,
 `entity_name_commands_v1`, `zone_config_weather_source_v1`,
 `zone_config_stage_started_on_v1`, `watermark_v1`,
-`chameleon_config_commands_v1`, `device_soil_depth_commands_v1`, and
-`field_journal_v1` when the journal is enabled. `watermark_v1` covers the
+`chameleon_config_commands_v1`, `device_soil_depth_commands_v1`,
+`conditional_irrigation_v1`, and `field_journal_v1` when the journal is enabled. `watermark_v1` covers the
 calibration resource, its set/delete commands, snapshots, and events. The other
 two tokens independently gate their named exact-base device commands. The cloud
 reads the list as `gatewayIdentity.syncCapabilities()`. It puts `weatherSource`

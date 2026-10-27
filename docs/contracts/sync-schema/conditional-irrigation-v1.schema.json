@@ -1,0 +1,1950 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://opensmartirrigation.org/contracts/conditional-irrigation-v1.schema.json",
+  "title": "Conditional irrigation v1 typed contract",
+  "definitions": {
+    "CanonicalUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "Eui64": {
+      "type": "string",
+      "pattern": "^[A-F0-9]{16}$"
+    },
+    "Utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_eui",
+        "channel"
+      ],
+      "properties": {
+        "device_eui": {
+          "$ref": "#/definitions/Eui64"
+        },
+        "channel": {
+          "type": "string"
+        }
+      }
+    },
+    "Condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "threshold_kpa",
+            "sources"
+          ],
+          "properties": {
+            "kind": {
+              "const": "SWT"
+            },
+            "threshold_kpa": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 300
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/definitions/Source"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "threshold_percent",
+            "sources"
+          ],
+          "properties": {
+            "kind": {
+              "const": "VWC"
+            },
+            "threshold_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "sources": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/definitions/Source"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "minimum_stress",
+            "response_mode"
+          ],
+          "properties": {
+            "kind": {
+              "const": "DENDRO"
+            },
+            "minimum_stress": {
+              "type": "string",
+              "enum": [
+                "mild",
+                "moderate",
+                "significant",
+                "severe"
+              ]
+            },
+            "response_mode": {
+              "type": "string",
+              "enum": [
+                "fixed",
+                "proportional"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "DeliverySettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[A-F0-9]{16}$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "delivery_interval_minutes"
+          ],
+          "properties": {
+            "delivery_interval_minutes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
+          }
+        }
+      },
+      "propertyNames": {
+        "pattern": "^[A-F0-9]{16}$"
+      }
+    },
+    "Schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schedule_uuid",
+        "device_eui",
+        "execution",
+        "kind",
+        "duration_minutes",
+        "enabled",
+        "detach"
+      ],
+      "properties": {
+        "schedule_uuid": {
+          "$ref": "#/definitions/CanonicalUuid"
+        },
+        "expected_sync_version": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "device_eui": {
+          "$ref": "#/definitions/Eui64"
+        },
+        "kind": {
+          "const": "WEEKLY"
+        },
+        "weekdays_mask": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 127
+        },
+        "start_time": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "conditional",
+            "always"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "detach": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ScheduleCreate": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Schedule"
+        },
+        {
+          "type": "object",
+          "required": [
+            "expected_sync_version"
+          ],
+          "properties": {
+            "expected_sync_version": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "ScheduleUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schedule_uuid",
+        "expected_sync_version"
+      ],
+      "properties": {
+        "schedule_uuid": {
+          "$ref": "#/definitions/CanonicalUuid"
+        },
+        "expected_sync_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "device_eui": {
+          "$ref": "#/definitions/Eui64"
+        },
+        "kind": {
+          "const": "WEEKLY"
+        },
+        "weekdays_mask": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 127
+        },
+        "start_time": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "execution": {
+          "type": "string",
+          "enum": [
+            "conditional",
+            "always"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        },
+        "detach": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "policy_uuid",
+        "zone_uuid",
+        "condition",
+        "timezone",
+        "enabled",
+        "observation_window_minutes",
+        "min_interval_minutes",
+        "max_daily_minutes",
+        "delivery_settings",
+        "effective_from",
+        "sync_version",
+        "deleted_at",
+        "updated_at"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": 1
+        },
+        "policy_uuid": {
+          "$ref": "#/definitions/CanonicalUuid"
+        },
+        "zone_uuid": {
+          "$ref": "#/definitions/ZoneUuid"
+        },
+        "condition": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "enabled": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer",
+              "enum": [
+                0,
+                1
+              ]
+            }
+          ]
+        },
+        "observation_window_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "min_interval_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1440
+        },
+        "max_daily_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "delivery_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DeliverySettings"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective_from": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sync_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "Clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trusted",
+        "reason"
+      ],
+      "properties": {
+        "trusted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SourceChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "eligible",
+        "state",
+        "reason",
+        "sources"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "SWT",
+            "VWC",
+            "DENDRO"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Source"
+          }
+        }
+      }
+    },
+    "Qualification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qualified",
+        "reason"
+      ],
+      "properties": {
+        "qualified": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Update": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "effective_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Incident": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurred_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "LastResult": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decision_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "effective_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "Runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "projection_revision",
+        "zone_uuid",
+        "policy_uuid",
+        "eligible_sources",
+        "source_choices",
+        "qualification",
+        "next_check",
+        "last_result",
+        "clock",
+        "as_of",
+        "valid_until",
+        "legacy_process_timezone"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": 1
+        },
+        "projection_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "zone_uuid": {
+          "$ref": "#/definitions/ZoneUuid"
+        },
+        "policy_uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eligible_sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RuntimeSourceChoice"
+          }
+        },
+        "source_choices": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "SWT",
+            "VWC",
+            "DENDRO"
+          ],
+          "properties": {
+            "SWT": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RuntimeSourceChoice"
+              }
+            },
+            "VWC": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/RuntimeSourceChoice"
+              }
+            },
+            "DENDRO": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/DendroSourceChoice"
+              }
+            }
+          }
+        },
+        "qualification": {
+          "$ref": "#/definitions/Qualification"
+        },
+        "next_check": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_result": {
+          "$ref": "#/definitions/LastResult"
+        },
+        "clock": {
+          "$ref": "#/definitions/Clock"
+        },
+        "as_of": {
+          "type": "string"
+        },
+        "valid_until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "legacy_process_timezone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        }
+      }
+    },
+    "ValveRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "projection_revision",
+        "device_eui",
+        "policy_uuid",
+        "zone_uuid",
+        "update",
+        "incident",
+        "clock",
+        "as_of",
+        "valid_until"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": 1
+        },
+        "projection_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "device_eui": {
+          "$ref": "#/definitions/Eui64"
+        },
+        "policy_uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zone_uuid": {
+          "$ref": "#/definitions/NullableZoneUuid"
+        },
+        "update": {
+          "$ref": "#/definitions/ValveUpdate"
+        },
+        "incident": {
+          "$ref": "#/definitions/ValveIncident"
+        },
+        "clock": {
+          "$ref": "#/definitions/Clock"
+        },
+        "as_of": {
+          "type": "string"
+        },
+        "valid_until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "ready",
+        "reason"
+      ],
+      "properties": {
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "ready": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 255
+        }
+      }
+    },
+    "Evidence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "timezone",
+        "reason",
+        "selected_at",
+        "requested_duration_minutes",
+        "condition",
+        "evaluation",
+        "observation"
+      ],
+      "properties": {
+        "timezone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selected_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "requested_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "condition": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Condition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evaluation": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/EvidenceEvaluation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observation": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/EvidenceObservation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "readiness": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Readiness"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "qualification": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Qualification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "projection_revision",
+        "decision_key",
+        "zone_uuid",
+        "state",
+        "effective_duration_minutes",
+        "requested_duration_minutes",
+        "schedule_sync_version",
+        "policy_sync_version",
+        "local_time",
+        "local_date",
+        "schedule_uuid",
+        "policy_uuid",
+        "device_eui",
+        "due_at",
+        "decision",
+        "decision_reason",
+        "decision_at",
+        "evidence"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": 1
+        },
+        "projection_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "decision_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "zone_uuid": {
+          "$ref": "#/definitions/ZoneUuid"
+        },
+        "policy_uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device_eui": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due_at": {
+          "type": "string"
+        },
+        "decision": {
+          "type": "string"
+        },
+        "decision_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision_at": {
+          "type": "string"
+        },
+        "evidence": {
+          "$ref": "#/definitions/Evidence"
+        },
+        "deleted_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "schedule_uuid": {
+          "$ref": "#/definitions/CanonicalUuid"
+        },
+        "local_date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "local_time": {
+          "type": "string",
+          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+        },
+        "policy_sync_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schedule_sync_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requested_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "effective_duration_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "state": {
+          "type": "string"
+        }
+      }
+    },
+    "RuntimeSourceChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "device_eui",
+        "channel",
+        "type_id",
+        "eligible",
+        "reason"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "SWT",
+            "VWC"
+          ]
+        },
+        "device_eui": {
+          "$ref": "#/definitions/Eui64"
+        },
+        "channel": {
+          "type": "string"
+        },
+        "type_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "DendroSourceChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "eligible",
+        "state",
+        "reason",
+        "sources"
+      ],
+      "properties": {
+        "kind": {
+          "const": "DENDRO"
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "device_eui",
+              "channel"
+            ],
+            "properties": {
+              "device_eui": {
+                "$ref": "#/definitions/Eui64"
+              },
+              "channel": {
+                "type": "string"
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "eligible": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sources": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/Source"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ValveUpdate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "ready",
+        "reason"
+      ],
+      "properties": {
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ready": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ValveIncident": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "incident_id",
+        "state",
+        "ended_at",
+        "reconciled_at",
+        "retry_pending"
+      ],
+      "properties": {
+        "incident_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reconciled_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retry_pending": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "EvidenceSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device_eui": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "threshold": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sample_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "first_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usable_tree_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "ObservationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device_eui": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eligible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sample_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "latest_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ZoneUuid": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+    },
+    "NullableZoneUuid": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$"
+    },
+    "EvidenceEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "value",
+        "unit",
+        "sources"
+      ],
+      "properties": {
+        "status": {
+          "type": "string"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EvidenceEvaluationSource"
+          }
+        }
+      }
+    },
+    "EvidenceEvaluationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "device_eui",
+        "channel"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "device_eui": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Eui64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "threshold": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sample_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "first_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "last_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "computed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "stress": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "action": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usable_tree_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "DENDRO"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {},
+          "else": {
+            "properties": {
+              "device_eui": {
+                "$ref": "#/definitions/Eui64"
+              },
+              "channel": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EvidenceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "sources"
+      ],
+      "properties": {
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EvidenceObservationSource"
+          }
+        }
+      }
+    },
+    "EvidenceObservationSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "device_eui",
+        "channel"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "device_eui": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/Eui64"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "channel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eligible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sample_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "latest_sample_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "computed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "DENDRO"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {},
+          "else": {
+            "properties": {
+              "device_eui": {
+                "$ref": "#/definitions/Eui64"
+              },
+              "channel": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ScheduleEdit": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/ScheduleCreate"
+        },
+        {
+          "$ref": "#/definitions/ScheduleUpdate"
+        }
+      ]
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "policy",
+    "schedule",
+    "runtime",
+    "valve_runtime",
+    "decision"
+  ],
+  "properties": {
+    "policy": {
+      "$ref": "#/definitions/Policy"
+    },
+    "schedule": {
+      "$ref": "#/definitions/Schedule"
+    },
+    "runtime": {
+      "$ref": "#/definitions/Runtime"
+    },
+    "valve_runtime": {
+      "$ref": "#/definitions/ValveRuntime"
+    },
+    "decision": {
+      "$ref": "#/definitions/Decision"
+    }
+  },
+  "x-golden-fixtures": {
+    "condition_kpa_29_9": {
+      "kind": "SWT",
+      "threshold_kpa": 29.9,
+      "sources": [
+        {
+          "device_eui": "A840410000000002",
+          "channel": "swt_2"
+        },
+        {
+          "device_eui": "A840410000000001",
+          "channel": "swt_1"
+        }
+      ]
+    },
+    "condition_vwc_zero": {
+      "kind": "VWC",
+      "threshold_percent": 0,
+      "sources": [
+        {
+          "device_eui": "A840410000000001",
+          "channel": "vwc_1"
+        }
+      ]
+    },
+    "condition_dendro_local": {
+      "kind": "DENDRO",
+      "minimum_stress": "moderate",
+      "response_mode": "fixed"
+    },
+    "runtime_last_result_skipped": {
+      "decision_key": "decision-1",
+      "decision": "SKIPPED",
+      "decision_reason": "clock_untrusted",
+      "due_at": "2026-10-20T00:00:00Z",
+      "state": "SKIPPED",
+      "decision_at": "2026-10-20T00:00:00Z",
+      "requested_duration_minutes": 60,
+      "effective_duration_minutes": null
+    },
+    "observation_windows_minutes": [
+      60,
+      180
+    ],
+    "tombstone": {
+      "contract_version": 1,
+      "policy_uuid": "12345678-1234-4234-8234-123456789abc",
+      "zone_uuid": "22345678223442348234123456789abc",
+      "condition": null,
+      "timezone": "UTC",
+      "enabled": false,
+      "observation_window_minutes": 60,
+      "min_interval_minutes": 0,
+      "max_daily_minutes": 180,
+      "delivery_settings": {},
+      "effective_from": null,
+      "sync_version": 4,
+      "deleted_at": "2026-10-20T00:00:00Z",
+      "updated_at": "2026-10-20T00:00:00Z"
+    },
+    "evidence_skipped": {
+      "timezone": "Europe/Zurich",
+      "reason": "clock_untrusted",
+      "selected_at": "2026-10-20T00:00:00Z",
+      "requested_duration_minutes": 60,
+      "condition": {
+        "kind": "SWT",
+        "threshold_kpa": 29.9,
+        "sources": [
+          {
+            "device_eui": "A840410000000002",
+            "channel": "swt_2"
+          },
+          {
+            "device_eui": "A840410000000001",
+            "channel": "swt_1"
+          }
+        ]
+      },
+      "evaluation": {
+        "status": "SKIPPED",
+        "reason": "clock_untrusted",
+        "value": null,
+        "unit": null,
+        "sources": []
+      },
+      "observation": {
+        "reason": "clock_untrusted",
+        "sources": []
+      },
+      "readiness": null,
+      "qualification": null
+    },
+    "runtime_full": {
+      "contract_version": 1,
+      "projection_revision": 3,
+      "zone_uuid": "22345678223442348234123456789abc",
+      "policy_uuid": "12345678-1234-4234-8234-123456789abc",
+      "eligible_sources": [
+        {
+          "kind": "SWT",
+          "device_eui": "A840410000000001",
+          "channel": "swt_1",
+          "type_id": "KIWI_SENSOR",
+          "eligible": true,
+          "reason": null
+        }
+      ],
+      "source_choices": {
+        "SWT": [
+          {
+            "kind": "SWT",
+            "device_eui": "A840410000000001",
+            "channel": "swt_1",
+            "type_id": "KIWI_SENSOR",
+            "eligible": true,
+            "reason": null
+          }
+        ],
+        "VWC": [],
+        "DENDRO": []
+      },
+      "qualification": {
+        "qualified": false,
+        "reason": "clock_untrusted"
+      },
+      "next_check": null,
+      "last_result": {
+        "decision_key": "decision-1",
+        "decision": "SKIPPED",
+        "decision_reason": "clock_untrusted",
+        "due_at": "2026-10-20T00:00:00Z",
+        "state": "SKIPPED",
+        "decision_at": "2026-10-20T00:00:00Z",
+        "requested_duration_minutes": 60,
+        "effective_duration_minutes": null
+      },
+      "clock": {
+        "trusted": false,
+        "reason": "clock_untrusted",
+        "source": "gateway"
+      },
+      "as_of": "2026-10-20T00:00:00Z",
+      "valid_until": null,
+      "legacy_process_timezone": "Europe/Zurich"
+    },
+    "valve_runtime_full": {
+      "contract_version": 1,
+      "projection_revision": 4,
+      "device_eui": "A840410000000002",
+      "policy_uuid": "12345678-1234-4234-8234-123456789abc",
+      "zone_uuid": "22345678223442348234123456789abc",
+      "update": {
+        "state": "CLOSED",
+        "ready": true,
+        "reason": null
+      },
+      "incident": {
+        "incident_id": null,
+        "state": null,
+        "ended_at": null,
+        "reconciled_at": null,
+        "retry_pending": false
+      },
+      "clock": {
+        "trusted": true,
+        "reason": null,
+        "source": "gateway"
+      },
+      "as_of": "2026-10-20T00:00:00Z",
+      "valid_until": "2026-10-20T00:07:00Z"
+    },
+    "decision_full": {
+      "contract_version": 1,
+      "projection_revision": 5,
+      "decision_key": "decision-1",
+      "zone_uuid": "22345678223442348234123456789abc",
+      "policy_uuid": "12345678-1234-4234-8234-123456789abc",
+      "device_eui": "A840410000000002",
+      "due_at": "2026-10-20T00:00:00Z",
+      "decision": "SKIPPED",
+      "decision_reason": "clock_untrusted",
+      "decision_at": "2026-10-20T00:00:00Z",
+      "evidence": {
+        "timezone": "Europe/Zurich",
+        "reason": "clock_untrusted",
+        "selected_at": "2026-10-20T00:00:00Z",
+        "requested_duration_minutes": 60,
+        "condition": {
+          "kind": "SWT",
+          "threshold_kpa": 29.9,
+          "sources": [
+            {
+              "device_eui": "A840410000000002",
+              "channel": "swt_2"
+            },
+            {
+              "device_eui": "A840410000000001",
+              "channel": "swt_1"
+            }
+          ]
+        },
+        "evaluation": {
+          "status": "SKIPPED",
+          "reason": "clock_untrusted",
+          "value": null,
+          "unit": null,
+          "sources": []
+        },
+        "observation": {
+          "reason": "clock_untrusted",
+          "sources": []
+        },
+        "readiness": null,
+        "qualification": null
+      },
+      "schedule_uuid": "12345678-1234-4234-8234-123456789abd",
+      "local_date": "2026-10-20",
+      "local_time": "06:00",
+      "policy_sync_version": 2,
+      "schedule_sync_version": 3,
+      "requested_duration_minutes": 60,
+      "effective_duration_minutes": null,
+      "state": "SKIPPED"
+    },
+    "policy_wire_enabled_one": {
+      "contract_version": 1,
+      "policy_uuid": "12345678-1234-4234-8234-123456789abc",
+      "zone_uuid": "22345678223442348234123456789abc",
+      "condition": {
+        "kind": "SWT",
+        "threshold_kpa": 29.9,
+        "sources": [
+          {
+            "device_eui": "A840410000000002",
+            "channel": "swt_2"
+          },
+          {
+            "device_eui": "A840410000000001",
+            "channel": "swt_1"
+          }
+        ]
+      },
+      "timezone": "UTC",
+      "enabled": 1,
+      "observation_window_minutes": 60,
+      "min_interval_minutes": 0,
+      "max_daily_minutes": 180,
+      "delivery_settings": {},
+      "effective_from": null,
+      "sync_version": 4,
+      "deleted_at": null,
+      "updated_at": "2026-10-20T00:00:00Z"
+    },
+    "schedule_full_update": {
+      "schedule_uuid": "62345678-1234-4234-8234-123456789abc",
+      "expected_sync_version": 4,
+      "device_eui": "A840410000000002",
+      "kind": "WEEKLY",
+      "weekdays_mask": 127,
+      "start_time": "06:00",
+      "duration_minutes": 30,
+      "enabled": true,
+      "detach": false,
+      "execution": "conditional"
+    }
+  }
+}

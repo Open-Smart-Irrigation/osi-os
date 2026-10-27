@@ -11,6 +11,8 @@ interface Props {
   zone: IrrigationZone;
   onClose: () => void;
   onSaved?: () => void;
+  onEditSchedule?: () => void;
+  onEditPolicy?: () => void;
 }
 
 type DrawerTab = 'scheduling' | 'analysis';
@@ -73,8 +75,9 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
 
 // ── Scheduling tab ─────────────────────────────────────────────────────────────
 
-const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = ({ zone, onSaved }) => {
+const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void; onEditSchedule?: () => void; onEditPolicy?: () => void }> = ({ zone, onSaved, onEditSchedule, onEditPolicy }) => {
   const { t } = useTranslation('devices');
+  const { t: valveT } = useTranslation('valves');
   const sched = zone.schedule;
   const isDendro = (sched?.triggerMetric ?? sched?.trigger_metric) === 'DENDRO';
 
@@ -84,17 +87,10 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
   const [configSaving, setConfigSaving] = useState(false);
 
   // Schedule params — duration + response mode, saved via updateSchedule
-  const [duration, setDuration]         = useState<number>(sched?.durationMinutes ?? sched?.duration_minutes ?? 20);
-  const [responseMode, setResponseMode] = useState<string>(sched?.responseMode ?? sched?.response_mode ?? 'proportional');
-  const [schedSaving, setSchedSaving]   = useState(false);
-  const [schedError, setSchedError]     = useState('');
-  const [schedSuccess, setSchedSuccess] = useState('');
 
   useEffect(() => {
     setPhenoStage(normalizeStage(zone.phenologicalStage) ?? '');
     setCalibKey(zone.calibrationKey ?? 'default');
-    setDuration(sched?.durationMinutes ?? sched?.duration_minutes ?? 20);
-    setResponseMode(sched?.responseMode ?? sched?.response_mode ?? 'proportional');
   }, [zone]);
 
   const handleConfigSave = async (field: 'phenologicalStage' | 'calibrationKey', value: string) => {
@@ -109,29 +105,6 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
     }
   };
 
-  const handleScheduleSave = async () => {
-    if (!sched) return;
-    setSchedSaving(true);
-    setSchedError('');
-    setSchedSuccess('');
-    try {
-      const metric = sched.triggerMetric ?? sched.trigger_metric ?? 'DENDRO';
-      const kpa    = sched.thresholdKpa  ?? sched.threshold_kpa  ?? 2;
-      await irrigationZonesAPI.updateSchedule(zone.id, {
-        trigger_metric:   metric as any,
-        threshold_kpa:    typeof kpa === 'number' ? kpa : Number(kpa),
-        enabled:          sched.enabled ?? true,
-        duration_minutes: Math.min(240, Math.max(1, Math.round(duration))),
-        response_mode:    responseMode,
-      });
-      setSchedSuccess('Saved.');
-      onSaved?.();
-    } catch {
-      setSchedError('Failed to save. Please try again.');
-    } finally {
-      setSchedSaving(false);
-    }
-  };
 
   const thresholdKpa = sched?.thresholdKpa ?? sched?.threshold_kpa;
   const stressLabel  = isDendro && thresholdKpa != null
@@ -194,8 +167,8 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
           <div className="flex items-center gap-1">
             <input
               type="number"
-              value={duration}
-              onChange={e => setDuration(Number(e.target.value))}
+              value={sched?.durationMinutes ?? sched?.duration_minutes ?? 20}
+              readOnly
               min={1} max={240}
               className="w-16 text-xs bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded px-2 py-0.5 text-right"
             />
@@ -207,8 +180,9 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
         <div className="flex justify-between items-center gap-2 py-1.5 border-b border-[var(--border)]">
           <span className="text-[var(--text-secondary)] text-xs shrink-0">Response mode</span>
           <select
-            value={responseMode}
-            onChange={e => setResponseMode(e.target.value)}
+            value={sched?.responseMode ?? sched?.response_mode ?? 'proportional'}
+            onChange={() => {}}
+            disabled
             className="text-xs bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded px-2 py-0.5 max-w-[180px]"
           >
             {RESPONSE_MODES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -221,16 +195,20 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void }> = 
         />
 
         {/* Save button */}
-        <div className="pt-2 pb-1 flex items-center gap-2">
-          <button
-            onClick={handleScheduleSave}
-            disabled={schedSaving || !sched}
+        <div className="pt-2 pb-1 flex flex-wrap items-center gap-2">
+          {sched && <button
+            onClick={onEditSchedule}
+            disabled={!onEditSchedule}
             className="bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-[var(--on-primary)] text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
           >
-            {schedSaving ? 'Saving…' : 'Save parameters'}
-          </button>
-          {schedSuccess && <span className="text-xs text-green-600">{schedSuccess}</span>}
-          {schedError   && <span className="text-xs text-red-600">{schedError}</span>}
+            {valveT('irrigationPreference.editSchedule')}
+          </button>}
+          {onEditPolicy && <button
+            onClick={onEditPolicy}
+            className="border border-[var(--primary)] text-[var(--primary)] hover:bg-[var(--secondary-bg)] text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+          >
+            {valveT('irrigationPolicy.openEditor', { defaultValue: 'Configure conditional irrigation' })}
+          </button>}
         </div>
       </Section>
 
@@ -409,8 +387,9 @@ const AnalysisTab: React.FC<{
 // ── Root component ─────────────────────────────────────────────────────────────
 
 export const AdvancedScheduleDrawer: React.FC<Props> = ({
-  isOpen, zone, onClose, onSaved,
+  isOpen, zone, onClose, onSaved, onEditSchedule, onEditPolicy,
 }) => {
+  const { t: valveT } = useTranslation('valves');
   const [tab, setTab] = useState<DrawerTab>('scheduling');
   const [recommendations, setRecommendations] = useState<ZoneRecommendation[]>([]);
   const [recLoading, setRecLoading] = useState(false);
@@ -435,7 +414,7 @@ export const AdvancedScheduleDrawer: React.FC<Props> = ({
       <div className="relative bg-[var(--card)] border-l border-[var(--border)] w-full max-w-md h-full flex flex-col shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[var(--border)]">
-          <h2 className="text-lg font-bold text-[var(--text)]">Advanced — {zone.name}</h2>
+          <h2 className="text-lg font-bold text-[var(--text)]">{valveT('irrigationPreference.advanced')} — {zone.name}</h2>
           <button
             onClick={onClose}
             className="text-[var(--text-tertiary)] hover:text-[var(--text)] text-2xl leading-none"
@@ -463,7 +442,7 @@ export const AdvancedScheduleDrawer: React.FC<Props> = ({
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
-          {tab === 'scheduling' && <SchedulingTab zone={zone} onSaved={onSaved} />}
+          {tab === 'scheduling' && <SchedulingTab zone={zone} onSaved={onSaved} onEditSchedule={onEditSchedule} onEditPolicy={onEditPolicy} />}
           {tab === 'analysis'   && (
             <AnalysisTab
               zone={zone}

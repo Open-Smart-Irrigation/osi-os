@@ -104,6 +104,7 @@ function moduleByName(name) {
     'sdi12-recipe': 'osi-sdi12-recipe',
     'sdi12-commissioning': 'osi-sdi12-commissioning',
     'osi-valve-control': 'osi-valve-control',
+    'osi-irrigation-policy': 'osi-irrigation-policy',
     'osi-system-settings': 'osi-system-settings',
   }[name] || `osi-${name}`;
   const modulePath = path.join(NODE_RED_MODULES, directory, 'index.js');

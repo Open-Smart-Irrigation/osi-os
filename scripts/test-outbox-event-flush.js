@@ -35,6 +35,7 @@ const LINK_OUT_ID = 'sync-outbox-flush-link-out-zone';
 const LINK_IN_ID = 'sync-outbox-flush-link-in';
 const GATE_ID = 'sync-outbox-flush-coalesce';
 const FLUSH_BUILD_ID = 'sync-outbox-build';
+const CONDITIONAL_REPLICATION = require('../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy');
 const ZONE_COMMAND_APPLY_ID = 'zone-command-apply-fn';
 const FLUSH_MARK_ID = 'sync-outbox-mark';
 const MQTT_ACK_ID = '9d5e3035c3d069c4';
@@ -355,6 +356,11 @@ function buildHarness(store, nowMs, outboxRows = OUTBOX_ROWS) {
       flow: { get: (k) => store.get(k), set: (k, v) => { store.set(k, v); } },
       global: { get: (k) => (k === 'fs' ? { existsSync: () => false, readFileSync: () => '{}' } : undefined) },
       node: { warn: (m) => warnings.push(String(m)), error: (m) => warnings.push(String(m)), log: () => {} },
+      // The builder loads the conditional replication helper through osi-lib (a hard dependency
+      // on this branch); the real module runs against the fake DB, which reports no peer.
+      osiLib: { require: (name) => (name === 'osi-irrigation-policy'
+        ? { ok: true, value: CONDITIONAL_REPLICATION }
+        : { ok: false, error: 'unexpected helper ' + name }) },
       Date: fakeDate(nowMs),
       JSON, Number, Math, String, Object, Array, Boolean, Promise, Set, Map, isFinite, parseInt, parseFloat, RegExp, Error,
       console: { log: () => {}, warn: () => {}, error: () => {} },

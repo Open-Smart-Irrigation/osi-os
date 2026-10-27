@@ -354,6 +354,20 @@ test('npm scripts: vitest filters and the checked tsx runner collect GUI tests',
   assert.equal(result.stats.run, 3);
 });
 
+test('npm scripts: a Playwright config is a runner for its browser spec', () => {
+  const root = repo({
+    '.github/workflows/ci.yml': workflow(['npm ci', 'npm run test:browser:conditional'], 'defaults:\n  run:\n    working-directory: gui'),
+    'gui/package.json': JSON.stringify({ scripts: { 'test:browser:conditional': 'playwright test --config playwright.conditional.config.ts' } }),
+    'gui/playwright.conditional.config.ts': "testMatch: '**/conditional-irrigation.spec.ts'\n",
+    'gui/tests/browser/conditional-irrigation.spec.ts': '',
+    [INVENTORY]: JSON.stringify({ excluded: [], indirect: [{
+      path: 'gui/tests/browser/conditional-irrigation.spec.ts',
+      runner: 'gui/playwright.conditional.config.ts',
+    }] }),
+  });
+  assert.deepEqual(verify(root).errors, []);
+});
+
 test('npm scripts: a GUI test outside every vitest filter fails', () => {
   const root = guiRepo({
     'test:unit': "node scripts/run-tsx-tests.mjs 'tests/**/*.test.ts' && vitest run src/a/__tests__",

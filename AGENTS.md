@@ -334,7 +334,7 @@ Long form: `osi-verification-commands`, "Base ref for a stacked branch".
 Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`, `SENSECAP_S2120`, `AQUASCOPE_LORAIN` (ChirpStack app `Sensors`); `STREGA_VALVE`, `MILESIGHT_UC512` (`Actuators`); `RAK10701_FIELD_TESTER` (`Field Tester`). Profiles, sensors, SWT canonicalization, unified SWT estimates, LoRain onboarding and interval-rain aggregation, STREGA timed irrigation and valve control (schedules pushed only on user change or explicit re-send, never on a timer): `osi-agronomy-sensors-reference`, "Device catalog (edge reference)". Rules that bind every change:
 
 - `device_data.swt_1`, `swt_2`, `swt_3` are canonical positive kPa magnitudes; derive pF only for display or export through the shared conversion in [matric-potential/v1.md](docs/contracts/matric-potential/v1.md); aggregate kPa before deriving pF; preserve calculated doubles and round display strings only.
-- STREGA user-facing opens are `OPEN_FOR_DURATION`; normal close is the valve's own timed close, not a bare `CLOSE` command. Operator cancellation uses `POST /api/v1/valves/:deveui/cancel`.
+- STREGA user-facing opens are `OPEN_FOR_DURATION`; normal close is the valve's own timed close, not a bare `CLOSE` command. Operator cancellation uses `POST /api/v1/valves/:deveui/cancel`; a flushed open that may have been sent is answered `handed_off` and keeps the valve reserved. Conditional irrigation (`osi-irrigation-policy`): see the agronomy skill.
 - The LoRain AppKey is retrieved from Aqua-Scope and must not be stored in this repo.
 
 ---

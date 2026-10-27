@@ -15,11 +15,15 @@ const scopeHelper = require(path.join(
 const installationHelper = require(path.join(
   ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js'
 ));
+const conditionalReplicationHelper = require(path.join(
+  ROOT, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js'
+));
 const FIXTURE_INSTALLATION_UUID = '11111111-1111-4111-8111-111111111111';
 const osiLib = {
   require(name) {
     if (name === 'scope') return { ok: true, value: scopeHelper };
     if (name === 'installation') return { ok: true, value: installationHelper };
+    if (name === 'osi-irrigation-policy') return { ok: true, value: conditionalReplicationHelper };
     return { ok: false, error: `unexpected helper ${name}` };
   },
 };
@@ -38,6 +42,7 @@ const EXPECTED_CAPABILITIES = [
   'watermark_v1',
   'chameleon_config_commands_v1',
   'device_soil_depth_commands_v1',
+  'conditional_irrigation_v1',
   'field_journal_v1',
 ];
 const JOURNAL_FIELDS = [
@@ -130,6 +135,15 @@ class JournalFixtureDb {
     this.userQueryError = settings.userQueryError || null;
     this.closeError = settings.closeError || null;
     this.tablesPresent = settings.tables !== false;
+    this.peerState = settings.peerState || null;
+    this.forceOutbox = settings.forceOutbox === true;
+    this.policyRows = Array.isArray(settings.policyRows) ? settings.policyRows.map((row) => ({ ...row })) : null;
+    this.outboxAggregate = settings.outboxAggregate || 'IRRIGATION_POLICY_RUNTIME';
+    this.forceOutboxRows = Array.isArray(settings.forceOutboxRows)
+      ? settings.forceOutboxRows.map((row) => ({ ...row }))
+      : null;
+    this.runs = [];
+    this.peerRow = null;
     if (settings.tables !== false) {
       const tableSql = {
         journal_catalog_state: 'CREATE TABLE journal_catalog_state(id INTEGER PRIMARY KEY, catalog_version, catalog_hash TEXT)',
@@ -253,6 +267,58 @@ class JournalFixtureDb {
           recovery_state: 'ACTIVE',
           recovery_operation_uuid: null,
         }];
+      } else if (this.policyRows && /FROM irrigation_policies p/.test(sql)) {
+        rows = this.policyRows.map((row) => ({ ...row }));
+      } else if (this.peerState && /FROM sync_link_state/.test(sql)
+          && !/FROM watermark_calibrations|FROM irrigation_policies|FROM conditional_irrigation_sync_projections/.test(sql)) {
+        const supported = this.peerState === 'supported';
+        this.peerRow = this.peerRow || {
+          peer_node: 'cloud',
+          linked: 1,
+          server_url: 'https://cloud.invalid',
+          cloud_user_id: 'cloud-user-1',
+          gateway_device_eui: GATEWAY_EUI,
+          installation_uuid: FIXTURE_INSTALLATION_UUID,
+          peer_capabilities_json: supported ? JSON.stringify(['conditional_irrigation_v1']) : '[]',
+          peer_capabilities_context_json: supported ? JSON.stringify({
+            server_url: 'https://cloud.invalid',
+            cloud_user_id: 'cloud-user-1',
+            gateway_device_eui: GATEWAY_EUI,
+            installation_uuid: FIXTURE_INSTALLATION_UUID,
+          }) : null,
+          peer_capabilities_request_id: supported ? 'prior-request' : null,
+          identity_installation_uuid: FIXTURE_INSTALLATION_UUID,
+          identity_gateway_device_eui: GATEWAY_EUI,
+        };
+        rows = [this.peerRow];
+      } else if (this.forceOutbox && /FROM sync_outbox/.test(sql)) {
+        const candidates = this.forceOutboxRows || [{
+            event_uuid: 'force-event-1',
+            aggregate_type: this.outboxAggregate,
+            aggregate_key: 'zone-force-1',
+            op: this.outboxAggregate.startsWith('IRRIGATION_POLICY_') ? 'IRRIGATION_POLICY_RUNTIME_CHANGED' : 'UPSERT_ZONE',
+            payload_json: '{}',
+            sync_version: 1,
+            occurred_at: '2026-10-20T10:00:00.000Z',
+            gateway_device_eui: GATEWAY_EUI,
+            delivered_at: null,
+            rejected_at: null,
+            retry_count: 0,
+            last_retryable_failure_at: null,
+          }];
+        const legacyRoute = /UPPER\(op\) LIKE 'IRRIGATION_POLICY_%'/.test(sql);
+        const eligible = legacyRoute ? candidates.filter((row) => {
+          const op = String(row.op || '').toUpperCase();
+          const aggregate = String(row.aggregate_type || '').toUpperCase();
+          if (op.startsWith('IRRIGATION_POLICY_') || aggregate.startsWith('IRRIGATION_POLICY_')) return false;
+          if (aggregate === 'VALVE_SCHEDULE') {
+            const payload = JSON.parse(String(row.payload_json || '{}'));
+            if (payload && (payload.condition_policy_uuid != null || payload.conditionPolicyUuid != null
+              || payload.effective_from != null || payload.effectiveFrom != null)) return false;
+          }
+          return true;
+        }) : candidates;
+        rows = eligible.slice(0, 100);
       } else if (/FROM watermark_calibrations/.test(sql)) {
         rows = this.tablesPresent ? [
           {
@@ -309,7 +375,22 @@ class JournalFixtureDb {
     }
   }
 
-  run(_sql, _params, callback) {
+  run(sql, params, callback) {
+    const values = Array.isArray(params) ? params.slice() : [];
+    this.runs.push({ sql: String(sql), params: values });
+    if (this.peerRow && /peer_capabilities_json=CASE WHEN \? THEN peer_capabilities_json ELSE NULL END/.test(sql)) {
+      this.peerRow.peer_capabilities_json = Number(values[0]) ? this.peerRow.peer_capabilities_json : null;
+      this.peerRow.peer_capabilities_context_json = values[1];
+      this.peerRow.peer_capabilities_request_id = values[2];
+    } else if (this.peerRow && /SET peer_capabilities_json=\?, peer_capabilities_context_json=\?/.test(sql)) {
+      this.peerRow.peer_capabilities_json = values[0];
+      this.peerRow.peer_capabilities_context_json = values[1];
+      this.peerRow.peer_capabilities_request_id = values[2];
+    } else if (this.peerRow && /SET peer_capabilities_json=NULL, peer_capabilities_context_json=NULL/.test(sql)) {
+      this.peerRow.peer_capabilities_json = null;
+      this.peerRow.peer_capabilities_context_json = null;
+      this.peerRow.peer_capabilities_request_id = null;
+    }
     callback.call({ changes: 0 }, null);
   }
 
@@ -390,10 +471,24 @@ function identityGlobal(options) {
 async function runNormalBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
   const context = runtime(db, options);
+  const message = {};
   try {
     const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'crypto', 'osiDb', 'osiLib', node.func);
-    const result = await execute({}, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb, osiLib);
-    return { payload: result && result.payload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
+    const result = await execute(message, context.flow, identityGlobal(options), context.env, context.node, crypto, context.osiDb, osiLib);
+    return { payload: result && result.payload, message, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
+  } finally {
+    db.destroy();
+  }
+}
+
+async function runOutboxBuild(node, options) {
+  const db = new JournalFixtureDb(options);
+  const context = runtime(db, options);
+  const message = {};
+  try {
+    const execute = new Function('msg', 'flow', 'global', 'env', 'node', 'osiDb', 'osiLib', node.func);
+    const result = await execute(message, context.flow, identityGlobal(options), context.env, context.node, context.osiDb, osiLib);
+    return { payload: result && result.payload, message, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors, runs: db.runs.slice() };
   } finally {
     db.destroy();
   }
@@ -403,14 +498,39 @@ async function runForcedBootstrap(node, options) {
   const db = new JournalFixtureDb(options);
   const context = runtime(db, options);
   let bootstrapPayload = null;
+  let outboxPayload = null;
+  const requestLog = [];
+  const settings = options || {};
   const osiCloudHttp = {
     async requestJsonIpv4(request) {
+      requestLog.push({ method: request.method, url: request.url });
       if (/\/auth\/refresh-sync$/.test(request.url)) {
         return { statusCode: 200, payload: { token: 'refreshed-fixture-token' } };
       }
-      if (/\/api\/v1\/sync\/edge\/bootstrap$/.test(request.url)) {
+      if (/\/api\/v1\/sync\/edge\/bootstrap(?:\/conditional-irrigation-v1)?$/.test(request.url)) {
         bootstrapPayload = request.payload;
-        return { statusCode: 200, payload: { applied: 0, skipped: 0 } };
+        if (settings.mutatePeerOn === 'bootstrap' && Number(settings.bootstrapStatus || 200) >= 400 && db.peerRow) {
+          db.peerRow.gateway_device_eui = '0016C001F10000FF';
+        }
+        return {
+          statusCode: Number(settings.bootstrapStatus || 200),
+          payload: settings.bootstrapPayload || {
+            success: Number(settings.bootstrapStatus || 200) >= 200 && Number(settings.bootstrapStatus || 200) < 300,
+            applied: 0,
+            skipped: 0,
+            supportedSyncCapabilities: ['conditional_irrigation_v1'],
+          },
+        };
+      }
+      if (/\/api\/v1\/sync\/edge\/events(?:\/conditional-irrigation-v1)?$/.test(request.url)) {
+        outboxPayload = request.payload;
+        if (settings.mutatePeerOn === 'outbox' && Number(settings.outboxStatus || 200) >= 400 && db.peerRow) {
+          db.peerRow.gateway_device_eui = '0016C001F10000FF';
+        }
+        return {
+          statusCode: Number(settings.outboxStatus || 200),
+          payload: settings.outboxPayload || { results: [{ eventUuid: 'force-event-1', status: 'APPLIED' }] },
+        };
       }
       if (/\/pending-commands\?limit=50$/.test(request.url)) {
         return { statusCode: 200, payload: { commands: [] } };
@@ -428,8 +548,17 @@ async function runForcedBootstrap(node, options) {
       _forceSyncUserId: 1,
       _forceSyncUsername: 'fixture-user',
     }, context.flow, identityGlobal(options), context.env, context.node,
-    crypto, context.osiDb, osiCloudHttp, osiLib);
-    return { payload: bootstrapPayload, syncState: context.flow.get('sync_state') || {}, warnings: context.warnings, errors: context.errors };
+      crypto, context.osiDb, osiCloudHttp, osiLib);
+    return {
+      payload: bootstrapPayload,
+      outboxPayload,
+      syncState: context.flow.get('sync_state') || {},
+      warnings: context.warnings,
+      errors: context.errors,
+      requestLog,
+      runs: db.runs.slice(),
+      peerRow: db.peerRow && { ...db.peerRow },
+    };
   } finally {
     db.destroy();
   }
@@ -519,7 +648,10 @@ function assertReadyAdvertisement(payload) {
 
 function assertSuppressedAdvertisement(payload) {
   assert.ok(payload, 'ordinary core bootstrap must continue');
-  assert.deepEqual(payload.gatewayIdentity.syncCapabilities, EXPECTED_CAPABILITIES.slice(0, 10));
+  assert.deepEqual(
+    payload.gatewayIdentity.syncCapabilities,
+    EXPECTED_CAPABILITIES.filter((capability) => capability !== 'field_journal_v1')
+  );
   for (const field of JOURNAL_FIELDS) {
     assert.equal(Object.prototype.hasOwnProperty.call(payload.gatewayIdentity, field), false, field);
   }
@@ -563,6 +695,256 @@ for (const profile of PROFILES) {
       }
     });
   }
+}
+
+for (const profile of PROFILES) {
+  test(profile + ' normal bootstrap captures an unsupported peer without selecting the guarded route', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-bootstrap-build');
+    const result = await runNormalBootstrap(node, { peerState: 'legacy' });
+    assert.match(result.message.url, /\/api\/v1\/sync\/edge\/bootstrap$/);
+    assert.ok(result.message._syncConditionalRequestId, 'legacy route still carries a durable response nonce');
+    assert.deepEqual(result.message._syncConditionalPeerContext, {
+      server_url: 'https://cloud.invalid',
+      cloud_user_id: 'cloud-user-1',
+      gateway_device_eui: GATEWAY_EUI,
+      installation_uuid: FIXTURE_INSTALLATION_UUID,
+    });
+    assert.equal(result.message._syncConditionalGuarded, false);
+  });
+
+  test(profile + ' normal bootstrap omits all conditional resources on a legacy peer', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-bootstrap-build');
+    const result = await runNormalBootstrap(node, { peerState: 'legacy' });
+    for (const key of [
+      'irrigationPolicies',
+      'irrigation_policy_runtime',
+      'irrigation_policy_valve_runtime',
+      'irrigation_policy_decisions',
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(result.payload, key), false, key);
+    }
+  });
+
+  test(profile + ' normal bootstrap includes conditional resources only after peer support', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-bootstrap-build');
+    const result = await runNormalBootstrap(node, { peerState: 'supported' });
+    for (const key of [
+      'irrigationPolicies',
+      'irrigation_policy_runtime',
+      'irrigation_policy_valve_runtime',
+      'irrigation_policy_decisions',
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(result.payload, key), true, key);
+      assert.ok(Array.isArray(result.payload[key]), key);
+    }
+  });
+
+  test(profile + ' normal bootstrap keeps a supported peer on the guarded route after capture', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-bootstrap-build');
+    const result = await runNormalBootstrap(node, { peerState: 'supported' });
+    assert.match(result.message.url, /\/api\/v1\/sync\/edge\/bootstrap\/conditional-irrigation-v1$/);
+    assert.ok(result.message._syncConditionalRequestId);
+    assert.equal(result.message._syncConditionalGuarded, true);
+  });
+
+  test(profile + ' forced bootstrap omits all conditional resources on a legacy peer', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-force-build');
+    const result = await runForcedBootstrap(node, { peerState: 'legacy' });
+    for (const key of [
+      'irrigationPolicies',
+      'irrigation_policy_runtime',
+      'irrigation_policy_valve_runtime',
+      'irrigation_policy_decisions',
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(result.payload, key), false, key);
+    }
+  });
+
+  test(profile + ' forced bootstrap includes conditional resources only after peer support', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-force-build');
+    const result = await runForcedBootstrap(node, { peerState: 'supported' });
+    for (const key of [
+      'irrigationPolicies',
+      'irrigation_policy_runtime',
+      'irrigation_policy_valve_runtime',
+      'irrigation_policy_decisions',
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(result.payload, key), true, key);
+      assert.ok(Array.isArray(result.payload[key]), key);
+    }
+  });
+}
+
+for (const profile of PROFILES) {
+  test(profile + ' ordinary outbox captures an unsupported peer without selecting the guarded route', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-outbox-build');
+    const result = await runOutboxBuild(node, {
+      peerState: 'legacy',
+      forceOutbox: true,
+      outboxAggregate: 'ZONE',
+    });
+    assert.match(result.message.url, /\/api\/v1\/sync\/edge\/events$/);
+    assert.ok(result.message._syncConditionalRequestId);
+    assert.equal(result.message._syncConditionalGuarded, false);
+  });
+
+  test(profile + ' ordinary outbox uses the guarded route only for an accepted peer', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-outbox-build');
+    const result = await runOutboxBuild(node, {
+      peerState: 'supported',
+      forceOutbox: true,
+    });
+    assert.match(result.message.url, /\/api\/v1\/sync\/edge\/events\/conditional-irrigation-v1$/);
+    assert.ok(result.message._syncConditionalRequestId);
+    assert.equal(result.message._syncConditionalGuarded, true);
+  });
+
+  test(profile + ' ordinary outbox filters held conditional rows before LIMIT 100', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-outbox-build');
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      event_uuid: 'held-policy-' + String(index).padStart(3, '0'),
+      aggregate_type: 'IRRIGATION_POLICY',
+      aggregate_key: 'policy-' + index,
+      op: 'IRRIGATION_POLICY_UPSERTED',
+      payload_json: '{}',
+      sync_version: 1,
+      occurred_at: '2026-10-20T10:' + String(index % 60).padStart(2, '0') + ':00.000Z',
+    }));
+    rows.push({
+      event_uuid: 'ordinary-after-held',
+      aggregate_type: 'ZONE',
+      aggregate_key: 'zone-ordinary',
+      op: 'UPSERT_ZONE',
+      payload_json: '{}',
+      sync_version: 101,
+      occurred_at: '2026-10-20T12:00:00.000Z',
+    });
+    const result = await runOutboxBuild(node, {
+      peerState: 'legacy',
+      forceOutbox: true,
+      forceOutboxRows: rows,
+    });
+    assert.deepEqual(result.message._syncEventIds, ['ordinary-after-held']);
+    assert.deepEqual(result.payload.events.map((event) => event.eventUuid), ['ordinary-after-held']);
+    assert.equal(result.message._syncConditionalGuarded, false);
+  });
+
+  test(profile + ' ordinary outbox releases held conditional rows after support is restored', async () => {
+    const node = loadFlows(profile).find((candidate) => candidate.id === 'sync-outbox-build');
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      event_uuid: 'held-policy-restored-' + String(index).padStart(3, '0'),
+      aggregate_type: 'IRRIGATION_POLICY',
+      aggregate_key: 'policy-restored-' + index,
+      op: 'IRRIGATION_POLICY_UPSERTED',
+      payload_json: '{}',
+      sync_version: 1,
+      occurred_at: '2026-10-20T10:' + String(index % 60).padStart(2, '0') + ':00.000Z',
+    }));
+    rows.push({
+      event_uuid: 'ordinary-after-held-restored',
+      aggregate_type: 'ZONE',
+      aggregate_key: 'zone-ordinary-restored',
+      op: 'UPSERT_ZONE',
+      payload_json: '{}',
+      sync_version: 101,
+      occurred_at: '2026-10-20T12:00:00.000Z',
+    });
+    const result = await runOutboxBuild(node, {
+      peerState: 'supported',
+      forceOutbox: true,
+      forceOutboxRows: rows,
+    });
+    assert.equal(result.message._syncConditionalGuarded, true);
+    assert.equal(result.payload.events.length, 100);
+    assert.ok(result.payload.events.every((event) => event.aggregateType === 'IRRIGATION_POLICY'));
+    assert.equal(result.payload.events.some((event) => event.eventUuid === 'ordinary-after-held-restored'), false);
+  });
+}
+
+for (const profile of PROFILES) {
+  const force = loadFlows(profile).find((candidate) => candidate.id === 'sync-force-build');
+  for (const statusCode of [404, 503]) {
+    test(profile + ' force guarded bootstrap ' + statusCode + ' preserves success state and has no legacy retry', async () => {
+      const before = '2026-10-20T09:00:00.000Z';
+      const result = await runForcedBootstrap(force, {
+        peerState: 'supported',
+        bootstrapStatus: statusCode,
+        initialSyncState: { lastBootstrapSuccessAt: before },
+      });
+      assert.ok(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/bootstrap\/conditional-irrigation-v1$/.test(entry.url)));
+      assert.equal(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/bootstrap$/.test(entry.url)), false);
+      assert.equal(result.runs.some((entry) => /INSERT INTO sync_cursor/.test(entry.sql)), false);
+      assert.equal(result.runs.some((entry) => /UPDATE users SET server_sync_token/.test(entry.sql)), false);
+      assert.equal(result.syncState.lastBootstrapSuccessAt, before);
+      assert.equal(result.peerRow.peer_capabilities_json, null, 'current guarded failure invalidates support');
+    });
+
+    test(profile + ' force guarded bootstrap ' + statusCode + ' leaves newer peer support untouched', async () => {
+      const result = await runForcedBootstrap(force, {
+        peerState: 'supported',
+        bootstrapStatus: statusCode,
+        mutatePeerOn: 'bootstrap',
+      });
+      assert.ok(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/bootstrap\/conditional-irrigation-v1$/.test(entry.url)));
+      assert.equal(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/bootstrap$/.test(entry.url)), false);
+      assert.deepEqual(JSON.parse(result.peerRow.peer_capabilities_json), ['conditional_irrigation_v1']);
+    });
+  }
+
+  for (const statusCode of [404, 503]) {
+    test(profile + ' force guarded outbox ' + statusCode + ' preserves pending rows and has no legacy retry', async () => {
+      const result = await runForcedBootstrap(force, {
+        peerState: 'supported',
+        forceOutbox: true,
+        outboxStatus: statusCode,
+      });
+      assert.ok(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/bootstrap\/conditional-irrigation-v1$/.test(entry.url)));
+      assert.ok(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/events\/conditional-irrigation-v1$/.test(entry.url)));
+      assert.equal(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/events$/.test(entry.url)), false);
+      assert.equal(result.peerRow.peer_capabilities_json, null, 'current guarded outbox failure invalidates support');
+      assert.equal(result.runs.some((entry) => /SET delivered_at/.test(entry.sql)), false, 'failed outbox leaves selected rows pending');
+    });
+
+    test(profile + ' force guarded outbox ' + statusCode + ' leaves newer peer support untouched', async () => {
+      const result = await runForcedBootstrap(force, {
+        peerState: 'supported',
+        forceOutbox: true,
+        outboxStatus: statusCode,
+        mutatePeerOn: 'outbox',
+      });
+      assert.ok(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/events\/conditional-irrigation-v1$/.test(entry.url)));
+      assert.equal(result.requestLog.some((entry) => /\/api\/v1\/sync\/edge\/events$/.test(entry.url)), false);
+      assert.deepEqual(JSON.parse(result.peerRow.peer_capabilities_json), ['conditional_irrigation_v1']);
+    });
+  }
+
+  test(profile + ' force outbox filters held conditional rows before LIMIT 100', async () => {
+    const rows = Array.from({ length: 100 }, (_, index) => ({
+      event_uuid: 'force-held-policy-' + String(index).padStart(3, '0'),
+      aggregate_type: 'IRRIGATION_POLICY',
+      aggregate_key: 'force-policy-' + index,
+      op: 'IRRIGATION_POLICY_UPSERTED',
+      payload_json: '{}',
+      sync_version: 1,
+      occurred_at: '2026-10-20T10:' + String(index % 60).padStart(2, '0') + ':00.000Z',
+    }));
+    rows.push({
+      event_uuid: 'force-ordinary-after-held',
+      aggregate_type: 'ZONE',
+      aggregate_key: 'force-zone-ordinary',
+      op: 'UPSERT_ZONE',
+      payload_json: '{}',
+      sync_version: 101,
+      occurred_at: '2026-10-20T12:00:00.000Z',
+    });
+    const result = await runForcedBootstrap(force, {
+      peerState: 'legacy',
+      forceOutbox: true,
+      forceOutboxRows: rows,
+    });
+    assert.ok(result.outboxPayload);
+    assert.deepEqual(result.outboxPayload.events.map((event) => event.eventUuid), ['force-ordinary-after-held']);
+  });
 }
 
 test('normal bootstrap does not inherit a stale gateway-identity source for an unrelated failure', async () => {
@@ -717,4 +1099,26 @@ for (const profile of PROFILES) {
     );
     assert.deepEqual(occurrences.map((node) => node.id), ['history-api-router-fn']);
   });
+}
+
+// R19 finding 7 (low): the bootstrap copy of a policy must match the event copy the 0077
+// trigger emits, and conform to conditional-irrigation-v1.schema.json#/definitions/Policy
+// (additionalProperties:false): no gateway_device_eui on the policy object.
+const R19_POLICY_ROW = {
+  policy_uuid: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', zone_uuid: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  condition_json: JSON.stringify({ kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }), timezone: 'UTC', enabled: 0,
+  observation_window_minutes: 60, min_interval_minutes: 60, max_daily_minutes: 240, delivery_settings_json: '{}',
+  effective_from: null, sync_version: 3, updated_at: '2026-10-20T10:00:00.000Z', deleted_at: null, gateway_device_eui: GATEWAY_EUI,
+};
+for (const profile of ['bcm2712', 'bcm2709']) {
+  for (const [label, nodeId, run] of [['normal', 'sync-bootstrap-build', runNormalBootstrap], ['forced', 'sync-force-build', runForcedBootstrap]]) {
+    test(profile + ' R19-7 ' + label + ' bootstrap policy items carry no gateway_device_eui', async () => {
+      const node = loadFlows(profile).find((candidate) => candidate.id === nodeId);
+      const result = await run(node, { peerState: 'supported', policyRows: [R19_POLICY_ROW] });
+      assert.equal(result.payload.irrigationPolicies.length, 1, JSON.stringify(result.errors));
+      const policy = result.payload.irrigationPolicies[0];
+      assert.equal(Object.prototype.hasOwnProperty.call(policy, 'gateway_device_eui'), false);
+      assert.equal(policy.policy_uuid, R19_POLICY_ROW.policy_uuid);
+    });
+  }
 }

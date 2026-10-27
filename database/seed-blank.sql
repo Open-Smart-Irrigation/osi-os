@@ -380,7 +380,6 @@ CREATE TABLE sdi12_recipe_deployments (
   compatible_at TEXT,
   updated_at TEXT NOT NULL
 );
-
 CREATE INDEX idx_sdi12_recipe_deployments_status
   ON sdi12_recipe_deployments(status);
 
@@ -391,6 +390,7 @@ CREATE TABLE sdi12_identify_attempts (
   requested_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
 -- Journal V2 durable replication and media state (migrations 0043/0044).
 CREATE TABLE journal_authority_state (
   workspace_uuid TEXT PRIMARY KEY,
@@ -7414,7 +7414,88 @@ CREATE TABLE IF NOT EXISTS zone_rain_source (
   selected_by_uuid TEXT,
   updated_at       TEXT NOT NULL
 );
+-- Policy and occurrence references are application-validated. They deliberately
+-- have no physical foreign keys so old zone/device lifecycle writes preserve the
+-- immutable decision history.
 
+CREATE TABLE IF NOT EXISTS irrigation_policies (
+  policy_uuid                 TEXT PRIMARY KEY,
+  zone_uuid                   TEXT NOT NULL,
+  condition_json              TEXT NOT NULL CHECK (json_valid(condition_json) AND json_type(condition_json) = 'object'),
+  timezone                    TEXT NOT NULL,
+  enabled                     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  observation_window_minutes  INTEGER NOT NULL DEFAULT 60 CHECK (observation_window_minutes BETWEEN 1 AND 1440),
+  min_interval_minutes        INTEGER NOT NULL DEFAULT 60 CHECK (min_interval_minutes BETWEEN 0 AND 1440),
+  max_daily_minutes           INTEGER NOT NULL DEFAULT 240 CHECK (max_daily_minutes BETWEEN 1 AND 1440),
+  delivery_settings_json      TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(delivery_settings_json) AND json_type(delivery_settings_json) = 'object'),
+  effective_from              TEXT,
+  sync_version                INTEGER NOT NULL DEFAULT 1,
+  created_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  deleted_at                  TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_irrigation_policies_live_zone
+  ON irrigation_policies(zone_uuid) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_irrigation_policies_zone_history
+  ON irrigation_policies(zone_uuid, deleted_at, updated_at);
+
+ALTER TABLE valve_schedules ADD COLUMN condition_policy_uuid TEXT;
+ALTER TABLE valve_schedules ADD COLUMN effective_from TEXT;
+ALTER TABLE valve_settings ADD COLUMN conditional_control_json TEXT;
+ALTER TABLE valve_schedule_pushes ADD COLUMN transport_json TEXT;
+ALTER TABLE valve_actuation_expectations ADD COLUMN transport_json TEXT;
+ALTER TABLE sync_link_state ADD COLUMN peer_capabilities_json TEXT;
+ALTER TABLE sync_link_state ADD COLUMN peer_capabilities_context_json TEXT;
+ALTER TABLE sync_link_state ADD COLUMN peer_capabilities_request_id TEXT;
+ALTER TABLE sync_link_state ADD COLUMN link_attempt_json TEXT;
+
+CREATE TABLE IF NOT EXISTS irrigation_occurrences (
+  schedule_uuid               TEXT NOT NULL,
+  local_date                  TEXT NOT NULL,
+  local_time                  TEXT NOT NULL,
+  policy_uuid                 TEXT,
+  zone_uuid                   TEXT,
+  device_eui                  TEXT NOT NULL,
+  due_at                      TEXT NOT NULL,
+  expires_at                  TEXT,
+  policy_revision             INTEGER,
+  schedule_revision           INTEGER,
+  policy_sync_version         INTEGER,
+  schedule_sync_version       INTEGER,
+  decision                    TEXT,
+  decision_reason             TEXT,
+  decision_evidence_json      TEXT,
+  decision_at                 TEXT,
+  requested_duration_minutes  INTEGER,
+  effective_duration_minutes  INTEGER,
+  command_id                  TEXT UNIQUE,
+  queue_id                    TEXT,
+  state                       TEXT NOT NULL DEFAULT 'PENDING' CHECK (state IN ('PENDING','CLAIMED','SKIPPED','RESERVED','ATTEMPTED','SENT','EXPIRED','UNKNOWN')),
+  reservation_start_at        TEXT,
+  reservation_end_at          TEXT,
+  reserved_minutes            INTEGER,
+  claimed_at                  TEXT,
+  attempted_at                TEXT,
+  sent_at                     TEXT,
+  observed_open_at            TEXT,
+  observed_close_at           TEXT,
+  created_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (schedule_uuid, local_date, local_time)
+);
+CREATE INDEX IF NOT EXISTS idx_irrigation_occurrences_device_due
+  ON irrigation_occurrences(device_eui, due_at);
+CREATE INDEX IF NOT EXISTS idx_irrigation_occurrences_policy_state
+  ON irrigation_occurrences(policy_uuid, state, due_at);
+CREATE INDEX IF NOT EXISTS idx_irrigation_occurrences_command
+  ON irrigation_occurrences(command_id) WHERE command_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS irrigation_runtime_state (
+  singleton_id             INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+  last_trusted_tick_at     TEXT,
+  last_decided_due_at      TEXT,
+  updated_at               TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 -- risk: additive
 -- 0074: Retain addressed Tensiomark evidence linked to canonical readings.
 CREATE TABLE IF NOT EXISTS tensiomark_observations (
@@ -7463,4 +7544,298 @@ BEGIN
     attempts = 0,
     next_attempt_at = NULL,
     last_error = NULL;
+  END;
+
+
+-- risk: additive
+-- 0077: conditional irrigation replication cache and guarded source triggers.
+--
+-- This migration replaces the legacy valve-schedule trigger definitions from
+-- 0024 without changing that historical migration.  Conditional resources are
+-- emitted only when the durable peer context still proves the exact current
+-- server, account, gateway and installation support.  A legacy schedule (one
+-- with neither conditional column set) retains the old linked-peer behavior.
+
+CREATE TABLE IF NOT EXISTS conditional_irrigation_sync_projections (
+  projection_kind     TEXT NOT NULL CHECK (projection_kind IN ('POLICY_RUNTIME','VALVE_RUNTIME','DECISION')),
+  projection_key      TEXT NOT NULL,
+  projection_revision INTEGER NOT NULL CHECK (projection_revision >= 1),
+  payload_hash        TEXT NOT NULL CHECK (length(payload_hash) = 64 AND payload_hash NOT GLOB '*[^0-9a-f]*'),
+  payload_json        TEXT NOT NULL CHECK (json_valid(payload_json)),
+  PRIMARY KEY (projection_kind, projection_key)
+);
+
+DROP TRIGGER IF EXISTS trg_sync_irrigation_policies_outbox_ai;
+CREATE TRIGGER trg_sync_irrigation_policies_outbox_ai
+AFTER INSERT ON irrigation_policies
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM sync_link_state s
+  JOIN installation_identity i ON i.singleton_id = 1
+  WHERE s.peer_node = 'cloud'
+    AND s.linked = 1
+    AND s.peer_capabilities_request_id IS NOT NULL
+    AND trim(s.peer_capabilities_request_id) <> ''
+    AND json_valid(s.peer_capabilities_json)
+    AND json_type(s.peer_capabilities_json) = 'array'
+    AND EXISTS (SELECT 1 FROM json_each(s.peer_capabilities_json) c WHERE c.value = 'conditional_irrigation_v1')
+    AND json_valid(s.peer_capabilities_context_json)
+    AND json_extract(s.peer_capabilities_context_json, '$.server_url') = s.server_url
+    AND json_extract(s.peer_capabilities_context_json, '$.cloud_user_id') = s.cloud_user_id
+    AND json_extract(s.peer_capabilities_context_json, '$.gateway_device_eui') = s.gateway_device_eui
+    AND json_extract(s.peer_capabilities_context_json, '$.installation_uuid') = s.installation_uuid
+    AND i.installation_uuid = s.installation_uuid
+    AND i.current_gateway_device_eui = s.gateway_device_eui
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'IRRIGATION_POLICY',
+    NEW.policy_uuid,
+    'IRRIGATION_POLICY_UPSERTED',
+    json_object(
+      'contract_version',            1,
+      'policy_uuid',                 NEW.policy_uuid,
+      'zone_uuid',                   NEW.zone_uuid,
+      'condition',                   json(NEW.condition_json),
+      'timezone',                    NEW.timezone,
+      'enabled',                     NEW.enabled,
+      'observation_window_minutes',  NEW.observation_window_minutes,
+      'min_interval_minutes',        NEW.min_interval_minutes,
+      'max_daily_minutes',           NEW.max_daily_minutes,
+      'delivery_settings',           json(NEW.delivery_settings_json),
+      'effective_from',              NEW.effective_from,
+      'sync_version',                NEW.sync_version,
+      'updated_at',                  NEW.updated_at,
+      'deleted_at',                  NEW.deleted_at
+    ),
+    NEW.sync_version,
+    COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    COALESCE(
+      NULLIF(trim((SELECT z.gateway_device_eui FROM irrigation_zones z WHERE z.zone_uuid = NEW.zone_uuid AND z.deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT s.gateway_device_eui FROM sync_link_state s WHERE s.peer_node = 'cloud')), '')
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS trg_sync_irrigation_policies_outbox_au;
+CREATE TRIGGER trg_sync_irrigation_policies_outbox_au
+AFTER UPDATE ON irrigation_policies
+FOR EACH ROW
+WHEN (
+    COALESCE(NEW.zone_uuid,'')                      <> COALESCE(OLD.zone_uuid,'') OR
+    COALESCE(NEW.condition_json,'')                 <> COALESCE(OLD.condition_json,'') OR
+    COALESCE(NEW.timezone,'')                       <> COALESCE(OLD.timezone,'') OR
+    COALESCE(NEW.enabled,0)                         <> COALESCE(OLD.enabled,0) OR
+    COALESCE(NEW.observation_window_minutes,0)      <> COALESCE(OLD.observation_window_minutes,0) OR
+    COALESCE(NEW.min_interval_minutes,0)            <> COALESCE(OLD.min_interval_minutes,0) OR
+    COALESCE(NEW.max_daily_minutes,0)               <> COALESCE(OLD.max_daily_minutes,0) OR
+    COALESCE(NEW.delivery_settings_json,'')          <> COALESCE(OLD.delivery_settings_json,'') OR
+    COALESCE(NEW.effective_from,'')                 <> COALESCE(OLD.effective_from,'') OR
+    COALESCE(NEW.sync_version,0)                    <> COALESCE(OLD.sync_version,0) OR
+    COALESCE(NEW.updated_at,'')                     <> COALESCE(OLD.updated_at,'') OR
+    COALESCE(NEW.deleted_at,'')                     <> COALESCE(OLD.deleted_at,'')
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM sync_link_state s
+    JOIN installation_identity i ON i.singleton_id = 1
+    WHERE s.peer_node = 'cloud'
+      AND s.linked = 1
+      AND s.peer_capabilities_request_id IS NOT NULL
+      AND trim(s.peer_capabilities_request_id) <> ''
+      AND json_valid(s.peer_capabilities_json)
+      AND json_type(s.peer_capabilities_json) = 'array'
+      AND EXISTS (SELECT 1 FROM json_each(s.peer_capabilities_json) c WHERE c.value = 'conditional_irrigation_v1')
+      AND json_valid(s.peer_capabilities_context_json)
+      AND json_extract(s.peer_capabilities_context_json, '$.server_url') = s.server_url
+      AND json_extract(s.peer_capabilities_context_json, '$.cloud_user_id') = s.cloud_user_id
+      AND json_extract(s.peer_capabilities_context_json, '$.gateway_device_eui') = s.gateway_device_eui
+      AND json_extract(s.peer_capabilities_context_json, '$.installation_uuid') = s.installation_uuid
+      AND i.installation_uuid = s.installation_uuid
+      AND i.current_gateway_device_eui = s.gateway_device_eui
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'IRRIGATION_POLICY',
+    NEW.policy_uuid,
+    'IRRIGATION_POLICY_UPSERTED',
+    json_object(
+      'contract_version',            1,
+      'policy_uuid',                 NEW.policy_uuid,
+      'zone_uuid',                   NEW.zone_uuid,
+      'condition',                   json(NEW.condition_json),
+      'timezone',                    NEW.timezone,
+      'enabled',                     NEW.enabled,
+      'observation_window_minutes',  NEW.observation_window_minutes,
+      'min_interval_minutes',        NEW.min_interval_minutes,
+      'max_daily_minutes',           NEW.max_daily_minutes,
+      'delivery_settings',           json(NEW.delivery_settings_json),
+      'effective_from',              NEW.effective_from,
+      'sync_version',                NEW.sync_version,
+      'updated_at',                  NEW.updated_at,
+      'deleted_at',                  NEW.deleted_at
+    ),
+    NEW.sync_version,
+    COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    COALESCE(
+      NULLIF(trim((SELECT z.gateway_device_eui FROM irrigation_zones z WHERE z.zone_uuid = NEW.zone_uuid AND z.deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT s.gateway_device_eui FROM sync_link_state s WHERE s.peer_node = 'cloud')), '')
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS trg_sync_valve_schedules_outbox_ai;
+CREATE TRIGGER trg_sync_valve_schedules_outbox_ai
+AFTER INSERT ON valve_schedules
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1
+  FROM sync_link_state s
+  WHERE s.peer_node = 'cloud'
+    AND s.linked = 1
+    AND (
+      (NEW.condition_policy_uuid IS NULL AND NEW.effective_from IS NULL)
+      OR EXISTS (
+        SELECT 1
+        FROM installation_identity i
+        WHERE i.singleton_id = 1
+          AND s.peer_capabilities_request_id IS NOT NULL
+          AND trim(s.peer_capabilities_request_id) <> ''
+          AND json_valid(s.peer_capabilities_json)
+          AND json_type(s.peer_capabilities_json) = 'array'
+          AND EXISTS (SELECT 1 FROM json_each(s.peer_capabilities_json) c WHERE c.value = 'conditional_irrigation_v1')
+          AND json_valid(s.peer_capabilities_context_json)
+          AND json_extract(s.peer_capabilities_context_json, '$.server_url') = s.server_url
+          AND json_extract(s.peer_capabilities_context_json, '$.cloud_user_id') = s.cloud_user_id
+          AND json_extract(s.peer_capabilities_context_json, '$.gateway_device_eui') = s.gateway_device_eui
+          AND json_extract(s.peer_capabilities_context_json, '$.installation_uuid') = s.installation_uuid
+          AND i.installation_uuid = s.installation_uuid
+          AND i.current_gateway_device_eui = s.gateway_device_eui
+      )
+    )
+)
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SCHEDULE',
+    NEW.schedule_uuid,
+    'VALVE_SCHEDULE_UPSERTED',
+    json_object(
+      'contract_version',       1,
+      'schedule_uuid',          NEW.schedule_uuid,
+      'device_eui',             NEW.device_eui,
+      'kind',                   NEW.kind,
+      'label',                  NEW.label,
+      'weekdays_mask',          NEW.weekdays_mask,
+      'start_time',             NEW.start_time,
+      'fire_at',                NEW.fire_at,
+      'duration_minutes',       NEW.duration_minutes,
+      'timezone',               NEW.timezone,
+      'enabled',                NEW.enabled,
+      'once_state',             NEW.once_state,
+      'condition_policy_uuid',  NEW.condition_policy_uuid,
+      'effective_from',         NEW.effective_from,
+      'deleted_at',             NEW.deleted_at,
+      'sync_version',           NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT d.gateway_device_eui FROM devices d WHERE UPPER(d.deveui) = UPPER(NEW.device_eui) AND d.deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT s.gateway_device_eui FROM sync_link_state s WHERE s.peer_node = 'cloud')), '')
+    )
+  );
+END;
+
+DROP TRIGGER IF EXISTS trg_sync_valve_schedules_outbox_au;
+CREATE TRIGGER trg_sync_valve_schedules_outbox_au
+AFTER UPDATE ON valve_schedules
+FOR EACH ROW
+WHEN (
+    COALESCE(NEW.kind,'')                    <> COALESCE(OLD.kind,'') OR
+    COALESCE(NEW.label,'')                   <> COALESCE(OLD.label,'') OR
+    COALESCE(NEW.weekdays_mask,0)            <> COALESCE(OLD.weekdays_mask,0) OR
+    COALESCE(NEW.start_time,'')              <> COALESCE(OLD.start_time,'') OR
+    COALESCE(NEW.fire_at,'')                 <> COALESCE(OLD.fire_at,'') OR
+    COALESCE(NEW.duration_minutes,0)         <> COALESCE(OLD.duration_minutes,0) OR
+    COALESCE(NEW.timezone,'')                <> COALESCE(OLD.timezone,'') OR
+    COALESCE(NEW.enabled,0)                  <> COALESCE(OLD.enabled,0) OR
+    COALESCE(NEW.once_state,'')              <> COALESCE(OLD.once_state,'') OR
+    COALESCE(NEW.condition_policy_uuid,'')   <> COALESCE(OLD.condition_policy_uuid,'') OR
+    COALESCE(NEW.effective_from,'')          <> COALESCE(OLD.effective_from,'') OR
+    COALESCE(NEW.deleted_at,'')              <> COALESCE(OLD.deleted_at,'') OR
+    COALESCE(NEW.sync_version,0)             <> COALESCE(OLD.sync_version,0)
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM sync_link_state s
+    WHERE s.peer_node = 'cloud'
+      AND s.linked = 1
+      AND (
+        (NEW.condition_policy_uuid IS NULL AND NEW.effective_from IS NULL)
+        OR EXISTS (
+          SELECT 1
+          FROM installation_identity i
+          WHERE i.singleton_id = 1
+            AND s.peer_capabilities_request_id IS NOT NULL
+            AND trim(s.peer_capabilities_request_id) <> ''
+            AND json_valid(s.peer_capabilities_json)
+            AND json_type(s.peer_capabilities_json) = 'array'
+            AND EXISTS (SELECT 1 FROM json_each(s.peer_capabilities_json) c WHERE c.value = 'conditional_irrigation_v1')
+            AND json_valid(s.peer_capabilities_context_json)
+            AND json_extract(s.peer_capabilities_context_json, '$.server_url') = s.server_url
+            AND json_extract(s.peer_capabilities_context_json, '$.cloud_user_id') = s.cloud_user_id
+            AND json_extract(s.peer_capabilities_context_json, '$.gateway_device_eui') = s.gateway_device_eui
+            AND json_extract(s.peer_capabilities_context_json, '$.installation_uuid') = s.installation_uuid
+            AND i.installation_uuid = s.installation_uuid
+            AND i.current_gateway_device_eui = s.gateway_device_eui
+        )
+      )
+  )
+BEGIN
+  INSERT INTO sync_outbox(
+    event_uuid, aggregate_type, aggregate_key, op, payload_json,
+    sync_version, occurred_at, gateway_device_eui
+  ) VALUES (
+    lower(hex(randomblob(16))),
+    'VALVE_SCHEDULE',
+    NEW.schedule_uuid,
+    'VALVE_SCHEDULE_UPSERTED',
+    json_object(
+      'contract_version',       1,
+      'schedule_uuid',          NEW.schedule_uuid,
+      'device_eui',             NEW.device_eui,
+      'kind',                   NEW.kind,
+      'label',                  NEW.label,
+      'weekdays_mask',          NEW.weekdays_mask,
+      'start_time',             NEW.start_time,
+      'fire_at',                NEW.fire_at,
+      'duration_minutes',       NEW.duration_minutes,
+      'timezone',               NEW.timezone,
+      'enabled',                NEW.enabled,
+      'once_state',             NEW.once_state,
+      'condition_policy_uuid',  NEW.condition_policy_uuid,
+      'effective_from',         NEW.effective_from,
+      'deleted_at',             NEW.deleted_at,
+      'sync_version',           NEW.sync_version
+    ),
+    NEW.sync_version,
+    strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    COALESCE(
+      NULLIF(trim((SELECT d.gateway_device_eui FROM devices d WHERE UPPER(d.deveui) = UPPER(NEW.device_eui) AND d.deleted_at IS NULL)), ''),
+      NULLIF(trim((SELECT s.gateway_device_eui FROM sync_link_state s WHERE s.peer_node = 'cloud')), '')
+    )
+  );
 END;

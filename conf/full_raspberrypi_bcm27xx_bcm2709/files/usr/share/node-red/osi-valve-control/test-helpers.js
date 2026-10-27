@@ -8,7 +8,7 @@ function facade(raw) {
   return {
     get: (sql, params) => Promise.resolve(raw.prepare(sql).get(...(params || []))),
     all: (sql, params) => Promise.resolve(raw.prepare(sql).all(...(params || []))),
-    run: (sql, params) => { const r = raw.prepare(sql).run(...(params || [])); return Promise.resolve({ changes: Number(r.changes) }); },
+    run: (sql, params) => { raw.prepare(sql).run(...(params || [])); return Promise.resolve(undefined); },
     async transaction(executor) {
       raw.exec('BEGIN IMMEDIATE');
       try { const out = await executor(facade(raw)); raw.exec('COMMIT'); return out; }
@@ -90,9 +90,14 @@ async function linkCloud(db, opts) {
 // enqueue() appends the MQTT downlink messages push.js builds, getQueue() reads it, and
 // drain(n) removes the first n items as the valve's uplinks would (Class A: one downlink per
 // uplink). Each item keeps fPort and the payload as upper-case hex.
+// `transport` is the same queue behind the gRPC adapter shape dispatch.js uses
+// (getDeviceQueue / flushDeviceQueue / enqueueDownlink with queue IDs), so a test can drive
+// either the MQTT fallback or the production transport path against one fake.
 function fakeChirpStack() {
   const queue = [];
   const log = { flushes: 0, enqueued: [] };
+  let nextId = 0;
+  const plain = (q) => ({ fPort: q.fPort, hex: q.hex });
   return {
     log,
     flushQueue: async () => { log.flushes += 1; queue.length = 0; return { statusCode: 200 }; },
@@ -103,8 +108,19 @@ function fakeChirpStack() {
         log.enqueued.push(item);
       }
     },
-    getQueue: () => queue.map((q) => Object.assign({}, q)),
-    drain: (n) => queue.splice(0, n == null ? queue.length : n),
+    getQueue: () => queue.map(plain),
+    drain: (n) => queue.splice(0, n == null ? queue.length : n).map(plain),
+    transport: {
+      async getDeviceQueue() { return queue.map((q) => ({ id: q.id, fPort: q.fPort, data: Buffer.from(q.hex, 'hex').toString('base64'), isPending: false })); },
+      async flushDeviceQueue() { log.flushes += 1; queue.length = 0; return { statusCode: 200 }; },
+      async enqueueDownlink(item) {
+        nextId += 1;
+        const entry = { id: 'fq-' + nextId, fPort: Number(item.fPort), hex: Buffer.from(item.data, 'base64').toString('hex').toUpperCase() };
+        queue.push(entry);
+        log.enqueued.push(plain(entry));
+        return { id: entry.id };
+      },
+    },
   };
 }
 

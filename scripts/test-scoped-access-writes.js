@@ -13,6 +13,14 @@ const {
 const scopeHelper = require(
   '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper'
 );
+const valveControl = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control'
+);
+const commandLedger = require(
+  '../conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger'
+);
+const valvePush = valveControl.push;
+const valveStore = valveControl.store;
 
 const AUTH_SECRET = 'scoped-access-test-secret';
 const ENV = {
@@ -20,7 +28,97 @@ const ENV = {
   OSI_SCOPED_ACCESS: '1',
 };
 
-function valveRequest(userId, username, deveui = 'VALVE1') {
+// The fixture uses a real ChirpStack EUI so authorization, persistence,
+// encoding, and transport all receive the same identity. No post-authorization
+// rewrite is permitted: that would allow the scope decision and physical
+// effect to target different devices.
+const VALVE_EUI = '0016C001F1000001';
+const TRANSPORT_ENV = {
+  ...ENV,
+  CHIRPSTACK_APP_ACTUATORS: 'scoped-access-test',
+  DEVICE_EUI: '0016C001F1000002',
+};
+
+function controlledRuntime() {
+  const base = Date.parse('2026-10-18T10:00:00.000Z');
+  const bootId = 'scoped-access-test-boot';
+  const fs = {
+    readFileSync(file) {
+      if (file === '/proc/sys/kernel/random/boot_id') return `${bootId}\n`;
+      if (file === '/proc/uptime') return '0 0\n';
+      if (file === '/var/run/osi-irrigation-clock.json') {
+        return JSON.stringify({ boot_id: bootId, epoch_ms: base, uptime_ms: 0, stratum: 1 });
+      }
+      throw Object.assign(new Error('fixture path unavailable'), { code: 'ENOENT' });
+    },
+  };
+  return {
+    clockOptions: {
+      fs,
+      bootPath: '/proc/sys/kernel/random/boot_id',
+      uptimePath: '/proc/uptime',
+      markerPath: '/var/run/osi-irrigation-clock.json',
+      rejectionPath: '/tmp/scoped-access-test-clock-rejection.json',
+      fallbackPath: '/tmp/scoped-access-test-clock-rejection-fallback.json',
+    },
+    runtimeNow: () => base,
+  };
+}
+
+function encoderLibraries(db) {
+  return {
+    require(name) {
+      if (name === 'osi-db-helper') {
+        return { ok: true, value: { Database: function Database() { return facadeDb(db); } } };
+      }
+      if (name === 'osi-command-ledger') return { ok: true, value: commandLedger };
+      if (name === 'osi-valve-control') {
+        return {
+          ok: true,
+          value: {
+            ...valveControl,
+            executeValveAttempt(args) {
+              return valveControl.executeValveAttempt({ ...args, trustedContext: controlledRuntime() });
+            },
+          },
+        };
+      }
+      return { ok: false, error: `unregistered in scoped-access encoder: ${name}` };
+    },
+  };
+}
+
+async function executeValveChain(db, msg, env = ENV) {
+  const authorized = await executeFunction(loadNode('write-strega-expectation'), { msg, env, db });
+  if (!authorized.result) return { authorized, transport: null, downlinkCalls: [] };
+  const downlinkCalls = [];
+  const transport = await executeFunction(loadNode('cdbaa3891d40d7a1'), {
+    msg: authorized.result,
+    env: { ...TRANSPORT_ENV, ...env, CHIRPSTACK_APP_ACTUATORS: 'scoped-access-test' },
+    db,
+    osiLibModules: {},
+    libOverrides: {
+      osiLib: encoderLibraries(db),
+      chirpstack: {
+        createProvisioningClientFromEnv() {
+          return {
+            async enqueueDownlink(item) {
+              downlinkCalls.push(item);
+              return { id: `scoped-access-queue-${downlinkCalls.length}` };
+            },
+          };
+        },
+      },
+    },
+  });
+  return { authorized, transport, downlinkCalls };
+}
+
+function assertDownlinkCount(response, expected, message) {
+  assert.equal(response.downlinkCalls.length, expected, message);
+}
+
+function valveRequest(userId, username, deveui = VALVE_EUI) {
   return {
     // Node-RED's http in node always sets _msgid; the valve route refuses a
     // request without one (osi-os #377).
@@ -73,9 +171,9 @@ async function executeValveBoundary(db, userId, username, deveui) {
 }
 
 test('W1: valve boundary allows in-scope researchers and records the actor', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const response = await executeValveBoundary(db, 2, 'res1', 'VALVE1');
+    const response = await executeValveBoundary(db, 2, 'res1', VALVE_EUI);
     assert.ok(response.result[0]);
     assert.equal(response.result[0].actor_user_uuid, 'u-res1');
   } finally {
@@ -84,16 +182,16 @@ test('W1: valve boundary allows in-scope researchers and records the actor', asy
 });
 
 test('W1: valve boundary hides foreign devices and rejects viewers or disabled users', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const foreign = await executeValveBoundary(db, 1, 'admin1', 'VALVE1');
+    const foreign = await executeValveBoundary(db, 1, 'admin1', VALVE_EUI);
     assert.equal(foreign.result[1].statusCode, 404);
 
-    const viewer = await executeValveBoundary(db, 3, 'view1', 'VALVE1');
+    const viewer = await executeValveBoundary(db, 3, 'view1', VALVE_EUI);
     assert.equal(viewer.result[1].statusCode, 403);
 
     db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
-    const disabled = await executeValveBoundary(db, 2, 'res1', 'VALVE1');
+    const disabled = await executeValveBoundary(db, 2, 'res1', VALVE_EUI);
     assert.equal(disabled.result[1].statusCode, 403);
   } finally {
     db.close();
@@ -108,13 +206,13 @@ function expectationMessage(actorUuid = 'u-res1', commandId = 'manual-scope-test
       command_type: 'OPEN_FOR_DURATION',
       action: 'OPEN_FOR_DURATION',
       duration_minutes: 10,
-      device_eui: 'VALVE1',
+      device_eui: VALVE_EUI,
       zone_id: 1,
       command_id: commandId,
     },
     payload: {
       type: 'actuator_command',
-      device: { devEui: 'VALVE1', zone_id: 1 },
+      device: { devEui: VALVE_EUI, zone_id: 1 },
       data: {
         action: 'OPEN_FOR_DURATION',
         duration_minutes: 10,
@@ -125,14 +223,11 @@ function expectationMessage(actorUuid = 'u-res1', commandId = 'manual-scope-test
 
 test('W1: enqueue rechecks fresh scope and records applied-command originator', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(),
-      env: ENV,
-      db,
-    });
-    assert.ok(response.result, 'authorized command continues to downlink');
+    const response = await executeValveChain(db, expectationMessage());
+    assert.ok(response.transport && response.transport.result[1], 'authorized command reaches the encoder and downlink boundary');
+    assertDownlinkCount(response, 1, 'an authorized command must enqueue exactly one physical downlink');
     assert.equal(
       db.prepare(
         "SELECT originator FROM applied_commands WHERE command_id='manual-scope-test'"
@@ -146,7 +241,7 @@ test('W1: enqueue rechecks fresh scope and records applied-command originator', 
 
 test('W1: revocation immediately stops enqueue before physical effect', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     UPDATE irrigation_zones SET user_id = 1 WHERE id = 1;
     UPDATE user_zone_assignments
@@ -154,12 +249,9 @@ test('W1: revocation immediately stops enqueue before physical effect', async ()
      WHERE user_uuid = 'u-res1' AND zone_uuid = 'z-1';
   `);
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result, null, 'a revoked grant must never reach the downlink builder');
+    const response = await executeValveChain(db, expectationMessage());
+    assert.equal(response.transport.result[1], null, 'a revoked grant must never reach the downlink builder');
+    assertDownlinkCount(response, 0, 'a revoked grant must produce zero physical downlinks');
     assert.equal(
       db.prepare(
         "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
@@ -182,17 +274,14 @@ test('W1: revocation immediately stops enqueue before physical effect', async ()
 
 test('R4: a role-denied actor (real zone access, non-mutating role) also gets a terminal ack', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), VALVE1's zone --
+    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), the fixture valve's zone --
     // assertFreshDeviceAccess succeeds; canMutate is what denies this, a different throw
     // site than the revoked-grant case above, and both must queue the same kind of ack.
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage('u-view1'),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result, null, 'a role-denied actor must never reach the downlink builder');
+    const response = await executeValveChain(db, expectationMessage('u-view1'));
+    assert.equal(response.transport.result[1], null, 'a role-denied actor must never reach the downlink builder');
+    assertDownlinkCount(response, 0, 'a role-denied actor must produce zero physical downlinks');
     const applied = db.prepare(
       "SELECT result, result_detail FROM applied_commands WHERE command_id='manual-scope-test'"
     ).get();
@@ -206,7 +295,7 @@ test('R4: a role-denied actor (real zone access, non-mutating role) also gets a 
 
 test('X1: a transient scope-helper infra error is not treated as a scope decision', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // assertFreshDeviceAccess/canMutate throw httpError(status, ...) for a real deny
     // (.statusCode set). A plain Error with no .statusCode -- e.g. SQLITE_BUSY on the
@@ -220,13 +309,13 @@ test('X1: a transient scope-helper infra error is not treated as a scope decisio
         return true;
       },
     };
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
+    const failed = await executeFunction(loadNode('write-strega-expectation'), {
       msg: expectationMessage(),
       env: ENV,
       db,
       osiLibModules: { scope: fakeScope },
     });
-    assert.equal(response.result, null, 'must not actuate while the scope decision is unresolved');
+    assert.equal(failed.result._stregaDispatchError.code, 'write_failed', 'must not actuate while the scope decision is unresolved');
     assert.equal(
       db.prepare(
         "SELECT COUNT(*) AS n FROM applied_commands WHERE command_id='manual-scope-test'"
@@ -240,8 +329,8 @@ test('X1: a transient scope-helper infra error is not treated as a scope decisio
       ).get().n,
       0
     );
-    assert.equal(response.errors.length, 1, 'the failure must surface through the generic error path, not be swallowed');
-    assert.match(response.errors[0], /SQLITE_BUSY/);
+    assert.equal(failed.errors.length, 1, 'the failure must surface through the generic error path, not be swallowed');
+    assert.match(failed.errors[0], /SQLITE_BUSY/);
   } finally {
     db.close();
   }
@@ -271,7 +360,7 @@ const STREGA_TIMED_OPEN_BODY = { action: 'open', unit: 'minutes', amount: 5 };
 // authorize+fanout. Returns either an HTTP-denial msg or the constructed actuatorMsg.
 async function runStregaTimedChain(db, userId, username, body, env = ENV) {
   const authResult = await executeFunction(loadNode('put-strega-timed-auth-fn'), {
-    msg: stregaTimedRequest(userId, username, 'VALVE1', body),
+    msg: stregaTimedRequest(userId, username, VALVE_EUI, body),
     env,
     db,
   });
@@ -294,7 +383,7 @@ async function runStregaTimedChain(db, userId, username, body, env = ENV) {
 
 test('X2: a granted researcher actuates a timed STREGA action with the actor propagated', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const { denied, actuatorMsg } = await runStregaTimedChain(db, 2, 'res1', STREGA_TIMED_OPEN_BODY);
     assert.equal(denied, null, 'a granted researcher must not be denied');
@@ -302,14 +391,11 @@ test('X2: a granted researcher actuates a timed STREGA action with the actor pro
     assert.equal(actuatorMsg.actor_user_uuid, 'u-res1');
     assert.equal(actuatorMsg._actorUserUuid, 'u-res1');
 
-    const written = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: actuatorMsg,
-      env: ENV,
-      db,
-    });
-    assert.ok(written.result, 'the actor must actually cross into write-strega-expectation and actuate');
+    const written = await executeValveChain(db, actuatorMsg);
+    assert.ok(written.transport && written.transport.result[1], 'the actor must cross authorization, expectation, and transport boundaries');
+    assertDownlinkCount(written, 1, 'an authorized timed action must enqueue exactly one physical downlink');
     assert.equal(
-      db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE device_eui='VALVE1'").get().n,
+      db.prepare('SELECT COUNT(*) AS n FROM valve_actuation_expectations').get().n,
       1
     );
   } finally {
@@ -319,8 +405,8 @@ test('X2: a granted researcher actuates a timed STREGA action with the actor pro
 
 test('X2: a revoked claimer is HTTP-denied with no actuator message', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
-  // Reassign z-1 away from res1 (VALVE1's own devices.user_id stays 2=res1, so the legacy
+  const db = seedScopedDb(VALVE_EUI);
+  // Reassign z-1 away from res1 (the fixture valve's own devices.user_id stays 2=res1, so the legacy
   // ownership SQL in put-strega-timed-auth-fn still finds the row) and revoke res1's grant
   // to it too (seedScopedDb grants res1 both ownership and an explicit g-1 grant) -- a fresh
   // scope check must still deny it, mirroring the "W1: revocation immediately stops enqueue"
@@ -341,8 +427,8 @@ test('X2: a revoked claimer is HTTP-denied with no actuator message', async () =
 
 test('X2: a viewer-role owner is HTTP-denied with no actuator message', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
-  // res1 still owns VALVE1's zone directly (assertFreshDeviceAccess passes); canMutate is
+  const db = seedScopedDb(VALVE_EUI);
+  // res1 still owns the fixture valve's zone directly (assertFreshDeviceAccess passes); canMutate is
   // what denies this -- a different throw site than the revoked-grant case above.
   db.exec("UPDATE users SET role = 'viewer' WHERE user_uuid = 'u-res1';");
   try {
@@ -357,7 +443,7 @@ test('X2: a viewer-role owner is HTTP-denied with no actuator message', async ()
 
 test('X2: flag-off preserves the legacy bearer-only behavior', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const { denied, actuatorMsg } = await runStregaTimedChain(
       db, 2, 'res1', STREGA_TIMED_OPEN_BODY, { ...ENV, OSI_SCOPED_ACCESS: '0' }
@@ -365,6 +451,9 @@ test('X2: flag-off preserves the legacy bearer-only behavior', async () => {
     assert.equal(denied, null, 'flag-off must not deny the device owner');
     assert.ok(actuatorMsg, 'flag-off must still build the actuator command');
     assert.equal(actuatorMsg.actor_user_uuid, null, 'flag-off never runs the scope block at all, so no actor is set');
+    const written = await executeValveChain(db, actuatorMsg, { ...ENV, OSI_SCOPED_ACCESS: '0' });
+    assert.ok(written.transport && written.transport.result[1], 'flag-off command must still cross the transport boundary');
+    assertDownlinkCount(written, 1, 'a flag-off timed action must enqueue exactly one physical downlink');
   } finally {
     db.close();
   }
@@ -372,7 +461,7 @@ test('X2: flag-off preserves the legacy bearer-only behavior', async () => {
 
 test('X2: the actor comes only from the verified bearer identity, never from the request body', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // A spoofed body cannot claim to be a different, more-privileged actor, and cannot
     // smuggle in the R2 system-actuation marker either -- the same invariant proven for the
@@ -412,19 +501,16 @@ test('X2: the actor comes only from the verified bearer identity, never from the
 // local-id sibling case directly below for the other half of that gate.
 test('E3: a scoped physical command without an actor is rejected fail-closed and never actuates', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const cloudCommandId = '900101';
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(null, cloudCommandId),
-      env: ENV,
-      db,
-    });
+    const response = await executeValveChain(db, expectationMessage(null, cloudCommandId));
     assert.equal(
-      response.result,
+      response.transport.result[1],
       null,
       'an actor-less physical command must never reach the downlink builder wired to this node\'s single output'
     );
+    assertDownlinkCount(response, 0, 'an actor-less cloud command must produce zero physical downlinks');
     assert.equal(
       db.prepare(
         `SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='${cloudCommandId}'`
@@ -460,19 +546,16 @@ test('E3: a scoped physical command without an actor is rejected fail-closed and
 // exactly the F93 poison (a permanently-stuck retry loop on the whole ack batch).
 test('E3: a scoped physical command without an actor, with a LOCAL commandId, is rejected fail-closed and queues no cloud ack', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const localCommandId = 'manual-scope-test';
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(null, localCommandId),
-      env: ENV,
-      db,
-    });
+    const response = await executeValveChain(db, expectationMessage(null, localCommandId));
     assert.equal(
-      response.result,
+      response.transport.result[1],
       null,
       'an actor-less physical command must never reach the downlink builder wired to this node\'s single output'
     );
+    assertDownlinkCount(response, 0, 'an actor-less local command must produce zero physical downlinks');
     assert.equal(
       db.prepare(
         `SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='${localCommandId}'`
@@ -500,17 +583,14 @@ test('E3: a scoped physical command without an actor, with a LOCAL commandId, is
 
 test('E3: a scoped actor with view-only zone access cannot actuate a valve', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), the zone VALVE1 lives
+    // u-view1 (role 'viewer') is genuinely granted to z-1 (g-2), the fixture valve's zone
     // in -- assertFreshDeviceAccess alone would have let this actor through. Before this
     // fix there was no role check at all on this path, only the device/zone-access check.
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage('u-view1'),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result, null, 'a viewer must never actuate a valve, even with real zone access');
+    const response = await executeValveChain(db, expectationMessage('u-view1'));
+    assert.equal(response.transport.result[1], null, 'a viewer must never actuate a valve, even with real zone access');
+    assertDownlinkCount(response, 0, 'a viewer must produce zero physical downlinks');
     assert.equal(
       db.prepare(
         "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
@@ -524,17 +604,14 @@ test('E3: a scoped actor with view-only zone access cannot actuate a valve', asy
 
 test('E3: flag-off preserves the legacy no-actor-required behavior', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: expectationMessage(null),
-      env: { ...ENV, OSI_SCOPED_ACCESS: '0' },
-      db,
-    });
-    assert.ok(response.result, 'flag-off must still accept a physical command with no actor at all');
+    const response = await executeValveChain(db, expectationMessage(null), { ...ENV, OSI_SCOPED_ACCESS: '0' });
+    assert.ok(response.transport && response.transport.result[1], 'flag-off must still accept a physical command with no actor at all');
+    assertDownlinkCount(response, 1, 'a flag-off physical command must enqueue exactly one downlink');
     assert.equal(
       db.prepare(
-        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='manual-scope-test'"
+        "SELECT COUNT(*) AS n FROM valve_actuation_expectations"
       ).get().n,
       1
     );
@@ -554,14 +631,14 @@ function noDurationExpectationMessage(actorUuid) {
     _stregaExpectationCommand: {
       command_type: 'VALVE_COMMAND',
       action: 'OPEN_FOR_DURATION',
-      device_eui: 'VALVE1',
+      device_eui: VALVE_EUI,
       zone_id: 1,
       command_id: actorUuid ? 'r3-no-duration-with-actor' : 'r3-no-duration-no-actor',
       // deliberately no duration_seconds / duration_minutes anywhere in this object.
     },
     payload: {
       type: 'actuator_command',
-      device: { devEui: 'VALVE1', zone_id: 1 },
+      device: { devEui: VALVE_EUI, zone_id: 1 },
       data: { action: 'OPEN_FOR_DURATION' },
     },
   };
@@ -569,14 +646,11 @@ function noDurationExpectationMessage(actorUuid) {
 
 test('R3: an actor-less, duration-less command is rejected by the actor gate, not passed through', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: noDurationExpectationMessage(null),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result, null, 'must never reach the downlink builder');
+    const response = await executeValveChain(db, noDurationExpectationMessage(null));
+    assert.equal(response.transport.result[1], null, 'must never reach the downlink builder');
+    assertDownlinkCount(response, 0, 'an actor-less malformed command must produce zero physical downlinks');
     const applied = db.prepare(
       "SELECT result, result_detail FROM applied_commands WHERE command_id='r3-no-duration-no-actor'"
     ).get();
@@ -600,14 +674,11 @@ test('R3: an actor-less, duration-less command is rejected by the actor gate, no
 
 test('R3: an authorized actor with an invalid/missing duration is rejected under scope, not passed through', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: noDurationExpectationMessage('u-res1'),
-      env: ENV,
-      db,
-    });
-    assert.equal(response.result, null, 'must never reach the downlink builder');
+    const response = await executeValveChain(db, noDurationExpectationMessage('u-res1'));
+    assert.equal(response.transport.result[1], null, 'must never reach the downlink builder');
+    assertDownlinkCount(response, 0, 'an authorized malformed command must produce zero physical downlinks');
     const applied = db.prepare(
       "SELECT result, result_detail FROM applied_commands WHERE command_id='r3-no-duration-with-actor'"
     ).get();
@@ -621,7 +692,7 @@ test('R3: an authorized actor with an invalid/missing duration is rejected under
 
 test('R3: flag-off keeps the legacy invalid-duration pass-through behavior', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('write-strega-expectation'), {
       msg: noDurationExpectationMessage(null),
@@ -650,7 +721,7 @@ test('R3: flag-off keeps the legacy invalid-duration pass-through behavior', asy
 // write-strega-expectation (see test-flows-wiring.js C5 / Route Command wires).
 test('R1: a cloud command with actor_user_uuid only in the payload crosses Route Command intact and enforces scope', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO user_zone_assignments (
       assignment_uuid, user_uuid, zone_uuid, assigned_by_user_uuid, created_at
@@ -661,7 +732,7 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
       payload: {
         commandType: 'VALVE_COMMAND',
         action: 'OPEN_FOR_DURATION',
-        deviceEui: 'VALVE1',
+        deviceEui: VALVE_EUI,
         duration_minutes: 10,
         commandId,
         actor_user_uuid: actorUuid,
@@ -681,16 +752,13 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
       actorUuid,
       'Route Command must copy the payload actor onto the message itself'
     );
-    return executeFunction(loadNode('write-strega-expectation'), {
-      msg: routedMsg,
-      env: ENV,
-      db,
-    });
+    return executeValveChain(db, routedMsg);
   }
   try {
-    // Granted researcher (owns VALVE1's zone directly): actuates.
+    // Granted researcher (owns the fixture valve's zone directly): actuates.
     const granted = await routeThenWrite('u-res1', 'r1-granted');
-    assert.ok(granted.result, 'a granted researcher must actuate');
+    assert.ok(granted.transport && granted.transport.result[1], 'a granted researcher must reach the transport boundary');
+    assertDownlinkCount(granted, 1, 'a granted cloud command must enqueue exactly one physical downlink');
     assert.equal(
       db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-granted'").get().n,
       1
@@ -701,7 +769,8 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
     scopeHelper._resetForTests();
     db.prepare("UPDATE user_zone_assignments SET deleted_at='2026-07-01' WHERE assignment_uuid='g-r1-admin'").run();
     const revoked = await routeThenWrite('u-admin', 'r1-revoked');
-    assert.equal(revoked.result, null, 'a revoked claimer must not actuate');
+    assert.equal(revoked.transport.result[1], null, 'a revoked claimer must not actuate');
+    assertDownlinkCount(revoked, 0, 'a revoked cloud claimer must produce zero physical downlinks');
     assert.equal(
       db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-revoked'").get().n,
       0
@@ -710,7 +779,8 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
     // Viewer with real zone access (g-2: u-view1 -> z-1): denied by role, not by zone access.
     scopeHelper._resetForTests();
     const viewer = await routeThenWrite('u-view1', 'r1-viewer');
-    assert.equal(viewer.result, null, 'a viewer must not actuate even with real zone access');
+    assert.equal(viewer.transport.result[1], null, 'a viewer must not actuate even with real zone access');
+    assertDownlinkCount(viewer, 0, 'a viewer cloud command must produce zero physical downlinks');
     assert.equal(
       db.prepare("SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE command_id='r1-viewer'").get().n,
       0
@@ -725,7 +795,7 @@ test('R1: a cloud command with actor_user_uuid only in the payload crosses Route
 // decision once scoped access is on -- warn, no ack, no expectation, no downlink.
 test('R2: a genuine scheduler dispatch (real message-level marker) actuates under scope with no actor', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const decision = await executeFunction(loadNode('5f0d2b7e9b9b1b3a'), {
       msg: {
@@ -735,7 +805,7 @@ test('R2: a genuine scheduler dispatch (real message-level marker) actuates unde
           trigger_metric: 'SWT_1',
           threshold_kpa: 20,
           duration_minutes: 10,
-          valve_deveui: 'VALVE1',
+          valve_deveui: VALVE_EUI,
           scheduling_mode: 'local',
           enabled_scope_holders: 1,
         },
@@ -752,15 +822,12 @@ test('R2: a genuine scheduler dispatch (real message-level marker) actuates unde
       'the scheduler must set the message-level system-actuation marker immediately before dispatch'
     );
 
-    const written = await executeFunction(loadNode('write-strega-expectation'), {
-      msg: actuatorMsg,
-      env: ENV,
-      db,
-    });
-    assert.ok(written.result, 'a genuine scheduler dispatch must actuate even with no actor, under scope');
+    const written = await executeValveChain(db, actuatorMsg);
+    assert.ok(written.transport && written.transport.result[1], 'a genuine scheduler dispatch must actuate even with no actor, under scope');
+    assertDownlinkCount(written, 1, 'a scheduler dispatch must enqueue exactly one physical downlink');
     assert.equal(
       db.prepare(
-        "SELECT COUNT(*) AS n FROM valve_actuation_expectations WHERE device_eui='VALVE1'"
+        'SELECT COUNT(*) AS n FROM valve_actuation_expectations'
       ).get().n,
       1
     );
@@ -771,7 +838,7 @@ test('R2: a genuine scheduler dispatch (real message-level marker) actuates unde
 
 test('R2: a payload/body-embedded system-actuation claim is never honored, only the true message-level flag', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // Every one of these is exactly what an HTTP request body or a cloud command payload
     // could set -- none of them is msg._systemActuation itself, which only the scheduler's
@@ -782,7 +849,7 @@ test('R2: a payload/body-embedded system-actuation claim is never honored, only 
       payload: {
         _systemActuation: true,
         type: 'actuator_command',
-        device: { devEui: 'VALVE1', zone_id: 1 },
+        device: { devEui: VALVE_EUI, zone_id: 1 },
         data: { action: 'OPEN_FOR_DURATION', duration_minutes: 10, _systemActuation: true },
       },
       body: { _systemActuation: true },
@@ -790,23 +857,20 @@ test('R2: a payload/body-embedded system-actuation claim is never honored, only 
       _stregaExpectationCommand: {
         command_type: 'VALVE_COMMAND',
         action: 'OPEN_FOR_DURATION',
-        device_eui: 'VALVE1',
+        device_eui: VALVE_EUI,
         zone_id: 1,
         duration_minutes: 10,
         command_id: 'r2-smuggle-attempt',
         _systemActuation: true,
       },
     };
-    const response = await executeFunction(loadNode('write-strega-expectation'), {
-      msg,
-      env: ENV,
-      db,
-    });
+    const response = await executeValveChain(db, msg);
     assert.equal(
-      response.result,
+      response.transport.result[1],
       null,
       'a payload/body-embedded marker must never exempt the actor requirement'
     );
+    assertDownlinkCount(response, 0, 'a forged system marker must produce zero physical downlinks');
     const applied = db.prepare(
       "SELECT result, result_detail FROM applied_commands WHERE command_id='r2-smuggle-attempt'"
     ).get();
@@ -825,7 +889,7 @@ test('R2: a payload/body-embedded system-actuation claim is never honored, only 
 });
 
 test('W2: schedule mutation allows grants, hides foreign zones, and rejects viewers', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const granted = await executeFunction(loadNode('70fcbea336401bd1'), {
       msg: scopedRequest(
@@ -877,7 +941,7 @@ test('W2: schedule mutation allows grants, hides foreign zones, and rejects view
 });
 
 test('W2: disable-all updates only researcher scope and rejects viewers', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO irrigation_schedules (
       irrigation_zone_id, trigger_metric, threshold_kpa,
@@ -928,7 +992,7 @@ test('W2: disable-all updates only researcher scope and rejects viewers', async 
 });
 
 test('E8: disable-all scopes an admin to owned-plus-granted zones like every other write surface', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO irrigation_schedules (
       irrigation_zone_id, trigger_metric, threshold_kpa,
@@ -968,7 +1032,7 @@ test('W2: scheduler query counts enabled scope holders and disables an empty zon
   assert.match(queryNode.func, /enabled_scope_holders/);
   assert.match(queryNode.func, /user_zone_assignments/);
 
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const decision = await executeFunction(loadNode('5f0d2b7e9b9b1b3a'), {
       msg: {
@@ -994,7 +1058,7 @@ test('W2: scheduler query counts enabled scope holders and disables an empty zon
 
 test('W3: scoped zone creation atomically grants the creator', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('scoped-zone-create-router'), {
       msg: scopedRequest(
@@ -1042,7 +1106,7 @@ test('W3: scoped zone creation atomically grants the creator', async () => {
 
 test('W3: sole-scope-holder delete tombstones grants and preserves detached plots', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO irrigation_zones (id, name, user_id, zone_uuid)
     VALUES (10, 'Delete me', 2, 'z-delete');
@@ -1085,7 +1149,7 @@ test('W3: sole-scope-holder delete tombstones grants and preserves detached plot
 
 test('W3: researcher cannot delete a multi-holder zone; admin can', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO irrigation_zones (id, name, user_id, zone_uuid)
     VALUES (11, 'Shared zone', 2, 'z-shared');
@@ -1132,7 +1196,7 @@ test('W3: researcher cannot delete a multi-holder zone; admin can', async () => 
 });
 
 test('W5: registration accepts an optional in-scope zone_id, unassigned for any writer', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // W3: no zone_id is legal for every mutation-capable role, researcher included.
     const researcherUnassigned = await executeFunction(loadNode('scoped-device-claim-router'), {
@@ -1229,7 +1293,7 @@ test('W5: registration accepts an optional in-scope zone_id, unassigned for any 
 });
 
 test('W5: flag-off registration ignores the scoped claim router', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(2, 'res1', 'POST', '/api/devices', {}, {
@@ -1249,7 +1313,7 @@ test('W5: flag-off registration ignores the scoped claim router', async () => {
 });
 
 test('W4: a foreign existing device is hidden before claim or reassignment', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const claim = await executeFunction(loadNode('scoped-device-claim-router'), {
       msg: scopedRequest(1, 'admin1', 'POST', '/api/devices', {}, {
@@ -1285,7 +1349,7 @@ test('W4: a foreign existing device is hidden before claim or reassignment', asy
 });
 
 test('P7: assignment only takes unassigned devices and names the conflict', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, sync_version, created_at, updated_at
@@ -1380,7 +1444,7 @@ test('P7: assignment only takes unassigned devices and names the conflict', asyn
 });
 
 test('E11: assigning an already assigned device to the same zone is accepted', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('scoped-device-assign-router'), {
       msg: scopedRequest(
@@ -1402,7 +1466,7 @@ test('E11: assigning an already assigned device to the same zone is accepted', a
 });
 
 test('P7: assignment keeps its role and target-zone write gates', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
@@ -1457,7 +1521,7 @@ test('P7: assignment keeps its role and target-zone write gates', async () => {
 });
 
 test('W4: device delete and weather-zone replacement enforce fresh scope', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const foreignDelete = await executeFunction(loadNode('scoped-device-delete-router'), {
       msg: scopedRequest(
@@ -1538,7 +1602,7 @@ const DEVICE_CONFIG_ROUTES = [
 ];
 
 test('W5: every device-config route fresh-checks write scope', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     for (const [index, [method, suffix]] of DEVICE_CONFIG_ROUTES.entries()) {
       scopeHelper._resetForTests();
@@ -1599,7 +1663,7 @@ test('W5: every device-config route fresh-checks write scope', async () => {
 });
 
 test('IB1: denied SDI-12 config cannot write, authorized config does write', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const deveui = 'AABBCCDDEEFF0001';
   try {
     db.prepare(
@@ -1680,7 +1744,7 @@ test('IB1: denied SDI-12 config cannot write, authorized config does write', asy
 });
 
 test('IB1: an unassigned SDI-12 node can be configured only by its owner or an admin', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const deveui = 'AABBCCDDEEFF0002';
   try {
     db.prepare(
@@ -1733,7 +1797,7 @@ test('IB1: an unassigned SDI-12 node can be configured only by its owner or an a
 });
 
 test('IB1: a researcher cannot configure an unassigned SDI-12 node owned by someone else', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const deveui = 'AABBCCDDEEFF0003';
   try {
     // Owned by the admin, in no zone: res1's zone assignments grant nothing here.
@@ -1766,7 +1830,7 @@ test('IB1: a researcher cannot configure an unassigned SDI-12 node owned by some
 });
 
 test('W5: flag-off device-config routing preserves each legacy branch', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     for (const [index, [method, suffix]] of DEVICE_CONFIG_ROUTES.entries()) {
       const path = `/api/devices/DENDRO1${suffix}`;
@@ -1798,7 +1862,7 @@ const ZONE_CONFIG_ROUTES = [
 ];
 
 test('W7: every zone-config route fresh-checks scope and records the actor', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     for (const [index, [method, path, params]] of ZONE_CONFIG_ROUTES.entries()) {
       scopeHelper._resetForTests();
@@ -1833,7 +1897,7 @@ test('W7: every zone-config route fresh-checks scope and records the actor', asy
 });
 
 test('W7: a grantee reaches the legacy zone write as the resource owner', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const guarded = await executeFunction(loadNode('scoped-zone-config-guard'), {
       msg: scopedRequest(
@@ -1874,7 +1938,7 @@ async function adminApi(db, userId, username, method, path, params = {}, body = 
 }
 
 test('W8: admin account CRUD omits hashes and protects the last enabled admin', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const created = await adminApi(
       db,
@@ -1954,7 +2018,7 @@ test('W8: admin account CRUD omits hashes and protects the last enabled admin', 
 });
 
 test('W8: serialized admin disable attempts leave at least one enabled admin', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const created = await adminApi(
       db,
@@ -1998,7 +2062,7 @@ test('W8: serialized admin disable attempts leave at least one enabled admin', a
 });
 
 test('W8: zone and plot grants invalidate into the next resolved scope', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const scopedDb = facadeDb(db);
   try {
     const zoneGrant = await adminApi(
@@ -2055,7 +2119,7 @@ test('W8: zone and plot grants invalidate into the next resolved scope', async (
 });
 
 test('E7: a missing zone_uuid on a grant POST is a 400, not a stringified-undefined 404', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // Before the fix, `String(isZoneGrant ? body.zone_uuid : body.plot_uuid || '')`
     // parsed as `isZoneGrant ? body.zone_uuid : (body.plot_uuid || '')`: a missing
@@ -2084,7 +2148,7 @@ test('E7: a missing zone_uuid on a grant POST is a 400, not a stringified-undefi
 });
 
 test('W8: every account and grant endpoint rejects non-admins', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const endpoints = [
     ['GET', '/api/users', {}],
     ['POST', '/api/users', {}],
@@ -2124,7 +2188,7 @@ function corruptRole(db, userUuid, role) {
 }
 
 test('E6: an unrecognized role fails closed on every mutation gate while reads stay scope-governed', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   corruptRole(db, 'u-res1', 'gibberish');
   try {
     // Reads are ungated by role entirely -- they must behave exactly per zone/plot scope,
@@ -2136,7 +2200,7 @@ test('E6: an unrecognized role fails closed on every mutation gate while reads s
       db,
     });
     const devices = db.prepare(devicesResponse.result[0].topic).all();
-    assert.deepEqual(devices.map((row) => row.deveui).sort(), ['DENDRO1', 'DENDRO2', 'VALVE1', 'WX1']);
+    assert.deepEqual(devices.map((row) => row.deveui).sort(), [VALVE_EUI, 'DENDRO1', 'DENDRO2', 'WX1']);
 
     scopeHelper._resetForTests();
     const schedule = await executeFunction(loadNode('70fcbea336401bd1'), {
@@ -2242,7 +2306,7 @@ test('E6: an unrecognized role fails closed on every mutation gate while reads s
           headers: {
             authorization: makeAuthHeader({ userId: 2, username: 'res1', secret: AUTH_SECRET }),
           },
-          params: { deveui: 'VALVE1' },
+          params: { deveui: VALVE_EUI },
         },
         payload: {},
       },
@@ -2260,8 +2324,10 @@ const REGISTER_ENV = {
   OSI_SCOPED_ACCESS: '1',
   DEVICE_EUI: '0016C001F1000001',
   CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_APP_ACTUATORS: 'app-actuators',
   CHIRPSTACK_PROFILE_KIWI: 'profile-kiwi',
   CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+  CHIRPSTACK_PROFILE_STREGA: 'profile-strega',
 };
 
 const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
@@ -2269,13 +2335,15 @@ const REGISTER_APPKEY = 'AABBCCDDEEFF00112233445566778899';
 const DEVICE_POST_ENV = {
   DEVICE_EUI: '0016C001F1000001',
   CHIRPSTACK_APP_SENSORS: 'app-sensors',
+  CHIRPSTACK_APP_ACTUATORS: 'app-actuators',
   CHIRPSTACK_PROFILE_LSN50: 'profile-lsn50',
+  CHIRPSTACK_PROFILE_STREGA: 'profile-strega',
 };
 
-async function applyDevicePost(db, deveui, zoneId) {
+async function applyDevicePost(db, deveui, zoneId, userId) {
   const row = db.prepare(
-    'SELECT deveui, user_id, type_id, gateway_device_eui, sync_version, irrigation_zone_id '
-      + 'FROM devices WHERE deveui = ?'
+    'SELECT d.*, vs.strega_generation '
+      + 'FROM devices d LEFT JOIN valve_settings vs ON vs.device_eui = d.deveui WHERE d.deveui = ?'
   ).get(deveui);
   const result = await executeFunction(loadNode('post-devices-insert'), {
     msg: {
@@ -2284,7 +2352,7 @@ async function applyDevicePost(db, deveui, zoneId) {
     },
     env: DEVICE_POST_ENV,
     flowState: {
-      new_device_user_id: row.user_id,
+      new_device_user_id: userId == null ? row.user_id : userId,
       new_device_deveui: row.deveui,
       new_device_name: row.deveui + ' repost',
       new_device_type: row.type_id,
@@ -2300,6 +2368,7 @@ function fakeChirpstackLib(tracker = { provisionCalls: 0 }) {
     createProvisioningClientFromEnv: () => ({
       ensureDeviceProvisioned: async (registration) => {
         tracker.provisionCalls += 1;
+        if (typeof tracker.beforeReturn === 'function') await tracker.beforeReturn(registration);
         return {
         devEui: registration.devEui,
         deviceAction: 'created',
@@ -2328,13 +2397,47 @@ function registerCommand(devEui, extras = {}) {
   };
 }
 
-async function applyRegister(db, devEui, extras) {
-  const tracker = { provisionCalls: 0 };
+async function applyRegister(db, devEui, extras, beforeReturn, { valveModules = valveControl, noValveHelper = false, noTransaction = false } = {}) {
+  const tracker = { provisionCalls: 0, beforeReturn };
+  const base = facadeDb(db);
+  const noTx = { get: base.get, all: base.all, run: base.run, close: base.close };
   const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
     msg: registerCommand(devEui, extras),
     env: REGISTER_ENV,
     db,
-    libOverrides: { chirpstack: fakeChirpstackLib(tracker) },
+    osiLibModules: { 'osi-valve-control': valveModules },
+    libOverrides: {
+      chirpstack: fakeChirpstackLib(tracker),
+      ...(noTransaction ? { osiDb: { Database: function Database() { return noTx; } } } : {}),
+      ...(noValveHelper ? { osiLib: { require: () => ({ ok: false, error: 'missing valve helper' }) } } : {}),
+    },
+  });
+  response.provisionCalls = tracker.provisionCalls;
+  return response;
+}
+
+async function prepareScopedValveLifecycle(db, deviceEui = '0016C001F1000001') {
+  const facade = facadeDb(db);
+  await valveStore.upsertSettings(facade, deviceEui, { strega_generation: 'GEN1' });
+  return facade.transaction((tx) => valvePush.prepareLifecycleClearRevisionTx(tx, {
+    deviceEui, generation: 'GEN1', reason: 'test_unclaim', now: '2026-10-19T12:00:00.000Z',
+  }));
+}
+
+async function applyLocalValveRegistration(db, { deviceEui = '0016C001F1000001', beforeReturn, valveModules = valveControl, noValveHelper = false, noTransaction = false } = {}) {
+  const prepared = await applyDevicePost(db, deviceEui, undefined, 2);
+  assert.ok(prepared.result && prepared.result[0], 'local registration preparation must continue to ChirpStack');
+  const tracker = { provisionCalls: 0, beforeReturn };
+  const base = facadeDb(db);
+  const noTx = { get: base.get, all: base.all, run: base.run, close: base.close };
+  const libOverrides = {
+    chirpstack: fakeChirpstackLib(tracker),
+    ...(noTransaction ? { osiDb: { Database: function Database() { return noTx; } } } : {}),
+    ...(noValveHelper ? { osiLib: { require: () => ({ ok: false, error: 'missing valve helper' }) } } : {}),
+  };
+  const response = await executeFunction(loadNode('cs-register-device-fn'), {
+    msg: prepared.result[0], env: DEVICE_POST_ENV, db,
+    osiLibModules: { 'osi-valve-control': valveModules }, libOverrides,
   });
   response.provisionCalls = tracker.provisionCalls;
   return response;
@@ -2351,8 +2454,134 @@ async function applyRegisterFlagOff(db, devEui, extras) {
   });
 }
 
-test('E6: re-posting an assigned device without zone_id preserves its zone', async () => {
+function seedLifecycleClaimTarget(db) {
+  db.prepare(
+    "INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, sync_version, created_at, updated_at) " +
+      "VALUES (?, 'Lifecycle valve', 'STREGA_VALVE', NULL, NULL, 1, '2026-01-01', '2026-01-01')"
+  ).run('0016C001F1000001');
+}
+
+function lifecycleControl(db, deviceEui = '0016C001F1000001') {
+  const row = db.prepare('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?').get(deviceEui);
+  return row && row.conditional_control_json ? JSON.parse(row.conditional_control_json) : null;
+}
+
+test('6b2a: decoded local STREGA claim invalidates an existing pending lifecycle clear', async () => {
   const db = seedScopedDb();
+  try {
+    seedLifecycleClaimTarget(db);
+    await prepareScopedValveLifecycle(db);
+    const response = await applyLocalValveRegistration(db);
+    assert.ok(response.result[0], 'local registration should continue after the guarded write');
+    assert.equal(response.provisionCalls, 1);
+    assert.equal(db.prepare("SELECT user_id FROM devices WHERE deveui='0016C001F1000001'").get().user_id, 2);
+    assert.equal(lifecycleControl(db).mode, 'FIXED');
+  } finally {
+    db.close();
+  }
+});
+
+test('6b2a: decoded cloud STREGA claim invalidates an existing pending lifecycle clear', async () => {
+  const db = seedScopedDb();
+  try {
+    seedLifecycleClaimTarget(db);
+    await prepareScopedValveLifecycle(db);
+    const response = await applyRegister(db, '0016C001F1000001', {
+      cloudUserId: 2002,
+      userUuid: 'u-res1',
+      deviceType: 'STREGA_VALVE',
+    });
+    const ack = response.result[0].specialAck;
+    assert.equal(ack.result, 'SUCCESS');
+    assert.equal(response.provisionCalls, 1);
+    assert.equal(db.prepare("SELECT user_id FROM devices WHERE deveui='0016C001F1000001'").get().user_id, 2);
+    assert.equal(lifecycleControl(db).mode, 'FIXED');
+  } finally {
+    db.close();
+  }
+});
+
+test('6b2a: local and cloud STREGA claims fail closed when the writer or transaction facade is missing', async () => {
+  for (const failure of ['local-helper', 'local-transaction', 'cloud-helper', 'cloud-transaction']) {
+    const db = seedScopedDb();
+    try {
+      seedLifecycleClaimTarget(db);
+      await prepareScopedValveLifecycle(db);
+      const response = failure === 'local-helper'
+        ? await applyLocalValveRegistration(db, { noValveHelper: true })
+        : failure === 'local-transaction'
+          ? await applyLocalValveRegistration(db, { noTransaction: true })
+          : failure === 'cloud-helper'
+            ? await applyRegister(db, '0016C001F1000001', {
+              cloudUserId: 2002, userUuid: 'u-res1', deviceType: 'STREGA_VALVE',
+            }, undefined, { noValveHelper: true })
+            : await applyRegister(db, '0016C001F1000001', {
+              cloudUserId: 2002, userUuid: 'u-res1', deviceType: 'STREGA_VALVE',
+            }, undefined, { noTransaction: true });
+      const failed = failure.startsWith('local-') ? response.result[1] : response.result[0].specialAck;
+      assert.equal(failure.startsWith('local-') ? failed.statusCode : failed.result, failure.startsWith('local-') ? 500 : 'FAILED', failure);
+      const detail = failure.startsWith('local-') ? response.result[1].payload : failed;
+      assert.match(JSON.stringify(detail), /strega_writer_unavailable|writer unavailable/i, failure);
+      assert.equal(db.prepare("SELECT user_id FROM devices WHERE deveui='0016C001F1000001'").get().user_id, null, failure);
+      assert.equal(lifecycleControl(db).mode, 'LIFECYCLE_CLEAR', failure);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('6b2a: local and cloud STREGA claims reject ownership changes while provisioning waits', async () => {
+  for (const path of ['local', 'cloud']) {
+    const db = seedScopedDb();
+    try {
+      seedLifecycleClaimTarget(db);
+      await prepareScopedValveLifecycle(db);
+      const beforeReturn = async () => {
+        db.prepare("UPDATE devices SET user_id=1, sync_version=sync_version+1 WHERE deveui='0016C001F1000001'").run();
+      };
+      const response = path === 'local'
+        ? await applyLocalValveRegistration(db, { beforeReturn })
+        : await applyRegister(db, '0016C001F1000001', {
+          cloudUserId: 2002, userUuid: 'u-res1', deviceType: 'STREGA_VALVE',
+        }, beforeReturn);
+      const failed = path === 'local' ? response.result[1] : response.result[0].specialAck;
+      assert.equal(path === 'local' ? failed.statusCode : failed.result, path === 'local' ? 500 : 'FAILED', path);
+      assert.match(JSON.stringify(path === 'local' ? failed.payload : failed), /claim_state_changed/i, path);
+      assert.equal(db.prepare("SELECT user_id FROM devices WHERE deveui='0016C001F1000001'").get().user_id, 1, path);
+      assert.equal(lifecycleControl(db).mode, 'LIFECYCLE_CLEAR', path);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('6b2a: local and cloud STREGA claims reject authorization changes while provisioning waits', async () => {
+  for (const path of ['local', 'cloud']) {
+    const db = seedScopedDb();
+    try {
+      seedLifecycleClaimTarget(db);
+      await prepareScopedValveLifecycle(db);
+      const beforeReturn = async () => {
+        db.prepare("UPDATE users SET disabled_at='2026-10-19T12:01:00.000Z' WHERE id=2").run();
+      };
+      const response = path === 'local'
+        ? await applyLocalValveRegistration(db, { beforeReturn })
+        : await applyRegister(db, '0016C001F1000001', {
+          cloudUserId: 2002, userUuid: 'u-res1', deviceType: 'STREGA_VALVE',
+        }, beforeReturn);
+      const failed = path === 'local' ? response.result[1] : response.result[0].specialAck;
+      assert.equal(path === 'local' ? failed.statusCode : failed.result, path === 'local' ? 500 : 'FAILED', path);
+      assert.match(JSON.stringify(path === 'local' ? failed.payload : failed), /claim_authorization_changed/i, path);
+      assert.equal(db.prepare("SELECT user_id FROM devices WHERE deveui='0016C001F1000001'").get().user_id, null, path);
+      assert.equal(lifecycleControl(db).mode, 'LIFECYCLE_CLEAR', path);
+    } finally {
+      db.close();
+    }
+  }
+});
+
+test('E6: re-posting an assigned device without zone_id preserves its zone', async () => {
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await applyDevicePost(db, 'DENDRO1');
     assert.ok(response.result[0]);
@@ -2364,7 +2593,7 @@ test('E6: re-posting an assigned device without zone_id preserves its zone', asy
 });
 
 test('E6: re-posting an assigned device into another zone is rejected without moving it', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     scopeHelper._resetForTests();
     const response = await executeFunction(loadNode('scoped-device-claim-router'), {
@@ -2386,7 +2615,7 @@ test('E6: re-posting an assigned device into another zone is rejected without mo
 });
 
 test('E6: re-posting an assigned device into the same zone is idempotent', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await applyDevicePost(db, 'DENDRO1', 1);
     assert.ok(response.result[0]);
@@ -2397,7 +2626,7 @@ test('E6: re-posting an assigned device into the same zone is idempotent', async
 });
 
 test('E7: deleting a zone unassigns members claimed by other users', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
@@ -2413,7 +2642,9 @@ test('E7: deleting a zone unassigns members claimed by other users', async () =>
       env: DEVICE_POST_ENV,
       db,
     });
-    db.exec(response.result[0].topic);
+    const mutation = response.result[1] || response.result[0];
+    if (response.result[0]) db.exec(response.result[0].topic);
+    else assert.equal(mutation.statusCode, 200);
     assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='DENDRO1'").get().irrigation_zone_id, null);
     assert.equal(db.prepare("SELECT irrigation_zone_id FROM devices WHERE deveui='OTHER1'").get().irrigation_zone_id, null);
   } finally {
@@ -2422,7 +2653,7 @@ test('E7: deleting a zone unassigns members claimed by other users', async () =>
 });
 
 test('E7: assignment conflicts identify a soft-deleted current zone', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec("UPDATE irrigation_zones SET deleted_at = '2026-08-13T00:00:00.000Z' WHERE id = 1");
   try {
     scopeHelper._resetForTests();
@@ -2458,7 +2689,7 @@ function seedRegisterCloudUserIds(db) {
 }
 
 test('X5: REGISTER_DEVICE refuses an EUI another account already claimed', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     seedRegisterCloudUserIds(db);
     const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 1001, userUuid: 'u-admin' });
@@ -2479,7 +2710,7 @@ test('X5: REGISTER_DEVICE refuses an EUI another account already claimed', async
 });
 
 test('X5: re-registering an EUI the same account already owns is idempotent', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     seedRegisterCloudUserIds(db);
     const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002 });
@@ -2494,7 +2725,7 @@ test('X5: re-registering an EUI the same account already owns is idempotent', as
 });
 
 test('N1: flag-off REGISTER_DEVICE still fences a cross-owner claim with the legacy FAILED ACK', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const tracker = { provisionCalls: 0 };
   try {
     seedRegisterCloudUserIds(db);
@@ -2530,7 +2761,7 @@ test('N1: flag-off REGISTER_DEVICE still fences a cross-owner claim with the leg
 });
 
 test('N1: flag-off REGISTER_DEVICE still rejects a type conflict before provisioning', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const tracker = { provisionCalls: 0 };
   try {
     seedRegisterCloudUserIds(db);
@@ -2555,7 +2786,7 @@ test('N1: flag-off REGISTER_DEVICE still rejects a type conflict before provisio
 });
 
 test('N2: REGISTER_DEVICE resolves the claimant by userUuid before cloud_user_id', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
@@ -2584,7 +2815,7 @@ test('N2: REGISTER_DEVICE resolves the claimant by userUuid before cloud_user_id
 });
 
 test('N2: an unmapped principal fails without mutation or ChirpStack provisioning', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at
@@ -2616,7 +2847,7 @@ test('N2: an unmapped principal fails without mutation or ChirpStack provisionin
 });
 
 test('N2: an unmapped principal is not treated as the owner of user 1 device', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   const tracker = { provisionCalls: 0 };
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-fn'), {
@@ -2641,7 +2872,7 @@ test('N2: an unmapped principal is not treated as the owner of user 1 device', a
 });
 
 test('R8: an unclaimed existing device is claimed, revived, provisioned, and assigned', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     INSERT INTO devices (
       deveui, name, type_id, user_id, irrigation_zone_id, sync_version,
@@ -2674,7 +2905,7 @@ test('R8: an unclaimed existing device is claimed, revived, provisioned, and ass
 });
 
 test('§10: a flag-off gateway ignores a cloud zoneUuid and keeps the legacy ACK shape', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await applyRegisterFlagOff(db, 'FLAGOFF1', { zoneUuid: 'z-1' });
     const ack = response.result[0].specialAck;
@@ -2700,7 +2931,7 @@ test('§10: a flag-off gateway ignores a cloud zoneUuid and keeps the legacy ACK
 });
 
 test('§10: the flag-off command ACK payload carries no zone keys', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const applied = await applyRegisterFlagOff(db, 'FLAGOFF2', { zoneUuid: 'z-1' });
     const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
@@ -2724,7 +2955,7 @@ test('§10: the flag-off command ACK payload carries no zone keys', async () => 
 });
 
 test('X9: a key-verification reconciliation flag survives the REGISTER_DEVICE ACK', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
       msg: {
@@ -2749,7 +2980,7 @@ test('X9: a key-verification reconciliation flag survives the REGISTER_DEVICE AC
 });
 
 test('§10: flag-off REGISTER_DEVICE ACK bytes omit the scoped verificationRequired field', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
       msg: {
@@ -2793,7 +3024,7 @@ test('X12: admin flow asserts that guarded SQL replacements changed their anchor
 });
 
 test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registration', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await applyRegister(db, 'CLOUDREG1', { zoneUuid: 'z-1' });
 
@@ -2811,7 +3042,7 @@ test('P9: REGISTER_DEVICE resolves zoneUuid and assigns the device on registrati
 });
 
 test('P9: an unknown or deleted zoneUuid registers unassigned with an ACK warning', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.prepare("UPDATE irrigation_zones SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = 2").run();
   try {
     const unknown = await applyRegister(db, 'CLOUDREG2', { zoneUuid: 'z-does-not-exist' });
@@ -2833,7 +3064,7 @@ test('P9: an unknown or deleted zoneUuid registers unassigned with an ACK warnin
 });
 
 test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await applyRegister(db, 'CLOUDREG4');
     assert.equal(response.result[0].specialAck.result, 'SUCCESS');
@@ -2849,7 +3080,7 @@ test('P9: REGISTER_DEVICE without zoneUuid keeps registering unassigned', async 
 });
 
 test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it already sits in', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     seedRegisterCloudUserIds(db);
     const response = await applyRegister(db, 'DENDRO1', { cloudUserId: 2002, zoneUuid: 'z-2' });
@@ -2865,7 +3096,7 @@ test('W4: a REGISTER_DEVICE replay never pulls a device out of the zone it alrea
 });
 
 test('P9: the command ACK payload carries the zone warning to the cloud', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const applied = await applyRegister(db, 'CLOUDREG5', { zoneUuid: 'z-nope' });
     const ackMessage = await executeFunction(loadNode('cs-reg-cloud-ack-fn'), {
@@ -2893,7 +3124,7 @@ function seedUnassignedDeleteTarget(db) {
 }
 
 test('W10: a researcher can delete an unassigned device', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   seedUnassignedDeleteTarget(db);
   try {
     const response = await executeFunction(loadNode('scoped-device-delete-router'), {
@@ -2921,7 +3152,7 @@ test('W10: a deleted device leaves the account-wide device list', async () => {
   // it does not tombstone) but must LEAVE the list every account now shares.
   // Without Task 1's d.user_id IS NOT NULL lifecycle filter, delete would be a
   // visual no-op in scoped mode.
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   seedUnassignedDeleteTarget(db);
   try {
     const before = await executeFunction(loadNode('get-devices-query'), {
@@ -2963,7 +3194,7 @@ test('W10: a deleted device leaves the account-wide device list', async () => {
 });
 
 test('W10: a viewer still cannot delete an unassigned device', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   seedUnassignedDeleteTarget(db);
   try {
     const response = await executeFunction(loadNode('scoped-device-delete-router'), {
@@ -2984,7 +3215,7 @@ test('W10: a viewer still cannot delete an unassigned device', async () => {
 });
 
 test('W10: the zone-assigned delete gate is unchanged', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     // admin1 has no write scope on zone 1, where DENDRO1 lives.
     const foreign = await executeFunction(loadNode('scoped-device-delete-router'), {
@@ -3072,7 +3303,7 @@ function systemWriteRequest(userId, username, body = {}) {
 
 test('PR-N: Reboot rejects a viewer with 403 under scope', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-reboot-fn'), {
       msg: systemWriteRequest(3, 'view1'),
@@ -3089,7 +3320,7 @@ test('PR-N: Reboot rejects a viewer with 403 under scope', async () => {
 
 test('PR-N: Reboot allows an admin under scope', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-reboot-fn'), {
       msg: systemWriteRequest(1, 'admin1'),
@@ -3106,7 +3337,7 @@ test('PR-N: Reboot allows an admin under scope', async () => {
 
 test('PR-N: Reboot flag-off preserves the legacy bearer-only behavior for a viewer', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-reboot-fn'), {
       msg: systemWriteRequest(3, 'view1'),
@@ -3122,7 +3353,7 @@ test('PR-N: Reboot flag-off preserves the legacy bearer-only behavior for a view
 
 test('PR-N: Fan Control rejects a viewer with 403 under scope', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-fan-fn'), {
       msg: systemWriteRequest(3, 'view1', { speed: 100 }),
@@ -3139,7 +3370,7 @@ test('PR-N: Fan Control rejects a viewer with 403 under scope', async () => {
 
 test('PR-N: Fan Control allows an admin past the role gate under scope', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-fan-fn'), {
       msg: systemWriteRequest(1, 'admin1', { speed: 100 }),
@@ -3171,7 +3402,7 @@ test('PR-N: Fan Control allows an admin past the role gate under scope', async (
 
 test('Fan Control: raw-PWM setup catches surface period-read/disable failures via node.warn', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-fan-fn'), {
       msg: systemWriteRequest(1, 'admin1', { speed: 100 }),
@@ -3199,7 +3430,7 @@ test('Fan Control: raw-PWM setup catches surface period-read/disable failures vi
 
 test('PR-N: Fan Control flag-off preserves the legacy bearer-only behavior for a viewer', async () => {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const response = await executeFunction(loadNode('sys-fan-fn'), {
       msg: systemWriteRequest(3, 'view1', { speed: 100 }),
@@ -3253,7 +3484,7 @@ async function postImprovementRequest(db, userId, username, env = ENV, libOverri
 }
 
 test('#400: a disabled account cannot file an improvement request and nothing is queued', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
     // Record every statement, so the test also pins that the refusal comes
@@ -3278,7 +3509,7 @@ test('#400: a disabled account cannot file an improvement request and nothing is
 });
 
 test('#400: an enabled account of any role still files an improvement request', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     const researcher = await postImprovementRequest(db, 2, 'res1');
     assert.equal(researcher.result.statusCode, 201);
@@ -3296,7 +3527,7 @@ test('#400: an enabled account of any role still files an improvement request', 
 });
 
 test('#400: flag-off filing is unchanged and never loads the scope helper', async () => {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     db.prepare("UPDATE users SET disabled_at = '2026-07-01' WHERE id = 2").run();
     const loaded = [];
@@ -3328,7 +3559,7 @@ test('#400: flag-off filing is unchanged and never loads the scope helper', asyn
 // refused as before. Scope here is what the helper grants: owned plus granted
 // zones, for an admin too.
 function seedSharedStation() {
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   db.exec(`
     UPDATE user_zone_assignments SET deleted_at = '2026-07-01' WHERE assignment_uuid = 'g-3';
     UPDATE devices SET gateway_device_eui = '00000000000000A1' WHERE deveui = 'WX1';
@@ -3560,7 +3791,7 @@ const OSI_LIB_UNTOUCHED = {
 
 async function runAdminSystemGuard(route, authorization, options = {}) {
   scopeHelper._resetForTests();
-  const db = seedScopedDb();
+  const db = seedScopedDb(VALVE_EUI);
   try {
     if (options.mutateDb) options.mutateDb(db);
     const msg = adminSystemWriteRequest(route, authorization);

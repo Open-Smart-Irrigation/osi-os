@@ -12,7 +12,7 @@ const source = forceSync.func;
 
 function outboxSection() {
   const start = source.indexOf('  const refreshOutboxPendingAfter = async () => {');
-  const end = source.indexOf('\n  if (!migrationPaused) {', start);
+  const end = source.indexOf('\n  if (!migrationPaused && !conditionalBootstrapRejected) {', start);
   assert.ok(start >= 0 && end > start, 'could not isolate Force Sync outbox section');
   return source.slice(start, end);
 }

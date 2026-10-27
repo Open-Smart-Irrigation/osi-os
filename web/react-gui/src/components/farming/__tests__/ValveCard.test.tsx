@@ -180,6 +180,19 @@ describe('StregaValveCard', () => {
         expect(screen.queryByRole('button', { name: /cancel queued open/i })).not.toBeInTheDocument();
     });
 
+    it('describes the legacy cancel button with the verbatim D04 text and offers it in a help button', async () => {
+        renderCard({
+            current_state: 'OPEN',
+            activeValveActuation: {
+                expectationId: 'vae-1',
+                reconciliationState: 'PENDING_OBSERVATION',
+            },
+        } as Partial<Device>);
+        const cancelBtn = await screen.findByRole('button', { name: /cancel queued open/i });
+        expect(cancelBtn).toHaveAccessibleDescription('Cancel deletes the pending command. It does not close a valve that is already open.');
+        expect(screen.getByRole('button', { name: 'About cancel' })).toBeInTheDocument();
+    });
+
     it('calls cancelIrrigation API for an active queued open without sending CLOSE', async () => {
         renderCard({
             current_state: 'OPEN',
@@ -489,5 +502,30 @@ describe('StregaValveCard enclosure history', () => {
         });
         await screen.findByText('not measured on Gen2');
         expect(screen.queryByTitle('View history')).not.toBeInTheDocument();
+    });
+
+    // R19 finding 1: removing a valve whose plan is still being cleared must say so instead of
+    // vanishing as a plain success; the card stays until the farmer acknowledges.
+    it.each([
+        ['clearing_scheduled', 'stregaValve.removedClearingScheduled'],
+        ['failed', 'stregaValve.removedClearingFailed'],
+    ])('after removal with valve_cleanup %s, shows the clearing state and waits for acknowledgement', async (outcome, key) => {
+        vi.mocked(devicesAPI.remove).mockResolvedValueOnce({ message: 'x', valve_cleanup: { outcome, may_still_hold_plan: true } } as never);
+        const { onRemove } = renderCard();
+        fireEvent.click(screen.getByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(screen.getByText('stregaValve.yesRemove'));
+        const notice = await screen.findByRole('status');
+        expect(notice).toHaveTextContent(key);
+        expect(onRemove).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText('stregaValve.removedNoticeOk'));
+        expect(onRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it('after removal with nothing to clear, calls onRemove at once', async () => {
+        vi.mocked(devicesAPI.remove).mockResolvedValueOnce({ message: 'Device removed successfully', valve_cleanup: { outcome: 'no_plan_to_clear', may_still_hold_plan: null } } as never);
+        const { onRemove } = renderCard();
+        fireEvent.click(screen.getByTitle('stregaValve.removeDeviceTitle'));
+        fireEvent.click(screen.getByText('stregaValve.yesRemove'));
+        await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(1));
     });
 });

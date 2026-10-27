@@ -172,6 +172,8 @@ for (const profile of profiles) {
     try {
       db.prepare("UPDATE devices SET deveui=? WHERE deveui='VALVE1'").run(EUI);
       const cs = { createProvisioningClientFromEnv() { creates++; events.push('create'); return {
+        async getDeviceQueue() { return []; },
+        async enqueueDownlink() { return { id: 'fixture-queue-item' }; },
         async flushDeviceQueue(eui) { assert.equal(eui, EUI); events.push('flush-start'); started(); try { await pending; } finally { events.push('flush-settled'); } },
         close() { closes++; events.push('close'); return []; }
       }; } };
@@ -180,20 +182,26 @@ for (const profile of profiles) {
       assert.equal(closes, 0, 'do not close a pending RPC');
       release();
       const out = await operation;
-      assert.equal(out.result[0].statusCode, 202, 'flush failure keeps existing best-effort API behavior');
+      // #515 (CMD-04, no MQTT fallback): a flush that did not settle fails the write closed with
+      // 503 transport_uncertain (push.transportFailure); the snapshot rows stay pending.
+      assert.equal(out.result[0].statusCode, rejectFlush ? 503 : 202);
+      if (rejectFlush) assert.equal(out.result[0].payload.error, 'transport_uncertain');
       assert.equal(creates, 1); assert.equal(closes, 1);
       assert.deepEqual(events, ['create', 'flush-start', 'flush-settled', 'close']);
       assert.ok(db.prepare('SELECT COUNT(*) AS n FROM valve_schedule_pushes').get().n > 0);
-      if (rejectFlush) assert.ok(out.warnings.some(w => w.includes('queue flush failed')));
+      if (rejectFlush) assert.ok(out.warnings.some(w => w.includes('queue flush uncertain')));
     } finally { release(); db.close(); }
   });
-  test(`${profile}: factory failure preserves best-effort pushes and warns`, async () => {
+  test(`${profile}: factory failure fails closed, keeps the snapshot pending and warns`, async () => {
     const db = H.seedScopedDb();
     try {
       db.prepare("UPDATE devices SET deveui=? WHERE deveui='VALVE1'").run(EUI);
       let creates = 0;
       const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() { creates++; throw new Error('fixture unavailable'); } });
-      assert.equal(out.result[0].statusCode, 202); assert.equal(creates, 1);
+      // #515: without a ChirpStack transport STREGA writes fail closed (no MQTT fallback).
+      assert.equal(out.result[0].statusCode, 503); assert.equal(out.result[0].payload.error, 'transport_uncertain');
+      assert.deepEqual(out.result[1], []); assert.equal(creates, 1);
+      assert.ok(db.prepare('SELECT COUNT(*) AS n FROM valve_schedule_pushes').get().n > 0);
       assert.ok(out.warnings.some(w => w.includes('client unavailable')));
     } finally { db.close(); }
   });
@@ -202,11 +210,12 @@ for (const profile of profiles) {
     let closes = 0;
     try {
       // Only this fault-injection test substitutes the API; all route tests above use VC.
-      const vc = { async handleHttpRequest(options) {
+      // The router itself is VC.liveValveApiRouter (#515), so the fake keeps the real module.
+      const vc = Object.assign({}, VC, { async handleHttpRequest(options) {
         await options.flushQueue(EUI);
         if (mode === 'api-rejection') throw new Error('fixture API rejection');
         return Object.assign(options.msg, { statusCode: 202, payload: { ok: true }, valvePushMessages: [{ topic: 'fixture/topic', payload: { fPort: 21 } }] });
-      } };
+      } });
       const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() { return {
         flushDeviceQueue: async () => {}, close() { closes++; if (mode === 'throw') throw new Error('fixture close error'); return mode === 'returned-errors' ? [new Error('fixture close error')] : []; }
       }; } }, vc);
@@ -239,11 +248,13 @@ for (const profile of profiles) {
       db.prepare("UPDATE devices SET deveui=? WHERE deveui='VALVE1'").run(EUI);
       const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() {
         creates++;
-        return { flushDeviceQueue() { flushes++; throw new Error('fixture synchronous flush failure'); }, close() { closes++; return []; } };
+        return { async getDeviceQueue() { return []; }, async enqueueDownlink() { return { id: 'fixture-queue-item' }; },
+          flushDeviceQueue() { flushes++; throw new Error('fixture synchronous flush failure'); }, close() { closes++; return []; } };
       } });
-      assert.equal(out.result[0].statusCode, 202);
+      // #515: the uncertain flush fails the write closed (503 transport_uncertain).
+      assert.equal(out.result[0].statusCode, 503); assert.equal(out.result[0].payload.error, 'transport_uncertain');
       assert.deepEqual([creates, flushes, closes], [1, 1, 1]);
-      assert.ok(out.warnings.some(w => w.includes('queue flush failed')));
+      assert.ok(out.warnings.some(w => w.includes('queue flush uncertain')));
       assert.ok(db.prepare('SELECT COUNT(*) AS n FROM valve_schedule_pushes').get().n > 0);
     } finally { db.close(); }
   });
@@ -253,7 +264,8 @@ for (const profile of profiles) {
     let creates = 0, closes = 0, flushes = 0;
     try {
       // These three cases deliberately substitute the API to reach router-only branches.
-      const vc = { handleHttpRequest(options) {
+      // The router itself is VC.liveValveApiRouter (#515), so the fake keeps the real module.
+      const vc = Object.assign({}, VC, { handleHttpRequest(options) {
         if (fault === 'synchronous API throw') throw new Error('fixture synchronous API failure');
         return (async () => {
           await options.flushQueue(EUI);
@@ -262,7 +274,7 @@ for (const profile of profiles) {
           if (fault === 'mapping failure') Object.defineProperty(out, 'valvePushMessages', { get() { throw new Error('fixture mapping failure'); } });
           return out;
         })();
-      } };
+      } });
       const out = await valve(db, request('POST', `/api/valves/${EUI}/plan/resend`), { createProvisioningClientFromEnv() {
         creates++; events.push('create');
         return { async flushDeviceQueue() { flushes++; events.push('flush'); }, close() { closes++; events.push('close'); return []; } };

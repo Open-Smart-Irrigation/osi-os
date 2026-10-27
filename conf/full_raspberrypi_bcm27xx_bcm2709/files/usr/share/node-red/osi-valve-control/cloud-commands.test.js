@@ -864,3 +864,105 @@ test('R5 M3: SET_VALVE_SCHEDULER_STATUS is not refused by a plan_conflict in the
   assert.equal(out.ok, true);
   assert.deepEqual((await pendingSnapshot(db)).map((r) => [r.fport, r.payload_hex]), [[21, '32']]);
 });
+
+// Night-run conformance fix (B-1, M-2): a cloud cancel over the transport reports its
+// outcome and the flush collateral in the ACK detail, and a handed-off open is a permanent
+// refusal rather than a success.
+async function seedTransportCancel(db) {
+  await insertExpectation(db, { id: 'e1', state: 'PENDING_OBSERVATION', commandedAt: '2026-10-19T08:00:00.000Z' });
+  await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-open', attempted_at: '2026-10-19T08:00:00.100Z' }), 'e1']);
+  await db.run("INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, transport_json) VALUES ('p-mon', ?, 'WEEKDAY_PLAN', 1, 15, '00', 'h', 'QUEUED', ?)",
+    [EUI, JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-plan', attempted_at: '2026-10-19T07:59:00.000Z' })]);
+}
+
+function cancelTransport(snapshot) {
+  return { getDeviceQueue: async () => snapshot, flushDeviceQueue: async () => ({}), enqueueDownlink: async () => { throw new Error('never'); } };
+}
+
+// Owner decision 2026-10-24 (fail closed, Codex P1 on PR #515): an open the pre-flush read still
+// lists unsent may be delivered before the flush, so it is a handed_off refusal, not a success.
+test('CANCEL_VALVE_ACTUATION over the transport: an open listed unsent before the flush is handed_off and names the collateral', async () => {
+  const { db } = await tempDb();
+  await seedTransportCancel(db);
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
+    transport: cancelTransport([{ id: 'q-plan', fPort: 15, data: 'AA==', isPending: false }, { id: 'q-open', fPort: 2, data: 'QQ8=', isPending: false }]),
+    now: new Date('2026-10-19T08:02:00.000Z'),
+  });
+  assert.equal(out.ok, false, JSON.stringify(out));
+  assert.equal(out.error, 'actuation_handed_off');
+  assert.equal(out.detail, 'outcome=handed_off; collateral=push:WEEKDAY_PLAN:1');
+  assert.deepEqual(out.collateral.map((c) => c.owner_id), ['p-mon']);
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e1'")).reconciliation_state, 'PENDING_OBSERVATION');
+});
+
+test('CANCEL_VALVE_ACTUATION over the transport: an open that never reached ChirpStack is a proven cancel', async () => {
+  const { db } = await tempDb();
+  await seedTransportCancel(db);
+  await db.run('UPDATE valve_actuation_expectations SET transport_json=? WHERE expectation_id=?', [JSON.stringify({ phase: 'INTENT', intent_at: '2026-10-19T08:00:00.000Z' }), 'e1']);
+  const transport = cancelTransport([{ id: 'q-plan', fPort: 15, data: 'AA==', isPending: false }]);
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, { transport, now: new Date('2026-10-19T08:02:00.000Z') });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.match(out.detail, /^outcome=cancelled/);
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e1'")).reconciliation_state, 'CANCELLED');
+});
+
+test('CANCEL_VALVE_ACTUATION over the transport: a handed-off open is a permanent refusal with its outcome', async () => {
+  const { db } = await tempDb();
+  await seedTransportCancel(db);
+  const out = await apply(db, { commandType: 'CANCEL_VALVE_ACTUATION', device_eui: EUI, expectation_id: 'e1' }, {
+    transport: cancelTransport([]), now: new Date('2026-10-19T08:02:00.000Z'),
+  });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'actuation_handed_off');
+  assert.equal(out.permanent, true);
+  assert.equal(out.detail, 'outcome=handed_off; collateral=push:WEEKDAY_PLAN:1');
+  assert.equal((await db.get("SELECT reconciliation_state FROM valve_actuation_expectations WHERE expectation_id='e1'")).reconciliation_state, 'PENDING_OBSERVATION');
+});
+
+// R19 finding 3: the cloud UPSERT_VALVE_SCHEDULE gets the local route's mode check, a revived
+// tombstone loses its policy binding, and Pause works even when the stored program is mixed.
+const POLICY_R19 = '33333333-3333-4333-8333-333333333333';
+async function seedR19Policy(db) {
+  await db.run("INSERT INTO irrigation_policies(policy_uuid,zone_uuid,condition_json,timezone,enabled) VALUES (?,?,?,?,0)", [POLICY_R19, 'zone-r19', JSON.stringify({ kind: 'DENDRO', minimum_stress: 'moderate', response_mode: 'fixed' }), 'UTC']);
+}
+function r19Transport() {
+  let sent = 0;
+  return { getDeviceQueue: async () => [], flushDeviceQueue: async () => ({}), enqueueDownlink: async () => ({ id: 'q' + (++sent) }) };
+}
+
+test('R19-3: reviving a tombstoned conditional row through the cloud clears its policy binding', async () => {
+  const { db } = await tempDb();
+  await seedR19Policy(db);
+  await db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,'06:00',30,'UTC',1,1)", ['11111111-1111-4111-8111-111111111111', EUI]);
+  await db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version,deleted_at,condition_policy_uuid,effective_from) VALUES (?,?,'WEEKLY',127,'20:00',10,'UTC',0,3,datetime('now'),?,datetime('now'))", ['22222222-2222-4222-8222-222222222222', EUI, POLICY_R19]);
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: '22222222-2222-4222-8222-222222222222', kind: 'WEEKLY', weekdays_mask: 127, start_time: '20:00', duration_minutes: 10, enabled: true }, { transport: r19Transport() });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  const row = await db.get("SELECT deleted_at, condition_policy_uuid, effective_from FROM valve_schedules WHERE schedule_uuid='22222222-2222-4222-8222-222222222222'");
+  assert.equal(row.deleted_at, null);
+  assert.equal(row.condition_policy_uuid, null, 'a revived row is a fixed row');
+  assert.equal(row.effective_from, null);
+  db.close();
+});
+
+test('R19-3: a cloud fixed schedule beside a live conditional one is refused and writes nothing', async () => {
+  const { db } = await tempDb();
+  await seedR19Policy(db);
+  await db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version,condition_policy_uuid) VALUES (?,?,'WEEKLY',127,'08:00',5,'UTC',1,1,?)", ['44444444-4444-4444-8444-444444444444', EUI, POLICY_R19]);
+  const out = await apply(db, { commandType: 'UPSERT_VALVE_SCHEDULE', device_eui: EUI, schedule_uuid: '55555555-5555-4555-8555-555555555555', kind: 'WEEKLY', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30, enabled: true }, { transport: r19Transport() });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'mixed_schedule_mode');
+  assert.equal(await db.get("SELECT 1 AS x FROM valve_schedules WHERE schedule_uuid='55555555-5555-4555-8555-555555555555'"), undefined);
+  db.close();
+});
+
+test('R19-3: Pause works on a valve whose stored program is mixed', async () => {
+  const push = require('./push');
+  const { db } = await tempDb();
+  await seedR19Policy(db);
+  await db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version) VALUES (?,?,'WEEKLY',127,'06:00',30,'UTC',1,1)", ['11111111-1111-4111-8111-111111111111', EUI]);
+  await db.run("INSERT INTO valve_schedules(schedule_uuid,device_eui,kind,weekdays_mask,start_time,duration_minutes,timezone,enabled,sync_version,condition_policy_uuid) VALUES (?,?,'WEEKLY',127,'20:00',10,'UTC',1,1,?)", ['22222222-2222-4222-8222-222222222222', EUI, POLICY_R19]);
+  const out = await push.setSchedulerStatus({ db, deviceEui: EUI, status: 'DEACTIVATED', now: new Date(), transport: r19Transport(), warn: () => {} });
+  assert.ok(out.rows.some((row) => row.purpose === 'SCHEDULER_STATUS'), JSON.stringify(out));
+  assert.equal((await store.getSettings(db, EUI)).scheduler_status, 'DEACTIVATED');
+  db.close();
+});

@@ -141,6 +141,7 @@ describe.each(cards)('$name removal context', ({ name, render: renderCard, deveu
     const calls: string[] = [];
     vi.mocked(devicesAPI.remove).mockImplementation(async () => {
       calls.push('devicesAPI.remove');
+      return undefined;
     });
     const onRemove = vi.fn(() => {
       calls.push('onRemove');

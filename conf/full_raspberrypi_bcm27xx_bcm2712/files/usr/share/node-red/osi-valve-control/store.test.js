@@ -213,7 +213,9 @@ test('pushSummary (final-fix-wave IMPORTANT 1): CLOCK_SYNC/SCHEDULER_STATUS push
 test('pushSummary (final-fix-wave IMPORTANT 1): last_plan_queued_at/last_plan_acked_at keep their prior (unfiltered-by-slot) semantics', async () => {
   const { db } = await tempDb();
   await store.insertPushes(db, [{ push_id: 'a', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 30, payload_hex: '00', plan_hash: 'h1' }]);
-  await store.ackPush(db, '0016C001F1000001', 'WEEKDAY_PLAN', 30, 0, 'OK', new Date().toISOString());
+  const ackAt = new Date().toISOString();
+  await db.run("UPDATE valve_schedule_pushes SET transport_json=?", [JSON.stringify({ phase: 'ATTEMPTED', attempted_at: new Date(Date.parse(ackAt) - 60000).toISOString() })]);
+  await store.ackPush(db, '0016C001F1000001', 'WEEKDAY_PLAN', 30, 0, 0, ackAt);
   const summary = await store.pushSummary(db, '0016C001F1000001');
   assert.ok(summary.last_plan_queued_at, 'last_plan_queued_at must still be populated');
   assert.ok(summary.last_plan_acked_at, 'last_plan_acked_at must still be populated');
@@ -480,14 +482,21 @@ test('clock step back: pushSummary counts the later insert for the slot', async 
   db.close();
 });
 
-test('clock step back: ackPush settles the later QUEUED insert when two are outstanding for the same purpose and port', async () => {
+// B-2 (night run) changed which row an ACK settles: ChirpStack delivers the queue first in,
+// first out, so the ACK belongs to the EARLIER insert, not the newest (newest-first credited
+// an old plan's ACK to a newer revision). Insertion order still decides, not queued_at: the
+// earlier insert carries the later timestamp here.
+test('clock step back: ackPush settles the earlier QUEUED insert (first in, first out) when two are outstanding for the same purpose and port', async () => {
   const { db } = await tempDb();
   // GEN2 rows with disjoint masks are not superseded by each other, so both stay QUEUED.
   await seedClockStepBack(db, 'DAYMASK_PLAN', { aheadPayload: '0499151930', behindPayload: '0299151930', aheadState: 'QUEUED' });
-  assert.equal(await store.ackPush(db, STEP_EUI, 'DAYMASK_PLAN', 25, null, 0, '2026-09-17T14:02:00.000Z'), 1);
+  await db.run("UPDATE valve_schedule_pushes SET transport_json=? WHERE push_id='ahead'", [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-ahead', attempted_at: '2026-09-17T14:01:00.000Z' })]);
+  await db.run("UPDATE valve_schedule_pushes SET transport_json=? WHERE push_id='behind'", [JSON.stringify({ phase: 'ACCEPTED', queue_id: 'q-behind', attempted_at: '2026-09-17T14:01:00.000Z' })]);
+  await store.upsertSettings(db, STEP_EUI, { strega_generation: 'GEN2' });
+  assert.equal(await store.ackPush(db, STEP_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-09-17T14:02:00.000Z'), 1);
   const byId = Object.fromEntries((await db.all('SELECT push_id, state FROM valve_schedule_pushes')).map((r) => [r.push_id, r.state]));
-  assert.equal(byId.behind, 'ACKED');
-  assert.equal(byId.ahead, 'QUEUED');
+  assert.equal(byId.ahead, 'ACKED');
+  assert.equal(byId.behind, 'QUEUED');
   db.close();
 });
 
@@ -587,6 +596,21 @@ test('F144: a schedule write with no EUI scope throws instead of falling back to
   db.close();
 });
 
+test('report-only rows are skipped before active projection selection so an older command owner remains visible', async () => {
+  const { db } = await tempDb();
+  const commandTransport = JSON.stringify({ phase: 'ATTEMPTED', effect_snapshot: { effect_class: 'SELF_CLOSING_OPEN', future_effect_end: '2026-10-18T11:30:00.000Z' } });
+  const reportTransport = JSON.stringify({ physical_run: { version: 1, source: 'explicit_report', earliest_possible_start_at: null, latest_possible_end_at: null } });
+  const insert = `INSERT INTO valve_actuation_expectations
+    (expectation_id,device_eui,command_id,commanded_at,commanded_duration_seconds,expected_close_at,volume_source,reconciliation_state,trigger,transport_json,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`;
+  await db.run(insert, ['command-owner', '0016C001F1000001', 'cmd-owner', '2026-10-18T10:00:00.000Z', 120, '2026-10-18T10:02:00.000Z', 'unknown', 'OBSERVED_RUNNING', 'one_time', commandTransport, '2026-10-18T10:00:00.000Z']);
+  await db.run(insert, ['report-newer', '0016C001F1000001', null, '2026-10-18T11:00:00.000Z', -1, '', 'unknown', 'OBSERVED_RUNNING', 'unexplained', reportTransport, '2026-10-18T11:00:00.000Z']);
+  const [valve] = await store.listValvesForUser(db, 1);
+  assert.equal(valve.active_expectation_id, 'command-owner');
+  assert.equal((await store.activeActuation(db, '0016C001F1000001')).expectation_id, 'command-owner');
+  db.close();
+});
+
 test('CMD-04 PR0: the 24 h sweep makes plan and status rows LOST (clock rows plain FAILED); a LOST slot stays in pushSummary past the 30-day window', async () => {
   const { db } = await tempDb();
   const eui = require('./test-helpers').FIXTURE_EUI;
@@ -616,5 +640,168 @@ test('CMD-04 PR0: the 24 h sweep makes plan and status rows LOST (clock rows pla
   assert.equal(states.find((r) => r.weekday === 1).error, 'stale_unconfirmed');
   assert.equal(states.find((r) => r.weekday === 2).state, 'ACKED');
   assert.equal(states.some((r) => r.weekday === 3), false, 'SUPERSEDED rows are not surfaced');
+  db.close();
+});
+
+// --- Night-run conformance fix (B-2; CMD-04 "an old ACK cannot verify a newer revision").
+// A STREGA ACK echoes only the port (GEN1 weekday ports 14-20, GEN2 port 25 for every group)
+// and a status; it carries no payload or hash. ChirpStack delivers a device queue first in,
+// first out, so an ACK is credited to the OLDEST outstanding handed-off row on that port, and
+// only when nothing older could also own it. When an older row may have been delivered (it
+// left the queue before a flush, or its handoff is unknown), the ACK cannot tell the rows
+// apart: the older row consumes the ACK as ambiguous and the newer one is annotated
+// 'ack_ambiguous' and stays unconfirmed, never ACKED (LOST only if the 24-hour sweep finds it so).
+const B2_EUI = STEP_EUI; // the valve tempDb() seeds
+
+async function b2Push(db, { id, purpose = 'DAYMASK_PLAN', weekday = null, fport = 25, payload, state = 'QUEUED', transport }) {
+  await db.run('INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, transport_json) VALUES (?,?,?,?,?,?,?,?,?)',
+    [id, B2_EUI, purpose, weekday, fport, payload, 'h-' + id, state, JSON.stringify(transport)]);
+}
+
+async function b2Control(db, control) {
+  await store.writeConditionalControl(db, B2_EUI, control);
+}
+
+async function b2States(db) {
+  const rows = await db.all('SELECT push_id, state, error, acked_at FROM valve_schedule_pushes ORDER BY rowid');
+  return Object.fromEntries(rows.map((r) => [r.push_id, { state: r.state, error: r.error, consumed: r.acked_at != null }]));
+}
+
+async function seedB2Conversion(db, { snapshot }) {
+  await store.upsertSettings(db, B2_EUI, { strega_generation: 'GEN2' });
+  // Fixed plan A was handed off, then the conversion superseded it and flushed the queue.
+  await b2Push(db, { id: 'A', payload: '0299151930', state: 'SUPERSEDED',
+    transport: { phase: 'UNKNOWN', queue_id: 'q-A', attempted_at: '2026-10-19T08:00:00.000Z', invalidated_by_flush: 'f1' } });
+  await b2Push(db, { id: 'C', payload: '80', transport: { phase: 'ACCEPTED', queue_id: 'q-C', attempted_at: '2026-10-19T08:05:00.000Z' } });
+  await b2Control(db, { mode: 'CONDITIONAL', generation: 'GEN2', desired_revision: 'rev-1', required_push_ids: ['C'], predecessor_push_ids: ['A'],
+    readiness: { state: 'PENDING', revision: 'rev-1', reason: 'awaiting_clear_ack' },
+    flushes: [{ flush_id: 'f1', status: 'COMPLETE', captured_snapshot: snapshot }] });
+}
+
+const clearRule = (candidate) => candidate.row.payload_hex === '80' && candidate.status === 1;
+
+test('B-2: an ACK that may be the superseded plan\'s does not attest the conditional clear (GEN2)', async () => {
+  const { db } = await tempDb();
+  await seedB2Conversion(db, { snapshot: [] }); // A had left the queue before the flush: it may have been delivered
+  const matched = await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:06:00.000Z', { verifiedRule: clearRule, generation: 'GEN2', generationIdentity: 'GEN2' });
+  assert.equal(matched, 0);
+  const s = await b2States(db);
+  assert.deepEqual(s.A, { state: 'SUPERSEDED', error: 'ack_ambiguous', consumed: true });
+  assert.deepEqual(s.C, { state: 'QUEUED', error: 'ack_ambiguous', consumed: false }, 'the clear stays unconfirmed, not ACKED');
+  const push = require('./push');
+  const readiness = await push.conditionalReadiness(db, B2_EUI);
+  assert.equal(readiness.ready, false);
+  db.close();
+});
+
+test('B-2: a later ACK on the port still confirms the newer row once the ambiguity has consumed the older one', async () => {
+  const { db } = await tempDb();
+  await seedB2Conversion(db, { snapshot: [] });
+  const opts = { verifiedRule: clearRule, generation: 'GEN2', generationIdentity: 'GEN2' };
+  await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:06:00.000Z', opts);
+  assert.equal(await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:20:00.000Z', opts), 1);
+  assert.deepEqual((await b2States(db)).C, { state: 'ACKED', error: null, consumed: true });
+  db.close();
+});
+
+test('B-2: an older row the flush snapshot proves unsent cannot own the ACK, so the clear is confirmed', async () => {
+  const { db } = await tempDb();
+  await seedB2Conversion(db, { snapshot: [{ id: 'q-A', fPort: 25, data: 'Ag==', isPending: false }] });
+  const matched = await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:06:00.000Z', { verifiedRule: clearRule, generation: 'GEN2', generationIdentity: 'GEN2' });
+  assert.equal(matched, 1);
+  const s = await b2States(db);
+  assert.equal(s.C.state, 'ACKED');
+  assert.deepEqual(s.A, { state: 'SUPERSEDED', error: null, consumed: false });
+  db.close();
+});
+
+test('B-2: the conditional clear rule applies to GEN2 too', async () => {
+  const { db } = await tempDb();
+  await seedB2Conversion(db, { snapshot: [{ id: 'q-A', fPort: 25, data: 'Ag==', isPending: false }] });
+  const matched = await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:06:00.000Z', { verifiedRule: () => false, generation: 'GEN2', generationIdentity: 'GEN2' });
+  assert.equal(matched, 0);
+  assert.notEqual((await b2States(db)).C.state, 'ACKED');
+  db.close();
+});
+
+test('B-2: two queued rows on one port are confirmed first in, first out (GEN2 groups of one compile)', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, B2_EUI, { strega_generation: 'GEN2' });
+  await b2Push(db, { id: 'G1', payload: '0299151930', transport: { phase: 'ACCEPTED', queue_id: 'q-1', attempted_at: '2026-10-19T08:00:00.000Z' } });
+  await b2Push(db, { id: 'G2', payload: '0499151930', transport: { phase: 'ACCEPTED', queue_id: 'q-2', attempted_at: '2026-10-19T08:00:01.000Z' } });
+  assert.equal(await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:10:00.000Z'), 1);
+  assert.equal((await b2States(db)).G1.state, 'ACKED');
+  assert.equal((await b2States(db)).G2.state, 'QUEUED');
+  assert.equal(await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:20:00.000Z'), 1);
+  assert.equal((await b2States(db)).G2.state, 'ACKED');
+  db.close();
+});
+
+test('B-2: a GEN1 weekday re-edit without a flush credits the superseded row first, then the new one', async () => {
+  const { db } = await tempDb();
+  await b2Push(db, { id: 'A', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload: '01', state: 'SUPERSEDED', transport: { phase: 'ACCEPTED', queue_id: 'q-A', attempted_at: '2026-10-19T08:00:00.000Z' } });
+  await b2Push(db, { id: 'B', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload: '02', transport: { phase: 'ACCEPTED', queue_id: 'q-B', attempted_at: '2026-10-19T08:01:00.000Z' } });
+  assert.equal(await store.ackPush(db, B2_EUI, 'WEEKDAY_PLAN', 15, 1, 0, '2026-10-19T08:10:00.000Z'), 1);
+  let s = await b2States(db);
+  assert.equal(s.A.state, 'ACKED', 'the older plan was delivered first');
+  assert.equal(s.B.state, 'QUEUED', 'the newer plan waits for its own ACK');
+  assert.equal(await store.ackPush(db, B2_EUI, 'WEEKDAY_PLAN', 15, 1, 0, '2026-10-19T08:20:00.000Z'), 1);
+  s = await b2States(db);
+  assert.equal(s.B.state, 'ACKED');
+  db.close();
+});
+
+test('B-2: a row handed off more than 24 hours before the ACK cannot own it', async () => {
+  const { db } = await tempDb();
+  await b2Push(db, { id: 'old', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload: '01', state: 'SUPERSEDED', transport: { phase: 'UNKNOWN', queue_id: 'q-old', attempted_at: '2026-10-17T08:00:00.000Z' } });
+  await b2Push(db, { id: 'new', purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload: '02', transport: { phase: 'ACCEPTED', queue_id: 'q-new', attempted_at: '2026-10-19T08:01:00.000Z' } });
+  assert.equal(await store.ackPush(db, B2_EUI, 'WEEKDAY_PLAN', 15, 1, 0, '2026-10-19T08:10:00.000Z'), 1);
+  assert.equal((await b2States(db)).new.state, 'ACKED');
+  db.close();
+});
+
+// (W8's own B-3 sweep test is not ported: the 24 h sweep follows CMD-04 PR0, see the
+// 'CMD-04 PR0: the 24 h sweep' test above.)
+
+test('R3-B1: provenUndelivered uses the persisted proof, then any COMPLETE flush snapshot, never an incomplete one', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, B2_EUI, { strega_generation: 'GEN2' });
+  const add = (id, transport) => b2Push(db, { id, payload: '0299151930', state: 'SUPERSEDED', transport: { phase: 'UNKNOWN', attempted_at: '2026-10-19T08:00:00.000Z', ...transport } });
+  await add('persisted', { queue_id: 'q-p', invalidated_by_flush: 'f9', first_invalidated_by_flush: 'f9', unsent_in_snapshot: true });
+  // R3-M5: a stale false without a completed-flush stamp is not a proof; the scan decides.
+  await add('unstamped', { queue_id: 'q-u', invalidated_by_flush: 'f2', unsent_in_snapshot: false });
+  await add('scanned', { queue_id: 'q-s', invalidated_by_flush: 'f2' });
+  await add('incomplete', { queue_id: 'q-i', invalidated_by_flush: 'f3' });
+  await b2Push(db, { id: 'C', payload: '80', transport: { phase: 'ACCEPTED', queue_id: 'q-C', attempted_at: '2026-10-19T08:05:00.000Z' } });
+  await b2Control(db, { flushes: [
+    { flush_id: 'f1', status: 'COMPLETE', captured_snapshot: [{ id: 'q-s', isPending: false }, { id: 'q-u', isPending: false }] },
+    { flush_id: 'f2', status: 'COMPLETE', captured_snapshot: [] },
+    { flush_id: 'f3', status: 'UNKNOWN', captured_snapshot: [{ id: 'q-i', isPending: false }] },
+  ] });
+  // 'persisted' and 'scanned' are proven unsent; 'incomplete' is not, so it is the oldest candidate.
+  assert.equal(await store.ackPush(db, B2_EUI, 'DAYMASK_PLAN', 25, null, 1, '2026-10-19T08:06:00.000Z'), 0);
+  const s = await b2States(db);
+  assert.equal(s.incomplete.error, 'ack_ambiguous');
+  assert.equal(s.persisted.error, null);
+  assert.equal(s.scanned.error, null);
+  assert.equal(s.unstamped.error, null);
+  db.close();
+});
+
+// R13 re-review R2: a flush marks the plan rows it removed LOST, but a lifecycle clear row that was
+// prepared and never attempted (no transport phase) was not on the air: it stays QUEUED for the
+// clear sender, so the ledger does not say "device may not hold this plan" for a clear in flight.
+test('markFlushedSnapshotLost skips never-attempted lifecycle clear rows', async () => {
+  const { db } = await tempDb();
+  const eui = '0016C001F1000001';
+  const insert = (id, transport) => db.run("INSERT INTO valve_schedule_pushes(push_id, device_eui, purpose, weekday, fport, payload_hex, plan_hash, state, transport_json) VALUES (?, ?, 'WEEKDAY_PLAN', 1, 15, '00', 'h', 'QUEUED', ?)", [id, eui, transport == null ? null : JSON.stringify(transport)]);
+  await insert('p-lifecycle', { lifecycle_clear_revision: 'rev-1' });
+  await insert('p-lifecycle-sent', { lifecycle_clear_revision: 'rev-1', phase: 'ACCEPTED', queue_id: 'q-1' });
+  await insert('p-plan', { phase: 'ACCEPTED', queue_id: 'q-2' });
+  await insert('p-legacy', null);
+  const out = await store.markFlushedSnapshotLost(db, eui, {});
+  const states = Object.fromEntries((await db.all('SELECT push_id, state FROM valve_schedule_pushes')).map((r) => [r.push_id, r.state]));
+  assert.deepEqual(states, { 'p-lifecycle': 'QUEUED', 'p-lifecycle-sent': 'FAILED', 'p-plan': 'FAILED', 'p-legacy': 'FAILED' });
+  assert.equal(out.lost, 3);
   db.close();
 });

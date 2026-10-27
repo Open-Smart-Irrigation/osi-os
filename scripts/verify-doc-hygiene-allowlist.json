@@ -235,6 +235,12 @@
       "issue": 384
     },
     {
+      "path": "docs/superpowers/plans/2026-10-13-conditional-irrigation.md",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name (a verifier script path in the gate list)",
+      "issue": 384
+    },
+    {
       "path": "docs/superpowers/plans/2026-10-24-mobile-history-slice-1-browser-brief.md",
       "max": 8,
       "reason": "Eight deterministic SHA-256 prefixes generated from synthetic source keys and channels; the EUI pattern cannot distinguish these series IDs from device identifiers",

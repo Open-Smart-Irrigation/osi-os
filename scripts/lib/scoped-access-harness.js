@@ -17,6 +17,16 @@ const NODE_RED_MODULES = path.join(
   'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red'
 );
 
+function profilePaths(profile = 'bcm2712') {
+  const name = String(profile).trim();
+  if (!['bcm2712', 'bcm2709'].includes(name)) throw new Error(`unsupported profile: ${name}`);
+  const filesRoot = path.join(ROOT, `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share`);
+  return {
+    flowsPath: path.join(filesRoot, 'flows.json'),
+    nodeRedModules: path.join(filesRoot, 'node-red'),
+  };
+}
+
 function loadNode(nodeId, flowsPath = DEFAULT_FLOWS) {
   const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
   const node = flows.find((candidate) => candidate.id === nodeId);
@@ -106,14 +116,24 @@ function facadeDb(db) {
   };
 }
 
-function moduleByName(name) {
+// osi-lib's own registry (NAME_TO_PATH) is the source of truth for the names a function node
+// may osiLib.require(), e.g. 'history-sync' -> osi-history-sync-helper; the short table keeps the
+// harness-only aliases.
+function osiLibRegistry(nodeRedModules) {
+  try { return require(path.join(nodeRedModules, 'osi-lib', 'index.js')).NAME_TO_PATH || {}; }
+  catch (_) { return {}; }
+}
+
+function moduleByName(name, nodeRedModules = NODE_RED_MODULES) {
   const directory = {
     scope: 'osi-scope-helper',
     journal: 'osi-journal',
     'osi-db-helper': 'osi-db-helper',
     'osi-command-ledger': 'osi-command-ledger',
-  }[name] || `osi-${name}`;
-  const modulePath = path.join(NODE_RED_MODULES, directory, 'index.js');
+    'osi-valve-control': 'osi-valve-control',
+    'osi-irrigation-policy': 'osi-irrigation-policy',
+  }[name] || osiLibRegistry(nodeRedModules)[name] || `osi-${name}`;
+  const modulePath = path.join(nodeRedModules, directory, 'index.js');
   if (!fs.existsSync(modulePath)) return null;
   return require(modulePath);
 }
@@ -142,6 +162,7 @@ async function executeFunction(node, options) {
     db,
     osiLibModules = {},
     libOverrides = {},
+    nodeRedModules = NODE_RED_MODULES,
   } = options;
   const errors = [];
   const warnings = [];
@@ -179,18 +200,18 @@ async function executeFunction(node, options) {
         const value = osiLibModules[name] ||
           (name === 'osi-db-helper'
             ? { Database: function Database() { return databaseFacade; } }
-            : moduleByName(name));
+            : moduleByName(name, nodeRedModules));
         return value
           ? { ok: true, value }
           : { ok: false, error: `unregistered in harness: ${name}` };
       },
     },
     crypto,
-    bcrypt: require(path.join(NODE_RED_MODULES, 'node_modules/bcryptjs')),
+    bcrypt: require(path.join(nodeRedModules, 'node_modules/bcryptjs')),
     httpLib: http,
     httpsLib: https,
-    osiHistory: require(path.join(NODE_RED_MODULES, 'osi-history-helper', 'index.js')),
-    HR: require(path.join(NODE_RED_MODULES, 'osi-history-router', 'index.js')),
+    osiHistory: require(path.join(nodeRedModules, 'osi-history-helper', 'index.js')),
+    HR: require(path.join(nodeRedModules, 'osi-history-router', 'index.js')),
   };
   Object.assign(providedLibs, libOverrides);
   const names = Object.keys(sandbox);
@@ -210,9 +231,10 @@ async function executeFunction(node, options) {
   };
 }
 
-function seedScopedDb() {
+function seedScopedDb(valveEui = 'VALVE1') {
   const db = new DatabaseSync(':memory:');
   db.exec(fs.readFileSync(path.join(ROOT, 'database/seed-blank.sql'), 'utf8'));
+  const fixtureValveEui = String(valveEui).replace(/'/g, "''");
   db.exec(`
     INSERT INTO users (
       username, password_hash, created_at, user_uuid, role, sync_version
@@ -232,7 +254,7 @@ function seedScopedDb() {
     ) VALUES
       ('DENDRO1', 'Tree 1', 'DRAGINO_LSN50', 2, 1, '2026-01-01', '2026-01-01'),
       ('WX1', 'Weather', 'SENSECAP_S2120', 1, 2, '2026-01-01', '2026-01-01'),
-      ('VALVE1', 'Valve', 'STREGA_VALVE', 2, 1, '2026-01-01', '2026-01-01'),
+      ('${fixtureValveEui}', 'Valve', 'STREGA_VALVE', 2, 1, '2026-01-01', '2026-01-01'),
       ('DENDRO2', 'Tree 2', 'DRAGINO_LSN50', 1, 2, '2026-01-01', '2026-01-01');
 
     INSERT INTO journal_plots (
@@ -262,5 +284,7 @@ module.exports = {
   facadeDb,
   loadNode,
   makeAuthHeader,
+  moduleByName,
+  profilePaths,
   seedScopedDb,
 };

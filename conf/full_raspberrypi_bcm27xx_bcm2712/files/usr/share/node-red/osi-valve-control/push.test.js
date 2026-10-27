@@ -59,7 +59,7 @@ const { tempDb, linkCloud, FIXTURE_EUI: EUI, fakeChirpStack, applyToValve } = re
 const store = require('./store');
 const workers = require('./workers');
 const push = require('./push');
-const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS } = push;
+const { compileAndQueue, queuePushes, emitPendingSnapshots, buildSnapshotPushes, setSchedulerStatus, SNAPSHOT_DEBOUNCE_MS, SNAPSHOT_MAX_DELAY_MS } = push;
 
 const T0 = Date.parse('2026-08-19T10:00:00Z');
 const at = (sec) => new Date(T0 + sec * 1000);
@@ -68,19 +68,36 @@ const EMPTY_GEN1 = 'FF'.repeat(24);
 const weekly = (uuid, mask, start, dur) => ({ schedule_uuid: uuid, device_eui: EUI, kind: 'WEEKLY', label: null, weekdays_mask: mask, start_time: start, duration_minutes: dur, timezone: 'UTC', enabled: 1 });
 const asItems = (rows) => rows.map((r) => ({ fPort: r.fport, hex: r.payload_hex.toUpperCase() }));
 const hex = (buf) => Buffer.from(buf).toString('hex').toUpperCase();
+const MODES = ['mqtt', 'transport'];
 
-function harness(db) {
+// mode 'mqtt': the no-transport fallback (MQTT messages handed to the fake queue).
+// mode 'transport': the production path on this branch -- every write goes through
+// dispatch.flushValveQueue / enqueueValveCommand against the same fake queue; `messages` stay
+// empty and the counts come from what the fake actually enqueued.
+function harness(db, mode) {
   const cs = fakeChirpStack();
+  const viaTransport = mode === 'transport';
+  const io = viaTransport ? { transport: cs.transport } : { flushQueue: cs.flushQueue };
+  const sent = (r, before) => (viaTransport ? cs.log.enqueued.slice(before) : r.messages);
   return {
-    cs,
-    compile: (sec, extra) => compileAndQueue(Object.assign({ db, deviceEui: EUI, appId: 'app', now: at(sec), flushQueue: cs.flushQueue, warn: () => {} }, extra || {})),
-    emit: async (sec) => { const r = await emitPendingSnapshots({ db, now: at(sec), appId: 'app', warn: () => {} }); cs.enqueue(r.messages); return r; },
+    cs, mode: viaTransport ? 'transport' : 'mqtt',
+    compile: (sec, extra) => compileAndQueue(Object.assign({ db, deviceEui: EUI, appId: 'app', now: at(sec), warn: () => {} }, io, extra || {})),
+    emit: async (sec) => {
+      const before = cs.log.enqueued.length;
+      const r = await emitPendingSnapshots(Object.assign({ db, now: at(sec), appId: 'app', warn: () => {} }, viaTransport ? { transport: cs.transport } : {}));
+      if (!viaTransport) cs.enqueue(r.messages);
+      return Object.assign({}, r, { messages: sent(r, before) });
+    },
     tick: async (sec) => {
-      const h = await workers.runHousekeeping({ db, now: at(sec), appId: 'app', warn: () => {} });
-      cs.enqueue(h.messages);
-      const c = await workers.runClockTick({ db, now: at(sec), appId: 'app', warn: () => {} });
-      cs.enqueue(c.messages);
-      return { housekeeping: h, clock: c };
+      const tio = viaTransport ? { transport: cs.transport } : {};
+      const before = cs.log.enqueued.length;
+      const h = await workers.runHousekeeping(Object.assign({ db, now: at(sec), appId: 'app', warn: () => {} }, tio));
+      if (!viaTransport) cs.enqueue(h.messages);
+      const mid = cs.log.enqueued.length;
+      const c = await workers.runClockTick(Object.assign({ db, now: at(sec), appId: 'app', warn: () => {} }, tio));
+      if (!viaTransport) cs.enqueue(c.messages);
+      return { housekeeping: Object.assign({}, h, { messages: viaTransport ? cs.log.enqueued.slice(before, mid) : h.messages }),
+        clock: Object.assign({}, c, { messages: viaTransport ? cs.log.enqueued.slice(mid) : c.messages }) };
     },
   };
 }
@@ -133,11 +150,11 @@ test('compileAndQueue rejects >4 windows with a 422 plan_conflict and writes not
   db.close();
 });
 
-for (const generation of ['GEN1', 'GEN2']) {
-  test(`acceptance 1 (${generation}): two quick deletes with no uplink between leave only compile-2 rows queued, with an explicit clear for every day either schedule covered; compile-1 rows SUPERSEDED, none LOST, none re-enqueued`, async () => {
+for (const mode of MODES) for (const generation of ['GEN1', 'GEN2']) {
+  test(`acceptance 1 (${generation}) [${mode}]: two quick deletes with no uplink between leave only compile-2 rows queued, with an explicit clear for every day either schedule covered; compile-1 rows SUPERSEDED, none LOST, none re-enqueued`, async () => {
     const { db } = await tempDb();
     await store.upsertSettings(db, EUI, { strega_generation: generation });
-    const h = harness(db);
+    const h = harness(db, mode);
     await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30)); // Mon-Fri
     await store.insertSchedule(db, weekly('b', 0x43, '18:00', 20)); // Sun, Mon, Sat
     const base = await h.compile(0);
@@ -165,10 +182,10 @@ for (const generation of ['GEN1', 'GEN2']) {
     db.close();
   });
 
-  test(`acceptance 2 (${generation}): add, edit, delete with zero uplinks -> the queue is snapshot 3 exactly and draining it gives the valve the DB state`, async () => {
+  test(`acceptance 2 (${generation}) [${mode}]: add, edit, delete with zero uplinks -> the queue is snapshot 3 exactly and draining it gives the valve the DB state`, async () => {
     const { db } = await tempDb();
     await store.upsertSettings(db, EUI, { strega_generation: generation });
-    const h = harness(db);
+    const h = harness(db, mode);
     await store.insertSchedule(db, weekly('keep', 0x7F, '05:00', 15));
     const s0 = await h.compile(0);
     await h.emit(WINDOW_SEC);
@@ -189,10 +206,10 @@ for (const generation of ['GEN1', 'GEN2']) {
     db.close();
   });
 
-  test(`acceptance 3 (${generation}): the valve drains part of snapshot 1, then compile 2 -> every compile-1 row SUPERSEDED, the queue is compile 2's rows, no compile-1 plan payload reappears`, async () => {
+  test(`acceptance 3 (${generation}) [${mode}]: the valve drains part of snapshot 1, then compile 2 -> every compile-1 row SUPERSEDED, the queue is compile 2's rows, no compile-1 plan payload reappears`, async () => {
     const { db } = await tempDb();
     await store.upsertSettings(db, EUI, { strega_generation: generation });
-    const h = harness(db);
+    const h = harness(db, mode);
     await store.insertSchedule(db, weekly('d', 0x7F, '06:00', 30));
     await store.insertSchedule(db, weekly('m', 0x02, '19:00', 10)); // makes GEN2 two groups
     const c1 = await h.compile(0);
@@ -215,9 +232,9 @@ for (const generation of ['GEN1', 'GEN2']) {
   });
 }
 
-test('acceptance 4 (GEN1 completeness): every snapshot has 7 weekday rows + status, also once every schedule is deleted', async () => {
+for (const mode of MODES) test(`acceptance 4 (GEN1 completeness) [${mode}]: every snapshot has 7 weekday rows + status, also once every schedule is deleted`, async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  const h = harness(db, mode);
   const shape = (rows) => rows.map((row) => row.fport).sort((a, b) => a - b);
   const full = [14, 15, 16, 17, 18, 19, 20, 21];
   await store.insertSchedule(db, weekly('a', 0x08, '06:00', 30));
@@ -232,10 +249,10 @@ test('acceptance 4 (GEN1 completeness): every snapshot has 7 weekday rows + stat
   db.close();
 });
 
-test('acceptance 5 (GEN2 completeness): every snapshot covers all 7 days, empty days as an explicit zero-window frame', async () => {
+for (const mode of MODES) test(`acceptance 5 (GEN2 completeness) [${mode}]: every snapshot covers all 7 days, empty days as an explicit zero-window frame`, async () => {
   const { db } = await tempDb();
   await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
-  const h = harness(db);
+  const h = harness(db, mode);
   const covered = (rows) => rows.filter((row) => row.purpose === 'DAYMASK_PLAN')
     .reduce((m, row) => m | (row.payload_hex.slice(0, 2) === '80' ? 0x7F : parseInt(row.payload_hex.slice(0, 2), 16)), 0);
   await store.insertSchedule(db, weekly('a', 0x7F, '06:00', 30));
@@ -255,10 +272,10 @@ test('acceptance 5 (GEN2 completeness): every snapshot covers all 7 days, empty 
   db.close();
 });
 
-test('acceptance 6: CLOCK_SYNC is never compiled; after a flush the next tick enqueues one freshly computed clock sync and no older one exists', async () => {
+for (const mode of MODES) test(`acceptance 6 [${mode}]: CLOCK_SYNC is never compiled; after a flush the next tick enqueues one freshly computed clock sync and no older one exists`, async () => {
   const { db } = await tempDb();
   workers._resetHousekeepingForTests();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const first = await h.tick(0); // clock due: never synced
   assert.equal(first.clock.messages.length, 1);
@@ -278,10 +295,10 @@ test('acceptance 6: CLOCK_SYNC is never compiled; after a flush the next tick en
   db.close();
 });
 
-test('acceptance 7: the 24 h sweep marks only the latest snapshot LOST and surfaces it; SUPERSEDED rows are never surfaced or re-sent', async () => {
+for (const mode of MODES) test(`acceptance 7 [${mode}]: the 24 h sweep marks only the latest snapshot LOST and surfaces it; SUPERSEDED rows are never surfaced or re-sent`, async () => {
   const { db } = await tempDb();
   await linkCloud(db);
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const c1 = await h.compile(0);
   await store.insertSchedule(db, weekly('b', 0x04, '07:00', 30));
@@ -289,7 +306,7 @@ test('acceptance 7: the 24 h sweep marks only the latest snapshot LOST and surfa
   await h.emit(10 + WINDOW_SEC);
   await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-08-18 08:00:00'");
   const enqueuedBefore = h.cs.log.enqueued.length;
-  await workers.runClockTick({ db, now: at(0), appId: 'app', warn: () => {} });
+  await workers.runClockTick(Object.assign({ db, now: at(0), appId: 'app', warn: () => {} }, mode === 'transport' ? { transport: h.cs.transport } : {}));
 
   const c1States = await statesById(db, c1.rows.map((row) => row.push_id));
   assert.deepEqual([...new Set(c1States.map((s) => s.state))], ['SUPERSEDED'], 'superseded rows are not swept');
@@ -314,34 +331,39 @@ test('acceptance 7: the 24 h sweep marks only the latest snapshot LOST and surfa
   db.close();
 });
 
-test('acceptance 8: a late ACK for a SUPERSEDED row leaves the ledger unchanged; an ACK for a snapshot still waiting to be emitted is not credited', async () => {
+// On this branch only rows that went through the transport (a durable ATTEMPTED/ACCEPTED owner)
+// can be credited by an ACK, so acceptance 8 runs on the transport path. dispatch stamps
+// attempted_at from the runtime clock, so the ACK instants follow the real clock.
+test('acceptance 8 [transport]: a late ACK for a SUPERSEDED row leaves the ledger unchanged; an ACK for a snapshot still waiting to be emitted is not credited', async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  const h = harness(db, 'transport');
+  const ackAt = (min) => new Date(Date.now() + min * 60000).toISOString();
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const c1 = await h.compile(0);
   await h.emit(WINDOW_SEC);
   await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
   const c2 = await h.compile(100);
   await h.emit(100 + WINDOW_SEC);
-  for (const row of c2.rows) assert.equal(await store.ackPush(db, EUI, row.purpose, row.fport, row.weekday, 0, '2026-08-19T11:00:00.000Z'), 1);
+  // GEN1 has no verifiable status ACK; the seven weekday plans are credited.
+  for (const row of c2.rows.filter((r) => r.purpose === 'WEEKDAY_PLAN')) assert.equal(await store.ackPush(db, EUI, row.purpose, row.fport, row.weekday, 0, ackAt(1)), 1);
   const before = await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid');
   const lateMonday = c1.rows.find((row) => row.weekday === 1);
-  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', lateMonday.fport, 1, 0, '2026-08-19T11:05:00.000Z'), 0);
+  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', lateMonday.fport, 1, 0, ackAt(2)), 0);
   assert.deepEqual(await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid'), before);
 
   // A third edit: its snapshot waits out the debounce window. An ACK that arrives meanwhile was
   // sent for an earlier snapshot and must not mark the new, never-sent row ACKED.
   await store.updateSchedule(db, 'a', { start_time: '08:00' }, EUI);
   const c3 = await h.compile(300);
-  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', lateMonday.fport, 1, 0, '2026-08-19T11:06:00.000Z'), 0);
+  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', lateMonday.fport, 1, 0, ackAt(3)), 0);
   assert.equal((await statesById(db, [c3.rows.find((row) => row.weekday === 1).push_id]))[0].state, 'QUEUED');
   db.close();
 });
 
-test('acceptance 9: after K compiles the queue holds at most one snapshot plus one CLOCK_SYNC', async () => {
+for (const mode of MODES) test(`acceptance 9 [${mode}]: after K compiles the queue holds at most one snapshot plus one CLOCK_SYNC`, async () => {
   const { db } = await tempDb();
   workers._resetHousekeepingForTests();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   let sec = 0;
   for (let k = 0; k < 6; k += 1) {
@@ -358,9 +380,9 @@ test('acceptance 9: after K compiles the queue holds at most one snapshot plus o
   db.close();
 });
 
-test('acceptance 10: five edits inside the debounce window produce one snapshot on the air', async () => {
+for (const mode of MODES) test(`acceptance 10 [${mode}]: five edits inside the debounce window produce one snapshot on the air`, async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const results = [];
   for (let i = 0; i < 5; i += 1) {
@@ -396,9 +418,9 @@ test('snapshot: a scheduler-status change on a programmed valve sends the full p
   db.close();
 });
 
-test('snapshot: without a flush (an open still awaiting observation) older rows are still SUPERSEDED, and the new snapshot is appended behind them', async () => {
+for (const mode of MODES) test(`snapshot [${mode}]: without a flush (an open still awaiting observation) older rows are still SUPERSEDED, and the new snapshot is appended behind them`, async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const c1 = await h.compile(0);
   await h.emit(WINDOW_SEC);
@@ -514,11 +536,11 @@ async function runningOpen(db, id) {
     [id, EUI]);
 }
 
-test('H1 (probe C): a whole-queue cancel flush after the clears left marks them LOST at once, surfaced, and nothing re-sends them', async () => {
+for (const mode of MODES) test(`H1 (probe C) [${mode}]: a whole-queue cancel flush after the clears left marks them LOST at once, surfaced, and nothing re-sends them`, async () => {
   const { db } = await tempDb();
   await linkCloud(db);
   workers._resetHousekeepingForTests();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
   await h.compile(0);
   await h.emit(WINDOW_SEC);
@@ -528,7 +550,7 @@ test('H1 (probe C): a whole-queue cancel flush after the clears left marks them 
   assert.equal(h.cs.getQueue().length, 8);
   await runningOpen(db, 'e-run');
 
-  const out = await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: h.cs.flushQueue, now: at(200) });
+  const out = await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', ...(mode === 'transport' ? { transport: h.cs.transport } : { flushQueue: h.cs.flushQueue }), now: at(200) });
   assert.equal(out.ok, true);
   assert.equal(h.cs.getQueue().length, 0, 'D19 (a): the whole queue went, clears included');
   const states = await statesById(db, clears.rows.map((r) => r.push_id));
@@ -545,13 +567,13 @@ test('H1 (probe C): a whole-queue cancel flush after the clears left marks them 
   db.close();
 });
 
-test('H1: a snapshot still waiting out the debounce window is not in the radio queue, so a cancel flush leaves it pending and it is still sent', async () => {
+for (const mode of MODES) test(`H1 [${mode}]: a snapshot still waiting out the debounce window is not in the radio queue, so a cancel flush leaves it pending and it is still sent`, async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  const h = harness(db, mode);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   const snap = await h.compile(0);
   await runningOpen(db, 'e-run');
-  await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', flushQueue: h.cs.flushQueue, now: at(5) });
+  await cancelActuation({ db, deviceEui: EUI, all: true, reason: 'operator', ...(mode === 'transport' ? { transport: h.cs.transport } : { flushQueue: h.cs.flushQueue }), now: at(5) });
   assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED']);
   await h.emit(WINDOW_SEC + 5);
   assert.deepEqual(h.cs.getQueue(), asItems(snap.rows));
@@ -802,117 +824,289 @@ test('N4: same-millisecond tie, emitted inside the cancel\'s flush -> the rows s
   });
 });
 
-// ---------------------------------------------------------------------------------------------
-// R13 M3 (inherited by PR0): a transport failure partway through a snapshot. With a transport
-// (ChirpStack enqueue), every row the transport did not accept is LOST at emission time and
-// surfaced at once; nothing re-sends it, and the 24 h sweep has nothing left to change.
-// ---------------------------------------------------------------------------------------------
-function failingTransport(cs, { acceptFirst, mode }) {
-  let calls = 0;
-  return async (item) => {
-    calls += 1;
-    if (calls > acceptFirst) {
-      if (mode === 'reject') return { accepted: false };
-      throw new Error('ChirpStack unavailable');
-    }
-    cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]);
-    return { id: 'q-' + calls };
-  };
+// --- W8 R3 review fixes, ported onto design C (CMD-04 PR0) on the transport path. R3-B1/M3: the
+// "proven unsent" evidence of a row is persisted on it at its first invalidation and never
+// overwritten, and an already-invalidated owner is not captured again by later flushes, so ACK
+// correlation (B-2, first in first out) keeps working across many snapshots and every flush
+// captures one snapshot of owners at most. dispatch stamps attempted_at from the runtime clock,
+// so the ACK instants follow the real clock.
+function ackAfterSend() {
+  return new Date(Date.now() + 60 * 1000).toISOString();
 }
 
-for (const mode of ['throw', 'reject']) {
-  test(`R13 M3 (${mode}): the transport fails after 3 rows of a snapshot -> the other 5 rows are LOST at once, surfaced, never re-sent`, async () => {
-    const { db } = await tempDb();
-    await linkCloud(db);
-    workers._resetHousekeepingForTests();
-    const h = harness(db);
-    await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
-    const snap = await h.compile(0);
-    const enqueue = failingTransport(h.cs, { acceptFirst: 3, mode });
-    const warnings = [];
-    const out = await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: (m) => warnings.push(m), enqueue });
-    assert.deepEqual(out.messages, [], 'sent through the transport, not returned for MQTT');
-    assert.equal(out.transportFailures, 5);
-    assert.deepEqual(h.cs.getQueue(), asItems(snap.rows.slice(0, 3)), 'status + Sun + Mon reached the queue');
-    const states = await statesById(db, snap.rows.map((r) => r.push_id));
-    assert.deepEqual(states.slice(0, 3).map((s) => s.state), ['QUEUED', 'QUEUED', 'QUEUED']);
-    for (const s of states.slice(3)) assert.deepEqual({ state: s.state, error: s.error }, { state: 'FAILED', error: 'not_resent_q02c' });
-    const summary = await store.pushSummary(db, EUI, at(WINDOW_SEC));
-    assert.deepEqual({ lost: summary.lost, queued: summary.queued, statusLost: summary.scheduler_status_lost }, { lost: 5, queued: 2, statusLost: false });
-    const payload = JSON.parse((await db.get("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED' ORDER BY rowid DESC LIMIT 1")).payload_json);
-    assert.equal(payload.push_state.lost, 5, 'the tile says "device may not hold this plan" now, not in 24 h');
-    assert.ok(warnings.some((w) => /not accepted/.test(w)));
+async function flushIntents(db) {
+  const row = await db.get('SELECT conditional_control_json FROM valve_settings WHERE device_eui=?', [EUI]);
+  return (JSON.parse((row && row.conditional_control_json) || '{}').flushes || []);
+}
 
-    // Nothing re-sends the lost rows, and the 24 h sweep has nothing left to change on them.
-    const before = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE push_id IN (' + snap.rows.slice(3).map(() => '?').join(',') + ')', snap.rows.slice(3).map((r) => r.push_id));
-    const ok = async (item) => { h.cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]); return { id: 'x' }; };
-    for (let s = 120; s <= 3720; s += 600) await workers.runHousekeeping({ db, now: at(s), appId: 'app', warn: () => {}, enqueue: ok });
-    assert.equal(h.cs.getQueue().length, 3, 'nothing re-sent');
-    await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-08-17 10:00:00'");
-    await store.failStalePushes(db, '2026-08-18T10:00:00.000Z');
-    const after = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE push_id IN (' + snap.rows.slice(3).map(() => '?').join(',') + ')', snap.rows.slice(3).map((r) => r.push_id));
-    assert.deepEqual(after, before);
+// n edits, each snapshot emitted by the tick, no uplink in between.
+async function snapshotTimes(db, h, scheduleUuid, n, startSec) {
+  const results = [];
+  for (let i = 0; i < n; i += 1) {
+    const sec = (startSec || 0) + i * 100;
+    await store.updateSchedule(db, scheduleUuid, { duration_minutes: 30 + i + Math.floor((startSec || 0) / 100) }, EUI);
+    results.push(await h.compile(sec));
+    await h.emit(sec + WINDOW_SEC);
+  }
+  return results;
+}
+
+for (const n of [3, 5]) {
+  test(`R3-B1 [transport]: after ${n} emitted snapshots with no uplink, the newest Monday row is ACKED and nothing is ambiguous (GEN1)`, async () => {
+    const { db } = await tempDb();
+    const h = harness(db, 'transport');
+    await store.insertSchedule(db, weekly('mon', 0x02, '06:00', 30));
+    const results = await snapshotTimes(db, h, 'mon', n);
+    const newest = results[n - 1].rows.find((r) => r.weekday === 1);
+    assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', 15, 1, 0, ackAfterSend()), 1);
+    assert.equal((await db.get('SELECT state FROM valve_schedule_pushes WHERE push_id=?', [newest.push_id])).state, 'ACKED');
+    assert.deepEqual(await db.all("SELECT push_id FROM valve_schedule_pushes WHERE error='ack_ambiguous'"), []);
+    // R3-M3: every flush captured one snapshot (8 owners) at most, never a growing history.
+    assert.deepEqual((await flushIntents(db)).map((f) => (f.owners || []).length), [0, ...Array(n - 1).fill(8)]);
     db.close();
   });
 }
 
-test('R13 M3: runHousekeeping sends snapshots through the transport it is given; without one it returns MQTT messages', async () => {
+test('R3-B1 [transport]: after 3 emitted snapshots with no uplink, the newest GEN2 group is ACKED and nothing is ambiguous', async () => {
   const { db } = await tempDb();
-  workers._resetHousekeepingForTests();
-  const h = harness(db);
-  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
-  const snap = await h.compile(0);
-  const sent = [];
-  const r = await workers.runHousekeeping({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: async (item) => { sent.push(item); return { id: 'q' }; } });
-  assert.equal(r.messages.length, 0);
-  assert.equal(sent.length, 8);
-  assert.deepEqual(sent.map((i) => [i.fPort, Buffer.from(i.data, 'base64').toString('hex').toUpperCase(), i.confirmed, i.devEui]), snap.rows.map((row) => [row.fport, row.payload_hex, false, EUI]));
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
+  const h = harness(db, 'transport');
+  await store.insertSchedule(db, weekly('all', 0x7F, '06:00', 30));
+  const results = await snapshotTimes(db, h, 'all', 3);
+  const newest = results[2].rows.find((r) => r.purpose === 'DAYMASK_PLAN');
+  assert.equal(await store.ackPush(db, EUI, 'DAYMASK_PLAN', 25, null, 1, ackAfterSend()), 1);
+  assert.equal((await db.get('SELECT state FROM valve_schedule_pushes WHERE push_id=?', [newest.push_id])).state, 'ACKED');
+  assert.deepEqual(await db.all("SELECT push_id FROM valve_schedule_pushes WHERE error='ack_ambiguous'"), []);
+  db.close();
+});
+
+// R3-M1 on design C: a GEN2 pause (the scheduler-status route) and a later edit both carry the
+// status first, so the queue ends with exactly one status item, DEACTIVATED, ahead of the plan.
+test('R3-M1 [transport]: GEN2 pause then edit: the queue holds exactly one status, DEACTIVATED, first', async () => {
+  const { db } = await tempDb();
+  await store.upsertSettings(db, EUI, { strega_generation: 'GEN2' });
+  const h = harness(db, 'transport');
+  await store.insertSchedule(db, weekly('mon', 0x02, '06:00', 30));
+  await h.compile(0);
+  await h.emit(WINDOW_SEC);
+  await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'DEACTIVATED', now: at(100), transport: h.cs.transport, warn: () => {} });
+  await store.updateSchedule(db, 'mon', { start_time: '07:00' }, EUI);
+  await h.compile(110);
+  await h.emit(110 + WINDOW_SEC);
+  const status = h.cs.getQueue().filter((item) => item.fPort === 21).map((item) => item.hex);
+  assert.deepEqual(status, ['32'], 'exactly one status item, DEACTIVATED');
+  assert.equal(h.cs.getQueue()[0].fPort, 21, 'status first (R5 M1)');
+  db.close();
+});
+
+// R3-M5 on design C: a compile whose flush RPC fails leaves no proof on the rows it invalidated;
+// its snapshot is still written and appended. The next completed flushes capture everything
+// again and stamp the real proof, so the ACK for the newest snapshot is credited, not ambiguous.
+test('R3-M5 [transport]: a failed flush followed by two completed snapshots: the newest row is ACKED, nothing ambiguous (GEN1)', async () => {
+  const { db } = await tempDb();
+  const h = harness(db, 'transport');
+  const realFlush = h.cs.transport.flushDeviceQueue;
+  await store.insertSchedule(db, weekly('mon', 0x02, '06:00', 30));
+  await snapshotTimes(db, h, 'mon', 1, 0); // A
+  h.cs.transport.flushDeviceQueue = async () => { throw new Error('chirpstack unreachable'); };
+  const b = await snapshotTimes(db, h, 'mon', 1, 1000); // B: the flush fails, B is appended behind A
+  assert.equal(b[0].flushed, false);
+  h.cs.transport.flushDeviceQueue = realFlush;
+  const results = await snapshotTimes(db, h, 'mon', 2, 2000); // C, D
+  const newest = results[1].rows.find((r) => r.weekday === 1);
+  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', 15, 1, 0, ackAfterSend()), 1);
+  assert.equal((await db.get('SELECT state FROM valve_schedule_pushes WHERE push_id=?', [newest.push_id])).state, 'ACKED');
+  assert.deepEqual(await db.all("SELECT push_id FROM valve_schedule_pushes WHERE error='ack_ambiguous'"), []);
+  db.close();
+});
+
+// --- B-4 (W8 proposal, R11 probe 3): unsettled plan rows no longer fence opens, and the clock tick
+// treats a FAILED (24 h sweep) or SUPERSEDED clock row as settled, never one inside the 24 h.
+test('B-4 (probe 3) [transport]: two quick edits, then a manual open is reserved, not valve_busy', async () => {
+  const dispatch = require('./dispatch');
+  const { db } = await tempDb();
+  const h = harness(db, 'transport');
+  await store.insertSchedule(db, weekly('a', 0x01, '06:00', 30));
+  await h.compile(0);
+  await h.emit(WINDOW_SEC);
   await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
   await h.compile(100);
-  const r2 = await workers.runHousekeeping({ db, now: at(100 + WINDOW_SEC), appId: 'app', warn: () => {} });
-  assert.equal(r2.messages.length, 8, 'MQTT fallback');
+  await h.emit(100 + WINDOW_SEC);
+  h.cs.drain(); // the valve takes the newest snapshot; nothing is acknowledged
+  const unsettled = await db.all("SELECT 1 FROM valve_schedule_pushes WHERE state<>'ACKED'");
+  assert.ok(unsettled.length >= 8, 'superseded and unacknowledged rows remain on record');
+  const reservation = await dispatch.reserveValveCommand({ db, command: { device_eui: EUI, command_id: 'manual-after-edits', action: 'OPEN_FOR_DURATION', duration_minutes: 5, commanded_at: at(300).toISOString(), timezone: 'UTC' }, now: at(300).toISOString() });
+  assert.equal(reservation.send, true);
   db.close();
 });
 
-test('R13 M3: a LOST row stays an ACK candidate while it is the newest row of its slot (a row that did reach the valve recovers); a SUPERSEDED one never is', async () => {
+test('B-4 clock gate [transport]: an unacknowledged clock sync blocks a new one for 24 h; once the sweep fails it, the next due tick sends a fresh one', async () => {
   const { db } = await tempDb();
-  const h = harness(db);
+  workers._resetHousekeepingForTests();
+  const h = harness(db, 'transport');
+  await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  await h.tick(0);
+  const clocks = () => db.all("SELECT state, error FROM valve_schedule_pushes WHERE purpose='CLOCK_SYNC' ORDER BY rowid");
+  assert.equal((await clocks()).length, 1);
+  await db.run("UPDATE valve_settings SET last_clock_sync_queued_at=NULL WHERE device_eui=?", [EUI]); // due again (e.g. a clock jump)
+  await h.tick(3600);
+  assert.equal((await clocks()).length, 1, 'inside 24 h the unacknowledged owner is kept, no new clock');
+  await db.run("UPDATE valve_schedule_pushes SET queued_at='2026-08-17 09:00:00' WHERE purpose='CLOCK_SYNC'");
+  await h.tick(7200); // the sweep fails the old clock row, then the tick may send a fresh one
+  const after = await clocks();
+  assert.deepEqual(after.map((r) => r.state), ['FAILED', 'QUEUED']);
+  db.close();
+});
+
+// --- Step 4 (R11 probe 2): the scheduler-status routes never flush and send a lone status while a
+// plan snapshot is outstanding. In fixed mode the status rides first in a full snapshot; in
+// conditional mode it is appended with no flush.
+for (const generation of ['GEN1', 'GEN2']) {
+  test(`R11 probe 2 (${generation}) [transport]: delete, pause, resume inside one uplink -> the valve ends with the deleted schedule cleared and status ACTIVE`, async () => {
+    const { db } = await tempDb();
+    await store.upsertSettings(db, EUI, { strega_generation: generation });
+    const h = harness(db, 'transport');
+    await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+    await h.compile(0);
+    await h.emit(WINDOW_SEC);
+    const valve = applyToValve(null, h.cs.drain()); // the valve holds schedule a
+    await store.softDeleteSchedule(db, 'a', EUI);
+    await h.compile(100);
+    await h.emit(100 + WINDOW_SEC); // the clears are on the air
+    await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'DEACTIVATED', now: at(140), transport: h.cs.transport, warn: () => {} });
+    await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'ACTIVE', now: at(145), transport: h.cs.transport, warn: () => {} });
+    await h.emit(145 + WINDOW_SEC);
+    applyToValve(valve, h.cs.drain());
+    assert.deepEqual(valveView(valve, generation), await desiredValve(db, generation));
+    for (let d = 0; d < 7; d += 1) {
+      if (generation === 'GEN1') assert.equal(valve.gen1[d], EMPTY_GEN1, `weekday ${d} cleared`);
+      else assert.equal(valve.gen2[d], '', `weekday ${d} cleared`);
+    }
+    assert.equal(valve.status, '0');
+    db.close();
+  });
+}
+
+test('R11 probe 2 [transport]: in conditional mode a pause is appended with no flush, so the conditional clear in flight stays queued', async () => {
+  const { db } = await tempDb();
+  const h = harness(db, 'transport');
+  await store.writeConditionalControl(db, EUI, { mode: 'CONDITIONAL', desired_revision: 'rev-1', required_push_ids: [], readiness: { state: 'PENDING', revision: 'rev-1', reason: 'awaiting_clear_ack' } });
+  await h.cs.transport.enqueueDownlink({ fPort: 14, data: Buffer.from(EMPTY_GEN1, 'hex').toString('base64') }); // a clear on the air
+  const flushesBefore = h.cs.log.flushes;
+  const out = await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'DEACTIVATED', now: at(10), transport: h.cs.transport, warn: () => {} });
+  assert.equal(out.statusOnly, true);
+  assert.equal(h.cs.log.flushes, flushesBefore, 'no flush');
+  assert.deepEqual(h.cs.getQueue().map((item) => item.fPort), [14, 21], 'the clear stays, the status follows');
+  assert.equal((await store.getSettings(db, EUI)).scheduler_status, 'DEACTIVATED');
+  await assert.rejects(setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'ACTIVE', now: at(20), transport: h.cs.transport, warn: () => {} }), (e) => e.code === 'conditional_readiness_pending');
+  db.close();
+});
+
+// R13-M1/m2: in conditional mode the policy worker honours Pause (DEACTIVATED), so the status
+// routes must let a paused conditional valve resume. ACTIVE is refused only while the conditional
+// clear is not confirmed (the valve may still hold a resident plan); once READY it is appended
+// (no flush). The status row and valve_settings are written in one transaction.
+test('R13-M1 [transport]: a conditional valve with a READY clear can be paused and resumed; each status is appended, never flushed', async () => {
+  const { db } = await tempDb();
+  const h = harness(db, 'transport');
+  await store.writeConditionalControl(db, EUI, { mode: 'CONDITIONAL', desired_revision: 'rev-1', required_push_ids: [], readiness: { state: 'READY', revision: 'rev-1', reason: 'all_current_clear_acked' } });
+  const flushesBefore = h.cs.log.flushes;
+  await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'DEACTIVATED', now: at(10), transport: h.cs.transport, warn: () => {} });
+  assert.equal((await store.getSettings(db, EUI)).scheduler_status, 'DEACTIVATED');
+  const resumed = await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'ACTIVE', now: at(20), transport: h.cs.transport, warn: () => {} });
+  assert.equal(resumed.statusOnly, true);
+  assert.equal((await store.getSettings(db, EUI)).scheduler_status, 'ACTIVE');
+  assert.equal(h.cs.log.flushes, flushesBefore, 'no flush');
+  assert.deepEqual(h.cs.getQueue().map((item) => item.hex), ['32', '30']);
+  db.close();
+});
+
+test('R13-m2: the conditional status row and valve_settings commit together (a send failure leaves both written, nothing half-done)', async () => {
+  const { db } = await tempDb();
+  await store.writeConditionalControl(db, EUI, { mode: 'CONDITIONAL', desired_revision: 'rev-1', required_push_ids: [], readiness: { state: 'READY', revision: 'rev-1', reason: 'all_current_clear_acked' } });
+  const failing = { async getDeviceQueue() { return []; }, async flushDeviceQueue() {}, async enqueueDownlink() { throw new Error('chirpstack down'); } };
+  const out = await setSchedulerStatus({ db, deviceEui: EUI, appId: 'app', status: 'DEACTIVATED', now: at(10), transport: failing, warn: () => {} });
+  assert.equal((await store.getSettings(db, EUI)).scheduler_status, 'DEACTIVATED');
+  const row = await db.get("SELECT state FROM valve_schedule_pushes WHERE purpose='SCHEDULER_STATUS' ORDER BY rowid DESC LIMIT 1");
+  assert.equal(row.state, 'QUEUED');
+  assert.equal(out.transportResults[0].phase, 'UNKNOWN', 'the uncertain send is reported to the route');
+  db.close();
+});
+
+// R13-M3 (probe F): a transport failure in the middle of a snapshot emission leaves the valve on a
+// half-old plan. The rows that did not reach ACCEPTED are LOST at once (not_resent_q02c), the
+// runtime is emitted, nothing is re-sent, and the 24 h sweep changes nothing more.
+test('R13-M3 (probe F) [transport]: ChirpStack fails after 3 enqueues -> the rest of the snapshot is LOST at once and surfaced', async () => {
+  const { db } = await tempDb();
+  await linkCloud(db);
+  workers._resetHousekeepingForTests();
+  const h = harness(db, 'transport');
   await store.insertSchedule(db, weekly('a', 0x3E, '06:00', 30));
   const snap = await h.compile(0);
-  // A timeout after ChirpStack had in fact accepted the row: the gateway marks it LOST.
-  await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: failingTransport(h.cs, { acceptFirst: 3, mode: 'throw' }) });
-  const tuesday = snap.rows.find((r) => r.weekday === 2);
-  assert.equal((await statesById(db, [tuesday.push_id]))[0].state, 'FAILED');
-  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', tuesday.fport, 2, 0, '2026-08-19T11:00:00.000Z'), 1, 'the valve says it holds Tuesday');
-  assert.equal((await statesById(db, [tuesday.push_id]))[0].state, 'ACKED');
-  assert.equal((await store.pushSummary(db, EUI, at(100))).lost, 4);
-
-  // A newer snapshot replaces the slot: the old LOST row is no longer a candidate.
-  await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
-  const next = await h.compile(200);
-  await h.emit(200 + WINDOW_SEC);
-  for (const row of next.rows) await store.ackPush(db, EUI, row.purpose, row.fport, row.weekday, 0, '2026-08-19T12:00:00.000Z');
-  const wednesdayOld = snap.rows.find((r) => r.weekday === 3);
-  const before = await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid');
-  assert.equal(await store.ackPush(db, EUI, 'WEEKDAY_PLAN', wednesdayOld.fport, 3, 0, '2026-08-19T12:05:00.000Z'), 0);
-  assert.deepEqual(await db.all('SELECT * FROM valve_schedule_pushes ORDER BY rowid'), before);
+  const realEnqueue = h.cs.transport.enqueueDownlink;
+  let calls = 0;
+  h.cs.transport.enqueueDownlink = async (item) => { calls += 1; if (calls > 3) throw new Error('chirpstack restarted'); return realEnqueue(item); };
+  const out = await h.emit(WINDOW_SEC);
+  assert.equal(h.cs.getQueue().length, 3, 'status, Sunday and Monday reached the queue');
+  assert.equal(out.transportFailures.length, 1);
+  const states = await statesById(db, snap.rows.map((r) => r.push_id));
+  assert.deepEqual(states.slice(0, 3).map((s) => s.state), ['QUEUED', 'QUEUED', 'QUEUED']);
+  for (const s of states.slice(3)) assert.deepEqual({ state: s.state, error: s.error }, { state: 'FAILED', error: 'not_resent_q02c' });
+  const summary = await store.pushSummary(db, EUI, at(WINDOW_SEC));
+  assert.equal(summary.lost, 5, 'surfaced now, not after 24 h');
+  const payload = JSON.parse((await db.get("SELECT payload_json FROM sync_outbox WHERE op='VALVE_RUNTIME_CHANGED' ORDER BY rowid DESC LIMIT 1")).payload_json);
+  assert.equal(payload.push_state.lost, 5);
+  h.cs.transport.enqueueDownlink = realEnqueue;
+  const before = h.cs.log.enqueued.length;
+  await h.tick(WINDOW_SEC + 60);
+  await h.tick(WINDOW_SEC + 120);
+  assert.equal(h.cs.log.enqueued.slice(before).filter((i) => i.fPort !== 12).length, 0, 'nothing is re-sent');
   db.close();
 });
 
-// ---------------------------------------------------------------------------------------------
-// Review of d3b0efb85: T1 (client lifecycle), T2 (stop at the first failure, tick re-entrancy),
-// T3 (warn once about the MQTT fallback).
-// ---------------------------------------------------------------------------------------------
-function fakeClientFactory(cs, behaviour) {
+// R13-M4: leaving conditional mode while an open awaits observation used to answer 202 with
+// nothing written and nothing sent (the fixed plan was stored but never programmed). Design C now
+// handles it like any compile during a pending observation: the control becomes FIXED, the full
+// snapshot is pending, the emitter holds it (no flush) until the open is observed or the 5-minute
+// cap, then appends it behind the queue; the response names the open it waited for.
+test('R13-M4 (probe C\') [transport]: a conversion back to fixed during an unobserved open is pending and visible, then sent, never silent', async () => {
+  const { db } = await tempDb();
+  const h = harness(db, 'transport');
+  await store.writeConditionalControl(db, EUI, { mode: 'CONDITIONAL', generation: 'GEN1', desired_revision: 'rev-1', required_push_ids: [], readiness: { state: 'READY', revision: 'rev-1', reason: 'all_current_clear_acked' } });
+  await db.run(
+    "INSERT INTO valve_actuation_expectations(expectation_id, device_eui, command_id, commanded_at, commanded_duration_seconds, expected_close_at, volume_source, reconciliation_state, created_at) VALUES ('e-open', ?, 'cmd-open', '2026-08-19T10:00:00Z', 600, '2026-08-19T10:10:00Z', 'unknown', 'PENDING_OBSERVATION', '2026-08-19T10:00:00Z')",
+    [EUI]);
+  await store.insertSchedule(db, weekly('fixed', 0x02, '06:00', 30));
+  const r = await h.compile(10);
+  assert.notEqual(r.blocked, true);
+  assert.equal(r.conversion_waits_for, 'cmd-open');
+  assert.equal(r.rows.length, 8, 'the full fixed snapshot is written');
+  assert.equal((await store.conditionalControl(db, EUI)).mode, 'FIXED');
+  assert.equal((await store.pushSummary(db, EUI, at(10))).queued, 7, 'the tile shows the plan as waiting, not silently nothing');
+  assert.equal((await h.emit(10 + WINDOW_SEC)).messages.length, 0, 'held while the open is unobserved');
+  await db.run("UPDATE valve_actuation_expectations SET reconciliation_state='OBSERVED_RUNNING' WHERE expectation_id='e-open'");
+  await h.emit(10 + 2 * WINDOW_SEC);
+  assert.deepEqual(h.cs.getQueue(), asItems(r.rows), 'sent once the open is observed');
+  db.close();
+});
+
+// --- PR0 2758ca709 (review of d3b0efb85: T1, T2, T3), on the transport path. T1: the tick builds a
+// ChirpStack client lazily, only when something is about to be sent, and closes it. T2: the
+// first transport failure stops the snapshot (the rest LOST, untried) and leaves other valves'
+// snapshots pending for the next tick; overlapping ticks are skipped. T3: a client that cannot
+// be built is warned about once. On this branch STREGA writes never fall back to MQTT (the
+// dispatch boundary): with no client the snapshots stay pending.
+function clientFactory(cs, behaviour) {
   const stats = { created: 0, closed: 0, calls: 0 };
   const factory = () => {
     stats.created += 1;
     return {
+      getDeviceQueue: (eui) => cs.transport.getDeviceQueue(eui),
+      flushDeviceQueue: (eui) => cs.transport.flushDeviceQueue(eui),
       enqueueDownlink: async (item) => {
         stats.calls += 1;
         if (behaviour && behaviour.enqueue) return behaviour.enqueue(item, stats);
-        cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]);
-        return { id: 'q' + stats.calls };
+        return cs.transport.enqueueDownlink(item);
       },
       close: () => { stats.closed += 1; return []; },
     };
@@ -920,7 +1114,7 @@ function fakeClientFactory(cs, behaviour) {
   return { factory, stats };
 }
 
-function deferred() {
+function deferredPromise() {
   let resolve; let reject;
   const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
   return { promise, resolve, reject };
@@ -931,105 +1125,102 @@ async function addValve(db, eui) {
   await db.run("INSERT INTO devices(deveui, name, type_id, user_id, created_at, updated_at) VALUES (?,'Valve C','STREGA_VALVE',1,datetime('now'),datetime('now'))", [eui]);
 }
 
-test('T1: the tick creates a ChirpStack client only when a snapshot is due, and closes it, also after a failure', async () => {
+test('PR0 T1 [transport]: the valve tick builds a ChirpStack client only when a snapshot is due, and closes it, also after a failure', async () => {
   const { db } = await tempDb();
   workers._resetHousekeepingForTests();
   const cs = fakeChirpStack();
-  const { factory, stats } = fakeClientFactory(cs);
+  const { factory, stats } = clientFactory(cs);
   await workers.runValveTick({ db, now: at(0), appId: 'app', warn: () => {}, transportFactory: factory });
   assert.equal(stats.created, 0, 'nothing pending: no client');
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
-  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(10), flushQueue: cs.flushQueue, warn: () => {} });
+  await store.upsertSettings(db, EUI, { last_clock_sync_queued_at: at(0).toISOString() }); // no clock due here
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(10), transport: cs.transport, warn: () => {} });
   await workers.runValveTick({ db, now: at(20), appId: 'app', warn: () => {}, transportFactory: factory });
   assert.equal(stats.created, 0, 'pending but inside the debounce window: no client');
   await workers.runValveTick({ db, now: at(10 + WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: factory });
   assert.deepEqual({ created: stats.created, closed: stats.closed, calls: stats.calls }, { created: 1, closed: 1, calls: 8 });
 
-  const failing = fakeClientFactory(cs, { enqueue: async () => { throw new Error('unavailable'); } });
+  const failing = clientFactory(cs, { enqueue: async () => { throw new Error('unavailable'); } });
   await store.updateSchedule(db, 'a', { start_time: '07:00' }, EUI);
-  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(200), flushQueue: cs.flushQueue, warn: () => {} });
+  await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(200), transport: cs.transport, warn: () => {} });
   await workers.runValveTick({ db, now: at(200 + WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: failing.factory });
-  assert.deepEqual({ created: failing.stats.created, closed: failing.stats.closed }, { created: 1, closed: 1 }, 'closed after a failure too');
+  assert.deepEqual({ created: failing.stats.created, closed: failing.stats.closed, calls: failing.stats.calls }, { created: 1, closed: 1, calls: 1 }, 'one attempt, closed after the failure too');
   db.close();
 });
 
-test('T2: the first transport failure stops the snapshot: the rest is LOST without being tried, other valves wait for the next tick', async () => {
+test('PR0 T2 [transport]: the first transport failure stops the snapshot (the rest LOST, untried); other valves wait for the next tick', async () => {
   const { db } = await tempDb();
-  workers._resetHousekeepingForTests();
   await addValve(db, OTHER_VALVE);
   const cs = fakeChirpStack();
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
   await store.insertSchedule(db, Object.assign(weekly('b', 0x04, '07:00', 30), { device_eui: OTHER_VALVE }));
-  const s1 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
-  const s2 = await compileAndQueue({ db, deviceEui: OTHER_VALVE, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
+  const s1 = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), transport: cs.transport, warn: () => {} });
+  const s2 = await compileAndQueue({ db, deviceEui: OTHER_VALVE, appId: 'app', now: at(0), transport: cs.transport, warn: () => {} });
   let calls = 0;
-  const down = async () => { calls += 1; throw new Error('DEADLINE_EXCEEDED'); };
-  const out = await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, enqueue: down });
+  const down = Object.assign({}, cs.transport, { enqueueDownlink: async () => { calls += 1; throw new Error('DEADLINE_EXCEEDED'); } });
+  const out = await emitPendingSnapshots({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, transport: down });
   assert.equal(calls, 1, 'one attempt, not one per row and per valve');
-  const first = (await db.all('SELECT device_eui FROM valve_schedule_pushes WHERE state=? GROUP BY device_eui', ['FAILED'])).map((r) => r.device_eui);
-  assert.equal(first.length, 1, 'only the valve whose snapshot was attempted has LOST rows');
-  const attempted = first[0] === EUI ? s1 : s2;
-  const waiting = first[0] === EUI ? s2 : s1;
-  const waitingEui = first[0] === EUI ? OTHER_VALVE : EUI;
-  const lostRows = await db.all('SELECT push_id, state, error FROM valve_schedule_pushes WHERE device_eui=?', [first[0]]);
-  assert.equal(lostRows.length, attempted.rows.length);
+  assert.equal(out.transportDown, true);
+  const failed = (await db.all("SELECT device_eui FROM valve_schedule_pushes WHERE state='FAILED' GROUP BY device_eui")).map((r) => r.device_eui);
+  assert.equal(failed.length, 1, 'only the valve whose snapshot was attempted has LOST rows');
+  const attempted = failed[0] === EUI ? s1 : s2;
+  const waiting = failed[0] === EUI ? s2 : s1;
+  const waitingEui = failed[0] === EUI ? OTHER_VALVE : EUI;
+  const lostRows = await statesById(db, attempted.rows.map((r) => r.push_id));
   for (const r of lostRows) assert.deepEqual({ state: r.state, error: r.error }, { state: 'FAILED', error: 'not_resent_q02c' });
-  assert.equal(out.transportFailures, attempted.rows.length);
+  const untried = await db.all('SELECT transport_json FROM valve_schedule_pushes WHERE push_id IN (' + attempted.rows.slice(1).map(() => '?').join(',') + ')', attempted.rows.slice(1).map((r) => r.push_id));
+  assert.ok(untried.every((r) => !r.transport_json || !JSON.parse(r.transport_json).phase), 'the rows after the failure were never tried');
   assert.ok(await store.getSnapshotPending(db, waitingEui), 'the other snapshot is still pending, never emitted');
-  const ok = await emitPendingSnapshots({ db, now: at(WINDOW_SEC + 60), appId: 'app', warn: () => {}, enqueue: async (item) => { cs.enqueue([{ payload: { fPort: item.fPort, data: item.data } }]); return { id: 'x' }; } });
+  const ok = await emitPendingSnapshots({ db, now: at(WINDOW_SEC + 60), appId: 'app', warn: () => {}, transport: cs.transport });
   assert.equal(ok.emitted, 1);
   assert.equal(cs.getQueue().length, waiting.rows.length);
   db.close();
 });
 
-test('T2: a hanging transport (bounded by its deadline) stalls one tick; an overlapping tick skips, so no duplicate clock or decommission send', async () => {
+test('PR0 T2 [transport]: a hanging transport stalls one tick; an overlapping tick skips, so no duplicate clock or decommission send', async () => {
   const { db } = await tempDb();
   workers._resetHousekeepingForTests();
   const cs = fakeChirpStack();
   await addValve(db, OTHER_VALVE);
-  // A decommissioned valve with a real plan on record: the sweep sends its clear once.
   await store.insertPushes(db, [{ push_id: 'acked-other', device_eui: OTHER_VALVE, purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: '00'.repeat(24), plan_hash: 'a-real-plan' }]);
   await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id='acked-other'");
   await db.run('UPDATE devices SET deleted_at=? WHERE deveui=?', [new Date(Date.now() - 2000).toISOString(), OTHER_VALVE]);
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
-  const snap = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), flushQueue: cs.flushQueue, warn: () => {} });
-  const hang = deferred();
-  let calls = 0;
-  const { factory } = fakeClientFactory(cs, { enqueue: async () => { calls += 1; return hang.promise; } });
-
+  const snap = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), transport: cs.transport, warn: () => {} });
+  const hang = deferredPromise();
+  let hung = 0;
+  const { factory } = clientFactory(cs, { enqueue: async (item) => { if (hung === 0) { hung += 1; return hang.promise; } return cs.transport.enqueueDownlink(item); } });
   const tick1 = workers.runValveTick({ db, now: at(WINDOW_SEC), appId: 'app', warn: () => {}, transportFactory: factory });
-  await new Promise((res) => setImmediate(res));
+  for (let i = 0; i < 20; i += 1) await new Promise((res) => setImmediate(res));
   const tick2 = await workers.runValveTick({ db, now: at(WINDOW_SEC + 60), appId: 'app', warn: () => {}, transportFactory: factory });
   assert.equal(tick2.skipped, true, 'the overlapping tick skips while one is running');
-  assert.deepEqual(tick2.messages, []);
   hang.reject(new Error('DEADLINE_EXCEEDED'));
   const r1 = await tick1;
   assert.equal(r1.skipped, false);
-  assert.equal(calls, 1, 'the hanging call was the only attempt');
   assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['FAILED']);
   const tick3 = await workers.runValveTick({ db, now: at(WINDOW_SEC + 120), appId: 'app', warn: () => {}, transportFactory: factory });
   assert.equal(tick3.skipped, false, 'the next tick runs again');
-  const all = r1.messages.concat(tick2.messages, tick3.messages);
-  assert.equal(all.filter((m) => m.payload.fPort === 12).length, 1, 'one clock sync');
-  assert.equal(all.filter((m) => m.payload.devEui === OTHER_VALVE && m.payload.fPort === 21).length, 1, 'one decommission send');
-  assert.equal((await db.all("SELECT 1 FROM valve_schedule_pushes WHERE purpose='CLOCK_SYNC'")).length, 1);
+  assert.equal((await db.all("SELECT 1 FROM valve_schedule_pushes WHERE purpose='CLOCK_SYNC'")).length, 1, 'one clock sync');
+  assert.equal((await db.all("SELECT 1 FROM valve_schedule_pushes WHERE device_eui=? AND purpose='SCHEDULER_STATUS' AND payload_hex='32'", [OTHER_VALVE])).length, 1, 'one decommission send');
   db.close();
 });
 
-test('T3: the MQTT fallback (no ChirpStack client) is warned about once, not on every tick', async () => {
+test('PR0 T3 [transport]: a ChirpStack client that cannot be built is warned about once; STREGA snapshots stay pending (no MQTT fallback on this branch)', async () => {
   const { db } = await tempDb();
   workers._resetHousekeepingForTests();
   push._resetTransportWarningsForTests();
   const cs = fakeChirpStack();
   await store.insertSchedule(db, weekly('a', 0x02, '06:00', 30));
+  await store.upsertSettings(db, EUI, { last_clock_sync_queued_at: at(0).toISOString() });
   const warnings = [];
   const broken = () => { throw new Error('CHIRPSTACK_API_URL is not set'); };
-  for (let i = 0; i < 3; i += 1) {
-    await store.updateSchedule(db, 'a', { duration_minutes: 30 + i }, EUI);
-    await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(i * 100), flushQueue: cs.flushQueue, warn: () => {} });
-    const r = await workers.runValveTick({ db, now: at(i * 100 + WINDOW_SEC), appId: 'app', warn: (m) => warnings.push(m), transportFactory: broken });
-    assert.equal(r.messages.filter((m) => m.payload.fPort !== 12).length, 8, 'the snapshot still leaves over MQTT');
+  const snap = await compileAndQueue({ db, deviceEui: EUI, appId: 'app', now: at(0), transport: cs.transport, warn: () => {} });
+  for (let i = 1; i <= 3; i += 1) {
+    const r = await workers.runValveTick({ db, now: at(i * 100), appId: 'app', warn: (m) => warnings.push(m), transportFactory: broken });
+    assert.deepEqual(r.messages, [], 'no MQTT downlink');
   }
-  assert.equal(warnings.filter((w) => /MQTT/.test(w)).length, 1);
+  assert.equal(warnings.filter((w) => /client unavailable/.test(w)).length, 1);
+  assert.ok(await store.getSnapshotPending(db, EUI), 'still pending, sent once a client can be built');
+  assert.deepEqual([...new Set((await statesById(db, snap.rows.map((r) => r.push_id))).map((s) => s.state))], ['QUEUED']);
   db.close();
 });

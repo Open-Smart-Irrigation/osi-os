@@ -113,6 +113,9 @@
     "yesRemove": "Yee, Ggyawo",
     "removing": "Tikuggyawo...",
     "failedToRemove": "Okuggyawo ekyuma kugaanye",
+    "removedClearingScheduled": "Valve removed. Its weekly plan is being cleared; until the valve confirms, it may keep running its program.",
+    "removedClearingFailed": "Valve removed, but clearing its weekly plan failed. The valve may keep running its program.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Bwagulibwa omulundi gw'omuliko: {{minutes}} edakiika ewedde",
     "actuationFeedback": {
       "closed": "Ggangwe",

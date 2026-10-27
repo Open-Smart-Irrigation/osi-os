@@ -1,0 +1,41 @@
+#!/bin/sh
+
+# BusyBox ntpd calls this asynchronously. Only a successful stratum callback
+# certifies a wall-clock baseline; connectivity loss and step/periodic notices
+# preserve the last-good marker for same-boot offline operation.
+set -u
+marker=${OSI_IRRIGATION_CLOCK_MARKER:-/var/run/osi-irrigation-clock.json}
+action=${ACTION:-}
+case "$action" in
+  stratum)
+    case "${stratum:-}" in
+      1|2|3|4|5|6|7|8|9|10|11|12|13|14|15) ;;
+      *) exit 0 ;;
+    esac
+    boot_id=${OSI_IRRIGATION_CLOCK_BOOT_ID:-}
+    [ -n "$boot_id" ] || boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || exit 0
+    epoch_ms=${OSI_IRRIGATION_CLOCK_EPOCH_MS:-}
+    if [ -z "$epoch_ms" ]; then
+      epoch_s=$(date +%s 2>/dev/null) || exit 0
+      epoch_ms="${epoch_s}000"
+    fi
+    uptime_ms=${OSI_IRRIGATION_CLOCK_UPTIME_MS:-}
+    if [ -z "$uptime_ms" ]; then
+      uptime_s=$(cut -d ' ' -f 1 /proc/uptime 2>/dev/null) || exit 0
+      case "$uptime_s" in ''|*[!0-9.]*) exit 0 ;; esac
+      uptime_ms=$(awk -v value="$uptime_s" 'BEGIN { printf "%.0f", value * 1000 }') || exit 0
+    fi
+    case "$boot_id" in ''|*[!A-Za-z0-9._:-]*) exit 0 ;; esac
+    case "$epoch_ms" in ''|*[!0-9]*) exit 0 ;; esac
+    case "$uptime_ms" in ''|*[!0-9]*) exit 0 ;; esac
+    dir=$(dirname "$marker")
+    tmp="$dir/.osi-irrigation-clock.$$"
+    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+    umask 077
+    printf '{"boot_id":"%s","epoch_ms":%s,"uptime_ms":%s,"stratum":%s}\n' "$boot_id" "$epoch_ms" "$uptime_ms" "$stratum" >"$tmp" || exit 0
+    mv -f "$tmp" "$marker" || exit 0
+    trap - EXIT HUP INT TERM
+    ;;
+  *) exit 0 ;;
+esac
+exit 0

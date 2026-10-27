@@ -2,6 +2,7 @@
 
 const { aggregateHash } = require('./aggregate');
 const { aggregateRows } = require('../osi-history-helper');
+const valveControl = require('../osi-valve-control');
 
 const DAY_SECONDS = 24 * 60 * 60;
 const DAY_MILLISECONDS = DAY_SECONDS * 1000;
@@ -463,6 +464,17 @@ function valveValueRecord(row, at, value, observedAt, quality) {
 
 function stateFromExpectation(row, at) {
   const reference = Date.parse(at);
+  if (valveControl.isReportOnlyExpectation(row)) {
+    const observedOpenAt = row.observed_open_at ? instant(row.observed_open_at, 'observed_open_at') : null;
+    const observedCloseAt = row.observed_close_at ? instant(row.observed_close_at, 'observed_close_at') : null;
+    if (observedCloseAt && Date.parse(observedCloseAt) <= reference) {
+      return valveValueRecord(row, at, 'CLOSED', observedCloseAt, 'observed');
+    }
+    if (observedOpenAt && Date.parse(observedOpenAt) <= reference && !observedCloseAt) {
+      return valveValueRecord(row, at, 'OPEN', observedOpenAt, 'observed');
+    }
+    return valveUnknownRecord(row, at);
+  }
   const commandedAt = instant(row.commanded_at, 'commanded_at');
   const expectedCloseAt = instant(row.expected_close_at, 'expected_close_at');
   const observedOpenAt = row.observed_open_at

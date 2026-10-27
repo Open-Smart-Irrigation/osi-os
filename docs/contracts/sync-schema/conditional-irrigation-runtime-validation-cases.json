@@ -1,0 +1,266 @@
+{
+  "cases": [
+    {
+      "name": "runtime full",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": true
+    },
+    {
+      "name": "valve runtime full",
+      "definition": "ValveRuntime",
+      "op": "IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED",
+      "fixture": "valve_runtime_full",
+      "expected": true
+    },
+    {
+      "name": "decision full",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": true
+    },
+    {
+      "name": "SWT condition empty sources",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition", "sources"], "value": []}
+      ]
+    },
+    {
+      "name": "SWT condition duplicate source",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition", "sources"], "value": [
+          {"device_eui": "A840410000000002", "channel": "swt_2"},
+          {"device_eui": "A840410000000002", "channel": "swt_2"}
+        ]}
+      ]
+    },
+    {
+      "name": "SWT condition unexpected source field",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition", "sources", 0, "raw_transport"], "value": "secret"}
+      ]
+    },
+    {
+      "name": "SWT condition source wrong type",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition", "sources", 0, "device_eui"], "value": 1234567890123456}
+      ]
+    },
+    {
+      "name": "VWC condition golden",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": true,
+      "patches": [
+        {"path": ["evidence", "condition"], "value": {
+          "kind": "VWC",
+          "threshold_percent": 0,
+          "sources": [{"device_eui": "A840410000000001", "channel": "vwc_1"}]
+        }}
+      ]
+    },
+    {
+      "name": "VWC condition empty sources",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition"], "value": {
+          "kind": "VWC", "threshold_percent": 0, "sources": []
+        }}
+      ]
+    },
+    {
+      "name": "VWC condition duplicate source",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition"], "value": {
+          "kind": "VWC", "threshold_percent": 0,
+          "sources": [
+            {"device_eui": "A840410000000001", "channel": "vwc_1"},
+            {"device_eui": "A840410000000001", "channel": "vwc_1"}
+          ]
+        }}
+      ]
+    },
+    {
+      "name": "VWC condition unexpected source field",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition"], "value": {
+          "kind": "VWC", "threshold_percent": 0,
+          "sources": [{"device_eui": "A840410000000001", "channel": "vwc_1", "raw_transport": "secret"}]
+        }}
+      ]
+    },
+    {
+      "name": "VWC condition source wrong type",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "condition"], "value": {
+          "kind": "VWC", "threshold_percent": 0,
+          "sources": [{"device_eui": 1234567890123456, "channel": "vwc_1"}]
+        }}
+      ]
+    },
+    {
+      "name": "DENDRO nested source optional kind wrong type",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"device_eui": "A840410000000003", "channel": "twd", "kind": 1, "eligible": null, "state": null, "reason": null, "sources": []}]}]}
+      ]
+    },
+    {
+      "name": "DENDRO nested source optional eligible wrong type",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"device_eui": "A840410000000003", "channel": "twd", "kind": null, "eligible": "yes", "state": null, "reason": null, "sources": []}]}]}
+      ]
+    },
+    {
+      "name": "DENDRO nested source optional state wrong type",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"device_eui": "A840410000000003", "channel": "twd", "kind": null, "eligible": null, "state": 7, "reason": null, "sources": []}]}]}
+      ]
+    },
+    {
+      "name": "DENDRO nested source optional reason wrong type",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"device_eui": "A840410000000003", "channel": "twd", "kind": null, "eligible": null, "state": null, "reason": 7, "sources": []}]}]}
+      ]
+    },
+    {
+      "name": "DENDRO nested source identity missing",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"channel": "twd"}]}]}
+      ]
+    },
+    {
+      "name": "DENDRO nested list source identity missing",
+      "definition": "Runtime",
+      "op": "IRRIGATION_POLICY_RUNTIME_CHANGED",
+      "fixture": "runtime_full",
+      "expected": false,
+      "patches": [
+        {"path": ["source_choices", "DENDRO"], "value": [{"kind": "DENDRO", "eligible": true, "state": "ready", "reason": null, "sources": [{"device_eui": "A840410000000001", "channel": "twd", "sources": [{"channel": "twd"}]}]}]}
+      ]
+    },
+    {
+      "name": "evaluation status must be non-null string",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "evaluation", "status"], "value": null}
+      ]
+    },
+    {
+      "name": "evaluation source kind must be non-null string",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "evaluation", "sources"], "value": [{"kind": null, "device_eui": "A840410000000002", "channel": "swt_2"}]}
+      ]
+    },
+    {
+      "name": "evaluation source channel must be non-null string",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "evaluation", "sources"], "value": [{"kind": "SWT", "device_eui": "A840410000000002", "channel": null}]}
+      ]
+    },
+    {
+      "name": "selected_at must be date-time",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "selected_at"], "value": "2026/10/20 00:00"}
+      ]
+    },
+    {
+      "name": "evaluation first_sample_at must be date-time",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "evaluation", "sources"], "value": [{"kind": "SWT", "device_eui": "A840410000000002", "channel": "swt_2", "first_sample_at": "yesterday"}]}
+      ]
+    },
+    {
+      "name": "observation source kind must be non-null string",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "observation", "sources"], "value": [{"kind": null, "device_eui": "A840410000000002", "channel": null}]}
+      ]
+    },
+    {
+      "name": "observation latest_sample_at must be date-time",
+      "definition": "Decision",
+      "op": "IRRIGATION_POLICY_DECISION_UPSERTED",
+      "fixture": "decision_full",
+      "expected": false,
+      "patches": [
+        {"path": ["evidence", "observation", "sources"], "value": [{"kind": "SWT", "device_eui": "A840410000000002", "channel": null, "latest_sample_at": "yesterday"}]}
+      ]
+    }
+  ]
+}

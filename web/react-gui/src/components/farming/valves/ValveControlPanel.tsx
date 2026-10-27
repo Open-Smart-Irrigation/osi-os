@@ -1,10 +1,9 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
-import {useDismissOnPointerDown} from '../../../hooks/useDismissOnPointerDown';
 import { devicesAPI, valvesAPI } from '../../../services/api';
 import { useSessionFence } from '../../../contexts/AuthSessionDataBoundary';
-import type { ValveSummary } from '../../../types/farming';
+import type { ValveSchedule, ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
 import { ValveTile } from './ValveTile';
 import { ValveOpenDialog } from './ValveOpenDialog';
@@ -12,45 +11,14 @@ import { ValveScheduleDialog } from './ValveScheduleDialog';
 import { ValveScheduleOverview } from './ValveScheduleOverview';
 import { ValveSettingsDialog } from './ValveSettingsDialog';
 import { ValveServiceDialog } from './ValveServiceDialog';
+import { ValveControlHelp } from '../shared/ValveControlHelp';
+import { ValveCancelOutcome } from './ValveCancelOutcome';
+import { valveCancelResultFromError, type ValveCancelResult } from '../../../services/valveCancel';
 
 // The heading's information button. Hover and keyboard focus show the tip; a tap
 // pins it (focus fires before click on touch, so the first tap opens and a second
 // tap closes). Escape, blur and a pointer-down outside dismiss it. The tooltip is
 // plain text: nothing in it can be focused, and it is no live region.
-function ValveControlHelp() {
-  const {t}=useTranslation('valves');
-  const id=useId(), ref=useRef<HTMLDivElement>(null);
-  const [state,setState]=useState({hover:false,focus:false,pinned:false,dismissed:false});
-  const update=(patch:Partial<typeof state>)=>setState(current=>({...current,...patch}));
-  const close=()=>update({pinned:false,dismissed:true});
-  useDismissOnPointerDown(ref,close);
-  const open=!state.dismissed&&(state.hover||state.focus||state.pinned);
-  // Document-level so hover-opened help also yields to Escape (WCAG 1.4.13);
-  // focus is left where it is.
-  useEffect(()=>{
-    if(!open)return undefined;
-    const onKeyDown=(event:KeyboardEvent)=>{
-      if(event.key!=='Escape')return;
-      event.preventDefault();
-      setState(current=>({...current,pinned:false,dismissed:true}));
-    };
-    document.addEventListener('keydown',onKeyDown);
-    return ()=>document.removeEventListener('keydown',onKeyDown);
-  },[open]);
-  return <div ref={ref} className="relative -my-2 -mr-2 shrink-0"
-    onMouseEnter={()=>update({hover:true,dismissed:false})}
-    onMouseLeave={()=>update({hover:false})}>
-    <button type="button" aria-label={t('scheduleHelpLabel')} aria-describedby={open?id:undefined}
-      onFocus={()=>update({focus:true,dismissed:false})} onBlur={()=>update({focus:false,pinned:false})}
-      onClick={()=>state.pinned?close():update({pinned:true,dismissed:false})}
-      className="flex min-h-12 min-w-12 items-center justify-center rounded-full text-base text-[var(--text-secondary)] hover:bg-[var(--card)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface)]">
-      <span aria-hidden="true">ⓘ</span>
-    </button>
-    {open&&<div id={id} role="tooltip" className="absolute right-0 top-full z-20 w-56 max-w-[calc(100vw-4rem)] whitespace-normal break-words rounded-lg border border-[var(--border)] bg-[var(--card)] p-3 text-xs text-[var(--text)] shadow-lg">
-      {t('scheduleHelp')}
-    </div>}
-  </div>;
-}
 
 export interface ValveControlPanelProps {
   onUpdate: () => void;
@@ -65,13 +33,22 @@ export interface ValveControlPanelProps {
   // normaliseDevice). Undefined/missing entries render the tile with no battery line, same
   // as before this prop existed.
   batteryByEui?: Map<string, { batPct?: unknown; batV?: unknown }>;
+  /** Opens the single conditional-policy editor for a selected policy row. */
+  onOpenPolicyEditor?: (valve: ValveSummary, schedule?: ValveSchedule) => void;
 }
 
 type DialogKind = 'open' | 'schedule' | 'settings' | 'service' | null;
 
 const valvesFetcher = () => valvesAPI.list();
 
-export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite, batteryByEui }) => {
+// A refused Resume on a conditional valve whose clear is not confirmed gets its own explanation;
+// every other failure keeps the generic actionFailed.
+function actionErrorKey(error: unknown): 'resumeRefusedClearPending' | 'actionFailed' {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
+  return code === 'conditional_readiness_pending' ? 'resumeRefusedClearPending' : 'actionFailed';
+}
+
+export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, canWrite, batteryByEui, onOpenPolicyEditor }) => {
   const { t } = useTranslation('valves');
   const sessionFence = useSessionFence();
   const { t: tc } = useTranslation('common');
@@ -87,6 +64,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
   const [dialogKind, setDialogKind] = useState<DialogKind>(null);
   const [actionBusyEui, setActionBusyEui] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<{ name: string; result: ValveCancelResult } | null>(null);
 
   const hasLiveValve = useMemo(
     () => (valves ?? []).some((v) => {
@@ -145,14 +123,39 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     await refresh();
   };
 
+  // A cancel reports its outcome and flush collateral (D19/Q01 = (a)); a handed-off or
+  // uncertain outcome arrives as a 409/503 whose body says so, and is shown as that outcome,
+  // not as a generic failure.
+  const handleCancel = async (valve: ValveSummary) => {
+    setActionBusyEui(valve.deviceEui);
+    setActionError(null);
+    setCancelNotice(null);
+    try {
+      const result = await devicesAPI.cancelIrrigation(valve.deviceEui);
+      if (result) setCancelNotice({ name: valve.name, result });
+      await refresh();
+    } catch (err) {
+      const result = valveCancelResultFromError(err);
+      if (result) {
+        setCancelNotice({ name: valve.name, result });
+        refresh().catch((refreshErr) => console.warn('Failed to refresh the valve list after a cancel', refreshErr));
+      } else {
+        setActionError(t('actionFailed'));
+      }
+    } finally {
+      setActionBusyEui(null);
+    }
+  };
+
   const runAction = async (eui: string, action: () => Promise<unknown>) => {
     setActionBusyEui(eui);
     setActionError(null);
+    setCancelNotice(null);
     try {
       await action();
       await refresh();
-    } catch {
-      setActionError(t('actionFailed'));
+    } catch (error) {
+      setActionError(t(actionErrorKey(error)));
     } finally {
       setActionBusyEui(null);
     }
@@ -173,6 +176,10 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
         open={dialogKind === 'schedule'}
         onClose={closeDialog}
         onChanged={refresh}
+        onOpenPolicyEditor={schedule => {
+          if (selectedValve) onOpenPolicyEditor?.(selectedValve, schedule);
+          closeDialog();
+        }}
       />
       <ValveSettingsDialog
         key={`settings-${selectedValve.deviceEui}`}
@@ -197,8 +204,10 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-[var(--text)]">{t('title')}</h2>
-        <ValveControlHelp />
+        <ValveControlHelp label={t('scheduleHelpLabel')}>{t('scheduleHelp')}</ValveControlHelp>
       </div>
+
+      {cancelNotice && <ValveCancelOutcome valveName={cancelNotice.name} result={cancelNotice.result} />}
 
       {actionError && (
         <p className="mt-3 rounded-lg border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-xs text-[var(--warn-text)]">
@@ -239,7 +248,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
               onSchedule={() => { setDialogEui(valve.deviceEui); setDialogKind('schedule'); }}
               onSettings={() => { setDialogEui(valve.deviceEui); setDialogKind('settings'); }}
               onService={() => { setDialogEui(valve.deviceEui); setDialogKind('service'); }}
-              onCancel={() => runAction(valve.deviceEui, () => devicesAPI.cancelIrrigation(valve.deviceEui))}
+              onCancel={() => handleCancel(valve)}
               onSkipToday={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'SKIP_TODAY'))}
               onPause={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'DEACTIVATED'))}
               onResume={() => runAction(valve.deviceEui, () => valvesAPI.setSchedulerStatus(valve.deviceEui, 'ACTIVE'))}
@@ -261,6 +270,7 @@ export const ValveControlPanel: React.FC<ValveControlPanelProps> = ({ onUpdate, 
         <ValveScheduleOverview
           valves={valves}
           onOpenValve={(valve) => { setDialogEui(valve.deviceEui); setDialogKind('schedule'); }}
+          onOpenPolicyEditor={(valve, schedule) => onOpenPolicyEditor?.(valve, schedule)}
         />
       )}
 

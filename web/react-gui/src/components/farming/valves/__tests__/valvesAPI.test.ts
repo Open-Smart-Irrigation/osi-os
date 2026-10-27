@@ -226,3 +226,22 @@ describe('normaliseValveSummary enclosure climate mapping', () => {
     expect(summary.enclosureMeasuredAt).toBeNull();
   });
 });
+
+// W29: Resume on a conditional valve whose clear is not confirmed is refused by the gateway (409
+// conditional_readiness_pending). The API layer tags it so the panel can explain it.
+describe('valvesAPI setSchedulerStatus refusal', () => {
+  beforeEach(() => { axiosMocks.post.mockReset(); });
+
+  it('tags a 409 conditional_readiness_pending refusal with its code', async () => {
+    axiosMocks.post.mockRejectedValue({ isAxiosError: true, response: { status: 409, data: { error: 'conditional_readiness_pending' } } });
+    const { valvesAPI } = await import('../../../../services/api');
+    await expect(valvesAPI.setSchedulerStatus(EUI, 'ACTIVE')).rejects.toMatchObject({ code: 'conditional_readiness_pending' });
+  });
+
+  it('passes any other failure through unchanged', async () => {
+    const other = { isAxiosError: true, response: { status: 500, data: { error: 'internal_error' } } };
+    axiosMocks.post.mockRejectedValue(other);
+    const { valvesAPI } = await import('../../../../services/api');
+    await expect(valvesAPI.setSchedulerStatus(EUI, 'DEACTIVATED')).rejects.toBe(other);
+  });
+});
