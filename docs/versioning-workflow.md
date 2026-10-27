@@ -93,7 +93,7 @@ git grep -n -F "<OLD>" -- . ':!openwrt' ':!CHANGELOG.md' ':!**/node_modules/**' 
 | `scripts/verify-sync-flow.js` | `EXPECTED_VERSION` and the comment above it |
 | `README.md` | `**v<NEW> Alpha**` at the top |
 | `CHANGELOG.md` | the release heading (see Step 2) |
-| `.claude/skills/osi-config-and-flags/SKILL.md` | the two lines that state the `firmware_version` default |
+| `.claude/skills/osi-config-and-flags/references/uci-and-identity.md` and `references/runtime-and-flags.md` | the two lines that state the `firmware_version` default (one in each file) |
 
 Edit `flows.json` with a script, never in the Node-RED editor. For example,
 from 0.7.0 to 0.8.0 (dots escaped in the pattern):
@@ -222,7 +222,8 @@ git add web/react-gui/src/pages/Login.tsx \
         conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
         conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
         scripts/verify-sync-flow.js \
-        .claude/skills/osi-config-and-flags/SKILL.md \
+        .claude/skills/osi-config-and-flags/references/uci-and-identity.md \
+        .claude/skills/osi-config-and-flags/references/runtime-and-flags.md \
         README.md \
         CHANGELOG.md
 git add -A -- feeds/chirpstack-openwrt-feed/apps/node-red/files/gui
@@ -378,8 +379,8 @@ A failed command-ledger activation can leave Node-RED and `osi-identityd`
 stopped with the marker `/srv/node-red/.osi-command-ledger-hold`, which
 records the reason and the time. The way out is to re-run the deploy: every
 deploy reads the marker first and clears it once the ledger pair loads
-(`.claude/skills/osi-live-ops-runbook/SKILL.md`, "Failed command-ledger
-activation").
+(`.claude/skills/osi-live-ops-runbook/references/deploy.md`, "Failed
+command-ledger activation").
 
 On each Pi after the deploy:
 
@@ -391,7 +392,8 @@ On each Pi after the deploy:
 - [ ] Dashboard loads without console errors
 - [ ] Latest heartbeat visible in osi-server cloud (within 90 s)
 - [ ] `osi-cloud-http` module resolves: `cat /srv/node-red/node_modules/osi-cloud-http/index.js | head -1`
-- [ ] The post-deploy checks in `.claude/skills/osi-live-ops-runbook/SKILL.md`
+- [ ] The post-deploy checks in
+      `.claude/skills/osi-live-ops-runbook/references/deploy.md`
       ("Post-deploy verification checklist") pass.
 - [ ] For a linked gateway, the cloud canary passes:
       `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <GATEWAY_EUI> --since <deploy-start ISO8601>`

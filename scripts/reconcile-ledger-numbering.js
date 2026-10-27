@@ -4,7 +4,7 @@
 // gateway whose schema_migrations ledger was stamped under a foreign branch's
 // version numbering (AgroLink, Bovey/Valve-focused) that now collides with
 // main's own numbering. See .superpowers/sdd/stabilization-plan-2026-09-10.md
-// §3.5c and .claude/skills/osi-schema-change-control/SKILL.md.
+// §3.5c and .claude/skills/osi-schema-change-control/references/ledger-recovery.md.
 //
 // Problem: a foreign-numbered device's schema_migrations rows record
 // versions/checksums from ITS OWN migration files. lib/osi-migrate's
