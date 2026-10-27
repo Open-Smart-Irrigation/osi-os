@@ -763,6 +763,7 @@ for (const profile of PROFILES) {
           rollupStats,
         }, 'daily', 3 * 86_400_000, nowMs);
         assert.equal(rollupStats.rowPasses, 1, `${channels.length} channels`);
+        assert.equal(rollupStats.reads, 1, `${channels.length} channels`);
         assert.deepEqual(Array.from(new Set(rows.map((row) => row.channel_id))).sort(),
           ['swt_1', 'swt_2', 'swt_3'].filter((id) => channels.some((field) => field === id)));
       }
@@ -773,10 +774,65 @@ for (const profile of PROFILES) {
       assert.deepEqual(summary.errors, []);
       assert.ok(summary.cardsProcessed > 0);
       assert.equal(rollupStats.reads, summary.cardsProcessed * levels.length);
+      assert.equal(rollupStats.probes, summary.cardsProcessed * levels.length);
       assert.equal(rollupStats.rowPasses, summary.cardsProcessed * 2 * levels.length);
     } finally {
       raw.close();
     }
+  });
+
+  // The rollup read leaves out columns that are NULL across the window, and
+  // keeps every column when the count probe returns no usable count.
+  test(`${profile}: rollup read selects only columns with a value in the window`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-probe', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-probe-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Rollup Probe', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A8404100000000E1', 'Kiwi', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2) VALUES (?, ?, ?, ?)');
+    for (let hour = 0; hour < 24; hour += 1) {
+      insert.run('A8404100000000E1', new Date(Date.parse('2026-10-02T00:30:00Z') + hour * 3_600_000).toISOString(), 10 + hour, null);
+    }
+    const scope = {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: sourceKey('soil', 'A8404100000000E1'),
+      channels: ['swt_1', 'swt_2', 'vwc_1'].map((field) => ({ id: field, field, unit: '' })),
+      deveuis: ['A8404100000000E1'],
+      sourceDevices: [{ deveui: 'A8404100000000E1', type_id: 'KIWI_SENSOR' }],
+      timezone: 'UTC',
+    };
+    const nowMs = Date.parse('2026-10-03T02:00:00Z');
+    const queries = [];
+    const probed = {
+      all(sql, params) {
+        queries.push(sql);
+        return raw.prepare(sql).all(...(params || []));
+      },
+    };
+    const rows = await helper.computeRollupBuckets(probed, scope, 'daily', 86_400_000, nowMs);
+    const rowRead = queries.find((sql) => sql.includes('ORDER BY'));
+    assert.match(rowRead, /SELECT id, deveui, recorded_at, swt_1 FROM/);
+    assert.deepEqual(rows.map((row) => [row.channel_id, row.sample_count, row.min_value, row.max_value]), [['swt_1', 24, 10, 33]]);
+
+    const countless = {
+      all(sql, params) {
+        queries.push(sql);
+        if (!sql.includes('ORDER BY')) return [{}];
+        return raw.prepare(sql).all(...(params || []));
+      },
+    };
+    queries.length = 0;
+    const fallbackRows = await helper.computeRollupBuckets(countless, scope, 'daily', 86_400_000, nowMs);
+    assert.match(queries.find((sql) => sql.includes('ORDER BY')), /SELECT id, deveui, recorded_at, swt_1, swt_2, vwc_1 FROM/);
+    assert.deepEqual(fallbackRows, rows);
+    raw.close();
   });
 
   test(`${profile}: partial source rollups recover older buckets and retain null gaps`, async () => {

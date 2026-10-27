@@ -965,6 +965,12 @@ function statsForValues(values, preservePrecision = false) {
   };
 }
 
+// The reducers ask for a row's source key once per row and channel; the
+// answer depends only on the raw key string, so a small cache skips the
+// DevEUI normalization for the handful of devices a window holds.
+const ROW_SOURCE_KEY_CACHE = new Map();
+const ROW_SOURCE_KEY_CACHE_LIMIT = 4096;
+
 function rowSourceKey(row, channel) {
   const raw = row.sourceKey
     || row.source_key
@@ -980,7 +986,16 @@ function rowSourceKey(row, channel) {
     || channel.sourceKey
     || channel.source_key
     || 'default';
-  return normalizeDeveui(raw) || String(raw || 'default').trim() || 'default';
+  if (typeof raw === 'string') {
+    const cached = ROW_SOURCE_KEY_CACHE.get(raw);
+    if (cached !== undefined) return cached;
+  }
+  const key = normalizeDeveui(raw) || String(raw || 'default').trim() || 'default';
+  if (typeof raw === 'string') {
+    if (ROW_SOURCE_KEY_CACHE.size >= ROW_SOURCE_KEY_CACHE_LIMIT) ROW_SOURCE_KEY_CACHE.clear();
+    ROW_SOURCE_KEY_CACHE.set(raw, key);
+  }
+  return key;
 }
 
 function sourceChannelKey(sourceKey, channel) {
@@ -1816,14 +1831,35 @@ function rollupWindow(scope, level, windowMs, nowMs) {
     start,
     end,
     selectedFields,
-    sql: `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC`,
+    where: `deveui IN (${placeholders}) AND ${range.sql}`,
     params: deveuis.concat(range.params),
   };
 }
 
+// Reads a rollup window's rows, selecting only the columns that hold a value
+// somewhere in the window. A column that is NULL on every row reads as null
+// when selected and as undefined when not, and channelValue treats both as
+// missing, so the rollups do not change. The soil card names about 40
+// columns; with id, deveui and recorded_at a row object passes 43
+// properties, where both node:sqlite and node-sqlite3 double its size.
+// A count that is missing or not a number keeps the column.
+async function readRollupRows(db, window, stats) {
+  const fields = window.selectedFields;
+  let present = fields;
+  if (fields.length) {
+    if (stats) stats.probes = (stats.probes || 0) + 1;
+    const counts = (await dbAll(db, `SELECT ${fields.map((field, index) => `COUNT(${field}) AS c${index}`).join(', ')} FROM device_data WHERE ${window.where}`, window.params))[0];
+    present = fields.filter((field, index) => toFiniteNumber(counts && counts[`c${index}`]) !== 0);
+  }
+  if (stats) stats.reads = (stats.reads || 0) + 1;
+  const columns = ['id', 'deveui', 'recorded_at', ...present].join(', ');
+  return dbAll(db, `SELECT ${columns} FROM device_data WHERE ${window.where} ORDER BY recorded_at ASC, id ASC`, window.params);
+}
+
 // A source scope reads a subset of its card's read: the same window and
-// order, its own DevEUI, and a subset of the columns. The SQL matches the
-// DevEUI exactly, and so does this filter.
+// order, its own DevEUI, and a subset of the columns the card asked for. A
+// column the card read left out is NULL for every card device, so for the
+// source too. The SQL matches the DevEUI exactly, and so does this filter.
 function rowsFromCardRead(window, cardWindow, cardRows) {
   if (!window || !cardWindow || window.start !== cardWindow.start || window.end !== cardWindow.end) return null;
   const cardDeveuis = new Set(cardWindow.deveuis);
@@ -1887,7 +1923,7 @@ function rollupRowsForWindow(scope, window, rows, stats) {
 async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const window = rollupWindow(scope, level, windowMs, nowMs);
   if (!window) return [];
-  const rows = await dbAll(db, window.sql, window.params);
+  const rows = await readRollupRows(db, window, scope.rollupStats);
   return rollupRowsForWindow(scope, window, rows, scope.rollupStats);
 }
 
@@ -3819,18 +3855,14 @@ async function runRollupJob(db, options = {}) {
           const cardWindow = rollupWindow(scope, level, ROLLUP_WINDOWS[level], nowMs);
           let cardRows = [];
           if (cardWindow) {
-            if (rollupStats) rollupStats.reads = (rollupStats.reads || 0) + 1;
-            cardRows = await dbAll(db, cardWindow.sql, cardWindow.params);
+            cardRows = await readRollupRows(db, cardWindow, rollupStats);
             bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(scope, cardWindow, cardRows, rollupStats));
           }
           for (const sourceScope of sourceScopes) {
             const window = rollupWindow(sourceScope, level, ROLLUP_WINDOWS[level], nowMs);
             if (!window) continue;
             let rows = rowsFromCardRead(window, cardWindow, cardRows);
-            if (!rows) {
-              if (rollupStats) rollupStats.reads = (rollupStats.reads || 0) + 1;
-              rows = await dbAll(db, window.sql, window.params);
-            }
+            if (!rows) rows = await readRollupRows(db, window, rollupStats);
             bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(sourceScope, window, rows, rollupStats));
           }
           cardRows = null;
