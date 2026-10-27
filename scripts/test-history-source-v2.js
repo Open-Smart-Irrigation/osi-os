@@ -285,6 +285,69 @@ function loadRouter(profile) {
   ));
 }
 
+// A fixture for the source/channel partition step that every history
+// reducer shares: equal-time duplicates with and without ids, rows outside
+// the window or without a device key, a requested source with no rows, a
+// repeated channel id, a channel-level source-key fallback, and device
+// types with and without SWT3.
+function sourcePartitionFixture() {
+  const sourceA = 'AA000000000000A1';
+  const sourceB = 'BB000000000000B2';
+  const sourceC = 'CC000000000000C3';
+  const absent = 'DD000000000000D4';
+  const start = '2026-10-01T00:00:00.000Z';
+  const end = '2026-10-02T00:00:00.000Z';
+  const startMs = Date.parse(start);
+  const at = (minutes) => new Date(startMs + minutes * 60_000).toISOString();
+  const rows = [];
+  let id = 100;
+  for (let step = 0; step < 48; step += 1) {
+    const t = at(step * 30);
+    rows.push({ id: id++, deveui: sourceA, recorded_at: t, swt_1: 10 + step, swt_2: step % 5 === 0 ? null : 30 + step, swt_3: 50 + step, vwc_1: null });
+    rows.push({ id: id++, deveui: sourceB, recorded_at: t, swt_1: 70 + step, swt_2: null, swt_3: step % 3 === 0 ? null : 90 + step, vwc_1: 20 + (step % 7) });
+    if (step % 4 === 0) rows.push({ id: id++, deveui: sourceC, recorded_at: t, swt_1: null, swt_2: 5 + step, swt_3: null, vwc_1: 15, ext_temperature_c: 12 + step });
+  }
+  // The higher id wins even when its value is null, a lower id listed later
+  // still loses, and rows without an id tie-break on position.
+  rows.push({ id: 5000, deveui: sourceA, recorded_at: at(60), swt_1: null, swt_2: 1, swt_3: 2, vwc_1: null });
+  rows.push({ id: 7, deveui: sourceA, recorded_at: at(90), swt_1: -1, swt_2: -1, swt_3: -1, vwc_1: -1 });
+  rows.push({ deveui: sourceB, recorded_at: at(120), swt_1: 1111, swt_2: null, swt_3: 2222, vwc_1: 3 });
+  rows.push({ deveui: sourceB, recorded_at: at(120), swt_1: 1112, swt_2: null, swt_3: 2223, vwc_1: 4 });
+  rows.push({ id: 6000, deveui: sourceA, recorded_at: '2026-09-30T23:59:59.000Z', swt_1: 999 });
+  rows.push({ id: 6001, deveui: sourceA, recorded_at: end, swt_1: 999 });
+  rows.push({ id: 6002, deveui: sourceA, recorded_at: 'not-a-time', swt_1: 999 });
+  rows.push({ id: 6003, recorded_at: at(15), swt_1: 41, swt_2: 42, ext_temperature_c: 43 });
+  const channels = [
+    { id: 'swt_1', field: 'swt_1', fields: ['swt_1', 'swt_wm1'], unit: 'kPa' },
+    { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
+    { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
+    { id: 'vwc_1', field: 'vwc_1', unit: '%' },
+    { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
+    { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C', sourceKey: sourceC },
+  ];
+  const sourceDevices = [
+    { deveui: sourceA, type_id: 'KIWI_SENSOR' },
+    { deveui: sourceB, type_id: 'DRAGINO_LSN50' },
+    { deveui: sourceC, type_id: 'KIWI_SENSOR' },
+    { deveui: absent, type_id: 'KIWI_SENSOR' },
+  ];
+  return { rows, channels, sourceDevices, start, end, sourceKeys: [absent, sourceA, sourceB, sourceC] };
+}
+
+function sourcePartitionProjection(results) {
+  return results.map((result) => result.sourceAggregates.map((aggregate) => ({
+    sourceKey: aggregate.sourceKey,
+    channelKey: aggregate.channelKey,
+    coveragePct: aggregate.coveragePct,
+    points: ((aggregate.series && aggregate.series[aggregate.channelKey] && aggregate.series[aggregate.channelKey].points) || [])
+      .map((point) => [point.recordedAt, point.value]),
+    buckets: (aggregate.buckets || []).map((bucket) => {
+      const stats = bucket.series && bucket.series[aggregate.channelKey];
+      return [bucket.bucketStart, bucket.coveragePct, stats ? [stats.min, stats.max, stats.mean, stats.median, stats.latest, stats.sampleCount] : null];
+    }),
+  })));
+}
+
 for (const profile of PROFILES) {
   test(`${profile}: five observations keep one series per physical source`, async () => {
     const helper = loadHelper(profile);
@@ -509,6 +572,83 @@ for (const profile of PROFILES) {
       available: false,
       reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
     });
+  });
+
+  // The digest was taken from 306d64f3, before the partition step stopped
+  // building one candidate per row and channel. Any change to which row a
+  // source/channel series keeps, or in what order, changes it.
+  test(`${profile}: source partitions keep the pinned duplicate selection and order`, () => {
+    const helper = loadHelper(profile);
+    const fixture = sourcePartitionFixture();
+    const results = [];
+    for (const eligibilityCardType of ['soil', undefined]) {
+      for (const aggregation of ['raw', 'hourly', 'daily']) {
+        results.push(helper.aggregateRows(fixture.rows, {
+          aggregation,
+          channels: fixture.channels,
+          sourceDevices: fixture.sourceDevices,
+          sourceKeys: fixture.sourceKeys,
+          start: fixture.start,
+          end: fixture.end,
+          timezone: 'UTC',
+          eligibilityCardType,
+          nowMs: Date.parse('2026-10-03T00:00:00.000Z'),
+        }));
+      }
+    }
+    const rawSeries = (source, channel) => results[3].sourceAggregates
+      .find((aggregate) => aggregate.sourceKey === source && aggregate.channelKey === channel)
+      .series[channel].points;
+    const valueAt = (source, channel, time) => {
+      const point = rawSeries(source, channel).find((entry) => entry.recordedAt === time);
+      return point ? point.value : undefined;
+    };
+    assert.equal(valueAt('AA000000000000A1', 'swt_1', '2026-10-01T01:00:00.000Z'), undefined, 'higher id with a null value wins');
+    assert.equal(valueAt('AA000000000000A1', 'swt_1', '2026-10-01T01:30:00.000Z'), 13, 'lower id listed later loses');
+    assert.equal(valueAt('BB000000000000B2', 'swt_1', '2026-10-01T02:00:00.000Z'), 1112, 'id-less duplicates tie-break on position');
+    assert.deepEqual(rawSeries('CC000000000000C3', 'ext_temperature_c').map((point) => point.value).slice(0, 3), [12, 16, 20]);
+    assert.ok(!results[3].sourceAggregates.some((aggregate) => aggregate.sourceKey === 'BB000000000000B2' && aggregate.channelKey === 'swt_3'));
+    const digest = crypto.createHash('sha256').update(JSON.stringify(sourcePartitionProjection(results))).digest('hex');
+    assert.equal(digest, 'e35492a02783814ecda7d7f2204c540f452e470225b09aee92d5389dd083ac0c');
+  });
+
+  // The rollup job hands every soil channel and up to 370 days of rows to
+  // this step. A count of candidates and entry checks, not wall time, keeps
+  // it linear in the row count.
+  test(`${profile}: source partitions stay linear in rows across many sources and channels`, () => {
+    const helper = loadHelper(profile);
+    const sources = ['A1', 'A2', 'A3', 'A4', 'A5'].map((suffix) => `AA0000000000${suffix}00`);
+    const fields = [
+      'swt_1', 'swt_2',
+      ...Array.from({ length: 10 }, (_, i) => `vwc_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_vic_${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `soil_temp_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_ec_${i + 1}`),
+    ];
+    const channels = fields.map((field) => ({ id: field, field, unit: '' }));
+    const startMs = Date.parse('2026-10-01T00:00:00.000Z');
+    const rows = [];
+    for (let step = 0; step < 96; step += 1) {
+      for (const deveui of sources) {
+        rows.push({ id: rows.length + 1, deveui, recorded_at: new Date(startMs + step * 15 * 60_000).toISOString(), swt_1: step, swt_2: step + 1 });
+      }
+    }
+    const partitionStats = {};
+    const result = helper.aggregateRows(rows, {
+      aggregation: 'hourly',
+      channels,
+      sourceDevices: sources.map((deveui) => ({ deveui, type_id: 'KIWI_SENSOR' })),
+      start: '2026-10-01T00:00:00.000Z',
+      end: '2026-10-02T00:00:00.000Z',
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-03T00:00:00.000Z'),
+      partitionStats,
+    });
+    assert.equal(result.sourceAggregates.length, sources.length * channels.length);
+    assert.ok(Number.isFinite(partitionStats.candidates) && partitionStats.candidates <= rows.length,
+      `candidates ${partitionStats.candidates} exceed ${rows.length} rows`);
+    assert.ok(Number.isFinite(partitionStats.checks) && partitionStats.checks <= rows.length,
+      `checks ${partitionStats.checks} exceed ${rows.length} rows`);
   });
 
   test(`${profile}: partial source rollups recover older buckets and retain null gaps`, async () => {

@@ -993,9 +993,9 @@ function sourceChannelKey(sourceKey, channel) {
 // soil card: a soil source whose SWT the policy does not list).
 const SOURCE_FAMILY_CARD_TYPES = new Set(['soil', 'environment']);
 
-// sourcePartitions asks once per row and channel, so the family channel set is
-// computed once per device row object and card type. null means the device
-// type has no family for the card type.
+// sourcePartitions and the aggregate paths ask once per source and channel, so
+// the family channel set is computed once per device row object and card type.
+// null means the device type has no family for the card type.
 const deviceFamilyChannelCache = new WeakMap();
 
 function deviceFamilyChannelKeys(device, cardType) {
@@ -1492,53 +1492,83 @@ function sourceDeviceForKey(sourceKey, sourceDevices) {
   ) || null;
 }
 
+// The duplicate rule keeps the row with the highest id (or, without an id, the
+// latest position) per source, channel and timestamp. The comparison does not
+// depend on the channel, so the winner is picked once per source and
+// timestamp, and every channel the source supports shares that source's
+// sorted entries. One candidate per row keeps memory and time linear in the
+// row count; the rollup job reads 370 days of rows across about 40 soil
+// channels. A row with no source key of its own falls back to the channel's
+// sourceKey, so a channel whose fallback differs from the first channel's
+// re-checks each entry's key.
+//
+// options.partitionStats, when given, counts candidates created and entries
+// checked so tests can pin the cost without timing it.
+function channelSourceKeyFallback(channel) {
+  return (channel && (channel.sourceKey || channel.source_key)) || 'default';
+}
+
 function sourcePartitions(rows, channels, options = {}) {
   const partitions = new Map();
   const sourceKeys = new Set(requestedSourceKeys(options));
   const filteredRows = Array.isArray(rows) ? rows : [];
   const startMs = parseTime(options.start || options.startAt || options.from);
   const endMs = parseTime(options.end || options.endAt || options.to);
-  const candidates = new Map();
+  const stats = options.partitionStats && typeof options.partitionStats === 'object' ? options.partitionStats : null;
+  const firstChannel = channels[0] || {};
+  const winners = new Map();
 
   filteredRows.forEach((row, index) => {
     const recordedAtMs = parseRecordedAtMs(row && (row.recorded_at || row.recordedAt));
     if (recordedAtMs === null
       || (startMs !== null && recordedAtMs < startMs)
       || (endMs !== null && recordedAtMs >= endMs)) return;
-    const sourceKey = rowSourceKey(row, channels[0] || {});
+    const sourceKey = rowSourceKey(row, firstChannel);
     sourceKeys.add(sourceKey);
-    for (const channel of channels) {
-      if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
-      const key = `${sourceKey}|${channel.id}|${recordedAtMs}`;
-      const existing = candidates.get(key);
-      const candidate = { row, recordedAtMs, index };
-      if (!existing || rowTieBreaker(row, index) >= rowTieBreaker(existing.row, existing.index)) {
-        candidates.set(key, candidate);
-      }
+    let bySource = winners.get(sourceKey);
+    if (!bySource) {
+      bySource = new Map();
+      winners.set(sourceKey, bySource);
+    }
+    const existing = bySource.get(recordedAtMs);
+    if (stats) stats.checks = (stats.checks || 0) + 1;
+    if (!existing || rowTieBreaker(row, index) >= rowTieBreaker(existing.row, existing.index)) {
+      if (stats) stats.candidates = (stats.candidates || 0) + 1;
+      bySource.set(recordedAtMs, { row, recordedAtMs, index });
     }
   });
 
+  const sortedBySource = new Map();
+  for (const [sourceKey, bySource] of winners) {
+    const entries = Array.from(bySource.values());
+    entries.sort((left, right) => (left.recordedAtMs - right.recordedAtMs) || (left.index - right.index));
+    sortedBySource.set(sourceKey, entries);
+  }
+
+  const firstFallback = channelSourceKeyFallback(firstChannel);
   for (const sourceKey of sourceKeys) {
+    const sourceEntries = sortedBySource.get(sourceKey) || [];
     for (const channel of channels) {
       if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
       const key = sourceChannelKey(sourceKey, channel);
-      const entries = [];
-      for (const candidate of candidates.values()) {
-        if (candidate.row && rowSourceKey(candidate.row, channel) === sourceKey
-          && channel.id && candidate.row && candidate.recordedAtMs !== null
-          && candidates.has(`${sourceKey}|${channel.id}|${candidate.recordedAtMs}`)
-          && candidates.get(`${sourceKey}|${channel.id}|${candidate.recordedAtMs}`) === candidate) {
-          entries.push(candidate);
-        }
+      let entries;
+      if (!channel.id) {
+        entries = [];
+      } else if (channelSourceKeyFallback(channel) === firstFallback) {
+        entries = sourceEntries;
+      } else {
+        if (stats) stats.checks = (stats.checks || 0) + sourceEntries.length;
+        entries = sourceEntries.filter((entry) => rowSourceKey(entry.row, channel) === sourceKey);
       }
-      entries.sort((left, right) => (left.recordedAtMs - right.recordedAtMs) || (left.index - right.index));
       partitions.set(key, { sourceKey, channel, entries });
     }
   }
   return partitions;
 }
 
-function aggregateRows(rows, options = {}) {
+// Per-source, per-channel aggregates. aggregateRows adds the pooled reducer
+// on top; computeRollupBuckets needs only one of the two for a scope.
+function sourceAggregatesForRows(rows, options = {}) {
   const aggregationInfo = resolveAggregation(options);
   const channels = filterSoilChannelsForSources(options.channels, options.sourceDevices);
   const partitions = sourcePartitions(rows, channels, options);
@@ -1587,6 +1617,11 @@ function aggregateRows(rows, options = {}) {
     }
   }
 
+  return { sourceAggregates, sourceCadences };
+}
+
+function aggregateRows(rows, options = {}) {
+  const { sourceAggregates, sourceCadences } = sourceAggregatesForRows(rows, options);
   const pooled = aggregateRowsPooled(rows, options);
   return {
     ...pooled,
@@ -1663,15 +1698,17 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
   const range = recordedAtRangeSql('recorded_at', start, end);
   const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC`;
   const rows = await dbAll(db, sql, deveuis.concat(range.params));
-  const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices });
+  const aggregateOptions = { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices };
   const out = [];
   const singleSource = Array.isArray(scope.sourceDevices) && scope.sourceDevices.length === 1
     ? normalizeDeveui(scope.sourceDevices[0] && (scope.sourceDevices[0].deveui || scope.sourceDevices[0].device_eui || scope.sourceDevices[0].deviceEui))
     : null;
+  // A multi-source scope writes the pooled buckets and a single-source scope
+  // its own source aggregate, so run only the reducer the scope reads.
   const sourceResult = singleSource
-    ? (result.sourceAggregates || []).find((aggregate) => aggregate.sourceKey === singleSource)
+    ? sourceAggregatesForRows(rows, aggregateOptions).sourceAggregates.find((aggregate) => aggregate.sourceKey === singleSource)
     : null;
-  const buckets = sourceResult ? sourceResult.buckets : result.buckets;
+  const buckets = sourceResult ? sourceResult.buckets : aggregateRowsPooled(rows, aggregateOptions).buckets;
   for (const bucket of buckets || []) {
     for (const channel of channels) {
       const stats = bucket.series && bucket.series[channel.id];
