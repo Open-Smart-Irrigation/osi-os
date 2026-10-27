@@ -92,7 +92,7 @@ Every runtime corpus requires a strict CHECKSUMS.json, including selected refere
 Use the next contiguous four-digit version after the highest `NNNN` present; do
 not copy an example version from this skill. `CHECKSUMS.json` is mandatory for runtime loading. Keep it consistent when authoring a new migration; never edit already-recorded migration bytes or regenerate expected hashes from suspect files.
 
-From `references/walkthrough.md`, "Walkthrough: adding a column end-to-end" (the verifier set is the merge gate for every schema change):
+From `references/walkthrough.md`, "Walkthrough: adding a column end-to-end". These verifiers are the minimum, not the whole gate: CI runs every step in `.github/workflows/migrations.yml`, including `node scripts/verify-seed-db-ledger.js` and `node scripts/verify-sqlite-cli-limits.js`, and all of them must pass:
 
 7. **Run the verifier set** and confirm each prints its OK line:
    ```bash
