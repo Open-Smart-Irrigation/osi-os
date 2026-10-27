@@ -43,12 +43,13 @@ depends on the risk class.
 node, osi-server Flyway); a non-trivial `flows.json` change; the sync contract (outbox/inbox/cursor, contract schemas,
 pending commands, paired edge/cloud payloads); `deploy.sh`, deploy or repair
 scripts, bootstrap or gateway identity; auth, tokens, redirects or secrets; actuator
-commands; or anything that writes or deletes `farming.db` / `device_data` history.
+commands; or anything that writes, prunes or deletes field history, on the edge
+(`farming.db`, `device_data`) or in the cloud (retention jobs, `sensor_data`).
 When unsure, it is a risk class.
 
 ```
 Standard:   VERIFY REALITY → EXECUTE (TDD, smallest change) → NON-AUTHOR REVIEW
-                  of the diff, re-running doubtful gates → SHIP (PR + evidence) → RECORD
+                  of the diff → SHIP (PR + evidence, gates re-run by CI) → RECORD
 Risk class: VERIFY REALITY → PLAN (written) → ADVERSARIAL REVIEW → EXECUTE (TDD, exact)
                   → INDEPENDENT VERIFICATION → SHIP (PR + evidence) → RECORD
 ```
@@ -234,15 +235,16 @@ down where the next person will trip.
 
 ## 7. Orchestrating agents (and being one)
 
-- **Separate the three roles.** Author, adversarial reviewer, and post-execution
-  verifier must be different contexts. Authors are systematically blind to their own
+- **Separate the roles.** The author never reviews or verifies its own work. In the
+  risk-class loop, author, adversarial reviewer, and post-execution verifier are
+  three different contexts; in the standard loop, author and reviewer are two. Authors are systematically blind to their own
   assumptions; every serious bug this quarter that reached review was caught by a
   non-author.
 - **Capability-match the stage.** Design, review, and verification need the
   strongest available model; faithful execution of a zero-placeholder plan is
   exactly what a sonnet-class agent does well. A weaker executor with a stronger
   plan beats the reverse.
-- **The plan is the contract.** Executors get fresh context and only the plan — if
+- **The plan is the contract** (risk-class loop). Executors get fresh context and only the plan — if
   they need conversation history to succeed, the plan is incomplete. The
   stop-on-divergence rule is what makes delegation safe.
 - **Verify agent reports.** Trust structure, not claims: clean tree, expected commit
@@ -276,7 +278,8 @@ risk class, the plan and its review live in the repo while the work is in progre
 or another file refers to them (a finished plan moves to the maintainers' archive under the
 rules in `docs/superpowers/README.md`);
 tests exist that fail without the change; every
-gate is green *as re-run by a non-author*; **a user can actually reach the
+gate is green *as re-run independently of the author* (CI, the local CI
+harness, or a non-author verifier); **a user can actually reach the
 behaviour** — a fully-tested component that nothing mounts is zero delivered
 capability, and its suite is green precisely because nothing exercises it; both
 profiles/seeds are in parity where applicable; the PR body carries root cause,
