@@ -17,7 +17,7 @@ import { HistoryDesktopDetail } from '../components/history/desktop/HistoryDeskt
 import { formatWindowCaption } from '../components/history/visualizations/chartAxis';
 import { clampCalendarMonthOffset, formatHistoryCalendarMonthLabel } from '../history/calendarMonth';
 import { historyCardDefinitionsByType } from '../history/cardDefinitions';
-import { filterHistoryDataSources, historyRecoveryCapabilities, historySourceChoiceLabel } from '../history/sourceSelection';
+import { coarserRecoveryAggregation, filterHistoryDataSources, historyRecoveryCapabilities, historySourceChoiceLabel } from '../history/sourceSelection';
 import { useFeatureFlags } from '../history/useFeatureFlags';
 import { useHistoryCardAdvancedData } from '../history/useHistoryCardAdvancedData';
 import { useHistoryCardData } from '../history/useHistoryCardData';
@@ -133,13 +133,6 @@ function formatRangeLabel(t: HistoryTranslate, range: HistoryRangeLabel): string
 
 function formatAggregationLabel(t: HistoryTranslate, aggregation: string): string {
   return t(`history.metadata.aggregation.${aggregation}`);
-}
-
-function coarserAggregation(value: HistoryAggregationLevel): HistoryAggregationLevel {
-  if (value === 'raw') return '15m';
-  if (value === '15m') return 'hourly';
-  if (value === 'hourly') return 'daily';
-  return value;
 }
 
 function monthRangeFromViewport(range: HistoryRangeSelection, monthOffset: number): HistoryRangeSelection {
@@ -564,6 +557,9 @@ export const HistoryCardDetailPage: React.FC = () => {
     [allSourceKeys.length, cardData.data, enabledSourceKeys, selectedSourceKey],
   );
   const recovery = historyRecoveryCapabilities(visibleCardData?.availability?.reasons);
+  const recoveryAggregation = recovery.canCoarsenAggregation
+    ? coarserRecoveryAggregation(timeViewport.viewport.aggregation, visibleCardData?.aggregation?.level)
+    : null;
   const recoveryActive = Boolean(!requiresCalendarSource && visibleCardData?.availability?.available === false && recovery.kind);
   const [inspectorSelection, setInspectorSelection] = useState<HistoryInspectorSelection | null>(null);
   const calendarDaysByDate = useMemo(() => {
@@ -903,8 +899,8 @@ export const HistoryCardDetailPage: React.FC = () => {
                       {t('history.sourceFilter.shorterRange')}
                     </button>
                   )}
-                  {recovery.canCoarsenAggregation && coarserAggregation(timeViewport.viewport.aggregation) !== timeViewport.viewport.aggregation && (
-                    <button type="button" className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-semibold" onClick={() => timeViewport.setViewport({ ...timeViewport.viewport, aggregation: coarserAggregation(timeViewport.viewport.aggregation) })}>
+                  {recoveryAggregation && (
+                    <button type="button" className="rounded border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-semibold" onClick={() => timeViewport.setViewport({ ...timeViewport.viewport, aggregation: recoveryAggregation })}>
                       {t('history.sourceFilter.coarserAggregation')}
                     </button>
                   )}

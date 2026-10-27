@@ -1,4 +1,4 @@
-import type { HistoryCardDataResponse, HistorySourceChoice } from './types';
+import type { HistoryAggregationLevel, HistoryCardDataResponse, HistorySourceChoice } from './types';
 
 export interface HistorySourceDescriptor {
   sourceKey?: string | null;
@@ -21,6 +21,23 @@ export function historyRecoveryCapabilities(reasons: readonly string[] | undefin
   if (raw) return { kind: 'raw', canChooseSource: true, canShortenRange: true, canCoarsenAggregation: false };
   if (point) return { kind: 'point', canChooseSource: true, canShortenRange: false, canCoarsenAggregation: true };
   return { kind: null, canChooseSource: false, canShortenRange: false, canCoarsenAggregation: false };
+}
+
+const COARSER_AGGREGATION: Partial<Record<HistoryAggregationLevel, HistoryAggregationLevel>> = {
+  raw: '15m',
+  '15m': 'hourly',
+  hourly: 'daily',
+};
+
+// The next coarser level a point-budget recovery can offer, or null. A
+// gesture-driven custom viewport asks for 'auto', so the step starts from
+// the level the server resolved and reported in aggregation.level.
+export function coarserRecoveryAggregation(
+  requested: HistoryAggregationLevel,
+  resolved: HistoryAggregationLevel | null | undefined,
+): HistoryAggregationLevel | null {
+  const current = requested === 'auto' ? resolved : requested;
+  return (current && COARSER_AGGREGATION[current]) || null;
 }
 
 function sourceSuffix(sourceKey: string): string {
