@@ -277,7 +277,7 @@ A change is done when: the issue's claim was re-verified against reality; for a
 risk class, the plan and its review live in the repo while the work is in progress
 or another file refers to them (a finished plan moves to the maintainers' archive under the
 rules in `docs/superpowers/README.md`);
-tests exist that fail without the change; every
+when behaviour changes, tests exist that fail without the change; every
 gate is green *as re-run independently of the author* (CI, the local CI
 harness, or a non-author verifier); **a user can actually reach the
 behaviour** — a fully-tested component that nothing mounts is zero delivered
