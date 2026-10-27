@@ -11,13 +11,14 @@ This skill is available from the `osi-os` skill tree for paired-repo awareness.
 Stage 1 Forge indexes `osi-os` only, so this server skill is ready for Stage 2
 but should not be added to the Stage 1 forge index.
 
-Verified sources to re-check before server work:
+Verified sources to re-check before server work, relative to the `osi-server`
+checkout you located (from a worktree it is not necessarily `../osi-server`):
 
-- `../osi-server/AGENTS.md`.
-- `../osi-server/backend/build.gradle.kts`.
-- `../osi-server/backend/src/main/resources/application.yml`.
-- `../osi-server/architect.yaml` and `RULES.yaml`.
-- `../osi-server/docs/agents/typescript-rule-overlays.md`.
+- `AGENTS.md`.
+- `backend/build.gradle.kts`.
+- `backend/src/main/resources/application.yml`.
+- `architect.yaml` and `RULES.yaml`.
+- `docs/agents/typescript-rule-overlays.md`.
 
 ## Stack Facts
 
