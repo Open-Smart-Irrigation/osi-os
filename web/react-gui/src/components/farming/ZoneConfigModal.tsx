@@ -221,8 +221,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     }
 
     if (configChanged || calibrationChanged || locationChanged) {
-      modalLifecycle.current = { ...previous, generation: previous.generation + 1 };
-      saveAttemptId.current += 1;
       const current = resolvedStageSignatures.current;
       resolvedStageSignatures.current = {
         zoneId: zone.id,
@@ -233,9 +231,6 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
         ...(calibrationChanged ? {} : current.calibration ? { calibration: current.calibration } : {}),
         ...(locationChanged ? {} : current.location ? { location: current.location } : {}),
       };
-      setSaving(false);
-      setError(null);
-      setPartialSaveStages([]);
     }
   }, [isOpen, zone.id, configBaseline, calibrationBaseline, locationBaseline]);
 
@@ -390,6 +385,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     const attemptId = ++saveAttemptId.current;
     const generation = modalLifecycle.current.generation;
     const attemptZoneId = zone.id;
+    const attemptBaselines = { configBaseline, calibrationBaseline, locationBaseline };
     const isCurrentAttempt = () => modalLifecycle.current.isOpen
       && modalLifecycle.current.zoneId === attemptZoneId
       && modalLifecycle.current.generation === generation
@@ -402,6 +398,7 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     let locationPayload: ReturnType<typeof parseLocationPayload> = null;
     let calibrationPayload: ReturnType<typeof parseCalibrationPayload> = null;
     let locationChanged = false;
+    const resolvedStages = new Set<SavedStage>();
     try {
       configPayload = buildConfigPayload();
       locationPayload = parseLocationPayload();
@@ -413,29 +410,49 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
       const calibrationSignature = calibrationPayload ? JSON.stringify(calibrationPayload) : null;
       const locationSignature = locationChanged ? JSON.stringify(locationPayload) : null;
 
-      if (hasConfigChanges && resolvedStageSignatures.current.config !== configSignature) {
-        if (!isCurrentAttempt()) return;
-        activeStage = 'config';
-        await irrigationZonesAPI.updateConfig(zone.id, configPayload);
-        if (!isCurrentAttempt()) return;
-        resolvedStageSignatures.current.config = configSignature ?? undefined;
+      if (hasConfigChanges) {
+        if (resolvedStageSignatures.current.config === configSignature) {
+          resolvedStages.add('config');
+        } else {
+          if (!isCurrentAttempt()) return;
+          activeStage = 'config';
+          await irrigationZonesAPI.updateConfig(zone.id, configPayload);
+          if (!isCurrentAttempt()) return;
+          if (resolvedStageSignatures.current.configBaseline === attemptBaselines.configBaseline) {
+            resolvedStageSignatures.current.config = configSignature ?? undefined;
+          }
+          resolvedStages.add('config');
+        }
       }
-      if (calibrationPayload && resolvedStageSignatures.current.calibration !== calibrationSignature) {
-        if (!isCurrentAttempt()) return;
-        sessionFence();
-        activeStage = 'calibration';
-        await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
-        if (!isCurrentAttempt()) return;
-        resolvedStageSignatures.current.calibration = calibrationSignature ?? undefined;
+      if (calibrationPayload) {
+        if (resolvedStageSignatures.current.calibration === calibrationSignature) {
+          resolvedStages.add('calibration');
+        } else {
+          if (!isCurrentAttempt()) return;
+          sessionFence();
+          activeStage = 'calibration';
+          await irrigationZonesAPI.updateCalibration(zone.id, calibrationPayload);
+          if (!isCurrentAttempt()) return;
+          if (resolvedStageSignatures.current.calibrationBaseline === attemptBaselines.calibrationBaseline) {
+            resolvedStageSignatures.current.calibration = calibrationSignature ?? undefined;
+          }
+          resolvedStages.add('calibration');
+        }
       }
-      if (locationChanged && locationPayload
-        && resolvedStageSignatures.current.location !== locationSignature) {
-        if (!isCurrentAttempt()) return;
-        sessionFence();
-        activeStage = 'location';
-        await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
-        if (!isCurrentAttempt()) return;
-        resolvedStageSignatures.current.location = locationSignature ?? undefined;
+      if (locationChanged && locationPayload) {
+        if (resolvedStageSignatures.current.location === locationSignature) {
+          resolvedStages.add('location');
+        } else {
+          if (!isCurrentAttempt()) return;
+          sessionFence();
+          activeStage = 'location';
+          await irrigationZonesAPI.setZoneLocation(zone.id, locationPayload);
+          if (!isCurrentAttempt()) return;
+          if (resolvedStageSignatures.current.locationBaseline === attemptBaselines.locationBaseline) {
+            resolvedStageSignatures.current.location = locationSignature ?? undefined;
+          }
+          resolvedStages.add('location');
+        }
       }
       // Only an operator's change is written: an untouched select never
       // confirms the suggestion by itself (D1).
@@ -453,23 +470,10 @@ export const ZoneConfigModal: React.FC<Props> = ({ isOpen, zone, onClose, onSave
     } catch (err: any) {
       if (!isCurrentAttempt()) return;
       if (activeStage === 'rain') {
-        const savedStages: SavedStage[] = [];
-        if (configPayload && Object.keys(configPayload).length > 0
-          && resolvedStageSignatures.current.config === JSON.stringify(configPayload)) {
-          savedStages.push('config');
-        }
-        if (calibrationPayload
-          && resolvedStageSignatures.current.calibration === JSON.stringify(calibrationPayload)) {
-          savedStages.push('calibration');
-        }
-        if (locationChanged && locationPayload
-          && resolvedStageSignatures.current.location === JSON.stringify(locationPayload)) {
-          savedStages.push('location');
-        }
         setError(t('zoneConfig.errors.rainChoiceSaveFailed', {
           defaultValue: 'Rain gauge choice was not saved. Review the selection and retry Save.',
         }));
-        setPartialSaveStages(savedStages);
+        setPartialSaveStages(Array.from(resolvedStages));
       } else {
         setError(err.response?.data?.detail ?? err.message ?? t('zoneConfig.errors.saveFailed', { defaultValue: 'Failed to save' }));
       }

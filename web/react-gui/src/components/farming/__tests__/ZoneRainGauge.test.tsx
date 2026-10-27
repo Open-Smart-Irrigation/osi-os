@@ -279,6 +279,101 @@ describe('zone settings: rain gauge for this zone', () => {
     expect(callbacks.onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps partial-save feedback when a same-zone poll refreshes the saved config', async () => {
+    vi.mocked(zoneRainSourceAPI.get).mockResolvedValue(AMBIGUOUS);
+    vi.mocked(zoneRainSourceAPI.set).mockRejectedValueOnce(new Error('rain endpoint unavailable'));
+    const callbacks = { onClose: vi.fn(), onSaved: vi.fn() };
+    const view = await modalView('en', callbacks);
+    const { rerender } = render(view(zone, true));
+    await waitFor(() => expect(rainSelect()).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'First note' } });
+    fireEvent.change(rainSelect(), { target: { value: STATION } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Rain gauge choice was not saved. Review the selection and retry Save.')).toBeInTheDocument();
+    expect(screen.getByText('Saved: Zone settings')).toBeInTheDocument();
+
+    rerender(view({ ...zone, notes: 'First note' }, true));
+    await waitFor(() => expect(screen.getByLabelText('Notes')).toHaveValue('First note'));
+
+    expect(screen.getByText('Rain gauge choice was not saved. Review the selection and retry Save.')).toBeInTheDocument();
+    expect(screen.getByText('Saved: Zone settings')).toBeInTheDocument();
+    expect(rainSelect().value).toBe(STATION);
+    expect(callbacks.onSaved).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
+  it('reports a deferred rain failure after the same-zone poll refreshes saved config', async () => {
+    vi.mocked(zoneRainSourceAPI.get).mockResolvedValue(AMBIGUOUS);
+    const rain = deferred<typeof EXPLICIT>();
+    vi.mocked(zoneRainSourceAPI.set).mockReturnValueOnce(rain.promise as never);
+    const callbacks = { onClose: vi.fn(), onSaved: vi.fn() };
+    const view = await modalView('en', callbacks);
+    const { rerender } = render(view(zone, true));
+    await waitFor(() => expect(rainSelect()).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'First note' } });
+    fireEvent.change(rainSelect(), { target: { value: STATION } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(zoneRainSourceAPI.set).toHaveBeenCalledTimes(1));
+
+    rerender(view({ ...zone, notes: 'First note' }, true));
+    await waitFor(() => expect(screen.getByLabelText('Notes')).toHaveValue('First note'));
+    await act(async () => { rain.reject(new Error('rain endpoint unavailable')); });
+
+    expect(screen.getByText('Rain gauge choice was not saved. Review the selection and retry Save.')).toBeInTheDocument();
+    expect(screen.getByText('Saved: Zone settings')).toBeInTheDocument();
+    expect(callbacks.onSaved).not.toHaveBeenCalled();
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
+  it('completes a deferred rain save after the same-zone poll refreshes saved config', async () => {
+    vi.mocked(zoneRainSourceAPI.get).mockResolvedValue(AMBIGUOUS);
+    const rain = deferred<typeof EXPLICIT>();
+    vi.mocked(zoneRainSourceAPI.set).mockReturnValueOnce(rain.promise as never);
+    const callbacks = { onClose: vi.fn(), onSaved: vi.fn() };
+    const view = await modalView('en', callbacks);
+    const { rerender } = render(view(zone, true));
+    await waitFor(() => expect(rainSelect()).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'First note' } });
+    fireEvent.change(rainSelect(), { target: { value: STATION } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(zoneRainSourceAPI.set).toHaveBeenCalledTimes(1));
+
+    rerender(view({ ...zone, notes: 'First note' }, true));
+    await waitFor(() => expect(screen.getByLabelText('Notes')).toHaveValue('First note'));
+    await act(async () => { rain.resolve(EXPLICIT); });
+
+    expect(callbacks.onSaved).toHaveBeenCalledTimes(1);
+    expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Rain gauge choice was not saved. Review the selection and retry Save.')).not.toBeInTheDocument();
+  });
+
+  it('does not associate a deferred config result with a newer same-zone baseline', async () => {
+    vi.mocked(zoneRainSourceAPI.get).mockResolvedValue(AMBIGUOUS);
+    const firstConfig = deferred<IrrigationZone>();
+    vi.mocked(irrigationZonesAPI.updateConfig)
+      .mockReturnValueOnce(firstConfig.promise)
+      .mockResolvedValue(zone);
+    const callbacks = { onClose: vi.fn(), onSaved: vi.fn() };
+    const view = await modalView('en', callbacks);
+    const { rerender } = render(view(zone, true));
+    await waitFor(() => expect(rainSelect()).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Note A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(irrigationZonesAPI.updateConfig).toHaveBeenCalledTimes(1));
+
+    rerender(view({ ...zone, notes: 'Note B' }, true));
+    await waitFor(() => expect(screen.getByLabelText('Notes')).toHaveValue('Note B'));
+    await act(async () => { firstConfig.resolve(zone); });
+
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Note A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(irrigationZonesAPI.updateConfig).toHaveBeenCalledTimes(2));
+    expect(irrigationZonesAPI.updateConfig).toHaveBeenNthCalledWith(1, 42, { notes: 'Note A' });
+    expect(irrigationZonesAPI.updateConfig).toHaveBeenNthCalledWith(2, 42, { notes: 'Note A' });
+    await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(2));
+    expect(callbacks.onClose).toHaveBeenCalledTimes(2);
+  });
+
   it('ignores a pending save after the modal closes and reopens', async () => {
     vi.mocked(zoneRainSourceAPI.get).mockResolvedValue(AMBIGUOUS);
     vi.mocked(zoneRainSourceAPI.set)
