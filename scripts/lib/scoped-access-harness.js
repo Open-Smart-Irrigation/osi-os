@@ -41,9 +41,11 @@ function normalizeDbArgs(params, callback) {
 
 function captureDbOutcome(db, method, sql, params, decision) {
   if (decision.kind === 'synthetic_busy') {
+    const error = new Error('SQLITE_BUSY: database is locked');
+    error.code = 'SQLITE_BUSY';
     return {
       kind: 'synthetic_busy', operationCount: 0, value: undefined,
-      error: new Error('SQLITE_BUSY: database is locked'),
+      error,
     };
   }
   if (decision.kind !== 'execute') throw new Error('unknown DB gate outcome');
@@ -63,21 +65,36 @@ function facadeDb(db, dbCallGate) {
       ? dbCallGate.select({ method, sql, params })
       : { kind: 'execute', hold: false };
     if (dbCallGate && dbCallGate.rawStart) dbCallGate.rawStart(decision);
-    const outcome = captureDbOutcome(db, method, sql, params, decision);
+    const capture = () => captureDbOutcome(db, method, sql, params, decision);
+    const outcome = dbCallGate && dbCallGate.withCallScope
+      ? dbCallGate.withCallScope(decision.callId, capture)
+      : capture();
     const delivery = dbCallGate && dbCallGate.deliver
       ? dbCallGate.deliver(decision, outcome, { method, sql, params })
       : Promise.resolve(outcome);
     if (callback) {
       delivery.then((captured) => {
-        if (captured.error) callback(captured.error);
+        if (captured.error) {
+          if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, captured.error, 'facade_callback');
+          callback(captured.error);
+        }
         else if (method === 'run') callback.call(captured.value, null);
         else callback(null, captured.value);
-      }, callback);
+      }, (error) => {
+        if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, error, 'facade_callback_rejection');
+        callback(error);
+      });
       return undefined;
     }
     return delivery.then((captured) => {
-      if (captured.error) throw captured.error;
+      if (captured.error) {
+        if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, captured.error, 'facade_promise_rejection');
+        throw captured.error;
+      }
       return captured.value;
+    }, (error) => {
+      if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, error, 'facade_promise_rejection');
+      throw error;
     });
   }
   return {

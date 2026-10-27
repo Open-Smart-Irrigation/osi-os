@@ -238,6 +238,25 @@ function readProperty(msg, property) {
   );
 }
 
+function summarizeFunctionOutput(result) {
+  const summarizeMessage = (msg) => msg == null ? null : ({
+    statusCode: msg.statusCode,
+    payload: msg.payload === undefined ? undefined : structuredClone(msg.payload),
+  });
+  if (result === null || result === undefined) return result;
+  const outputs = Array.isArray(result) ? result : [result];
+  return outputs.map((output) => Array.isArray(output)
+    ? output.map(summarizeMessage)
+    : summarizeMessage(output));
+}
+
+class TestHarnessFault extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'TestHarnessFault';
+  }
+}
+
 class FlowRuntime {
   constructor(db, { scoped = false, follow = [], directAckLanes = null, dbCallGate = null, functionOverrides = new Map() } = {}) {
     this.db = db;
@@ -340,18 +359,21 @@ class FlowRuntime {
       if (out === null || out === undefined) continue;
       for (const msg of (Array.isArray(out) ? out : [out])) {
         if (msg === null || msg === undefined) continue;
-        if (node.id === ACK_STATUS_NODE && index === 1) this.captureAck(lane, 'postlog', msg);
+        if (node.id === ACK_STATUS_NODE && index === 1) this.captureAck(lane, 'postlog', msg, true);
         this.send(lane, wires[index], msg);
       }
     }
   }
 
-  captureAck(lane, source, msg) {
+  captureAck(lane, source, msg, followed) {
     const raw = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : structuredClone(msg.payload || {});
     const visit = 'ack-' + (++this.ackVisit);
     const commandId = raw.commandId === undefined ? null : raw.commandId;
-    lane.ackIngress.push({ lane: lane.name, source, visit, commandId, raw: structuredClone(raw), order: ++this.observationOrder });
+    const record = { lane: lane.name, source, visit, commandId, raw: structuredClone(raw),
+      followed: Boolean(followed), order: ++this.observationOrder };
+    lane.ackIngress.push(record);
     msg._fixtureAckVisit = { lane: lane.name, source, visit, commandId };
+    return record;
   }
 
   raise(lane, node, msg, error) {
@@ -398,18 +420,22 @@ class FlowRuntime {
           this.tabContext.set(node.z, flowStore);
         }
         const dbCallGate = this.dbCallGate && this.dbCallGate.forLane
-          ? this.dbCallGate.forLane(name, node.id)
+          ? this.dbCallGate.forLane(name, node.id, entry.key)
           : this.dbCallGate;
         let ackQueueEntry = null;
         if (node.id === ACK_QUEUE_NODE) {
           const visit = msg._fixtureAckVisit;
           const input = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : structuredClone(msg.payload || {});
           const commandId = input.commandId === undefined ? null : input.commandId;
+          const ownerId = commandId == null ? null : String(commandId);
           const ownerRow = this.db.prepare(
             'SELECT command_id, command_type, result, result_detail, last_error FROM applied_commands WHERE command_id = ?'
-          ).get(commandId);
+          ).get(ownerId);
+          if (ownerRow) assert.equal(ownerRow.command_id, ownerId,
+            'ACK prequeue owner lookup returns the exact normalized command id');
           ackQueueEntry = {
             lane: name, source: visit && visit.source, visit: visit && visit.visit, commandId,
+            ownerId,
             input: structuredClone(input),
             ledgerBeforeQueue: ownerRow ? {
               ...ownerRow,
@@ -454,14 +480,17 @@ class FlowRuntime {
         lane.sql.push(sqlEntry);
         lane.trace.push({ kind: 'sql_topic', lane: name, node: node.id, topic: msg.topic });
         const gate = this.dbCallGate && this.dbCallGate.forLane
-          ? this.dbCallGate.forLane(name, node.id)
+          ? this.dbCallGate.forLane(name, node.id, entry.key)
           : this.dbCallGate;
         const decision = gate
           ? gate.select({ method: 'all', sql: msg.topic, params: [] })
           : { kind: 'execute', hold: false };
         sqlEntry.callId = decision.callId || null;
         if (gate && gate.rawStart) gate.rawStart(decision);
-        const outcome = captureDbOutcome(this.db, 'all', msg.topic, [], decision);
+        const capture = () => captureDbOutcome(this.db, 'all', msg.topic, [], decision);
+        const outcome = gate && gate.withCallScope
+          ? gate.withCallScope(decision.callId, capture)
+          : capture();
         sqlEntry.gateKind = decision.kind;
         sqlEntry.operationCount = outcome.operationCount;
         sqlEntry.operationError = outcome.error ? String(outcome.error.message || outcome.error) : null;
@@ -475,7 +504,8 @@ class FlowRuntime {
           ? await gate.deliver(decision, outcome, { method: 'all', sql: msg.topic, params: [] })
           : outcome;
         if (delivered.error) {
-          return { kind: 'raise', node, msg, error: delivered.error };
+          if (gate && gate.errorDelivered) gate.errorDelivered(decision, delivered.error, 'sqlite_delivered_error');
+          return { kind: 'raise', node, msg, error: delivered.error, callId: decision.callId, stepKey: entry.key };
         }
         msg.payload = delivered.value;
         lane.trace.push({ kind: 'sql_delivery', lane: name, node: node.id, operationCount: outcome.operationCount });
@@ -492,7 +522,7 @@ class FlowRuntime {
           let ok;
           if (rule.t === 'nnull') ok = value !== null && value !== undefined;
           else if (rule.t === 'else') ok = !matched;
-          else throw new Error('unsupported switch rule ' + rule.t + ' in ' + node.id);
+          else throw new TestHarnessFault('unsupported switch rule ' + rule.t + ' in ' + node.id);
           if (ok) {
             matched = true;
             targets.push(node.wires[index]);
@@ -507,7 +537,7 @@ class FlowRuntime {
       case 'debug':
         return null;
       default:
-        throw new Error('unsupported node type ' + node.type + ' (' + node.id + ')');
+        throw new TestHarnessFault('unsupported node type ' + node.type + ' (' + node.id + ')');
     }
   }
 
@@ -518,8 +548,10 @@ class FlowRuntime {
     this.inFlight.delete(key);
     const lane = this.lane(entry.name);
     if (captured.error) {
+      if (captured.error instanceof TestHarnessFault) throw captured.error;
       if (this.dbCallGate && this.dbCallGate.functionComplete) {
-        this.dbCallGate.functionComplete(entry.name, entry.node.id, captured.error.message || captured.error);
+        this.dbCallGate.functionComplete(entry.name, entry.node.id, entry.key,
+          captured.error.message || captured.error, null);
       }
       this.raise(lane, entry.node, entry.msg, captured.error);
       return;
@@ -528,17 +560,25 @@ class FlowRuntime {
     if (!action) return;
     if (action.kind === 'function') {
       if (this.dbCallGate && this.dbCallGate.functionComplete) {
-        this.dbCallGate.functionComplete(entry.name, action.node.id, action.outcome.errors.join('; ') || null);
+        this.dbCallGate.functionComplete(entry.name, action.node.id, entry.key,
+          action.outcome.errors.join('; ') || null, summarizeFunctionOutput(action.outcome.result));
       }
       lane.ran.push(action.node.id);
       lane.errors.push(...action.outcome.errors.map((message) => ({ node: action.node.id, message })));
       this.route(lane, action.node, action.outcome.result);
     } else if (action.kind === 'route') this.route(lane, action.node, action.result);
-    else if (action.kind === 'raise') this.raise(lane, action.node, action.msg, action.error);
+    else if (action.kind === 'raise') {
+      if (this.dbCallGate && this.dbCallGate.raiseObserved) {
+        this.dbCallGate.raiseObserved({ lane: entry.name, nodeId: action.node.id,
+          stepKey: action.stepKey || entry.key, callId: action.callId || null, error: action.error });
+      }
+      this.raise(lane, action.node, action.msg, action.error);
+    }
     else if (action.kind === 'link') {
       lane.links.push({ node: action.node.id, msg: action.msg });
-      if (action.node.id === ID.toDirectCommandAck) this.captureAck(lane, 'direct', action.msg);
       const directAllowed = action.node.id !== ID.toDirectCommandAck || this.directAckLanes.has(entry.name);
+      if (action.node.id === ID.toDirectCommandAck) this.captureAck(lane, 'direct', action.msg,
+        this.follow.has(action.node.id) && directAllowed);
       if (this.follow.has(action.node.id) && directAllowed) this.send(lane, action.node.links, action.msg);
     } else if (action.kind === 'switch') {
       for (const targets of action.targets) this.send(lane, targets, action.msg);
@@ -547,7 +587,7 @@ class FlowRuntime {
     } else if (action.kind === 'publish') {
       lane.published.push({ node: action.node.id, topic: action.msg.topic, payload: action.msg.payload,
         fixtureAckVisit: action.msg._fixtureAckVisit ? { ...action.msg._fixtureAckVisit } : undefined });
-    } else throw new Error('unsupported step result ' + action.kind);
+    } else throw new TestHarnessFault('unsupported step result ' + action.kind);
   }
 
   async step(name) {
@@ -613,9 +653,59 @@ function makeDbCallGate(selectDecision) {
   const events = [];
   const held = new Map();
   const counters = new Map();
+  const sqlObservations = [];
+  const observationByCallId = new Map();
   let nextCallId = 0;
+  let activeCallId = null;
   const waiters = [];
   let diagnosticsForLane = () => null;
+  function observationFor(callId) {
+    if (!callId) return null;
+    if (!observationByCallId.has(callId)) {
+      const selected = events.find((event) => event.phase === 'selected' && event.callId === callId);
+      const observation = {
+        callId, lane: selected && selected.lane, nodeName: selected && selected.nodeName,
+        method: selected && selected.method, sql: selected && selected.sqlRole,
+        prepareCount: 0, executeCount: 0,
+      };
+      observationByCallId.set(callId, observation);
+      sqlObservations.push(observation);
+    }
+    return observationByCallId.get(callId);
+  }
+  function withCallScope(callId, callback) {
+    const prior = activeCallId;
+    activeCallId = callId;
+    observationFor(callId);
+    try { return callback(); }
+    finally { activeCallId = prior; }
+  }
+  function observeDatabase(db) {
+    return new Proxy(db, {
+      get(target, property) {
+        if (property === 'prepare') return (sql, ...args) => {
+          const observation = observationFor(activeCallId);
+          if (observation) observation.prepareCount += 1;
+          const statement = Reflect.apply(target.prepare, target, [sql, ...args]);
+          return new Proxy(statement, {
+            get(statementTarget, method) {
+              const value = Reflect.get(statementTarget, method, statementTarget);
+              if (['all', 'get', 'run'].includes(String(method)) && typeof value === 'function') {
+                return (...params) => {
+                  const scoped = observationFor(activeCallId);
+                  if (scoped) scoped.executeCount += 1;
+                  return Reflect.apply(value, statementTarget, params);
+                };
+              }
+              return typeof value === 'function' ? value.bind(statementTarget) : value;
+            },
+          });
+        };
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  }
   function removeWaiter(waiter) {
     const index = waiters.indexOf(waiter);
     if (index >= 0) waiters.splice(index, 1);
@@ -649,8 +739,15 @@ function makeDbCallGate(selectDecision) {
       }
     }
   }
-  function forLane(lane, nodeId) {
+  function forLane(lane, nodeId, stepKey) {
     return {
+      withCallScope,
+      errorDelivered(decision, error, stage) {
+        const event = decision.event;
+        events.push({ callId: event.callId, phase: 'error_delivered', stage, lane, nodeId,
+          nodeName: event.nodeName, stepKey, errorCode: error && error.code || null,
+          errorMessage: String(error && error.message || error), deliveryCount: event.deliveries });
+      },
       rawStart(decision) {
         const event = decision.event;
         events.push({ callId: event.callId, phase: 'raw_started', lane, nodeId, nodeName: event.nodeName,
@@ -734,6 +831,9 @@ function makeDbCallGate(selectDecision) {
   }
   return {
     events,
+    sqlObservations,
+    observeDatabase,
+    withCallScope,
     forLane,
     setDiagnosticsForLane(fn) { diagnosticsForLane = fn || (() => null); },
     rawStart(decision) {
@@ -746,8 +846,25 @@ function makeDbCallGate(selectDecision) {
     transactionEvent(phase, error) {
       events.push({ phase: 'transaction_' + phase, nodeName: null, error: error ? String(error.message || error) : null });
     },
-    functionComplete(lane, nodeId, error) {
-      events.push({ phase: 'function_complete', lane, nodeId, error: error ? String(error) : null });
+    errorDelivered(decision, error, stage) {
+      const event = decision.event;
+      events.push({ callId: event.callId, phase: 'error_delivered', stage, lane: event.lane,
+        nodeId: event.nodeId, nodeName: event.nodeName, stepKey: null,
+        errorCode: error && error.code || null, errorMessage: String(error && error.message || error),
+        deliveryCount: event.deliveries });
+    },
+    raiseObserved({ lane, nodeId, stepKey, callId, error }) {
+      const event = events.find((candidate) => candidate.phase === 'selected' && candidate.callId === callId);
+      events.push({ callId, phase: 'raise_observed', lane, nodeId, nodeName: canonicalNodeNameForId(nodeId),
+        stepKey, errorCode: error && error.code || null,
+        errorMessage: String(error && error.message || error), deliveryCount: event ? event.deliveries : null });
+    },
+    functionComplete(lane, nodeId, stepKey, error, returnedOutput) {
+      const errorCalls = events.filter((event) => event.phase === 'error_delivered' &&
+        event.lane === lane && event.stepKey === stepKey).map((event) => event.callId);
+      events.push({ phase: 'function_complete', lane, nodeId, nodeName: canonicalNodeNameForId(nodeId),
+        stepKey, callId: errorCalls.length === 1 ? errorCalls[0] : null,
+        error: error ? String(error) : null, returnedOutput });
     },
     laneComplete(lane) { events.push({ phase: 'b_completed', lane }); },
     release,
@@ -814,6 +931,63 @@ function assertOneHeldCallTrace(gate, held, operationCount) {
   }
   assert.equal(held.operationCount, operationCount);
   assert.equal(held.deliveries, 1);
+  if (held.method !== 'close') {
+    const observations = gate.sqlObservations.filter((entry) => entry.callId === held.callId);
+    assert.equal(observations.length, 1, `one independent SQLite observer record exists for ${held.callId}`);
+    const observed = observations[0];
+    assert.deepEqual({ lane: observed.lane, nodeName: observed.nodeName, method: observed.method, sql: observed.sql },
+      { lane: held.lane, nodeName: held.nodeName, method: held.method, sql: held.sqlRole },
+      'SQLite observation is bound to the selected call identity and exact source site');
+    const expectedRawCount = held.decisionKind === 'synthetic_busy' ? 0 : 1;
+    assert.equal(observed.prepareCount, expectedRawCount, 'independent observer counts prepare calls');
+    assert.equal(observed.executeCount, expectedRawCount, 'independent observer counts statement execution calls');
+  }
+}
+
+function assertBusyErrorAttribution(gate, rt, held, laneName, nodeId, { downstreamAccepted = false } = {}) {
+  assert.equal(held.decisionKind, 'synthetic_busy');
+  assert.equal(held.nodeId, nodeId, 'busy attribution retains the selected node identity');
+  const delivery = gate.events.filter((event) => event.phase === 'error_delivered' && event.callId === held.callId);
+  assert.equal(delivery.length, 1, `${held.callId} delivers its selected busy error exactly once`);
+  assert.equal(delivery[0].lane, laneName);
+  assert.equal(delivery[0].nodeName, held.nodeName);
+  assert.equal(delivery[0].errorCode, 'SQLITE_BUSY');
+  assert.equal(delivery[0].errorMessage, 'SQLITE_BUSY: database is locked');
+  assert.equal(delivery[0].deliveryCount, 1);
+  const assertSqliteRaise = () => {
+    const raised = gate.events.filter((event) => event.phase === 'raise_observed' && event.callId === held.callId);
+    assert.equal(raised.length, 1, `${held.callId} SQLite error reaches the existing raise route once`);
+    assert.equal(raised[0].stepKey, delivery[0].stepKey);
+    assert.equal(raised[0].errorCode, 'SQLITE_BUSY');
+    assert.equal(raised[0].errorMessage, delivery[0].errorMessage);
+    const thrown = rt.lane(laneName).thrown;
+    assert.equal(thrown.length, 1, 'SQLite error creates one observed raise origin');
+    assert.equal(thrown[0].node, nodeId);
+    assert.equal(thrown[0].message, delivery[0].errorMessage);
+  };
+  if (downstreamAccepted) {
+    assertSqliteRaise();
+    assert.equal(onlyResponse(rt, laneName).statusCode, 202);
+    return;
+  }
+  if (delivery[0].stage === 'sqlite_delivered_error') {
+    assertSqliteRaise();
+  } else {
+    const completed = gate.events.filter((event) => event.phase === 'function_complete' &&
+      event.lane === laneName && event.nodeName === held.nodeName && event.stepKey === delivery[0].stepKey);
+    assert.equal(completed.length, 1, `${held.callId} busy error reaches its Function completion once`);
+    assert.equal(completed[0].callId, held.callId, `${held.callId} stays bound through Function completion`);
+    assert.ok(completed[0].returnedOutput, `${held.callId} Function completion records its returned route output`);
+    assert.equal(JSON.stringify(completed[0].returnedOutput).includes('500'), true,
+      `${held.callId} Function output retains its 500 failure result`);
+    assert.equal(rt.lane(laneName).thrown.length, 0, 'no harness throw supplies the busy response');
+  }
+  const unrelatedErrors = rt.lane(laneName).errors.filter((entry) =>
+    entry.node !== held.nodeId || !String(entry.message).includes('SQLITE_BUSY'));
+  assert.deepEqual(unrelatedErrors, [], 'no unrelated lane error supplies the selected busy response');
+  assert.ok(rt.lane(laneName).errors.length <= 1, 'selected busy produces at most one Function error origin');
+  assert.equal(rt.lane(laneName).responses.length, 1, 'selected busy path produces the sole lane response');
+  assert.equal(rt.lane(laneName).responses[0].statusCode, 500);
 }
 
 function heldAtSite(event, { lane = 'A', nodeId, method, sqlIncludes }) {
@@ -834,7 +1008,10 @@ async function withRuntime(options, body) {
   const db = seedDb();
   let rt;
   try {
-    rt = new FlowRuntime(db, options);
+    const runtimeDb = options.dbCallGate && options.dbCallGate.observeDatabase
+      ? options.dbCallGate.observeDatabase(db)
+      : db;
+    rt = new FlowRuntime(runtimeDb, options);
     if (rt.dbCallGate && rt.dbCallGate.setDiagnosticsForLane) {
       rt.dbCallGate.setDiagnosticsForLane((laneName) => {
         if (!laneName || !rt.lanes.has(laneName)) return null;
@@ -872,6 +1049,36 @@ const ACK_NEW_ENVELOPE_METADATA = [
   'eventUuid', 'aggregateType', 'aggregateKey', 'appliedAt', 'requestedSyncVersion', 'appliedSyncVersion',
 ];
 
+function ackTupleKey(tuple) {
+  return JSON.stringify([tuple.lane, tuple.source, tuple.visit, tuple.commandId]);
+}
+
+function assertAckPublicationBijection(rt, name) {
+  const lane = rt.lane(name);
+  const followed = lane.ackIngress.filter((visit) => visit.followed);
+  const expected = new Map(followed.map((visit) => [ackTupleKey(visit), visit]));
+  assert.equal(expected.size, followed.length, `${name} followed raw ACK visits have unique tuples`);
+  const queueCounts = new Map();
+  for (const queue of lane.queueAcks) {
+    const key = ackTupleKey(queue);
+    assert.ok(expected.has(key), `${name} queue invocation has a followed raw source tuple: ${key}`);
+    queueCounts.set(key, (queueCounts.get(key) || 0) + 1);
+  }
+  const publications = lane.published.filter((entry) => entry.node === ID.commandAckMqtt);
+  const publicationCounts = new Map();
+  for (const publication of publications) {
+    assert.ok(publication.fixtureAckVisit,
+      `${name} every command-ACK publication carries a visit tag before any filtered assertion`);
+    const key = ackTupleKey(publication.fixtureAckVisit);
+    assert.ok(expected.has(key), `${name} publication belongs to a followed raw visit: ${key}`);
+    publicationCounts.set(key, (publicationCounts.get(key) || 0) + 1);
+  }
+  for (const [key, visit] of expected) {
+    assert.equal(queueCounts.get(key), 1, `${name} followed ${visit.source} visit queues exactly once`);
+    assert.equal(publicationCounts.get(key), 1, `${name} followed ${visit.source} visit publishes exactly once`);
+  }
+}
+
 function expectedInitialCloudAck(raw) {
   const appliedSyncVersionCandidate = raw.appliedSyncVersion == null ? null : Number(raw.appliedSyncVersion);
   const appliedSyncVersion = Number.isSafeInteger(appliedSyncVersionCandidate) && appliedSyncVersionCandidate >= 0
@@ -900,6 +1107,7 @@ function expectedInitialCloudAck(raw) {
 
 function assertManualAcceptedAckEvidence(rt, name, commandId, queueId, attributedLogOrder) {
   const lane = rt.lane(name);
+  assertAckPublicationBijection(rt, name);
   const rawVisits = lane.ackIngress.filter((visit) => String(visit.commandId) === String(commandId));
   const direct = rawVisits.filter((visit) => visit.source === 'direct');
   const postlog = rawVisits.filter((visit) => visit.source === 'postlog');
@@ -985,8 +1193,7 @@ function assertManualAcceptedAckEvidence(rt, name, commandId, queueId, attribute
       requestedSyncVersion: null,
       appliedSyncVersion: null,
     };
-    assert.equal(typeof direct[0].raw.timestamp, 'string');
-    assert.equal(new Date(direct[0].raw.timestamp).toISOString(), direct[0].raw.timestamp);
+    assertIsoTimestamp(direct[0].raw.timestamp, name + ' direct raw visit timestamp');
     assert.deepEqual(directPublished, expected, name + ' full exact first terminal envelope');
     assert.equal(Object.hasOwn(directPublished, 'transportPhase'), false);
     assert.equal(Object.hasOwn(directPublished, 'error'), false);
@@ -1000,6 +1207,7 @@ function assertManualAcceptedAckEvidence(rt, name, commandId, queueId, attribute
 
 function assertManualFailureAckEvidence(rt, name, scenario) {
   const lane = rt.lane(name);
+  assertAckPublicationBijection(rt, name);
   const direct = lane.ackIngress.filter((visit) => visit.source === 'direct');
   assert.equal(direct.length, 1, `${name} ${scenario} has one raw direct ACK`);
   const rawVisit = direct[0];
@@ -1045,8 +1253,7 @@ function assertManualFailureAckEvidence(rt, name, scenario) {
     eventUuid: null, aggregateType: null, aggregateKey: null,
     appliedAt: raw.timestamp, requestedSyncVersion: null, appliedSyncVersion: null,
   });
-  assert.equal(typeof raw.timestamp, 'string');
-  assert.equal(new Date(raw.timestamp).toISOString(), raw.timestamp, 'appliedAt is a valid raw-visit instant');
+  assertIsoTimestamp(raw.timestamp, `${name} ${scenario} raw visit timestamp`);
   assert.deepEqual(actual, expected, `${name} exact ${rt.scoped ? 'scoped owner replay' : 'new'} ${scenario} envelope`);
   if (scenario === 'busy') {
     assert.equal(queue[0].ledgerBeforeQueue, null, `${name} busy request has no stored command owner`);
@@ -1537,6 +1744,8 @@ for (const order of ['cloud first', 'cloud paused']) {
         await rt.run('cloud');
       }
       assertValveAccepted(rt, 'manual', { eui: VALVE_A, minutes: 12 });
+      assertAckPublicationBijection(rt, 'manual');
+      assertAckPublicationBijection(rt, 'cloud');
       const manualAcks = commandAcks(rt, 'manual');
       assert.equal(rt.lane('manual').ackIngress.filter((visit) => String(visit.commandId) === '501').length, 0,
         'manual raw ACK visits never acquire the adjacent cloud command id');
@@ -1573,15 +1782,18 @@ for (const order of ['cloud first', 'cloud paused']) {
       }
       assertIsoTimestamp(cloudVisit.raw.timestamp, 'cloud 501 post-log raw visit timestamp');
       const expectedCloudEnvelope = expectedInitialCloudAck(cloudVisit.raw);
-      const cloudQueue = rt.lane('cloud').queueAcks.filter((visit) => visit.lane === cloudVisit.lane &&
+      const cloudPostlogQueue = rt.lane('cloud').queueAcks.filter((visit) => visit.lane === cloudVisit.lane &&
         visit.source === cloudVisit.source && visit.visit === cloudVisit.visit &&
         String(visit.commandId) === String(cloudVisit.commandId));
-      assert.equal(cloudQueue.length, 1);
-      assert.deepEqual(cloudQueue[0].input, cloudVisit.raw,
+      assert.equal(cloudPostlogQueue.length, 1, 'cloud post-log visit queues once');
+      assert.equal(cloudPostlogQueue[0].ownerId, '501', 'cloud owner lookup normalizes the numeric raw command ID');
+      assert.equal(cloudPostlogQueue[0].ledgerBeforeQueue, null,
+        'cloud post-log raw visit has no prequeue command owner');
+      const cloudQueue = rt.lane('cloud').queueAcks.filter((visit) => String(visit.commandId) === String(cloudVisit.commandId));
+      assert.equal(cloudQueue.length, 1, 'manual-only direct-link fixture follows one cloud queue visit');
+      assert.deepEqual(cloudPostlogQueue[0].input, cloudVisit.raw,
         'cloud queue input matches its own lane/source/visit/command raw ACK');
-      assert.equal(cloudQueue[0].ledgerBeforeQueue, null,
-        'unscoped cloud fixture has no prequeue command owner');
-      assert.deepEqual(cloudQueue[0].branchResult, expectedCloudEnvelope,
+      assert.deepEqual(cloudPostlogQueue[0].branchResult, expectedCloudEnvelope,
         'cloud queue branch constructs the complete initial ACK from its own raw visit and ledger recipe');
       const cloudPublication = rt.lane('cloud').published.filter((entry) => entry.node === ID.commandAckMqtt &&
         entry.fixtureAckVisit && entry.fixtureAckVisit.lane === cloudVisit.lane &&
@@ -1593,7 +1805,7 @@ for (const order of ['cloud first', 'cloud paused']) {
       });
       assert.deepEqual(JSON.parse(cloudPublication[0].payload), expectedCloudEnvelope,
         'cloud full ACK envelope is pinned to the independently expected raw-visit recipe');
-      assert.deepEqual(JSON.parse(cloudPublication[0].payload), cloudQueue[0].branchResult,
+      assert.deepEqual(JSON.parse(cloudPublication[0].payload), cloudPostlogQueue[0].branchResult,
         'cloud publication equals its own lane/source/visit/command queue branch result');
       const persistedRows = rt.db.prepare(
         'SELECT command_id, command_type, result, applied_at, result_detail, originator, last_error ' +
@@ -1877,6 +2089,7 @@ for (const site of HELPER_BUSY_CASES) {
         assertScheduleApplied(rt, db, 'B', { ...SCHEDULE_OWNERS.B, userId: USERS.admin1.userId });
         assert.equal(rt.lane('A').sql.length, 0, 'helper failure occurs before Node-RED SQL');
       }
+      assertBusyErrorAttribution(gate, rt, held, 'A', site.nodeId);
       assert.equal(held.deliveries, 1);
       assertOneHeldCallTrace(gate, held, 0);
       assert.equal(gate.events.filter((event) => event === held).length, 1, 'selector matched one helper call');
@@ -2097,6 +2310,12 @@ for (const scoped of [false, true]) {
           } else {
             if (kind === 'execute') assertScheduleApplied(rt, db, 'A', { ...SCHEDULE.A, userId: USERS.res1.userId });
             assertScheduleApplied(rt, db, 'B', { ...SCHEDULE_OWNERS.B, userId: USERS.admin1.userId });
+          }
+
+          if (kind === 'synthetic_busy') {
+            assertBusyErrorAttribution(gate, rt, held, 'A', site.boundary, {
+              downstreamAccepted: site.chain === 'valve' && site.boundary === ID.valveWriteDb,
+            });
           }
 
           const sqlEntry = rt.lane('A').sql.find((entry) => entry.node === site.boundary);
@@ -2950,7 +3169,7 @@ test('schedule UPDATE synthetic busy rolls back A unchanged before B begins', as
     assert.match(held.error, /SQLITE_BUSY/);
     assertZeroSelectedOperation(held.operationCount);
     assert.throws(() => assertZeroSelectedOperation(1), assert.AssertionError,
-      'selected-operation mutant with one SQL operation is rejected');
+      'assertion-unit example rejects an operation count of one');
     const selectedSite = { lane: 'A', nodeId: ID.schedWrite, method: 'run', sqlIncludes: sql };
     assert.equal(heldAtSite(held, selectedSite), true,
       'the held selected busy matches the exact first lifecycle UPDATE site before release');
@@ -2960,6 +3179,7 @@ test('schedule UPDATE synthetic busy rolls back A unchanged before B begins', as
     gate.release(held);
     await rt.settleStep(key);
     await rt.run('A');
+    assertBusyErrorAttribution(gate, rt, held, 'A', ID.schedWrite);
     assert.equal(onlyResponse(rt, 'A').statusCode, 500);
     const assertNoPostCheckpointSql = (entries) => assert.deepEqual(entries, priorSql,
       'failed lifecycle call adds no Node-RED SQLite visits beyond the exact request lookup checkpoint');
@@ -3033,20 +3253,29 @@ test('zone soft-delete synthetic busy rolls back earlier A writes and outbox bef
     gate.release(held);
     await rt.settleStep(key);
     await rt.run('A');
+    assertBusyErrorAttribution(gate, rt, held, 'A', ZD.router);
     assert.equal(onlyResponse(rt, 'A').statusCode, 500);
     assert.equal(rt.lane('A').sql.length, 0, 'zone lifecycle UPDATE fails in its helper transaction with zero node-red SQL');
     assertOneHeldCallTrace(gate, held, 0);
     assert.deepEqual(zoneState(db), before,
       'A unassign, soft-delete, schedule-disable, versions and outbox all roll back');
-    const aRollback = gate.events.findIndex((event) => event.phase === 'transaction_rollback' && event.lane === 'A');
-    const aBegin = gate.events.findIndex((event) => event.phase === 'transaction_begin' && event.lane === 'A');
-    const selected = gate.events.findIndex((event) => event.phase === 'selected' && event.callId === held.callId);
-    const released = gate.events.findIndex((event) => event.phase === 'delivery_released' && event.callId === held.callId);
     await rt.run('B');
     assertZoneDeleted(rt, db, 'B', ZONE_DELETE.B, before);
-    const bBegin = gate.events.findIndex((event) => event.phase === 'transaction_begin' && event.lane === 'B');
-    assert.ok(aBegin < selected && selected < released && released < aRollback && aRollback < bBegin,
-      'A begins, selects one zero-SQL busy, releases, rolls back, then B starts');
+    const exactlyOne = (predicate, label) => {
+      const indices = gate.events.map((event, index) => predicate(event) ? index : -1).filter((index) => index >= 0);
+      assert.equal(indices.length, 1, label + ' appears exactly once');
+      return indices[0];
+    };
+    const aBegin = exactlyOne((event) => event.phase === 'transaction_begin' && event.lane === 'A', 'A transaction begin');
+    const selected = exactlyOne((event) => event.phase === 'selected' && event.callId === held.callId, 'selected zone update');
+    const released = exactlyOne((event) => event.phase === 'delivery_released' && event.callId === held.callId, 'selected zone update release');
+    const aRollback = exactlyOne((event) => event.phase === 'transaction_rollback' && event.lane === 'A', 'A transaction rollback');
+    const bBegin = exactlyOne((event) => event.phase === 'transaction_begin' && event.lane === 'B', 'B transaction begin');
+    const bCommit = exactlyOne((event) => event.phase === 'transaction_commit' && event.lane === 'B', 'B transaction commit');
+    const bCompleted = exactlyOne((event) => event.phase === 'b_completed' && event.lane === 'B', 'B completion');
+    assert.ok(aBegin < selected && selected < released && released < aRollback && aRollback < bBegin &&
+      bBegin < bCommit && bCommit < bCompleted,
+    'A begins, selects and releases zero-SQL busy, rolls back, then B begins, commits, and completes');
   });
 });
 
@@ -3077,7 +3306,7 @@ for (const boundary of ZONE_DELETE_BOUNDARIES) {
         const after = zoneState(db);
         assertZoneGeneratedEvidence(after, 'router-entry interleaved run');
         assert.deepEqual(stableZoneState(after), stableZoneState(expected),
-          'interleaved semantic effects and outbox order equal the independent serial run');
+          'interleaved semantic effects and outbox contents and multiplicity equal the independent serial run');
       });
     });
   }
