@@ -1,6 +1,6 @@
 ---
 name: osi-agronomy-sensors-reference
-description: Use when interpreting soil water tension (SWT) kPa or pF values, Chameleon sensor calibration/wiring, dendrometer TWD/MDS output, rain gauge aggregation (LoRain/S2120), ET0/evapotranspiration questions, deciding which device_data column a sensor writes to, STREGA valve command semantics, STREGA Gen1 vs Gen2 (SV2) telemetry differences and enclosure temperature/humidity, UC512 valve telemetry, or any device-payload/decoder question. Covers KIWI_SENSOR, TEKTELIC_CLOVER, DRAGINO_LSN50, SENSECAP_S2120, AQUASCOPE_LORAIN, STREGA_VALVE, MILESIGHT_UC512.
+description: "Use when interpreting sensor values or payloads: SWT kPa/pF, Chameleon, dendrometer TWD/MDS, rain gauges, ET0, which device_data column a sensor writes, STREGA/UC512 valve semantics, or any decoder. Covers every supported device type."
 ---
 
 # OSI Agronomy & Sensors Reference

@@ -1,6 +1,6 @@
 ---
 name: osi-schema-change-control
-description: Use when adding/changing a SQLite table, column, index, trigger, or view on the OSI OS edge; editing seed-blank.sql or a bundled farming.db; writing database/migrations/ordered/NNNN__slug.sql; touching lib/osi-migrate; a migration verifier fails (verify-migrations, verify-seed-replay, verify-runtime-schema-parity, verify-db-schema-consistency, verify-devices-rebuild-fence); schema_object_fingerprints drift; or touching the frozen sync-init-fn boot node.
+description: Use when changing edge SQLite schema (tables, columns, indexes, triggers, views), seed-blank.sql or bundled farming.db, ordered migrations or lib/osi-migrate, the frozen sync-init-fn boot node, or when a migration/schema verifier fails.
 ---
 
 # OSI Schema Change Control

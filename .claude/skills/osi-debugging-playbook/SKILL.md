@@ -1,6 +1,6 @@
 ---
 name: osi-debugging-playbook
-description: Use when triaging an OSI OS symptom of unknown root cause — SWT/soil-tension null despite uplinks, "i2c_missing"/"I2C_MISSING", "duplicate column name" from a verifier/upgrade test, EBUSY on /sys/class/pwm, fan not responding, export.csv 401 vs 404, history chart gaps, stale cloud mirror/sync_outbox growth, Node-RED all-routes-404 after deploy, curl exit 52/28 hangs, or "which script checks X".
+description: "Use when triaging an edge symptom of unknown cause: missing SWT, I2C_MISSING, verifier \"duplicate column\", fan EBUSY, export 401/404, history gaps, stale cloud mirror or growing sync_outbox, Node-RED 404s after deploy, curl hangs."
 ---
 
 # OSI Debugging Playbook

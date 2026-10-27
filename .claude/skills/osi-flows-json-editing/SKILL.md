@@ -1,6 +1,6 @@
 ---
 name: osi-flows-json-editing
-description: Use when editing conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json or its bcm2709 mirror, adding/modifying a Node-RED function node, HTTP endpoint, inject, or MQTT IN node, changing REST routes or the scheduler/sync orchestration logic that lives in flows.json, wiring a new npm module or shared helper into a function node, or touching the edge backend in general.
+description: "Use before any edit to flows.json (either profile): function nodes, HTTP endpoints, injects, MQTT IN nodes, REST routes, scheduler or sync orchestration, or wiring a helper module into a function node."
 ---
 
 # OSI Flows.json Editing

@@ -1,6 +1,6 @@
 ---
 name: osi-config-and-flags
-description: Use when looking up or changing OSI OS gateway configuration or feature-flag surface - UCI osi-server.cloud.* settings, DEVICE_EUI / gateway identity resolution and precedence, CHIRPSTACK_PROFILE_*/CHIRPSTACK_APP_* env vars, OSI_HEALTH_*_RETENTION_DAYS overrides, Node-RED settings.js load-bearing options, deploy.sh tunables, /api/system/features flags, or adding a brand-new config knob. Not for symptom triage, live-Pi repair execution, flows.json editing mechanics, or schema migrations.
+description: "Use when looking up or changing gateway configuration: UCI osi-server.cloud.*, DEVICE_EUI resolution, CHIRPSTACK_* env vars, retention overrides, settings.js options, deploy.sh tunables, /api/system/features flags, or adding a config knob."
 ---
 
 # OSI Config and Flags
