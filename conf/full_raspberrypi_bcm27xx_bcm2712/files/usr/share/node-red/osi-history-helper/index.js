@@ -1678,49 +1678,182 @@ function normalizeQueryChannels(channels) {
   return normalized;
 }
 
-/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
-async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
+// The single-source rollup reducer. It returns, for each channel the source
+// supports, the buckets the per-source aggregate from sourceAggregatesForRows
+// would hold, but only those with at least one sample: computeRollupBuckets
+// writes nothing for an empty bucket. The row preparation and bucket
+// assignment run once per source rather than once per channel, and each
+// channel then reads only its own non-null values. Returns null when the
+// source supports no channel.
+//
+// options.end is always set on the rollup path, so the cadence reference does
+// not depend on which rows carry a value. stats, when given, counts row
+// passes so tests can pin the cost without timing it.
+function sourceRollupBuckets(rows, options, sourceKey, stats) {
+  const aggregationInfo = resolveAggregation(options);
+  const aggregation = aggregationInfo.level;
+  const channels = filterSoilChannelsForSources(options.channels, options.sourceDevices);
+  const partitions = sourcePartitions(rows, channels, options);
+  const sourceDevice = sourceDeviceForKey(sourceKey, options.sourceDevices);
+  const callOptions = {
+    ...options,
+    aggregation,
+    aggregationRequested: options.aggregationRequested || aggregationInfo.requested,
+    sourceDevices: sourceDevice ? [sourceDevice] : options.sourceDevices,
+    sourceKeys: [sourceKey],
+    requestedSourceKeys: [sourceKey],
+  };
+  const bucketSeconds = BUCKET_SECONDS[aggregation];
+  const startMs = parseTime(options.start || options.startAt || options.from);
+  const endMs = parseTime(options.end || options.endAt || options.to);
+  if (!bucketSeconds) throw new Error(`unsupported aggregation: ${aggregation}`);
+  if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
+  const nowMs = toFiniteNumber(options.nowMs) ?? Date.now();
+
+  // Channels whose partition shares one entries array share one row pass.
+  const groups = new Map();
+  for (const channel of channels) {
+    if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
+    const partition = partitions.get(sourceChannelKey(sourceKey, channel));
+    const entries = partition ? partition.entries : [];
+    if (!groups.has(entries)) groups.set(entries, []);
+    groups.get(entries).push(channel);
+  }
+  if (groups.size === 0) return null;
+
+  let grid = null;
+  const byChannel = new Map();
+  for (const [entries, groupChannels] of groups) {
+    if (stats) stats.rowPasses = (stats.rowPasses || 0) + 1;
+    const sortedRows = filterSoilRowsForSources(entries.map((entry) => entry.row), callOptions.sourceDevices)
+      .map((row) => ({ row, recordedAtMs: parseRecordedAtMs(row.recorded_at || row.recordedAt) }))
+      .filter((entry) => entry.recordedAtMs !== null)
+      .filter((entry) => entry.recordedAtMs >= startMs && entry.recordedAtMs < endMs)
+      .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
+    const buckets = bucketSkeletonFor(startMs, endMs, aggregation, bucketSeconds, options.timezone, options.localDaysPerBucket, options.bucketSkeletonCache);
+    if (!grid) grid = buckets.map((bucket) => bucket.bucketStart);
+    const perChannel = groupChannels.map((channel) => ({
+      channel,
+      fields: channelFieldNames(channel),
+      rows: [],
+      bucketIndexes: [],
+    }));
+    let bucketIndex = 0;
+    for (const entry of sortedRows) {
+      while (bucketIndex < buckets.length && entry.recordedAtMs >= buckets[bucketIndex].bucketEndMs) bucketIndex += 1;
+      if (bucketIndex >= buckets.length) break;
+      for (const slot of perChannel) {
+        let present = false;
+        for (const field of slot.fields) {
+          if (toFiniteNumber(entry.row[field]) !== null) {
+            present = true;
+            break;
+          }
+        }
+        if (!present) continue;
+        slot.rows.push(entry);
+        slot.bucketIndexes.push(bucketIndex);
+      }
+    }
+    for (const slot of perChannel) {
+      const { channel } = slot;
+      const channelList = filterSoilChannelsForSources([channel], callOptions.sourceDevices);
+      if (channelList.length === 0) throw new Error('aggregateRows requires at least one channel');
+      const sourceCadences = deriveSourceCadences(slot.rows, channelList, { ...callOptions, channels: [channel] }, true);
+      const channelBuckets = new Map();
+      let cursor = 0;
+      while (cursor < slot.rows.length) {
+        const index = slot.bucketIndexes[cursor];
+        const bucketRows = [];
+        while (cursor < slot.rows.length && slot.bucketIndexes[cursor] === index) {
+          bucketRows.push(slot.rows[cursor]);
+          cursor += 1;
+        }
+        const skeleton = buckets[index];
+        const channelStats = statsForValues(
+          bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })),
+          isSwtKpaChannel(channel),
+        );
+        const elapsedBucketSeconds = Math.max(0, (Math.min(skeleton.bucketEndMs, nowMs) - skeleton.bucketStartMs) / 1000);
+        const coverage = coverageForBucket(bucketRows, channelList, sourceCadences, elapsedBucketSeconds);
+        channelBuckets.set(skeleton.bucketStart, {
+          bucketStart: skeleton.bucketStart,
+          bucketEnd: skeleton.bucketEnd,
+          series: { [channel.id]: { ...channelStats, unit: channel.unit || null } },
+          coveragePct: coverage.coveragePct,
+          coverageConfidence: coverage.coverageConfidence,
+        });
+      }
+      byChannel.set(channel.id, channelBuckets);
+    }
+  }
+  return { grid, byChannel };
+}
+
+// The device_data read for one rollup scope and level, or null when the scope
+// has no source or the window is empty.
+function rollupWindow(scope, level, windowMs, nowMs) {
   const aggregation = String(level || '').trim();
   if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
   const channels = normalizeQueryChannels(filterSoilChannelsForSources(scope.channels, scope.sourceDevices));
   const deveuis = Array.from(new Set((Array.isArray(scope.deveuis) ? scope.deveuis : [])
     .map(normalizeDeveui)
     .filter(Boolean)));
-  if (deveuis.length === 0 || channels.length === 0) return [];
+  if (deveuis.length === 0 || channels.length === 0) return null;
 
   const todayStartMs = startOfLocalDayMs(nowMs ?? Date.now(), scope.timezone || 'UTC');
   const startMs = todayStartMs - Math.max(0, Number(windowMs || 0));
-  if (!Number.isFinite(startMs) || startMs >= todayStartMs) return [];
+  if (!Number.isFinite(startMs) || startMs >= todayStartMs) return null;
   const start = new Date(startMs).toISOString();
   const end = new Date(todayStartMs).toISOString();
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const range = recordedAtRangeSql('recorded_at', start, end);
-  const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC`;
-  const rows = await dbAll(db, sql, deveuis.concat(range.params));
+  return {
+    aggregation,
+    channels,
+    deveuis,
+    start,
+    end,
+    selectedFields,
+    sql: `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC`,
+    params: deveuis.concat(range.params),
+  };
+}
+
+// A source scope reads a subset of its card's read: the same window and
+// order, its own DevEUI, and a subset of the columns. The SQL matches the
+// DevEUI exactly, and so does this filter.
+function rowsFromCardRead(window, cardWindow, cardRows) {
+  if (!window || !cardWindow || window.start !== cardWindow.start || window.end !== cardWindow.end) return null;
+  const cardDeveuis = new Set(cardWindow.deveuis);
+  const cardFields = new Set(cardWindow.selectedFields);
+  if (!window.deveuis.every((deveui) => cardDeveuis.has(deveui))) return null;
+  if (!window.selectedFields.every((field) => cardFields.has(field))) return null;
+  const deveuis = new Set(window.deveuis);
+  return cardRows.filter((row) => deveuis.has(row.deveui));
+}
+
+function rollupRowsForWindow(scope, window, rows, stats) {
+  const { aggregation, channels, start, end } = window;
   const aggregateOptions = { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices };
   const out = [];
   const singleSource = Array.isArray(scope.sourceDevices) && scope.sourceDevices.length === 1
     ? normalizeDeveui(scope.sourceDevices[0] && (scope.sourceDevices[0].deveui || scope.sourceDevices[0].device_eui || scope.sourceDevices[0].deviceEui))
     : null;
   // A multi-source scope writes the pooled buckets and a single-source scope
-  // its own source aggregates, so run only the reducer the scope reads. A
-  // source aggregate holds one channel, so each channel reads its own.
-  const sourceResults = singleSource
-    ? sourceAggregatesForRows(rows, aggregateOptions).sourceAggregates.filter((aggregate) => aggregate.sourceKey === singleSource)
-    : [];
-  const channelBuckets = new Map(sourceResults.map((aggregate) => [
-    aggregate.channelKey,
-    new Map((aggregate.buckets || []).map((bucket) => [bucket.bucketStart, bucket])),
-  ]));
-  const buckets = sourceResults.length
-    ? sourceResults[0].buckets
-    : aggregateRowsPooled(rows, aggregateOptions).buckets;
-  for (const gridBucket of buckets || []) {
+  // its own source aggregates, so run only the reducer the scope reads.
+  const sourceResult = singleSource ? sourceRollupBuckets(rows, aggregateOptions, singleSource, stats) : null;
+  const gridStarts = sourceResult
+    ? sourceResult.grid
+    : null;
+  const pooledBuckets = sourceResult ? null : aggregateRowsPooled(rows, aggregateOptions).buckets;
+  const gridLength = sourceResult ? gridStarts.length : (pooledBuckets || []).length;
+  for (let gridIndex = 0; gridIndex < gridLength; gridIndex += 1) {
     for (const channel of channels) {
-      const bucket = sourceResults.length
-        ? (channelBuckets.get(channel.id) || new Map()).get(gridBucket.bucketStart)
-        : gridBucket;
+      const bucket = sourceResult
+        ? (sourceResult.byChannel.get(channel.id) || new Map()).get(gridStarts[gridIndex])
+        : pooledBuckets[gridIndex];
       if (!bucket) continue;
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
@@ -1748,6 +1881,14 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
     }
   }
   return out;
+}
+
+/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
+async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
+  const window = rollupWindow(scope, level, windowMs, nowMs);
+  if (!window) return [];
+  const rows = await dbAll(db, window.sql, window.params);
+  return rollupRowsForWindow(scope, window, rows, scope.rollupStats);
 }
 
 async function upsertRollups(db, rows) {
@@ -3634,6 +3775,9 @@ async function runRollupJob(db, options = {}) {
     ? options.levels.filter((level) => Object.prototype.hasOwnProperty.call(ROLLUP_WINDOWS, level))
     : ['hourly', 'daily', 'weekly'];
   const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE deleted_at IS NULL', []);
+  // options.rollupStats, when given, counts device_data reads and per-source
+  // row passes so tests can pin the cost without timing it.
+  const rollupStats = options.rollupStats && typeof options.rollupStats === 'object' ? options.rollupStats : null;
   let cardsProcessed = 0;
   let bucketsUpserted = 0;
   let csvZonesWritten = 0;
@@ -3659,23 +3803,37 @@ async function runRollupJob(db, options = {}) {
           sourceDevices,
           timezone: zone.timezone || 'UTC',
         };
-        for (const level of levels) {
-          const rows = await computeRollupBuckets(db, scope, level, ROLLUP_WINDOWS[level], nowMs);
-          bucketsUpserted += await upsertRollups(db, rows);
-        }
         // Keep the historical pooled rows for maintenance and analysis, and
         // write a source-keyed copy for the card API.  The two namespaces are
         // deliberately separate: a pooled row can never be relabelled as a
-        // physical sensor measurement on read.
+        // physical sensor measurement on read. Each level reads the card's
+        // rows once; the source scopes take their rows from that read.
+        const sourceScopes = [];
         for (const device of sourceDevices) {
           const deveui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
           const sourceLogicalKey = sourceKeyForCsv(card, device);
           if (!deveui || !sourceLogicalKey) continue;
-          const sourceScope = { ...scope, logicalSourceKey: sourceLogicalKey, deveuis: [deveui], sourceDevices: [device] };
-          for (const level of levels) {
-            const rows = await computeRollupBuckets(db, sourceScope, level, ROLLUP_WINDOWS[level], nowMs);
-            bucketsUpserted += await upsertRollups(db, rows);
+          sourceScopes.push({ ...scope, logicalSourceKey: sourceLogicalKey, deveuis: [deveui], sourceDevices: [device] });
+        }
+        for (const level of levels) {
+          const cardWindow = rollupWindow(scope, level, ROLLUP_WINDOWS[level], nowMs);
+          let cardRows = [];
+          if (cardWindow) {
+            if (rollupStats) rollupStats.reads = (rollupStats.reads || 0) + 1;
+            cardRows = await dbAll(db, cardWindow.sql, cardWindow.params);
+            bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(scope, cardWindow, cardRows, rollupStats));
           }
+          for (const sourceScope of sourceScopes) {
+            const window = rollupWindow(sourceScope, level, ROLLUP_WINDOWS[level], nowMs);
+            if (!window) continue;
+            let rows = rowsFromCardRead(window, cardWindow, cardRows);
+            if (!rows) {
+              if (rollupStats) rollupStats.reads = (rollupStats.reads || 0) + 1;
+              rows = await dbAll(db, window.sql, window.params);
+            }
+            bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(sourceScope, window, rows, rollupStats));
+          }
+          cardRows = null;
         }
       }
       if (exportDir) {

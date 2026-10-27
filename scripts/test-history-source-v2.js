@@ -711,6 +711,74 @@ for (const profile of PROFILES) {
     }
   });
 
+  // One row pass per source, however many channels the card carries, and one
+  // device_data read per card and level: the source scopes take their rows
+  // from the card's read. Counts, not wall time, keep the rollup job's cost
+  // pinned.
+  test(`${profile}: rollup reducer makes one row pass per source and one read per card and level`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-cost', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-cost-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Rollup Cost', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000D1', 'Chameleon One', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000D2', 'Chameleon Two', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2, swt_3, ext_temperature_c) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [index, deveui] of ['A8404100000000D1', 'A8404100000000D2'].entries()) {
+      for (let hour = 0; hour < 48; hour += 1) {
+        const recordedAt = new Date(Date.parse('2026-10-01T00:30:00Z') + hour * 3_600_000).toISOString();
+        insert.run(deveui, recordedAt, 10 + index + hour, 40 + index + hour, 70 + index + hour, 15 + index);
+      }
+    }
+    const db = {
+      all(sql, params) { return raw.prepare(sql).all(...(params || [])); },
+      run(sql, params) { return raw.prepare(sql).run(...(params || [])); },
+    };
+    const nowMs = Date.parse('2026-10-03T02:00:00Z');
+    const device = { deveui: 'A8404100000000D1', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 };
+    const fields = [
+      'swt_1', 'swt_2', 'swt_3',
+      ...Array.from({ length: 10 }, (_, i) => `vwc_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_vic_${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `soil_temp_${i + 1}`),
+      ...Array.from({ length: 5 }, (_, i) => `soil_ec_${i + 1}`),
+    ];
+    try {
+      for (const channels of [fields.slice(0, 1), fields]) {
+        const rollupStats = {};
+        const rows = await helper.computeRollupBuckets(db, {
+          zoneId: 1,
+          cardType: 'soil',
+          logicalSourceKey: sourceKey('soil', device.deveui),
+          channels: channels.map((field) => ({ id: field, field, unit: '' })),
+          deveuis: [device.deveui],
+          sourceDevices: [device],
+          timezone: 'UTC',
+          rollupStats,
+        }, 'daily', 3 * 86_400_000, nowMs);
+        assert.equal(rollupStats.rowPasses, 1, `${channels.length} channels`);
+        assert.deepEqual(Array.from(new Set(rows.map((row) => row.channel_id))).sort(),
+          ['swt_1', 'swt_2', 'swt_3'].filter((id) => channels.some((field) => field === id)));
+      }
+
+      const levels = ['hourly', 'daily', 'weekly'];
+      const rollupStats = {};
+      const summary = await helper.runRollupJob(db, { nowMs, exportDir: null, levels, rollupStats });
+      assert.deepEqual(summary.errors, []);
+      assert.ok(summary.cardsProcessed > 0);
+      assert.equal(rollupStats.reads, summary.cardsProcessed * levels.length);
+      assert.equal(rollupStats.rowPasses, summary.cardsProcessed * 2 * levels.length);
+    } finally {
+      raw.close();
+    }
+  });
+
   test(`${profile}: partial source rollups recover older buckets and retain null gaps`, async () => {
     const helper = loadHelper(profile);
     const router = loadRouter(profile);
