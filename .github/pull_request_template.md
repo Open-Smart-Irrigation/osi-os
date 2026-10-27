@@ -15,7 +15,7 @@
 ## Checklist
 
 - [ ] Issue/claim **re-verified against current `main`** before work started
-- [ ] Plan + review live in `docs/superpowers/plans/` (non-trivial changes)
+- [ ] Risk class (playbook §2): plan + review live in `docs/superpowers/plans/`
 - [ ] Tests exist that **fail without this change** (TDD or regression pins)
 - [ ] All gates green, **re-run by someone/something other than the author**
       (`verify-sync-flow.js`, migration verifiers, GUI typecheck + test:unit + build — as applicable)

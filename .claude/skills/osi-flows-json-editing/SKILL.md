@@ -583,10 +583,11 @@ If you intentionally changed a pinned wiring contract, update
 `scripts/test-flows-wiring.js` in the same commit and say why in the commit
 message — do not just make the test pass by weakening the assertion.
 
-This checklist is the mechanical gate only. Non-trivial flows.json changes
-still go through the engineering-playbook loop (`docs/engineering-playbook.md`
-§2: written plan, adversarial review, independent verification by a
-non-author) — §8 defines done, not a green checklist.
+This checklist is the mechanical gate only. A non-trivial flows.json change is
+a risk class and goes through the full risk-class loop
+(`docs/engineering-playbook.md` §2: written plan, adversarial review,
+independent verification by a non-author); §8 defines done, not a green
+checklist.
 
 ## Common mistakes
 

@@ -1,6 +1,6 @@
 version: '1.0'
 template: osi-os-typescript
-description: OSI OS TypeScript rules for the edge React GUI. These rules are advisory overlays for agents; Superpowers TDD and repo verification remain authoritative.
+description: OSI OS TypeScript rules for the edge React GUI. These rules are advisory overlays for agents; The engineering playbook loop and repo verification remain authoritative.
 rules:
   - pattern: edge-api-services
     globs:

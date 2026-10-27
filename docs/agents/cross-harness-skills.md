@@ -19,11 +19,13 @@ config to disable a scan root, so deduping symlinked roots is an OpenCode-side
 fix, not ours. Keep the single symlink; a second real copy to silence the
 warning would drift from the first.
 
-Process discipline comes from the superpowers skills where a harness has them
-installed (on the maintainer workstation: Claude Code, and Codex through its
-plugin and `~/.agents/skills`). A harness without them
-applies the same loop by hand from `docs/engineering-playbook.md`. The
-`osi-*` skills cover the domain layer for every harness.
+Process discipline comes from `docs/engineering-playbook.md` §2 (standard and
+risk-class loops). On the maintainer workstation, user-level workflow skills
+(`sol-loop`, `council`, `full-send`, `full-stop`, adapted from tstack) drive that
+loop in Claude Code and Codex; they are not part of this repository, and no
+harness here depends on the superpowers plugin. A harness without those skills
+applies the same loop by hand. The `osi-*` skills cover the domain layer for
+every harness.
 
 ## How each harness loads AGENTS.md
 

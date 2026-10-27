@@ -4,7 +4,7 @@ Operational source of truth for `osi-os`. The edge is canonical; `osi-server` mi
 
 Sister repo: [`osi-server`](../osi-server/AGENTS.md).
 
-> **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (verify reality → written plan → adversarial review → exact execution → independent verification), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
+> **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (§2: a standard loop, and the full plan-first loop for risk classes), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
 
 Binding rules come first in this file; reference detail lives in the docs and skills each section links. Some harnesses read only the first 32 KiB of this file, so move reference material out instead of letting the file grow (`node scripts/verify-agents-size.js`).
 
@@ -264,8 +264,8 @@ Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md 
 The 14 skills above load in Claude Code (`.claude/skills/`), Codex (through the
 `.agents/skills` symlink, which is load-bearing) and OpenCode (both roots; its
 `duplicate skill name` warnings are cosmetic). Keep the single symlink; never
-add a second real copy. A harness without the superpowers skills applies the
-same loop by hand from `docs/engineering-playbook.md`. Read
+add a second real copy. Process: `docs/engineering-playbook.md` §2 (standard
+and risk-class loops); harnesses without workflow skills apply it by hand. Read
 [docs/agents/cross-harness-skills.md](docs/agents/cross-harness-skills.md)
 before changing that layout.
 
