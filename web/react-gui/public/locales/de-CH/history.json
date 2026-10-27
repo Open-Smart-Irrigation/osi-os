@@ -529,7 +529,14 @@
     },
     "sourceFilter": {
       "label": "Quelle",
-      "all": "Alle"
+      "all": "Alle",
+      "chooseOne": "Wählen Sie eine Quelle für diese Ansicht.",
+      "limitsTitle": "Diese Anfrage benötigt weniger Daten.",
+      "recoveryRaw": "Diese Anfrage umfasst zu viele Rohmesswerte. Wählen Sie eine Quelle oder verkürzen Sie den Zeitraum.",
+      "recoveryPoint": "Dieses Ergebnis ist zu gross. Wählen Sie eine Quelle oder verwenden Sie gröbere Daten.",
+      "shorterRange": "Kürzeren Zeitraum verwenden",
+      "coarserAggregation": "Gröbere Daten verwenden",
+      "availableSources": "Quelle wählen"
     },
     "settings": {
       "open": "Karteneinstellungen öffnen",

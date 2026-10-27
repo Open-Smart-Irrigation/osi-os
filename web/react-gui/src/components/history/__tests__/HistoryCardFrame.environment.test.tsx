@@ -201,10 +201,10 @@ describe('HistoryCardFrame environment line chart', () => {
     const chart = screen.getByRole('region', { name: 'Environment trend' });
     expect(within(chart).queryByText('Environment trend')).not.toBeInTheDocument();
     expect(within(chart).queryByText(/\breadings\b/i)).not.toBeInTheDocument();
-    expect(within(chart).queryByText('Air temperature')).not.toBeInTheDocument();
-    expect(within(chart).queryByText('Relative humidity')).not.toBeInTheDocument();
-    expect(within(chart).queryByText('Rain')).not.toBeInTheDocument();
-    expect(within(chart).queryByText('Light')).not.toBeInTheDocument();
+    expect(within(chart).getAllByText('Air temperature').length).toBeGreaterThanOrEqual(1);
+    expect(within(chart).getAllByText('Relative humidity').length).toBeGreaterThanOrEqual(1);
+    expect(within(chart).getAllByText('Rain').length).toBeGreaterThanOrEqual(1);
+    expect(within(chart).getAllByText('Light').length).toBeGreaterThanOrEqual(1);
     expect(within(chart).getByText('°C axis')).toBeInTheDocument();
     expect(within(chart).getByText('% axis')).toBeInTheDocument();
     expect(within(chart).getByText('mm axis')).toBeInTheDocument();

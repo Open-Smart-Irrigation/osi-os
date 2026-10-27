@@ -85,6 +85,7 @@ const { translateForTest } = vi.hoisted(() => {
     'history.viewMode.calendar': 'Calendar',
     'history.viewMode.status-overview': 'Status Overview',
     'history.viewMode.advanced': 'Advanced View',
+    'history.soilLineChart.title': 'Soil line chart',
     'history.metadata.coverageUnknown': 'Coverage unknown',
     'history.metadata.coverageKnown': '{{coverage}}% coverage',
     'history.metadata.coverageConfidence.configured': 'Configured cadence',
@@ -152,6 +153,14 @@ const { translateForTest } = vi.hoisted(() => {
     },
   };
 });
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+globalThis.ResizeObserver = ResizeObserverStub;
 
 vi.mock('react-i18next', () => ({
   initReactI18next: {
@@ -720,6 +729,84 @@ describe('History card detail route', () => {
     expect(screen.queryByText(/\bhistory\b/i)).not.toBeInTheDocument();
   });
 
+  it('filters a two-source subset in the mounted line chart while keeping the all-source request', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [zoneCard({
+        defaultView: 'line-chart',
+        views: ['line-chart'],
+        sourceDeviceCount: 3,
+        sourceDevices: [
+          { name: 'Probe A', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'source-a' },
+          { name: 'Probe B', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'source-b' },
+          { name: 'Probe C', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'source-c' },
+        ],
+      })],
+    });
+    vi.mocked(historyAPI.getZoneCardData).mockResolvedValue({
+      cardId: 'soil-card:root-zone',
+      cardType: 'soil',
+      view: 'line-chart',
+      range: { label: '24h', from: '2026-05-30T10:00:00.000Z', to: '2026-05-31T10:00:00.000Z', timezone: 'UTC' },
+      aggregation: { level: 'raw', bucketSizeSeconds: null, coveragePct: 96, coverageConfidence: 'configured', pointCount: 3 },
+      limits: { maxPointsPerSeries: 1000, maxEvents: 100, maxInterpretations: 20, truncated: false },
+      series: [
+        ...['a', 'b', 'c'].map((suffix) => ({
+          id: `device-${suffix}:swt_1`,
+          sourceKey: `source-${suffix}`,
+          sourceLabel: `Probe ${suffix.toUpperCase()}`,
+          channelKey: 'swt_1',
+          unit: 'kPa',
+          points: [{ t: '2026-05-30T00:00:00Z', value: 10 }],
+        })),
+      ],
+      profiles: [],
+      events: [],
+      calendar: null,
+      interpretations: [],
+      freshness: { dataAsOf: '2026-05-31T10:00:00.000Z', syncState: 'local' },
+      advancedFields: {},
+    } as never);
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+    await screen.findByRole('region', { name: 'Soil line chart' });
+    expect(screen.getByText('Probe C · SWT 1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sources' }));
+    fireEvent.click(screen.getByLabelText('Probe C'));
+    expect(screen.queryByText('Probe C · SWT 1')).not.toBeInTheDocument();
+    expect(screen.getByText('Probe A · SWT 1')).toBeInTheDocument();
+    expect(screen.getByText('Probe B · SWT 1')).toBeInTheDocument();
+    expect(firstZoneCardDataRequest()).toEqual(expect.objectContaining({ sourceKey: null }));
+  });
+
+  it('blocks a multi-source calendar until one physical source is selected', async () => {
+    vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
+      zoneId: 12,
+      generatedAt: '2026-05-31T10:00:00Z',
+      cards: [zoneCard({
+        defaultView: 'calendar',
+        views: ['calendar'],
+        sourceDeviceCount: 2,
+        sourceDevices: [
+          { name: 'Probe A', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'source-a' },
+          { name: 'Probe B', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'source-b' },
+        ],
+      })],
+    });
+
+    renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
+    await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
+    expect(screen.getByTestId('history-source-choice-required')).toBeInTheDocument();
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sources' }));
+    fireEvent.click(screen.getByLabelText('Probe B'));
+    await waitFor(() => {
+      expect(firstZoneCardDataRequest()).toEqual(expect.objectContaining({ view: 'calendar', sourceKey: 'source-a' }));
+    });
+  });
+
   it('does not render range controls and still fetches the default range', async () => {
     vi.mocked(historyAPI.getZoneCards).mockResolvedValue({
       zoneId: 12,
@@ -874,10 +961,10 @@ describe('History card detail route', () => {
       cards: [
         zoneCard({
           sourceDeviceCount: 2,
-          sourceLabels: ['Chameleon 1', 'Chameleon 2'],
+          sourceLabels: ['Soil sensor', 'Soil sensor'],
           sourceDevices: [
-            { name: 'Chameleon 1', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
-            { name: 'Chameleon 2', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
+            { name: 'Soil sensor', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-1' },
+            { name: 'Soil sensor', typeId: 'DRAGINO_LSN50', role: 'soil', sourceKey: 'soil-source-2' },
           ],
         }),
       ],
@@ -886,24 +973,21 @@ describe('History card detail route', () => {
     renderAppAtRoute('/history/zones/12/cards/soil-card%3Aroot-zone');
 
     await screen.findByRole('heading', { level: 1, name: 'Soil Moisture North Block' });
-    expect(screen.getByText('2 sources: Chameleon 1, Chameleon 2')).toBeInTheDocument();
+    expect(screen.getByText('2 sources: Soil sensor, Soil sensor')).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Source' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Sources/i }));
-    const chameleonOne = screen.getByLabelText('Chameleon 1');
-    const chameleonTwo = screen.getByLabelText('Chameleon 2');
+    const soilOne = screen.getByLabelText('Soil sensor · source-1');
+    const soilTwo = screen.getByLabelText('Soil sensor · source-2');
 
-    expect(chameleonOne).toBeChecked();
-    expect(chameleonTwo).toBeChecked();
-    await waitFor(() => {
-      expect(historyAPI.getZoneCardData).toHaveBeenCalled();
-      expect(firstZoneCardDataRequest()).toEqual(expect.not.objectContaining({ sourceKey: expect.anything() }));
-    });
+    expect(soilOne).toBeChecked();
+    expect(soilTwo).toBeChecked();
+    expect(historyAPI.getZoneCardData).not.toHaveBeenCalled();
     historyAPIMock.getZoneCardData.mockClear();
 
-    fireEvent.click(chameleonTwo);
+    fireEvent.click(soilTwo);
 
     await waitFor(() => {
-      expect(chameleonTwo).not.toBeChecked();
+      expect(soilTwo).not.toBeChecked();
       expect(historyAPI.getZoneCardData).toHaveBeenCalledWith(
         12,
         'soil-card:root-zone',

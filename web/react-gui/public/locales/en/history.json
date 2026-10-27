@@ -543,7 +543,14 @@
     },
     "sourceFilter": {
       "label": "Source",
-      "all": "All"
+      "all": "All",
+      "chooseOne": "Choose one source to view this history.",
+      "limitsTitle": "This request needs a smaller result.",
+      "recoveryRaw": "This request covers too many raw readings. Choose one source or shorten the range.",
+      "recoveryPoint": "This result is too large. Choose a source or use coarser data.",
+      "shorterRange": "Use a shorter range",
+      "coarserAggregation": "Use coarser data",
+      "availableSources": "Choose a source"
     },
     "settings": {
       "open": "Open card settings",

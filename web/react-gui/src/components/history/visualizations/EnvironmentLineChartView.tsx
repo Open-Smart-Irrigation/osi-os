@@ -14,6 +14,7 @@ import type {
   HistoryCardDataResponse,
   HistorySeriesPoint,
 } from '../../../history/types';
+import { displayHistorySeriesLabel, historySeriesStyles, historySeriesValue } from '../../../history/sourceIdentity';
 import { HISTORY_CHART_MARGIN, formatDisplayUnit, formatTimeTick, historyTimeXAxis, historyValueYAxis } from './chartAxis';
 
 interface EnvironmentLineChartViewProps {
@@ -26,11 +27,14 @@ type ChartRow = {
   timestamp: string;
   tMs: number;
   label: string;
-} & Record<string, number | string | null>;
+  __seriesMeta?: Record<string, { statisticAvailability?: Record<string, string>; coverageAvailability?: string | null }>;
+} & Record<string, unknown>;
 type ChartWindow = { fromMs: number; toMs: number };
 type RenderPoint = {
   t: string;
   value: number | null;
+  statisticAvailability?: Record<string, string>;
+  coverageAvailability?: string | null;
 };
 type RenderSeries = {
   key: string;
@@ -39,7 +43,6 @@ type RenderSeries = {
   points: RenderPoint[];
 };
 
-const SERIES_COLORS = ['#0284c7', '#16a34a', '#ca8a04', '#7c3aed', '#dc2626', '#0891b2'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -51,18 +54,8 @@ function normalizedText(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-function finiteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
 function pointValue(point: Partial<HistorySeriesPoint> | null | undefined): number | null {
-  if (!isRecord(point)) return null;
-  return (
-    finiteNumber(point.value) ??
-    finiteNumber(point.latest) ??
-    finiteNumber(point.mean) ??
-    finiteNumber(point.median)
-  );
+  return historySeriesValue(point);
 }
 
 function validTimestamp(value: unknown): string | null {
@@ -84,11 +77,6 @@ function formatTimestamp(value: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
-}
-
-function formatTimestampMs(value: unknown): string {
-  const ms = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(ms) ? formatTimestamp(new Date(ms).toISOString()) : '-';
 }
 
 function sourceText(series: unknown): string {
@@ -164,6 +152,7 @@ function formatTooltipValue(value: unknown, unit: string): string {
 }
 
 function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]): RenderSeries[] {
+  const records = seriesList.filter(isRecord);
   return seriesList.map((series, index) => {
     const source = sourceText(series);
     const rawPoints = isRecord(series) ? series.points : null;
@@ -171,14 +160,17 @@ function normalizeSeriesList(t: HistoryTranslate, seriesList: readonly unknown[]
       ? rawPoints.reduce<RenderPoint[]>((accumulator, point) => {
           const timestamp = validTimestamp(isRecord(point) ? point.t : null);
           if (!timestamp) return accumulator;
-          accumulator.push({ t: timestamp, value: pointValue(point) });
+          accumulator.push({ t: timestamp, value: pointValue(point), statisticAvailability: isRecord(point) ? point.statisticAvailability as Record<string, string> | undefined : undefined, coverageAvailability: isRecord(point) ? typeof point.coverageAvailability === 'string' ? point.coverageAvailability : null : null });
           return accumulator;
         }, [])
       : [];
 
+    const key = normalizedText(isRecord(series) ? series.id : null) ?? `series-${index}`;
     return {
-      key: `series-${index}`,
-      label: displaySeriesLabel(t, series, source),
+      key,
+      label: isRecord(series) && (normalizedText(series.sourceLabel) || normalizedText(series.deviceSourceId))
+        ? displayHistorySeriesLabel(series, records)
+        : displaySeriesLabel(t, series, source),
       unit: displayUnit(series, source),
       points,
     };
@@ -198,6 +190,11 @@ export function buildNumericRows(seriesList: RenderSeries[]): ChartRow[] {
         label: formatTimestamp(point.t),
       };
       existing[series.key] = point.value;
+      existing.__seriesMeta ??= {};
+      existing.__seriesMeta[series.key] = {
+        statisticAvailability: point.statisticAvailability,
+        coverageAvailability: point.coverageAvailability,
+      };
       rows.set(point.t, existing);
     });
   });
@@ -215,6 +212,38 @@ function groupSeriesByUnit(seriesList: RenderSeries[]): Array<{ unit: string; se
     unit: unit === 'unitless' ? '' : unit,
     series,
   }));
+}
+
+function seriesPlotPoints(series: RenderSeries): Array<{ tMs: number; timestamp: string; statisticAvailability?: Record<string, string>; coverageAvailability?: string | null } & Record<string, unknown>> {
+  return series.points.map((point) => ({
+    tMs: Date.parse(point.t),
+    timestamp: point.t,
+    statisticAvailability: point.statisticAvailability,
+    coverageAvailability: point.coverageAvailability,
+    [series.key]: point.value,
+  }));
+}
+
+export function HistorySeriesTooltip({ active, payload, label, byKey, rows }: { active?: boolean; payload?: Array<{ dataKey?: string; value?: unknown; name?: string; payload?: Record<string, unknown> }>; label?: unknown; byKey: Map<string, RenderSeries>; rows?: ChartRow[]; locale?: string }) {
+  if (!active || !payload?.length) return null;
+  const labelMs = Number(label);
+  const targetMs = Number.isFinite(labelMs) ? labelMs : Number(payload[0]?.payload?.tMs);
+  const row = rows?.find((candidate) => candidate.tMs === targetMs);
+  const entries = row
+    ? [...byKey.entries()]
+      .filter(([key]) => Object.prototype.hasOwnProperty.call(row, key) || Boolean(row.__seriesMeta?.[key]))
+      .map(([key, series]) => ({ key, series, value: row[key], metadata: row.__seriesMeta?.[key] }))
+    : payload.filter((item) => Number(item.payload?.tMs) === targetMs).map((item) => ({
+      key: String(item.dataKey),
+      series: byKey.get(String(item.dataKey)),
+      value: item.value,
+      metadata: {
+        statisticAvailability: item.payload?.statisticAvailability as Record<string, string> | undefined,
+        coverageAvailability: item.payload?.coverageAvailability as string | null | undefined,
+      },
+    }));
+  if (entries.length === 0) return null;
+  return <div className="rounded border border-slate-200 bg-white p-2 text-xs shadow"><p className="mb-1 font-semibold">{formatTimestamp(new Date(targetMs).toISOString())}</p>{entries.map(({ key, series, value, metadata }) => { const statistics = metadata?.statisticAvailability ?? {}; const reason = statistics.latest ?? statistics.value ?? statistics.mean ?? statistics.median ?? metadata?.coverageAvailability ?? null; return <p key={key}><span className="font-semibold">{series?.label ?? 'Source'}:</span> {value === null || value === undefined ? `Unavailable${reason ? `: ${reason}` : ''}` : formatTooltipValue(value, series?.unit ?? '')}</p>; })}</div>;
 }
 
 function visualWindowsEqual(left: ChartWindow | undefined, right: ChartWindow | undefined): boolean {
@@ -241,6 +270,14 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
       })),
     };
   }, [data, t]);
+  const styles = historySeriesStyles(visibleSeries.map((series) => series.key));
+  const markerSets = new Map(visibleSeries.map((series) => {
+    const visible = series.points.filter((point) => point.value !== null);
+    const markerTimes = visible.length === 1
+      ? visible.map((point) => Date.parse(point.t))
+      : series.points.flatMap((point, index, points) => point.value !== null && (points[index - 1]?.value === null || points[index + 1]?.value === null) ? [Date.parse(point.t)] : []);
+    return [series.key, new Set(markerTimes)] as const;
+  }));
   const spanMs = chartWindow
     ? chartWindow.toMs - chartWindow.fromMs
     : (rows.length ? rows[rows.length - 1].tMs - rows[0].tMs : 0);
@@ -269,7 +306,15 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
       className="flex min-h-0 flex-1 flex-col"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
-        {groups.map((group, groupIndex) => {
+        <div data-testid="history-series-legend" className="flex flex-wrap gap-2">
+          {visibleSeries.map((series) => (
+            <span key={series.key} className="inline-flex items-center gap-2 rounded border border-[var(--border)] px-2 py-1 text-xs text-[var(--text)]">
+              <svg aria-hidden="true" width="28" height="8" viewBox="0 0 28 8" className="shrink-0"><line x1="1" y1="4" x2="27" y2="4" stroke={styles.get(series.key)?.color} strokeWidth="2" strokeDasharray={styles.get(series.key)?.dash} /></svg>
+              {series.label}
+            </span>
+          ))}
+        </div>
+        {groups.map((group) => {
           return (
             <div key={group.unit || 'unitless'} className="flex min-h-0 flex-1 flex-col gap-1">
               {groups.length > 1 && (
@@ -290,27 +335,23 @@ const EnvironmentLineChartViewComponent: React.FC<EnvironmentLineChartViewProps>
                     />
                     <YAxis {...historyValueYAxis(group.unit || undefined, 52)} />
                     {hoverCapable && (
-                      <Tooltip
-                        isAnimationActive={false}
-                        labelFormatter={formatTimestampMs}
-                        formatter={(value, _name, item) => {
-                          const series = group.seriesByKey.get(String(item.dataKey));
-                          return [
-                            formatTooltipValue(value, series?.unit ?? ''),
-                            series?.label ?? t('history.environmentLineChart.series.environment'),
-                          ];
-                        }}
-                      />
+                      <Tooltip isAnimationActive={false} filterNull={false} content={<HistorySeriesTooltip byKey={group.seriesByKey} rows={group.rows} locale={undefined} />} />
                     )}
-                    {group.series.map((series, index) => (
+                    {group.series.map((series) => (
                       <Line
                         key={series.key}
                         type="monotone"
+                        data={seriesPlotPoints(series)}
                         dataKey={series.key}
                         name={series.label}
-                        stroke={SERIES_COLORS[(groupIndex + index) % SERIES_COLORS.length]}
+                        stroke={styles.get(series.key)?.color}
+                        strokeDasharray={styles.get(series.key)?.dash}
                         strokeWidth={2}
-                        dot={false}
+                        dot={(props) => {
+                          const tMs = Number((props as { payload?: { tMs?: number } }).payload?.tMs);
+                          const marker = markerSets.get(series.key)?.has(tMs);
+                          return marker ? <circle cx={(props as { cx?: number }).cx} cy={(props as { cy?: number }).cy} r={3} fill={styles.get(series.key)?.color} /> : <React.Fragment />;
+                        }}
                         isAnimationActive={false}
                         connectNulls={false}
                       />

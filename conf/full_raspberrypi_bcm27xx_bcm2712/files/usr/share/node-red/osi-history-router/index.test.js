@@ -462,6 +462,19 @@ test('shouldUseHistoryRollups with scopeContext', function() {
   assert.strictEqual(HR.shouldUseHistoryRollups({ scope: 'gateway' }, '30d', 'auto'), false);
 });
 
+test('bucketGeometry reports the timezone the daily buckets actually use', function() {
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'Europe/Zurich'), { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' });
+  // The gateway card passes env TZ, which on OpenWrt can be a POSIX TZ string.
+  // Intl rejects it, the helper builds UTC buckets, and the label must say so.
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'CET-1CEST,M3.5.0,M10.5.0/3'), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', 'Not/AZone'), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', '  Europe/Zurich  '), { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', ''), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('daily', null), { bucketTimezone: 'UTC', bucketAlignment: 'zone_calendar' });
+  assert.deepStrictEqual(HR.bucketGeometry('hourly', 'CET-1CEST,M3.5.0,M10.5.0/3'), { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' });
+  assert.deepStrictEqual(HR.bucketGeometry('weekly', 'Europe/Zurich'), { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' });
+});
+
 test('shouldUseCardRollups bypasses soil rollups only for a plain LSN50 source', function() {
   var ctx = { scope: 'zone' };
   var soil = { cardType: 'soil' };
@@ -603,6 +616,21 @@ test('calendarRowsFromSeries groups by time', function() {
   var rows = HR.calendarRowsFromSeries(series);
   assert.ok(typeof rows === 'object');
   assert.ok(Object.keys(rows).length >= 2);
+});
+
+test('calendarRowsFromSeries keeps equal-time sources separate and omits gaps', function() {
+  var rows = HR.calendarRowsFromSeries([
+    { id: 'soil-src-a:swt_1', deviceSourceId: 'soil-src-a', channelKey: 'swt_1', points: [
+      { t: '2026-07-01T00:00:00Z', value: 15 },
+      { t: '2026-07-02T00:00:00Z', value: null, quality: 'gap' }
+    ] },
+    { id: 'soil-src-b:swt_1', deviceSourceId: 'soil-src-b', channelKey: 'swt_1', points: [
+      { t: '2026-07-01T00:00:00Z', value: 25 }
+    ] }
+  ]);
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map(function(row) { return row.swt_1; }).sort(), [15, 25]);
+  assert.ok(rows.every(function(row) { return !Object.keys(row).some(function(key) { return key.indexOf(':swt_1') >= 0; }); }));
 });
 
 test('calendarRowsFromSeries empty', function() {

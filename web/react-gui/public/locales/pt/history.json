@@ -529,7 +529,14 @@
     },
     "sourceFilter": {
       "label": "Fonte",
-      "all": "Todas"
+      "all": "Todas",
+      "chooseOne": "Escolha uma fonte para ver este histórico.",
+      "limitsTitle": "Este pedido precisa de menos dados.",
+      "recoveryRaw": "Este pedido inclui demasiadas leituras brutas. Escolha uma fonte ou reduza o intervalo.",
+      "recoveryPoint": "Este resultado é demasiado grande. Escolha uma fonte ou use dados mais agregados.",
+      "shorterRange": "Usar um intervalo mais curto",
+      "coarserAggregation": "Usar dados mais agregados",
+      "availableSources": "Escolher uma fonte"
     },
     "settings": {
       "open": "Abrir definições do cartão",

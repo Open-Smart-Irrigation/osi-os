@@ -1,11 +1,12 @@
 import { historyAPI } from '../services/api';
-import type { HistoryWindowRequest, HistoryWindowResponse } from '@osi/history-uplot';
+import { MobileHistoryError, type HistoryWindowRequest, type HistoryWindowResponse } from '@osi/history-uplot';
 import type {
   HistoryCardDataRequest,
   HistoryCardDataResponse,
   HistoryRangeLabel,
 } from './types';
 import type { HistoryCardDataScope } from './useHistoryCardData';
+import { displayHistorySeriesLabel } from './sourceIdentity';
 
 export type MobileHistoryRequest = HistoryWindowRequest;
 
@@ -47,9 +48,23 @@ export function normalizeEdgeHistoryResponse(
   response: HistoryCardDataResponse,
   request: MobileHistoryRequest,
 ): MobileHistoryResponse {
+  // Source-aware labels and availability need the v2 series identity; an
+  // older host response cannot tell two devices with the same channel apart.
+  if (response.seriesIdentityVersion !== 2) {
+    throw new MobileHistoryError({ kind: 'protocol', code: 'http-error', reason: 'History data needs an updated gateway or server response (series identity v2).' });
+  }
+  if (response.availability?.available === false) {
+    const reasons = Array.isArray(response.availability.reasons) ? response.availability.reasons : [];
+    const reason = `History is unavailable for this request: ${reasons.join(', ') || 'unknown'}`;
+    const sizeLimited = reasons.some((item) => item === 'point_budget_exceeded' || item === 'raw_read_limit_exceeded');
+    throw new MobileHistoryError(sizeLimited
+      ? { kind: 'size', status: 413, reason }
+      : { kind: 'sources', missingIds: [], dropped: [], accessDeniedIds: [], reason });
+  }
+  const records = response.series as unknown as readonly Record<string, unknown>[];
   const series = response.series.map((item, index) => {
     const id = String(item.id ?? `series-${index}`);
-    const label = String(item.label ?? id);
+    const label = displayHistorySeriesLabel(item as unknown as Record<string, unknown>, records);
     const unit = String(item.unit ?? '');
     return {
       id,

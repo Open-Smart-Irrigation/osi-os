@@ -30,7 +30,7 @@ vi.mock('@osi/history-uplot', async () => {
 import { MobileSoilUplotHistory } from '../../components/history/mobile/MobileSoilUplotHistory';
 
 function response(label: string) {
-  return { cardId: 'soil', cardType: 'soil', view: 'line-chart', range: { label: '24h', from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timezone: 'UTC' }, aggregation: { level: '15m', pointCount: 1, coveragePct: 100 }, limits: { maxPointsPerSeries: 10, truncated: false }, series: [{ id: label, label, unit: 'kPa', points: [{ t: '2026-01-01T00:00:00Z', value: 12, coverageConfidence: 'configured' }] }], freshness: { dataAsOf: null, syncState: 'synced' } };
+  return { seriesIdentityVersion: 2, cardId: 'soil', cardType: 'soil', view: 'line-chart', range: { label: '24h', from: '2026-01-01T00:00:00Z', to: '2026-01-02T00:00:00Z', timezone: 'UTC' }, aggregation: { level: '15m', pointCount: 1, coveragePct: 100 }, limits: { maxPointsPerSeries: 10, truncated: false }, series: [{ id: label, label, unit: 'kPa', points: [{ t: '2026-01-01T00:00:00Z', value: 12, coverageConfidence: 'configured' }] }], freshness: { dataAsOf: null, syncState: 'synced' } };
 }
 
 function view(cardId = 'soil') { return <MobileSoilUplotHistory scope={{ type: 'zone', zoneId: 7 }} cardId={cardId} sourceKey="old-source" />; }

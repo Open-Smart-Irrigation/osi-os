@@ -1,6 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { soilStatusVisual } from '../../../history/soilStatus';
+import { displayHistorySeriesLabel } from '../../../history/sourceIdentity';
 import type { HistoryProfilePoint } from '../../../history/types';
 
 interface SoilProfileViewProps {
@@ -12,6 +13,10 @@ type HistoryTranslate = (key: string, options?: Record<string, unknown>) => stri
 interface RenderableProfilePoint {
   renderKey: string;
   label: string | null;
+  sourceLabel: string | null;
+  deviceSourceId: string | null;
+  sourceKey: string | null;
+  channelKey: string | null;
   depthCm: number | null;
   value: number | null;
   unit: string | null;
@@ -36,9 +41,15 @@ function normalizeProfilePoint(
 ): RenderableProfilePoint {
   const id = normalizeText(point?.id);
   const label = normalizeText(point?.label);
+  const deviceSourceId = normalizeText(point?.deviceSourceId);
+  const channelKey = normalizeText(point?.channelKey);
   return {
-    renderKey: id ?? `profile-${index}`,
+    renderKey: deviceSourceId && channelKey ? `${deviceSourceId}:${channelKey}` : (id ?? `profile-${index}`),
     label,
+    sourceLabel: normalizeText(point?.sourceLabel),
+    deviceSourceId,
+    sourceKey: normalizeText(point?.sourceKey),
+    channelKey,
     depthCm: normalizeFiniteNumber(point?.depthCm),
     value: normalizeFiniteNumber(point?.value),
     unit: normalizeText(point?.unit),
@@ -104,9 +115,15 @@ export const SoilProfileView: React.FC<SoilProfileViewProps> = ({ profiles }) =>
       <div className="grid gap-3 my-auto">
         {sortedProfiles.map((point, index) => {
           const visual = soilStatusVisual(point.status);
-          const label = point.label && !isGenericSoilLayerLabel(point.label)
+          const rawLabel = point.label && !isGenericSoilLayerLabel(point.label)
             ? point.label
             : t('history.soilProfile.labelUnknown', { index: index + 1 });
+          const label = point.sourceLabel || point.deviceSourceId || point.sourceKey
+            ? displayHistorySeriesLabel(
+              { ...point, label: rawLabel },
+              sortedProfiles.map((profile) => ({ ...profile, label: profile.label && !isGenericSoilLayerLabel(profile.label) ? profile.label : t('history.soilProfile.labelUnknown', { index: sortedProfiles.indexOf(profile) + 1 }) })),
+            )
+            : rawLabel;
           const style = visual
             ? {
                 '--soil-row-color': visual.colorVar,

@@ -130,7 +130,7 @@ describe('DailyMinMaxView', () => {
     expect(screen.getByRole('region', { name: /daily min\/max/i })).toBeInTheDocument();
     expect(screen.queryByText('Daily Min/Max')).not.toBeInTheDocument();
     expect(screen.queryByText(/\bdays\b/i)).not.toBeInTheDocument();
-    expect(screen.queryByText('Air temperature')).not.toBeInTheDocument();
+    expect(screen.getByTestId('history-series-legend')).toHaveTextContent('Air temperature');
     expect(screen.queryByText('11-24 C')).not.toBeInTheDocument();
     expect(screen.queryByText('12-26 C')).not.toBeInTheDocument();
     expect(screen.queryByText(/load here when card data APIs are enabled/i)).not.toBeInTheDocument();

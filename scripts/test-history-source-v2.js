@@ -1,0 +1,1822 @@
+#!/usr/bin/env node
+'use strict';
+
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
+
+const ROOT = path.resolve(__dirname, '..');
+const FIXTURE_PATH = path.join(ROOT, 'docs/contracts/history-source-v2/synthetic-cases.json');
+const SEED_PATH = path.join(ROOT, 'database/seed-blank.sql');
+const PROFILES = [
+  'full_raspberrypi_bcm27xx_bcm2712',
+  'full_raspberrypi_bcm27xx_bcm2709',
+];
+
+const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf8')).fiveObservationCase;
+const identityVectors = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs/contracts/history-source-v2/identity-vectors.json'), 'utf8')).vectors;
+const seed = fs.readFileSync(SEED_PATH, 'utf8');
+
+function compareExpectedSeries(expectedSeries, actualSeries, tolerance) {
+  const mismatches = [];
+  if (actualSeries.length !== expectedSeries.length) {
+    mismatches.push(`series count: expected ${expectedSeries.length}, got ${actualSeries.length}`);
+  }
+  const metadataKeys = [
+    'id',
+    'deviceSourceId',
+    'sourceKey',
+    'channelKey',
+    'sourceLabel',
+    'label',
+    'unit',
+    'depthCm',
+    'metadataBasis',
+  ];
+  for (let index = 0; index < expectedSeries.length; index += 1) {
+    const expected = expectedSeries[index];
+    const actual = actualSeries.find((series) => series.id === expected.id) || actualSeries[index];
+    if (!actual) {
+      mismatches.push(`series ${expected.id}: missing`);
+      continue;
+    }
+    const expectedMetadata = {
+      id: expected.id,
+      deviceSourceId: expected.deviceSourceId,
+      sourceKey: expected.sourceKey,
+      channelKey: expected.channelKey,
+      sourceLabel: expected.sourceLabel,
+      label: expected.label,
+      unit: expected.unit,
+      depthCm: expected.depthCm,
+      metadataBasis: expected.metadataBasis,
+    };
+    for (const key of metadataKeys) {
+      if (actual[key] !== expectedMetadata[key]) {
+        mismatches.push(`series ${expected.id}.${key}: expected ${JSON.stringify(expectedMetadata[key])}, got ${JSON.stringify(actual[key])}`);
+      }
+    }
+    const actualPoints = Array.isArray(actual.points) ? actual.points : [];
+    if (actualPoints.length !== expected.points.length) {
+      mismatches.push(`series ${expected.id}.points count: expected ${expected.points.length}, got ${actualPoints.length}`);
+    }
+    for (let pointIndex = 0; pointIndex < expected.points.length; pointIndex += 1) {
+      const expectedPoint = expected.points[pointIndex];
+      const actualPoint = actualPoints[pointIndex];
+      if (!actualPoint) {
+        mismatches.push(`series ${expected.id}.points[${pointIndex}]: missing`);
+        continue;
+      }
+      for (const key of ['t', 'bucketStart', 'bucketEnd']) {
+        const actualTime = new Date(actualPoint[key]).toISOString();
+        const expectedTime = new Date(expectedPoint[key]).toISOString();
+        if (actualTime !== expectedTime) {
+          mismatches.push(`series ${expected.id}.points[${pointIndex}].${key}: expected ${expectedTime}, got ${actualTime}`);
+        }
+      }
+      if (expectedPoint.value === null || actualPoint.value === null) {
+        if (actualPoint.value !== expectedPoint.value) {
+          mismatches.push(`series ${expected.id}.points[${pointIndex}].value: expected ${expectedPoint.value}, got ${actualPoint.value}`);
+        }
+      } else if (Math.abs(actualPoint.value - expectedPoint.value) > tolerance) {
+        mismatches.push(`series ${expected.id}.points[${pointIndex}].value: expected ${expectedPoint.value}, got ${actualPoint.value}`);
+      }
+    }
+  }
+  return mismatches;
+}
+
+function databaseForFixture() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(seed);
+  raw.exec(`
+    INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'history-source-v2', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'history-source-v2-user');
+    INSERT INTO devices (deveui, name, type_id, user_id, created_at, updated_at)
+    VALUES
+      ('A8404100000000A1', 'Synthetic A', 'KIWI_SENSOR', 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+      ('A8404100000000B1', 'Synthetic B', 'KIWI_SENSOR', 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+  `);
+  const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+  for (const device of fixture.devices) {
+    for (const observation of device.observations) {
+      insert.run(device.deveui, observation.recordedAt, observation.value);
+    }
+  }
+  return raw;
+}
+
+function facade(raw) {
+  return {
+    all(sql, params) {
+      return raw.prepare(sql).all(...(params || []));
+    },
+  };
+}
+
+function sourceKey(cardType, deveui) {
+  return `${cardType}-src-${crypto.createHash('sha256').update(deveui).digest('hex').slice(0, 12)}`;
+}
+
+function databaseForPartialRollup() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(seed);
+  raw.exec(`
+    INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'partial-rollup', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'partial-rollup-user');
+    INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+    VALUES (1, 'Partial Rollup', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES
+      ('A8404100000000A1', 'Synthetic A', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+      ('A8404100000000B1', 'Synthetic B', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+  `);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-02T12:00:00Z', 22);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000B1', '2026-10-01T12:00:00Z', 0);
+  raw.prepare(`
+    INSERT INTO history_channel_rollups (
+      zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+      min_value, max_value, mean_value, median_value, latest_value, coverage_pct,
+      coverage_confidence, sample_count, event_count, threshold_crossing_count, unit
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    1, 'soil', sourceKey('soil', 'A8404100000000A1'), 'swt_1', 'daily',
+    '2026-10-01T00:00:00.000Z', '2026-10-02T00:00:00.000Z',
+    10, 10, 10, 10, 10, 100, 'configured', 1, 0, 0, 'kPa'
+  );
+  return raw;
+}
+
+function databaseForLegacyBoundaries() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(seed);
+  raw.exec(`
+    INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+    VALUES (1, 'legacy-boundaries', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'legacy-boundaries-user');
+    INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+    VALUES (1, 'Legacy boundaries', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+    VALUES
+      ('A8404100000000A1', 'Legacy A', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+      ('A8404100000000B1', 'Legacy B', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+  `);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-02T12:00:00Z', 48);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-03T12:00:00Z', 24);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000A1', '2026-10-03T13:00:00Z', 23);
+  raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)').run('A8404100000000B1', '2026-10-03T13:00:00Z', 99);
+  return raw;
+}
+
+function alternatingRollupDatabase() {
+  const startMs = Date.parse('2020-01-01T00:00:00Z');
+  const endMs = startMs + (2000 * 24 * 60 * 60 * 1000);
+  const logicalSourceKey = sourceKey('soil', 'A8404100000000A1');
+  const rollups = [];
+  for (let index = 0; index < 2000; index += 2) {
+    const bucketStart = new Date(startMs + (index * 24 * 60 * 60 * 1000)).toISOString();
+    const bucketEnd = new Date(startMs + ((index + 1) * 24 * 60 * 60 * 1000)).toISOString();
+    rollups.push({
+      logical_source_key: logicalSourceKey,
+      channel_id: 'swt_1',
+      bucket_start: bucketStart,
+      bucket_end: bucketEnd,
+      min_value: 10,
+      max_value: 10,
+      mean_value: 10,
+      median_value: 10,
+      latest_value: 10,
+      coverage_pct: 100,
+      coverage_confidence: 'configured',
+      sample_count: 1,
+      event_count: 0,
+      threshold_crossing_count: 0,
+      unit: 'kPa',
+    });
+  }
+  let rawQueries = 0;
+  return {
+    range: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
+    facade: {
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return rollups;
+        rawQueries += 1;
+        return [];
+      },
+    },
+    rawQueryCount: () => rawQueries,
+  };
+}
+
+function retainedRollup(logicalSourceKey, bucketStartMs, bucketEndMs, value, extra = {}) {
+  return {
+    logical_source_key: logicalSourceKey,
+    channel_id: 'swt_1',
+    bucket_start: new Date(bucketStartMs).toISOString(),
+    bucket_end: new Date(bucketEndMs).toISOString(),
+    min_value: value,
+    max_value: value,
+    mean_value: value,
+    median_value: value,
+    latest_value: value,
+    coverage_pct: 100,
+    coverage_confidence: 'configured',
+    sample_count: 1,
+    event_count: 0,
+    threshold_crossing_count: 0,
+    unit: 'kPa',
+    computed_at: '2026-10-01T00:00:00Z',
+    ...extra,
+  };
+}
+
+// Answers the zone timezone lookup, returns retained rollups, and counts every
+// other (device_data) read.
+function geometryDatabase(rollups, zoneTimezone) {
+  let rawQueries = 0;
+  return {
+    facade: {
+      all(sql) {
+        if (sql.includes('irrigation_zones')) return zoneTimezone ? [{ timezone: zoneTimezone }] : [];
+        if (sql.includes('history_channel_rollups')) return rollups;
+        rawQueries += 1;
+        return [];
+      },
+    },
+    rawQueryCount: () => rawQueries,
+  };
+}
+
+function zurichDateKey(iso) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
+}
+
+function syntheticRows(count, startMs, spanMs, sourceKeys, channelKeys) {
+  return Array.from({ length: count }, (_, index) => {
+    const source = sourceKeys[index % sourceKeys.length];
+    const channel = channelKeys[index % channelKeys.length];
+    return {
+      id: index + 1,
+      deveui: source,
+      recorded_at: new Date(startMs + (index % Math.max(1, Math.floor(spanMs / 1000))) * 1000).toISOString(),
+      swt_1: channel === 'swt_1' ? 10 : null,
+      swt_2: channel === 'swt_2' ? 20 : null,
+    };
+  });
+}
+
+function loadHelper(profile) {
+  return require(path.join(
+    ROOT,
+    'conf',
+    profile,
+    'files/usr/share/node-red/osi-history-helper'
+  ));
+}
+
+function loadRouter(profile) {
+  return require(path.join(
+    ROOT,
+    'conf',
+    profile,
+    'files/usr/share/node-red/osi-history-router'
+  ));
+}
+
+// A fixture for the source/channel partition step that every history
+// reducer shares: equal-time duplicates with and without ids, rows outside
+// the window or without a device key, a requested source with no rows, a
+// repeated channel id, a channel-level source-key fallback, and device
+// types with and without SWT3.
+function sourcePartitionFixture() {
+  const sourceA = 'AA000000000000A1';
+  const sourceB = 'BB000000000000B2';
+  const sourceC = 'CC000000000000C3';
+  const absent = 'DD000000000000D4';
+  const start = '2026-10-01T00:00:00.000Z';
+  const end = '2026-10-02T00:00:00.000Z';
+  const startMs = Date.parse(start);
+  const at = (minutes) => new Date(startMs + minutes * 60_000).toISOString();
+  const rows = [];
+  let id = 100;
+  for (let step = 0; step < 48; step += 1) {
+    const t = at(step * 30);
+    rows.push({ id: id++, deveui: sourceA, recorded_at: t, swt_1: 10 + step, swt_2: step % 5 === 0 ? null : 30 + step, swt_3: 50 + step, vwc_1: null });
+    rows.push({ id: id++, deveui: sourceB, recorded_at: t, swt_1: 70 + step, swt_2: null, swt_3: step % 3 === 0 ? null : 90 + step, vwc_1: 20 + (step % 7) });
+    if (step % 4 === 0) rows.push({ id: id++, deveui: sourceC, recorded_at: t, swt_1: null, swt_2: 5 + step, swt_3: null, vwc_1: 15, ext_temperature_c: 12 + step });
+  }
+  // The higher id wins even when its value is null, a lower id listed later
+  // still loses, and rows without an id tie-break on position.
+  rows.push({ id: 5000, deveui: sourceA, recorded_at: at(60), swt_1: null, swt_2: 1, swt_3: 2, vwc_1: null });
+  rows.push({ id: 7, deveui: sourceA, recorded_at: at(90), swt_1: -1, swt_2: -1, swt_3: -1, vwc_1: -1 });
+  rows.push({ deveui: sourceB, recorded_at: at(120), swt_1: 1111, swt_2: null, swt_3: 2222, vwc_1: 3 });
+  rows.push({ deveui: sourceB, recorded_at: at(120), swt_1: 1112, swt_2: null, swt_3: 2223, vwc_1: 4 });
+  rows.push({ id: 6000, deveui: sourceA, recorded_at: '2026-09-30T23:59:59.000Z', swt_1: 999 });
+  rows.push({ id: 6001, deveui: sourceA, recorded_at: end, swt_1: 999 });
+  rows.push({ id: 6002, deveui: sourceA, recorded_at: 'not-a-time', swt_1: 999 });
+  rows.push({ id: 6003, recorded_at: at(15), swt_1: 41, swt_2: 42, ext_temperature_c: 43 });
+  const channels = [
+    { id: 'swt_1', field: 'swt_1', fields: ['swt_1', 'swt_wm1'], unit: 'kPa' },
+    { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
+    { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
+    { id: 'vwc_1', field: 'vwc_1', unit: '%' },
+    { id: 'swt_2', field: 'swt_2', unit: 'kPa' },
+    { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C', sourceKey: sourceC },
+  ];
+  const sourceDevices = [
+    { deveui: sourceA, type_id: 'KIWI_SENSOR' },
+    { deveui: sourceB, type_id: 'DRAGINO_LSN50' },
+    { deveui: sourceC, type_id: 'KIWI_SENSOR' },
+    { deveui: absent, type_id: 'KIWI_SENSOR' },
+  ];
+  return { rows, channels, sourceDevices, start, end, sourceKeys: [absent, sourceA, sourceB, sourceC] };
+}
+
+function sourcePartitionProjection(results) {
+  return results.map((result) => result.sourceAggregates.map((aggregate) => ({
+    sourceKey: aggregate.sourceKey,
+    channelKey: aggregate.channelKey,
+    coveragePct: aggregate.coveragePct,
+    points: ((aggregate.series && aggregate.series[aggregate.channelKey] && aggregate.series[aggregate.channelKey].points) || [])
+      .map((point) => [point.recordedAt, point.value]),
+    buckets: (aggregate.buckets || []).map((bucket) => {
+      const stats = bucket.series && bucket.series[aggregate.channelKey];
+      return [bucket.bucketStart, bucket.coveragePct, stats ? [stats.min, stats.max, stats.mean, stats.median, stats.latest, stats.sampleCount] : null];
+    }),
+  })));
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: five observations keep one series per physical source`, async () => {
+    const helper = loadHelper(profile);
+    const router = loadRouter(profile);
+    const raw = databaseForFixture();
+    try {
+      const result = await helper.aggregateDeviceData(facade(raw), {
+        device_euis: fixture.devices.map((device) => device.deveui),
+        start: fixture.request.from,
+        end: fixture.request.to,
+        aggregation: fixture.request.aggregation,
+        timezone: fixture.request.timezone,
+        sourceFilterActive: true,
+        useRollups: false,
+        channels: [{ id: fixture.channelKey, field: fixture.channelKey, unit: fixture.unit }],
+      });
+
+      const responseSeries = router.buildSeriesFromAggregate(
+        { cardType: 'soil' },
+        result,
+        fixture.devices.map((device) => ({
+          deveui: device.deveui,
+          name: device.name,
+          type_id: 'KIWI_SENSOR',
+          chameleon_enabled: 0,
+          soil_moisture_probe_depths_json: JSON.stringify({ swt_1: device.depthCm }),
+          irrigation_zone_id: 1,
+        }))
+      );
+      // buildSeriesFromAggregate is a series projection helper, not the HTTP
+      // response boundary. The boundary marker is asserted by Task 2/3 route
+      // tests; adding it here would make this series-only test fabricate it.
+      const expectedResponseSeries = fixture.expectedResponses.edge.series;
+      const mismatches = compareExpectedSeries(
+        expectedResponseSeries,
+        responseSeries,
+        fixture.edgeAggregateToleranceKpa
+      );
+
+      const rawResult = await helper.aggregateDeviceData(facade(raw), {
+        device_euis: fixture.devices.map((device) => device.deveui),
+        start: fixture.request.from,
+        end: fixture.request.to,
+        aggregation: 'raw',
+        timezone: fixture.request.timezone,
+        sourceFilterActive: true,
+        useRollups: false,
+        channels: [{ id: fixture.channelKey, field: fixture.channelKey, unit: fixture.unit }],
+      });
+      const rawSeries = router.buildSeriesFromAggregate(
+        { cardType: 'soil' },
+        rawResult,
+        fixture.devices.map((device) => ({
+          deveui: device.deveui,
+          name: device.name,
+          type_id: 'KIWI_SENSOR',
+          chameleon_enabled: 0,
+          soil_moisture_probe_depths_json: JSON.stringify({ swt_1: device.depthCm }),
+          irrigation_zone_id: 1,
+        }))
+      );
+      const actualRawPoints = rawSeries
+        .flatMap((series) => series.points.map((point) => ({ t: point.t, value: point.value })))
+        .sort((left, right) => left.t.localeCompare(right.t));
+      const expectedRawPoints = fixture.devices
+        .flatMap((device) => device.observations.map((observation) => ({
+          t: new Date(observation.recordedAt).toISOString(),
+          value: observation.value,
+        })))
+        .sort((left, right) => left.t.localeCompare(right.t));
+      assert.deepEqual(actualRawPoints, expectedRawPoints);
+      assert.deepEqual(mismatches, [], JSON.stringify({ result, responseSeries, expectedResponseSeries }));
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: Analysis source keys and device source IDs match the contract identity vectors`, () => {
+    const helper = loadHelper(profile);
+    assert.ok(identityVectors.length > 0);
+    for (const vector of identityVectors) {
+      const device = { deveui: vector.deveui };
+      // sourceKeyForCsv is the key Analysis and export expose as sourceKey;
+      // it must be the contract's edge selector for each card.
+      assert.equal(helper.sourceKeyForCsv({ cardType: 'soil' }, device), vector.sourceKeys.soil.edge, `${vector.deveui} soil`);
+      assert.equal(helper.sourceKeyForCsv({ cardType: 'environment' }, device), vector.sourceKeys.environment.edge, `${vector.deveui} environment`);
+      assert.equal(helper.deviceSourceId(device), vector.deviceSourceId, `${vector.deveui} deviceSourceId`);
+    }
+  });
+
+  test(`${profile}: every supported measurement resolution keeps physical sources separate`, () => {
+    const helper = loadHelper(profile);
+    const sourceA = 'A8404100000000A1';
+    const sourceB = 'A8404100000000B1';
+    const sourceDevices = [
+      { deveui: sourceA, type_id: 'KIWI_SENSOR' },
+      { deveui: sourceB, type_id: 'KIWI_SENSOR' },
+    ];
+    const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+    const cases = {
+      raw: ['2026-10-01T00:00:00Z', '2026-10-01T00:30:00Z'],
+      '15m': ['2026-10-01T00:00:00Z', '2026-10-01T00:30:00Z'],
+      hourly: ['2026-10-01T00:00:00Z', '2026-10-01T02:00:00Z'],
+      daily: ['2026-10-01T00:00:00Z', '2026-10-03T00:00:00Z'],
+      weekly: ['2026-10-05T00:00:00Z', '2026-10-19T00:00:00Z'],
+    };
+    for (const [aggregation, [start, end]] of Object.entries(cases)) {
+      const rows = [
+        { id: 1, deveui: sourceA, recorded_at: start, swt_1: 0 },
+        { id: 2, deveui: sourceB, recorded_at: start, swt_1: 99 },
+        { id: 3, deveui: sourceA, recorded_at: new Date(Date.parse(start) + 60_000).toISOString(), swt_1: 1 },
+        { id: 4, deveui: sourceB, recorded_at: new Date(Date.parse(start) + 60_000).toISOString(), swt_1: 100 },
+      ];
+      const result = helper.aggregateRows(rows, {
+        aggregation,
+        channels: [channel],
+        sourceDevices,
+        sourceKeys: [sourceA, sourceB],
+        start,
+        end,
+        expectedCadenceSeconds: aggregation === 'raw' ? undefined : 3600,
+      });
+      const bySource = new Map(result.sourceAggregates.map((entry) => [entry.sourceKey, entry]));
+      assert.ok(bySource.has(sourceA), `${aggregation}: source A missing`);
+      assert.ok(bySource.has(sourceB), `${aggregation}: source B missing`);
+      if (aggregation === 'raw') {
+        assert.deepEqual(bySource.get(sourceA).series.swt_1.points.map((point) => point.value), [0, 1], aggregation);
+        assert.deepEqual(bySource.get(sourceB).series.swt_1.points.map((point) => point.value), [99, 100], aggregation);
+      } else {
+        const firstA = bySource.get(sourceA).buckets[0].series.swt_1;
+        const firstB = bySource.get(sourceB).buckets[0].series.swt_1;
+        assert.deepEqual([firstA.min, firstA.max, firstA.sampleCount], [0, 1, 2], aggregation);
+        assert.deepEqual([firstB.min, firstB.max, firstB.sampleCount], [99, 100, 2], aggregation);
+      }
+    }
+  });
+
+  test(`${profile}: equal-time row identity is selected before validity and point budget is explicit`, async () => {
+    const helper = loadHelper(profile);
+    const sourceA = 'A8404100000000A1';
+    const sourceB = 'A8404100000000B1';
+    const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+    const rows = [
+      { id: 1, deveui: sourceA, recorded_at: '2026-10-01T00:00:00Z', swt_1: 10 },
+      { id: 2, deveui: sourceA, recorded_at: '2026-10-01T00:00:00Z', swt_1: null },
+      { id: 3, deveui: sourceB, recorded_at: '2026-10-01T00:00:00Z', swt_1: 0 },
+      { id: 4, deveui: sourceB, recorded_at: '2026-10-01T00:00:00Z', swt_1: 999 },
+    ];
+    const sourceDevices = [
+      { deveui: sourceA, type_id: 'KIWI_SENSOR' },
+      { deveui: sourceB, type_id: 'KIWI_SENSOR' },
+    ];
+    const result = helper.aggregateRows(rows, {
+      aggregation: 'raw',
+      channels: [channel],
+      sourceDevices,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-01T01:00:00Z',
+    });
+    const bySource = new Map(result.sourceAggregates.map((entry) => [entry.sourceKey, entry]));
+    assert.deepEqual(bySource.get(sourceA).series.swt_1.points, []);
+    assert.deepEqual(bySource.get(sourceB).series.swt_1.points.map((point) => point.value), [999]);
+
+    const unavailable = await helper.aggregateDeviceData({}, {
+      deveuis: [sourceA],
+      sourceDevices: [sourceDevices[0]],
+      cardType: 'soil',
+      channels: [channel],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-04T00:00:00Z',
+      aggregation: 'hourly',
+      maxPointsPerSeries: 2,
+    });
+    assert.deepEqual(unavailable.availability, {
+      available: false,
+      reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+    });
+    assert.equal(unavailable.sourceAggregates.length, 1);
+    assert.deepEqual(unavailable.sourceAggregates[0].series.swt_1.points, []);
+
+    const emptyAuthorized = await helper.aggregateDeviceData({
+      all() {
+        throw new Error('authoritative empty source list must not query pooled history');
+      },
+    }, {
+      deveuis: [sourceA],
+      sourceDevices: [],
+      cardType: 'soil',
+      channels: [channel],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-01T01:00:00Z',
+      aggregation: 'hourly',
+      logicalSourceKey: 'root-zone',
+    });
+    assert.deepEqual(emptyAuthorized.availability, {
+      available: false,
+      reasons: ['no_authorized_sources'],
+    });
+    assert.deepEqual(emptyAuthorized.sourceAggregates, []);
+
+    const overflow = await helper.aggregateDeviceData({
+      all(sql, params, callback) {
+        callback(null, Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          deveui: sourceA,
+          recorded_at: new Date(Date.parse('2026-10-01T00:00:00Z') + index * 1000).toISOString(),
+          swt_1: 1,
+        })));
+      },
+    }, {
+      deveuis: [sourceA],
+      sourceDevices: [sourceDevices[0]],
+      channels: [channel],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-02T00:00:00Z',
+      aggregation: 'raw',
+      maxPointsPerSeries: 2000,
+      // The interactive card route opts in to the raw-row sentinel.
+      rawRowLimit: true,
+    });
+    assert.deepEqual(overflow.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+  });
+
+  // The digest was taken from 306d64f3, before the partition step stopped
+  // building one candidate per row and channel. Any change to which row a
+  // source/channel series keeps, or in what order, changes it.
+  test(`${profile}: source partitions keep the pinned duplicate selection and order`, () => {
+    const helper = loadHelper(profile);
+    const fixture = sourcePartitionFixture();
+    const results = [];
+    for (const eligibilityCardType of ['soil', undefined]) {
+      for (const aggregation of ['raw', 'hourly', 'daily']) {
+        results.push(helper.aggregateRows(fixture.rows, {
+          aggregation,
+          channels: fixture.channels,
+          sourceDevices: fixture.sourceDevices,
+          sourceKeys: fixture.sourceKeys,
+          start: fixture.start,
+          end: fixture.end,
+          timezone: 'UTC',
+          eligibilityCardType,
+          nowMs: Date.parse('2026-10-03T00:00:00.000Z'),
+        }));
+      }
+    }
+    const rawSeries = (source, channel) => results[3].sourceAggregates
+      .find((aggregate) => aggregate.sourceKey === source && aggregate.channelKey === channel)
+      .series[channel].points;
+    const valueAt = (source, channel, time) => {
+      const point = rawSeries(source, channel).find((entry) => entry.recordedAt === time);
+      return point ? point.value : undefined;
+    };
+    assert.equal(valueAt('AA000000000000A1', 'swt_1', '2026-10-01T01:00:00.000Z'), undefined, 'higher id with a null value wins');
+    assert.equal(valueAt('AA000000000000A1', 'swt_1', '2026-10-01T01:30:00.000Z'), 13, 'lower id listed later loses');
+    assert.equal(valueAt('BB000000000000B2', 'swt_1', '2026-10-01T02:00:00.000Z'), 1112, 'id-less duplicates tie-break on position');
+    assert.deepEqual(rawSeries('CC000000000000C3', 'ext_temperature_c').map((point) => point.value).slice(0, 3), [12, 16, 20]);
+    assert.ok(!results[3].sourceAggregates.some((aggregate) => aggregate.sourceKey === 'BB000000000000B2' && aggregate.channelKey === 'swt_3'));
+    const digest = crypto.createHash('sha256').update(JSON.stringify(sourcePartitionProjection(results))).digest('hex');
+    assert.equal(digest, 'e35492a02783814ecda7d7f2204c540f452e470225b09aee92d5389dd083ac0c');
+  });
+
+  // The rollup job hands every soil channel and up to 370 days of rows to
+  // this step. A count of candidates and entry checks, not wall time, keeps
+  // it linear in the row count.
+  test(`${profile}: source partitions stay linear in rows across many sources and channels`, () => {
+    const helper = loadHelper(profile);
+    const sources = ['A1', 'A2', 'A3', 'A4', 'A5'].map((suffix) => `AA0000000000${suffix}00`);
+    const fields = [
+      'swt_1', 'swt_2',
+      ...Array.from({ length: 10 }, (_, i) => `vwc_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_vic_${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `soil_temp_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_ec_${i + 1}`),
+    ];
+    const channels = fields.map((field) => ({ id: field, field, unit: '' }));
+    const startMs = Date.parse('2026-10-01T00:00:00.000Z');
+    const rows = [];
+    for (let step = 0; step < 96; step += 1) {
+      for (const deveui of sources) {
+        rows.push({ id: rows.length + 1, deveui, recorded_at: new Date(startMs + step * 15 * 60_000).toISOString(), swt_1: step, swt_2: step + 1 });
+      }
+    }
+    const partitionStats = {};
+    const result = helper.aggregateRows(rows, {
+      aggregation: 'hourly',
+      channels,
+      sourceDevices: sources.map((deveui) => ({ deveui, type_id: 'KIWI_SENSOR' })),
+      start: '2026-10-01T00:00:00.000Z',
+      end: '2026-10-02T00:00:00.000Z',
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-03T00:00:00.000Z'),
+      partitionStats,
+    });
+    assert.equal(result.sourceAggregates.length, sources.length * channels.length);
+    assert.ok(Number.isFinite(partitionStats.candidates) && partitionStats.candidates <= rows.length,
+      `candidates ${partitionStats.candidates} exceed ${rows.length} rows`);
+    assert.ok(Number.isFinite(partitionStats.checks) && partitionStats.checks <= rows.length,
+      `checks ${partitionStats.checks} exceed ${rows.length} rows`);
+  });
+
+  // A single-source rollup scope reads the per-source aggregates, which hold
+  // one channel each. Every channel the device reports needs its own rows in
+  // both the pooled and the source-keyed namespace.
+  test(`${profile}: rollup job writes every channel for single-source and multi-source scopes`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-channels', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-channels-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES
+        (1, 'One Source', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        (2, 'Two Sources', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000C1', 'Chameleon One', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C2', 'Chameleon Two', 'DRAGINO_LSN50', 1, 2, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C3', 'Chameleon Three', 'DRAGINO_LSN50', 1, 2, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2, swt_3) VALUES (?, ?, ?, ?, ?)');
+    for (const [index, deveui] of ['A8404100000000C1', 'A8404100000000C2', 'A8404100000000C3'].entries()) {
+      for (let hour = 0; hour < 48; hour += 1) {
+        const recordedAt = new Date(Date.parse('2026-10-01T00:30:00Z') + hour * 3_600_000).toISOString();
+        insert.run(deveui, recordedAt, 10 + index + hour, 40 + index + hour, 70 + index + hour);
+      }
+    }
+    const db = {
+      all(sql, params) { return raw.prepare(sql).all(...(params || [])); },
+      run(sql, params) { return raw.prepare(sql).run(...(params || [])); },
+    };
+    try {
+      const summary = await helper.runRollupJob(db, { nowMs: Date.parse('2026-10-03T02:00:00Z'), exportDir: null, levels: ['daily'] });
+      assert.deepEqual(summary.errors, []);
+      const channelsByKey = new Map();
+      for (const row of raw.prepare("SELECT zone_id, logical_source_key, channel_id FROM history_channel_rollups WHERE card_type = 'soil' AND bucket_level = 'daily'").all()) {
+        const key = `${row.zone_id}:${row.logical_source_key}`;
+        if (!channelsByKey.has(key)) channelsByKey.set(key, new Set());
+        channelsByKey.get(key).add(row.channel_id);
+      }
+      const expectedKeys = [
+        '1:root-zone',
+        `1:${sourceKey('soil', 'A8404100000000C1')}`,
+        '2:root-zone',
+        `2:${sourceKey('soil', 'A8404100000000C2')}`,
+        `2:${sourceKey('soil', 'A8404100000000C3')}`,
+      ];
+      assert.deepEqual(Array.from(channelsByKey.keys()).sort(), expectedKeys.slice().sort());
+      for (const key of expectedKeys) {
+        assert.deepEqual(Array.from(channelsByKey.get(key)).sort(), ['swt_1', 'swt_2', 'swt_3'], key);
+      }
+      const swt2 = raw.prepare(`SELECT min_value, max_value, sample_count FROM history_channel_rollups
+        WHERE zone_id = 1 AND logical_source_key = ? AND channel_id = 'swt_2' AND bucket_start = '2026-10-02T00:00:00.000Z'`)
+        .get(sourceKey('soil', 'A8404100000000C1'));
+      assert.deepEqual({ ...swt2 }, { min_value: 64, max_value: 87, sample_count: 24 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  // One row pass per source, however many channels the card carries, and one
+  // device_data read per card and level: the source scopes take their rows
+  // from the card's read. Counts, not wall time, keep the rollup job's cost
+  // pinned.
+  test(`${profile}: rollup reducer makes one row pass per source and one read per card and level`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-cost', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-cost-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Rollup Cost', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000D1', 'Chameleon One', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000D2', 'Chameleon Two', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2, swt_3, ext_temperature_c) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const [index, deveui] of ['A8404100000000D1', 'A8404100000000D2'].entries()) {
+      for (let hour = 0; hour < 48; hour += 1) {
+        const recordedAt = new Date(Date.parse('2026-10-01T00:30:00Z') + hour * 3_600_000).toISOString();
+        insert.run(deveui, recordedAt, 10 + index + hour, 40 + index + hour, 70 + index + hour, 15 + index);
+      }
+    }
+    const db = {
+      all(sql, params) { return raw.prepare(sql).all(...(params || [])); },
+      run(sql, params) { return raw.prepare(sql).run(...(params || [])); },
+    };
+    const nowMs = Date.parse('2026-10-03T02:00:00Z');
+    const device = { deveui: 'A8404100000000D1', type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 };
+    const fields = [
+      'swt_1', 'swt_2', 'swt_3',
+      ...Array.from({ length: 10 }, (_, i) => `vwc_${i + 1}`),
+      ...Array.from({ length: 10 }, (_, i) => `soil_vic_${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `soil_temp_${i + 1}`),
+      ...Array.from({ length: 5 }, (_, i) => `soil_ec_${i + 1}`),
+    ];
+    try {
+      for (const channels of [fields.slice(0, 1), fields]) {
+        const rollupStats = {};
+        const rows = await helper.computeRollupBuckets(db, {
+          zoneId: 1,
+          cardType: 'soil',
+          logicalSourceKey: sourceKey('soil', device.deveui),
+          channels: channels.map((field) => ({ id: field, field, unit: '' })),
+          deveuis: [device.deveui],
+          sourceDevices: [device],
+          timezone: 'UTC',
+          rollupStats,
+        }, 'daily', 3 * 86_400_000, nowMs);
+        assert.equal(rollupStats.rowPasses, 1, `${channels.length} channels`);
+        assert.equal(rollupStats.reads, 1, `${channels.length} channels`);
+        assert.deepEqual(Array.from(new Set(rows.map((row) => row.channel_id))).sort(),
+          ['swt_1', 'swt_2', 'swt_3'].filter((id) => channels.some((field) => field === id)));
+      }
+
+      const levels = ['hourly', 'daily', 'weekly'];
+      const rollupStats = {};
+      const summary = await helper.runRollupJob(db, { nowMs, exportDir: null, levels, rollupStats });
+      assert.deepEqual(summary.errors, []);
+      assert.ok(summary.cardsProcessed > 0);
+      assert.equal(rollupStats.reads, summary.cardsProcessed * levels.length);
+      assert.equal(rollupStats.probes, summary.cardsProcessed * levels.length);
+      assert.equal(rollupStats.rowPasses, summary.cardsProcessed * 2 * levels.length);
+    } finally {
+      raw.close();
+    }
+  });
+
+  // The rollup read leaves out columns that are NULL across the window, and
+  // keeps every column when the count probe returns no usable count.
+  test(`${profile}: rollup read selects only columns with a value in the window`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'rollup-probe', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'rollup-probe-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Rollup Probe', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A8404100000000E1', 'Kiwi', 'KIWI_SENSOR', 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+    `);
+    const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2) VALUES (?, ?, ?, ?)');
+    for (let hour = 0; hour < 24; hour += 1) {
+      insert.run('A8404100000000E1', new Date(Date.parse('2026-10-02T00:30:00Z') + hour * 3_600_000).toISOString(), 10 + hour, null);
+    }
+    const scope = {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: sourceKey('soil', 'A8404100000000E1'),
+      channels: ['swt_1', 'swt_2', 'vwc_1'].map((field) => ({ id: field, field, unit: '' })),
+      deveuis: ['A8404100000000E1'],
+      sourceDevices: [{ deveui: 'A8404100000000E1', type_id: 'KIWI_SENSOR' }],
+      timezone: 'UTC',
+    };
+    const nowMs = Date.parse('2026-10-03T02:00:00Z');
+    const queries = [];
+    const probed = {
+      all(sql, params) {
+        queries.push(sql);
+        return raw.prepare(sql).all(...(params || []));
+      },
+    };
+    const rows = await helper.computeRollupBuckets(probed, scope, 'daily', 86_400_000, nowMs);
+    const rowRead = queries.find((sql) => sql.includes('ORDER BY'));
+    assert.match(rowRead, /SELECT id, deveui, recorded_at, swt_1 FROM/);
+    assert.deepEqual(rows.map((row) => [row.channel_id, row.sample_count, row.min_value, row.max_value]), [['swt_1', 24, 10, 33]]);
+
+    const countless = {
+      all(sql, params) {
+        queries.push(sql);
+        if (!sql.includes('ORDER BY')) return [{}];
+        return raw.prepare(sql).all(...(params || []));
+      },
+    };
+    queries.length = 0;
+    const fallbackRows = await helper.computeRollupBuckets(countless, scope, 'daily', 86_400_000, nowMs);
+    assert.match(queries.find((sql) => sql.includes('ORDER BY')), /SELECT id, deveui, recorded_at, swt_1, swt_2, vwc_1 FROM/);
+    assert.deepEqual(fallbackRows, rows);
+    raw.close();
+  });
+
+  test(`${profile}: partial source rollups recover older buckets and retain null gaps`, async () => {
+    const helper = loadHelper(profile);
+    const router = loadRouter(profile);
+    const raw = databaseForPartialRollup();
+    const devices = [
+      { deveui: 'A8404100000000A1', name: 'Synthetic A', type_id: 'KIWI_SENSOR' },
+      { deveui: 'A8404100000000B1', name: 'Synthetic B', type_id: 'KIWI_SENSOR' },
+    ];
+    try {
+      const aggregate = await helper.aggregateDeviceData(facade(raw), {
+        zoneId: 1,
+        cardType: 'soil',
+        logicalSourceKey: 'root-zone',
+        deveuis: devices.map((device) => device.deveui),
+        sourceDevices: devices,
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-03T00:00:00Z',
+        aggregation: 'daily',
+        useRollups: true,
+        nowMs: Date.parse('2026-10-04T00:00:00Z'),
+        channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      });
+      const bySource = new Map(aggregate.sourceAggregates.map((entry) => [entry.sourceKey, entry]));
+      const sourceA = bySource.get(devices[0].deveui);
+      const sourceB = bySource.get(devices[1].deveui);
+      assert.deepEqual(sourceA.buckets.map((bucket) => bucket.series.swt_1.latest), [10, 22]);
+      assert.deepEqual(sourceB.buckets.map((bucket) => bucket.series.swt_1.latest), [0, null]);
+      const series = router.buildSeriesFromAggregate({ cardType: 'soil' }, aggregate, devices);
+      assert.equal(series.filter((entry) => entry.deviceSourceId === helper.deviceSourceId(devices[0])).length, 1);
+      assert.ok(series.some((entry) => entry.deviceSourceId === helper.deviceSourceId(devices[1]) && entry.points.some((point) => point.quality === 'gap')));
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: explicit source selection reads source-keyed rollups and filters plain-LSN SWT3`, async () => {
+    const helper = loadHelper(profile);
+    const sourceA = 'A8404100000000A1';
+    const sourceB = 'A8404100000000B1';
+    const devices = [
+      { deveui: sourceA, name: 'Chameleon A', type_id: 'KIWI_SENSOR' },
+      { deveui: sourceB, name: 'Plain LSN B', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0 },
+    ];
+    const rollupRows = devices.flatMap((device, index) => {
+      const logicalSourceKey = sourceKey('soil', device.deveui);
+      return [
+        {
+          logical_source_key: logicalSourceKey,
+          channel_id: 'swt_1',
+          bucket_level: 'daily',
+          bucket_start: '2026-10-01T00:00:00.000Z',
+          bucket_end: '2026-10-02T00:00:00.000Z',
+          min_value: 10 + index,
+          max_value: 10 + index,
+          mean_value: 10 + index,
+          median_value: 10 + index,
+          latest_value: 10 + index,
+          coverage_pct: 100,
+          coverage_confidence: 'configured',
+          sample_count: 1,
+          event_count: 0,
+          threshold_crossing_count: 0,
+          unit: 'kPa',
+        },
+        {
+          logical_source_key: logicalSourceKey,
+          channel_id: 'swt_3',
+          bucket_level: 'daily',
+          bucket_start: '2026-10-01T00:00:00.000Z',
+          bucket_end: '2026-10-02T00:00:00.000Z',
+          min_value: 30 + index,
+          max_value: 30 + index,
+          mean_value: 30 + index,
+          median_value: 30 + index,
+          latest_value: 30 + index,
+          coverage_pct: 100,
+          coverage_confidence: 'configured',
+          sample_count: 1,
+          event_count: 0,
+          threshold_crossing_count: 0,
+          unit: 'kPa',
+        },
+      ];
+    });
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return rollupRows;
+        return [];
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: devices.map((device) => device.deveui),
+      sourceDevices: devices,
+      sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-02T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [
+        { id: 'swt_1', field: 'swt_1', unit: 'kPa' },
+        { id: 'swt_3', field: 'swt_3', unit: 'kPa' },
+      ],
+    });
+    const bySourceChannel = new Map(aggregate.sourceAggregates.map((entry) => [`${entry.sourceKey}|${entry.channelKey}`, entry]));
+    assert.equal(bySourceChannel.get(`${sourceA}|swt_1`).buckets[0].series.swt_1.latest, 10);
+    assert.equal(bySourceChannel.get(`${sourceA}|swt_3`).buckets[0].series.swt_3.latest, 30);
+    assert.equal(bySourceChannel.get(`${sourceB}|swt_1`).buckets[0].series.swt_1.latest, 11);
+    assert.equal(bySourceChannel.has(`${sourceB}|swt_3`), false);
+  });
+
+  test(`${profile}: descriptor-less source filters cannot consume pooled rollups`, async () => {
+    const helper = loadHelper(profile);
+    let rollupQueries = 0;
+    const source = 'A8404100000000A1';
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) {
+          rollupQueries += 1;
+          throw new Error('descriptor-less source filter must not read pooled rollups');
+        }
+        return [];
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-02T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(rollupQueries, 0);
+    assert.equal(aggregate.sourceAggregates[0].buckets[0].series.swt_1.latest, null);
+  });
+
+  test(`${profile}: interactive aggregate point budget counts source-channel grid before reads`, async () => {
+    const helper = loadHelper(profile);
+    const channel = (id) => ({ id, field: id, unit: 'kPa' });
+    // Chameleon Kiwis: SWT3 is a supported channel, so each device fills the
+    // full three-channel grid.
+    const devices = Array.from({ length: 6 }, (_, index) => ({
+      deveui: `A84041000000${String(index + 1).padStart(4, '0')}`,
+      type_id: 'KIWI_SENSOR',
+      chameleon_enabled: 1,
+    }));
+    const start = Date.parse('2026-01-01T00:00:00Z');
+    const hours = 1667;
+    const end = new Date(start + hours * 60 * 60 * 1000).toISOString();
+    let overBudgetReads = 0;
+    const overBudget = await helper.aggregateDeviceData({
+      all() {
+        overBudgetReads += 1;
+        throw new Error('point-budget preflight must not read history');
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: devices.map((device) => device.deveui),
+      sourceDevices: devices,
+      start: '2026-01-01T00:00:00Z',
+      end,
+      aggregation: 'hourly',
+      useRollups: true,
+      channels: [channel('swt_1'), channel('swt_2'), channel('swt_3')],
+      maxPointsTotal: 30000,
+      maxPointsPerSeries: 2000,
+    });
+    assert.equal(overBudgetReads, 0);
+    assert.deepEqual(overBudget.availability, {
+      available: false,
+      reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+    });
+    assert.equal(overBudget.sourceAggregates.length, 18);
+    assert.ok(overBudget.sourceAggregates.every((entry) => entry.buckets.length === 0 && entry.series[entry.channelKey].points.length === 0));
+
+    const exactDevices = devices.slice(0, 5);
+    const exactEnd = new Date(start + 2000 * 60 * 60 * 1000).toISOString();
+    const exact = await helper.aggregateDeviceData({ all() { return []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: exactDevices.map((device) => device.deveui),
+      sourceDevices: exactDevices,
+      start: '2026-01-01T00:00:00Z',
+      end: exactEnd,
+      aggregation: 'hourly',
+      useRollups: true,
+      channels: [channel('swt_1'), channel('swt_2'), channel('swt_3')],
+      maxPointsTotal: 30000,
+      maxPointsPerSeries: 2000,
+    });
+    assert.equal(exact.availability, undefined);
+    assert.equal(exact.sourceAggregates.length, 15);
+    assert.equal(exact.sourceAggregates[0].buckets.length, 2000);
+  });
+
+  test(`${profile}: interactive point budget counts only channels each device type supports`, async () => {
+    const helper = loadHelper(profile);
+    const environmentChannels = [
+      { id: 'ambient_temperature', field: 'ambient_temperature', unit: 'C' },
+      { id: 'ext_temperature_c', field: 'ext_temperature_c', unit: 'C' },
+      { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
+      { id: 'light_lux', field: 'light_lux', unit: 'lux' },
+      { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
+    ];
+    const gauges = Array.from({ length: 9 }, (_, index) => ({
+      deveui: `A84041000000C${String(index + 1).padStart(3, '0')}`,
+      type_id: 'AQUASCOPE_LORAIN',
+    }));
+    // 30 days hourly = 720 buckets. 9 gauges x 2 LoRain channels x 720 =
+    // 12,960 points fits the 30,000 budget; 9 x 5 card channels x 720 =
+    // 32,400 does not.
+    const query = {
+      zoneId: 1,
+      cardType: 'environment',
+      logicalSourceKey: 'microclimate',
+      deveuis: gauges.map((device) => device.deveui),
+      sourceDevices: gauges,
+      start: '2026-09-01T00:00:00Z',
+      end: '2026-10-01T00:00:00Z',
+      aggregation: 'hourly',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: environmentChannels,
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    };
+    const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, query);
+    assert.equal(aggregate.availability, undefined);
+    assert.equal(aggregate.sourceAggregates.length, 18);
+    for (const device of gauges) {
+      const channelKeys = aggregate.sourceAggregates
+        .filter((entry) => entry.sourceKey === device.deveui)
+        .map((entry) => entry.channelKey)
+        .sort();
+      assert.deepEqual(channelKeys, ['ambient_temperature', 'rain_mm_per_hour']);
+    }
+    assert.ok(aggregate.sourceAggregates.every((entry) => entry.buckets.length === 720));
+
+    // Rollup maintenance, export and Analysis call without a point budget and
+    // keep today's channel set; so does a device row that carries no type.
+    const unbudgeted = await helper.aggregateDeviceData({ all() { return []; } }, {
+      ...query,
+      maxPointsPerSeries: undefined,
+      maxPointsTotal: undefined,
+    });
+    assert.equal(unbudgeted.sourceAggregates.length, 45);
+    const untyped = await helper.aggregateDeviceData({ all() { return []; } }, {
+      ...query,
+      sourceDevices: [{ deveui: gauges[0].deveui }],
+      deveuis: [gauges[0].deveui],
+    });
+    assert.equal(untyped.sourceAggregates.length, 5);
+  });
+
+  test(`${profile}: a Kiwi without Chameleon gets no SWT3 series on the interactive path`, async () => {
+    const helper = loadHelper(profile);
+    const plain = { deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR', chameleon_enabled: 0 };
+    const chameleon = { deveui: 'A8404100000000B1', type_id: 'KIWI_SENSOR', chameleon_enabled: 1 };
+    const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [plain.deveui, chameleon.deveui],
+      sourceDevices: [plain, chameleon],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: ['swt_1', 'swt_2', 'swt_3'].map((id) => ({ id, field: id, unit: 'kPa' })),
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    });
+    const pairs = aggregate.sourceAggregates.map((entry) => `${entry.sourceKey}|${entry.channelKey}`).sort();
+    assert.deepEqual(pairs, [
+      `${plain.deveui}|swt_1`,
+      `${plain.deveui}|swt_2`,
+      `${chameleon.deveui}|swt_1`,
+      `${chameleon.deveui}|swt_2`,
+      `${chameleon.deveui}|swt_3`,
+    ].sort());
+  });
+
+  test(`${profile}: every fixture keeps the same series set on the budgeted card path`, async () => {
+    const helper = loadHelper(profile);
+    const soilChannels = ['swt_1', 'swt_2', 'swt_3', 'vwc_1', 'soil_temp_1'];
+    const environmentChannels = ['ambient_temperature', 'ext_temperature_c', 'relative_humidity', 'light_lux', 'rain_mm_per_hour'];
+    // A device type with no family for the card keeps the card-wide channel
+    // list: TEKTELIC_CLOVER has no soil family in device-sources.js, but it is
+    // a soil source (isSoilSource) and Process Data writes SWT for it.
+    const fixtures = [
+      ['Kiwi', 'soil', { type_id: 'KIWI_SENSOR' }, ['swt_1', 'swt_2']],
+      ['Chameleon Kiwi', 'soil', { type_id: 'KIWI_SENSOR', chameleon_enabled: 1 }, ['swt_1', 'swt_2', 'swt_3']],
+      ['plain LSN50', 'soil', { type_id: 'DRAGINO_LSN50' }, ['swt_1', 'swt_2']],
+      ['Chameleon LSN50', 'soil', { type_id: 'DRAGINO_LSN50', chameleon_enabled: 1 }, ['swt_1', 'swt_2', 'swt_3']],
+      ['WATERMARK LSN50 with temperature', 'soil', { type_id: 'DRAGINO_LSN50', temp_enabled: 1, watermark_evidence: 1 }, ['swt_1', 'swt_2']],
+      ['SDI-12 Tensiomark', 'soil', { type_id: 'DRAGINO_SDI12', sdi12_probe_profile: 'TENSIOMARK' }, ['swt_1', 'swt_2', 'vwc_1', 'soil_temp_1']],
+      ['Clover', 'soil', { type_id: 'TEKTELIC_CLOVER' }, soilChannels],
+      ['Kiwi', 'environment', { type_id: 'KIWI_SENSOR' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
+      ['temperature LSN50', 'environment', { type_id: 'DRAGINO_LSN50', temp_enabled: 1 }, ['ext_temperature_c', 'rain_mm_per_hour']],
+      ['S2120', 'environment', { type_id: 'SENSECAP_S2120' }, ['ambient_temperature', 'relative_humidity', 'light_lux', 'rain_mm_per_hour']],
+      ['LoRain', 'environment', { type_id: 'AQUASCOPE_LORAIN' }, ['ambient_temperature', 'rain_mm_per_hour']],
+      ['Clover', 'environment', { type_id: 'TEKTELIC_CLOVER' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
+    ];
+    const seriesSet = async (device, cardType, budget) => {
+      const aggregate = await helper.aggregateDeviceData({ all() { return []; } }, {
+        zoneId: 1,
+        cardType,
+        logicalSourceKey: cardType === 'soil' ? 'root-zone' : 'microclimate',
+        deveuis: [device.deveui],
+        sourceDevices: [device],
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-03T00:00:00Z',
+        aggregation: 'daily',
+        useRollups: true,
+        nowMs: Date.parse('2026-10-04T00:00:00Z'),
+        channels: (cardType === 'soil' ? soilChannels : environmentChannels).map((id) => ({ id, field: id, unit: 'u' })),
+        ...(budget ? { maxPointsPerSeries: 2000, maxPointsTotal: 30000 } : {}),
+      });
+      return aggregate.sourceAggregates.map((entry) => entry.channelKey);
+    };
+    for (const [name, cardType, extra, expected] of fixtures) {
+      const device = { deveui: 'A8404100000000F1', ...extra };
+      assert.deepEqual(await seriesSet(device, cardType, true), expected, `${name} on the ${cardType} card`);
+    }
+    const clover = { deveui: 'A8404100000000F1', type_id: 'TEKTELIC_CLOVER' };
+    assert.deepEqual(await seriesSet(clover, 'soil', true), await seriesSet(clover, 'soil', false));
+
+    // Reviewer probe: 48 h of Clover SWT1/SWT2 uplinks, hourly, on the budgeted path.
+    const startMs = Date.parse('2026-10-01T00:00:00Z');
+    const rows = Array.from({ length: 48 }, (_, index) => ({
+      id: index + 1,
+      deveui: clover.deveui,
+      recorded_at: new Date(startMs + index * 60 * 60 * 1000 + 60 * 1000).toISOString(),
+      swt_1: 30,
+      swt_2: 40,
+    }));
+    const probe = await helper.aggregateDeviceData({ all(sql) { return /FROM device_data/.test(sql) ? rows : []; } }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [clover.deveui],
+      sourceDevices: [clover],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'hourly',
+      useRollups: false,
+      channels: ['swt_1', 'swt_2'].map((id) => ({ id, field: id, unit: 'kPa' })),
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+    });
+    const filled = Object.fromEntries(probe.sourceAggregates.map((entry) => [
+      entry.channelKey,
+      entry.buckets.filter((bucket) => Number(bucket.series[entry.channelKey].sampleCount || 0) > 0).length,
+    ]));
+    assert.deepEqual(filled, { swt_1: 48, swt_2: 48 });
+  });
+
+  test(`${profile}: raw point budget counts deduplicated valid points`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const device = { deveui: source, type_id: 'KIWI_SENSOR' };
+    const channel = { id: 'swt_1', field: 'swt_1', unit: 'kPa' };
+    const rows = [
+      { id: 1, deveui: source, recorded_at: '2026-10-01T00:00:00Z', swt_1: 10 },
+      { id: 2, deveui: source, recorded_at: '2026-10-01T00:00:00Z', swt_1: null },
+      { id: 3, deveui: source, recorded_at: '2026-10-01T01:00:00Z', swt_1: 11 },
+    ];
+    const within = await helper.aggregateDeviceData({ all() { return rows; } }, {
+      deveuis: [source], sourceDevices: [device], sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z', aggregation: 'raw',
+      useRollups: false, channels: [channel], maxPointsTotal: 1,
+    });
+    assert.equal(within.availability, undefined);
+    assert.deepEqual(within.sourceAggregates[0].series.swt_1.points.map((point) => point.value), [11]);
+
+    const over = await helper.aggregateDeviceData({ all() { return rows.concat({
+      id: 4, deveui: source, recorded_at: '2026-10-01T02:00:00Z', swt_1: 12,
+    }); } }, {
+      deveuis: [source], sourceDevices: [device], sourceFilterActive: true,
+      start: '2026-10-01T00:00:00Z', end: '2026-10-02T00:00:00Z', aggregation: 'raw',
+      useRollups: false, channels: [channel], maxPointsTotal: 1,
+    });
+    assert.deepEqual(over.availability, {
+      available: false,
+      reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+    });
+    assert.deepEqual(over.sourceAggregates[0].series.swt_1.points, []);
+  });
+
+  test(`${profile}: alternating rollup gaps use one bounded source range`, async () => {
+    const helper = loadHelper(profile);
+    const database = alternatingRollupDatabase();
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: database.range.start,
+      end: database.range.end,
+      aggregation: 'daily',
+      useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(database.rawQueryCount(), 1);
+    assert.equal(aggregate.sourceAggregates[0].buckets.length, 2000);
+    assert.equal(aggregate.availability, undefined);
+  });
+
+  test(`${profile}: daily zone rollups keep one bucket per local day for an unaligned range`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const dayMs = 24 * 60 * 60 * 1000;
+    // Zurich local midnights for 4 Sep .. 2 Oct 2026 (CEST, 22:00Z).
+    const firstLocalMidnightMs = Date.parse('2026-09-03T22:00:00Z');
+    const rollups = Array.from({ length: 29 }, (_, index) => retainedRollup(
+      logicalSourceKey,
+      firstLocalMidnightMs + index * dayMs,
+      firstLocalMidnightMs + (index + 1) * dayMs,
+      10,
+    ));
+    const database = geometryDatabase(rollups, 'Europe/Zurich');
+    // No timezone option: the helper resolves the zone's own timezone.
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start: '2026-09-03T10:23:00.000Z',
+      end: '2026-10-03T10:23:00.000Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-03T10:23:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    const localDays = buckets.map((bucket) => zurichDateKey(bucket.bucketStart));
+    assert.equal(new Set(localDays).size, localDays.length, `one bucket per local day, got ${localDays.join(',')}`);
+    assert.equal(buckets.length, 31);
+    assert.equal(localDays[0], '2026-09-03');
+    assert.equal(localDays[30], '2026-10-03');
+    const retainedValues = buckets.slice(1, 30).map((bucket) => bucket.series.swt_1.latest);
+    assert.ok(retainedValues.every((value) => value === 10), `retained days keep their rollup value, got ${retainedValues.join(',')}`);
+    assert.ok(database.rawQueryCount() <= 2, `raw reads stay bounded, got ${database.rawQueryCount()}`);
+  });
+
+  test(`${profile}: weekly season reads one bucket per week from rollups at two anchors`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const start = '2026-04-01T00:00:00.000Z';
+    const end = '2026-09-30T23:59:59.999Z';
+    const startMs = Date.parse(start);
+    const endMs = Date.parse(end);
+    // The rollup job anchors weekly buckets at todayStart - 370 d and keys the
+    // upsert on bucket_start, so runs on two consecutive days leave two grids
+    // one day apart. The newer run (anchor B) has the better coverage.
+    const anchors = [
+      { firstMs: Date.parse('2026-03-29T22:00:00Z'), value: 10, coverage: 50, computedAt: '2026-10-25T02:00:00Z' },
+      { firstMs: Date.parse('2026-03-30T22:00:00Z'), value: 20, coverage: 100, computedAt: '2026-10-26T02:00:00Z' },
+    ];
+    const rollups = [];
+    for (const anchor of anchors) {
+      for (let bucketStartMs = anchor.firstMs; bucketStartMs < endMs; bucketStartMs += weekMs) {
+        if (bucketStartMs < startMs) continue;
+        rollups.push(retainedRollup(logicalSourceKey, bucketStartMs, bucketStartMs + weekMs, anchor.value, {
+          coverage_pct: anchor.coverage,
+          computed_at: anchor.computedAt,
+        }));
+      }
+    }
+    const database = geometryDatabase(rollups, 'Europe/Zurich');
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start,
+      end,
+      range: 'season',
+      aggregation: 'weekly',
+      timezone: 'Europe/Zurich',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-26T12:00:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    const expectedWeeks = Math.ceil((endMs - startMs) / weekMs);
+    assert.equal(buckets.length, expectedWeeks, `one bucket per request week, got ${buckets.length}`);
+    const starts = buckets.map((bucket) => bucket.bucketStart);
+    assert.equal(new Set(starts).size, starts.length);
+    assert.deepEqual(starts, starts.slice().sort());
+    const values = buckets.map((bucket) => bucket.series.swt_1.latest);
+    const retained = values.filter((value) => value !== null);
+    assert.ok(retained.length >= expectedWeeks - 1, `weeks covered by a retained rollup keep it, got ${values.join(',')}`);
+    assert.ok(retained.every((value) => value === 20), `the better-covered retained row wins, got ${values.join(',')}`);
+    assert.ok(database.rawQueryCount() <= 1, `raw reads stay bounded, got ${database.rawQueryCount()}`);
+  });
+
+  test(`${profile}: hourly rollups at :00 cover a request anchored at :23`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const logicalSourceKey = sourceKey('soil', source);
+    const hourMs = 60 * 60 * 1000;
+    const start = '2026-09-03T10:23:00.000Z';
+    const end = '2026-10-03T10:23:00.000Z';
+    const firstRetainedMs = Date.parse('2026-09-03T11:00:00Z');
+    const rollups = Array.from({ length: 720 }, (_, index) => retainedRollup(
+      logicalSourceKey,
+      firstRetainedMs + index * hourMs,
+      firstRetainedMs + (index + 1) * hourMs,
+      10,
+    ));
+    const database = geometryDatabase(rollups, 'UTC');
+    const aggregate = await helper.aggregateDeviceData(database.facade, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      start,
+      end,
+      aggregation: 'hourly',
+      timezone: 'UTC',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-10T00:00:00.000Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      maxPointsPerSeries: 2000,
+      maxPointsTotal: 30000,
+      rawRowLimit: true,
+    });
+    assert.equal(aggregate.availability, undefined);
+    const buckets = aggregate.sourceAggregates[0].buckets;
+    assert.equal(buckets.length, 720, `one bucket per request hour, got ${buckets.length}`);
+    // A retained bucket keeps the interval its statistics cover.
+    assert.equal(buckets[0].bucketStart, '2026-09-03T11:00:00.000Z');
+    assert.ok(buckets.every((bucket) => bucket.series.swt_1.latest === 10));
+    assert.equal(database.rawQueryCount(), 0);
+  });
+
+  test(`${profile}: live-tail raw overflow returns actionable availability`, async () => {
+    const helper = loadHelper(profile);
+    let rawQuery = 0;
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [];
+        rawQuery += 1;
+        if (rawQuery === 1) return [];
+        return Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          deveui: 'A8404100000000A1',
+          recorded_at: new Date(Date.parse('2026-10-04T00:00:00Z') + index * 1000).toISOString(),
+          swt_1: 1,
+        }));
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: '2026-10-02T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+  });
+
+  test(`${profile}: mixed completed rollup and recovery overflow clears retained buckets`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const device = { deveui: source, type_id: 'KIWI_SENSOR' };
+    const logicalSourceKey = `soil-src-${require('node:crypto').createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
+    const rollup = {
+      zone_id: 1, card_type: 'soil', logical_source_key: logicalSourceKey, channel_id: 'swt_1',
+      bucket_level: 'daily', bucket_start: '2026-10-01T00:00:00.000Z',
+      bucket_end: '2026-10-02T00:00:00.000Z', min_value: 5, max_value: 5,
+      mean_value: 5, median_value: 5, latest_value: 5, coverage_pct: 100,
+      coverage_confidence: 'configured', sample_count: 1, unit: 'kPa',
+    };
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [rollup];
+        return Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          deveui: source,
+          recorded_at: new Date(Date.parse('2026-10-02T00:00:00Z') + index * 1000).toISOString(),
+          swt_1: 1,
+        }));
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [device],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-04T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+    assert.equal(aggregate.sourceAggregates.length, 1);
+    assert.deepEqual(aggregate.sourceAggregates[0].buckets, []);
+    assert.deepEqual(aggregate.sourceAggregates[0].series.swt_1.points, []);
+  });
+
+  test(`${profile}: shared recovery budget covers all source-channel pairs`, async () => {
+    const helper = loadHelper(profile);
+    const sourceKeys = ['A8404100000000A1', 'A8404100000000B1'];
+    const channelKeys = ['swt_1', 'swt_2'];
+    let queryCount = 0;
+    const rows = syntheticRows(30001, Date.parse('2026-10-01T00:00:00Z'), 48 * 60 * 60 * 1000, sourceKeys, channelKeys);
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        queryCount += 1;
+        if (sql.includes('history_channel_rollups')) return [];
+        return rows;
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: sourceKeys,
+      sourceDevices: sourceKeys.map((deveui) => ({ deveui, type_id: 'KIWI_SENSOR' })),
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+      channels: channelKeys.map((id) => ({ id, field: id, unit: 'kPa' })),
+    });
+    assert.equal(queryCount, 2, 'one rollup query plus one shared recovery query');
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+    assert.equal(aggregate.sourceAggregates.length, 4);
+    assert.ok(aggregate.sourceAggregates.every((entry) => entry.buckets.length === 0));
+  });
+
+  test(`${profile}: completed and live reads share the 30000-row budget`, async () => {
+    const helper = loadHelper(profile);
+    const sqls = [];
+    let rawQuery = 0;
+    const aggregate = await helper.aggregateDeviceData({
+      all(sql) {
+        sqls.push(sql);
+        if (sql.includes('history_channel_rollups')) return [];
+        rawQuery += 1;
+        if (rawQuery === 1) return syntheticRows(20000, Date.parse('2026-10-01T00:00:00Z'), 48 * 60 * 60 * 1000, ['A8404100000000A1'], ['swt_1']);
+        return syntheticRows(10001, Date.parse('2026-10-03T00:00:00Z'), 48 * 60 * 60 * 1000, ['A8404100000000A1'], ['swt_1']);
+      },
+    }, {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: ['A8404100000000A1'],
+      sourceDevices: [{ deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' }],
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      aggregation: 'daily',
+      useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
+      nowMs: Date.parse('2026-10-03T12:00:00Z'),
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    });
+    assert.equal(rawQuery, 2);
+    assert.match(sqls[2], /LIMIT 10001$/);
+    assert.deepEqual(aggregate.availability, {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    });
+  });
+
+  test(`${profile}: SQL margin rows still consume the shared sentinel budget`, async () => {
+    const helper = loadHelper(profile);
+    const source = 'A8404100000000A1';
+    const boundaryRows = (startMs) => syntheticRows(30000, startMs, 48 * 60 * 60 * 1000, [source], ['swt_1'])
+      .concat({
+        id: 30001,
+        deveui: source,
+        recorded_at: new Date(startMs - 1).toISOString(),
+        swt_1: 1,
+      });
+    const query = (rows) => ({
+      all(sql) {
+        if (sql.includes('history_channel_rollups')) return [];
+        return rows;
+      },
+    });
+    const options = {
+      zoneId: 1,
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+      deveuis: [source],
+      sourceDevices: [{ deveui: source, type_id: 'KIWI_SENSOR' }],
+      aggregation: 'daily',
+      useRollups: true,
+      // The card route always passes the zone timezone; an explicit UTC keeps
+      // the zone lookup out of this fixture's query count.
+      timezone: 'UTC',
+      channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+    };
+    const recoveryOverflow = await helper.aggregateDeviceData(query(boundaryRows(Date.parse('2026-10-01T00:00:00Z'))), {
+      ...options,
+      start: '2026-10-01T00:00:00Z',
+      end: '2026-10-03T00:00:00Z',
+      nowMs: Date.parse('2026-10-04T00:00:00Z'),
+    });
+    const liveOverflow = await helper.aggregateDeviceData(query(boundaryRows(Date.parse('2026-10-03T00:00:00Z'))), {
+      ...options,
+      start: '2026-10-03T00:00:00Z',
+      end: '2026-10-05T00:00:00Z',
+      nowMs: Date.parse('2026-10-03T00:00:00Z'),
+    });
+    const expectedAvailability = {
+      available: false,
+      reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+    };
+    assert.deepEqual(recoveryOverflow.availability, expectedAvailability);
+    assert.deepEqual(liveOverflow.availability, expectedAvailability);
+  });
+
+  test(`${profile}: daily export keeps a month with more than 30000 raw rows`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'busy-export', 'fixture', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z', 'busy-export-user');
+      INSERT INTO irrigation_zones (id, name, user_id, zone_uuid, timezone, created_at, updated_at)
+      VALUES (1, 'Busy export', 1, 'busy-zone', 'UTC', '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A8404100000000A1', 'Busy Kiwi', 'KIWI_SENSOR', 1, 1, '2026-05-31T00:00:00Z', '2026-05-31T00:00:00Z');
+    `);
+    try {
+      // 30,001 rows, one a minute from 1 June: about 20.8 days of June.
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+      const startMs = Date.parse('2026-06-01T00:00:00Z');
+      raw.exec('BEGIN');
+      for (let index = 0; index < 30001; index += 1) {
+        insert.run('A8404100000000A1', new Date(startMs + index * 60000).toISOString(), 20);
+      }
+      raw.exec('COMMIT');
+      const result = await helper.buildZoneExportCsv(facade(raw), {
+        zoneId: 1,
+        from: '2026-06-01',
+        to: '2026-06-30',
+        granularity: 'daily',
+        nowMs: Date.parse('2026-07-02T00:00:00Z'),
+      });
+      const swt1Days = result.rows.filter((row) => row.channel_key === 'swt_1').map((row) => row.timestamp);
+      assert.equal(swt1Days.length, 21);
+      assert.equal(swt1Days[0], '2026-06-01T00:00:00.000Z');
+      assert.equal(swt1Days[20], '2026-06-21T00:00:00.000Z');
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy 24h and 48h boundaries stay source isolated`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      const exact24 = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(exact24.map((point) => point.value), [24, 23]);
+      const exact48 = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 48, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(exact48.map((point) => point.value), [48, 24, 23]);
+      assert.ok(exact48.every((point) => point.value !== 99));
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy aggregate reads only the requested device's rows`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      // B is busy: 30,001 rows inside the 48 h window. A, the requested
+      // device, has three. Before the fix, B's rows filled A's raw budget.
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
+      const busyStart = Date.parse('2026-10-02T13:00:00Z');
+      raw.exec('BEGIN');
+      for (let index = 0; index < 30001; index += 1) {
+        insert.run('A8404100000000B1', new Date(busyStart + index * 5000).toISOString(), 70);
+      }
+      raw.exec('COMMIT');
+      const sqls = [];
+      const recording = {
+        all(sql, params) {
+          sqls.push({ sql, params: params || [] });
+          return raw.prepare(sql).all(...(params || []));
+        },
+      };
+      const points = await helper.legacySensorHistory(recording, {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 48, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(points.map((point) => point.value), [48, 24, 23]);
+      const dataReads = sqls.filter((entry) => /FROM device_data/.test(entry.sql));
+      assert.ok(dataReads.length > 0);
+      assert.ok(dataReads.every((entry) => !entry.params.includes('A8404100000000B1')), 'device_data reads must not include the unrequested device');
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: explicit source devices bound both device_data reads, whatever device_euis lists`, async () => {
+    const helper = loadHelper(profile);
+    const requested = { deveui: 'A8404100000000A1', type_id: 'KIWI_SENSOR' };
+    const other = 'A8404100000000B1';
+    const readsFor = async (useRollups) => {
+      const reads = [];
+      await helper.aggregateDeviceData({
+        all(sql, params) {
+          if (/FROM device_data/.test(sql)) reads.push({ sql, params: params || [] });
+          return [];
+        },
+      }, {
+        zoneId: 1,
+        cardType: 'soil',
+        logicalSourceKey: 'root-zone',
+        // device_euis names a second card device; sourceDevices is authoritative.
+        device_euis: [requested.deveui, other],
+        sourceDevices: [requested],
+        start: '2026-10-01T00:00:00Z',
+        end: '2026-10-03T12:00:00Z',
+        aggregation: 'hourly',
+        useRollups,
+        timezone: 'UTC',
+        nowMs: Date.parse('2026-10-03T12:00:00Z'),
+        channels: [{ id: 'swt_1', field: 'swt_1', unit: 'kPa' }],
+      });
+      return reads;
+    };
+    const rawFallback = (await readsFor(false)).filter((entry) => /ORDER BY deveui ASC/.test(entry.sql));
+    assert.equal(rawFallback.length, 1);
+    // The rollup path reads the live tail after today's local midnight.
+    const liveTail = (await readsFor(true)).filter((entry) => /ORDER BY recorded_at ASC, id ASC LIMIT/.test(entry.sql));
+    assert.equal(liveTail.length, 1);
+    for (const entry of [...rawFallback, ...liveTail]) {
+      assert.ok(entry.params.includes(requested.deveui), entry.sql);
+      assert.ok(!entry.params.includes(other), `device_data read must not include the unrequested device: ${entry.sql}`);
+    }
+  });
+
+  test(`${profile}: legacy rollup key carries the requested device's annotated zone row`, async () => {
+    const helper = loadHelper(profile);
+    const raw = new DatabaseSync(':memory:');
+    raw.exec(seed);
+    raw.exec(`
+      INSERT INTO users (id, username, password_hash, created_at, updated_at, user_uuid)
+      VALUES (1, 'legacy-key', 'fixture', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z', 'legacy-key-user');
+      INSERT INTO irrigation_zones (id, name, user_id, timezone, created_at, updated_at)
+      VALUES (1, 'Legacy key', 1, 'UTC', '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, temp_enabled, created_at, updated_at)
+      VALUES
+        ('A8404100000000C1', 'WATERMARK node', 'DRAGINO_LSN50', 1, 1, 1, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z'),
+        ('A8404100000000C2', 'Zone Kiwi', 'KIWI_SENSOR', 1, 1, 0, '2026-10-01T00:00:00Z', '2026-10-01T00:00:00Z');
+      INSERT INTO watermark_readings (deveui, recorded_at, payload_hex, frame_status, conversion_version)
+      VALUES ('A8404100000000C1', '2026-10-02T00:00:00Z', '00', 'accepted', 'fixture');
+    `);
+    try {
+      const key = await helper.resolveDeviceFieldRollupKey(facade(raw), 'A8404100000000C1', 'swt_1');
+      assert.equal(key.cardType, 'soil');
+      // The typed row with its WATERMARK annotation, not a bare { deveui }.
+      assert.equal(key.device.deveui, 'A8404100000000C1');
+      assert.equal(key.device.type_id, 'DRAGINO_LSN50');
+      assert.equal(key.device.watermark_evidence, 1);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy aggregate passes only the requested, typed device row`, () => {
+    // Source pin, not a behaviour test. aggregateDeviceData reads device_data
+    // for the explicit sourceDevices only, and key resolution already drops a
+    // plain LSN50's SWT3, so neither the device_euis narrowing nor the typed
+    // row changes legacySensorHistory's output today. Both stay pinned so the
+    // legacy caller does not rely on the helper-side bound alone.
+    const source = loadHelper(profile).legacySensorHistory.toString();
+    const call = source.slice(source.indexOf('aggregateDeviceData(db, {'));
+    assert.match(call, /^aggregateDeviceData\(db, \{[\s\S]*?\n {4}device_euis: \[requestedDeveui\],\n/);
+    assert.match(call, /^aggregateDeviceData\(db, \{[\s\S]*?\n {4}sourceDevices: \[key\.device \|\| \{ deveui: requestedDeveui \}\],\n/);
+  });
+
+  test(`${profile}: legacy raw history omits rows whose value is missing`, async () => {
+    const helper = loadHelper(profile);
+    const raw = databaseForLegacyBoundaries();
+    try {
+      const insert = raw.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1, swt_2) VALUES (?, ?, ?, ?)');
+      // A row that carries only another channel, and a newer equal-time row
+      // that hides the older valid 13:00 value.
+      insert.run('A8404100000000A1', '2026-10-04T10:00:00Z', null, 5);
+      insert.run('A8404100000000A1', '2026-10-03T13:00:00Z', null, 6);
+      const points = await helper.legacySensorHistory(facade(raw), {
+        deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+      });
+      assert.deepEqual(points, [{ t: '2026-10-03T12:00:00.000Z', value: 24 }]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  test(`${profile}: legacy raw entry rejects the 30001st row`, async () => {
+    const helper = loadHelper(profile);
+    const oversized = (dendro) => helper.legacySensorHistory({
+      all(sql, params, callback) {
+        callback(null, Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          recorded_at: new Date(Date.parse(params[params.length - 2]) + index * 1000).toISOString(),
+          value: 1,
+          ...(dendro ? { dendro_position_mm: 1 } : {}),
+        })));
+      },
+    }, {
+      deveui: 'A8404100000000A1', field: 'swt_1', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+    });
+    const error = await oversized(false).then(() => null, (caught) => caught);
+    assert.equal(error.statusCode, 413);
+    assert.equal(error.code, 'HISTORY_RAW_LIMIT_EXCEEDED');
+    const dendroError = await helper.legacySensorHistory({
+      all(sql, params, callback) {
+        callback(null, Array.from({ length: 30001 }, (_, index) => ({
+          id: index + 1,
+          recorded_at: new Date(Date.parse(params[params.length - 2]) + index * 1000).toISOString(),
+          dendro_position_mm: 1,
+        })));
+      },
+    }, {
+      deveui: 'A8404100000000A1', mode: 'dendro', hours: 24, nowMs: Date.parse('2026-10-04T12:00:00Z'),
+    }).then(() => null, (caught) => caught);
+    assert.equal(dendroError.statusCode, 413);
+    assert.equal(dendroError.code, 'HISTORY_RAW_LIMIT_EXCEEDED');
+  });
+}

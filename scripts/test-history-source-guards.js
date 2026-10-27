@@ -104,7 +104,9 @@ for (const profile of PROFILES) {
     assert.match(source, /osiHistory\.annotateWatermarkEvidence\(db/);
     // shouldUseCardRollups applies the range/aggregation rule itself and forces
     // raw reads for a soil card that has an SWT3-ineligible LSN50 source.
+    assert.match(source, /sourceDevices\.length > 0[\s\S]*HR\.shouldUseCardRollups\(card, allSourceDevices, scopeContext, range\.label, aggregationRequested, \{ sourceAware: true \}\)/);
     assert.match(source, /HR\.shouldUseCardRollups\(card, allSourceDevices, scopeContext, range\.label, aggregationRequested\)/);
+    assert.match(source, /maxPointsTotal: LIMITS\.maxPointsTotal/);
     // The all-zones export runs in the history router's portable adapter.
     const routerSource = fs.readFileSync(path.join(ROOT, 'conf', profile, 'files/usr/share/node-red/osi-history-router/index.js'), 'utf8');
     assert.match(routerSource, /history\.buildAllZonesExportCsv\(db/);
@@ -156,6 +158,7 @@ for (const profile of PROFILES) {
     assert.deepEqual(rawSeries.map((series) => series.id), ['swt_1', 'swt_2']);
     assert.deepEqual(rawSeries.map((series) => series.depthCm), [10, 20]);
     assert.equal(router.shouldUseCardRollups(plainCard, [PLAIN], { scope: 'zone' }, '30d', 'auto'), false);
+    assert.equal(router.shouldUseCardRollups(plainCard, [PLAIN], { scope: 'zone' }, '30d', 'auto', { sourceAware: true }), true);
 
     const chameleonSeries = router.buildSeriesFromAggregate(plainCard, {
       aggregation: 'raw',
@@ -191,6 +194,198 @@ for (const profile of PROFILES) {
       assert.ok(swt1, 'soil profile SWT1 is present');
       assert.equal(swt1.depthCm, 15);
       assert.equal(swt1.value, 12);
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: HTTP selected source reads an older source-keyed rollup`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    seedMixedSourceData(db);
+    const selectedSource = 'A840410000000012';
+    const selectedLogicalKey = sourceKey('soil', selectedSource);
+    db.prepare(`
+      INSERT INTO history_channel_rollups (
+        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+        min_value, max_value, mean_value, median_value, latest_value, coverage_pct,
+        coverage_confidence, sample_count, event_count, threshold_crossing_count, unit
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      1, 'soil', selectedLogicalKey, 'swt_1', 'daily',
+      '2026-01-02T00:00:00.000Z', '2026-01-03T00:00:00.000Z',
+      42, 42, 42, 42, 42, 100, 'configured', 1, 0, 0, 'kPa'
+    );
+    try {
+      const response = await executeFunction(node, {
+        msg: historyRequest(2, 'res1', 'GET', '/api/history/zones/1/cards/' + helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' }) + '/data', { zoneId: '1', cardId: helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' }) }, {
+          sourceKey: sourceKey('soil', selectedSource),
+          from: '2026-01-01T00:00:00.000Z',
+          to: '2026-01-03T00:00:00.000Z',
+          aggregation: 'daily',
+        }),
+        env: ENV,
+        db,
+        libOverrides: { osiHistory: helper, HR: router },
+      });
+      assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+      const payload = response.result.payload;
+      assert.deepEqual(payload.availability, { available: true, reasons: [] });
+      assert.equal(payload.limits.maxPointsTotal, 30000);
+      const selectedSeries = payload.series.filter((series) => series.sourceKey === selectedLogicalKey || series.deviceSourceId === helper.deviceSourceId({ deveui: selectedSource }));
+      assert.ok(selectedSeries.some((series) => series.channelKey === 'swt_1' && series.points.some((point) => point.value === 42)), JSON.stringify(payload.series));
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: HTTP all-source mixed card reads source-keyed retained rollups`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    seedMixedSourceData(db);
+    const plainSource = 'A840410000000011';
+    const chameleonSource = 'A840410000000012';
+    const insertRollup = db.prepare(`
+      INSERT INTO history_channel_rollups (
+        zone_id, card_type, logical_source_key, channel_id, bucket_level, bucket_start, bucket_end,
+        min_value, max_value, mean_value, median_value, latest_value, coverage_pct,
+        coverage_confidence, sample_count, event_count, threshold_crossing_count, unit
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const [deveui, value] of [[plainSource, 41], [chameleonSource, 42]]) {
+      insertRollup.run(
+        1, 'soil', sourceKey('soil', deveui), 'swt_1', 'daily',
+        '2026-01-02T00:00:00.000Z', '2026-01-03T00:00:00.000Z',
+        value, value, value, value, value, 100, 'configured', 1, 0, 0, 'kPa'
+      );
+    }
+    try {
+      const cardId = helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' });
+      const response = await executeFunction(node, {
+        msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${cardId}/data`, { zoneId: '1', cardId }, {
+          from: '2026-01-01T00:00:00.000Z',
+          to: '2026-01-03T00:00:00.000Z',
+          aggregation: 'daily',
+        }),
+        env: ENV,
+        db,
+        libOverrides: { osiHistory: helper, HR: router },
+      });
+      assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+      const payload = response.result.payload;
+      const physical = payload.series.filter((series) => series.channelKey === 'swt_1');
+      assert.equal(physical.length, 2, JSON.stringify(payload.series));
+      assert.deepEqual(physical.map((series) => series.points.find((point) => point.value !== null)?.value).sort((a, b) => a - b), [41, 42]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: HTTP card data aggregates in the zone timezone and labels the bucket geometry`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    db.prepare("UPDATE irrigation_zones SET timezone = 'Europe/Zurich' WHERE id = 1").run();
+    db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, created_at, updated_at)
+      VALUES ('A840420000000101', 'Zone Kiwi', 'KIWI_SENSOR', 2, 1, '2026-01-01', '2026-01-01')`).run();
+    const cardId = helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' });
+    const calls = [];
+    const recordingHelper = Object.assign({}, helper, {
+      aggregateDeviceData(database, query) {
+        calls.push(query);
+        return helper.aggregateDeviceData(database, query);
+      },
+    });
+    try {
+      const geometry = {};
+      for (const aggregation of ['daily', 'hourly']) {
+        const response = await executeFunction(node, {
+          msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${cardId}/data`, { zoneId: '1', cardId }, {
+            from: '2026-01-01T10:23:00.000Z',
+            to: '2026-01-08T10:23:00.000Z',
+            aggregation,
+          }),
+          env: ENV,
+          db,
+          libOverrides: { osiHistory: recordingHelper, HR: router },
+        });
+        assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+        geometry[aggregation] = {
+          bucketTimezone: response.result.payload.aggregation.bucketTimezone,
+          bucketAlignment: response.result.payload.aggregation.bucketAlignment,
+        };
+      }
+      assert.equal(calls.length, 2);
+      assert.ok(calls.every((query) => query.timezone === 'Europe/Zurich'), JSON.stringify(calls.map((query) => query.timezone)));
+      // The interactive card route opts in to the 30,000-row raw sentinel;
+      // export does not.
+      assert.ok(calls.every((query) => query.rawRowLimit === true), JSON.stringify(calls.map((query) => query.rawRowLimit)));
+      assert.deepEqual(geometry, {
+        daily: { bucketTimezone: 'Europe/Zurich', bucketAlignment: 'zone_calendar' },
+        hourly: { bucketTimezone: 'UTC', bucketAlignment: 'request_anchored' },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: HTTP interactive grid over 30000 returns descriptors without traces`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    for (let index = 0; index < 6; index += 1) {
+      const deveui = `A84042000000${String(index + 1).padStart(4, '0')}`;
+      // Chameleon Kiwis support SWT3, so each fills the three-channel grid.
+      db.prepare(`INSERT INTO devices (deveui, name, type_id, user_id, irrigation_zone_id, chameleon_enabled, created_at, updated_at)
+        VALUES (?, ?, 'KIWI_SENSOR', 2, 1, 1, '2026-01-01', '2026-01-01')`).run(deveui, `Grid source ${index + 1}`);
+    }
+    const cardId = helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' });
+    try {
+      const response = await executeFunction(node, {
+        msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${cardId}/data`, { zoneId: '1', cardId }, {
+          from: '2026-01-01T00:00:00.000Z',
+          to: '2026-03-11T11:00:00.000Z',
+          aggregation: 'hourly',
+        }),
+        env: ENV,
+        db,
+        libOverrides: { osiHistory: helper, HR: router },
+      });
+      assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+      const payload = response.result.payload;
+      assert.deepEqual(payload.availability, {
+        available: false,
+        reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+      });
+      assert.equal(payload.limits.maxPointsTotal, 30000);
+      assert.ok(payload.series.length >= 18);
+      assert.ok(payload.series.every((series) => series.points.length === 0));
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile}: HTTP route keeps an authoritative empty source list out of pooled history`, async () => {
+    const { helper, router, node } = historyProfile(profile);
+    const db = seedScopedDb();
+    const card = {
+      id: helper.deriveCardId({ zoneUuid: 'z-1', cardType: 'soil' }),
+      cardType: 'soil',
+      logicalSourceKey: 'root-zone',
+    };
+    const guardedHelper = Object.assign({}, helper, {
+      deriveCardsForZone() { return [card]; },
+      aggregateDeviceData() { throw new Error('empty source route must not query pooled history'); },
+    });
+    try {
+      const response = await executeFunction(node, {
+        msg: historyRequest(2, 'res1', 'GET', `/api/history/zones/1/cards/${card.id}/data`, { zoneId: '1', cardId: card.id }, { range: '24h' }),
+        env: ENV,
+        db,
+        libOverrides: { osiHistory: guardedHelper, HR: router },
+      });
+      assert.equal(response.result && response.result.statusCode, 200, JSON.stringify(response.result && response.result.payload));
+      assert.deepEqual(response.result.payload.availability, { available: false, reasons: ['no_authorized_sources'] });
+      assert.deepEqual(response.result.payload.series, []);
+      assert.deepEqual(response.result.payload.profiles, []);
     } finally {
       db.close();
     }

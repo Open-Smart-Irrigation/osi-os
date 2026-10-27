@@ -34,6 +34,11 @@ const ROLLUP_WINDOWS = {
   weekly: 370 * 24 * 60 * 60 * 1000,
 };
 
+// Reuse the established legacy raw-history bound.  The sentinel row makes an
+// overflow explicit; returning the oldest partial scan would look complete
+// and hide newer observations.
+const RAW_HISTORY_MAX_ROWS = 30000;
+
 const ALLOWED_DEVICE_DATA_CHANNELS = new Set([
   'swt_1',
   'swt_2',
@@ -495,9 +500,12 @@ function filterSoilRowsForSources(rows, sourceDevices) {
   return (Array.isArray(rows) ? rows : []).map((row) => {
     const eui = normalizeDeveui(row && (row.deveui || row.device_eui || row.deviceEui));
     const device = eui ? byEui.get(eui) : null;
-    if (!device || isLsn50Swt3Eligible(device)) return row;
+    // An explicit source list is authoritative. Rows from another device
+    // must not be relabeled into the requested source's series.
+    if (!device) return null;
+    if (isLsn50Swt3Eligible(device)) return row;
     return { ...row, swt_3: null };
-  });
+  }).filter(Boolean);
 }
 
 function deviceBelongsToZone(device, zone) {
@@ -957,6 +965,12 @@ function statsForValues(values, preservePrecision = false) {
   };
 }
 
+// The reducers ask for a row's source key once per row and channel; the
+// answer depends only on the raw key string, so a small cache skips the
+// DevEUI normalization for the handful of devices a window holds.
+const ROW_SOURCE_KEY_CACHE = new Map();
+const ROW_SOURCE_KEY_CACHE_LIMIT = 4096;
+
 function rowSourceKey(row, channel) {
   const raw = row.sourceKey
     || row.source_key
@@ -972,18 +986,63 @@ function rowSourceKey(row, channel) {
     || channel.sourceKey
     || channel.source_key
     || 'default';
-  return normalizeDeveui(raw) || String(raw || 'default').trim() || 'default';
+  if (typeof raw === 'string') {
+    const cached = ROW_SOURCE_KEY_CACHE.get(raw);
+    if (cached !== undefined) return cached;
+  }
+  const key = normalizeDeveui(raw) || String(raw || 'default').trim() || 'default';
+  if (typeof raw === 'string') {
+    if (ROW_SOURCE_KEY_CACHE.size >= ROW_SOURCE_KEY_CACHE_LIMIT) ROW_SOURCE_KEY_CACHE.clear();
+    ROW_SOURCE_KEY_CACHE.set(raw, key);
+  }
+  return key;
 }
 
 function sourceChannelKey(sourceKey, channel) {
   return `${sourceKey}|${channel.id}`;
 }
 
+// Card types whose interactive grid is checked against the per-device channel
+// policy in device-sources.js. Other cards keep the card-wide channel list, and
+// so does a device type with no family for the card (TEKTELIC_CLOVER on the
+// soil card: a soil source whose SWT the policy does not list).
+const SOURCE_FAMILY_CARD_TYPES = new Set(['soil', 'environment']);
+
+// sourcePartitions and the aggregate paths ask once per source and channel, so
+// the family channel set is computed once per device row object and card type.
+// null means the device type has no family for the card type.
+const deviceFamilyChannelCache = new WeakMap();
+
+function deviceFamilyChannelKeys(device, cardType) {
+  let byCardType = deviceFamilyChannelCache.get(device);
+  if (!byCardType) {
+    byCardType = new Map();
+    deviceFamilyChannelCache.set(device, byCardType);
+  }
+  if (!byCardType.has(cardType)) {
+    const family = describeDeviceSource(device).families.find((entry) => entry.cardType === cardType);
+    byCardType.set(cardType, family ? new Set(family.channelKeys) : null);
+  }
+  return byCardType.get(cardType);
+}
+
+function deviceFamilySupportsChannel(device, cardType, channel) {
+  // A device row without a type keeps the card-wide channel list.
+  if (!deviceTypeId(device)) return true;
+  const familyChannelKeys = deviceFamilyChannelKeys(device, cardType);
+  // So does a device type without a family for this card type.
+  return familyChannelKeys === null || familyChannelKeys.has(channel.id);
+}
+
 function sourceSupportsChannel(sourceKey, channel, options = {}) {
-  if (!channel || channel.id !== 'swt_3' || !Array.isArray(options.sourceDevices) || !options.sourceDevices.length) return true;
+  if (!channel || !Array.isArray(options.sourceDevices) || !options.sourceDevices.length) return true;
+  const eligibilityCardType = SOURCE_FAMILY_CARD_TYPES.has(options.eligibilityCardType) ? options.eligibilityCardType : null;
+  if (channel.id !== 'swt_3' && !eligibilityCardType) return true;
   const normalized = normalizeDeveui(sourceKey);
   const source = options.sourceDevices.find((device) => normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)) === normalized);
-  return !source || isLsn50Swt3Eligible(source);
+  if (!source) return true;
+  if (channel.id === 'swt_3' && !isLsn50Swt3Eligible(source)) return false;
+  return !eligibilityCardType || deviceFamilySupportsChannel(source, eligibilityCardType, channel);
 }
 
 function normalizeSourceKey(value) {
@@ -1310,7 +1369,7 @@ function bucketSkeletonFor(startMs, endMs, aggregation, bucketSeconds, timezone,
   }));
 }
 
-function aggregateRows(rows, options = {}) {
+function aggregateRowsPooled(rows, options = {}) {
   const aggregationInfo = resolveAggregation(options);
   const aggregation = aggregationInfo.level;
   const aggregationRequested = options.aggregationRequested || aggregationInfo.requested;
@@ -1430,6 +1489,163 @@ function aggregateRows(rows, options = {}) {
   };
 }
 
+// A history card may contain several physical devices that report the same
+// channel.  The old pooled reducer is still used by analysis callers, but the
+// history API needs a reducer per physical source.  Keep that partitioning in
+// the helper so raw rows, bucketed rows, and rollup maintenance share the same
+// duplicate rule.
+function rowTieBreaker(row, index) {
+  const id = toFiniteNumber(row && row.id);
+  return id === null ? index : id;
+}
+
+function sourceDeviceForKey(sourceKey, sourceDevices) {
+  const normalized = normalizeDeveui(sourceKey);
+  if (!normalized) return null;
+  return (Array.isArray(sourceDevices) ? sourceDevices : []).find((device) =>
+    normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui)) === normalized
+  ) || null;
+}
+
+// The duplicate rule keeps the row with the highest id (or, without an id, the
+// latest position) per source, channel and timestamp. The comparison does not
+// depend on the channel, so the winner is picked once per source and
+// timestamp, and every channel the source supports shares that source's
+// sorted entries. One candidate per row keeps memory and time linear in the
+// row count; the rollup job reads 370 days of rows across about 40 soil
+// channels. A row with no source key of its own falls back to the channel's
+// sourceKey, so a channel whose fallback differs from the first channel's
+// re-checks each entry's key.
+//
+// options.partitionStats, when given, counts candidates created and entries
+// checked so tests can pin the cost without timing it.
+function channelSourceKeyFallback(channel) {
+  return (channel && (channel.sourceKey || channel.source_key)) || 'default';
+}
+
+function sourcePartitions(rows, channels, options = {}) {
+  const partitions = new Map();
+  const sourceKeys = new Set(requestedSourceKeys(options));
+  const filteredRows = Array.isArray(rows) ? rows : [];
+  const startMs = parseTime(options.start || options.startAt || options.from);
+  const endMs = parseTime(options.end || options.endAt || options.to);
+  const stats = options.partitionStats && typeof options.partitionStats === 'object' ? options.partitionStats : null;
+  const firstChannel = channels[0] || {};
+  const winners = new Map();
+
+  filteredRows.forEach((row, index) => {
+    const recordedAtMs = parseRecordedAtMs(row && (row.recorded_at || row.recordedAt));
+    if (recordedAtMs === null
+      || (startMs !== null && recordedAtMs < startMs)
+      || (endMs !== null && recordedAtMs >= endMs)) return;
+    const sourceKey = rowSourceKey(row, firstChannel);
+    sourceKeys.add(sourceKey);
+    let bySource = winners.get(sourceKey);
+    if (!bySource) {
+      bySource = new Map();
+      winners.set(sourceKey, bySource);
+    }
+    const existing = bySource.get(recordedAtMs);
+    if (stats) stats.checks = (stats.checks || 0) + 1;
+    if (!existing || rowTieBreaker(row, index) >= rowTieBreaker(existing.row, existing.index)) {
+      if (stats) stats.candidates = (stats.candidates || 0) + 1;
+      bySource.set(recordedAtMs, { row, recordedAtMs, index });
+    }
+  });
+
+  const sortedBySource = new Map();
+  for (const [sourceKey, bySource] of winners) {
+    const entries = Array.from(bySource.values());
+    entries.sort((left, right) => (left.recordedAtMs - right.recordedAtMs) || (left.index - right.index));
+    sortedBySource.set(sourceKey, entries);
+  }
+
+  const firstFallback = channelSourceKeyFallback(firstChannel);
+  for (const sourceKey of sourceKeys) {
+    const sourceEntries = sortedBySource.get(sourceKey) || [];
+    for (const channel of channels) {
+      if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
+      const key = sourceChannelKey(sourceKey, channel);
+      let entries;
+      if (!channel.id) {
+        entries = [];
+      } else if (channelSourceKeyFallback(channel) === firstFallback) {
+        entries = sourceEntries;
+      } else {
+        if (stats) stats.checks = (stats.checks || 0) + sourceEntries.length;
+        entries = sourceEntries.filter((entry) => rowSourceKey(entry.row, channel) === sourceKey);
+      }
+      partitions.set(key, { sourceKey, channel, entries });
+    }
+  }
+  return partitions;
+}
+
+// Per-source, per-channel aggregates. aggregateRows adds the pooled reducer
+// on top; computeRollupBuckets needs only one of the two for a scope.
+function sourceAggregatesForRows(rows, options = {}) {
+  const aggregationInfo = resolveAggregation(options);
+  const channels = filterSoilChannelsForSources(options.channels, options.sourceDevices);
+  const partitions = sourcePartitions(rows, channels, options);
+  const sourceAggregates = [];
+  const sourceCadences = {};
+  const requested = requestedSourceKeys(options);
+  const sourceKeys = Array.from(new Set([
+    ...requested,
+    ...Array.from(partitions.values()).map((partition) => partition.sourceKey),
+  ]));
+
+  for (const sourceKey of sourceKeys) {
+    for (const channel of channels) {
+      if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
+      const partition = partitions.get(sourceChannelKey(sourceKey, channel));
+      const sourceDevice = sourceDeviceForKey(sourceKey, options.sourceDevices);
+      const aggregate = aggregateRowsPooled(
+        partition ? partition.entries.map((entry) => entry.row) : [],
+        {
+          ...options,
+          aggregation: aggregationInfo.level,
+          aggregationRequested: options.aggregationRequested || aggregationInfo.requested,
+          channels: [channel],
+          sourceDevices: sourceDevice
+            ? [sourceDevice]
+            : options.sourceDevices,
+          sourceKeys: [sourceKey],
+          requestedSourceKeys: [sourceKey],
+        }
+      );
+      const sourceCadence = aggregate.sourceCadences || {};
+      Object.assign(sourceCadences, sourceCadence);
+      sourceAggregates.push({
+        sourceKey,
+        channelKey: channel.id,
+        unit: channel.unit || null,
+        aggregation: aggregate.aggregation,
+        bucketSizeSeconds: aggregate.bucketSizeSeconds,
+        expectedCadenceSeconds: aggregate.expectedCadenceSeconds,
+        coverageConfidence: aggregate.coverageConfidence,
+        coveragePct: aggregate.coveragePct,
+        sourceCadences: sourceCadence,
+        series: aggregate.series,
+        buckets: aggregate.buckets,
+      });
+    }
+  }
+
+  return { sourceAggregates, sourceCadences };
+}
+
+function aggregateRows(rows, options = {}) {
+  const { sourceAggregates, sourceCadences } = sourceAggregatesForRows(rows, options);
+  const pooled = aggregateRowsPooled(rows, options);
+  return {
+    ...pooled,
+    sourceAggregates,
+    sourceCadences,
+    sourceIdentityVersion: 2,
+  };
+}
+
 function dbAll(db, sql, params) {
   return new Promise((resolve, reject) => {
     if (!db || typeof db.all !== 'function') return reject(new Error('aggregateDeviceData requires db.all'));
@@ -1477,30 +1693,204 @@ function normalizeQueryChannels(channels) {
   return normalized;
 }
 
-/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
-async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
+// The single-source rollup reducer. It returns, for each channel the source
+// supports, the buckets the per-source aggregate from sourceAggregatesForRows
+// would hold, but only those with at least one sample: computeRollupBuckets
+// writes nothing for an empty bucket. The row preparation and bucket
+// assignment run once per source rather than once per channel, and each
+// channel then reads only its own non-null values. Returns null when the
+// source supports no channel.
+//
+// options.end is always set on the rollup path, so the cadence reference does
+// not depend on which rows carry a value. stats, when given, counts row
+// passes so tests can pin the cost without timing it.
+function sourceRollupBuckets(rows, options, sourceKey, stats) {
+  const aggregationInfo = resolveAggregation(options);
+  const aggregation = aggregationInfo.level;
+  const channels = filterSoilChannelsForSources(options.channels, options.sourceDevices);
+  const partitions = sourcePartitions(rows, channels, options);
+  const sourceDevice = sourceDeviceForKey(sourceKey, options.sourceDevices);
+  const callOptions = {
+    ...options,
+    aggregation,
+    aggregationRequested: options.aggregationRequested || aggregationInfo.requested,
+    sourceDevices: sourceDevice ? [sourceDevice] : options.sourceDevices,
+    sourceKeys: [sourceKey],
+    requestedSourceKeys: [sourceKey],
+  };
+  const bucketSeconds = BUCKET_SECONDS[aggregation];
+  const startMs = parseTime(options.start || options.startAt || options.from);
+  const endMs = parseTime(options.end || options.endAt || options.to);
+  if (!bucketSeconds) throw new Error(`unsupported aggregation: ${aggregation}`);
+  if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateRows requires a valid start/end range for bucketed aggregation');
+  const nowMs = toFiniteNumber(options.nowMs) ?? Date.now();
+
+  // Channels whose partition shares one entries array share one row pass.
+  const groups = new Map();
+  for (const channel of channels) {
+    if (!sourceSupportsChannel(sourceKey, channel, options)) continue;
+    const partition = partitions.get(sourceChannelKey(sourceKey, channel));
+    const entries = partition ? partition.entries : [];
+    if (!groups.has(entries)) groups.set(entries, []);
+    groups.get(entries).push(channel);
+  }
+  if (groups.size === 0) return null;
+
+  let grid = null;
+  const byChannel = new Map();
+  for (const [entries, groupChannels] of groups) {
+    if (stats) stats.rowPasses = (stats.rowPasses || 0) + 1;
+    const sortedRows = filterSoilRowsForSources(entries.map((entry) => entry.row), callOptions.sourceDevices)
+      .map((row) => ({ row, recordedAtMs: parseRecordedAtMs(row.recorded_at || row.recordedAt) }))
+      .filter((entry) => entry.recordedAtMs !== null)
+      .filter((entry) => entry.recordedAtMs >= startMs && entry.recordedAtMs < endMs)
+      .sort((a, b) => a.recordedAtMs - b.recordedAtMs);
+    const buckets = bucketSkeletonFor(startMs, endMs, aggregation, bucketSeconds, options.timezone, options.localDaysPerBucket, options.bucketSkeletonCache);
+    if (!grid) grid = buckets.map((bucket) => bucket.bucketStart);
+    const perChannel = groupChannels.map((channel) => ({
+      channel,
+      fields: channelFieldNames(channel),
+      rows: [],
+      bucketIndexes: [],
+    }));
+    let bucketIndex = 0;
+    for (const entry of sortedRows) {
+      while (bucketIndex < buckets.length && entry.recordedAtMs >= buckets[bucketIndex].bucketEndMs) bucketIndex += 1;
+      if (bucketIndex >= buckets.length) break;
+      for (const slot of perChannel) {
+        let present = false;
+        for (const field of slot.fields) {
+          if (toFiniteNumber(entry.row[field]) !== null) {
+            present = true;
+            break;
+          }
+        }
+        if (!present) continue;
+        slot.rows.push(entry);
+        slot.bucketIndexes.push(bucketIndex);
+      }
+    }
+    for (const slot of perChannel) {
+      const { channel } = slot;
+      const channelList = filterSoilChannelsForSources([channel], callOptions.sourceDevices);
+      if (channelList.length === 0) throw new Error('aggregateRows requires at least one channel');
+      const sourceCadences = deriveSourceCadences(slot.rows, channelList, { ...callOptions, channels: [channel] }, true);
+      const channelBuckets = new Map();
+      let cursor = 0;
+      while (cursor < slot.rows.length) {
+        const index = slot.bucketIndexes[cursor];
+        const bucketRows = [];
+        while (cursor < slot.rows.length && slot.bucketIndexes[cursor] === index) {
+          bucketRows.push(slot.rows[cursor]);
+          cursor += 1;
+        }
+        const skeleton = buckets[index];
+        const channelStats = statsForValues(
+          bucketRows.map((entry) => ({ value: channelValue(entry.row, channel), recordedAtMs: entry.recordedAtMs })),
+          isSwtKpaChannel(channel),
+        );
+        const elapsedBucketSeconds = Math.max(0, (Math.min(skeleton.bucketEndMs, nowMs) - skeleton.bucketStartMs) / 1000);
+        const coverage = coverageForBucket(bucketRows, channelList, sourceCadences, elapsedBucketSeconds);
+        channelBuckets.set(skeleton.bucketStart, {
+          bucketStart: skeleton.bucketStart,
+          bucketEnd: skeleton.bucketEnd,
+          series: { [channel.id]: { ...channelStats, unit: channel.unit || null } },
+          coveragePct: coverage.coveragePct,
+          coverageConfidence: coverage.coverageConfidence,
+        });
+      }
+      byChannel.set(channel.id, channelBuckets);
+    }
+  }
+  return { grid, byChannel };
+}
+
+// The device_data read for one rollup scope and level, or null when the scope
+// has no source or the window is empty.
+function rollupWindow(scope, level, windowMs, nowMs) {
   const aggregation = String(level || '').trim();
   if (!['hourly', 'daily', 'weekly'].includes(aggregation)) throw new Error(`unsupported rollup level: ${level}`);
   const channels = normalizeQueryChannels(filterSoilChannelsForSources(scope.channels, scope.sourceDevices));
   const deveuis = Array.from(new Set((Array.isArray(scope.deveuis) ? scope.deveuis : [])
     .map(normalizeDeveui)
     .filter(Boolean)));
-  if (deveuis.length === 0 || channels.length === 0) return [];
+  if (deveuis.length === 0 || channels.length === 0) return null;
 
   const todayStartMs = startOfLocalDayMs(nowMs ?? Date.now(), scope.timezone || 'UTC');
   const startMs = todayStartMs - Math.max(0, Number(windowMs || 0));
-  if (!Number.isFinite(startMs) || startMs >= todayStartMs) return [];
+  if (!Number.isFinite(startMs) || startMs >= todayStartMs) return null;
   const start = new Date(startMs).toISOString();
   const end = new Date(todayStartMs).toISOString();
   const placeholders = deveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const range = recordedAtRangeSql('recorded_at', start, end);
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
-  const rows = await dbAll(db, sql, deveuis.concat(range.params));
-  const result = aggregateRows(rows, { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices });
+  return {
+    aggregation,
+    channels,
+    deveuis,
+    start,
+    end,
+    selectedFields,
+    where: `deveui IN (${placeholders}) AND ${range.sql}`,
+    params: deveuis.concat(range.params),
+  };
+}
+
+// Reads a rollup window's rows, selecting only the columns that hold a value
+// somewhere in the window. A column that is NULL on every row reads as null
+// when selected and as undefined when not, and channelValue treats both as
+// missing, so the rollups do not change. The soil card names about 40
+// columns; with id, deveui and recorded_at a row object passes 43
+// properties, where both node:sqlite and node-sqlite3 double its size.
+// A count that is missing or not a number keeps the column.
+async function readRollupRows(db, window, stats) {
+  const fields = window.selectedFields;
+  let present = fields;
+  if (fields.length) {
+    if (stats) stats.probes = (stats.probes || 0) + 1;
+    const counts = (await dbAll(db, `SELECT ${fields.map((field, index) => `COUNT(${field}) AS c${index}`).join(', ')} FROM device_data WHERE ${window.where}`, window.params))[0];
+    present = fields.filter((field, index) => toFiniteNumber(counts && counts[`c${index}`]) !== 0);
+  }
+  if (stats) stats.reads = (stats.reads || 0) + 1;
+  const columns = ['id', 'deveui', 'recorded_at', ...present].join(', ');
+  return dbAll(db, `SELECT ${columns} FROM device_data WHERE ${window.where} ORDER BY recorded_at ASC, id ASC`, window.params);
+}
+
+// A source scope reads a subset of its card's read: the same window and
+// order, its own DevEUI, and a subset of the columns the card asked for. A
+// column the card read left out is NULL for every card device, so for the
+// source too. The SQL matches the DevEUI exactly, and so does this filter.
+function rowsFromCardRead(window, cardWindow, cardRows) {
+  if (!window || !cardWindow || window.start !== cardWindow.start || window.end !== cardWindow.end) return null;
+  const cardDeveuis = new Set(cardWindow.deveuis);
+  const cardFields = new Set(cardWindow.selectedFields);
+  if (!window.deveuis.every((deveui) => cardDeveuis.has(deveui))) return null;
+  if (!window.selectedFields.every((field) => cardFields.has(field))) return null;
+  const deveuis = new Set(window.deveuis);
+  return cardRows.filter((row) => deveuis.has(row.deveui));
+}
+
+function rollupRowsForWindow(scope, window, rows, stats) {
+  const { aggregation, channels, start, end } = window;
+  const aggregateOptions = { aggregation, channels, start, end, timezone: scope.timezone, expectedCadences: scope.expectedCadences || scope.expected_cadences, sourceDevices: scope.sourceDevices };
   const out = [];
-  for (const bucket of result.buckets || []) {
+  const singleSource = Array.isArray(scope.sourceDevices) && scope.sourceDevices.length === 1
+    ? normalizeDeveui(scope.sourceDevices[0] && (scope.sourceDevices[0].deveui || scope.sourceDevices[0].device_eui || scope.sourceDevices[0].deviceEui))
+    : null;
+  // A multi-source scope writes the pooled buckets and a single-source scope
+  // its own source aggregates, so run only the reducer the scope reads.
+  const sourceResult = singleSource ? sourceRollupBuckets(rows, aggregateOptions, singleSource, stats) : null;
+  const gridStarts = sourceResult
+    ? sourceResult.grid
+    : null;
+  const pooledBuckets = sourceResult ? null : aggregateRowsPooled(rows, aggregateOptions).buckets;
+  const gridLength = sourceResult ? gridStarts.length : (pooledBuckets || []).length;
+  for (let gridIndex = 0; gridIndex < gridLength; gridIndex += 1) {
     for (const channel of channels) {
+      const bucket = sourceResult
+        ? (sourceResult.byChannel.get(channel.id) || new Map()).get(gridStarts[gridIndex])
+        : pooledBuckets[gridIndex];
+      if (!bucket) continue;
       const stats = bucket.series && bucket.series[channel.id];
       if (!stats || Number(stats.sampleCount || 0) === 0) continue;
       out.push({
@@ -1527,6 +1917,14 @@ async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
     }
   }
   return out;
+}
+
+/** Aggregates the UNION of scope.deveuis into one combined row per bucket/channel under scope.logicalSourceKey. */
+async function computeRollupBuckets(db, scope = {}, level, windowMs, nowMs) {
+  const window = rollupWindow(scope, level, windowMs, nowMs);
+  if (!window) return [];
+  const rows = await readRollupRows(db, window, scope.rollupStats);
+  return rollupRowsForWindow(scope, window, rows, scope.rollupStats);
 }
 
 async function upsertRollups(db, rows) {
@@ -1569,12 +1967,11 @@ async function upsertRollups(db, rows) {
  * CONTRACT (verified live on kaba100, 2026-07-11):
  * - Input rows MUST all belong to ONE logical_source_key. Merged cards
  *   (soil='root-zone', environment='microclimate') store ONE combined-
- *   aggregate row per bucket/channel — computeRollupBuckets aggregates the
- *   UNION of the card's devices before upserting. Per-source detail exists
- *   only in raw device_data and the CSV export path.
- * - bucket.series is keyed by channel_id only; multi-key input would
- *   silently drop data, hence the guard below. A future per-source rollup
- *   scheme must extend this keying (see refactor-program open decisions).
+ *   aggregate row per bucket/channel — the pooled namespace still aggregates
+ *   the UNION of the card's devices before upserting. Source-keyed rows are
+ *   written alongside it for the history card path.
+ * - bucket.series is keyed by channel_id only within one logical source;
+ *   source-aware callers invoke this reducer once per physical source.
  * - bucket.sampleCount sums sample_count ACROSS CHANNELS (same semantics
  *   as the live aggregateRows path).
  */
@@ -1667,6 +2064,317 @@ function rollupRowsToResult(rows, query, channels) {
   };
 }
 
+function sourceLogicalKeyForDevice(cardType, device) {
+  return sourceKeyForCsv({ cardType }, device);
+}
+
+function sourceRollupResults(rows, query, channels, sourceDevices) {
+  const devices = Array.isArray(sourceDevices) ? sourceDevices : [];
+  const byLogicalKey = new Map();
+  for (const row of rows || []) {
+    const key = String(row.logical_source_key || '').trim();
+    if (!key) continue;
+    if (!byLogicalKey.has(key)) byLogicalKey.set(key, []);
+    byLogicalKey.get(key).push(row);
+  }
+  const aggregates = [];
+  for (const device of devices) {
+    const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    const logicalKey = sourceLogicalKeyForDevice(query.cardType || query.card_type, device);
+    if (!sourceKey || !logicalKey) continue;
+    const sourceRows = byLogicalKey.get(logicalKey) || [];
+    const result = rollupRowsToResult(sourceRows, { ...query, logicalSourceKey: logicalKey }, channels);
+    for (const channel of channels) {
+      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })) continue;
+      aggregates.push({
+        sourceKey,
+        channelKey: channel.id,
+        unit: channel.unit || null,
+        aggregation: result.aggregation,
+        bucketSizeSeconds: result.bucketSizeSeconds,
+        coverageConfidence: result.coverageConfidence,
+        coveragePct: result.coveragePct,
+        series: {},
+        buckets: (result.buckets || []).map((bucket) => ({
+          ...bucket,
+          series: { [channel.id]: bucket.series && bucket.series[channel.id] },
+        })),
+      });
+    }
+  }
+  return aggregates;
+}
+
+// A retained rollup row covers the request bucket that contains its
+// bucket_start. The rollup job anchors hourly and weekly rows at its own
+// todayStart - window and keys the upsert on bucket_start, so a request
+// anchored elsewhere, or two job runs on consecutive days, never match bucket
+// starts exactly.
+function bucketContainsStart(bucket, startMs) {
+  const bucketStartMs = parseTime(bucket.bucketStart);
+  const bucketEndMs = parseTime(bucket.bucketEnd);
+  return startMs !== null && bucketStartMs !== null && bucketEndMs !== null
+    && startMs >= bucketStartMs && startMs < bucketEndMs;
+}
+
+function betterRetainedRollup(candidate, current) {
+  if (!current) return true;
+  const candidateHasSamples = Number(candidate.sample_count || 0) > 0;
+  const currentHasSamples = Number(current.sample_count || 0) > 0;
+  if (candidateHasSamples !== currentHasSamples) return candidateHasSamples;
+  const candidateCoverage = toFiniteNumber(candidate.coverage_pct);
+  const currentCoverage = toFiniteNumber(current.coverage_pct);
+  if (candidateCoverage !== currentCoverage) {
+    if (currentCoverage === null) return true;
+    if (candidateCoverage === null) return false;
+    return candidateCoverage > currentCoverage;
+  }
+  const candidateWritten = parseTime(candidate.computed_at);
+  const currentWritten = parseTime(current.computed_at);
+  if (candidateWritten !== currentWritten) {
+    if (currentWritten === null) return true;
+    if (candidateWritten === null) return false;
+    return candidateWritten > currentWritten;
+  }
+  return (toFiniteNumber(candidate.id) ?? -1) > (toFiniteNumber(current.id) ?? -1);
+}
+
+// Keeps at most one retained row per source/channel and request bucket. The
+// kept row keeps its own bucket_start/bucket_end: the response exposes the
+// interval the stored statistics actually cover.
+function selectRetainedRollupRows(rollupRows, skeleton) {
+  const groups = new Map();
+  for (const row of rollupRows || []) {
+    const key = `${row.logical_source_key}|${row.channel_id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const selected = [];
+  for (const rows of groups.values()) {
+    for (const bucket of skeleton || []) {
+      let best = null;
+      for (const row of rows) {
+        if (bucketContainsStart(bucket, parseTime(row.bucket_start)) && betterRetainedRollup(row, best)) best = row;
+      }
+      if (best) selected.push(best);
+    }
+  }
+  return selected;
+}
+
+async function resolveRollupTimezone(db, query, zoneId) {
+  const explicit = query.timezone || query.time_zone;
+  if (explicit) return explicit;
+  if (zoneId === undefined || zoneId === null) return 'UTC';
+  const zoneRows = await dbAll(db, 'SELECT timezone FROM irrigation_zones WHERE id = ?', [zoneId]);
+  const zoneTimezone = zoneRows[0] && typeof zoneRows[0].timezone === 'string' ? zoneRows[0].timezone.trim() : '';
+  return zoneTimezone ? normalizeTimezone(zoneTimezone) : 'UTC';
+}
+
+async function recoverMissingSourceRollupBuckets(db, query, sourceDevices, channels, rollupRows, start, end, aggregation) {
+  const recovered = [];
+  const missingPairs = [];
+  for (const device of sourceDevices || []) {
+    const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    const logicalKey = sourceLogicalKeyForDevice(query.cardType || query.card_type, device);
+    if (!sourceKey || !logicalKey) continue;
+    for (const channel of channels) {
+      if (!sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })) continue;
+      const retainedStartsMs = (rollupRows || [])
+        .filter((row) => row.logical_source_key === logicalKey && row.channel_id === channel.id)
+        .map((row) => parseTime(row.bucket_start))
+        .filter((value) => value !== null);
+      const skeleton = aggregateRowsPooled([], {
+        aggregation,
+        channels: [channel],
+        sourceDevices: [device],
+        sourceKeys: [sourceKey],
+        start,
+        end,
+        timezone: query.timezone || query.time_zone || 'UTC',
+        nowMs: query.nowMs,
+      });
+      const missing = (skeleton.buckets || []).filter((bucket) => !retainedStartsMs.some((startMs) => bucketContainsStart(bucket, startMs)));
+      if (!missing.length) continue;
+      missingPairs.push({
+        sourceKey,
+        device,
+        gapStart: missing[0].bucketStart,
+        gapEnd: missing[missing.length - 1].bucketEnd,
+        missingStarts: new Set(missing.map((bucket) => String(bucket.bucketStart))),
+        channelKey: channel.id,
+        channel,
+      });
+    }
+  }
+  if (!missingPairs.length) return { aggregates: recovered, rawRowsRead: 0, rawScanOverflow: false };
+  // One bounded envelope covers all missing source/channel pairs. The raw
+  // sentinel is shared with the live-tail query by aggregateDeviceData.
+  const envelopeStart = missingPairs
+    .map((pair) => pair.gapStart)
+    .sort((left, right) => parseTime(left) - parseTime(right))[0];
+  const envelopeEnd = missingPairs
+    .map((pair) => pair.gapEnd)
+    .sort((left, right) => parseTime(right) - parseTime(left))[0];
+  const sourceKeys = Array.from(new Set(missingPairs.map((pair) => pair.sourceKey)));
+  const selectedFields = Array.from(new Set(missingPairs.flatMap((pair) => channelFieldNames(pair.channel))));
+  const placeholders = sourceKeys.map(() => '?').join(',');
+  const range = recordedAtRangeSql('recorded_at', envelopeStart, envelopeEnd);
+  const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`;
+  const fetchedRows = await dbAll(db, sql, sourceKeys.concat(range.params));
+  const rows = fetchedRows.filter(recordedAtRangeFilter(envelopeStart, envelopeEnd));
+  if (fetchedRows.length > RAW_HISTORY_MAX_ROWS) {
+    return {
+      aggregates: missingPairs.map((pair) => ({
+        sourceKey: pair.sourceKey,
+        channelKey: pair.channelKey,
+        unit: pair.channel.unit || null,
+        aggregation,
+        series: { [pair.channelKey]: { unit: pair.channel.unit || null, points: [] } },
+        buckets: [],
+      })),
+      rawRowsRead: fetchedRows.length,
+      rawScanOverflow: true,
+    };
+  }
+  for (const pair of missingPairs) {
+    const pairRows = rows
+      .filter((row) => normalizeDeveui(row && (row.deveui || row.device_eui || row.deviceEui)) === pair.sourceKey)
+      .filter(recordedAtRangeFilter(pair.gapStart, pair.gapEnd));
+    const aggregate = aggregateRows(pairRows, {
+      aggregation,
+      aggregationRequested: query.aggregationRequested || aggregation,
+      channels: [pair.channel],
+      eligibilityCardType: query.eligibilityCardType,
+      sourceDevices: [pair.device],
+      sourceKeys: [pair.sourceKey],
+      start: pair.gapStart,
+      end: pair.gapEnd,
+      timezone: query.timezone || query.time_zone || 'UTC',
+      nowMs: query.nowMs,
+    });
+    const sourceAggregate = (aggregate.sourceAggregates || []).find((entry) => entry.sourceKey === pair.sourceKey && entry.channelKey === pair.channelKey);
+    const recoveredBuckets = (sourceAggregate ? sourceAggregate.buckets : (aggregate.buckets || []))
+      .filter((bucket) => pair.missingStarts.has(String(bucket.bucketStart)));
+    recovered.push({
+      sourceKey: pair.sourceKey,
+      channelKey: pair.channelKey,
+      unit: pair.channel.unit || null,
+      aggregation,
+      bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+      coverageConfidence: sourceAggregate ? sourceAggregate.coverageConfidence : aggregate.coverageConfidence,
+      coveragePct: sourceAggregate ? sourceAggregate.coveragePct : aggregate.coveragePct,
+      sourceCadences: sourceAggregate ? sourceAggregate.sourceCadences : aggregate.sourceCadences,
+      series: sourceAggregate ? sourceAggregate.series : aggregate.series,
+      buckets: recoveredBuckets,
+    });
+  }
+  return { aggregates: recovered, rawRowsRead: fetchedRows.length, rawScanOverflow: false };
+}
+
+function mergeSourceAggregates(completed, live) {
+  const merged = new Map();
+  for (const aggregate of [...(completed || []), ...(live || [])]) {
+    const key = `${aggregate.sourceKey}|${aggregate.channelKey}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...aggregate, buckets: (aggregate.buckets || []).slice(), series: aggregate.series });
+      continue;
+    }
+    const buckets = [...(existing.buckets || []), ...(aggregate.buckets || [])]
+      .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+    const byStart = new Map();
+    for (const bucket of buckets) byStart.set(bucket.bucketStart, bucket);
+    existing.buckets = Array.from(byStart.values()).sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+    if (aggregate.series && aggregate.series[aggregate.channelKey]) {
+      existing.series = {
+        ...(existing.series || {}),
+        [aggregate.channelKey]: {
+          ...(existing.series && existing.series[aggregate.channelKey] || {}),
+          points: [
+            ...((existing.series && existing.series[aggregate.channelKey] && existing.series[aggregate.channelKey].points) || []),
+            ...(aggregate.series[aggregate.channelKey].points || []),
+          ],
+        },
+      };
+    }
+  }
+  return Array.from(merged.values());
+}
+
+function unavailableSourceAggregates(sourceDevices, channels, cardType, eligibilityCardType) {
+  return (sourceDevices || []).flatMap((device) => {
+    const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+    if (!sourceKey) return [];
+    return (channels || [])
+      .filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType }))
+      .map((channel) => ({
+        sourceKey,
+        channelKey: channel.id,
+        unit: channel.unit || null,
+        aggregation: null,
+        source: 'device_data',
+        cardType: cardType || null,
+        series: { [channel.id]: { unit: channel.unit || null, points: [] } },
+        buckets: [],
+      }));
+  });
+}
+
+async function aggregatePooledRollupCompatibility(db, query, channels, aggregationInfo, logicalSourceKey, deveuis, start, end) {
+  const startMs = parseTime(start);
+  const endMs = parseTime(end);
+  if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateDeviceData requires a valid start/end range');
+  const todayStartMs = startOfLocalDayMs(query.nowMs ?? Date.now(), query.timezone || query.time_zone || 'UTC');
+  const splitMs = Math.min(Math.max(todayStartMs, startMs), endMs);
+  const rollupStartIso = new Date(startMs).toISOString();
+  const splitIso = new Date(splitMs).toISOString();
+  let rollupRows = [];
+  if (splitMs > startMs) {
+    const channelIds = channels.map((channel) => channel.id);
+    const channelPlaceholders = channelIds.map(() => '?').join(',');
+    const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${channelPlaceholders}) ORDER BY bucket_start ASC, channel_id ASC`;
+    rollupRows = await dbAll(db, sql, [query.zoneId ?? query.zone_id, query.cardType || query.card_type, logicalSourceKey, aggregationInfo.level, rollupStartIso, splitIso].concat(channelIds));
+  }
+  const completed = rollupRows.length
+    ? rollupRowsToResult(rollupRows, { ...query, aggregation: aggregationInfo.level, aggregationRequested: aggregationInfo.requested, logicalSourceKey }, channels)
+    : null;
+  let live = null;
+  if (splitMs < endMs && deveuis.length) {
+    const placeholders = deveuis.map(() => '?').join(',');
+    const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
+    const range = recordedAtRangeSql('recorded_at', splitIso, end);
+    const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC`;
+    const rows = await dbAll(db, `${sql} LIMIT ${RAW_HISTORY_MAX_ROWS + 1}`, deveuis.concat(range.params));
+    if (rows.length > RAW_HISTORY_MAX_ROWS) {
+      return {
+        aggregation: aggregationInfo.level,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregationInfo.level] || null,
+        source: 'device_data',
+        buckets: [],
+        availability: {
+          available: false,
+          reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+        },
+      };
+    }
+    live = aggregateRowsPooled(rows, { ...query, aggregation: aggregationInfo.level, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end });
+  }
+  if (!completed && !live) return null;
+  const buckets = [...(completed ? completed.buckets : []), ...(live ? live.buckets : [])]
+    .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+  return {
+    aggregation: aggregationInfo.level,
+    aggregationRequested: aggregationInfo.requested,
+    bucketSizeSeconds: BUCKET_SECONDS[aggregationInfo.level] || null,
+    source: completed && live ? 'rollups+live' : (completed ? 'history_channel_rollups' : 'device_data'),
+    coverageConfidence: (live && live.coverageConfidence) || (completed && completed.coverageConfidence) || 'unknown',
+    coveragePct: (live && live.coveragePct) ?? (completed && completed.coveragePct) ?? null,
+    buckets,
+  };
+}
+
 function firstDefinedValue(values) {
   for (const value of values) {
     if (value !== undefined && value !== null && value !== '') return value;
@@ -1697,7 +2405,15 @@ function queryDeviceEuis(query = {}) {
   return Array.from(new Set(values.map(normalizeSourceKey).map(normalizeDeveui).filter(Boolean)));
 }
 
-async function aggregateDeviceData(db, query = {}) {
+async function aggregateDeviceData(db, rawQuery = {}) {
+  // Only the interactive card route sets a point budget. On that path a
+  // source/channel pair counts, and gets a series, only when the device's
+  // type supports the channel for this card; a type with no family for the
+  // card keeps every card channel. Rollup maintenance, export, legacy and
+  // Analysis callers keep the card-wide channel list.
+  const interactiveBudget = [rawQuery.maxPointsPerSeries, rawQuery.max_points_per_series, rawQuery.maxPointsTotal, rawQuery.max_points_total]
+    .some((value) => { const number = toFiniteNumber(value); return number !== null && number > 0; });
+  let query = { ...rawQuery, eligibilityCardType: interactiveBudget ? firstDefinedValue([rawQuery.cardType, rawQuery.card_type]) : undefined };
   const aggregationInfo = resolveAggregation(query);
   const aggregation = aggregationInfo.level;
   const channels = normalizeQueryChannels(filterSoilChannelsForSources(query.channels, query.sourceDevices));
@@ -1713,60 +2429,273 @@ async function aggregateDeviceData(db, query = {}) {
   const deveuis = queryDeviceEuis(query);
   const sourceFilterFlag = query.sourceFilterActive ?? query.source_filter_active;
   const hasSourceFilter = sourceFilterFlag === true || sourceFilterFlag === 1 || String(sourceFilterFlag || '').toLowerCase() === 'true';
+  const hasExplicitSourceDevices = Object.prototype.hasOwnProperty.call(query, 'sourceDevices')
+    || Object.prototype.hasOwnProperty.call(query, 'source_devices');
+  const explicitSourceDevices = Array.isArray(query.sourceDevices)
+    ? query.sourceDevices
+    : (Array.isArray(query.source_devices) ? query.source_devices : []);
+  const sourceDevices = hasExplicitSourceDevices ? explicitSourceDevices : deveuis.map((deveui) => ({ deveui }));
+  // An explicit source list is authoritative for the device_data reads too:
+  // rows of other card devices must not consume the shared raw-row budget.
+  const readDeveuis = hasExplicitSourceDevices ? uniqueDeveuis(sourceDevices) : deveuis;
+  if (hasExplicitSourceDevices && sourceDevices.length === 0) {
+    const unavailable = aggregateRows([], {
+      ...query,
+      aggregation,
+      aggregationRequested: aggregationInfo.requested,
+      channels,
+      start,
+      end,
+      sourceDevices: [],
+      deveuis: [],
+      sourceKeys: [],
+      requestedSourceKeys: [],
+    });
+    return {
+      ...unavailable,
+      source: 'device_data',
+      availability: { available: false, reasons: ['no_authorized_sources'] },
+    };
+  }
+  const maxPointsPerSeries = toFiniteNumber(query.maxPointsPerSeries ?? query.max_points_per_series);
+  const maxPointsTotal = toFiniteNumber(query.maxPointsTotal ?? query.max_points_total);
+  let preflightBuckets = null;
+  if ((maxPointsPerSeries !== null && maxPointsPerSeries > 0) || (maxPointsTotal !== null && maxPointsTotal > 0)) {
+    if (aggregation === 'raw') {
+      // Raw responses are counted after SQL row limiting and source/time
+      // deduplication below; there is no bucket grid to preflight here.
+      preflightBuckets = null;
+    } else {
+      preflightBuckets = aggregateRowsPooled([], {
+        ...query,
+        aggregation,
+        channels: channels.length ? [channels[0]] : channels,
+        start,
+        end,
+        timezone: query.timezone || query.time_zone || 'UTC',
+        nowMs: query.nowMs,
+      }).buckets || [];
+    }
+  }
+  if (maxPointsPerSeries !== null && maxPointsPerSeries > 0 && aggregation !== 'raw') {
+    if ((preflightBuckets || []).length > maxPointsPerSeries) {
+      return {
+        aggregation,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+        source: 'device_data',
+        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType, query.eligibilityCardType),
+        sourceIdentityVersion: 2,
+        maxPointsTotal: maxPointsTotal !== null && maxPointsTotal > 0 ? maxPointsTotal : null,
+        coverageConfidence: 'unknown',
+        coveragePct: null,
+        buckets: [],
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
+  if (maxPointsTotal !== null && maxPointsTotal > 0 && aggregation !== 'raw') {
+    const eligibleSourceChannelCount = sourceDevices.reduce((count, device) => {
+      const sourceKey = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+      if (!sourceKey) return count;
+      return count + channels.filter((channel) => sourceSupportsChannel(sourceKey, channel, { sourceDevices: [device], eligibilityCardType: query.eligibilityCardType })).length;
+    }, 0);
+    const estimatedPointCount = (preflightBuckets || []).length * eligibleSourceChannelCount;
+    if (estimatedPointCount > maxPointsTotal) {
+      return {
+        aggregation,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
+        source: 'device_data',
+        sourceAggregates: unavailableSourceAggregates(sourceDevices, channels, cardType, query.eligibilityCardType),
+        sourceIdentityVersion: 2,
+        maxPointsTotal,
+        coverageConfidence: 'unknown',
+        coveragePct: null,
+        buckets: [],
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
   const shouldUseRollups =
-    !hasSourceFilter
+    (!hasSourceFilter || (hasExplicitSourceDevices && sourceDevices.length > 0))
     && (useRollups === true || (useRollups !== false && hasRollupIdentity && ['hourly', 'daily', 'weekly'].includes(aggregation)));
+  // Retained rollups are written in the zone timezone (runRollupJob). A
+  // caller that omits the timezone reads them in that same timezone, not UTC.
+  if (shouldUseRollups) query = { ...query, timezone: await resolveRollupTimezone(db, query, zoneId) };
+  if (shouldUseRollups && !hasExplicitSourceDevices && logicalSourceKey) {
+    const compatibility = await aggregatePooledRollupCompatibility(db, query, channels, aggregationInfo, logicalSourceKey, deveuis, start, end);
+    if (compatibility) return compatibility;
+  }
   if (shouldUseRollups) {
     const startMs = parseTime(start);
     const endMs = parseTime(end);
     if (startMs === null || endMs === null || endMs <= startMs) throw new Error('aggregateDeviceData requires a valid start/end range');
     const todayStartMs = startOfLocalDayMs(query.nowMs ?? Date.now(), query.timezone || query.time_zone || 'UTC');
     const splitMs = Math.min(Math.max(todayStartMs, startMs), endMs);
+    const rollupStartIso = new Date(startMs).toISOString();
     const splitIso = new Date(splitMs).toISOString();
-    const channelIds = channels.map((channel) => channel.id);
-    const placeholders = channelIds.map(() => '?').join(',');
+    const rollupDevices = sourceDevices;
+    const sourceLogicalKeys = rollupDevices
+      .map((device) => sourceLogicalKeyForDevice(cardType, device))
+      .filter(Boolean);
     let rollupRows = [];
-    if (splitMs > startMs) {
-      const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key = ? AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${placeholders}) ORDER BY bucket_start ASC, channel_id ASC`;
-      const params = [zoneId, cardType, logicalSourceKey, aggregation, start, splitIso].concat(channelIds);
-      rollupRows = await dbAll(db, sql, params);
+    if (splitMs > startMs && sourceLogicalKeys.length) {
+      const keyPlaceholders = sourceLogicalKeys.map(() => '?').join(',');
+      const channelIds = channels.map((channel) => channel.id);
+      const channelPlaceholders = channelIds.map(() => '?').join(',');
+      const sql = `SELECT * FROM history_channel_rollups WHERE zone_id = ? AND card_type = ? AND logical_source_key IN (${keyPlaceholders}) AND bucket_level = ? AND bucket_start >= ? AND bucket_start < ? AND channel_id IN (${channelPlaceholders}) ORDER BY logical_source_key ASC, bucket_start ASC, channel_id ASC`;
+      const params = [zoneId, cardType].concat(sourceLogicalKeys, [aggregation, rollupStartIso, splitIso], channelIds);
+      const requestSkeleton = aggregateRowsPooled([], {
+        aggregation,
+        channels: [channels[0]],
+        start,
+        end: splitIso,
+        timezone: query.timezone,
+        nowMs: query.nowMs,
+      }).buckets || [];
+      rollupRows = selectRetainedRollupRows(await dbAll(db, sql, params), requestSkeleton);
     }
-    const completed = rollupRowsToResult(rollupRows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested }, channels);
+    const completedSources = sourceRollupResults(
+      rollupRows,
+      { ...query, cardType, aggregation, aggregationRequested: aggregationInfo.requested },
+      channels,
+      rollupDevices
+    );
+    const recoveredResult = splitMs > startMs
+      ? await recoverMissingSourceRollupBuckets(
+        db,
+        { ...query, cardType, aggregation, aggregationRequested: aggregationInfo.requested },
+        rollupDevices,
+        channels,
+        rollupRows,
+        start,
+        splitIso,
+        aggregation
+      )
+      : { aggregates: [], rawRowsRead: 0, rawScanOverflow: false };
+    const recoveredSources = recoveredResult.aggregates;
     let live = null;
+    let liveOverflow = false;
     const hasTrailingWindow = splitMs < endMs;
-    if (hasTrailingWindow && deveuis.length > 0) {
-      const livePlaceholders = deveuis.map(() => '?').join(',');
+    if (hasTrailingWindow && readDeveuis.length > 0) {
+      const remainingRawBudget = Math.max(0, RAW_HISTORY_MAX_ROWS - recoveredResult.rawRowsRead);
+      const livePlaceholders = readDeveuis.map(() => '?').join(',');
       const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
       const range = recordedAtRangeSql('recorded_at', splitIso, end);
-      const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC`;
-      const rows = await dbAll(db, sql, deveuis.concat(range.params));
-      live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: query.sourceDevices });
+      if (remainingRawBudget === 0) {
+        liveOverflow = true;
+        live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+      } else {
+        const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${livePlaceholders}) AND ${range.sql} ORDER BY recorded_at ASC, id ASC LIMIT ${remainingRawBudget + 1}`;
+        const fetchedRows = await dbAll(db, sql, readDeveuis.concat(range.params));
+        const rows = fetchedRows.filter(recordedAtRangeFilter(splitIso, end));
+        if (fetchedRows.length > remainingRawBudget) {
+          liveOverflow = true;
+          live = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+        } else {
+          live = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start: splitIso, end, sourceDevices: rollupDevices });
+        }
+      }
     }
-    if (rollupRows.length || live) {
-      const buckets = (completed.buckets || []).concat(live && live.buckets || [])
-        .sort((left, right) => String(left.bucketStart).localeCompare(String(right.bucketStart)));
+    if (rollupRows.length || recoveredSources.length || live) {
+      const rawBudgetRejected = recoveredResult.rawScanOverflow || liveOverflow;
+      const sourceAggregates = rawBudgetRejected
+        ? unavailableSourceAggregates(rollupDevices, channels, cardType, query.eligibilityCardType)
+        : mergeSourceAggregates(
+          [...completedSources, ...recoveredSources],
+          live && live.sourceAggregates
+        );
+      const buckets = sourceAggregates.flatMap((source) => source.buckets || []);
       const coverageValues = buckets.map((bucket) => toFiniteNumber(bucket.coveragePct)).filter((value) => value !== null);
       const coverageConfidence = buckets.some((bucket) => bucket.coverageConfidence === 'unknown')
         ? 'unknown'
         : (buckets.some((bucket) => bucket.coverageConfidence === 'derived') ? 'derived' : (buckets.length ? 'configured' : 'unknown'));
       return {
-        ...completed,
+        aggregation,
+        aggregationRequested: aggregationInfo.requested,
+        bucketSizeSeconds: BUCKET_SECONDS[aggregation] || null,
         source: rollupRows.length && live ? 'rollups+live' : (rollupRows.length ? 'history_channel_rollups' : 'device_data'),
+        sourceAggregates,
+        sourceIdentityVersion: 2,
+        sourceCadences: live && live.sourceCadences || {},
         coverageConfidence,
         coveragePct: coverageValues.length ? roundTo(coverageValues.reduce((sum, value) => sum + value, 0) / coverageValues.length) : null,
         buckets,
+        ...(rawBudgetRejected ? {
+          availability: {
+            available: false,
+            reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+          },
+        } : {}),
       };
     }
   }
 
-  if (deveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
-  const placeholders = deveuis.map(() => '?').join(',');
+  if (readDeveuis.length === 0) throw new Error('aggregateDeviceData requires at least one DevEUI');
+  const placeholders = readDeveuis.map(() => '?').join(',');
   const selectedFields = Array.from(new Set(channels.flatMap(channelFieldNames)));
   const range = recordedAtRangeSql('recorded_at', start, end, { endInclusive: true });
-  const sql = `SELECT deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC`;
-  const params = deveuis.concat(range.params);
+  // The interactive card route and legacy history opt in to the raw-row
+  // sentinel, so a long-range request becomes an actionable 'unavailable'
+  // answer instead of an unbounded device_data scan. Export and rollup
+  // maintenance keep reading every row of their bounded windows.
+  const rawRowLimit = query.rawRowLimit === true;
+  const rawLimitSql = rawRowLimit ? ` LIMIT ${RAW_HISTORY_MAX_ROWS + 1}` : '';
+  const sql = `SELECT id, deveui, recorded_at, ${selectedFields.join(', ')} FROM device_data WHERE deveui IN (${placeholders}) AND ${range.sql} ORDER BY deveui ASC, recorded_at ASC, id ASC${rawLimitSql}`;
+  const params = readDeveuis.concat(range.params);
   const rows = await dbAll(db, sql, params);
-  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices: query.sourceDevices });
+  if (rawRowLimit && rows.length > RAW_HISTORY_MAX_ROWS) {
+    const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
+    return {
+      ...unavailable,
+      source: 'device_data',
+      availability: {
+        available: false,
+        reasons: ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'],
+      },
+    };
+  }
+  if (aggregation === 'raw' && maxPointsPerSeries !== null && maxPointsPerSeries > 0) {
+    const partitions = sourcePartitions(rows, channels, { ...query, sourceDevices, sourceKeys: deveuis, start, end });
+    const pointBudgetExceeded = Array.from(partitions.values()).some((partition) =>
+      partition.entries.filter((entry) => channelValue(entry.row, partition.channel) !== null).length > maxPointsPerSeries
+    );
+    if (pointBudgetExceeded) {
+      const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
+      return {
+        ...unavailable,
+        source: 'device_data',
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
+  if (aggregation === 'raw' && maxPointsTotal !== null && maxPointsTotal > 0) {
+    const partitions = sourcePartitions(rows, channels, { ...query, sourceDevices, sourceKeys: deveuis, start, end });
+    const validPointCount = Array.from(partitions.values()).reduce((count, partition) => count + partition.entries.filter((entry) => channelValue(entry.row, partition.channel) !== null).length, 0);
+    if (validPointCount > maxPointsTotal) {
+      const unavailable = aggregateRows([], { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
+      return {
+        ...unavailable,
+        source: 'device_data',
+        maxPointsTotal,
+        availability: {
+          available: false,
+          reasons: ['point_budget_exceeded', 'select_fewer_sources_or_coarser_aggregation'],
+        },
+      };
+    }
+  }
+  const result = aggregateRows(rows, { ...query, aggregation, aggregationRequested: aggregationInfo.requested, channels, start, end, sourceDevices });
   if (shouldUseRollups) result.source = 'device_data_fallback';
   return result;
 }
@@ -1780,6 +2709,21 @@ function legacyFieldExpression(field) {
   const normalized = String(field || '').trim();
   if (!LEGACY_SENSOR_HISTORY_FIELDS.has(normalized)) return null;
   return LEGACY_FIELD_EXPRESSIONS[normalized] || `dd.${normalized}`;
+}
+
+function dedupeLegacyHistoryRows(rows) {
+  const byTimestamp = new Map();
+  for (const row of rows || []) {
+    const timestamp = canonicalRecordedAt(row && row.recorded_at);
+    if (!timestamp) continue;
+    const existing = byTimestamp.get(timestamp);
+    const rowId = toFiniteNumber(row && row.id);
+    const existingId = toFiniteNumber(existing && existing.id);
+    if (!existing || (rowId !== null && (existingId === null || rowId >= existingId))) {
+      byTimestamp.set(timestamp, { ...row, recorded_at: timestamp });
+    }
+  }
+  return Array.from(byTimestamp.values()).sort((left, right) => String(left.recorded_at).localeCompare(String(right.recorded_at)));
 }
 
 function optionalUserFilter(options = {}, alias = 'd') {
@@ -1839,6 +2783,9 @@ async function resolveDeviceFieldRollupKey(db, deveui, field, options = {}) {
       channel,
       channels: [channel],
       deveuis: sourceDeveuis,
+      // The zone row carries the LSN50 watermark annotation; the joined
+      // lookup row above does not.
+      device: sourceDevices.find((candidate) => normalizeDeveui(candidate && candidate.deveui) === normalizedDeveui) || device,
       timezone: zone.timezone || 'UTC',
     };
   }
@@ -1862,17 +2809,21 @@ async function rawLegacySensorHistory(db, options = {}) {
   const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
   const range = recordedAtRangeSql('dd.recorded_at', start, end);
   const rows = await dbAll(db, `
-    SELECT dd.recorded_at, ${expression} AS value
+    SELECT dd.id, dd.recorded_at, ${expression} AS value
     FROM device_data dd
     JOIN devices dv ON dv.deveui = dd.deveui
     WHERE dd.deveui = ?
       ${ownerFilter.sql}
-      AND ${expression} IS NOT NULL
       AND ${range.sql}
-    ORDER BY dd.recorded_at ASC
+    ORDER BY dd.recorded_at ASC, dd.id ASC
     LIMIT ?
-  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit]));
-  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit + 1]));
+  if (rows.length > limit) throw legacyRawLimitError();
+  // Deduplicate first so a newer invalid row still hides an older valid one
+  // at the same timestamp, then drop missing values as the aggregated
+  // legacy path (flattenLegacyAggregate) does.
+  return dedupeLegacyHistoryRows(rows.filter(recordedAtRangeFilter(start, end)))
+    .filter((row) => toFiniteNumber(row.value) !== null)
     .map((row) => ({ t: canonicalRecordedAt(row.recorded_at), value: toFiniteNumber(row.value) }));
 }
 
@@ -1921,6 +2872,15 @@ function dendroHistoryRow(row) {
   };
 }
 
+function legacyRawLimitError() {
+  const error = new Error('History raw row limit exceeded; select a shorter interval or fewer sources');
+  error.statusCode = 413;
+  error.code = 'HISTORY_RAW_LIMIT_EXCEEDED';
+  error.reason = 'raw_read_limit_exceeded';
+  error.reasons = ['raw_read_limit_exceeded', 'select_fewer_sources_or_shorter_interval'];
+  return error;
+}
+
 async function rawLegacyDendroHistory(db, options = {}) {
   const normalizedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   if (!normalizedDeveui) return [];
@@ -1929,8 +2889,10 @@ async function rawLegacyDendroHistory(db, options = {}) {
   if (!start || !end) throw new Error('rawLegacyDendroHistory requires start and end');
   const ownerFilter = optionalUserFilter(options, 'dv');
   const range = recordedAtRangeSql('dd.recorded_at', start, end);
+  const limit = Math.max(1, Math.min(30000, Math.round(toFiniteNumber(options.limit) || 30000)));
   const rows = await dbAll(db, `
     SELECT
+      dd.id,
       dd.recorded_at,
       dd.dendro_position_raw_mm,
       dd.dendro_position_mm,
@@ -1949,11 +2911,12 @@ async function rawLegacyDendroHistory(db, options = {}) {
       ${ownerFilter.sql}
       AND ${range.sql}
       AND (dd.dendro_position_mm IS NOT NULL OR dd.adc_ch0v IS NOT NULL OR dd.adc_ch1v IS NOT NULL OR dd.dendro_ratio IS NOT NULL)
-    ORDER BY dd.recorded_at ASC
-    LIMIT 30000
-  `, [normalizedDeveui].concat(ownerFilter.params, range.params));
-  return sortByRecordedAt(rows.filter(recordedAtRangeFilter(start, end)))
-    .map((row) => dendroHistoryRow({ ...row, recorded_at: canonicalRecordedAt(row.recorded_at) }));
+    ORDER BY dd.recorded_at ASC, dd.id ASC
+    LIMIT ?
+  `, [normalizedDeveui].concat(ownerFilter.params, range.params, [limit + 1]));
+  if (rows.length > limit) throw legacyRawLimitError();
+  return dedupeLegacyHistoryRows(rows.filter(recordedAtRangeFilter(start, end)))
+    .map((row) => dendroHistoryRow(row));
 }
 
 function mergeDendroAggregateField(byTime, field, points) {
@@ -2017,18 +2980,26 @@ async function legacySensorHistory(db, options = {}) {
   const key = await resolveDeviceFieldRollupKey(db, options.deveui || options.deviceEui || options.device_eui, field, options);
   if (!key) return rawLegacySensorHistory(db, scopedOptions);
   const aggregation = legacyAggregationForHours(hours);
+  const requestedDeveui = normalizeDeveui(options.deveui || options.deviceEui || options.device_eui);
   const result = await aggregateDeviceData(db, {
     zoneId: key.zoneId,
     cardType: key.cardType,
     logicalSourceKey: key.logicalSourceKey,
-    device_euis: key.deveuis,
+    device_euis: [requestedDeveui],
     start,
     end,
     aggregation,
     channels: key.channels,
+    sourceDevices: [key.device || { deveui: requestedDeveui }],
+    rawRowLimit: true,
     timezone: key.timezone,
     nowMs: endMs,
   });
+  if (result && result.availability && result.availability.available === false) {
+    const error = legacyRawLimitError();
+    error.reasons = result.availability.reasons || error.reasons;
+    throw error;
+  }
   return flattenLegacyAggregate(result, key.channelId);
 }
 
@@ -2640,6 +3611,11 @@ async function aggregateZoneExportRows(db, scope) {
           nowMs: scope.nowMs,
           useRollups: deviceTypeId(device) === 'AQUASCOPE_LORAIN' ? false : undefined,
         });
+        // csvRowsFromAggregate reads buckets only; an unavailable window
+        // would otherwise drop the month from the CSV without an error.
+        if (aggregate && aggregate.availability && aggregate.availability.available === false) {
+          throw exportWindowUnavailable(aggregate.availability.reasons);
+        }
         for (const csvRow of csvRowsFromAggregate(aggregate, card, device, sourceName, channels, arrayIdByDeveui[deveui] || null, {
           site: scope.site,
           zone: zoneName,
@@ -2678,6 +3654,15 @@ function exportTooLarge(maxRows) {
   const error = new Error(`export exceeds ${maxRows} rows`);
   error.code = 'EXPORT_TOO_LARGE';
   error.statusCode = 413;
+  error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
+  return error;
+}
+
+function exportWindowUnavailable(reasons) {
+  const error = new Error('export window could not be aggregated');
+  error.code = 'EXPORT_TOO_LARGE';
+  error.statusCode = 413;
+  error.reasons = Array.isArray(reasons) ? reasons.slice() : [];
   error.suggestion = 'choose a shorter range, a coarser granularity, or fewer channels';
   return error;
 }
@@ -2826,6 +3811,9 @@ async function runRollupJob(db, options = {}) {
     ? options.levels.filter((level) => Object.prototype.hasOwnProperty.call(ROLLUP_WINDOWS, level))
     : ['hourly', 'daily', 'weekly'];
   const zones = await dbAll(db, 'SELECT id, name, zone_uuid, timezone FROM irrigation_zones WHERE deleted_at IS NULL', []);
+  // options.rollupStats, when given, counts device_data reads and per-source
+  // row passes so tests can pin the cost without timing it.
+  const rollupStats = options.rollupStats && typeof options.rollupStats === 'object' ? options.rollupStats : null;
   let cardsProcessed = 0;
   let bucketsUpserted = 0;
   let csvZonesWritten = 0;
@@ -2851,9 +3839,33 @@ async function runRollupJob(db, options = {}) {
           sourceDevices,
           timezone: zone.timezone || 'UTC',
         };
+        // Keep the historical pooled rows for maintenance and analysis, and
+        // write a source-keyed copy for the card API.  The two namespaces are
+        // deliberately separate: a pooled row can never be relabelled as a
+        // physical sensor measurement on read. Each level reads the card's
+        // rows once; the source scopes take their rows from that read.
+        const sourceScopes = [];
+        for (const device of sourceDevices) {
+          const deveui = normalizeDeveui(device && (device.deveui || device.device_eui || device.deviceEui));
+          const sourceLogicalKey = sourceKeyForCsv(card, device);
+          if (!deveui || !sourceLogicalKey) continue;
+          sourceScopes.push({ ...scope, logicalSourceKey: sourceLogicalKey, deveuis: [deveui], sourceDevices: [device] });
+        }
         for (const level of levels) {
-          const rows = await computeRollupBuckets(db, scope, level, ROLLUP_WINDOWS[level], nowMs);
-          bucketsUpserted += await upsertRollups(db, rows);
+          const cardWindow = rollupWindow(scope, level, ROLLUP_WINDOWS[level], nowMs);
+          let cardRows = [];
+          if (cardWindow) {
+            cardRows = await readRollupRows(db, cardWindow, rollupStats);
+            bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(scope, cardWindow, cardRows, rollupStats));
+          }
+          for (const sourceScope of sourceScopes) {
+            const window = rollupWindow(sourceScope, level, ROLLUP_WINDOWS[level], nowMs);
+            if (!window) continue;
+            let rows = rowsFromCardRead(window, cardWindow, cardRows);
+            if (!rows) rows = await readRollupRows(db, window, rollupStats);
+            bucketsUpserted += await upsertRollups(db, rollupRowsForWindow(sourceScope, window, rows, rollupStats));
+          }
+          cardRows = null;
         }
       }
       if (exportDir) {
@@ -3485,6 +4497,7 @@ module.exports = {
   analysisSeriesId: analysis.analysisSeriesId,
   buildAnalysisCatalog: analysis.buildAnalysisCatalog,
   deviceSourceId,
+  sourceKeyForCsv,
   describeDeviceSource,
   listAnalysisViews: analysis.listAnalysisViews,
   resolveAnalysisSeries: analysis.resolveAnalysisSeries,
@@ -3533,6 +4546,7 @@ module.exports = {
   annotateWatermarkEvidence,
   isLsn50Swt3Eligible,
   aggregateDeviceData,
+  normalizeTimezone,
   buildAdvancedMetadataPlaceholder,
   buildAdvancedDiagnostics,
   buildCalendar,

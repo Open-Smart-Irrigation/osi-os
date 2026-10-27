@@ -97,6 +97,12 @@
       "issue": 384
     },
     {
+      "path": "docs/contracts/history-source-v2/identity-vectors.json",
+      "max": 2,
+      "reason": "Synthetic identity contract vector tests hyphen-separated and canonical DevEUI forms; mirrored into osi-server, with no deployment identity.",
+      "issue": 384
+    },
+    {
       "path": "docs/contracts/journal-catalog/journal-catalog.json",
       "max": 1830,
       "reason": "contract fixture or schema mirrored into osi-server; changed by the code package",
