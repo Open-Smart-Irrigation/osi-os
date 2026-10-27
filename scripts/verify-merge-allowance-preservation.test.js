@@ -127,6 +127,17 @@ test('rejects an accidentally lost right-parent entry', (t) => {
   assert.match(run.output, /right node_allowances right_only/);
 });
 
+test('rejects a lost right-parent total_allowance change', (t) => {
+  const left = allowance({ totalDelta: 10 });
+  const right = allowance({ totalDelta: 25 });
+  const fixture = withRepo(t, { left, right, result: left });
+  const run = invoke(fixture);
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /unmatched right total_allowance total_allowance/);
+  assert.match(run.output, /"delta":25/);
+  assert.match(run.output, /result=.*"delta":10/);
+});
+
 test('requires exact measured dispositions for deletion and reduction', (t) => {
   const parent = allowance({
     nodes: { obsolete: { delta: 8, reason: 'old measured exemption' } },
@@ -199,6 +210,32 @@ test('binds receipts to both parent SHAs and the raw result-file digest', (t) =>
   const digestRun = invoke(fixture, ['--dispositions', digestPath]);
   assert.notEqual(digestRun.status, 0);
   assert.match(digestRun.output, /resultSha256|digest|hash/i);
+});
+
+test('rejects a disposition receipt bound to the wrong right-parent SHA', (t) => {
+  const parent = allowance({ nodes: { obsolete: { delta: 8, reason: 'old' } } });
+  const fixture = withRepo(t, { left: parent, right: parent, result: allowance() });
+  const decisions = [
+    decision('left', 'node_allowances', 'obsolete'),
+    decision('right', 'node_allowances', 'obsolete'),
+  ];
+  const wrongRight = receipt(fixture, decisions);
+  wrongRight.right = '0'.repeat(40);
+  const run = invoke(fixture, ['--dispositions', writeReceipt(fixture, wrongRight)]);
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /dispositions right SHA does not match/);
+});
+
+test('rejects a disposition with a blank decision reason', (t) => {
+  const parent = allowance({ nodes: { obsolete: { delta: 8, reason: 'old' } } });
+  const fixture = withRepo(t, { left: parent, right: parent, result: allowance() });
+  const decisions = [
+    decision('left', 'node_allowances', 'obsolete', '   '),
+    decision('right', 'node_allowances', 'obsolete'),
+  ];
+  const run = invoke(fixture, ['--dispositions', writeReceipt(fixture, receipt(fixture, decisions))]);
+  assert.notEqual(run.status, 0);
+  assert.match(run.output, /decision 1 needs a nonempty reason/);
 });
 
 test('rejects duplicate, stale, extra, and malformed disposition decisions', (t) => {
