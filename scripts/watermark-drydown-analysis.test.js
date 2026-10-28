@@ -447,3 +447,132 @@ test("CLI rejects stale or symlinked output paths before writing", () => {
 test("CLI reports output failures as exit 1", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-output-failure-")); const files = { readings: path.join(dir, "readings.csv"), calibration: path.join(dir, "calibration.json"), metadata: path.join(dir, "metadata.json"), before: path.join(dir, "before.csv"), after: path.join(dir, "after.csv"), references: path.join(dir, "references.csv") }; const resistorColumns = ["resistor_id", "nominal_band", "channel", "repeat", "meter_ohm", "fwd_early", "fwd_late", "rev_early", "rev_late", "supply_mv"]; fs.writeFileSync(files.readings, csv([reading()])); fs.writeFileSync(files.calibration, JSON.stringify(calibrationWithProvenance())); fs.writeFileSync(files.metadata, JSON.stringify(runMetadata())); fs.writeFileSync(files.before, csv(completeResistorMatrix({ phase: "before" }), resistorColumns)); fs.writeFileSync(files.after, csv(completeResistorMatrix({ phase: "after" }), resistorColumns)); fs.writeFileSync(files.references, "reference_id,recorded_at,reference_c\n"); const parentFile = path.join(dir, "parent"); fs.writeFileSync(parentFile, "not-a-directory"); const output = path.join(parentFile, "nested"); const result = cp.spawnSync(process.execPath, [path.join(__dirname, "watermark-drydown-analysis.js"), "--readings", files.readings, "--calibration", files.calibration, "--run-metadata", files.metadata, "--resistors-before", files.before, "--resistors-after", files.after, "--reference-temperature", files.references, "--interval-min", "5", "--out", output], { encoding: "utf8" }); assert.equal(result.status, 1); fs.rmSync(dir, { recursive: true, force: true });
 });
+
+
+function cliInputFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-input-boundary-"));
+  const files = {
+    readings: path.join(dir, "readings.csv"), calibration: path.join(dir, "calibration.json"), metadata: path.join(dir, "metadata.json"),
+    before: path.join(dir, "before.csv"), after: path.join(dir, "after.csv"), references: path.join(dir, "references.csv"),
+  };
+  const columns = ["resistor_id", "nominal_band", "channel", "repeat", "meter_ohm", "fwd_early", "fwd_late", "rev_early", "rev_late", "supply_mv"];
+  fs.writeFileSync(files.readings, csv([reading()]));
+  fs.writeFileSync(files.calibration, JSON.stringify(calibrationWithProvenance()));
+  fs.writeFileSync(files.metadata, JSON.stringify(runMetadata()));
+  fs.writeFileSync(files.before, csv(completeResistorMatrix({ phase: "before" }), columns));
+  fs.writeFileSync(files.after, csv(completeResistorMatrix({ phase: "after" }), columns));
+  fs.writeFileSync(files.references, "reference_id,recorded_at,reference_c\n");
+  return { dir, files, args: ["--readings", files.readings, "--calibration", files.calibration, "--run-metadata", files.metadata, "--resistors-before", files.before, "--resistors-after", files.after, "--reference-temperature", files.references, "--interval-min", "5", "--out"] };
+}
+
+function runCliArgs(args) {
+  return cp.spawnSync(process.execPath, [path.join(__dirname, "watermark-drydown-analysis.js"), ...args], { encoding: "utf8" });
+}
+
+function assertInputError(error, field) {
+  assert.equal(error?.name, "InputError");
+  assert.equal(error?.code, "INPUT");
+  assert.match(error.message, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+}
+
+test("calibration JSON rejects coercible nonnumeric values before output", () => {
+  const fixture = cliInputFixture();
+  try {
+    for (const [field, value] of [["series_fwd_1_ohm", true], ["series_rev_1_ohm", []], ["sync_version", [1]]]) {
+      const invalid = calibrationWithProvenance({ [field]: value });
+      fs.writeFileSync(fixture.files.calibration, JSON.stringify(invalid));
+      const out = path.join(fixture.dir, `bad-${field}`);
+      const result = runCliArgs([...fixture.args, out]);
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, new RegExp(field));
+      assert.equal(fs.existsSync(out), false);
+    }
+    for (const [field, value] of [["pullup_1_ohm", []], ["series_fwd_1_ohm", "130"]]) {
+      let error;
+      try { analyzeFixture({ calibration: calibrationWithProvenance({ [field]: value }) }); } catch (caught) { error = caught; }
+      assertInputError(error, field);
+    }
+    fs.writeFileSync(fixture.files.calibration, JSON.stringify(calibrationWithProvenance()));
+    const out = path.join(fixture.dir, "valid-numbers");
+    const result = runCliArgs([...fixture.args.slice(0, -3), "--interval-min", "5e0", "--out", out]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(fs.existsSync(path.join(out, "summary.json")));
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("structured numeric rows reject coercible arrays and strings", () => {
+  const cases = [
+    ["before.row1.meter_ohm", (before) => { before[0].meter_ohm = [2200]; }],
+    ["before.row1.fwd_early", (before) => { before[0].fwd_early = [1]; }],
+    ["reference_c", (_before, references) => { references.push({ reference_id: "ref-bad", recorded_at: atMinutes(1), reference_c: true }); }],
+  ];
+  for (const [field, mutate] of cases) {
+    const before = completeResistorMatrix({ phase: "before" }); const references = [];
+    mutate(before, references);
+    let error;
+    try { analyzeFixture({ before, references }); } catch (caught) { error = caught; }
+    assertInputError(error, field);
+  }
+  const structured = completeResistorMatrix({ phase: "before" }); structured[0].channel = "1";
+  let integerError;
+  try { analyzeFixture({ before: structured }); } catch (caught) { integerError = caught; }
+  assertInputError(integerError, "before.row1.channel");
+
+  const columns = ["resistor_id", "nominal_band", "channel", "repeat", "meter_ohm", "fwd_early", "fwd_late", "rev_early", "rev_late", "supply_mv"];
+  const csvRows = completeResistorMatrix({ phase: "before" });
+  const csvInput = csvRows.map((row) => ({ ...row, meter_ohm: String(row.meter_ohm) }));
+  csvInput[0].meter_ohm = "2.2e3";
+  csvInput[1].meter_ohm = "2200.0";
+  assert.equal(analyzeFixture({ before: csv(csvInput, columns), after: csv(completeResistorMatrix({ phase: "after" }), columns) }).criteria.P1.verdict, "pass");
+  const refCsv = "reference_id,recorded_at,reference_c\nref,2026-10-01T00:01:00.000Z,2.4e1\n";
+  assert.equal(analyzeFixture({ readings: [reading()], references: refCsv }).criteria.P6.verdict, "pass");
+  const parsedIntegerCsv = analyzer.parseCsv("channel\n1\n", ["channel"]);
+  assert.equal(parsedIntegerCsv[0].channel, "1");
+  assert.throws(() => analyzeFixture({ before: completeResistorMatrix({ phase: "before" }).map((row, i) => i === 0 ? { ...row, channel: [1] } : row) }), /before\.row1\.channel/);
+});
+
+test("CLI rejects unknown duplicate and valueless flags before artifacts", () => {
+  const fixture = cliInputFixture();
+  try {
+    const cases = [
+      ["unknown", [...fixture.args, path.join(fixture.dir, "unknown-out"), "--mystery", "value"], "unknown CLI option"],
+      ["duplicate", [...fixture.args, path.join(fixture.dir, "duplicate-out"), "--interval-min", "6"], "duplicate CLI option"],
+      ["missing", fixture.args, "missing value"],
+      ["positional", [...fixture.args, path.join(fixture.dir, "positional-out"), "extra"], "positional"],
+    ];
+    for (const [name, args, expected] of cases) {
+      const result = runCliArgs(args);
+      assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, new RegExp(expected));
+      assert.equal(fs.existsSync(path.join(fixture.dir, `${name}-out`)), false);
+    }
+    const nextFlagOut = path.join(fixture.dir, "next-flag-out");
+    const nextFlag = runCliArgs([...fixture.args.slice(0, -3), "--interval-min", "--out", nextFlagOut]);
+    assert.equal(nextFlag.status, 2, nextFlag.stderr);
+    assert.equal(nextFlag.stdout, "");
+    assert.match(nextFlag.stderr, /missing value/);
+    assert.equal(fs.existsSync(nextFlagOut), false);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("unterminated quote is rejected before empty CSV", () => {
+  let error;
+  try { analyzer.parseCsv('"', ["id"]); } catch (caught) { error = caught; }
+  assertInputError(error, "unterminated CSV quote");
+  assert.deepEqual(analyzer.parseCsv("", ["id"]), []);
+  assert.deepEqual(analyzer.parseCsv("id\n", ["id"]), []);
+  assert.deepEqual(analyzer.parseCsv('id,note\n1,"a,b"\n2,"a""b"\n'), [{ id: "1", note: "a,b" }, { id: "2", note: 'a"b' }]);
+
+  const fixture = cliInputFixture();
+  try {
+    fs.writeFileSync(fixture.files.readings, '"');
+    const out = path.join(fixture.dir, "quote-out");
+    const result = runCliArgs([...fixture.args, out]);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /unterminated CSV quote/);
+    assert.equal(fs.existsSync(out), false);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
