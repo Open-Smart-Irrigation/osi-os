@@ -237,6 +237,7 @@ and from the table above in the same change.
 | Keys | Reason |
 |---|---|
 | `analysis.export.allZonesCsvBusy`, `analysis.export.errors.tooLarge`, `busy`, `invalidRange`, `failed`; `analysis.views.confirmDelete` (6 keys in `common.json`) | Added with the analysis page's all-zones CSV export (its busy label and the messages for a refused or failed export) and the confirmation before a saved view is deleted. No human Luganda pass yet, so `lg` ships the English source text. de-CH/es/fr/it/pt were translated in the same change. |
+| `analysis.export.allZonesCsv` | Restored in PR #422; available history does not establish a human Luganda author or speaker confirmation (#440). Ships the English source "Export all zones CSV" pending a human Luganda pass. Remove this row and its entry in the all-zones export test's `PENDING_HUMAN_LUGANDA` set together when a human supplies or confirms the translation. |
 
 Tracked in code at `web/react-gui/tests/analysis-locales.test.ts`
 (`PENDING_HUMAN_LUGANDA` in the all-zones export test), which asserts each

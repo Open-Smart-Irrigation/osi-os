@@ -67,6 +67,7 @@ test('the weather data view keys resolve in all seven locales with matching plac
 
 test('the all-zones export messages and the saved-view delete confirmation resolve in all seven locales', () => {
   const keys = [
+    'export.allZonesCsv',
     'export.allZonesCsvBusy',
     'export.errors.tooLarge',
     'export.errors.busy',
