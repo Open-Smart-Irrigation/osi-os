@@ -8,6 +8,7 @@ const { DatabaseSync } = require('node:sqlite');
 // The router takes a Database constructor; hand it one backed by node:sqlite.
 function TestDatabase(dbPath) { return facade(new DatabaseSync(dbPath)); }
 const store = require('./store');
+const conflict422Fixture = require('../../../../../../../web/react-gui/src/components/farming/valves/__tests__/fixtures/planConflict422.json');
 
 const SECRET = 'test-secret';
 function token(userId) {
@@ -87,6 +88,44 @@ test('POST schedule creates, compiles, queues pushes and exposes mqtt messages; 
   assert.equal(list.payload.schedules.length, 1);
   assert.equal(list.payload.compiled.days[0].length, 1);
   assert.equal(list.payload.push_state.length, 7);
+});
+
+
+test('POST returns Monday overlap and Tuesday overflow together without persisting the candidate', async () => {
+  const { path, db } = await tempDb();
+  const eui = '0016C001F1000001';
+  const stored = [
+    { schedule_uuid: 'monday', label: '<img src=x onerror=alert(1)>', weekdays_mask: 2, start_time: '06:00', duration_minutes: 30 },
+    { schedule_uuid: 't1', label: 'First', weekdays_mask: 4, start_time: '01:00', duration_minutes: 10 },
+    { schedule_uuid: 't2', label: null, weekdays_mask: 4, start_time: '02:00', duration_minutes: 10 },
+    { schedule_uuid: 't3', label: null, weekdays_mask: 4, start_time: '03:00', duration_minutes: 10 },
+    { schedule_uuid: 't4', label: null, weekdays_mask: 4, start_time: '04:00', duration_minutes: 10 },
+  ];
+  for (const row of stored) {
+    await store.insertSchedule(db, {
+      ...row, device_eui: eui, kind: 'WEEKLY', timezone: 'UTC', enabled: 1,
+    });
+  }
+  const before = await db.all('SELECT schedule_uuid, label, weekdays_mask, start_time, duration_minutes FROM valve_schedules WHERE device_eui=? ORDER BY schedule_uuid', [eui]);
+  const out = await call(path, req('POST', '/api/valves/' + eui + '/schedules', {
+    kind: 'WEEKLY', label: 'Proposed', weekdays_mask: 6,
+    start_time: '06:10', duration_minutes: 10, enabled: true,
+  }));
+  assert.equal(out.statusCode, 422);
+  const known = new Set(stored.map((row) => row.schedule_uuid));
+  const candidateIds = [...new Set(out.payload.details.flatMap((detail) => detail.conflicts).filter((uuid) => !known.has(uuid)))];
+  assert.equal(candidateIds.length, 1, 'only the rejected generated UUID may differ from the shared fixture');
+  const normalized = {
+    error: out.payload.error,
+    details: out.payload.details.map((detail) => ({
+      ...detail,
+      conflicts: detail.conflicts.map((uuid) => uuid === candidateIds[0] ? '__candidate__' : uuid),
+    })),
+  };
+  assert.deepEqual(normalized, conflict422Fixture);
+  const after = await db.all('SELECT schedule_uuid, label, weekdays_mask, start_time, duration_minutes FROM valve_schedules WHERE device_eui=? ORDER BY schedule_uuid', [eui]);
+  assert.deepEqual(after, before, 'the rejected candidate must not change any stored schedule');
+  db.close();
 });
 
 test('POST schedule that overflows 4 windows -> 422 with weekday, conflicts and labels', async () => {
