@@ -26,7 +26,7 @@ const { spawn } = require('node:child_process');
 
 const GLOB_CHARS = /[*?[\]{}]/;
 
-const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--test-shard|--check|-c)(?=$|[\s="'])/;
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test[-_]name[-_]pattern|--test[-_]skip[-_]pattern|--test[-_]only|--test[-_]shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
   if (value === undefined || value === null || String(value) === '') return null;
@@ -83,6 +83,11 @@ function tapSummary(lines, files) {
   return { empty, counts };
 }
 
+function zeroCollectionError(counts, files) {
+  return files.length > 0 && counts.tests === 0
+    ? 'node --test collected zero tests for listed files' : null;
+}
+
 function main(args, cwd) {
   const errors = checkTestFiles(args, cwd);
   if (errors.length) {
@@ -131,6 +136,9 @@ function main(args, cwd) {
       if (counts.tests === undefined) {
         console.error('run-module-tests: node --test printed no summary');
         status = status || 1;
+      } else if (zeroCollectionError(counts, args)) {
+        console.error(`run-module-tests: ${zeroCollectionError(counts, args)}`);
+        status = status || 1;
       } else if (counts.tests > 0 && (counts.skipped || 0) + (counts.todo || 0) >= counts.tests) {
         console.error('run-module-tests: every test was skipped');
         status = status || 1;
@@ -142,4 +150,4 @@ function main(args, cwd) {
 
 if (require.main === module) main(process.argv.slice(2), process.cwd()).then((code) => process.exit(code));
 
-module.exports = { checkTestFiles, tapSummary, main };
+module.exports = { checkTestFiles, tapSummary, zeroCollectionError, main };

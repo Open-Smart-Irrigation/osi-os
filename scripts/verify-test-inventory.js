@@ -569,7 +569,7 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
-const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--test-shard|--check|-c)(?=$|[\s="'])/;
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test[-_]name[-_]pattern|--test[-_]skip[-_]pattern|--test[-_]only|--test[-_]shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
   if (value === undefined || value === null || String(value) === '') return null;

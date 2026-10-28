@@ -440,6 +440,7 @@ function inventoryCli(root) {
 
 const MARKER_TEST = "require('node:test')('passes', () => require('node:fs').writeFileSync(process.env.MARKER, 'ran'));\n";
 const FAIL_MARKER_TEST = "require('node:test')('fails', () => { require('node:fs').writeFileSync(process.env.MARKER, 'ran'); throw new Error('boom'); });\n";
+const FAIL_MARKER_PASSES = "require('node:test')('passes', () => { require('node:fs').writeFileSync(process.env.MARKER, 'ran'); throw new Error('boom'); });\n";
 
 function bashStep(root, run, inherited = {}) {
   const marker = path.join(root, 'marker');
@@ -471,13 +472,13 @@ function assertRun(root, label) {
   assert.equal(cli.status, 0, `${label}: CLI status ${cli.status}; stdout=${cli.stdout}; stderr=${cli.stderr}`);
 }
 
-function assertBashSuppressed(spec, label, inherited = {}) {
+function assertBashSuppressed(spec, label, inherited = {}, failingBody = FAIL_MARKER_TEST) {
   const passingRoot = gatedRepo(spec, { 'scripts/a.test.js': MARKER_TEST });
   const passing = bashStep(passingRoot, spec.run, inherited);
   assert.equal(passing.child.status, 0, `FIXTURE_ERROR ${label} passing Bash: ${passing.child.stdout}${passing.child.stderr}`);
   assert.equal(fs.existsSync(passing.marker), false, `FIXTURE_ERROR ${label} passing Bash reached marker`);
 
-  const failingRoot = gatedRepo(spec, { 'scripts/a.test.js': FAIL_MARKER_TEST });
+  const failingRoot = gatedRepo(spec, { 'scripts/a.test.js': failingBody });
   const failing = bashStep(failingRoot, spec.run, inherited);
   assert.equal(failing.child.status, 0, `FIXTURE_ERROR ${label} failing Bash: ${failing.child.stdout}${failing.child.stderr}`);
   assert.equal(fs.existsSync(failing.marker), false, `FIXTURE_ERROR ${label} failing Bash reached marker`);
@@ -651,6 +652,62 @@ test('NODE_OPTIONS test-shard filters do not count as complete test runs', async
   ];
   for (const item of cases) {
     await t.test(item.name, () => assertBashSuppressed(item.spec, `NODE_OPTIONS test-shard ${item.name}`, item.inherited));
+  }
+});
+
+test('NODE_OPTIONS filter option names with underscore or mixed separators block direct and runner coverage', async (t) => {
+  const directCases = [
+    {
+      name: 'underscore skip-pattern',
+      spec: { step: '        env:\n          NODE_OPTIONS: --test_skip_pattern=passes', run: 'node --test scripts/a.test.js' },
+      inherited: { NODE_OPTIONS: '--test_skip_pattern=passes' },
+    },
+    {
+      name: 'mixed skip-pattern',
+      spec: { run: 'NODE_OPTIONS=--test-skip_pattern=passes node --test scripts/a.test.js' },
+    },
+    {
+      name: 'underscore name-pattern',
+      spec: { workflowEnv: 'env:\n  NODE_OPTIONS: --test_name_pattern=nomatch', run: 'node --test scripts/a.test.js' },
+      inherited: { NODE_OPTIONS: '--test_name_pattern=nomatch' },
+    },
+    {
+      name: 'mixed name-pattern',
+      spec: { jobEnv: '    env:\n      NODE_OPTIONS: --test-name_pattern=nomatch', run: 'node --test scripts/a.test.js' },
+      inherited: { NODE_OPTIONS: '--test-name_pattern=nomatch' },
+    },
+    {
+      name: 'underscore shard',
+      spec: { step: '        env:\n          NODE_OPTIONS: --test_shard=2/2', run: 'node --test scripts/a.test.js' },
+      inherited: { NODE_OPTIONS: '--test_shard=2/2' },
+    },
+  ];
+  for (const item of directCases) {
+    await t.test(`direct ${item.name}`, () => assertBashSuppressed(item.spec, item.name, item.inherited, FAIL_MARKER_PASSES));
+  }
+
+  const runnerSource = fs.readFileSync(path.join(__dirname, 'run-module-tests.js'), 'utf8');
+  const runnerCases = [
+    ['underscore skip-pattern', '--test_skip_pattern=passes'],
+    ['mixed skip-pattern', '--test-skip_pattern=passes'],
+    ['underscore name-pattern', '--test_name_pattern=not-matching'],
+    ['mixed name-pattern', '--test-name_pattern=not-matching'],
+    ['underscore shard', '--test_shard=2/2'],
+  ];
+  for (const [name, filter] of runnerCases) {
+    await t.test(`runner ${name}`, () => {
+      const run = 'node scripts/run-module-tests.js scripts/a.test.js';
+      const spec = { step: `        env:\n          NODE_OPTIONS: ${filter}`, run };
+      const root = gatedRepo(spec, {
+        'scripts/a.test.js': MARKER_TEST,
+        'scripts/run-module-tests.js': runnerSource,
+      });
+      const { child, marker } = bashStep(root, run, { NODE_OPTIONS: filter });
+      assert.equal(child.status, 2, `${name} runner should reject the filter: ${child.stdout}${child.stderr}`);
+      assert.equal(fs.existsSync(marker), false, `${name} runner started the test child`);
+      assert.match(child.stderr, /NODE_OPTIONS.*--test[-_]?(?:skip|name|shard)/i);
+      assertUnrun(root, `runner ${name}`);
+    });
   }
 });
 
