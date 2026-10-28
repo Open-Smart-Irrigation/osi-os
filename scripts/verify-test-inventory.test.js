@@ -397,15 +397,17 @@ test('npm scripts: a missing script fails', () => {
 
 // ------------------------------------------- steps that cannot fail a pull request
 
-function gated({ on = '  pull_request:\n    branches: [ main ]', job = '', step = '', run, shell = '' }) {
+function gated({ on = '  pull_request:\n    branches: [ main ]', workflowEnv = '', job = '', jobEnv = '', step = '', run, shell = '' }) {
   return [
     'name: Gated',
     'on:',
     on,
+    workflowEnv,
     'jobs:',
     '  check:',
     '    runs-on: ubuntu-latest',
     job,
+    jobEnv,
     '    steps:',
     '      - uses: actions/checkout@v4',
     '      - name: the step under test',
@@ -428,6 +430,23 @@ function gatedRepo(spec, extra = {}) {
 }
 
 const NOT_RUN = /scripts\/a\.test\.js: no workflow runs this test/;
+
+function inventoryCli(root) {
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  delete env.NODE_TEST_CONTEXT;
+  return spawnSync(process.execPath, [SCRIPT, `--root=${root}`], { cwd: root, encoding: 'utf8', env });
+}
+
+function assertUnrun(root, label) {
+  const result = verify(root);
+  assert.match(result.errors.join('\n'), NOT_RUN, label);
+  assert.equal(result.status.has('scripts/a.test.js'), false, `${label}: exported verifier marked test run`);
+  const cli = inventoryCli(root);
+  assert.equal(cli.status, 1, `${label}: CLI status ${cli.status}; stdout=${cli.stdout}; stderr=${cli.stderr}`);
+  assert.match(cli.stderr, /verify-test-inventory: FAIL/, label);
+  assert.match(cli.stderr, NOT_RUN, label);
+}
 
 test('a test in a step or job that cannot fail a pull request is not run', () => {
   for (const [spec, reason] of [
@@ -463,6 +482,46 @@ test('a test command whose exit status is discarded is not run', () => {
   }
 });
 
+test('unreachable or masked shell tests do not count as workflow runs', () => {
+  for (const run of [
+    '{ node --test scripts/a.test.js; } || true',
+    'if false; then node --test scripts/a.test.js; fi',
+    'true || node --test scripts/a.test.js',
+    'exit 0\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS=--test-skip-pattern=ok node --test scripts/a.test.js',
+  ]) {
+    assertUnrun(gatedRepo({ run }), run);
+  }
+});
+
+test('workflow environment is inherited by test steps and step values override it', () => {
+  for (const [key, value] of [
+    ['NODE_OPTIONS', '--test-skip-pattern=ok'],
+    ['NODE_TEST_CONTEXT', 'child'],
+  ]) {
+    for (const [scope, field, envBlock] of [
+      ['workflow', 'workflowEnv', `env:\n  ${key}: ${value}`],
+      ['job', 'jobEnv', `    env:\n      ${key}: ${value}`],
+      ['step', 'step', `        env:\n          ${key}: ${value}`],
+    ]) {
+      const root = gatedRepo({ [field]: envBlock, run: 'node --test scripts/a.test.js' });
+      assertUnrun(root, `${scope} ${key}`);
+    }
+
+    const root = gatedRepo({
+      workflowEnv: `env:\n  ${key}: ${value}`,
+      jobEnv: `    env:\n      ${key}: ${value}`,
+      step: `        env:\n          ${key}: ''`,
+      run: 'node --test scripts/a.test.js',
+    });
+    const result = verify(root);
+    assert.deepEqual(result.errors, [], `empty step ${key} must override inherited values`);
+    assert.equal(result.status.get('scripts/a.test.js')?.kind, 'run');
+    const cli = inventoryCli(root);
+    assert.equal(cli.status, 0, `empty step ${key} CLI: ${cli.stdout}${cli.stderr}`);
+  }
+});
+
 test('pipefail, shell: bash and a final && list keep the exit status', () => {
   for (const spec of [
     { run: 'set -o pipefail\nnode --test scripts/a.test.js | tee out.txt' },
@@ -470,9 +529,12 @@ test('pipefail, shell: bash and a final && list keep the exit status', () => {
     { shell: '        shell: bash', run: 'node --test scripts/a.test.js | tee out.txt' },
     { run: 'echo start\nnode --test scripts/a.test.js && echo done' },
     { run: 'false || node --test scripts/a.test.js' },
+    { run: 'set +e\nset -e\nnode --test scripts/a.test.js' },
     { run: 'echo x | node --test scripts/a.test.js' },
   ]) {
-    assert.deepEqual(verify(gatedRepo(spec)).errors, [], JSON.stringify(spec));
+    const root = gatedRepo(spec);
+    assert.deepEqual(verify(root).errors, [], JSON.stringify(spec));
+    assert.equal(inventoryCli(root).status, 0, JSON.stringify(spec));
   }
 });
 
@@ -504,6 +566,15 @@ test('a bash script started with sh fails, because sh is dash on the runner', ()
   assert.match(bad, /scripts\/b\.test\.sh: a bash script \(shebang .*bash\) run with sh/);
   const ok = gatedRepo({ run: 'node --test scripts/a.test.js\nbash scripts/b.test.sh\nsh scripts/p.test.sh' }, extra);
   assert.deepEqual(verify(ok).errors, []);
+});
+
+test('the module-test runner remains covered under a step child context', () => {
+  const root = gatedRepo({
+    step: '        env:\n          NODE_TEST_CONTEXT: child',
+    run: 'node scripts/run-module-tests.js scripts/a.test.js',
+  }, { 'scripts/run-module-tests.js': '' });
+  assert.deepEqual(verify(root).errors, []);
+  assert.equal(inventoryCli(root).status, 0);
 });
 
 test('the runner and --no-warnings still mark tests as run', () => {

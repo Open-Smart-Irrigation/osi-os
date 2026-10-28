@@ -13,7 +13,8 @@
 //
 // Usage: node scripts/run-module-tests.js <test file> [<test file> ...]
 // Paths are relative to the working directory. Globs, directories and
-// options are rejected. The environment is passed through unchanged.
+// options and NODE_OPTIONS test filters are rejected. Other environment
+// options pass through unchanged; NODE_TEST_CONTEXT is cleared for the child.
 // After the run it also fails when a listed file reported no test of its
 // own (node --test counts such a file as one passing test) or when every
 // test was skipped.
@@ -24,6 +25,14 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const GLOB_CHARS = /[*?[\]{}]/;
+
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--check|-c)(?=$|[\s="'])/;
+
+function nodeOptionsTestFilter(value) {
+  if (value === undefined || value === null || String(value) === '') return null;
+  const match = NODE_OPTIONS_TEST_FILTER.exec(String(value));
+  return match ? match[1] : null;
+}
 
 function checkTestFiles(files, cwd) {
   const errors = [];
@@ -59,14 +68,15 @@ function checkTestFiles(files, cwd) {
 // Reads node --test's TAP output as it streams through and returns the
 // files that reported no test of their own, plus the summary counts.
 function tapSummary(lines, files) {
-  const listed = new Set(files);
+  const canonical = (file) => path.normalize(file).split(path.sep).join('/');
+  const listed = new Set(files.map(canonical));
   const empty = [];
   const counts = {};
   for (const line of lines) {
     // A file without test() calls appears as one top-level test named by
     // its path; a file with tests appears through its tests.
     const m = /^ok \d+ - (.*)$/.exec(line);
-    if (m && listed.has(m[1])) empty.push(m[1]);
+    if (m && listed.has(canonical(m[1]))) empty.push(m[1]);
     const c = /^# (tests|pass|fail|skipped|todo|cancelled) (\d+)$/.exec(line);
     if (c) counts[c[1]] = Number(c[2]);
   }
@@ -78,6 +88,11 @@ function main(args, cwd) {
   if (errors.length) {
     for (const e of errors) console.error(`run-module-tests: ${e}`);
     console.error(`run-module-tests: FAIL (${errors.length} problems; nothing was run)`);
+    return Promise.resolve(2);
+  }
+  const filter = nodeOptionsTestFilter(process.env.NODE_OPTIONS);
+  if (filter) {
+    console.error(`run-module-tests: NODE_OPTIONS ${filter} can filter or suppress listed tests`);
     return Promise.resolve(2);
   }
   console.log(`run-module-tests: ${args.length} test files`);

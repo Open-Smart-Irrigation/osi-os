@@ -465,6 +465,7 @@ function loadWorkflows(root, errors) {
           label,
           uses: step.uses,
           with: step.with || {},
+          env: { ...(doc.env || {}), ...(job.env || {}), ...(step.env || {}) },
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
           pipefail: shell === 'bash',
@@ -568,6 +569,13 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--check|-c)(?=$|[\s="'])/;
+
+function nodeOptionsTestFilter(value) {
+  if (value === undefined || value === null || String(value) === '') return null;
+  const match = NODE_OPTIONS_TEST_FILTER.exec(String(value));
+  return match ? `NODE_OPTIONS ${match[1]} does not run every test in the file` : null;
+}
 
 // Why a failing command would not fail the step under bash -e, or null.
 function exitStatusLost(commands, i, pipefail) {
@@ -598,6 +606,29 @@ function checkRunStep(ctx, step) {
     return;
   }
   const hits = []; // { file, via, lost }
+  const unreachable = new Set();
+  const groupLost = new Map();
+  for (let i = 0; i < commands.length; i += 1) {
+    const words = commands[i].words;
+    if (words[0] === 'if' && words[1] === 'false') {
+      let end = i + 1;
+      while (end < commands.length && !commands[end].words.includes('fi')) end += 1;
+      if (end < commands.length && !commands.slice(i + 1, end).some((command) => command.words.includes('else'))) {
+        for (let k = i + 1; k <= end; k += 1) unreachable.add(k);
+      }
+    }
+    if (words[0] === '{') {
+      let end = i + 1;
+      while (end < commands.length && commands[end].words[0] !== '}') end += 1;
+      if (end < commands.length && commands[end].sep === '||'
+        && commands[end + 1]?.words.length === 1 && commands[end + 1].words[0] === 'true') {
+        for (let k = i; k < end; k += 1) groupLost.set(k, 'it is inside a brace group whose exit status is discarded (||)');
+      }
+    }
+    if (words.length === 1 && words[0] === 'true' && commands[i].sep === '||' && i + 1 < commands.length) {
+      unreachable.add(i + 1);
+    }
+  }
   const resolveToken = (token, mode) => {
     if (token.includes('$') || token.includes('__EXPR__') || token.startsWith('/')) return null;
     if (!SCRIPT_EXT.test(token)) {
@@ -627,23 +658,33 @@ function checkRunStep(ctx, step) {
   };
   let pipefail = step.pipefail;
   let errexitOff = false;
+  let terminated = false;
   commands.forEach((command, i) => {
+    if (unreachable.has(i) || terminated) return;
     let words = command.words;
     let lost = null;
+    const commandEnv = { ...(step.env || {}) };
     while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]))) {
       if (CONDITION_WORDS.has(words[0])) lost = lost || `its exit status is the condition of ${words[0]}`;
+      const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(words[0]);
+      if (assignment) commandEnv[assignment[1]] = assignment[2];
       words = words.slice(1);
     }
     if (!words.length) return;
-    lost = lost || exitStatusLost(commands, i, pipefail);
+    lost = lost || groupLost.get(i) || exitStatusLost(commands, i, pipefail);
     const [cmd, ...args] = words;
     if (cmd === 'set') {
       for (let k = 0; k < args.length; k += 1) {
         const a = args[k];
         if (/^\+[a-z]*e/.test(a) || (a.startsWith('+') && args[k + 1] === 'errexit')) errexitOff = true;
+        if (/^-[a-z]*e/.test(a) || (a.startsWith('-') && args[k + 1] === 'errexit')) errexitOff = false;
         if (/^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
         if (/^\+[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = false;
       }
+      return;
+    }
+    if (cmd === 'exit') {
+      terminated = true;
       return;
     }
     if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
@@ -668,13 +709,15 @@ function checkRunStep(ctx, step) {
         if (NODE_PARTIAL_OPTIONS.test(o)) partial = partial || `node option ${o.split('=')[0]} does not run every test in the file`;
         else if (!NODE_RUN_OPTIONS.test(o)) errors.push(`${where}: node option ${o} is not modelled by this verifier`);
       }
-      const itemLost = lost || partial;
+      const nodeOptionsLost = nodeOptionsTestFilter(commandEnv.NODE_OPTIONS);
+      const itemLost = lost || partial || nodeOptionsLost;
       if (options.includes('--test')) {
+        const contextLost = commandEnv.NODE_TEST_CONTEXT ? 'NODE_TEST_CONTEXT suppresses direct node --test collection' : null;
         if (!rest.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
         for (const a of rest) {
           if (a.startsWith('-')) { errors.push(`${where}: node option ${a} after the test files is not modelled`); continue; }
           const rel = resolveToken(a, 'test');
-          if (rel) hits.push({ file: rel, via: where, lost: itemLost });
+          if (rel) hits.push({ file: rel, via: where, lost: itemLost || contextLost });
         }
         return;
       }

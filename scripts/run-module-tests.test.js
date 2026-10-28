@@ -24,8 +24,8 @@ function scratch(files) {
   return root;
 }
 
-function run(cwd, args) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8' });
+function run(cwd, args, env = process.env) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', env });
   return { code: r.status, out: r.stdout + r.stderr };
 }
 
@@ -99,6 +99,58 @@ test('a listed file with no tests fails', () => {
   const r = run(root, ['a.test.js', 'empty.test.js']);
   assert.notEqual(r.code, 0);
   assert.match(r.out, /empty\.test\.js contains no tests/);
+});
+
+test('an empty file passed with a ./ prefix fails the whole step', () => {
+  const root = scratch({ 'a/empty.test.js': '// all tests were deleted\n' });
+  const r = run(root, ['./a/empty.test.js']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /a\/empty\.test\.js contains no tests/);
+  assert.match(r.out, /# tests 1/, 'Node must have reported the listed empty file');
+});
+
+test('the runner clears NODE_TEST_CONTEXT before starting its child', () => {
+  const root = scratch({ 'a/ok.test.js': PASSING });
+  const env = { ...process.env, NODE_OPTIONS: '--enable-source-maps', NODE_TEST_CONTEXT: 'child' };
+  const r = run(root, ['a/ok.test.js'], env);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /# pass 1/);
+});
+
+test('the runner rejects or clears a partial NODE_OPTIONS test filter', () => {
+  const root = scratch({
+    'a/two.test.js': [
+      "const test = require('node:test');",
+      "const fs = require('node:fs');",
+      "test('filtered', () => fs.writeFileSync(process.env.FIRST_MARKER, 'ran'));",
+      "test('still-runs', () => fs.writeFileSync(process.env.SECOND_MARKER, 'ran'));",
+      '',
+    ].join(' '),
+  });
+  const first = path.join(root, 'first-marker');
+  const second = path.join(root, 'second-marker');
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_OPTIONS;
+  env.NODE_OPTIONS = '--test-skip-pattern=filtered';
+  env.FIRST_MARKER = first;
+  env.SECOND_MARKER = second;
+
+  const direct = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'a/two.test.js'], {
+    cwd: root, encoding: 'utf8', env,
+  });
+  assert.equal(direct.status, 0, `FIXTURE_ERROR: direct filtered Node run: ${direct.stdout}${direct.stderr}`);
+  assert.equal(fs.existsSync(first), false, `FIXTURE_ERROR: filter did not suppress matching test: ${direct.stdout}`);
+  assert.equal(fs.existsSync(second), true, `FIXTURE_ERROR: filter suppressed unrelated test: ${direct.stdout}`);
+  fs.rmSync(second);
+
+  const r = run(root, ['a/two.test.js'], env);
+  if (r.code === 0) {
+    assert.equal(fs.existsSync(first), true, `runner passed without running filtered test: ${r.out}`);
+    assert.equal(fs.existsSync(second), true, `runner passed without running remaining test: ${r.out}`);
+  } else {
+    assert.match(r.out, /NODE_OPTIONS|filter/i, `runner rejection must name the filter: ${r.out}`);
+  }
 });
 
 test('a run in which every test is skipped fails', () => {
