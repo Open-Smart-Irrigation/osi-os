@@ -725,10 +725,16 @@ function checkRunStep(ctx, step) {
         if (arg === '-p') continue;
         if (/^[+-]/.test(arg)) { unsupportedFlag = true; continue; }
         const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(arg);
-        const name = assignment ? assignment[1] : trackedEnvNames.find((key) => arg.startsWith(`${key}+`)) || arg;
+        const appendAssignment = /^([A-Za-z_][A-Za-z0-9_]*)\+=(.*)$/.exec(arg);
+        const name = assignment ? assignment[1] : appendAssignment ? appendAssignment[1] : arg;
         if (!shellEnv.has(name)) continue;
         if (unsupportedFlag) markUnknown(name, true);
         else if (assignment && arg === `${name}=${assignment[2]}`) setShellEnv(name, assignment[2], !unexport);
+        else if (appendAssignment) {
+          const state = shellEnv.get(name);
+          if (!state.known) markUnknown(name, !unexport);
+          else setShellEnv(name, `${state.value ?? ''}${appendAssignment[2]}`, !unexport);
+        }
         else if (assignment) markUnknown(name, !unexport);
         else {
           const state = shellEnv.get(name);
@@ -743,8 +749,20 @@ function checkRunStep(ctx, step) {
         if (shellEnv.has(name)) markUnknown(name, false);
       }
       for (const name of prefixUnknownNames) markUnknown(name, false);
+      let functionOnly = false;
+      let unsupportedFlag = false;
+      const names = [];
       for (const arg of args) {
-        if (shellEnv.has(arg)) shellEnv.set(arg, { value: undefined, exported: false, known: true });
+        if (arg === '--') continue;
+        if (arg === '-f') { functionOnly = true; continue; }
+        if (arg.startsWith('-')) { unsupportedFlag = true; continue; }
+        names.push(arg);
+      }
+      for (const arg of names) {
+        if (shellEnv.has(arg)) {
+          if (unsupportedFlag) markUnknown(arg);
+          else if (!functionOnly) shellEnv.set(arg, { value: undefined, exported: false, known: true });
+        }
         else {
           const name = trackedEnvNames.find((key) => arg.includes(key));
           if (name) markUnknown(name);

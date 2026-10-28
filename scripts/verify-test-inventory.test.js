@@ -559,6 +559,18 @@ test('exported shell environment mutations persist and fail closed for direct te
       run: 'NODE_OPTIONS+=" --test-skip-pattern=passes"\nnode --test scripts/a.test.js',
     },
     {
+      name: 'export append to inherited NODE_OPTIONS fails closed',
+      workflowEnv: 'env:\n  NODE_OPTIONS: --enable-source-maps',
+      inherited: { NODE_OPTIONS: '--enable-source-maps' },
+      run: 'export NODE_OPTIONS+=" --test-skip-pattern=passes"\nnode --test scripts/a.test.js',
+    },
+    {
+      name: 'unset -f leaves exported NODE_OPTIONS filter in place',
+      workflowEnv: 'env:\n  NODE_OPTIONS: --test-skip-pattern=passes',
+      inherited: { NODE_OPTIONS: '--test-skip-pattern=passes' },
+      run: 'unset -f NODE_OPTIONS\nnode --test scripts/a.test.js',
+    },
+    {
       name: 'export NODE_OPTIONS assignment persists',
       run: 'export NODE_OPTIONS=--test-skip-pattern=passes\nnode --test scripts/a.test.js',
     },
@@ -586,6 +598,16 @@ test('exported shell environment mutations persist and fail closed for direct te
 
 test('shell environment controls stay local, reset cleanly and do not cross steps', () => {
   const inheritedFilter = '--test-skip-pattern=passes';
+  const ordinaryUnset = 'unset NODE_OPTIONS\nnode --test scripts/a.test.js';
+  const ordinaryUnsetRoot = gatedRepo({
+    workflowEnv: `env:\n  NODE_OPTIONS: ${inheritedFilter}`,
+    run: ordinaryUnset,
+  }, { 'scripts/a.test.js': MARKER_TEST });
+  const ordinaryUnsetControl = bashStep(ordinaryUnsetRoot, ordinaryUnset, { NODE_OPTIONS: inheritedFilter });
+  assert.equal(ordinaryUnsetControl.child.status, 0, `FIXTURE_ERROR ordinary unset: ${ordinaryUnsetControl.child.stdout}${ordinaryUnsetControl.child.stderr}`);
+  assert.equal(fs.existsSync(ordinaryUnsetControl.marker), true, 'ordinary unset did not clear the exported filter');
+  assertRun(ordinaryUnsetRoot, 'ordinary unset clears an exported filter');
+
   const localEmpty = 'NODE_OPTIONS= node --test scripts/a.test.js';
   const emptyRoot = gatedRepo({
     workflowEnv: `env:\n  NODE_OPTIONS: ${inheritedFilter}`,
