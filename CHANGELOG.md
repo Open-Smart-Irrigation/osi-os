@@ -435,7 +435,7 @@ Security below.
   the 0.6.5 image and never upgraded since) takes the pre-ledger path on its
   first deploy: `repair-sync-outbox-v2.js`, then `baseline-existing-db.js`,
   then the migrations. For a gateway that is far behind, follow
-  [docs/operations/uganda-catchup-runbook.md](docs/operations/uganda-catchup-runbook.md).
+  [docs/operations/ledger-catchup-runbook.md](docs/operations/ledger-catchup-runbook.md).
 - The migration step now refuses to start, before stopping Node-RED, unless
   the backup directory has free space of twice the database size plus 128 MB
   (`MIGRATE_MIN_FREE_MARGIN_MB`). Pre-migration backups are pruned to the

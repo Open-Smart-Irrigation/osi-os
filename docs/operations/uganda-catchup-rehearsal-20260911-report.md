@@ -1,6 +1,6 @@
 # Uganda catch-up rehearsal report — 2026-09-11
 
-Runbook: `docs/operations/uganda-catchup-runbook.md` Phase 2 (rehearsal) + Phase 3 (window script authoring).
+Runbook: `docs/operations/ledger-catchup-runbook.md` Phase 2 (rehearsal) + Phase 3 (window script authoring).
 Worktree: `.worktrees/uganda-rehearsal`, branch `ops/uganda-catchup-rehearsal-20260911`, off `origin/main` @ `855aee17f`.
 Scope: **entirely local**. No SSH to any gateway. No live DB touched. Everything below ran against local
 byte-copies of the exfiltrated backup under `/home/phil/osi-backups/uganda-rehearsal-20260911/`.
@@ -130,7 +130,7 @@ these 11 diffs needs a dedicated, reviewed table-rebuild reconciliation design �
 work, not an extension of this rehearsal's mandate.** Until then, `baseline-existing-db.js` will keep
 correctly refusing to stamp Uganda, and that refusal is the tool working as designed, not a bug.
 
-## Runbook staleness (docs/operations/uganda-catchup-runbook.md)
+## Runbook staleness (docs/operations/ledger-catchup-runbook.md)
 
 1. **"Uganda... has no sync_outbox"** (Why Uganda is special, and repeated in the catch-up-artifact item 1)
    — **stale**. `sync_outbox` is present; it was only missing 3 v2 columns, which
@@ -328,6 +328,6 @@ that foreign-EUI fallback live indefinitely.
   `irrigation_events.event_uuid` / `zone_weather_cache.fetched_at` should be added via a small
   `ALTER TABLE ADD COLUMN` companion tool (same sanctioned pattern as `repair-sync-outbox-v2.js`) ahead of
   the rest, and re-rehearse G4 from scratch once that plan exists. Update the 5 runbook-staleness items
-  above in `docs/operations/uganda-catchup-runbook.md` regardless of when G4 clears.
+  above in `docs/operations/ledger-catchup-runbook.md` regardless of when G4 clears.
 - G1-G3 and G5 are untouched by this local-only rehearsal and still need their own evidence before the
   runbook's NOT-READY banner can come down.

@@ -139,7 +139,7 @@ successful migration it flips the staged payload (`swap_call flipTo
 block doesn't re-flip. This applies to every deploy over this offline path
 exactly as it does to the tunnel flow — `deploy.sh` itself is unmodified
 between the two, so the fix lands here for free. The Uganda catch-up window
-(`scripts/ops/uganda-catchup-window.sh`, `docs/operations/uganda-catchup-runbook.md`)
+(`scripts/ops/uganda-catchup-window.sh`, `docs/operations/ledger-catchup-runbook.md`)
 enforces the same rule independently with a `--expected-flows-sha` check,
 since that script restarts Node-RED without ever flipping a payload itself.
 

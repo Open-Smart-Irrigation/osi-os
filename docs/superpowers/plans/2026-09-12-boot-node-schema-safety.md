@@ -78,7 +78,7 @@ Task 7 (this wave):
 | `database/seed-blank.sql`, 7 bundled `farming.db`, `CHECKSUMS.json` | same text, regenerated together | 5 |
 | `scripts/verify-trigger-body-parity.js` | `GATEWAY_EUI_LITERALS` rule updated | 5 |
 | `lib/osi-migrate/__tests__/fingerprints-gateway-eui.test.js` | 22-site assertion retired | 5 |
-| `docs/operations/uganda-catchup-runbook.md` | reconciled to the recovered state | 7 |
+| `docs/operations/ledger-catchup-runbook.md` | reconciled to the recovered state | 7 |
 | `.github/workflows/migrations.yml` | wires every new verifier and test file | 1-3, 5 |
 
 ---
@@ -860,11 +860,11 @@ git commit -m "chore(boot): delete the unfenced writable_schema devices_old heal
 ### Task 7: Reconcile the Uganda catch-up runbook (#87)
 
 **Files:**
-- Modify: `docs/operations/uganda-catchup-runbook.md`
+- Modify: `docs/operations/ledger-catchup-runbook.md`
 
 - [x] **Step 1: Read the current document**
 
-Run: `git show origin/main:docs/operations/uganda-catchup-runbook.md`
+Run: `git show origin/main:docs/operations/ledger-catchup-runbook.md`
 It still describes execution as gated on a stable-connectivity window and on Uganda being pre-history-sync. Both are stale.
 
 - [x] **Step 2: Rewrite the status section against the verified state**
@@ -875,13 +875,13 @@ Keep the operational procedure — it is still the recipe for the next behind-sc
 
 - [x] **Step 3: Run the slop check**
 
-Run: `node .claude/skills/anti-slop-writing/slop-check.js docs/operations/uganda-catchup-runbook.md`
+Run: `node .claude/skills/anti-slop-writing/slop-check.js docs/operations/ledger-catchup-runbook.md`
 Expected: `slop-check: PASS (no tier-1 findings)`, exit 0. Read every tier-2 warning; do not bulk-suppress.
 
 - [x] **Step 4: Commit**
 
 ```bash
-git add docs/operations/uganda-catchup-runbook.md
+git add docs/operations/ledger-catchup-runbook.md
 git commit -m "docs(ops): reconcile the Uganda catch-up runbook with the recovered gateway state (#87)"
 ```
 

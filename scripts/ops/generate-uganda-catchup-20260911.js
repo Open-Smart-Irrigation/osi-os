@@ -20,7 +20,7 @@
 // (migrate-cli.js) carries every trigger forward from its 0001 body to its
 // head body via those same later migrations, exactly as it would for any
 // other gateway baselined at N=1. See REHEARSAL-REPORT.md "runbook staleness"
-// section for the full comparison (docs/operations/uganda-catchup-runbook.md
+// section for the full comparison (docs/operations/ledger-catchup-runbook.md
 // Phase 2 item 3 currently says to source triggers from the seed's "current"
 // bodies - that instruction is what this comment, and the artifact, correct).
 //
