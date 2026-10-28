@@ -1,5 +1,5 @@
 'use strict';
-// FUTURE SOURCE ONLY. Actual @node-red/nodes 3.1.15 HTTPIn/HTTPOut plus Express.
+// Exercise the real Node-RED HTTPIn and HTTPOut constructors with Express.
 // The repository function is executed with the existing facadeDb seam. This
 // tests the real response constructor and HTTP bytes, not a guessed merger.
 const test = require('node:test');
@@ -314,8 +314,8 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       const preflight = await request('OPTIONS', csvPath);
       console.log(JSON.stringify({ profile, case: 'options', ...preflight,
         owner: preflight.seen.includes(config.options.id) ? config.options.id : 'express-auto-options' }));
-      // 3.1.15 HTTPIn source has no options registration branch. This source
-      // expectation must be confirmed by the first actual loopback capture.
+      // Express 4.21.2 handles OPTIONS automatically with Allow: GET,HEAD and no CORS or max-age.
+      // The positive preflight gate remains unmet; a future fix must update these assertions.
       assert.ok(!preflight.seen.includes(config.options.id), 'OPTIONS not handled by configured flow node');
       assert.equal(preflight.status, 200);
       assert.deepEqual(preflight.body.split(/,\s*/), ['GET', 'HEAD']);
@@ -324,7 +324,7 @@ for (const profile of ['bcm2712', 'bcm2709']) {
       for (const name of Object.keys(CORS)) assert.deepEqual(rawHeaderValues(preflight, name), []);
       // The media-type assertion runs last so BASE RED cannot hide a failed
       // auth, JSON, CORS, body, filename or OPTIONS control.
-      contentType(csv, 'text/csv'); // Expected sole BASE RED; candidate GREEN.
+      contentType(csv, 'text/csv'); // Assert the CSV response media type.
       });
     } finally {
       raw.close();

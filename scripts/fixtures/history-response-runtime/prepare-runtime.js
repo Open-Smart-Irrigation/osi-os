@@ -1,5 +1,5 @@
 'use strict';
-// FUTURE SOURCE ONLY. Run only after admission, through C/run-heavy.py.
+// Verify the pinned Node-RED archives and HTTPIn source used by the fixture.
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
