@@ -569,7 +569,7 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
-const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--check|-c)(?=$|[\s="'])/;
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--test-shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
   if (value === undefined || value === null || String(value) === '') return null;
@@ -608,24 +608,52 @@ function checkRunStep(ctx, step) {
   const hits = []; // { file, via, lost }
   const unreachable = new Set();
   const groupLost = new Map();
+  const conditionalCommands = new Set();
+  let pipefail = step.pipefail;
+  let conditionalDepth = 0;
+  const startsIf = (words) => words[0] === 'if' || (words[0] === 'then' && words[1] === 'if');
   for (let i = 0; i < commands.length; i += 1) {
     const words = commands[i].words;
+    const head = words[0];
+    if (startsIf(words)) conditionalDepth += 1;
+    if (conditionalDepth > 0) conditionalCommands.add(i);
+    if (head === 'fi' && conditionalDepth > 0) conditionalDepth -= 1;
     if (words[0] === 'if' && words[1] === 'false') {
-      let end = i + 1;
-      while (end < commands.length && !commands[end].words.includes('fi')) end += 1;
-      if (end < commands.length && !commands.slice(i + 1, end).some((command) => command.words.includes('else'))) {
-        for (let k = i + 1; k <= end; k += 1) unreachable.add(k);
+      let depth = 0;
+      let end = -1;
+      for (let k = i; k < commands.length; k += 1) {
+        const nestedHead = commands[k].words[0];
+        if (startsIf(commands[k].words)) depth += 1;
+        else if (nestedHead === 'fi') {
+          depth -= 1;
+          if (depth === 0) { end = k; break; }
+        }
+      }
+      if (end >= 0) {
+        depth = 0;
+        let branchEnd = end;
+        for (let k = i + 1; k < end; k += 1) {
+          const nestedHead = commands[k].words[0];
+          if (startsIf(commands[k].words)) depth += 1;
+          else if (nestedHead === 'fi') depth -= 1;
+          else if (depth === 0 && (nestedHead === 'else' || nestedHead === 'elif')) {
+            branchEnd = k;
+            break;
+          }
+        }
+        for (let k = i + 1; k < branchEnd; k += 1) unreachable.add(k);
       }
     }
     if (words[0] === '{') {
       let end = i + 1;
       while (end < commands.length && commands[end].words[0] !== '}') end += 1;
-      if (end < commands.length && commands[end].sep === '||'
-        && commands[end + 1]?.words.length === 1 && commands[end + 1].words[0] === 'true') {
-        for (let k = i; k < end; k += 1) groupLost.set(k, 'it is inside a brace group whose exit status is discarded (||)');
+      const lost = end < commands.length && exitStatusLost(commands, end, pipefail);
+      if (lost) {
+        for (let k = i; k <= end; k += 1) groupLost.set(k, `it is inside a brace group whose ${lost}`);
       }
     }
-    if (words.length === 1 && words[0] === 'true' && commands[i].sep === '||' && i + 1 < commands.length) {
+    if (words.length === 1 && (words[0] === 'true' || words[0] === ':')
+      && commands[i].sep === '||' && i + 1 < commands.length) {
       unreachable.add(i + 1);
     }
   }
@@ -656,7 +684,6 @@ function checkRunStep(ctx, step) {
       else if (isTestFile(rel)) hits.push({ file: rel, via: where, lost: lost || `it is passed as an argument to ${scriptRel}, which is not a test runner` });
     }
   };
-  let pipefail = step.pipefail;
   let errexitOff = false;
   let terminated = false;
   const trackedEnvNames = ['NODE_OPTIONS', 'NODE_TEST_CONTEXT'];
@@ -794,7 +821,8 @@ function checkRunStep(ctx, step) {
       return;
     }
     if (cmd === 'exit') {
-      terminated = true;
+      const conditionalList = i > 0 && ['||', '&&'].includes(commands[i - 1].sep);
+      if (!conditionalCommands.has(i) && !conditionalList) terminated = true;
       return;
     }
     if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
@@ -824,7 +852,8 @@ function checkRunStep(ctx, step) {
       const nodeOptionsLost = nodeOptionsTestFilter(commandEnv.NODE_OPTIONS);
       const itemLost = commandLost || partial || nodeOptionsLost;
       if (options.includes('--test')) {
-        const contextLost = commandEnv.NODE_TEST_CONTEXT ? 'NODE_TEST_CONTEXT suppresses direct node --test collection' : null;
+        const contextLost = commandEnv.NODE_TEST_CONTEXT !== undefined
+          ? 'NODE_TEST_CONTEXT suppresses direct node --test collection' : null;
         if (!rest.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
         for (const a of rest) {
           if (a.startsWith('-')) { errors.push(`${where}: node option ${a} after the test files is not modelled`); continue; }

@@ -153,6 +153,29 @@ test('the runner rejects or clears a partial NODE_OPTIONS test filter', () => {
   }
 });
 
+test('the runner rejects NODE_OPTIONS test sharding before it can pass with zero tests', () => {
+  const root = scratch({
+    'a/shard.test.js': "require('node:test')('passes', () => require('node:fs').writeFileSync(process.env.MARKER, 'ran'));\n",
+  });
+  const marker = path.join(root, 'marker');
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_OPTIONS;
+  env.NODE_OPTIONS = '--test-shard=2/2';
+  env.MARKER = marker;
+
+  const direct = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', 'node --test --test-reporter=tap a/shard.test.js'], {
+    cwd: root, encoding: 'utf8', env,
+  });
+  assert.equal(direct.status, 0, `FIXTURE_ERROR: direct sharded Node run: ${direct.stdout}${direct.stderr}`);
+  assert.equal(fs.existsSync(marker), false, `FIXTURE_ERROR: shard unexpectedly ran the test: ${direct.stdout}${direct.stderr}`);
+
+  const r = run(root, ['a/shard.test.js'], env);
+  assert.equal(r.code, 2, `runner passed a shard with no test execution: ${r.out}`);
+  assert.match(r.out, /NODE_OPTIONS.*--test-shard/i);
+  assert.equal(fs.existsSync(marker), false, 'runner started the sharded test child');
+});
+
 test('a run in which every test is skipped fails', () => {
   const root = scratch({ 'a.test.js': "require('node:test')('later', { skip: true }, () => {});\n" });
   const r = run(root, ['a.test.js']);

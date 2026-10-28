@@ -439,6 +439,7 @@ function inventoryCli(root) {
 }
 
 const MARKER_TEST = "require('node:test')('passes', () => require('node:fs').writeFileSync(process.env.MARKER, 'ran'));\n";
+const FAIL_MARKER_TEST = "require('node:test')('fails', () => { require('node:fs').writeFileSync(process.env.MARKER, 'ran'); throw new Error('boom'); });\n";
 
 function bashStep(root, run, inherited = {}) {
   const marker = path.join(root, 'marker');
@@ -468,6 +469,32 @@ function assertRun(root, label) {
   assert.deepEqual(result.errors, [], `${label}: ${result.errors.join('\n')}`);
   assert.equal(result.status.get('scripts/a.test.js')?.kind, 'run', `${label}: exported verifier status`);
   assert.equal(cli.status, 0, `${label}: CLI status ${cli.status}; stdout=${cli.stdout}; stderr=${cli.stderr}`);
+}
+
+function assertBashSuppressed(spec, label, inherited = {}) {
+  const passingRoot = gatedRepo(spec, { 'scripts/a.test.js': MARKER_TEST });
+  const passing = bashStep(passingRoot, spec.run, inherited);
+  assert.equal(passing.child.status, 0, `FIXTURE_ERROR ${label} passing Bash: ${passing.child.stdout}${passing.child.stderr}`);
+  assert.equal(fs.existsSync(passing.marker), false, `FIXTURE_ERROR ${label} passing Bash reached marker`);
+
+  const failingRoot = gatedRepo(spec, { 'scripts/a.test.js': FAIL_MARKER_TEST });
+  const failing = bashStep(failingRoot, spec.run, inherited);
+  assert.equal(failing.child.status, 0, `FIXTURE_ERROR ${label} failing Bash: ${failing.child.stdout}${failing.child.stderr}`);
+  assert.equal(fs.existsSync(failing.marker), false, `FIXTURE_ERROR ${label} failing Bash reached marker`);
+  assertUnrun(passingRoot, label);
+}
+
+function assertBashMasksFailure(spec, label) {
+  const passingRoot = gatedRepo(spec, { 'scripts/a.test.js': MARKER_TEST });
+  const passing = bashStep(passingRoot, spec.run);
+  assert.equal(passing.child.status, 0, `FIXTURE_ERROR ${label} passing Bash: ${passing.child.stdout}${passing.child.stderr}`);
+  assert.equal(fs.existsSync(passing.marker), true, `FIXTURE_ERROR ${label} passing Bash did not reach marker`);
+
+  const failingRoot = gatedRepo(spec, { 'scripts/a.test.js': FAIL_MARKER_TEST });
+  const failing = bashStep(failingRoot, spec.run);
+  assert.equal(failing.child.status, 0, `FIXTURE_ERROR ${label} failing Bash: ${failing.child.stdout}${failing.child.stderr}`);
+  assert.equal(fs.existsSync(failing.marker), true, `FIXTURE_ERROR ${label} failing Bash did not reach marker`);
+  assertUnrun(passingRoot, label);
 }
 
 test('a test in a step or job that cannot fail a pull request is not run', () => {
@@ -516,6 +543,38 @@ test('unreachable or masked shell tests do not count as workflow runs', () => {
   }
 });
 
+test('a false then-branch stays unreachable with else, nesting and a word named fi', async (t) => {
+  for (const run of [
+    'if false; then node --test scripts/a.test.js; else echo skipped; fi',
+    'if false; then if true; then echo nested; fi; node --test scripts/a.test.js; fi',
+    'if false; then echo fi; node --test scripts/a.test.js; fi',
+  ]) {
+    await t.test(run, () => assertBashSuppressed({ run }, run));
+  }
+
+  const reachableRun = 'if false; then echo skipped; else node --test scripts/a.test.js; fi';
+  const reachableRoot = gatedRepo({ run: reachableRun }, { 'scripts/a.test.js': MARKER_TEST });
+  const control = bashStep(reachableRoot, reachableRun);
+  assert.equal(control.child.status, 0, `FIXTURE_ERROR reachable else branch: ${control.child.stdout}${control.child.stderr}`);
+  assert.equal(fs.existsSync(control.marker), true, 'reachable else branch did not reach marker');
+  assertRun(reachableRoot, 'reachable else branch');
+});
+
+test('brace groups whose failing status is discarded do not count as runs', async (t) => {
+  for (const run of [
+    '{ node --test scripts/a.test.js; } || echo ignored',
+    '{ node --test scripts/a.test.js; } || :',
+    '{ node --test scripts/a.test.js; } &\nwait',
+  ]) {
+    await t.test(run, () => assertBashMasksFailure({ run }, run));
+  }
+});
+
+test('colon short-circuit leaves the right-hand test unreachable', () => {
+  const run = ': || node --test scripts/a.test.js';
+  assertBashSuppressed({ run }, 'colon short-circuit');
+});
+
 test('workflow environment is inherited by test steps and step values override it', () => {
   for (const [key, value] of [
     ['NODE_OPTIONS', '--test-skip-pattern=ok'],
@@ -535,12 +594,63 @@ test('workflow environment is inherited by test steps and step values override i
       jobEnv: `    env:\n      ${key}: ${value}`,
       step: `        env:\n          ${key}: ''`,
       run: 'node --test scripts/a.test.js',
-    });
-    const result = verify(root);
-    assert.deepEqual(result.errors, [], `empty step ${key} must override inherited values`);
-    assert.equal(result.status.get('scripts/a.test.js')?.kind, 'run');
-    const cli = inventoryCli(root);
-    assert.equal(cli.status, 0, `empty step ${key} CLI: ${cli.stdout}${cli.stderr}`);
+    }, { 'scripts/a.test.js': MARKER_TEST });
+    if (key === 'NODE_TEST_CONTEXT') {
+      const control = bashStep(root, 'node --test scripts/a.test.js', { NODE_TEST_CONTEXT: '' });
+      assert.equal(control.child.status, 0, `FIXTURE_ERROR empty step NODE_TEST_CONTEXT: ${control.child.stdout}${control.child.stderr}`);
+      assert.equal(fs.existsSync(control.marker), false, 'defined empty NODE_TEST_CONTEXT reached marker');
+      assertUnrun(root, 'empty step NODE_TEST_CONTEXT overrides inherited value but still suppresses collection');
+    } else {
+      const control = bashStep(root, 'node --test scripts/a.test.js', { NODE_OPTIONS: '' });
+      assert.equal(control.child.status, 0, `FIXTURE_ERROR empty step NODE_OPTIONS: ${control.child.stdout}${control.child.stderr}`);
+      assert.equal(fs.existsSync(control.marker), true, 'empty step NODE_OPTIONS did not clear inherited filter');
+      assertRun(root, 'empty step NODE_OPTIONS override');
+    }
+  }
+});
+
+test('any defined NODE_TEST_CONTEXT suppresses direct test collection', async (t) => {
+  const run = 'node --test scripts/a.test.js';
+  const cases = [
+    {
+      name: 'step empty',
+      spec: { step: "        env:\n          NODE_TEST_CONTEXT: ''", run },
+      inherited: { NODE_TEST_CONTEXT: '' },
+    },
+    { name: 'export empty', spec: { run: `export NODE_TEST_CONTEXT=\n${run}` } },
+    { name: 'inline empty', spec: { run: `NODE_TEST_CONTEXT= ${run}` } },
+    {
+      name: 'empty step overrides workflow child',
+      spec: {
+        workflowEnv: 'env:\n  NODE_TEST_CONTEXT: child',
+        step: "        env:\n          NODE_TEST_CONTEXT: ''",
+        run,
+      },
+      inherited: { NODE_TEST_CONTEXT: '' },
+    },
+  ];
+  for (const item of cases) {
+    await t.test(item.name, () => assertBashSuppressed(item.spec, item.name, item.inherited));
+  }
+});
+
+test('NODE_OPTIONS test-shard filters do not count as complete test runs', async (t) => {
+  const cases = [
+    {
+      name: 'step environment',
+      spec: {
+        step: '        env:\n          NODE_OPTIONS: --test-shard=2/2',
+        run: 'node --test scripts/a.test.js',
+      },
+      inherited: { NODE_OPTIONS: '--test-shard=2/2' },
+    },
+    {
+      name: 'inline environment',
+      spec: { run: 'NODE_OPTIONS=--test-shard=2/2 node --test scripts/a.test.js' },
+    },
+  ];
+  for (const item of cases) {
+    await t.test(item.name, () => assertBashSuppressed(item.spec, `NODE_OPTIONS test-shard ${item.name}`, item.inherited));
   }
 });
 
@@ -573,12 +683,6 @@ test('exported shell environment mutations persist and fail closed for direct te
     {
       name: 'export NODE_OPTIONS assignment persists',
       run: 'export NODE_OPTIONS=--test-skip-pattern=passes\nnode --test scripts/a.test.js',
-    },
-    {
-      name: 'standalone reassignment keeps inherited NODE_TEST_CONTEXT exported',
-      workflowEnv: "env:\n  NODE_TEST_CONTEXT: ''",
-      inherited: { NODE_TEST_CONTEXT: '' },
-      run: 'NODE_TEST_CONTEXT=child\nnode --test scripts/a.test.js',
     },
     {
       name: 'export NODE_TEST_CONTEXT assignment persists',
@@ -656,6 +760,13 @@ test('shell environment controls stay local, reset cleanly and do not cross step
   assert.equal(fs.existsSync(emptyResetControl.marker), true, 'empty export did not clear the prior filter');
   assertRun(emptyResetRoot, 'empty exported reset');
 
+  const contextUnexported = 'NODE_TEST_CONTEXT=child\nnode --test scripts/a.test.js';
+  const contextUnexportedRoot = gatedRepo({ run: contextUnexported }, { 'scripts/a.test.js': MARKER_TEST });
+  const contextUnexportedControl = bashStep(contextUnexportedRoot, contextUnexported);
+  assert.equal(contextUnexportedControl.child.status, 0, `FIXTURE_ERROR unexported NODE_TEST_CONTEXT: ${contextUnexportedControl.child.stdout}${contextUnexportedControl.child.stderr}`);
+  assert.equal(fs.existsSync(contextUnexportedControl.marker), true, 'unexported NODE_TEST_CONTEXT reached child environment');
+  assertRun(contextUnexportedRoot, 'unexported NODE_TEST_CONTEXT assignment');
+
   const acrossSteps = repo({
     '.github/workflows/ci.yml': workflow(['export NODE_OPTIONS=--test-skip-pattern=passes', 'node --test scripts/a.test.js']),
     'scripts/a.test.js': MARKER_TEST,
@@ -696,6 +807,26 @@ test('false-or adjacency and the module runner environment positive controls rem
   assert.equal(runnerControl.child.status, 0, `FIXTURE_ERROR runner control: ${runnerControl.child.stdout}${runnerControl.child.stderr}`);
   assert.equal(fs.existsSync(runnerControl.marker), true, 'module runner failed to clear child context or preserve benign options');
   assertRun(runnerRoot, 'runner benign options and context clearing');
+});
+
+test('conditional exit commands do not mask reachable later tests', async (t) => {
+  for (const run of [
+    'echo prep || exit 1\nnode --test scripts/a.test.js',
+    'if [ -n "$NOPE" ]; then exit 0; fi\nnode --test scripts/a.test.js',
+  ]) {
+    await t.test(run, () => {
+      const passingRoot = gatedRepo({ run }, { 'scripts/a.test.js': MARKER_TEST });
+      const passing = bashStep(passingRoot, run);
+      assert.equal(passing.child.status, 0, `FIXTURE_ERROR ${run} passing Bash: ${passing.child.stdout}${passing.child.stderr}`);
+      assert.equal(fs.existsSync(passing.marker), true, `FIXTURE_ERROR ${run} passing Bash did not reach marker`);
+
+      const failingRoot = gatedRepo({ run }, { 'scripts/a.test.js': FAIL_MARKER_TEST });
+      const failing = bashStep(failingRoot, run);
+      assert.equal(failing.child.status, 1, `FIXTURE_ERROR ${run} failing Bash: ${failing.child.stdout}${failing.child.stderr}`);
+      assert.equal(fs.existsSync(failing.marker), true, `FIXTURE_ERROR ${run} failing Bash did not reach marker`);
+      assertRun(passingRoot, `conditional exit: ${run}`);
+    });
+  }
 });
 
 test('pipefail, shell: bash and a final && list keep the exit status', () => {

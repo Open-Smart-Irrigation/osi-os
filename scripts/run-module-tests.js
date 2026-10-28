@@ -26,7 +26,7 @@ const { spawn } = require('node:child_process');
 
 const GLOB_CHARS = /[*?[\]{}]/;
 
-const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--check|-c)(?=$|[\s="'])/;
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test-name-pattern|--test-skip-pattern|--test-only|--test-shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
   if (value === undefined || value === null || String(value) === '') return null;
