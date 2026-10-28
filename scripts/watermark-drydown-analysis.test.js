@@ -576,3 +576,71 @@ test("unterminated quote is rejected before empty CSV", () => {
     assert.equal(fs.existsSync(out), false);
   } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
 });
+
+
+const CSV_NUMERIC_COLUMNS = ["resistor_id", "nominal_band", "channel", "repeat", "meter_ohm", "fwd_early", "fwd_late", "rev_early", "rev_late", "supply_mv"];
+function parsedResistorRows(phase = "before") {
+  return analyzer.parseCsv(csv(completeResistorMatrix({ phase }), CSV_NUMERIC_COLUMNS), CSV_NUMERIC_COLUMNS);
+}
+function resistorCsv(phase) { return csv(completeResistorMatrix({ phase }), CSV_NUMERIC_COLUMNS); }
+
+for (const [copyName, copy] of [
+  ["slice", (rows) => rows.slice()],
+  ["filter", (rows) => rows.filter(() => true)],
+  ["spread", (rows) => [...rows]],
+]) {
+  test(`parseCsv numeric origin survives ${copyName} array copies through analyze`, () => {
+    const before = copy(parsedResistorRows());
+    const report = analyzeFixture({ readings: [reading()], before, after: resistorCsv("after") });
+    assert.equal(report.criteria.P1.verdict, "pass");
+  });
+}
+
+test("constructed rows appended to parseCsv output use structured numeric validation", () => {
+  const before = parsedResistorRows();
+  before.push({ ...before[0], channel: "1" });
+  let error;
+  try { analyzeFixture({ readings: [reading()], before, after: resistorCsv("after") }); } catch (caught) { error = caught; }
+  assertInputError(error, "before.row25.channel");
+});
+
+test("blank CLI interval is rejected before unreadable input files", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "wm-blank-interval-precedence-"));
+  try {
+    const output = path.join(dir, "must-not-exist");
+    const missing = (name) => path.join(dir, "unreadable", name);
+    const result = runCliArgs([
+      "--readings", missing("readings.csv"), "--calibration", missing("calibration.json"),
+      "--run-metadata", missing("metadata.json"), "--resistors-before", missing("before.csv"),
+      "--resistors-after", missing("after.csv"), "--reference-temperature", missing("references.csv"),
+      "--interval-min", "   ", "--out", output,
+    ]);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /interval-min is required/);
+    assert.equal(fs.existsSync(output), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+test("per-row CSV origin covers copied readings and references but not appended rows", () => {
+  const readingColumns = ["deveui", "id", "recorded_at", "f_cnt", "frame_status", "payload_hex"];
+  const parsedReadings = analyzer.parseCsv(csv([reading()], readingColumns), readingColumns);
+  const copiedReadings = parsedReadings.slice();
+  assert.ok(analyzeFixture({ readings: copiedReadings }).readings.length > 0);
+
+  const referenceColumns = ["reference_id", "recorded_at", "reference_c"];
+  const parsedReferences = analyzer.parseCsv("reference_id,recorded_at,reference_c\nref,2026-10-01T00:01:00.000Z,24.0\n", referenceColumns);
+  const copiedReferences = [...parsedReferences];
+  assert.equal(analyzeFixture({ readings: [reading()], references: copiedReferences }).criteria.P6.verdict, "pass");
+
+  copiedReadings.push({ ...copiedReadings[0], id: "constructed", recorded_at: atMinutes(5), f_cnt: "2" });
+  let readingError;
+  try { analyzeFixture({ readings: copiedReadings }); } catch (caught) { readingError = caught; }
+  assertInputError(readingError, "reading constructed f_cnt");
+
+  copiedReferences.push({ ...copiedReferences[0], reference_id: "constructed", reference_c: "24.0" });
+  let referenceError;
+  try { analyzeFixture({ readings: [reading()], references: copiedReferences }); } catch (caught) { referenceError = caught; }
+  assertInputError(referenceError, "reference_c");
+});
