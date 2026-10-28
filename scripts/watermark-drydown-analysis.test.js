@@ -82,8 +82,8 @@ function completeResistorMatrix({ phase, errorRel = 0 }) {
 
 function csv(rows, columns = Object.keys(rows[0] || {})) { const escape = (value) => { const text = String(value ?? ""); return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text; }; return [columns.join(","), ...rows.map((row) => columns.map((c) => escape(row[c])).join(","))].join("\n") + "\n"; }
 
-function analyzeFixture({ readings = [], before = completeResistorMatrix({ phase: "before" }), after = completeResistorMatrix({ phase: "after" }), references = [], metadata = runMetadata(), calibration = calibrationWithProvenance() } = {}) {
-  const input = { readings, calibration, runMetadata: metadata, resistorsBefore: before, resistorsAfter: after, intervalMin: 5 };
+function analyzeFixture({ readings = [], before = completeResistorMatrix({ phase: "before" }), after = completeResistorMatrix({ phase: "after" }), references = [], metadata = runMetadata(), calibration = calibrationWithProvenance(), intervalMin = 5 } = {}) {
+  const input = { readings, calibration, runMetadata: metadata, resistorsBefore: before, resistorsAfter: after, intervalMin };
   if (legacyMode) input.referenceTemperature = references;
   else input.references = references;
   return analyzer.analyze(input);
@@ -643,4 +643,80 @@ test("per-row CSV origin covers copied readings and references but not appended 
   let referenceError;
   try { analyzeFixture({ readings: [reading()], references: copiedReferences }); } catch (caught) { referenceError = caught; }
   assertInputError(referenceError, "reference_c");
+});
+
+
+test("structured fractional channel is rejected as a safe-integer error", () => {
+  const before = completeResistorMatrix({ phase: "before" });
+  before[0].channel = 1.5;
+  let error;
+  try { analyzeFixture({ before }); } catch (caught) { error = caught; }
+  assertInputError(error, "before.row1.channel");
+});
+
+test("structured unsafe frame counter is rejected while safe integer controls pass", () => {
+  let error;
+  try { analyzeFixture({ readings: [reading({ fCnt: 2 ** 53 })] }); } catch (caught) { error = caught; }
+  assertInputError(error, "reading r1 f_cnt");
+  const valid = analyzeFixture({ readings: [reading({ fCnt: Number.MAX_SAFE_INTEGER })] });
+  assert.equal(valid.criteria.P1.verdict, "pass");
+});
+
+test("CSV finite fields reject non-decimal radix strings and retain decimal exponents", () => {
+  const referenceCsv = (value) => `reference_id,recorded_at,reference_c\nref,2026-10-01T00:01:00.000Z,${value}\n`;
+  for (const value of ["0x898", "0b1", "0o7"]) {
+    let error;
+    try { analyzeFixture({ readings: [reading()], references: referenceCsv(value) }); } catch (caught) { error = caught; }
+    assertInputError(error, "reference_c");
+  }
+  for (const value of ["24.0", "2.4e1"]) {
+    const report = analyzeFixture({ readings: [reading()], references: referenceCsv(value) });
+    assert.equal(report.criteria.P6.verdict, "pass");
+  }
+});
+
+test("CSV integer fields keep the signed-decimal grammar", () => {
+  const columns = ["deveui", "id", "recorded_at", "f_cnt", "frame_status", "payload_hex"];
+  const readingsCsv = (value) => csv([reading({ fCnt: value })], columns);
+  for (const value of ["0x1", "1e0", "+1"]) {
+    let error;
+    try { analyzeFixture({ readings: readingsCsv(value) }); } catch (caught) { error = caught; }
+    assertInputError(error, "reading r1 f_cnt");
+  }
+  assert.equal(analyzeFixture({ readings: readingsCsv("1") }).criteria.P1.verdict, "pass");
+});
+
+test("CLI rejects hexadecimal interval before creating output", () => {
+  const fixture = cliInputFixture();
+  try {
+    const output = path.join(fixture.dir, "hex-interval-out");
+    const args = [...fixture.args, output];
+    args[args.indexOf("--interval-min") + 1] = "0x5";
+    const result = runCliArgs(args);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /interval-min/i);
+    assert.equal(fs.existsSync(output), false);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("CLI rejects empty readings value as missing before creating output", () => {
+  const fixture = cliInputFixture();
+  try {
+    const output = path.join(fixture.dir, "empty-readings-out");
+    const args = [...fixture.args, output];
+    args[args.indexOf("--readings") + 1] = "";
+    const result = runCliArgs(args);
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /missing value.*--readings/i);
+    assert.equal(fs.existsSync(output), false);
+  } finally { fs.rmSync(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("structured analyze interval requires a number", () => {
+  let error;
+  try { analyzeFixture({ intervalMin: "5" }); } catch (caught) { error = caught; }
+  assertInputError(error, "interval-min");
+  assert.equal(analyzeFixture({ intervalMin: 5 }).criteria.P1.verdict, "pass");
 });
