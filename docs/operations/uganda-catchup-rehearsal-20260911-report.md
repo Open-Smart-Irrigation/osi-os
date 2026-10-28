@@ -1,6 +1,6 @@
 # Uganda catch-up rehearsal report — 2026-09-11
 
-Runbook: `docs/operations/ledger-catchup-runbook.md` Phase 2 (rehearsal) + Phase 3 (window script authoring).
+Runbook: the phase-based catch-up document used during this local rehearsal (Phase 2, rehearsal; Phase 3, window-script authoring). The later neutral [guide](ledger-catchup-runbook.md) generalizes its safety lessons and does not contain those phases.
 Worktree: `.worktrees/uganda-rehearsal`, branch `ops/uganda-catchup-rehearsal-20260911`, off `origin/main` @ `855aee17f`.
 Scope: **entirely local**. No SSH to any gateway. No live DB touched. Everything below ran against local
 byte-copies of the exfiltrated backup under `/home/phil/osi-backups/uganda-rehearsal-20260911/`.
@@ -130,13 +130,15 @@ these 11 diffs needs a dedicated, reviewed table-rebuild reconciliation design �
 work, not an extension of this rehearsal's mandate.** Until then, `baseline-existing-db.js` will keep
 correctly refusing to stamp Uganda, and that refusal is the tool working as designed, not a bug.
 
-## Runbook staleness (docs/operations/ledger-catchup-runbook.md)
+## Runbook staleness (historical source comparison)
 
-1. **"Uganda... has no sync_outbox"** (Why Uganda is special, and repeated in the catch-up-artifact item 1)
+This section records findings against the then-current phase-based runbook reviewed during the rehearsal. The current neutral [ledger catch-up guide](ledger-catchup-runbook.md) is a later generalization; it does not contain these phase checklists or item-level instructions. The findings below are retained as evidence from this rehearsal, not as instructions to rerun its window.
+
+1. **The then-current runbook's "Uganda... has no sync_outbox" claim** (Why Uganda is special, and repeated in its catch-up-artifact item 1)
    — **stale**. `sync_outbox` is present; it was only missing 3 v2 columns, which
    `repair-sync-outbox-v2.js` — already designed for exactly this — handles cleanly. Confirmed in the
    brief's own "known facts" and re-confirmed here.
-2. **Catch-up artifact items 2-3 say to source `sync_link_state`/trigger bodies from "the seed's DDL" /
+2. **That version's catch-up artifact items 2-3 say to source `sync_link_state`/trigger bodies from "the seed's DDL" /
    "seed's current bodies"** (i.e. `database/seed-blank.sql`, which tracks HEAD) — **stale and would have
    silently broken G4**. Empirically: `sync_link_state` gained an `installation_uuid` column, and
    `sync_history_cursors`/`sync_history_segments` gained columns, between migration `0001` and HEAD; 16 of
@@ -147,12 +149,12 @@ correctly refusing to stamp Uganda, and that refusal is the tool working as desi
    (reference(1)) instead.** Later migrations (`0002..0053`) carry each object forward to its HEAD shape
    via `applyPending`, exactly as they would for any other gateway baselined at N=1 — that mechanism is
    untouched.
-3. **"Uganda is missing whole sync tables" undersells the actual gap.** The runbook frames Uganda's problem
+3. **"Uganda is missing whole sync tables" undersells the actual gap.** That version frames Uganda's problem
    as purely additive (missing whole tables). In reality there are 11 further, genuinely non-additive
    diffs (FK declarations, CHECK constraint scope, column defaults/nullability) that predate even
    reference(1) and block a clean baseline regardless of the catch-up artifact. This is the rehearsal's
    central new finding — see "What's blocking G4" above.
-4. **Phase 2 checklist implies the catch-up artifact + `repair-sync-outbox-v2.js` + `baseline-existing-db.js`
+4. **The historical Phase 2 checklist implies the catch-up artifact + `repair-sync-outbox-v2.js` + `baseline-existing-db.js`
    is a complete recipe that reaches a "matched N" for Uganda.** Empirically false — see above. The
    checklist item "record the matched N" needs a documented failure branch, not just a happy path.
 5. **G1-G3, G5 evidence rows are out of scope for this rehearsal** (no SSH, no live heartbeat, no
@@ -317,17 +319,21 @@ that foreign-EUI fallback live indefinitely.
 | `work/uganda-copyB-restore.db` | Pristine, never modified (sha256 `04b75d96...` throughout) |
 | `work/uganda-dryrun.db` | Fresh pristine decompress used only for the window-script dry run |
 
-## Summary / next steps
+## Summary of the rehearsal
 
-- **Deliverables (this branch):** catch-up artifact + generator (with tests), the on-device window script,
-  and this report. All committed; PR opened, **not merged**.
-- **G4 is NOT green.** Do not run the runbook's Phase 3/4 against the real Uganda gateway.
-- **Next step for whoever picks this up:** design a reviewed, table-rebuild-based reconciliation for the 11
+- **Deliverables at the time of this report:** catch-up artifact + generator (with tests), the on-device window
+  script, and this report. They were committed; the PR was opened and not merged.
+- **G4 was not green in this rehearsal.** The Phase 3/4 warning below describes only the historical window
+  procedure. It is not a procedure in the later neutral guide and must not be used for live work.
+- **Recorded next steps at the time:** design a reviewed, table-rebuild-based reconciliation for the 11
   non-additive diffs listed under "What's blocking G4" (FK declarations on `device_data`/`zone_weather_cache`,
   the `devices` CHECK, six column-default/nullability mismatches), decide whether
   `irrigation_events.event_uuid` / `zone_weather_cache.fetched_at` should be added via a small
   `ALTER TABLE ADD COLUMN` companion tool (same sanctioned pattern as `repair-sync-outbox-v2.js`) ahead of
-  the rest, and re-rehearse G4 from scratch once that plan exists. Update the 5 runbook-staleness items
-  above in `docs/operations/ledger-catchup-runbook.md` regardless of when G4 clears.
-- G1-G3 and G5 are untouched by this local-only rehearsal and still need their own evidence before the
-  runbook's NOT-READY banner can come down.
+  the rest, and re-rehearse G4 from scratch once that plan exists.
+- **Historical runbook request:** the five staleness items above referred to the phase-based source reviewed
+  during this rehearsal. They are retained here as comparison evidence; the current neutral guide does not
+  contain that checklist.
+- G1-G3 and G5 were not exercised in this local rehearsal. Their historical blank status does not establish
+  current gateway state. The NOT-READY banner belonged to the then-current runbook and is not part of the
+  neutral guide.

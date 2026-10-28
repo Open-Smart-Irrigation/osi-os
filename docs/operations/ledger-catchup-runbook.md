@@ -22,7 +22,7 @@ The incident showed that a schema repair can complete while the running gateway 
 
 Before any restart against a changed schema, confirm the intended flows payload is active, not merely staged. If the live payload cannot be matched to the reviewed repair plan, stop before changing the database or restarting Node-RED.
 
-Any parent-table rebuild must fence the drop/rename swap with foreign-key enforcement disabled for the rebuild and restore enforcement afterward. Review the exact transaction and every dependent child table. A rebuild must fail closed if row mapping or constraints do not match the reviewed plan.
+Any parent-table rebuild must set `PRAGMA foreign_keys=OFF` before opening the rebuild transaction. Keep it disabled across the complete drop/rename swap and through transaction completion. On every exit path, restore `PRAGMA foreign_keys=ON` after the final drop and after `COMMIT` or `ROLLBACK`, using a `finally` path. Then run `PRAGMA foreign_key_check` and require zero violations before proceeding. Review every dependent child table. A rebuild must fail closed if row mapping or constraints do not match the reviewed plan.
 
 ## Plan evidence to establish for each gateway
 

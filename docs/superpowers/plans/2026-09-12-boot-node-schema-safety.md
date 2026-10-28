@@ -78,7 +78,7 @@ Task 7 (this wave):
 | `database/seed-blank.sql`, 7 bundled `farming.db`, `CHECKSUMS.json` | same text, regenerated together | 5 |
 | `scripts/verify-trigger-body-parity.js` | `GATEWAY_EUI_LITERALS` rule updated | 5 |
 | `lib/osi-migrate/__tests__/fingerprints-gateway-eui.test.js` | 22-site assertion retired | 5 |
-| `docs/operations/ledger-catchup-runbook.md` | reconciled to the recovered state | 7 |
+| Catch-up runbook then in effect | Task 7 reconciled its then-current status; #449 later generalized it as `docs/operations/ledger-catchup-runbook.md` | 7 |
 | `.github/workflows/migrations.yml` | wires every new verifier and test file | 1-3, 5 |
 
 ---
@@ -859,31 +859,25 @@ git commit -m "chore(boot): delete the unfenced writable_schema devices_old heal
 
 ### Task 7: Reconcile the Uganda catch-up runbook (#87)
 
-**Files:**
-- Modify: `docs/operations/ledger-catchup-runbook.md`
+**Historical source:** Task 7 worked from the then-current phase-based catch-up runbook. The #449 pre-edit tree at commit `f6682ef6d0d90355bded9789fb4d423136ab02bb` preserves that source. #449 later generalized the reusable material as [`docs/operations/ledger-catchup-runbook.md`](../../operations/ledger-catchup-runbook.md); that neutral guide does not contain Task 7's detailed procedure or deployment status.
 
-- [x] **Step 1: Read the current document**
+- [x] **Step 1: Read the then-current source**
 
-Run: `git show origin/main:docs/operations/ledger-catchup-runbook.md`
-It still describes execution as gated on a stable-connectivity window and on Uganda being pre-history-sync. Both are stale.
+The Task 7 record documents a `git show origin/main` lookup for the runbook then in effect. That lookup is historical, not a command to rerun against today's `origin/main`. The neutral path was introduced later by #449 and must not be substituted for the source that Task 7 read.
 
-- [x] **Step 2: Rewrite the status section against the verified state**
+- [x] **Step 2: Record the status section against the evidence available then**
 
-State, with the 2026-09-12 read-only evidence: `schema_migrations` head 56; `devices` carrying all 45 columns including the five `sdi12_*`; `device_data` at 70,578 rows with ingest live (newest `2026-09-12T19:19:49Z`); five incident-window backups under `/data/db/`. Replace the "blocked on connectivity" framing with what the catch-up produced and what the incident cost (70,176 rows deleted by an unfenced cascade, since restored). Link the incident log and the issues that fix the generating defects.
+Task 7 recorded the 2026-09-12 read-only evidence as historical status: `schema_migrations` head 56; `devices` carrying all 45 columns including the five `sdi12_*`; `device_data` at 70,578 rows with ingest live (newest `2026-09-12T19:19:49Z`); and five incident-window backups under `/data/db/`. It replaced the "blocked on connectivity" framing with the catch-up outcome and the incident cost (70,176 rows deleted by an unfenced cascade, since restored), and linked the incident log and issues addressing the defects. These figures describe that historical source and are not current deployment state.
 
-Keep the operational procedure — it is still the recipe for the next behind-schema gateway — but move the Uganda-specific status into a dated outcome section so a future reader does not mistake history for a pending task.
+Task 7 retained the detailed procedure that existed at the time and moved deployment-specific status into a dated outcome section. #449 later generalized the document and removed those gateway-specific details; this completed plan is not current operating guidance.
 
 - [x] **Step 3: Run the slop check**
 
-Run: `node .claude/skills/anti-slop-writing/slop-check.js docs/operations/ledger-catchup-runbook.md`
-Expected: `slop-check: PASS (no tier-1 findings)`, exit 0. Read every tier-2 warning; do not bulk-suppress.
+Historical gate definition: Task 7 recorded the expected signal as `slop-check: PASS (no tier-1 findings)`, exit 0, with tier-2 warnings reviewed individually. This is historical evidence for the then-current source, not a fresh result for the later neutral guide.
 
 - [x] **Step 4: Commit**
 
-```bash
-git add docs/operations/ledger-catchup-runbook.md
-git commit -m "docs(ops): reconcile the Uganda catch-up runbook with the recovered gateway state (#87)"
-```
+Task 7's commit operated on the runbook path present at that time. #449 later generalized the file; the completed task's former staging and commit commands are not current instructions and are not repeated here.
 
 ---
 
