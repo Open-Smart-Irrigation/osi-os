@@ -659,20 +659,112 @@ function checkRunStep(ctx, step) {
   let pipefail = step.pipefail;
   let errexitOff = false;
   let terminated = false;
+  const trackedEnvNames = ['NODE_OPTIONS', 'NODE_TEST_CONTEXT'];
+  const shellEnv = new Map(trackedEnvNames.map((name) => {
+    if (Object.prototype.hasOwnProperty.call(step.env || {}, name)) {
+      const value = String(step.env[name] ?? '');
+      return [name, { value, exported: true, known: !/[${}]/.test(value) }];
+    }
+    return [name, { value: undefined, exported: false, known: true }];
+  }));
+  const markUnknown = (name, exported = shellEnv.get(name).exported) => {
+    shellEnv.set(name, { value: undefined, exported, known: false });
+  };
+  const setShellEnv = (name, value, exported) => {
+    shellEnv.set(name, { value, exported, known: !/[${}]/.test(value) });
+  };
   commands.forEach((command, i) => {
     if (unreachable.has(i) || terminated) return;
     let words = command.words;
     let lost = null;
-    const commandEnv = { ...(step.env || {}) };
-    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]))) {
+    const commandEnv = {};
+    const unknownCommandEnv = new Set();
+    for (const [name, state] of shellEnv) {
+      if (state.exported) {
+        if (state.known) commandEnv[name] = state.value;
+        else unknownCommandEnv.add(name);
+      }
+    }
+    const prefixAssignments = [];
+    const prefixUnknownNames = [];
+    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]) || /^(NODE_OPTIONS|NODE_TEST_CONTEXT)\+=/.test(words[0]))) {
       if (CONDITION_WORDS.has(words[0])) lost = lost || `its exit status is the condition of ${words[0]}`;
       const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(words[0]);
-      if (assignment) commandEnv[assignment[1]] = assignment[2];
+      const appendAssignment = /^(NODE_OPTIONS|NODE_TEST_CONTEXT)\+=/.exec(words[0]);
+      if (assignment) {
+        commandEnv[assignment[1]] = assignment[2];
+        prefixAssignments.push(assignment);
+        if (shellEnv.has(assignment[1])) {
+          if (/[${}]/.test(assignment[2])) unknownCommandEnv.add(assignment[1]);
+          else unknownCommandEnv.delete(assignment[1]);
+        }
+      } else if (appendAssignment) {
+        prefixUnknownNames.push(appendAssignment[1]);
+        unknownCommandEnv.add(appendAssignment[1]);
+      }
       words = words.slice(1);
     }
-    if (!words.length) return;
+    if (!words.length) {
+      for (const [, name, value] of prefixAssignments) {
+        if (shellEnv.has(name)) setShellEnv(name, value, shellEnv.get(name).exported);
+      }
+      for (const name of prefixUnknownNames) markUnknown(name);
+      return;
+    }
     lost = lost || groupLost.get(i) || exitStatusLost(commands, i, pipefail);
     const [cmd, ...args] = words;
+    if (cmd === 'export') {
+      let unexport = false;
+      let unsupportedFlag = false;
+      for (const [, name] of prefixAssignments) {
+        if (shellEnv.has(name)) markUnknown(name, false);
+      }
+      for (const name of prefixUnknownNames) markUnknown(name, false);
+      for (const arg of args) {
+        if (arg === '-n') { unexport = true; continue; }
+        if (arg === '-p') continue;
+        if (/^[+-]/.test(arg)) { unsupportedFlag = true; continue; }
+        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(arg);
+        const name = assignment ? assignment[1] : trackedEnvNames.find((key) => arg.startsWith(`${key}+`)) || arg;
+        if (!shellEnv.has(name)) continue;
+        if (unsupportedFlag) markUnknown(name, true);
+        else if (assignment && arg === `${name}=${assignment[2]}`) setShellEnv(name, assignment[2], !unexport);
+        else if (assignment) markUnknown(name, !unexport);
+        else {
+          const state = shellEnv.get(name);
+          if (state.value === undefined && state.known) markUnknown(name, !unexport);
+          else shellEnv.set(name, { ...state, exported: !unexport });
+        }
+      }
+      return;
+    }
+    if (cmd === 'unset') {
+      for (const [, name] of prefixAssignments) {
+        if (shellEnv.has(name)) markUnknown(name, false);
+      }
+      for (const name of prefixUnknownNames) markUnknown(name, false);
+      for (const arg of args) {
+        if (shellEnv.has(arg)) shellEnv.set(arg, { value: undefined, exported: false, known: true });
+        else {
+          const name = trackedEnvNames.find((key) => arg.includes(key));
+          if (name) markUnknown(name);
+        }
+      }
+      return;
+    }
+    if (['declare', 'local', 'readonly', 'typeset'].includes(cmd)) {
+      for (const arg of args) {
+        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(arg);
+        const name = assignment ? assignment[1] : arg.replace(/^-?[a-zA-Z]+/, '');
+        if (shellEnv.has(name)) markUnknown(name, true);
+      }
+      return;
+    }
+    if (cmd === 'eval' || cmd === '.' || cmd === 'source') {
+      for (const name of trackedEnvNames) markUnknown(name, true);
+    }
+    // Assignments before a command are temporary, as in `NAME=value command`.
+    // They override this command's environment but never the shell's state.
     if (cmd === 'set') {
       for (let k = 0; k < args.length; k += 1) {
         const a = args[k];
@@ -688,12 +780,14 @@ function checkRunStep(ctx, step) {
       return;
     }
     if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
+    const unknownName = [...unknownCommandEnv][0];
+    const commandLost = lost || (unknownName && `cannot model exported ${unknownName} after a shell mutation`);
     if (cmd === 'npm') {
       const sub = args.find((a) => !a.startsWith('-'));
       if (['install', 'i', 'add', 'update', 'upgrade', 'isntall', 'in'].includes(sub)) errors.push(`${where}: npm ${sub}: use npm ci so the lockfile decides`);
       if (args.includes('--legacy-peer-deps')) errors.push(`${where}: --legacy-peer-deps is not allowed`);
       if (args.includes('--force')) errors.push(`${where}: --force is not allowed`);
-      const add = (file, via) => hits.push({ file, via, lost });
+      const add = (file, via) => hits.push({ file, via, lost: commandLost });
       if (sub === 'run' || sub === 'run-script') npmCollection(ctx, step.dir, args[args.indexOf(sub) + 1], where, add);
       else if (sub === 'test' || sub === 't') npmCollection(ctx, step.dir, 'test', where, add);
       return;
@@ -710,7 +804,7 @@ function checkRunStep(ctx, step) {
         else if (!NODE_RUN_OPTIONS.test(o)) errors.push(`${where}: node option ${o} is not modelled by this verifier`);
       }
       const nodeOptionsLost = nodeOptionsTestFilter(commandEnv.NODE_OPTIONS);
-      const itemLost = lost || partial || nodeOptionsLost;
+      const itemLost = commandLost || partial || nodeOptionsLost;
       if (options.includes('--test')) {
         const contextLost = commandEnv.NODE_TEST_CONTEXT ? 'NODE_TEST_CONTEXT suppresses direct node --test collection' : null;
         if (!rest.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
@@ -737,14 +831,14 @@ function checkRunStep(ctx, step) {
         const firstLine = fs.readFileSync(path.join(root, scriptRel), 'utf8').split('\n', 1)[0];
         if (/^#!.*\bbash\b/.test(firstLine)) errors.push(`${where}: ${scriptRel}: a bash script (shebang ${firstLine.slice(2).trim()}) run with sh; run it with bash`);
       }
-      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
-      scriptArgs(scriptRel || args[idx], args.slice(idx + 1), lost);
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost: commandLost });
+      scriptArgs(scriptRel || args[idx], args.slice(idx + 1), commandLost);
       return;
     }
     if (SCRIPT_EXT.test(cmd) && cmd.includes('/')) {
       const scriptRel = resolveToken(cmd, 'script');
-      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
-      scriptArgs(scriptRel || cmd, args, lost);
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost: commandLost });
+      scriptArgs(scriptRel || cmd, args, commandLost);
     }
   });
   if (hits.length && step.gate.undecidable.length) {
