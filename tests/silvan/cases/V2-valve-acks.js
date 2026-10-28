@@ -20,6 +20,55 @@ const { redact } = require('../lib/rest');
 const state = { zones: [], devices: [] };
 const sched = [];
 
+const QUEUE_TIME = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/;
+const OBSERVED_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/;
+
+function instantMs(value, source) {
+  const match = typeof value === 'string' &&
+    (source === 'queue' ? QUEUE_TIME : OBSERVED_TIME).exec(value);
+  if (!match) throw new Error('invalid ' + source + ' timestamp');
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number);
+  const millisecond = Number((match[7] || '').padEnd(3, '0'));
+  const civil = new Date(0);
+  civil.setUTCFullYear(year, month - 1, day);
+  civil.setUTCHours(hour, minute, second, millisecond);
+  if (civil.getUTCFullYear() !== year || civil.getUTCMonth() !== month - 1 ||
+      civil.getUTCDate() !== day || civil.getUTCHours() !== hour ||
+      civil.getUTCMinutes() !== minute || civil.getUTCSeconds() !== second ||
+      civil.getUTCMilliseconds() !== millisecond) {
+    throw new Error('invalid ' + source + ' calendar timestamp');
+  }
+  let offsetMinutes = 0;
+  if (source === 'observer' && match[8] !== 'Z') {
+    const offsetHours = Number(match[10]);
+    const offsetRest = Number(match[11]);
+    if (offsetHours > 23 || offsetRest > 59) throw new Error('invalid observer offset');
+    offsetMinutes = (match[9] === '+' ? 1 : -1) * (offsetHours * 60 + offsetRest);
+  }
+  const instant = civil.getTime() - offsetMinutes * 60_000;
+  if (!Number.isFinite(instant)) throw new Error('invalid ' + source + ' instant');
+  return instant;
+}
+
+async function waitForDropPlan(observer, eui, queuedAt, seenBeforeEdit) {
+  const cutoff = instantMs(queuedAt, 'queue');
+  let timestampError = null;
+  const selected = await observer.waitForDownlink((d) => {
+    if (seenBeforeEdit.has(d) || d.deveui !== eui ||
+        !d.decoded || d.decoded.kind !== 'WEEKDAY_PLAN') return false;
+    try {
+      return instantMs(d.at, 'observer') > cutoff;
+    } catch (e) {
+      timestampError = e;
+      return true;
+    }
+  }, 15000);
+  if (timestampError) throw timestampError;
+  return selected;
+}
+
+exports.waitForDropPlan = waitForDropPlan;
+
 async function pushRows(ssh, eui) {
   return ssh.sql(
     "SELECT push_id, purpose, weekday, fport, state, ack_status, queued_at, acked_at, error " +
@@ -127,15 +176,19 @@ exports.run = async (ctx) => {
   // ---------- 5. dropped ACK (valve never answers) -------------------------
   observer.setBehaviour(eui, 'drop');
   const beforeDrop = await pushRows(ssh, eui);
+  const seenBeforeDrop = new Set(observer.downlinks);
   const s3 = await rest.put('/api/valves/' + eui + '/schedules/' + (sched[0] || ''), {
     kind: 'WEEKLY', weekdays_mask: 1, start_time: '05:15', duration_minutes: 8, label: 'drop ' + tag,
   });
   ctx.expect('editing the schedule is accepted when the valve will never answer', s3.status < 300, { status: s3.status });
-  const dropDownlink = await observer.waitForDownlink(
-    (d) => d.deveui === eui && d.decoded.kind === 'WEEKDAY_PLAN' && d.at > beforeDrop[beforeDrop.length - 1].queued_at, 15000
-  ).catch(() => null);
+  let dropWaitError = null;
+  const queuedAt = beforeDrop[beforeDrop.length - 1]?.queued_at;
+  const dropDownlink = await waitForDropPlan(observer, eui, queuedAt, seenBeforeDrop)
+    .catch((e) => { dropWaitError = e; return null; });
   ctx.expect('a plan downlink is still emitted when the valve is silent', !!dropDownlink,
-    dropDownlink && { fPort: dropDownlink.fPort, hex: dropDownlink.bytesHex });
+    dropDownlink
+      ? { fPort: dropDownlink.fPort, hex: dropDownlink.bytesHex }
+      : { reason: dropWaitError ? dropWaitError.message : 'no matching plan within 15000 ms' });
   await ctx.sleep(4000);
   const afterDrop = await pushRows(ssh, eui);
   const stillQueued = afterDrop.filter((r) => r.state === 'QUEUED');
