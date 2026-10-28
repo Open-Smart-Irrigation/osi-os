@@ -182,6 +182,25 @@ describe('AdvancedScheduleDrawer', () => {
     expect(edit).toHaveBeenCalledTimes(1);
   });
 
+  it('shows an unknown stress threshold and distinct VPD override counts in German', async () => {
+    const unknownThresholdZone: IrrigationZone = {
+      ...zone,
+      schedule: { irrigation_zone_id: 42, trigger_metric: 'DENDRO', threshold_kpa: 5, enabled: true, duration_minutes: 20, response_mode: 'proportional' },
+    };
+    renderLocalized(unknownThresholdZone, 'de-CH');
+    expect(screen.getByText('Stufe 5')).toBeInTheDocument();
+
+    cleanup();
+    const unequalCounts: NonNullable<ZoneRecommendation['diagnostics']> = {
+      ...zeroDiagnostics,
+      vpdOverrideSummary: { downgradedTreeCount: 2, upgradedTreeCount: 1 },
+    };
+    vi.mocked(dendroAnalyticsAPI.getZoneRecommendations).mockResolvedValueOnce([recommendation(unequalCounts)]);
+    renderLocalized(zone, 'de-CH');
+    fireEvent.click(screen.getByRole('button', { name: de.tabAnalysis }));
+    expect(await screen.findByText('2 herabgestuft / 1 heraufgestuft')).toBeInTheDocument();
+  });
+
   it('keeps conditional policy creation reachable without a legacy schedule', () => {
     const onEditPolicy = vi.fn(); renderLocalized(zone, 'en', { onEditPolicy });
     fireEvent.click(screen.getByRole('button', { name: /configure conditional irrigation/i }));
