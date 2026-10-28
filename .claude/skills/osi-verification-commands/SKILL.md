@@ -52,7 +52,7 @@ repo (`scripts/`, `.github/workflows/`) plus `AGENTS.md`.
 | Codec robustness | `node scripts/verify-codec-robustness.js` | Exit 0. |
 | Communication contract | `node scripts/verify-communication-contract.js` | Exit 0. |
 | Gateway health persistence | `node --test scripts/test-gateway-health-persistence.js` | Node test exit 0. |
-| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | Exit 0. Fails if any existing node grew, a new node exceeds 4 KB, or total embedded JS increased. |
+| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | Exit 0. Fails if any existing node grew, a new node exceeds 1,536 chars or is over 400 chars without loading its logic via `osiLib.require`, total embedded JS increased, or a fix exception is past its 14-day payback. Only fix exceptions in `scripts/flows-growth-exceptions.json` at the base ref lift it. |
 | Helper registration | `node scripts/verify-helper-registration.js` | Exit 0. Verifies osi-lib NAME_TO_PATH registry, loader test, and deploy.sh coverage match. |
 | Bare require scan | `node scripts/flows-bare-require-scan.js` | Exit 0. Fails if any function node uses bare `require()` instead of `osiLib.require()`. |
 | Channel manifest parity | `node scripts/verify-channel-manifest-parity.js` | Exit 0. GUI and edge manifest byte-identical. |
@@ -90,19 +90,15 @@ moved out of it on 2026-10-22 and carries the same authority.
 `scripts/verify-flows-size-ratchet.js`, `scripts/verify-no-stray-ddl.js`, and
 `scripts/verify-migrations.js` each compare HEAD against a base ref that
 defaults to `origin/main`, overridable with `OSI_FLOWS_SIZE_BASE_REF`,
-`OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively.
-`scripts/verify-live-gateway-identity.js` carries no `git show` call of its
-own; it cross-checks the same size pins by reading
-`scripts/verify-flows-size-ratchet-allowances.json`, and names its own base
-with `OSI_IDENTITY_BASE_REF` (also defaulting to `origin/main`) for its
-messages.
+`OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively. The size
+ratchet also reads `scripts/flows-growth-exceptions.json` from that base ref.
 
 A branch built as a multi-commit stack can sit unmerged through several
 unrelated merges into `origin/main`. Each merge moves the default base out
 from under the stack's own committed size/DDL/migration pins without the
 stack itself changing, so a pin correct at write time later reads as false
 growth. When that happens, pin the stack against the commit it actually
-branched from and set all four env vars to that commit for every verifier run
+branched from and set all three env vars to that commit for every verifier run
 until the stack is rebased onto the current `origin/main`.
 
 ## Common Mistakes

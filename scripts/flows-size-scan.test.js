@@ -38,27 +38,36 @@ test('isThinNewNode: small new node passes without SQL or osiLib (below floor)',
     { ok: true });
 });
 
-test('isThinNewNode: large new node with a fat SQL literal and NO osiLib FAILS', () => {
-  const node = fn('fat', 'x'.repeat(THIN_NODE_FLOOR) + '\n' + bigSql(SQL_LITERAL_MAX));
+test('isThinNewNode: new node over the floor without osiLib FAILS', () => {
+  const node = fn('logic', 'const parts=[];\n' + 'parts.push(x);\n'.repeat(40));
+  const r = isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /must load its logic through osiLib.require/);
+});
+
+test('isThinNewNode: new node over the floor that loads via osiLib.require PASSES', () => {
+  const node = fn('adapter',
+    "const h = osiLib.require('zone-env');\nif(!h.ok){return null;}\n" + 'const v = h.value.run(msg);\n'.repeat(20),
+    { libs: [{ var: 'osiLib', module: 'osi-lib' }] });
+  assert.deepEqual(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }), { ok: true });
+});
+
+test('isThinNewNode: osiLib node with a fat SQL literal FAILS', () => {
+  const node = fn('adapter',
+    "const h = osiLib.require('zone-env');\nif(!h.ok){return null;}\n" + bigSql(SQL_LITERAL_MAX),
+    { libs: [{ var: 'osiLib', module: 'osi-lib' }] });
   const r = isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX });
   assert.equal(r.ok, false);
   assert.match(r.reason, /oversized SQL literal/);
 });
 
-test('isThinNewNode: large new node that loads via osiLib.require PASSES even with a fat SQL literal', () => {
-  const node = fn('adapter',
-    "const h = osiLib.require('zone-env');\nif(!h.ok){return null;}\n" + bigSql(SQL_LITERAL_MAX),
-    { libs: [{ var: 'osiLib', module: 'osi-lib' }] });
-  assert.deepEqual(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }), { ok: true });
-});
-
-test('isThinNewNode: large new node with NO fat SQL literal PASSES (assembly logic is fine)', () => {
-  const node = fn('assembly', 'const parts=[];\n' + 'parts.push(x);\n'.repeat(600));
-  assert.deepEqual(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }), { ok: true });
+test('isThinNewNode: osiLib.require without the libs declaration does not count', () => {
+  const node = fn('undeclared', "const h = osiLib.require('zone-env');\n" + 'x;\n'.repeat(300));
+  assert.equal(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }).ok, false);
 });
 
 test('exported constants have the documented values', () => {
-  assert.equal(NEW_NODE_CEILING, 4096);
-  assert.equal(THIN_NODE_FLOOR, 4096);
+  assert.equal(NEW_NODE_CEILING, 1536);
+  assert.equal(THIN_NODE_FLOOR, 400);
   assert.equal(SQL_LITERAL_MAX, 400);
 });
