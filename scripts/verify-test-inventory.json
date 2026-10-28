@@ -81,14 +81,6 @@
       "reason": "needs BusyBox ash, wget and setsid as on the gateway (#390; run it in a node:22-alpine container, see its header); fails under dash"
     },
     {
-      "path": "scripts/test-valve-schedule-timestamp-wire-format.js",
-      "reason": "slow (#391): passes (32/32) but took about 17 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
-    },
-    {
-      "path": "scripts/test-valve-actuation-text-caps.js",
-      "reason": "slow (#391): passes (60/60) but took about 23 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
-    },
-    {
       "pattern": "web/history-zoom-prototypes/**",
       "reason": "pending owner decision D4: prototype app scope. Chart-library comparison app (uPlot, D3, Chart.js, ECharts) whose unit tests and Playwright browser specs run by hand (npm test, npm run test:browser); whether the app lands on main at all is open. Remove this entry when the app is wired into a workflow or dropped from the branch"
     }
