@@ -31,4 +31,4 @@ Primary target: Raspberry Pi 5 (`full_raspberrypi_bcm27xx_bcm2712`).
 
 ## Session Closeout
 
-When the user says `finish the session`, follow [AGENTS.md](AGENTS.md) session closeout and run `scripts/session-closeout.sh`.
+When the user says `finish the session`, load the `osi-session-closeout` skill; it runs `scripts/session-closeout.sh`.

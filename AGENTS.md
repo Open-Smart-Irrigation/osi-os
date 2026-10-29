@@ -4,7 +4,7 @@ Operational source of truth for `osi-os`. The edge is canonical; `osi-server` mi
 
 Sister repo: [`osi-server`](../osi-server/AGENTS.md).
 
-> **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (verify reality → written plan → adversarial review → exact execution → independent verification), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
+> **How to work here:** [docs/engineering-playbook.md](docs/engineering-playbook.md) — the working loop (§2: a standard loop, and the full plan-first loop for risk classes), the thinking tools, and the failure modes this repo has already paid for. Read it before your first non-trivial change; hold every PR to its §8 definition of done.
 
 Binding rules come first in this file; reference detail lives in the docs and skills each section links. Some harnesses read only the first 32 KiB of this file, so move reference material out instead of letting the file grow (`node scripts/verify-agents-size.js`).
 
@@ -242,46 +242,21 @@ Read the repo-owned `architect.yaml` and `RULES.yaml` overlays before edits. See
 
 ## Agent skills
 
-Field manuals for agents live in `.claude/skills/` (Agent Skills spec: SKILL.md + `name`/`description` frontmatter); `.agents/skills` is a committed symlink to it for `.agents`-convention tools (Codex, Gemini CLI, …). Index:
-
-- `osi-debugging-playbook` — symptom→triage table + verifier toolbox; load when investigating any edge failure or data gap.
-- `osi-live-ops-runbook` — deploy/repair/post-check procedures for live Pis; load before touching a real gateway.
-- `osi-flows-json-editing` — script-only flows.json editing rules; load before ANY Node-RED flow change.
-- `osi-schema-change-control` — migrations, risk classes, frozen boot DDL, parity gates; load before ANY schema change.
-- `osi-agronomy-sensors-reference` — domain pack (SWT/pF, Chameleon, dendrometry, rain, LoRaWAN as used here); load when touching sensor semantics or displays.
-- `osi-config-and-flags` — UCI/env/flag catalog incl. DEVICE_EUI resolution; load when configuring or provisioning.
-- `osi-common-pitfalls` — short cross-cutting hazard card (FK fences, silent catches, profile mirroring, missing-data rule, pipe-exit traps); load at the start of any edge change or review.
-- `osi-verification-commands` — verifier catalog with pass signals and per-surface minimum evidence; load when selecting gates or writing execution reports.
-- `osi-sync-contract-awareness` — sync contract invariants (edge-authoritative writes, outbox/inbox/cursor, canonicalization, cross-repo PR rule); load for any sync or paired edge/cloud change.
-- `osi-react-gui-patterns` — GUI serving/routing/auth/i18n/missing-data patterns and test invocation; load for `web/react-gui` changes.
-- `osi-server-backend-patterns` — paired-repo awareness for osi-server (Flyway discipline, Gradle builds, API bridge); load for cloud-side work initiated from this repo.
-- `osi-forge-boundaries` — Stage 1 Forge worker/controller boundaries and stop-and-report rules; load for issue-to-PR automation tasks.
-- `osi-hardest-problem-campaign` — deferred stub; do not author without maintainer input.
-- `anti-slop-writing` — prose floor for ALL documentation and user-facing text; load before writing or editing any docs/README/ADR/runbook/PR prose. Mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`.
+Field manuals for agents live in `.claude/skills/` (Agent Skills spec); `.agents/skills` is a committed symlink to it for Codex and other `.agents`-convention tools. Each skill's `description` says when to load it, and harnesses show those descriptions in every session, so this file does not repeat them. Load the owning skill before the change it covers: `osi-flows-json-editing` before any Node-RED flow change, `osi-schema-change-control` before any schema change, `osi-live-ops-runbook` before touching a real gateway, and `anti-slop-writing` before writing docs or PR text (mechanical check: `node .claude/skills/anti-slop-writing/slop-check.js <files>`).
 
 ### Cross-harness discovery and process parity
 
-The 14 skills above load in Claude Code (`.claude/skills/`), Codex (through the
+The 14 skills load in Claude Code (`.claude/skills/`), Codex (through the
 `.agents/skills` symlink, which is load-bearing) and OpenCode (both roots; its
 `duplicate skill name` warnings are cosmetic). Keep the single symlink; never
-add a second real copy. A harness without the superpowers skills applies the
-same loop by hand from `docs/engineering-playbook.md`. Read
+add a second real copy. Process: `docs/engineering-playbook.md` §2 (standard
+and risk-class loops); harnesses without workflow skills apply it by hand. Read
 [docs/agents/cross-harness-skills.md](docs/agents/cross-harness-skills.md)
 before changing that layout.
 
 ## Session closeout
 
-When the user says `finish the session`:
-
-1. Run `git status --short --branch` and report staged/unstaged/untracked.
-2. Remove only clearly temporary files. List ambiguous files as cleanup candidates instead of deleting them.
-3. Review and update this `AGENTS.md` for durable repo-level changes.
-4. Record cross-session operational context in the memory store of the harness you are running in (Claude Code: its auto-memory for this repo). A harness without a memory store writes it to the run's `HANDOVER.md` under `.superpowers/sdd/<run>/` and says so in the closeout report. Never edit another harness's memory files. A rule every harness must follow goes into this file or a repo skill by PR, not into memory.
-5. Run `scripts/session-closeout.sh` (`OSI_OS_MEMORY_FILE=<your memory index>` opts into a memory check) and report warnings.
-6. If no context files needed changes, say so explicitly.
-7. End with remaining risks, skipped verification, and the next recommended step.
-
-Keep closeout updates factual. Never delete ambiguous files without asking.
+When the user says `finish the session`, load `osi-session-closeout` and follow it.
 
 ---
 
@@ -314,18 +289,7 @@ Long form: `osi-verification-commands`, "Base ref for a stacked branch".
 
 ## Adding a new device type
 
-> **Why this is still a manual checklist:** there is no plugin registry — see ADR [`docs/adr/2026-05-28-static-device-plugin-registry.md`](docs/adr/2026-05-28-static-device-plugin-registry.md) for the deferral rationale. Do not propose a plugin system without a concrete second-party candidate.
-
-1. Add an ordered migration `database/migrations/ordered/NNNN__<slug>.sql` and the matching `seed-blank.sql` change (load `osi-schema-change-control`); step 6 regenerates the bundled `farming.db` copies. A new `devices.type_id` member is a `destructive` ordered migration that rebuilds `devices` (SQLite cannot alter `CHECK` in place; precedent `0060__add_rak10701_field_tester_type.sql`), plus `REQUIRED_TYPES` and `DEVICES_COLUMNS` in `sync-init-fn` under the boot-node merge gate. Never add a second rebuild path.
-2. Add TypeScript types (`web/react-gui/src/types/farming.ts`).
-3. Add Node-RED ingest flow in `flows.json` (use the `application/+/device/+/event/up` topic; guard the branch head with a `deviceProfileName` filter so other branches don't double-process the same message).
-4. Add catalog / merge logic.
-5. Add React card/component and render in dashboard.
-6. Regenerate the bundled DB copies with `node scripts/build-seed-db.js` (it replays the ordered migrations into a fresh image, so the shipped ledger advances with the schema); verify with `scripts/verify-db-schema-consistency.js` and `scripts/verify-seed-db-ledger.js`.
-7. Add the profile to `chirpstack-bootstrap.js` (all three copies: `scripts/` and both profiles) and map its ChirpStack application; if the flows filter on the profile ID, add its `CHIRPSTACK_PROFILE_*` key to `node-red.init`.
-8. For Data-view support, update the finite source policy in both payload
-   profiles and run the source matrix, manifest parity, and deploy-file coverage
-   checks documented in [docs/channel-manifest.md](docs/channel-manifest.md).
+There is no plugin registry (ADR [2026-05-28](docs/adr/2026-05-28-static-device-plugin-registry.md)); follow the manual checklist in [docs/architecture/adding-a-device-type.md](docs/architecture/adding-a-device-type.md). A new `devices.type_id` member is a `destructive` ordered migration that rebuilds `devices`, under the boot-node merge gate.
 
 ---
 
@@ -355,14 +319,3 @@ Device types: `KIWI_SENSOR`, `TEKTELIC_CLOVER`, `DRAGINO_LSN50`, `DRAGINO_SDI12`
 ### In the repo
 
 Repo paths, the Pi image workflow, the Journal V2 media cache and the provider weather store: [docs/architecture/repo-file-locations.md](docs/architecture/repo-file-locations.md).
-
----
-
-## Issues
-
-Tracked at https://github.com/Open-Smart-Irrigation/osi-os/issues. Don't trust this
-list or any issue body blindly — re-verify against current `main` before planning
-(several issues have turned out already-fixed or mostly stale). Long-running open
-areas as of 2026-07-05: i18n (#47), lossless edge→cloud backup (#56), rootfs
-auto-grow (#50), Uganda live-ops (#55, #64, #87), dendro scheduling (#22), Mclimate
-valve (#18), and the schema-hardening roadmap (#88–#90, gated — see its plan docs).

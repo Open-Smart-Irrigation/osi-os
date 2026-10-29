@@ -1,6 +1,6 @@
 ---
 name: osi-live-ops-runbook
-description: Use when deploying OSI OS to a live or previously provisioned Raspberry Pi gateway, repairing a live Pi's Node-RED/ChirpStack/database state, taking a pre-repair backup, recovering from schema fingerprint drift, SSHing into a live gateway, restarting Node-RED on a farm device, testing STREGA valves on live hardware, or judging whether an operation is safe against a running farm, the production cloud or a customer-hosted instance.
+description: Use before deploying to, repairing, backing up, SSHing into, or restarting services on a live or previously provisioned gateway, testing valves on hardware, or judging whether an operation is safe against a farm, production cloud, or customer instance.
 ---
 
 # OSI Live Ops Runbook
@@ -44,27 +44,7 @@ follow the pointers inline.
 
 ### 1. Never overwrite or reseed `farming.db` on a live Pi
 
-`deploy.sh` (repo root) contains this literal comment at the top:
-
-```
-# Safety invariant: this script must never overwrite /data/db/farming.db.
-# The edge database is live user data and osi-os is the operational source of
-# truth. The bundled seed database is only copied when the target DB is absent.
-```
-
-The actual guard, in `seed_db_if_missing()`:
-
-1. If `/data/db/farming.db` already exists → **SKIP**, log "existing live database
-   preserved", return success. Nothing is written.
-2. Else if any SQLite sidecar file exists (`farming.db-wal`, `farming.db-shm`,
-   `farming.db-journal`) but the main file is absent → **ERROR and refuse**, exit
-   non-zero. This is the "DB file missing but the journal isn't" state — it usually
-   means something went wrong (mid-crash, mid-copy, a bad manual `rm`), and seeding
-   over it would silently discard whatever the sidecars were protecting.
-3. Only when the target is truly absent **and** no sidecars exist does it fetch the
-   profile-matched seed DB, integrity-check it (`PRAGMA integrity_check` via
-   `sqlite3` if available), re-check the target is still absent (race guard), then
-   `mv` the seed into place.
+The seeding guard in `deploy.sh` that enforces this, `seed_db_if_missing()`, is described in `references/deploy.md`, "How `seed_db_if_missing()` guards the live database".
 
 **Why the seed ships stamped** (moved from `AGENTS.md` on 2026-10-22; same
 authority): the bundled seed ships already stamped at the migration head (a full
@@ -99,48 +79,7 @@ Before hand-repairing schema, editing rows directly, or touching ChirpStack's
 SQLite config on a live Pi, take a timestamped backup. BusyBox `ash` has no `bash`,
 so keep this POSIX:
 
-```sh
-# Run on the Pi (ash-compatible)
-TS=$(date +%Y%m%d-%H%M%S)
-LABEL="pre-repair"          # e.g. "pre-eui-fix", "pre-fingerprint-restamp"
-BK="/data/db/backups/${LABEL}-${TS}"
-mkdir -p "$BK"
-# Raw copy, ONLY with the writer stopped: a raw copy of farming.db and its
-# sidecars taken while Node-RED writes is not a consistent backup.
-raw_copy_stopped() {
-  /etc/init.d/node-red stop
-  trap '/etc/init.d/node-red start' EXIT  # remove if the repair needs it stopped
-  i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
-  pgrep -f '[n]ode-red' >/dev/null 2>&1 && { echo "FATAL: Node-RED still running - no raw copy"; exit 1; }
-  cp -a /data/db/farming.db "$BK/farming.db" \
-    || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
-  for f in farming.db-wal farming.db-shm farming.db-journal; do
-    [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
-  done
-}
-if command -v sqlite3 >/dev/null 2>&1; then
-  # ONLINE backup via sqlite3 .backup (WAL-consistent while Node-RED writes). The
-  # output is one self-contained file: do not copy the live -wal/-shm next to it.
-  sqlite3 -cmd ".timeout 5000" /data/db/farming.db ".backup '$BK/farming.db'" || raw_copy_stopped
-  # Same check as scripts/pi/backup-pre-deploy.sh: the copy must pass integrity_check.
-  INTEG=$(sqlite3 "$BK/farming.db" "PRAGMA integrity_check" 2>&1) || true
-  [ "$INTEG" = "ok" ] || { echo "FATAL: backup integrity_check failed: $INTEG - do NOT proceed"; exit 1; }
-else
-  raw_copy_stopped
-  echo "WARN: no sqlite3 - integrity unchecked"
-fi
-# flows.json is a SYMLINK into /srv/node-red/payloads/<stamp>; -L copies the
-# active payload's contents, not a dangling link.
-cp -aL /srv/node-red/flows.json "$BK/flows.json"
-cp -a /srv/node-red/settings.js "$BK/settings.js"
-cp -a /srv/node-red/flows_cred.json "$BK/flows_cred.json" 2>/dev/null || true  # MQTT credentials
-# ChirpStack state — REQUIRED before any direct chirpstack.sqlite edit
-[ -e /srv/chirpstack/chirpstack.sqlite ] && cp -a /srv/chirpstack/chirpstack.sqlite "$BK/chirpstack.sqlite"
-mkdir -p "$BK/gui"
-cp -a /usr/lib/node-red/gui/. "$BK/gui/" 2>/dev/null || true
-echo "Backup at $BK"
-ls -la "$BK"
-```
+The backup script is in `references/repair.md`, "Pre-repair backup script".
 
 This matches `AGENTS.md` "Live-deploy safety rules": a timestamped directory under
 `/data/db/backups/` holding the `.backup` copy of `farming.db`, the dereferenced
@@ -148,6 +87,16 @@ This matches `AGENTS.md` "Live-deploy safety rules": a timestamped directory und
 descriptive label prefix instead of the literal `osi-os-` if it helps you find the
 right backup later; what matters is the timestamp, the `.backup` method and the
 integrity check.
+
+ChirpStack's SQLite, from `references/repair.md` ("ChirpStack v4 has no plain REST API"):
+
+- **Write:** stop ChirpStack first (the DB is locked while it runs), modify via
+  `sqlite3`, then start it again:
+  ```bash
+  /etc/init.d/chirpstack stop
+  sqlite3 /srv/chirpstack/chirpstack.sqlite "UPDATE ... ;"
+  /etc/init.d/chirpstack start
+  ```
 
 ### 3. Host access gate
 
@@ -177,92 +126,20 @@ offline verifier repair in "Live-repair recipes" below — that regenerates a ve
 that is *supposed* to change because the EUI itself was wrong, not a shortcut around
 an unknown credential.
 
----
+That recipe is in `references/repair.md`, "Changing DEVICE_EUI breaks linked login".
 
-## Quick reference
-
-| Task | Command |
-|---|---|
-| Build GUI | `cd web/react-gui && npm run build` |
-| Bundle GUI | `tar czf react_gui.tar.gz -C web/react-gui/build .` |
-| Serve repo root | `python3 -m http.server 9876 --bind 127.0.0.1` |
-| Deploy over reverse tunnel | see "Deploy runbook" step 4 below |
-| Restart Node-RED (repairs only; never as part of a deploy, `deploy.sh` restarts it itself) | `/etc/init.d/node-red restart` |
-| Show active flows payload | `ls -l /srv/node-red/flows.json` (symlink into `payloads/<stamp>`) |
-| Cloud canary verdict after deploy | `OSI_ADMIN_TOKEN=<admin JWT> node scripts/deploy-canary-gate.js --eui <EUI> --since <deploy-start ISO8601>` from the operator machine (full invocation: `docs/operations/deploy-canary-gate-runbook.md`; see step 5) |
-| Free a leaked local port | `pkill -9 -f 'http.server 9876'` |
-| SSH to a gateway | `ssh -i ~/.ssh/<key> -o IdentitiesOnly=yes root@<pi-ip>` |
-| Filter SSH banner noise | pipe through `grep -v -e 'post-quantum' -e 'store now'` (portable; BusyBox grep lacks BRE alternation) |
-| Re-baseline a drifted fingerprint | `node scripts/restamp-fingerprints.js /data/db/farming.db` (on-Pi path) |
-
----
-
-## Deploy runbook (reverse-tunnel flow)
+### 5. Deploy prerequisites and stop conditions
 
 The [migration source and SSH prerequisites](../../../docs/operations/migration-manifest-trust.md#required-deployment-prerequisites) are mandatory: select and protect a stable source, authenticate the host/user, own the loopback listener and forwarding port, and confirm forwarding succeeded.
 
-This is the standard way to push a new build to a live gateway without exposing the
-Pi to the internet or needing a registry. Numbered, copy-pasteable, run from your
-dev workstation unless noted.
+**Read the deploy verdict — do not restart by hand.** There is nothing left for you to restart on a normal deploy.
 
-1. **Build the GUI.**
-   ```bash
-   cd web/react-gui && npm run build
-   ```
+   Restarting Node-RED by hand right after a green deploy doesn't make it any
+   safer — it only obscures which restart (migration, flip, or yours) produced
+   the state you're looking at. If something looks wrong, re-read the deploy
+   output before touching the service.
 
-2. **Bundle it.** `react_gui.tar.gz` at the repo root is disposable — `deploy.sh`
-   fetches it by that exact name (see the "React GUI" step in deploy.sh) and nothing
-   else references it after the deploy completes.
-   ```bash
-   cd /path/to/osi-os
-   tar czf react_gui.tar.gz -C web/react-gui/build .
-   ```
-
-3. **Serve the repo root locally**, bound to loopback only:
-   ```bash
-   python3 -m http.server 9876 --bind 127.0.0.1
-   ```
-   Port 9876 must be free before this step. If a previous run leaked a server:
-   ```bash
-   pkill -9 -f 'http.server 9876'
-   ```
-
-4. **Open a reverse tunnel and run the deploy script on the Pi**, downloading first
-   instead of piping into `sh`:
-   ```bash
-   ssh -o ExitOnForwardFailure=yes -R 9876:localhost:9876 root@<pi-ip> \
-     'curl -fsSL http://127.0.0.1:9876/deploy.sh -o /tmp/osi-os-deploy.sh && sh /tmp/osi-os-deploy.sh; rc=$?; rm -f /tmp/osi-os-deploy.sh; exit "$rc"'
-   ```
-   **Why download-then-run instead of `curl ... | sh`:** in a pipe, the shell's exit
-   status is the last command's (`sh`'s), not `curl`'s. If `curl` 404s (local
-   `http.server` already exited, tunnel dropped), `sh` gets empty stdin, exits 0, and
-   the pipeline reports success — a deploy that fetched nothing can print "Deploy
-   complete" and exit 0. Same failure class as `git push | tail -1` hiding a failed
-   push behind `tail`'s exit code (engineering playbook §1). Download-then-run makes
-   `curl`'s failure set `$rc`, so a 404'd deploy fails loudly over the SSH exit code.
-   `deploy.sh`'s own header comment shows the same download-then-run form.
-
-5. **Read the deploy verdict — do not restart by hand.** `deploy.sh` already
-   restarts Node-RED itself, up to twice: once around the schema-migration step
-   **only when a live `/data/db/farming.db` exists** (`run_schema_migration`
-   stops it, migrates, then activates the staged flows+GUI pair
-   (`--- Activate paired flows+GUI payload before Node-RED restart ---`,
-   `OK: activated flows+GUI payloads/<stamp>`) before it starts Node-RED again,
-   so a restart never runs old flows on a migrated schema; on a fresh Pi the
-   migration step SKIPs, so this restart does not happen), and once in the
-   health block (`--- Flip payload + local health self-check + auto-rollback (5.3 / DD10) ---`):
-   it flips the pair if the migration step has not already, and restarts
-   Node-RED unless it already did. The flip always switches flows.json and the
-   GUI directory together.
-   There is nothing left for you to restart on a normal deploy.
-
-   On a passing post-flip self-check the script prints, in order:
-   ```text
-   OK: boot node confirmed 'sync-init: schema init complete' after <n>s
-   OK: local health self-check PASSED (Node-RED service running, /gui reachable after <n>s)
-   OK: committing payload <stamp>
-   ```
-   and prunes old payload directories down to `PAYLOAD_KEEP_N` (default 5).
+On a failing post-flip self-check (`references/deploy.md`, "Deploy runbook (reverse-tunnel flow)", step 5):
 
    On a failing self-check it instead prints:
    ```text
@@ -283,29 +160,42 @@ dev workstation unless noted.
    `ERROR: no previous payload to roll back to; first-deploy payload was removed and Node-RED remains stopped.`
    and exits 1 — treat that as a stop, with the service down.
 
-   Restarting Node-RED by hand right after a green deploy doesn't make it any
-   safer — it only obscures which restart (migration, flip, or yours) produced
-   the state you're looking at. If something looks wrong, re-read the deploy
-   output before touching the service.
+In the migration step (`references/deploy.md`, "What `deploy.sh` actually does end-to-end", step 8): Node-RED is restarted on success and on an ordinary migration failure; the one exception is `migrate-cli.js` exiting 3 (backup-restore integrity failure), which deliberately leaves Node-RED stopped for the operator.
 
-   The local self-check only proves Node-RED came up and `/gui` answered on
-   *this* Pi. For the cloud-side verdict — whether the gateway is actually
-   delivering healthy heartbeats to osi-server after the deploy — run, from
-   your operator machine (not the Pi). It requires an admin token in the
-   environment plus the gateway EUI and the deploy-start timestamp — a bare
-   invocation exits `2` (usage error), not a verdict:
-   ```bash
-   export OSI_ADMIN_TOKEN=<admin JWT>
-   node scripts/deploy-canary-gate.js \
-     --eui <GATEWAY_EUI> \
-     --since <ISO8601 deploy-start timestamp> \
-     [--expect-schema-sig <sig>]   # for schema-changing deploys
-   ```
-   Exit `0` = pass, `1` = fail (read stderr reasons), `2` = usage/auth/transport
-   error (treat as fail). Defaults when their flags are omitted: 5 consecutive
-   healthy heartbeats (`--consecutive`), 60 s poll interval (`--interval`),
-   900 s overall timeout (`--timeout`), `minDiskFreePct` 10. Full procedure:
-   `docs/operations/deploy-canary-gate-runbook.md`.
+**When `deploy.sh` refuses to proceed:** a missing/empty communication-preflight
+artifact or a failed `verify-communication-contract.js` run; `/srv/node-red/payloads`
+on a different filesystem than `/srv/node-red` (the symlink flip can't be atomic);
+integrity-check failure on the seed DB; `farming.db` absent while WAL/SHM/journal
+sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and not
+installable via `opkg`; Node-RED failing to stop within 30s before a migration;
+a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
+is restarted before the script exits — except `migrate-cli.js` exit code 3, a
+backup-restore integrity failure, which leaves Node-RED stopped); a failed
+download or verification of the migration runner, an uncreatable migration
+backup directory, or an unreadable database size (refused before Node-RED is
+stopped); a failed ledger-reconciliation download or probe (the previous
+payload is restarted); a failed command-ledger staging run (before anything is
+stopped); a failed command-ledger activation after the migration (see below);
+and a failed post-flip self-check, which either auto-rolls back the flows+GUI
+pair and exits 1, or — when there is no previous payload — removes the
+first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
+
+After a failed command-ledger activation (`references/deploy.md`, "Failed command-ledger activation"), the fourth outcome is a hold:
+
+- otherwise: Node-RED and identityd are held **stopped**, as in the script's
+  other holds. Nothing is disabled, so a reboot or a manual start runs the
+  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
+  records the reason, the time and the copy.
+
+Way out: re-run the deploy. If it fails again, the load error printed by the
+installer or the probe names the cause.
+
+The post-deploy verification checklist is in `references/deploy.md`, "Post-deploy verification checklist":
+
+Run these after every live deploy. Each has an expected "healthy" output — treat any
+deviation as a signal to stop and investigate before telling the operator it's done.
+
+### 6. Bootstrap invocation and credential-file recovery
 
    ChirpStack reprovisioning happens automatically — `osi-bootstrap`
    (`conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap`, `START=99`)
@@ -344,348 +234,11 @@ dev workstation unless noted.
      The CLI's `ENV_FILE` override is for direct use only. Updated and replaced files are
      root-owned mode `0600`; the Gen2 backup keeps exact source bytes and an
      existing backup is retained. Text repair requires lossless UTF-8.
-   - Deploy updates `/srv/node-red/` but does not replace the image's ROM
-     `/usr/share/node-red/` writer. `osi-bootstrap` continues to prefer that
-     ROM file whenever it exists; only a new image supplies an updated ROM copy.
-   - What it touches: the Tektelic codec on a Kiwi or Clover profile that has
-     none (a codec already there is left alone), a new `OSI CLOVER Sensor`
-     profile when CLOVER is unset or aliased, the `chirpstack_profile_clover`
-     UCI key, the `CHIRPSTACK_PROFILE_CLOVER` env line, and the profile of each
-     DevEUI you name. It reuses the existing API key and writes nothing once
-     all is correct. Node-RED needs a restart to pick up a new Clover id; after
-     a standalone run, request it with
-     `/usr/libexec/osi-identityd.sh request-restart chirpstack_bootstrap 60`.
 
-### What `deploy.sh` actually does end-to-end
+"Credential env-file refusal" is `references/repair.md`, "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`". Its fail-closed steps:
 
-Reading straight through the script, in order:
+No writer means the `74` came from somewhere else; stop.
 
-1. Detects the Pi model from `/proc/device-tree/model` to pick the matching seed DB
-   profile (`bcm2712` for Pi 5, `bcm2709` for Pi 4/400/3/2, `bcm2708` for Pi Zero/1;
-   unknown models fall back to `bcm2712`, the canonical source-of-truth profile).
-2. Runs a **communication preflight**: fetches `flows.json` for all three hardware
-   profiles plus the Node-RED init script, `settings.js`, `chirpstack-bootstrap.js`,
-   and the diagnose script into a temp dir, fails loudly if any fetched artifact is
-   empty, then runs `verify-communication-contract.js` against them before touching
-   anything live.
-3. Reads the release version from `96_osi_server_config` and records the current
-   `osi-server.cloud.firmware_version`. Deploys `settings.js`, the Node-RED init
-   script, and the gateway identity helper (the latter two `chmod 755`), installs
-   `osi-bootstrap` and enables it when it is not enabled (this also re-enables a
-   service an operator disabled, and is not undone on rollback; when this deploy
-   enables it on a gateway whose env file is already provisioned, it writes
-   `/etc/osi-bootstrap.done`), removes a legacy GPS sidecar service if
-   present, then fetches the deploy-payload-swap helper
-   (`scripts/deploy-payload-swap.js`) and hard-aborts if `/srv/node-red/payloads`
-   is on a different filesystem than `/srv/node-red` — the symlink flip in step
-   10 must be atomic, and a cross-filesystem rename can't guarantee that.
-4. Stages `flows.json` as a new payload directory,
-   `/srv/node-red/payloads/<stamp>` (a UTC timestamp like `20260719T120000Z`),
-   via `stagePayload`. The flip that makes this payload live is deferred until
-   after the schema-migration step; the previous stamp (if any) is recorded so
-   a failed flip can be rolled back to it.
-5. Runs `seed_db_if_missing` — the guarded, non-destructive DB step above.
-6. Deploys the Node-RED runtime `package.json`/`package-lock.json`,
-   the full helper-module set (every `fetch_required "<name> package.json"` in
-   `deploy.sh`; list them with
-   `grep -o 'fetch_required "[^"]*package.json"' deploy.sh`), `edge-channels.json`,
-   the `chirpstack-bootstrap.js` bootstrap script, every file under `codecs/`
-   that `deploy.sh` names (list them with `grep -o 'codecs/[a-z0-9_]*\.js' deploy.sh | sort -u`),
-   and the partner-institute uplink transform (`agroscope_uplink_transform.js`, an
-   edge→cloud forwarding transform, not a device decoder).
-7. Runs `npm install --omit=dev --no-fund --no-audit` in `/srv/node-red`, exiting
-   non-zero on failure.
-8. Runs `run_schema_migration()`: **SKIPs entirely** if `/data/db/farming.db`
-   doesn't exist yet (a brand-new Pi ends up at exactly the bundled seed
-   schema, not seed-plus-migrations). Otherwise it ensures the `sqlite3` CLI is
-   present (attempting `opkg install sqlite3-cli` if missing); fetches
-   `database/migrations/ordered/CHECKSUMS.json`, every ordered migration file
-   it names, the helper scripts (`baseline-existing-db.js`,
-   `repair-sync-outbox-v2.js`, `migrate-cli.js`, `semantic-schema-compare.js`,
-   `restamp-fingerprints.js`, `verify-head-cli.js`,
-   `verify-runtime-schema-parity.js`) and the `lib/osi-migrate` runner
-   modules, then refuses, before Node-RED is touched, unless every migration
-   matches its `CHECKSUMS.json` SHA-256, no unnamed `.sql` sits beside them,
-   and every runner file is non-empty and parses; stops Node-RED and waits up to 30s
-   for the process to exit, refusing to proceed if it doesn't; WAL-checkpoints
-   the DB and runs `PRAGMA integrity_check`; if the `schema_migrations` ledger
-   has zero rows, runs the sync-outbox v2 repair then `baseline-existing-db.js`
-   first; then runs `migrate-cli.js --backup-dir /data/backups/migrate`
-   (override via `MIGRATE_BACKUP_DIR`). Node-RED is restarted on success and on
-   an ordinary migration failure; the one exception is `migrate-cli.js` exiting
-   3 (backup-restore integrity failure), which deliberately leaves Node-RED
-   stopped for the operator. The runner mechanics this step delivers — risk
-   classes, checksums, fingerprint stamping — are `osi-schema-change-control`'s
-   territory; this section only covers what `deploy.sh` does mechanically to
-   fetch and invoke them.
-9. Fixes mosquitto file ownership/permissions if mosquitto is installed.
-10. Flips the payload live (`flipTo(<new stamp>)`: flows.json and the GUI
-    directory together; skipped when the migration step already activated it),
-    writes the new `firmware_version` to UCI (every switch back to the previous
-    payload puts the old value back first), restarts Node-RED unless the
-    migration step did, then probes `http://127.0.0.1:1880/gui` with
-    `wget --spider` and requires the boot node's
-    `sync-init: schema init complete` line from this restart (5.3 / DD10).
-    On pass: prints `OK: local health self-check PASSED …` then
-    `OK: committing payload <stamp>` and prunes old payload directories to
-    `PAYLOAD_KEEP_N` (default 5). On fail: prints
-    `ALERT: local health self-check FAILED - AUTO-ROLLING-BACK the flows payload and paired GUI`,
-    flips back to the previous stamp (flows and GUI together), restarts
-    Node-RED on the last-known-good pair, prints
-    `ROLLED BACK: flows+GUI -> payloads/<prev>; Node-RED restarted on last-known-good pair`,
-    notes that a committed DB migration is **not** auto-undone (DD10 — see
-    step 8) and that `deploy-canary-gate.js` gives the full cloud verdict, then
-    exits 1. If there is no previous payload to roll back to, it removes the
-    first-deploy payload, leaves Node-RED stopped, prints an `ERROR`, and
-    exits 1.
-11. The React GUI is not a separate step after the flip. Earlier,
-    `--- flows.json + React GUI (staged payload; activation deferred to migration) ---`
-    fetches `react_gui.tar.gz`, extracts it into a staging directory and stages
-    it with flows.json as one payload (`OK: staged paired payloads/<stamp> …`),
-    and captures the existing flows+GUI pair as the rollback target
-    (`OK: captured existing flows+GUI pair as payloads/<prev>`). Nothing under
-    `/usr/lib/node-red/gui/` is wiped in place: the flip in step 10 swaps the
-    whole pair, so the `/gui` probe exercises the new GUI bundle together with
-    the new flows. It still proves only that Node-RED served the route, not that
-    the SPA works in a browser.
-12. Prints the final summary: `=== Deploy complete. ===`, the payload path
-    annotated "(flipped + local health self-checked)", a rollback note
-    (automatic for payload failure; committed DB migration restore is the 1.B1
-    operator path, not automatic), and the ChirpStack reprovisioning reminder.
-
-**When `deploy.sh` refuses to proceed:** a missing/empty communication-preflight
-artifact or a failed `verify-communication-contract.js` run; `/srv/node-red/payloads`
-on a different filesystem than `/srv/node-red` (the symlink flip can't be atomic);
-integrity-check failure on the seed DB; `farming.db` absent while WAL/SHM/journal
-sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and not
-installable via `opkg`; Node-RED failing to stop within 30s before a migration;
-a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
-is restarted before the script exits — except `migrate-cli.js` exit code 3, a
-backup-restore integrity failure, which leaves Node-RED stopped); a failed
-download or verification of the migration runner, an uncreatable migration
-backup directory, or an unreadable database size (refused before Node-RED is
-stopped); a failed ledger-reconciliation download or probe (the previous
-payload is restarted); a failed command-ledger staging run (before anything is
-stopped); a failed command-ledger activation after the migration (see below);
-and a failed post-flip self-check, which either auto-rolls back the flows+GUI
-pair and exits 1, or — when there is no previous payload — removes the
-first-deploy payload, leaves Node-RED stopped, and exits 1 with an `ERROR`. All of these are hard aborts (`exit 1`), not partial continues.
-
-**Failed command-ledger activation.** At staging, before anything is stopped,
-`deploy.sh` copies the live `osi-command-ledger/{package.json,index.js}` and
-`osi-watermark-binding/canonicalization.js` to
-`/srv/node-red/.osi-command-ledger-previous.<stamp>`. The file `absent` in that
-directory lists the files that did not exist. If the copy fails, the deploy stops
-there. A successful deploy removes the copy; a failed one keeps it.
-
-If the activation fails, the script lists each live file as previous,
-candidate, absent or unknown, then decides:
-- no ledger file is in place, as before the deploy (a gateway that never had
-  one): the deploy's usual failure path runs, which restarts the previous
-  payload when the database allows it;
-- the live pair loads in a fresh process: the same failure path runs;
-- it does not load: the kept state is restored. Absent files are restored too:
-  candidate files that did not exist before are moved to `<copy>/failed`. If
-  the result has no ledger files, or loads, the same failure path runs;
-- otherwise: Node-RED and identityd are held **stopped**, as in the script's
-  other holds. Nothing is disabled, so a reboot or a manual start runs the
-  previous payload beside these files. `/srv/node-red/.osi-command-ledger-hold`
-  records the reason, the time and the copy.
-
-Every later deploy reads the marker before its first fetch:
-- if the live pair loads, it clears the marker and says so;
-- if not, it prints a `WARNING` and carries on; an activation whose pair
-  loads clears the marker.
-
-Way out: re-run the deploy. If it fails again, the load error printed by the
-installer or the probe names the cause.
-
-### Private branch deployments
-
-Deployments from private product branches use the same migration and payload
-safety gates as the public product. Complete schema migration and any ledger
-reconciliation before flipping the payload, and deploy compatible cloud and
-edge versions in that order.
-
----
-
-## Post-deploy verification checklist
-
-Run these after every live deploy. Each has an expected "healthy" output — treat any
-deviation as a signal to stop and investigate before telling the operator it's done.
-
-| Check | Command | Expected |
-|---|---|---|
-| `farming.db` preserved | `sqlite3 /data/db/farming.db "SELECT COUNT(*) FROM device_data;"` before/after | Same or larger count, never smaller or zero after a non-empty prior count |
-| Fresh telemetry | `sqlite3 /data/db/farming.db "SELECT deveui, recorded_at FROM device_data ORDER BY recorded_at DESC LIMIT 5;"` | Timestamps within the last few minutes (gateway-dependent uplink cadence) |
-| GUI bundle rotated | `ls /usr/lib/node-red/gui/assets/` | New `index-<hash>.js` filename different from the pre-deploy listing (Vite content-hashes build output; `web/react-gui/vite.config.js` sets `base: '/gui/'`) |
-| Node-RED up | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/gui` | `301` (redirect into the SPA route) |
-| Zone CSV export route auth-gated | `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:1880/api/history/zones/1/export.csv` | `401` — this route (`GET /api/history/zones/:zoneId/export.csv` in `flows.json`, tab `history-api-tab`) requires a Bearer token via `verifyBearer`; `401` without a token means the route loaded and is enforcing auth correctly. `404`/`500` means the route or its router function failed to load — treat as broken, not healthy. |
-| ChirpStack profile env vars present | `grep -e 'CHIRPSTACK_PROFILE_RAK10701' -e 'CHIRPSTACK_PROFILE_S2120' /srv/node-red/.chirpstack.env` (path/semantics; pipe-free form keeps this table row rendering) | Both present. Flag semantics and full variable list: `osi-config-and-flags`. |
-| Gateway health samples fresh | `sqlite3 /data/db/farming.db "SELECT gateway_device_eui, sampled_at FROM gateway_health_samples ORDER BY sampled_at DESC LIMIT 3;"` | Rows within the last ~60 s (the 60 s heartbeat inject also persists this table; schema at `database/migrations/ordered/0002__gateway_health.sql`) |
-
-Use `127.0.0.1`, not `localhost`, for every on-Pi curl (see BusyBox traps below).
-
----
-
-## Stale-fingerprint recovery
-
-`scripts/restamp-fingerprints.js` re-baselines `schema_object_fingerprints` to
-whatever the live schema currently is:
-
-```bash
-node scripts/restamp-fingerprints.js /data/db/farming.db
-```
-
-**Only run this when both are true:**
-- `applyPending`/`verifyHead` (the migration runner's own checks) report fingerprint
-  drift specifically because of a crash between a migration's commit and its
-  fingerprint stamp — not because the schema is actually wrong.
-- You (or the operator) have independently confirmed the live schema is correct for
-  the intended migration state.
-
-The script refuses to run against a nonexistent path (it deliberately does not let
-`sqlite3` silently create-and-restamp an empty DB at a typo'd path). It has no other
-guard: it does not verify the schema is correct itself, it only re-stamps whatever
-is there. That judgment call is the operator's, not the script's.
-
-This is the **only** sanctioned way to overwrite the fingerprint baseline. Never
-hand-edit rows in `schema_object_fingerprints` directly. After running it, run
-`verifyHead` again and confirm `ok:true` before considering the drift resolved. The
-migration model this fingerprint mechanism belongs to (what a "commit" vs "stamp"
-step is, what drift means structurally) is `osi-schema-change-control`'s territory.
-
----
-
-## Foreign-numbered ledger recovery
-
-`AGENTS.md` ("Live-deploy safety rules") keeps the rule lines; this section holds
-the long form that moved out of it on 2026-10-22 and carries the same authority.
-
-A gateway that ran one of the two customer lines (one valve-focused, one not) has
-`schema_migrations` rows numbered under that branch's own scheme, which can collide
-with main's numbering (e.g. v22 is `journal_catalog_v2` on the non-valve customer
-line, `valve_control` on main) — `applyPending` correctly refuses on the checksum
-mismatch (`repair_required`), and `deploy.sh` aborts before the payload flip, but
-the device is then wedged with no forward path.
-
-`node scripts/reconcile-ledger-numbering.js <db> --report` (dry run; add `--apply`
-plus `--backup-dir` to act) is the ONLY sanctioned recovery: it proves, row by row,
-that a foreign-numbered ledger entry's content is exactly what some main migration
-already delivers — either byte-identical, or identical after stripping the leading
-`-- NNNN:` header comment and structurally proving equal schema effect via
-`scripts/semantic-schema-compare.js` — before rewriting that row's
-`version`/`name`/`checksum` to match main. It refuses on any unproven, unknown, or
-ambiguous row and touches nothing when it refuses.
-
-`deploy.sh`'s `run_schema_migration()` calls it automatically (between the ledger
-inspection and `migrate-cli.js`) whenever any applied ledger row above version 21
-has a checksum that disagrees with main's `CHECKSUMS.json`; a main-numbered
-gateway's checksums already agree there and never triggers it.
-
-`--clear-repair-required` is the narrower, separate recovery for a row already
-stuck `repair_required` whose checksum, at its own current version, already matches
-main (e.g. a prior reconcile run committed the remap but crashed before the status
-flip) — it never clears a row whose checksum still disagrees. Never hand-edit
-`schema_migrations` outside these two sanctioned tools.
-
-### Rehearsing that cutover on a copy
-
-`node scripts/rehearse-ledger-cutover.js --db <pulled copy> --work <scratch directory>`
-runs, on a copy only, the same chain deploy.sh runs for such a gateway (reconcile
-`--report`, `--apply`, `migrate-cli.js`, `verify-head-cli.js`), then the
-devices-rebuild rehearsal twice, the shipped boot node with the gateway's EUI,
-`integrity_check`/`foreign_key_check`, a schema comparison against `seed-blank.sql`,
-and per-table row counts and content hashes before and after; a second pass on the
-result must change nothing. Row changes the migrations make by design are listed in
-its `EXPECTED_CHANGES`; any other change fails. It refuses paths under `/data/db`
-and a non-empty `--work` it did not create, and writes
-`<work>/rehearsal-report.json` with every step's result and duration.
-
----
-
-## BusyBox / ash traps on the Pi
-
-The Pi image runs BusyBox `ash`, not `bash`. These are field-verified operator
-knowledge (label: operator-procedure, not independently re-derivable from this repo
-alone):
-
-- **No bash.** Don't use `[[ ]]`, arrays, `local` in places bash allows but POSIX
-  doesn't, or bashisms in any one-liner you paste onto the Pi. Stick to POSIX `sh`/
-  `ash` syntax, as `deploy.sh` itself does (`#!/bin/sh`, `set -eu`).
-- **Case conversion:** use `tr 'abcdef' 'ABCDEF'`, not `tr '[:lower:]' '[:upper:]'`
-  — the POSIX character-class form is unreliable on this image. This is also called
-  out in `AGENTS.md` under "Conventions".
-- **`localhost` resolves to IPv6 `::1` first** under the minimal `wget`/resolver on
-  this image, which often has nothing listening on `::1`. Always target `127.0.0.1`
-  explicitly in on-Pi curl/wget calls, including in the verification checklist
-  above and in the reverse-tunnel deploy command.
-- **The SSH "post-quantum" banner is harmless.** Every SSH connection to these
-  gateways prints a post-quantum key exchange notice from the server side. Filter it
-  out of scripted output rather than treating it as an error:
-  ```bash
-  ssh ... 2>&1 | grep -v -e 'post-quantum' -e 'store now'
-  ```
-
----
-
-## Live-repair recipes
-
-### Stale `.chirpstack.env` overriding runtime identity
-
-`/srv/node-red/.chirpstack.env` can carry a stale `DEVICE_EUI*` value that overrides
-the runtime identity even after UCI has been corrected. During an identity repair,
-remove or regenerate this file so the helper/UCI path (canonical, uppercase EUI)
-is what actually takes effect. **Save a copy first**: the same file carries the
-`CHIRPSTACK_APP_*`/`CHIRPSTACK_PROFILE_*` values, and `CHIRPSTACK_PROFILE_LORAIN`
-reaches the Node-RED runtime ONLY through this file (`node-red.init` does not
-export it from UCI) — a regenerated env missing it silently breaks LoRain ingest
-until the ChirpStack bootstrap rewrites the file. Full flag semantics and where
-this file's other variables come from: `osi-config-and-flags`.
-
-### Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`
-
-`chirpstack-bootstrap.js` exits `74` and prints `Credential env-file operation
-failed {...}` on stderr when it refuses a credential file; `deploy.sh` stops with
-the same status. On first boot `osi-bootstrap` logs only `bootstrap failed, will
-retry next boot` (`logread -e osi-bootstrap`). The JSON diagnostic went to the
-init script's stderr and is not in `logread`, and every later boot fails the
-same way.
-
-One cause has a known repair. The writer creates a missing file by `link()`ing
-a flushed staging copy into place and then `unlink()`ing the staging name. A
-crash or power cut between the two leaves the published file complete but with
-a second link in its staging directory:
-`/srv/node-red/..chirpstack.env.tmp-XXXXXX/env` (first-boot provisioning of
-`.chirpstack.env`) or `/srv/node-red/..chirpstack.env.pre-gen2.tmp-XXXXXX/env`
-(the deploy's first Gen2 recovery backup). The writer refuses any credential
-file with more than one link, so the refusal repeats until the leftover is gone.
-
-1. Reproduce the diagnostic with the file-only check. It reads and narrows
-   the two env files and makes no ChirpStack call. Pick a writer that supports
-   the flag: an older image's ROM copy ignores unknown flags and runs a full
-   provisioning pass.
-   ```sh
-   S=
-   for f in /usr/share/node-red/chirpstack-bootstrap.js /srv/node-red/chirpstack-bootstrap.js; do
-     if [ -z "$S" ] && [ -f "$f" ] && grep -q -- '--secure-env-file' "$f"; then S="$f"; fi
-   done
-   echo "writer: ${S:-none}"
-   [ -n "$S" ] && node "$S" --secure-env-file; echo "exit=$?"
-   ```
-   No writer means the `74` came from somewhere else; stop. This recipe
-   applies when the diagnostic reads `"reason":"UNSAFE_ENTRY"`; current
-   writers add `"linkCount":2,"stagingLeftover":true` for this case. Other
-   reasons have other causes: `ROOT_REQUIRED` (not run as root),
-   `SNAPSHOT_CHANGED` (a concurrent writer), `OS_ERROR` with an `osCode` such
-   as `ENOSPC` or `EROFS` (fix the filesystem, then rerun).
-2. Inspect both credential entries and every staging directory. In `ls -li`
-   output the first column is the inode number and the third the link count.
-   ```sh
-   ls -lid /srv/node-red/.chirpstack.env /srv/node-red/.chirpstack.env.pre-gen2
-   ls -lid /srv/node-red/..chirpstack.env*.tmp-*
-   ls -lia /srv/node-red/..chirpstack.env*.tmp-*/
-   ```
 3. Delete nothing unless all of these hold for the entry with two links:
    it is a regular file (`-rw-------`, owner root); its link count is exactly
    2; exactly one staging directory exists for that entry
@@ -703,12 +256,8 @@ file with more than one link, so the refusal repeats until the leftover is gone.
    node "$S" --secure-env-file; echo "exit=$?"   # exit=0
    ```
    The published file and its bytes stay in place; only the second name goes.
-4. Rerun the step that failed. After a deploy, rerun `deploy.sh`. After a
-   first-boot failure, `.chirpstack.env` already holds the API key the failed
-   run created; pass it in so the rerun does not create a second key (#181):
-   ```sh
-   rm -f /etc/osi-bootstrap.done && CHIRPSTACK_API_KEY="$(sed -n 's/^CHIRPSTACK_API_KEY=//p' /srv/node-red/.chirpstack.env | head -1)" /etc/init.d/osi-bootstrap start
-   ```
+
+From `references/repair.md` (same section):
 
 A staging directory that is empty, or whose `env` has link count 1, comes from
 an interruption before publication or after a rename. It does not block later
@@ -716,86 +265,6 @@ runs, and the writer leaves its contents root-owned mode `0600` inside a mode
 `0700` directory. An unpublished `env` from a first-boot run can hold the only
 copy of the key that run created, so keep it until the gateway provisions
 cleanly, then remove it the same way.
-
-### Changing DEVICE_EUI breaks linked login
-
-The offline verifier is `bcrypt(password::DEVICE_EUI)` (see `AGENTS.md` "Security").
-If the EUI changes (fixing a wrong one, replacing hardware), every stored verifier
-for that gateway stops matching and logins fail. Repair sequence:
-
-1. Fix the UCI value:
-   ```bash
-   uci set osi-server.cloud.device_eui='<CORRECT_EUI_UPPERCASE>'
-   uci commit osi-server
-   ```
-2. Regenerate the verifier on the Pi with `bcryptjs` (placeholders `<password>` /
-   `<eui>` — uppercase EUI, same delimiter):
-   ```bash
-   node -e "const b=require('/srv/node-red/node_modules/bcryptjs'); console.log(b.hashSync('<password>::<eui>', 10))"
-   ```
-3. Write the new hash into the DB:
-   ```bash
-   sqlite3 /data/db/farming.db "UPDATE users SET server_offline_verifier = '<hash>' WHERE username = '<username>';"
-   ```
-4. Restart Node-RED, then have the operator unlink and re-link the cloud account so
-   a fresh sync token issues for the corrected EUI.
-
-Also check `irrigation_zones` rows created before the fix — a sync trigger applies a
-`COALESCE(gateway_device_eui, <fallback>)` only on `INSERT`, so already-existing zone
-rows keep whatever EUI they were created with and need an explicit `UPDATE`.
-
-### ChirpStack v4 has no plain REST API
-
-ChirpStack v4.x is gRPC-web only; `curl http://127.0.0.1:8080/api/...` 404s
-regardless of payload. To inspect or change ChirpStack config on a live Pi:
-
-- **Read:** `sqlite3 /srv/chirpstack/chirpstack.sqlite "SELECT ...;"`
-- **Write:** stop ChirpStack first (the DB is locked while it runs), modify via
-  `sqlite3`, then start it again:
-  ```bash
-  /etc/init.d/chirpstack stop
-  sqlite3 /srv/chirpstack/chirpstack.sqlite "UPDATE ... ;"
-  /etc/init.d/chirpstack start
-  ```
-
-### Flows fail to load / all routes 404
-
-`functionExternalModules: true` is set in `settings.js` (confirmed at
-`feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`). If a function
-node's `libs` array references a helper module (e.g. `osi-db-helper`) not declared
-in `/srv/node-red/package.json`, Node-RED tries to `npm install` it, fails (not a
-published package), and refuses to load **all** flows — every route returns 404
-with nothing obviously wrong in standard logs. Fix: ensure `package.json` declares
-it as a `file:` dependency, e.g.:
-```json
-"osi-db-helper": "file:osi-db-helper"
-```
-`deploy.sh` deploys this file itself, so this mostly bites hand-edited or
-partially-deployed Pis. To see the real error, run Node-RED in the foreground:
-```bash
-node-red --userDir /srv/node-red
-```
-Triage tables for narrowing down *which* symptom you're looking at belong to
-`osi-debugging-playbook`; this recipe is specifically the "declared helper module
-missing from package.json" root cause.
-
-### Live valve testing (STREGA)
-
-STREGA valves accept `OPEN_FOR_DURATION` only in normal operation; the valve closes
-itself when the commanded duration elapses. There is no safe bare `CLOSE` in this
-model — the reconciliation monitor (`strega-reconciliation-monitor` in `flows.json`)
-explicitly does not emit a CLOSE downlink on timer elapse, "STREGA self-closes" per
-its own comment.
-
-- Never send a bare `CLOSE` command during testing or debugging.
-- Use short durations (60 s) when reproducing a valve-open bug; let it auto-close.
-- Operator-driven cancellation of an in-progress duration is a real, separate path:
-  ```bash
-  curl -X POST http://127.0.0.1:1880/api/v1/valves/<deveui>/cancel
-  ```
-  (confirmed route: `POST /api/v1/valves/:deveui/cancel`, node
-  `cancel-valve-http-in` in `flows.json`, tab `device-api-tab`). Reserve this for
-  genuine operator cancel intent, not as test cleanup.
 
 ---
 
@@ -815,67 +284,9 @@ in runbooks, docs, or scripts.
 
 ---
 
-## Common mistakes
+## References
 
-- Running `curl ... | sh` for the deploy step instead of download-then-run, then
-  trusting a printed "Deploy complete" without checking the actual SSH/curl exit
-  code — a 404'd fetch can still exit the pipeline at 0.
-- Treating `export.csv` returning `401` as a failure. It is the healthy state for an
-  unauthenticated request; `404`/`500` is the actual failure signal.
-- `scp`-ing any `farming.db` onto a Pi that has ever been provisioned — there is no
-  scenario in normal operations where this is correct.
-- Using `localhost` in an on-Pi curl/wget call and getting a confusing connection
-  refusal that's actually an IPv6 resolution artifact, not a dead service.
-- Sending a bare `CLOSE` to a STREGA valve "to be safe" — it is not part of the
-  supported command set; use a short `OPEN_FOR_DURATION` or the cancel endpoint.
-- Resetting a password or token to get unblocked instead of asking the operator.
-- Treating a loaded SSH key or working `ssh` check against `osicloud.ch` or a
-  customer-hosted instance as permission to proceed there.
-- Hand-editing `schema_object_fingerprints` instead of using
-  `restamp-fingerprints.js`, or running that script without first confirming the
-  live schema is actually correct.
-- Forgetting that `run_schema_migration()` SKIPs entirely when
-  `/data/db/farming.db` doesn't exist yet — a brand-new Pi ends up at exactly
-  the bundled seed schema, not seed-plus-migrations.
-- Trusting `=== Deploy complete. ===` without reading the self-check verdict
-  printed above it. A failed post-flip probe auto-rolls the flows+GUI pair back
-  while any committed DB migration stays applied — the
-  `ROLLED BACK: flows+GUI -> payloads/<prev>` line (or its absence) tells you
-  which payload is actually live, not the closing banner.
-- Restarting Node-RED by hand right after a deploy "just to be sure."
-  `deploy.sh` already restarted it — once around the schema migration, once
-  after the payload flip — and another restart only muddies which restart
-  produced the state you're observing.
-
----
-
-## Provenance and maintenance
-
-Re-verify these if this skill feels stale (the deploy flow and safety rules change
-rarely, but do change):
-
-- Seeding guard logic: `grep -n "seed_db_if_missing" -A 25 deploy.sh` (repo root).
-- Download-then-run tunnel command still matches practice: check the current
-  operator wrapper behavior contract (not in this repo) or re-derive from
-  `deploy.sh`'s own header comment plus this skill's rationale.
-- `osi-bootstrap` stamp/START logic:
-  `cat conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/init.d/osi-bootstrap`.
-- `export.csv` route + auth gate: `grep -n "export.csv" -A2` and
-  `grep -n "function verifyBearer" -A15` against
-  `conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json`.
-- STREGA cancel route: `grep -n "valves/:deveui/cancel"` against the same
-  `flows.json`.
-- `restamp-fingerprints.js` behavior: `sed -n '1,30p' scripts/restamp-fingerprints.js`.
-- Gateway-health table/migration: `sed -n '1,10p' database/migrations/ordered/0002__gateway_health.sql`.
-- Payload flip/self-check/rollback:
-  `grep -n "stagePayload\|flipTo\|PAYLOAD_KEEP_N\|AUTO-ROLLING-BACK" deploy.sh`
-  and `sed -n '1,40p' scripts/deploy-payload-swap.js`.
-- Migration-runner delivery: `grep -n "run_schema_migration" -A 30 deploy.sh`.
-- Canary-gate defaults: `head -20 scripts/deploy-canary-gate.js`.
-- package.json helper declarations: `grep -n "file:" conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package.json`.
-- `functionExternalModules` flag: `grep -n functionExternalModules feeds/chirpstack-openwrt-feed/apps/node-red/files/settings.js`.
-- Prime directives / asymmetry framing: `sed -n '13,32p' docs/engineering-playbook.md`.
-- Host access gate wording: `sed -n '/Host access gate/,/^---/p' AGENTS.md`.
-- Cross-check this file still matches `AGENTS.md` "Live-deploy safety rules" verbatim
-  intent — if that section is edited, this skill's Prime Safety Rules section needs
-  a matching pass.
+- `references/deploy.md`: Read before pushing a build to a gateway, when reading a deploy verdict, or when `deploy.sh` refuses to proceed. Sections: "How `seed_db_if_missing()` guards the live database"; "Quick reference"; "Deploy runbook (reverse-tunnel flow)"; "What `deploy.sh` actually does end-to-end"; "Private branch deployments"; "Post-deploy verification checklist".
+- `references/repair.md`: Read before any repair on a live gateway: the backup script, fingerprint and ledger recovery, and the repair recipes. Sections: "Pre-repair backup script"; "Stale-fingerprint recovery"; "Foreign-numbered ledger recovery"; "Rehearsing that cutover on a copy"; "Live-repair recipes"; "Stale `.chirpstack.env` overriding runtime identity"; "Credential env-file refusal: exit 74 with `UNSAFE_ENTRY`"; "Changing DEVICE_EUI breaks linked login"; "ChirpStack v4 has no plain REST API"; "Flows fail to load / all routes 404"; "Live valve testing (STREGA)".
+- `references/busybox-traps.md`: Read before pasting any command onto a Pi. Sections: "BusyBox / ash traps on the Pi".
+- `references/pitfalls-and-maintenance.md`: Read when something looks wrong after a deploy, or to re-verify this skill against the repo. Sections: "Common mistakes"; "Provenance and maintenance".

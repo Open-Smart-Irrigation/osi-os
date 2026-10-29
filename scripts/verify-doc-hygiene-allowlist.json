@@ -1,32 +1,74 @@
 {
   "entries": [
     {
-      "path": ".claude/skills/osi-agronomy-sensors-reference/SKILL.md",
-      "max": 2,
+      "path": ".claude/skills/osi-agronomy-sensors-reference/references/device-catalog.md",
+      "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 384
     },
     {
-      "path": ".claude/skills/osi-config-and-flags/SKILL.md",
+      "path": ".claude/skills/osi-agronomy-sensors-reference/references/soil-water-tension.md",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-config-and-flags/references/chirpstack-profiles.md",
       "max": 1,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
     },
     {
       "path": ".claude/skills/osi-flows-json-editing/SKILL.md",
-      "max": 8,
+      "max": 3,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
       "issue": 384
     },
     {
-      "path": ".claude/skills/osi-live-ops-runbook/SKILL.md",
+      "path": ".claude/skills/osi-flows-json-editing/references/edit-script.md",
+      "max": 1,
+      "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-flows-json-editing/references/function-node-conventions.md",
+      "max": 2,
+      "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-flows-json-editing/references/guards-and-parity.md",
+      "max": 2,
+      "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-flows-json-editing/references/pitfalls-and-maintenance.md",
+      "max": 1,
+      "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-live-ops-runbook/references/deploy.md",
       "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 384
     },
     {
       "path": ".claude/skills/osi-schema-change-control/SKILL.md",
-      "max": 2,
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-schema-change-control/references/pitfalls-and-maintenance.md",
+      "max": 1,
+      "reason": "quotes a code identifier that carries a name; removed by the code package",
+      "issue": 384
+    },
+    {
+      "path": ".claude/skills/osi-schema-change-control/references/walkthrough.md",
+      "max": 1,
       "reason": "quotes a code identifier that carries a name; removed by the code package",
       "issue": 384
     },
