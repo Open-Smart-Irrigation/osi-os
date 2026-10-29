@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const { SEED_DB_PATHS: seedDatabasePaths } = require('./seed-db-paths');
 
 const schemaContract = {
+  chameleon_reading_links: ["chameleon_reading_id", "device_data_id", "linked_at"],
   tensiomark_observations: ["id", "device_data_id", "deveui", "recorded_at", "received_at", "raw_response", "payload_base64", "configuration_hash", "configuration_json", "disposition", "normalized_json"],
   radio_store_identity: ["singleton_id", "radio_store_uuid", "installation_uuid", "state", "created_at", "updated_at"],
   radio_history_bridge: ["history_key", "generation", "status", "claimed_at", "transferred_at", "last_error"],
@@ -1256,6 +1257,7 @@ const schemaContract = {
 };
 
 const requiredIndexes = {
+  chameleon_reading_links: ['ux_chameleon_reading_links_device_data'],
   tensiomark_observations: ["idx_tensiomark_observations_device_time", "idx_tensiomark_observations_device_data"],
   sync_outbox_recovery_audit: ['idx_sync_outbox_recovery_audit_event'],
   installation_recovery_audit: ['idx_installation_recovery_audit_operation'],
@@ -1366,6 +1368,10 @@ const requiredIndexes = {
 };
 
 const requiredIndexSqlFragments = {
+  ux_chameleon_reading_links_device_data: [
+    'unique index',
+    'on chameleon_reading_links(device_data_id)',
+  ],
   idx_device_data_deveui_recorded_at: [
     'on device_data(deveui, recorded_at)',
   ],
@@ -1537,6 +1543,16 @@ const requiredIndexSqlFragments = {
 };
 
 const requiredTriggerSqlFragments = {
+  trg_chameleon_reading_links_identity_bi: [
+    'before insert on chameleon_reading_links',
+    'join device_data dd on dd.deveui = cr.deveui',
+    'where cr.id = new.chameleon_reading_id and dd.id = new.device_data_id',
+    "select raise(abort, 'chameleon reading link must join rows of one device')",
+  ],
+  trg_chameleon_reading_links_immutable_bu: [
+    'before update on chameleon_reading_links',
+    "select raise(abort, 'chameleon reading link is immutable')",
+  ],
   trg_sync_zones_outbox_ai: [
     "where peer_node = 'cloud' and linked = 1",
     "new.zone_uuid is not null",
