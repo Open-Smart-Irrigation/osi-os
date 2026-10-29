@@ -426,4 +426,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { verifyAnalysisRouterImplementation };
+module.exports = { verifyAnalysisRouterImplementation, verifyHistoryRouterImplementation };
