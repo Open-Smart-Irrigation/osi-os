@@ -671,7 +671,8 @@
       "longitudeRange": "La longitudine deve essere compresa tra -180 e 180.",
       "flowRateRequired": "La portata (L/min) è necessaria per salvare la calibrazione dell'irrigazione.",
       "flowRatePositive": "La portata (L/min) deve essere maggiore di 0.",
-      "saveFailed": "Salvataggio non riuscito"
+      "saveFailed": "Salvataggio non riuscito",
+      "rainChoiceSaveFailed": "La scelta del pluviometro non è stata salvata. Controlla la selezione e riprova."
     },
     "weatherProvider": "Fornitore meteo",
     "weatherProviderHelpLabel": "Informazioni sul fornitore meteo",
@@ -686,7 +687,13 @@
     "stageStartedOn": "Inizio della fase",
     "stageStartedOnHelpLabel": "Informazioni sulla data di inizio della fase",
     "stageStartedOnHelp": "La data in cui è iniziata la fase attuale (giorno 1). Nella fase di sviluppo e nella fase finale il Kc segue la curva FAO-56 a partire da questa data; nelle altre fasi resta al valore della fase. La fase non avanza mai da sola: dopo la durata tipica per questa coltura ({{days}} giorni) il Kc resta al valore finale della fase finché non scegli la fase successiva. Dopo la caduta delle foglie o la raccolta scegli Dormienza (Kc 0,25, suolo nudo); in primavera scegli Fase iniziale con la data del germogliamento. Le modifiche a coltura, fase o data di inizio valgono per i giorni calcolati dopo la modifica. Lascia vuoto per usare il valore di tabella della fase.",
-    "stageStartedOnHelpNoLength": "La data in cui è iniziata la fase attuale (giorno 1). Nella fase di sviluppo e nella fase finale il Kc segue la curva FAO-56 a partire da questa data; nelle altre fasi resta al valore della fase. La fase non avanza mai da sola: dopo la durata tipica per questa coltura il Kc resta al valore finale della fase finché non scegli la fase successiva. Dopo la caduta delle foglie o la raccolta scegli Dormienza (Kc 0,25, suolo nudo); in primavera scegli Fase iniziale con la data del germogliamento. Le modifiche a coltura, fase o data di inizio valgono per i giorni calcolati dopo la modifica. Lascia vuoto per usare il valore di tabella della fase."
+    "stageStartedOnHelpNoLength": "La data in cui è iniziata la fase attuale (giorno 1). Nella fase di sviluppo e nella fase finale il Kc segue la curva FAO-56 a partire da questa data; nelle altre fasi resta al valore della fase. La fase non avanza mai da sola: dopo la durata tipica per questa coltura il Kc resta al valore finale della fase finché non scegli la fase successiva. Dopo la caduta delle foglie o la raccolta scegli Dormienza (Kc 0,25, suolo nudo); in primavera scegli Fase iniziale con la data del germogliamento. Le modifiche a coltura, fase o data di inizio valgono per i giorni calcolati dopo la modifica. Lascia vuoto per usare il valore di tabella della fase.",
+    "partialSave": {
+      "saved": "Salvato:",
+      "config": "Impostazioni della zona",
+      "calibration": "Calibrazione dell’irrigazione",
+      "location": "Posizione della zona"
+    }
   },
   "irrigationOutcomes": {
     "title": "Irrigazioni recenti",
@@ -1000,9 +1007,11 @@
     "optionShared": "{{name}} (stazione meteo condivisa)",
     "optionSuggested": "{{label}} — suggerito",
     "ambiguous": "Due pluviometri trasmettono per questa zona. Finché non ne scegli uno, la zona non ha pioggia misurata.",
-    "onlyCandidate": "Viene usato l'unico pluviometro di questa zona.",
     "loadFailed": "Non è stato possibile caricare i pluviometri di questa zona.",
-    "banner": "Due pluviometri trasmettono per questa zona. Scegline uno nelle impostazioni della zona."
+    "banner": "Due pluviometri trasmettono per questa zona. Scegline uno nelle impostazioni della zona.",
+    "automaticOption": "Automatico: {{name}}",
+    "automaticOnlyCandidate": "{{name}} viene usato automaticamente perché è l’unico pluviometro di questa zona.",
+    "bannerReadOnly": "Chiedi a qualcuno che può modificare questa zona di scegliere un pluviometro nelle impostazioni della zona."
   },
   "soilTension": {
     "sectionTitle": "Tensione idrica del suolo",
