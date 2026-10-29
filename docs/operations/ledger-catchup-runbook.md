@@ -55,6 +55,8 @@ The historical phase-based runbook contained reusable steps that this guide does
 - Confirming the cloud account exists on the target cloud host before linking the gateway.
 - Constructing the catch-up from the `0001` baseline rather than from the seed's current trigger bodies.
 - Monitoring the first cloud bootstrap after linking, including the `applyBootstrap` single-transaction residual.
+- Re-proving the byte-image restore path whenever `lib/osi-migrate` has changed since the last rehearsal.
+- Running the boot-DDL fallback verifiers (`verify-sync-flow.js`, `verify-boot-ddl-interpolation.js`, `verify-runtime-schema-parity.js`) against the migrated copy, since no headless Node-RED boot harness exists.
 
 ## Postflight and closure evidence
 
