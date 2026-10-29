@@ -138,10 +138,13 @@ successful migration it flips the staged payload (`swap_call flipTo
 `PAYLOAD_FLIPPED` flag so the later "Flip payload + local health self-check"
 block doesn't re-flip. This applies to every deploy over this offline path
 exactly as it does to the tunnel flow — `deploy.sh` itself is unmodified
-between the two, so the fix lands here for free. The Uganda catch-up window
-(`scripts/ops/uganda-catchup-window.sh`, `docs/operations/ledger-catchup-runbook.md`)
-enforces the same rule independently with a `--expected-flows-sha` check,
-since that script restarts Node-RED without ever flipping a payload itself.
+between the two, so the fix lands here for free. The historical Uganda catch-up window script
+(`scripts/ops/uganda-catchup-window.sh`) enforced the same rule independently
+with its optional `--expected-flows-sha` check, since that script restarts
+Node-RED without ever flipping a payload itself. The neutral
+[ledger catch-up guide](ledger-catchup-runbook.md) states the requirement
+(confirm the active payload before any restart) but supplies no enforcement
+mechanism of its own.
 
 ## Constraints and non-goals
 

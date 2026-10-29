@@ -46,6 +46,16 @@ Compare history-bearing row counts with the recorded pre-change values after eac
 
 Do not use commands, generated SQL, script options, migration heads, or expected values copied from the historical artifacts as a replacement for a reviewed plan. If a general-purpose migration or repair tool is needed, use only one that is already documented and approved for the target state.
 
+## Procedures this guide does not generalize
+
+The historical phase-based runbook contained reusable steps that this guide does not restate. They are preserved in Git history at `docs/operations/uganda-catchup-runbook.md` as of commit `40b8f556d65f3fd063663467103fffd526cf0e08` (`git show 40b8f556d:docs/operations/uganda-catchup-runbook.md`). Re-derive and review each one against the target gateway before use; none is an instruction here.
+
+- Running the on-device step in a session that survives a dropped connection (`setsid`). The maintained procedure is in [deploying over a flaky link](deploying-over-a-flaky-link.md).
+- A disk-space preflight that confirms room for a second database copy before the backup.
+- Confirming the cloud account exists on the target cloud host before linking the gateway.
+- Constructing the catch-up from the `0001` baseline rather than from the seed's current trigger bodies.
+- Monitoring the first cloud bootstrap after linking, including the `applyBootstrap` single-transaction residual.
+
 ## Postflight and closure evidence
 
 The gateway-specific execution record should contain the plan and source revision, backup verification, actual command exit statuses, before-and-after row counts, migration-head result, SQLite integrity result, foreign-key check, active flows confirmation, service restart result, and the relevant ingest or sync evidence. Record any deviations and leave the work open if a required check is missing or unexplained.

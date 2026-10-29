@@ -323,7 +323,7 @@ that foreign-EUI fallback live indefinitely.
 
 - **Deliverables at the time of this report:** catch-up artifact + generator (with tests), the on-device window
   script, and this report. They were committed; the PR was opened and not merged.
-- **G4 was not green in this rehearsal.** The Phase 3/4 warning below describes only the historical window
+- **G4 was not green in this rehearsal.** The Phase 3/4 warning above describes only the historical window
   procedure. It is not a procedure in the later neutral guide and must not be used for live work.
 - **Recorded next steps at the time:** design a reviewed, table-rebuild-based reconciliation for the 11
   non-additive diffs listed under "What's blocking G4" (FK declarations on `device_data`/`zone_weather_cache`,
