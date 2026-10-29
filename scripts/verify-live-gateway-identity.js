@@ -1105,9 +1105,12 @@ if (silentCatchBaseline) {
   // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
   // 81: zone-day projection -- lsn50-zone-agg-fn's silent close() catch is replaced by a
   // close in finally: 82 -> 81.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 80 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 80,
-    'silent-catch baseline records 80 for both maintained profiles',
-    'silent-catch baseline must be 80 for both maintained profiles');
+  // 77: issue #356 durable Chameleon diagnostic link -- Insert Chameleon Reading's
+  // close() catch and calibration-local-backfill's ROLLBACK and close() catches become
+  // visible node.warn while both nodes move to one scoped db.transaction: 80 -> 77.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 77 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 77,
+    'silent-catch baseline records 77 for both maintained profiles',
+    'silent-catch baseline must be 77 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }

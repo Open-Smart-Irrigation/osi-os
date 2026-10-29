@@ -138,7 +138,7 @@ function tableColumns(dbPath, tableName) {
   assertIncludes(funcOf('sensor-history-fn'), "swt_1: 'COALESCE(dd.swt_1, dd.swt_wm1)'", 'sensor history coalesces canonical SWT1 with Kiwi fallback');
   assertIncludes(funcOf('sensor-history-fn'), "swt_2: 'COALESCE(dd.swt_2, dd.swt_wm2)'", 'sensor history coalesces canonical SWT2 with Kiwi fallback');
   assertIncludes(funcOf('d0b2b1c1a937e16d'), "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 SWT');
-  assertIncludes(funcOf('d0b2b1c1a937e16d'), 'COALESCE(dd.swt_3, NULL)', 'SWT_AVG expression handles SWT3');
+  assertIncludes(funcOf('d0b2b1c1a937e16d'), '* 1.0 / ((v1 IS NOT NULL) + (v2 IS NOT NULL) + (v3 IS NOT NULL))', 'SWT_AVG expression handles SWT3');
 
   compileFunctionNode('lsn50-config-query-fn');
   compileFunctionNode('lsn50-apply-config');

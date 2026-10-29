@@ -44,6 +44,7 @@ async function runFunctionNode(id, msg) {
   const statuses = [];
   const errors = [];
   let closeCount = 0;
+  let transactions = 0;
 
   class FakeDatabase {
     constructor(dbPath) {
@@ -53,6 +54,17 @@ async function runFunctionNode(id, msg) {
     run(sql, params, callback) {
       writes.push({ dbPath: this.dbPath, sql, params });
       callback(null);
+    }
+
+    // Mirrors osi-db-helper: one queued BEGIN IMMEDIATE ... COMMIT whose scope
+    // returns promises; INSERT ... RETURNING id answers with the write count.
+    transaction(executor) {
+      transactions += 1;
+      const scope = {
+        get: (sql, params) => { writes.push({ dbPath: this.dbPath, sql, params }); return Promise.resolve({ id: writes.length }); },
+        run: (sql, params) => { writes.push({ dbPath: this.dbPath, sql, params }); return Promise.resolve(); },
+      };
+      return Promise.resolve().then(() => executor(scope));
     }
 
     close(callback) {
@@ -77,7 +89,7 @@ async function runFunctionNode(id, msg) {
     warn(value) { errors.push(value); },
   });
 
-  return { result, writes, statuses, errors, closeCount };
+  return { result, writes, statuses, errors, closeCount, transactions };
 }
 
 const syncInit = funcOf('sync-init-fn');
@@ -113,6 +125,8 @@ assertIncludes(chameleonInsert, 'const dataInvalidFlag = dataInvalid ? 1 : 0;', 
 assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
 assertIncludes(chameleonInsert, "statusFlags == null ? 'grey' : (statusFlags ? 'yellow' : 'green')", 'insert status handles unknown flags');
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
+assertIncludes(chameleonInsert, 'INSERT INTO chameleon_reading_links', 'insert links its diagnostic to the uplink device_data row');
+assertIncludes(chameleonInsert, 'await db.transaction(', 'insert writes the diagnostic and its link in one scoped transaction');
 
 const dendroInsert = funcOf('dendro-readings-insert-fn');
 assertIncludes(dendroInsert, 'd.dendroValid === null', 'dendrometer insert skips chameleon frames via dendroValid null guard');
@@ -274,6 +288,22 @@ compileFunctionNode('dendro-readings-insert-fn');
   assert.strictEqual(emptyFields.writes[0].params[13], null, 'empty temp string stores NULL');
   assert.strictEqual(emptyFields.writes[0].params[14], null, 'empty resistance string stores NULL');
   assert.strictEqual(emptyFields.writes[0].params[27], null, 'missing fCnt stores NULL');
+
+  assert.strictEqual(normal.transactions, 1, 'normal write uses one scoped transaction');
+
+  // Issue #356: a message carrying its device_data id links the diagnostic.
+  const linkedMsg = JSON.parse(JSON.stringify(normalMsg));
+  linkedMsg.formattedData.deviceDataId = 77;
+  const linked = await runFunctionNode('chameleon-readings-insert-fn', linkedMsg);
+  assert.strictEqual(linked.result, linkedMsg, 'linked chameleon payload passes downstream');
+  assert.strictEqual(linked.transactions, 1, 'diagnostic and link share one transaction');
+  assert.strictEqual(linked.writes.length, 2, 'linked payload writes the diagnostic and its link');
+  assert(linked.writes[0].sql.endsWith(' RETURNING id'), 'diagnostic insert returns its row id');
+  assert(linked.writes[1].sql.includes('INSERT INTO chameleon_reading_links'), 'second write is the link');
+  assert.strictEqual(linked.writes[1].params.length, 2, 'link has two parameters');
+  assert.strictEqual(linked.writes[1].params[0], 1, 'link uses the returned diagnostic id');
+  assert.strictEqual(linked.writes[1].params[1], 77, 'link uses this uplink device_data id');
+  assert.strictEqual(linked.closeCount, 1, 'linked write closes the database handle');
 
   console.log('LSN50 Chameleon persistence checks passed');
 })().catch((error) => {
