@@ -85,6 +85,27 @@ test('built-in patterns flag a real-looking EUI and a tailnet address only', () 
   assert.doesNotMatch(r.out, /docs\/a\.md:4:/);
 });
 
+test('the ValveCard fixture path is scanned and its reserved example EUI passes', () => {
+  const fixturePath = 'web/react-gui/src/components/farming/__tests__/ValveCard.test.tsx';
+  const sentinel = 'DEADBEEFCAFEBABE';
+  const badRoot = repo({ [fixturePath]: `const testDevice = { deveui: '${sentinel}' };\n` });
+  const bad = run(badRoot, []);
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, new RegExp(`^${fixturePath}:1: eui64$`, 'm'));
+  assert.doesNotMatch(bad.out, new RegExp(sentinel));
+
+  const reserved = '0016C001F1000001';
+  const goodRoot = repo({ [fixturePath]: `const testDevice = { deveui: '${reserved}' };\n` });
+  const good = run(goodRoot, []);
+  assert.equal(good.code, 0, good.out);
+  assert.match(good.out, /verify-doc-hygiene: OK/);
+
+  const fixture = fs.readFileSync(path.join(__dirname, '..', fixturePath), 'utf8');
+  const actual = fixture.match(/deveui:\s*'([0-9A-F]{16})'/i)?.[1];
+  assert.ok(actual, 'ValveCard fixture must contain its device EUI');
+  assert.equal(isFakeEui(actual), true, 'ValveCard fixture EUI must be accepted by the built-in predicate');
+});
+
 const FAIL_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or add or raise an entry in scripts/verify-doc-hygiene-allowlist.json with a reason';
 const STDIN_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or reword the text';
 
@@ -412,8 +433,13 @@ function runDiff(root, input, terms = 'zebrafarm') {
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-test('SCOPE is exported for the pre-push hook', () => {
-  assert.deepEqual(SCOPE, ['README.md', 'AGENTS.md', 'CLAUDE.md', 'CHANGELOG.md', 'docs', '.claude/skills', '.github', 'analysis']);
+test('scanner and pre-push hook share scope for export and history scans', () => {
+  const hook = fs.readFileSync(path.join(__dirname, 'hooks/pre-push-doc-hygiene.sh'), 'utf8');
+  const hookScope = hook.match(/^SCOPE_PATHS='([^']*)'$/m);
+  assert.ok(hookScope, 'pre-push hook must declare SCOPE_PATHS');
+  assert.deepEqual(hookScope[1].split(/\s+/), SCOPE);
+  assert.match(hook, /for p in \$SCOPE_PATHS \$ALLOWLIST_PATH; do[\s\S]*?set -- "\$@" "\$p"/);
+  assert.match(hook, /log -p[\s\S]*?-- \$SCOPE_PATHS \\\s*\n/);
 });
 
 test('--stdin-diff reports a name added in one commit and removed in the next, for the adding commit', (t) => {
