@@ -44,7 +44,8 @@ fi
 # anything, keeps the old entry in a marked rollback directory until the
 # replacement opens :memory:, and never removes the node-red-node-sqlite peer
 # entry. A rollback directory left by a restore that found its destination
-# occupied is kept and refused on every run until it is inspected.
+# occupied is kept and refused on every run until it is inspected. The seed
+# also refuses, before any change, while a deploy rollback entry exists.
 # A refusal, or a recovery step that asks for a retry, exits 1: the
 # rest of this script is skipped for this boot and OpenWrt keeps the defaults
 # script, so it runs again on the next boot.
@@ -149,13 +150,24 @@ seed_sqlite3_pin() {
     fi
     return 0
 }
-# Sets SEED_B to the single rollback directory, SEED_B_EXACT=1 when its owner
-# line is complete, and SEED_B_META=1 when it holds no original.
+# Refuses while any deploy rollback entry exists. Otherwise sets SEED_B to the
+# single rollback directory, SEED_B_EXACT=1 when its owner line is complete,
+# and SEED_B_META=1 when it holds no original.
 seed_sqlite3_scan_backup() {
     SEED_B=''
     SEED_B_META=0
     SEED_B_EXACT=0
     seed_modules="$DST/node_modules"
+    # The seed never recovers a deploy rollback. Its original may be inside
+    # it, or nested in the final path after an occupied restore, so an entry
+    # of that name, of any type, stops the seed before it moves or deletes
+    # anything.
+    for seed_f in "$seed_modules"/.osi-sqlite3-rollback.*; do
+        seed_sqlite3_present "$seed_f" || continue
+        echo "ERROR: deploy sqlite3 rollback present: $seed_f; seed leaves sqlite3 for deploy or an operator to resolve" >&2
+        seed_sqlite3_report_paths "$seed_f" "$seed_modules/sqlite3" "$seed_modules/sqlite3/original"
+        return 1
+    done
     for seed_b in "$seed_modules"/.osi-sqlite3-seed-rollback.*; do
         seed_sqlite3_present "$seed_b" || continue
         if [ -n "$SEED_B" ] || [ ! -d "$seed_b" ] || [ -L "$seed_b" ]; then

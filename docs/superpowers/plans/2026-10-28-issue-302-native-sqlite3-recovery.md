@@ -2992,3 +2992,134 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
 ```
+
+## R7 amendment: cross-tool rollback refusal
+
+Each tool now refuses, before it moves or deletes anything, while an entry exists under the other tool's rollback prefix. Deploy refuses `.osi-sqlite3-seed-rollback.*` and the seed refuses `.osi-sqlite3-rollback.*`. This appendix is the design record for that change, and it supersedes the R6 text above wherever the two disagree. The R6 text stays unchanged as history. The product commit that changes deploy and both seeds also appends this section, so the plan and the product move together.
+
+The appendix was written before execution, and its outcomes are forecasts. Results belong to the execution record, which keeps every attempt.
+
+### Why R6 was amended
+
+Independent Sol verification of the R6 candidate C `14d5c93cf3ded0a60ae07d76df42ad811bb36393` and its integration I `6c8ead8ff60fdc9ed19f72a0855b9d49b2fe0138` found S1 (report SHA-256 `7441c3d4dd05a71161c422178c4ee95e88b516e43d6403733812410d1f197b8a`). After an occupied restore by one tool, its rollback keeps only metadata and the original sits nested at `sqlite3/original` beside the occupant. The other tool's scanner globbed only its own prefix, so it treated the occupant as a broken module, moved the whole final path into its own rollback, promoted the firmware copy and deleted that rollback. The occupant and the nested original were gone, and the first tool's later retries cleared their metadata and succeeded. Sol's two-order probe at I failed both tests: 2 tests, 0 pass, 2 fail, direct, controller and wrapper exit 1.
+
+C and I stay publication-held. Their 68/68 suite, gates and mutant kills are evidence for those heads only, and S1 means they are not qualified for publication.
+
+### Changed contract
+
+- `native_sqlite3_scan_backup` returns 1 while any entry matches `.osi-sqlite3-seed-rollback.*`. `seed_sqlite3_scan_backup` returns 1 while any entry matches `.osi-sqlite3-rollback.*`. Presence is each tool's existing `[ -e ] || [ -L ]` helper, so a dangling link, file, FIFO, socket, device or directory refuses.
+- The guard runs before the scanner's own loop. Deploy preflight calls the scanner before recovery, orphan-marker removal and the lock fetch. Materialisation calls it before stage removal, staging, the old-path rename and rollback deletion; it matters for a standalone materialisation. The seed calls it at entry, before its own recovery, marker removal, stages and both swap paths.
+- Each refusal names the foreign entry and reports the entry, the final path and the nested original path.
+- With no foreign entry, the scanners, recovery and every R2 to R5 behaviour run unchanged.
+
+### Consequences
+
+- A run refuses while the other tool's entry exists, even when the final path is healthy and the run would have changed nothing. An empty or unowned foreign entry also blocks.
+- A seed refusal exits 1, as every seed refusal does. The rest of the seed script is skipped for that boot, including the helper-module copies and `chown`. Copies that run before the SQLite block still run. OpenWrt keeps the script for the next boot. "Before any change" therefore means before the guarded SQLite changes, not before every earlier seed-script write.
+- While a foreign entry exists, a tool's own metadata-only clear waits as well, so no retained evidence is discarded by either tool.
+- Each tool still owns its own recovery: the next deploy resolves a deploy rollback and the next boot's seed resolves a seed rollback. Occupied restores remain operator inspections, as since R5. Entries under both prefixes block both tools until an operator inspects them.
+- The R6 "Cross-tool leftovers" limit changes. Before, a deploy after an interrupted seed installed a fresh module and left the seed refusing beside a final it did not own. Now deploy refuses, the next seed restores its own swap, and both tools then converge.
+- Stages are not guarded. `.osi-sqlite3-seed-stage.*` and `.osi-sqlite3-stage.*` hold candidates only, and neither stage glob matches the other tool's names. Final-path markers naming the other tool's rollback were already refused by each tool's marker-name check.
+- Unchanged limits: no `fsync`, one tool at a time, no lock, no automatic cross-tool recovery, and no protection for a rollback directory someone removed by hand while its original stays nested in the final path.
+
+### Product fragments
+
+Each old fragment occurs exactly once in C. Deploy replaces its header comment and its scanner opening; each seed profile replaces its header comment and its scanner opening, identically in both profiles. Every removed line is a comment. Deploy gains 19 lines and loses 7; each seed gains 15 and loses 3.
+
+| Fragment | Old SHA-256 | New SHA-256 |
+|---|---|---|
+| deploy header | `ece240ca538e1903cbd4dd1c5f7693e9d28e017f426c71d08bd76378022d5257` | `12aa97631900f0b56cb3983296faa575323f44c3a5f46b9bdc37f47bd8526bb0` |
+| deploy scanner | `0e7594d26b10a02d08f5a433fd733f474ef998f5c8c9b4c6d28b7008ef4fdaf5` | `f9231e3b7cc010c102eec572af78584068d703192213415310137d6768b15a22` |
+| seed header | `7ec31568910c89bc71edd395e8584aac59c84237180fd83072769942631da14c` | `66e8e873616f2003ae76094f2cf9722ac4d51f02f7b9ecea46126a1910f874d7` |
+| seed scanner | `c1d5f0018a1ca3be09203c23a3f7404baee47cb4d1a88e42c51e1d5ea9192944` | `945789f2f56b466d7fd7fe7332abedaf303271b8af057817efe0d1f544cd2b24` |
+
+The new deploy scanner opening:
+
+```sh
+# Refuses while any seed rollback entry exists. Otherwise sets NS_B to the
+# single rollback directory, NS_B_EXACT=1 when its owner line is complete, and
+# NS_B_META=1 when it holds no original.
+native_sqlite3_scan_backup() {
+    NS_B=''
+    NS_B_META=0
+    NS_B_EXACT=0
+    ns_root="$NODE_RED_ROOT/node_modules"
+    # Deploy never recovers a seed rollback. Its original may be inside it, or
+    # nested in the final path after an occupied restore, so an entry of that
+    # name, of any type, stops deploy before it moves or deletes anything.
+    for ns_f in "$ns_root"/.osi-sqlite3-seed-rollback.*; do
+        native_sqlite3_present "$ns_f" || continue
+        echo "ERROR: seed sqlite3 rollback present: $ns_f; deploy leaves sqlite3 for the seed or an operator to resolve" >&2
+        native_sqlite3_report_paths "$ns_f" "$ns_root/sqlite3" "$ns_root/sqlite3/original"
+        return 1
+    done
+    for ns_b in "$ns_root"/.osi-sqlite3-rollback.*; do
+```
+
+The new seed scanner opening:
+
+```sh
+# Refuses while any deploy rollback entry exists. Otherwise sets SEED_B to the
+# single rollback directory, SEED_B_EXACT=1 when its owner line is complete,
+# and SEED_B_META=1 when it holds no original.
+seed_sqlite3_scan_backup() {
+    SEED_B=''
+    SEED_B_META=0
+    SEED_B_EXACT=0
+    seed_modules="$DST/node_modules"
+    # The seed never recovers a deploy rollback. Its original may be inside
+    # it, or nested in the final path after an occupied restore, so an entry
+    # of that name, of any type, stops the seed before it moves or deletes
+    # anything.
+    for seed_f in "$seed_modules"/.osi-sqlite3-rollback.*; do
+        seed_sqlite3_present "$seed_f" || continue
+        echo "ERROR: deploy sqlite3 rollback present: $seed_f; seed leaves sqlite3 for deploy or an operator to resolve" >&2
+        seed_sqlite3_report_paths "$seed_f" "$seed_modules/sqlite3" "$seed_modules/sqlite3/original"
+        return 1
+    done
+    for seed_b in "$seed_modules"/.osi-sqlite3-seed-rollback.*; do
+```
+
+Both header comments gain one sentence each: deploy "Deploy also refuses, before any change, while a seed rollback entry exists; the seed refuses a deploy one the same way.", and the seed "The seed also refuses, before any change, while a deploy rollback entry exists." The deploy header is rewrapped around that sentence.
+
+### Tests
+
+The test additions (SHA-256 `51abfd2f285cf4f434ab861395c716595c0b82bb3397f61ab8814acd8f40f10a`) are appended to C's test file after one newline. C's 68 tests stay as an unchanged byte prefix, so the file holds 72 tests. No C test creates an entry under the other tool's prefix, so the guard is inert in all 68.
+
+| Test | What it holds |
+|---|---|
+| `R7 seed occupied restore stays refused across later deploys and seeds` | Sol's setup with the seed first, then a deploy preflight, a full deploy and two seed retries, each a fresh process |
+| `R7 deploy occupied restore stays refused across later seeds and deploys` | The same with deploy first, then two seed boots, a deploy preflight and a full deploy |
+| `R7 every entry type under the other rollback prefix blocks both tools before changes` | A dangling link, file, FIFO and directory holding `original/kept.txt` under each foreign prefix; deploy preflight, standalone materialisation and full deploy; two seed boots |
+| `R7 an interrupted swap is left for the tool that made it` | Each tool interrupted after its old-path rename (exit 26); the other tool refuses, the owner restores the original with its device and inode, then each tool runs to success |
+
+After every later run the occupied-restore tests compare the rollback directory's device and inode, its metadata names and bytes, the final path's device, inode and listing, the occupant bytes, and the nested original's device, inode, listing and bytes. Refusals must show a nonzero product status and the foreign-prefix diagnostic, and must not print a success, ordinary-write, `cleared`, `restored` or `rolled back` marker.
+
+Forecast SHA-256 of the files after this amendment: `deploy.sh` `047fce786cf4c4703df04183711f732b8da5e780aded71d603c76fdca6490c24`, both seed profiles `216e6cae340e5ba00df2cfcf740cbe96f6d43843e51c359356da4209e5b04df6`, `scripts/test-deploy-native-sqlite3.js` `779d7c46f7901de707a8cb10c705c2d06f3ddcc2f2fe57b3c4784d05ab11df8e`. This plan file is C's plan followed by this appendix.
+
+### Mutants
+
+| ID | Mutation | Named test: first expected failing assertion |
+|---|---|---|
+| M21 | Deploy guard body replaced by `continue` | seed occupied restore: nonzero `PREFLIGHT_RC`, `later deploy preflight` |
+| M22 | Seed guard body replaced by `continue` | deploy occupied restore: nonzero `SEED_RC`, `later seed next boot` |
+| M23 | Deploy presence narrowed to `[ -e ]` | every entry type: nonzero `PREFLIGHT_RC`, `deploy: dangling-symlink preflight` |
+| M24 | Seed presence narrowed to `[ -e ]` | every entry type: nonzero `SEED_RC`, `seed: dangling-symlink: next boot` |
+| M25 | Materialisation's rescan replaced by `NS_B=''` | every entry type: nonzero `MATERIALIZE_RC`, `deploy: dangling-symlink materialise` |
+
+A kill counts only when the named test runs once and fails at that assertion. A setup error, timeout or missing test is not a kill. M01 to M20 are not rerun: their anchors still occur once, the amendment touches no line they mutate, and none of their named tests creates a foreign entry. Their kills at C remain evidence for the unchanged lines.
+
+### Tests-first order
+
+1. On a clean checkout at C, tests-first writes only the test file. Running `node --test '--test-name-pattern=^R7 '` on it is forecast to give 4 tests, 0 pass, 4 fail, each at the first assertion named for M21, M22, M23 and the deploy-after-interrupted-seed preflight.
+2. The test file alone is committed as the sole child of C, with the 68-test prefix unchanged.
+3. product writes deploy, both seeds and this appendix. The whole file is forecast to give 72 tests, 72 pass, 0 fail, skip or cancel, inside the existing 600 s bound.
+4. Deploy, both seeds and the plan are committed together. The candidate then differs from P in five paths, and from C in the same five: the test, deploy, both seeds and the plan.
+5. The candidate check proves product, then tests-first, then C, with exact bytes for all five paths. Mutants M21 to M25 run under the 180 s bound. Sol's retained probe, appended unchanged, is forecast to pass 2 of 2.
+6. Current main is merged with no hand resolution. The integration check proves main's tree overlaid with the five-path delta, no local or effective merge attribute and no configured merge driver, the seven seed databases identical across both parents and the result, migrations and the allowance file equal to both parents, and `AGENTS.md` from main. The repository gates rerun on the merge, including `verify-migrations.js` against main, `verify-seed-db-ledger.js` and the both-parent allowance check.
+
+A divergence from a forecast stops execution with its evidence. It does not authorize editing an assertion, the product text or a bound.
+
+### Reviews and votes
+
+Council round 3 approved T `78e8a0cdb84a1be56a7d5326106555e2c9099173` only: Sol and Claude Fable each voted APPROVE 9/10. The DeepSeek vote is missing, so there is no full council for this plan or this amendment. Those votes do not cover this appendix. The amendment's source review is Sol's bounded R7 review (SHA-256 `ab8d68600983db247f5912073f0a5c884d6e3c1f02c58ccee5d3d2af759c8443`), which accepted the product fragments, tests and mutants by source inspection and asked for this appendix. After execution, the new candidate and integration heads need a fresh exact-head Sol verification. A risk-class merge remains the maintainer's action, and #302 stays open.
