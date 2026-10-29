@@ -128,16 +128,99 @@ missing `uci`, a missing `osi-server.cloud` section or a failed commit is
 logged as a `WARN` and does not fail the deploy; the gateway then reports the
 `node-red.init` fallback or the old value.
 
-### Step 1a — Chameleon calibrations (not bundled)
+### Step 1a — Bundle Chameleon calibrations
 
-The 0.8.0 image does not bundle Chameleon calibrations; gateways fetch them
-from OSI Server at runtime. Do not run
-`scripts/apply-chameleon-calibration-seed.js` for the release:
-the script now writes all seven seed images, but its test
-(`scripts/test-apply-chameleon-calibration-seed.js`, a step in the Edge
-Migrations workflow) expects exactly the rows of its own synthetic seed and
-fails once the tracked images hold rows, so it must first count relative to
-the starting state.
+Before the release commit, obtain the calibration snapshot with the refresh
+script using an operator-supplied admin token in a private, unrecorded local
+terminal. First run the seven-image parity gate. If it fails, stop the release
+and inspect each image separately; one image is representative only after the
+gate passes. Inspect every generated SQL row and every preexisting bundled
+table row across all 17 columns. Review names, deployment-linked device
+identifiers, private mappings and other fields that may be unfit for a public
+repository. Decide whether every identifier is publishable. For each
+`array_id` present in both the snapshot and the old image, decide whether
+retaining all old column values is correct. Approve that retention explicitly
+or stop the release for a separately reviewed update policy.
+
+Apply the reviewed snapshot to all seven bundled images with `--require-rows`;
+an empty-snapshot refusal stops the release. Run the seven-image parity gate
+again *before* using one image to inspect the final table. Inspect every final
+row and all 17 columns, including rows retained by `INSERT OR IGNORE`. If
+parity fails, stop and inspect each image; do not assume the representative
+row set covers the others. Record only
+`public-row review passed; retained-old-value collisions approved` or
+`release stopped: <nonidentifying category>`, without identifiers or row
+values. Run the remaining checks, then commit the SQL and all seven images
+with the release change.
+
+The following commands are future release steps. The operator supplies
+`CALIBRATION_ADMIN_TOKEN` privately in the shell environment. The placeholder
+is not a token, and this document does not describe how to obtain one. If a parity gate fails
+or a collision is disapproved, stop before the next command.
+
+```bash
+OSI_ADMIN_TOKEN="$CALIBRATION_ADMIN_TOKEN" node scripts/refresh-chameleon-calibrations.js
+# Private terminal: inspect every generated INSERT and decide publishability.
+less database/seeds/chameleon-calibrations.sql
+calibration_review_sql='SELECT
+  quote(array_id) AS array_id,
+  quote(sensor_id) AS sensor_id,
+  quote(sensor1_a) AS sensor1_a,
+  quote(sensor1_b) AS sensor1_b,
+  quote(sensor1_c) AS sensor1_c,
+  quote(sensor1_r2) AS sensor1_r2,
+  quote(sensor2_a) AS sensor2_a,
+  quote(sensor2_b) AS sensor2_b,
+  quote(sensor2_c) AS sensor2_c,
+  quote(sensor2_r2) AS sensor2_r2,
+  quote(sensor3_a) AS sensor3_a,
+  quote(sensor3_b) AS sensor3_b,
+  quote(sensor3_c) AS sensor3_c,
+  quote(sensor3_r2) AS sensor3_r2,
+  quote(test_rig_run_start_date) AS test_rig_run_start_date,
+  quote(source) AS source,
+  quote(fetched_at) AS fetched_at
+FROM chameleon_calibrations
+ORDER BY array_id;'
+node scripts/verify-seed-db-ledger.js
+# Private terminal: inspect every old row and compare overlapping keys with the SQL.
+sqlite3 -readonly -line database/farming.db "$calibration_review_sql"
+# For each collision, approve retained old values or stop the release.
+node scripts/apply-chameleon-calibration-seed.js --require-rows
+node scripts/verify-seed-db-ledger.js
+# Private terminal: inspect every final row only after seven-image parity passes.
+sqlite3 -readonly -line database/farming.db "$calibration_review_sql"
+node --test scripts/test-apply-chameleon-calibration-seed.js
+node scripts/verify-db-schema-consistency.js
+node scripts/verify-profile-parity.js
+```
+
+The query applies `quote()` to every named column, so `NULL` is visibly
+different from empty text. Review its output privately and scroll through all
+rows, including nullable `sensor*_r2` fields and metadata. Do not capture or
+publish the output. If parity fails, stop and inspect every image separately
+with the same query:
+
+```bash
+for db in \
+  conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
+  conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
+  conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db \
+  conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
+  conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
+  database/farming.db \
+  web/react-gui/farming.db
+do
+  printf '%s\n' "$db"
+  sqlite3 -readonly -line "$db" "$calibration_review_sql"
+done
+```
+
+Do not commit or publish until parity is repaired and the row review is
+repeated. `verify-seed-db-ledger.js` checks all seven image digests alongside
+ledger and schema fingerprints. `verify-profile-parity.js` covers only the
+maintained profile pair. The focused writer test checks row values on
+temporary copies.
 
 ---
 
@@ -222,6 +305,14 @@ git add web/react-gui/src/pages/Login.tsx \
         conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json \
         conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json \
         scripts/verify-sync-flow.js \
+        database/seeds/chameleon-calibrations.sql \
+        conf/base_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
+        conf/base_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
+        conf/full_raspberrypi_bcm27xx_bcm2708/files/usr/share/db/farming.db \
+        conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/db/farming.db \
+        conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/db/farming.db \
+        database/farming.db \
+        web/react-gui/farming.db \
         .claude/skills/osi-config-and-flags/references/uci-and-identity.md \
         .claude/skills/osi-config-and-flags/references/runtime-and-flags.md \
         README.md \
@@ -408,7 +499,7 @@ On each Pi after the deploy:
                  matching osi-server revision found with verify-sync-op-parity
                  Luganda release gate checked (docs/i18n/pending-luganda-translations.md)
 [ ] Step 1  — Bump every version location; run the verifiers
-[ ] Step 1a — Do not bundle Chameleon calibrations
+[ ] Step 1a — Refresh Chameleon snapshot; review every SQL, old and final row privately; approve or stop on collisions; apply with --require-rows; verify all seven images before representative inspection
 [ ] Step 2  — Rename [Unreleased] to the release; new empty [Unreleased]
 [ ] Step 3  — Rebuild React GUI + react_gui.tar.gz; refresh the feed GUI copy
 [ ] Step 4  — Release PR (incl. feed GUI), merge, CI green, tag v<NEW>, push only the tag
