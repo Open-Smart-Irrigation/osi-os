@@ -668,7 +668,8 @@
       "longitudeRange": "Longitude must be between -180 and 180.",
       "flowRateRequired": "Flow rate (L/min) is required to save irrigation calibration.",
       "flowRatePositive": "Flow rate (L/min) must be greater than 0.",
-      "saveFailed": "Failed to save"
+      "saveFailed": "Failed to save",
+      "rainChoiceSaveFailed": "Rain gauge choice was not saved. Review the selection and retry Save."
     },
     "weatherProvider": "Weather provider",
     "weatherProviderHelpLabel": "About the weather provider",
@@ -683,7 +684,13 @@
     "stageStartedOn": "Stage started on",
     "stageStartedOnHelpLabel": "About the stage start date",
     "stageStartedOnHelp": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop ({{days}} days) Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.",
-    "stageStartedOnHelpNoLength": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value."
+    "stageStartedOnHelpNoLength": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.",
+    "partialSave": {
+      "saved": "Saved:",
+      "config": "Zone settings",
+      "calibration": "Irrigation calibration",
+      "location": "Zone location"
+    }
   },
   "irrigationOutcomes": {
     "title": "Recent irrigations",
@@ -997,9 +1004,11 @@
     "optionShared": "{{name}} (shared weather station)",
     "optionSuggested": "{{label}} — suggested",
     "ambiguous": "Two rain gauges report for this zone. Until you choose one, the zone has no measured rain.",
-    "onlyCandidate": "The only rain gauge of this zone is used.",
     "loadFailed": "The rain gauges of this zone could not be loaded.",
-    "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
+    "banner": "Two rain gauges report for this zone. Choose one in the zone settings.",
+    "automaticOption": "Automatic: {{name}}",
+    "automaticOnlyCandidate": "Automatically using {{name}}, the only rain gauge for this zone.",
+    "bannerReadOnly": "Ask someone who can edit this zone to choose a rain gauge in zone settings."
   },
   "soilTension": {
     "sectionTitle": "Soil tension",

@@ -13,7 +13,7 @@ import test from 'node:test';
 const localeRoot = path.resolve(process.cwd(), 'public/locales');
 const EUROPEAN = ['de-CH', 'es', 'fr', 'it', 'pt'];
 const KEYS = ['label', 'helpLabel', 'help', 'notChosen', 'optionShared', 'optionSuggested', 'ambiguous',
-  'onlyCandidate', 'loadFailed', 'banner'];
+  'automaticOption', 'automaticOnlyCandidate', 'loadFailed', 'banner', 'bannerReadOnly'];
 
 const group = (locale: string): Record<string, string> =>
   JSON.parse(fs.readFileSync(path.join(localeRoot, locale, 'devices.json'), 'utf8')).zoneRainGauge ?? {};

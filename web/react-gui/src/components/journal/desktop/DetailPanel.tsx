@@ -17,7 +17,11 @@ import {
   parseContextSnapshot,
   scalarSelectionsFromValues,
 } from '../../../journal/entryCorrection';
-import { resolveOccurrence, type ResolvedOccurrence } from '../../../journal/occurrence';
+import {
+  currentOccurrenceDefault,
+  resolveOccurrence,
+  type ResolvedOccurrence,
+} from '../../../journal/occurrence';
 import { randomUuid } from '../../../utils/uuid';
 import { deriveFieldStates } from '../../../journal/templateEngine';
 import { useJournalEntries } from '../../../journal/useJournalEntries';
@@ -102,26 +106,10 @@ function copyDuplicateCandidateEntryUuid(error: unknown): string | null {
   return typeof uuid === 'string' && uuid ? uuid : null;
 }
 
-// The copy form's own occurred date/time input default: "now", formatted in
-// the SOURCE entry's occurred_timezone (A1 — the new occurrence is resolved
-// against that same timezone, DST-safe, never the source's stored offset).
-function defaultCopyOccurredLocal(timezone: string): string {
-  let formatter: Intl.DateTimeFormat;
-  try {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  } catch {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  }
-  const parts = formatter.formatToParts(new Date());
-  const values = new Map(parts.map(({ type, value }) => [type, value]));
-  return `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
+// The copy form's default is "now" in the SOURCE entry's timezone. Keep that
+// instant's offset only while the generated local value remains untouched.
+function defaultCopyOccurred(timezone: string): ReturnType<typeof currentOccurrenceDefault> {
+  return currentOccurrenceDefault(timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
 function plotLabelOf(plotUuid: string | null, plots: readonly JournalPlot[]): string | null {
@@ -934,9 +922,11 @@ function EntryCopyForm({
   );
   // A1: the copy form's OWN occurred date/time input, defaulted to "now" in
   // the source's own occurred_timezone -- never the source's stored instant.
+  const [initialCopyOccurrence] = useState(() => defaultCopyOccurred(aggregate.occurred_timezone));
   const [occurredLocal, setOccurredLocal] = useState<string>(
-    () => defaultCopyOccurredLocal(aggregate.occurred_timezone),
+    initialCopyOccurrence.localTime,
   );
+  const [utcOffset, setUtcOffset] = useState<number | null>(initialCopyOccurrence.offsetMinutes);
   const [showValidation, setShowValidation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Held stable for this copy form instance so a duplicate-guard-409 ack-retry
@@ -983,9 +973,9 @@ function EntryCopyForm({
     setGenericError(false);
     let occurrence: ResolvedOccurrence;
     try {
-      // A1: resolved against the SOURCE's own occurred_timezone (DST-safe) —
-      // never the source's stored occurred_utc_offset_minutes.
-      occurrence = resolveOccurrence(occurredLocal, aggregate.occurred_timezone);
+      // A1: resolve against the SOURCE's timezone and retain its default offset
+      // only until a user edits the local time. Never reuse the source's offset.
+      occurrence = resolveOccurrence(occurredLocal, aggregate.occurred_timezone, utcOffset);
     } catch {
       setDateError(true);
       setSubmitting(false);
@@ -1054,7 +1044,11 @@ function EntryCopyForm({
             value={occurredLocal}
             aria-invalid={dateError}
             aria-describedby={dateError ? occurredErrorId : undefined}
-            onChange={(event) => { setOccurredLocal(event.target.value); setDateError(false); }}
+            onChange={(event) => {
+              setOccurredLocal(event.target.value);
+              setUtcOffset(null);
+              setDateError(false);
+            }}
             className="min-h-12 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text)]"
           />
           {dateError && (

@@ -160,6 +160,7 @@ const environmentSummary = {
 function renderCard(
   devices: Device[] = [],
   zoneOverrides: Partial<IrrigationZone & { zoneUuid?: string | null; zone_uuid?: string | null }> = {},
+  canWrite = true,
 ) {
   render(
     <MemoryRouter>
@@ -168,6 +169,7 @@ function renderCard(
         devices={devices}
         unassignedDevices={[]}
         onUpdate={vi.fn()}
+        canWrite={canWrite}
       />
     </MemoryRouter>,
   );
@@ -399,7 +401,29 @@ describe('IrrigationZoneCard Data entry', () => {
     await waitFor(() => expect(waterCard).toHaveTextContent(
       'Two rain gauges report for this zone. Choose one in the zone settings.',
     ));
+    expect(screen.getByRole('button', { name: 'Configure' })).toBeInTheDocument();
     expect(apiMocks.getRainSource).toHaveBeenCalledWith(12);
+  });
+
+  it('gives read-only users rain-gauge guidance they can act on', async () => {
+    apiMocks.getSummary.mockResolvedValue(environmentSummary);
+    apiMocks.getRainSource.mockResolvedValue({
+      state: 'ambiguous', selectedDeveui: null, basis: null, suggestedDeveui: 'A840410000000001',
+      candidates: [
+        { deveui: 'A840410000000001', name: 'Gauge north', typeId: 'AQUASCOPE_LORAIN', via: 'direct' },
+        { deveui: 'A840410000000002', name: 'Station east', typeId: 'SENSECAP_S2120', via: 'weather_station' },
+      ],
+    });
+
+    renderCard([dendroDevice], {}, false);
+    fireEvent.click(screen.getByRole('button', { expanded: false }));
+
+    const waterCard = await screen.findByTestId('water-today-card');
+    await waitFor(() => expect(waterCard).toHaveTextContent(
+      'Ask someone who can edit this zone to choose a rain gauge in zone settings.',
+    ));
+    expect(screen.queryByRole('button', { name: 'Configure' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /settings/i })).not.toBeInTheDocument();
   });
 
   it('shows no gauge banner once a gauge is chosen', async () => {

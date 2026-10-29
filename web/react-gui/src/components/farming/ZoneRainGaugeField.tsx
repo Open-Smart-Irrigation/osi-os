@@ -30,6 +30,13 @@ export const ZoneRainGaugeField: React.FC<Props> = ({ id, source, loadFailed, va
   }
   if (!source || source.candidates.length === 0) return null;
 
+  const onlyCandidate = source.basis === 'only_candidate'
+    && source.candidates.length === 1
+    && source.selectedDeveui === source.candidates[0].deveui
+    ? source.candidates[0]
+    : null;
+  const onlyCandidateName = onlyCandidate?.name ?? onlyCandidate?.deveui;
+
   const optionLabel = (candidate: ZoneRainGaugeCandidate) => {
     const name = candidate.name ?? candidate.deveui;
     const label = candidate.via === 'weather_station'
@@ -58,7 +65,12 @@ export const ZoneRainGaugeField: React.FC<Props> = ({ id, source, loadFailed, va
         onChange={(e) => onChange(e.target.value)}
         className="w-full bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-2 text-sm"
       >
-        <option value="">{t('zoneRainGauge.notChosen', { defaultValue: '— No gauge chosen —' })}</option>
+        <option value="">{onlyCandidateName
+          ? t('zoneRainGauge.automaticOption', {
+            name: onlyCandidateName,
+            defaultValue: 'Automatic: {{name}}',
+          })
+          : t('zoneRainGauge.notChosen', { defaultValue: '— No gauge chosen —' })}</option>
         {source.candidates.map((candidate) => (
           <option key={candidate.deveui} value={candidate.deveui}>{optionLabel(candidate)}</option>
         ))}
@@ -70,9 +82,12 @@ export const ZoneRainGaugeField: React.FC<Props> = ({ id, source, loadFailed, va
           })}
         </p>
       )}
-      {source.basis === 'only_candidate' && (
+      {onlyCandidateName && (
         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
-          {t('zoneRainGauge.onlyCandidate', { defaultValue: 'The only rain gauge of this zone is used.' })}
+          {t('zoneRainGauge.automaticOnlyCandidate', {
+            name: onlyCandidateName,
+            defaultValue: 'Automatically using {{name}}, the only rain gauge for this zone.',
+          })}
         </p>
       )}
     </div>

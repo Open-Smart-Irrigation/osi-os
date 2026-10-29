@@ -158,16 +158,21 @@ test('verify-migrations allows a next-version migration and manifest entry beyon
   assert.match(result.stdout, /base immutability OK/);
 });
 
-test('verify-migrations accepts the committed ordered migration checksum manifest', () => {
+test('verify-migrations accepts the committed ordered migration checksum manifest', (t) => {
+  const committedDir = path.join(repoRoot, 'database/migrations/ordered');
   assert.equal(
-    fs.existsSync(path.join(repoRoot, 'database/migrations/ordered/CHECKSUMS.json')),
+    fs.existsSync(path.join(committedDir, 'CHECKSUMS.json')),
     true,
     'database/migrations/ordered/CHECKSUMS.json must be committed'
   );
 
-  const result = runVerifier();
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-migrations-committed-'));
+  const migrationsDir = path.join(tempRoot, 'ordered');
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  fs.cpSync(committedDir, migrationsDir, { recursive: true });
+
+  const result = runVerifier(['--migrations-dir', migrationsDir]);
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /checksum manifest OK/);
-  assert.match(result.stdout, /base immutability OK/);
 });

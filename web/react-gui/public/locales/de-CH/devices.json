@@ -671,7 +671,8 @@
       "longitudeRange": "Der Längengrad muss zwischen -180 und 180 liegen.",
       "flowRateRequired": "Für die Bewässerungskalibrierung ist der Durchfluss (l/min) erforderlich.",
       "flowRatePositive": "Der Durchfluss (l/min) muss grösser als 0 sein.",
-      "saveFailed": "Speichern fehlgeschlagen"
+      "saveFailed": "Speichern fehlgeschlagen",
+      "rainChoiceSaveFailed": "Die Regenmesserauswahl wurde nicht gespeichert. Prüfen Sie die Auswahl und versuchen Sie erneut, sie zu speichern."
     },
     "weatherProvider": "Wetteranbieter",
     "weatherProviderHelpLabel": "Über den Wetteranbieter",
@@ -686,7 +687,13 @@
     "stageStartedOn": "Phase begonnen am",
     "stageStartedOnHelpLabel": "Info zum Startdatum der Phase",
     "stageStartedOnHelp": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur ({{days}} Tage) bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden.",
-    "stageStartedOnHelpNoLength": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden."
+    "stageStartedOnHelpNoLength": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden.",
+    "partialSave": {
+      "saved": "Gespeichert:",
+      "config": "Zoneneinstellungen",
+      "calibration": "Bewässerungskalibrierung",
+      "location": "Zonenstandort"
+    }
   },
   "irrigationOutcomes": {
     "title": "Letzte Bewässerungen",
@@ -1000,9 +1007,11 @@
     "optionShared": "{{name}} (gemeinsame Wetterstation)",
     "optionSuggested": "{{label}} — vorgeschlagen",
     "ambiguous": "Zwei Regenmesser melden für diese Zone. Bis Sie einen wählen, hat die Zone keinen gemessenen Regen.",
-    "onlyCandidate": "Der einzige Regenmesser dieser Zone wird verwendet.",
     "loadFailed": "Die Regenmesser dieser Zone konnten nicht geladen werden.",
-    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen."
+    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen.",
+    "automaticOption": "Automatisch: {{name}}",
+    "automaticOnlyCandidate": "{{name}} wird automatisch als einziger Regenmesser für diese Zone verwendet.",
+    "bannerReadOnly": "Bitten Sie jemanden mit Bearbeitungsrechten für diese Zone, in den Zoneneinstellungen einen Regenmesser auszuwählen."
   },
   "soilTension": {
     "sectionTitle": "Bodenwasserspannung",
