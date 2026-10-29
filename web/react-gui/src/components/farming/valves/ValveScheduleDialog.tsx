@@ -100,12 +100,25 @@ function utcIsoToZonedFields(iso: string, timeZone: string): { date: string; tim
 }
 
 function describeConflict(details: ValvePlanError[], t: Translate): string {
-  const first = details[0];
-  if (!first) return t('scheduleDialog.conflictGeneric');
-  const weekdayLabel = first.weekday !== null ? t(`weekdays.${first.weekday}`) : '';
-  if (first.code === 'too_many_windows') return t('scheduleDialog.conflictTooMany', { weekday: weekdayLabel });
-  if (first.code === 'overlap') return t('scheduleDialog.conflictOverlap', { weekday: weekdayLabel });
-  return t('scheduleDialog.conflictInvalidStart');
+  if (details.length === 0) return t('scheduleDialog.conflictGeneric');
+  return details.map((detail) => {
+    const day = detail.weekday;
+    const weekday = typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6
+      ? t(`weekdays.${day}`)
+      : null;
+    let message: string;
+    if (detail.code === 'too_many_windows' && weekday) {
+      message = t('scheduleDialog.conflictTooMany', { weekday });
+    } else if (detail.code === 'overlap' && weekday) {
+      message = t('scheduleDialog.conflictOverlap', { weekday });
+    } else if (detail.code === 'invalid_start_time') {
+      message = t('scheduleDialog.conflictInvalidStart');
+    } else {
+      message = t('scheduleDialog.conflictGeneric');
+    }
+    const labels = detail.labels.filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
+    return labels.length > 0 ? message + ' (' + labels.join(', ') + ')' : message;
+  }).join('\n');
 }
 
 // The gateway returns push rows newest first in ledger insertion order (store.weekdayPushStates,
@@ -450,7 +463,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
 
               <section className="mt-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{t('scheduleDialog.list')}</p>
-                {rowError && <p className="mt-1 text-xs text-[var(--warn-text)]">{rowError}</p>}
+                {rowError && <p className="mt-1 whitespace-pre-line text-xs text-[var(--warn-text)]">{rowError}</p>}
                 {data.schedules.length === 0 ? (
                   <p className="mt-2 text-sm text-[var(--text-tertiary)]">{t('noSchedule')}</p>
                 ) : (
@@ -581,7 +594,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       {weeklyPreview}{weeklyLiters !== null && ` · ${t('scheduleDialog.previewLiters', { liters: weeklyLiters })}`}
                     </p>
                   )}
-                  {weeklyError && <p className="mt-2 text-xs text-[var(--warn-text)]">{weeklyError}</p>}
+                  {weeklyError && <p className="mt-2 whitespace-pre-line text-xs text-[var(--warn-text)]">{weeklyError}</p>}
                   <div className="mt-3 flex gap-2">
                     {editingWeeklyUuid && (
                       <button
@@ -663,7 +676,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       {oncePreview}{onceLiters !== null && ` · ${t('scheduleDialog.previewLiters', { liters: onceLiters })}`}
                     </p>
                   )}
-                  {onceError && <p className="mt-2 text-xs text-[var(--warn-text)]">{onceError}</p>}
+                  {onceError && <p className="mt-2 whitespace-pre-line text-xs text-[var(--warn-text)]">{onceError}</p>}
                   <div className="mt-3 flex gap-2">
                     {editingOnceUuid && (
                       <button
