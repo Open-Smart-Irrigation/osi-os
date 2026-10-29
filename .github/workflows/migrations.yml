@@ -60,7 +60,12 @@ jobs:
       # that matches nothing and stays green. run-module-tests.js fails on a
       # missing file, and verify-test-inventory.js (test-inventory.yml) fails
       # on a test file that no workflow runs.
-      - run: |
+      # OSI_BASELINE_RUNNER builds the disposable reference(N) chain through one
+      # node:sqlite handle instead of a sqlite3 process per query (#327). The
+      # live and scratch databases under test still use the sqlite3 CLI.
+      - env:
+          OSI_BASELINE_RUNNER: node-sqlite
+        run: |
           node scripts/run-module-tests.js \
             lib/osi-migrate/__tests__/add-column-compat.test.js \
             lib/osi-migrate/__tests__/backup.test.js \
