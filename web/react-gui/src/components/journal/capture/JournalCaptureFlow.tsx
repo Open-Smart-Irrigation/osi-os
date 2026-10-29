@@ -33,6 +33,7 @@ import type {
   LayoutTransitionResolutionKind,
 } from '../../../journal/layoutTransition';
 import {
+  currentOccurrenceDefault,
   isValidApiInstant,
   OccurrenceResolutionError,
   resolveOccurrence,
@@ -175,26 +176,6 @@ const EMPTY_NUMBER_INPUT_ERRORS: ReadonlyMap<string, string> = new Map();
 // with no friendly resolver and no user-meaningful label -- never render its
 // raw opaque id on the confirm screen (mirrors DetailPanel's own omission).
 const OMITTED_CONFIRM_VALUE_CODE = 'attr.actuation_expectation_id';
-
-function localDefault(timezone: string, fallbackTimezone: string): string {
-  let formatter: Intl.DateTimeFormat;
-  try {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  } catch {
-    formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: fallbackTimezone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    });
-  }
-  const parts = formatter.formatToParts(new Date());
-  const values = new Map(parts.map(({ type, value }) => [type, value]));
-  return `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
-}
 
 function cropForPlot(
   plot: JournalPlot | undefined,
@@ -814,10 +795,11 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
   const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const effectiveInitialTimezone = initialTimezone ?? browserTimezone;
   const [timezone, setTimezone] = useState(effectiveInitialTimezone);
-  const [occurredLocal, setOccurredLocal] = useState(() =>
-    localDefault(effectiveInitialTimezone, browserTimezone));
+  const [initialOccurrenceDefault] = useState(() =>
+    currentOccurrenceDefault(effectiveInitialTimezone, browserTimezone));
+  const [occurredLocal, setOccurredLocal] = useState(initialOccurrenceDefault.localTime);
   const [occurredEndLocal, setOccurredEndLocal] = useState('');
-  const [utcOffset, setUtcOffset] = useState<number | null>(null);
+  const [utcOffset, setUtcOffset] = useState<number | null>(initialOccurrenceDefault.offsetMinutes);
   const [endUtcOffset, setEndUtcOffset] = useState<number | null>(null);
   const [resolved, setResolved] = useState<ResolvedOccurrence | null>(null);
   const [endResolved, setEndResolved] = useState<ResolvedOccurrence | null>(null);
@@ -1766,19 +1748,20 @@ export const JournalCaptureFlow: React.FC<JournalCaptureFlowProps> = ({
     const nextTimezone = nextPlot?.zone_uuid
       ? zoneTimezones[nextPlot.zone_uuid] ?? browserTimezone
       : browserTimezone;
+    const nextOccurrenceDefault = currentOccurrenceDefault(nextTimezone, browserTimezone);
     setSelectedPlotUuids(requestedSelection);
     setLayoutCode(nextLayoutCode);
     setTemplateCode(nextTemplate);
     const nextCrop = cropForPlot(nextPlot, zoneCrops);
     setCrop(nextCrop);
     setTimezone(nextTimezone);
-    setOccurredLocal(localDefault(nextTimezone, browserTimezone));
+    setOccurredLocal(nextOccurrenceDefault.localTime);
     setOccurredEndLocal('');
     setResolved(null);
     resolvedRef.current = null;
     setEndResolved(null);
     endResolvedRef.current = null;
-    setUtcOffset(null);
+    setUtcOffset(nextOccurrenceDefault.offsetMinutes);
     setEndUtcOffset(null);
     setOccurrenceError(null);
     setEndOccurrenceError(null);

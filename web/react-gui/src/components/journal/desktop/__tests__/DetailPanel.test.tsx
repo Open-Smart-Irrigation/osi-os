@@ -1121,6 +1121,77 @@ describe('DetailPanel — copy an entry', () => {
     expect(payload.occurred_utc_offset_minutes).toBe(120);
   });
 
+  it.each([
+    {
+      now: '2026-10-25T00:29:00.000Z',
+      local: '2026-10-25T02:29',
+      offset: 120,
+      instant: '2026-10-25T00:29:00.000Z',
+    },
+    {
+      now: '2026-10-25T01:29:00.000Z',
+      local: '2026-10-25T02:29',
+      offset: 60,
+      instant: '2026-10-25T01:29:00.000Z',
+    },
+    {
+      now: '2026-07-16T08:30:00.000Z',
+      local: '2026-07-16T10:30',
+      offset: 120,
+      instant: '2026-07-16T08:30:00.000Z',
+    },
+  ])('preserves the automatic copy default instant at $now', async ({ now, local, offset, instant }) => {
+    vi.setSystemTime(new Date(now));
+    mockDetail({ entries: [entry({ occurred_timezone: 'Europe/Zurich' })] });
+    mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    const occurredInput = screen.getByLabelText('workspace.detail.copy.occurredLabel');
+    expect(occurredInput).toHaveValue(local);
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    await waitFor(() => expect(mocks.createEntry).toHaveBeenCalledOnce());
+    const [payload] = mocks.createEntry.mock.calls[0];
+    expect(payload).toMatchObject({
+      occurred_start_local: local,
+      occurred_timezone: 'Europe/Zurich',
+      occurred_utc_offset_minutes: offset,
+    });
+    const localAsUtc = Date.parse(`${local}:00Z`);
+    expect(new Date(localAsUtc - offset * 60_000).toISOString()).toBe(instant);
+  });
+
+  it('clears the copy default offset after a manual fold-time edit', async () => {
+    vi.setSystemTime(new Date('2026-10-25T01:29:00.000Z'));
+    mockDetail({ entries: [entry({ occurred_timezone: 'Europe/Zurich' })] });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    const occurredInput = screen.getByLabelText('workspace.detail.copy.occurredLabel');
+    expect(occurredInput).toHaveValue('2026-10-25T02:29');
+    fireEvent.change(occurredInput, { target: { value: '2026-10-25T02:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.detail.copy.dateError');
+    expect(mocks.createEntry).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manual copy time in the Zurich spring-forward gap', async () => {
+    vi.setSystemTime(new Date('2026-03-29T00:30:00.000Z'));
+    mockDetail({ entries: [entry({ occurred_timezone: 'Europe/Zurich' })] });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.actions.copy' }));
+    fireEvent.change(screen.getByLabelText('workspace.detail.copy.occurredLabel'), {
+      target: { value: '2026-03-29T02:30' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'workspace.detail.copy.save' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.detail.copy.dateError');
+    expect(mocks.createEntry).not.toHaveBeenCalled();
+  });
+
   it('closes the copy form and refreshes/returns focus after a successful save', async () => {
     const retry = mockDetail({ entries: [entry()] });
     mocks.createEntry.mockResolvedValue({ entry_uuid: 'new-entry-1', outbox_event_uuid: 'evt-1', sync_version: 1 });
