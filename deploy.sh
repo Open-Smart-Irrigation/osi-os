@@ -715,183 +715,521 @@ native_sqlite3_reinstall_impossible() {
     return 0
 }
 
-# Runs before the first write of the deploy. The one state nothing downstream
-# can rescue is a lockfile that pins a sqlite3 the gateway does not have and
-# cannot obtain; stopping here leaves the gateway exactly as it was found.
+# Native sqlite3 recovery. The preflight runs before the first deploy write.
+# It may restore a scanner-validated interrupted swap or clear a rollback
+# directory proven to hold only owner metadata; either way it stops before the
+# ordinary deploy writes and the deploy has to be run again. A rollback
+# directory left by a restore that found its destination occupied is kept,
+# and every later deploy refuses until it is inspected. Materialisation
+# repairs a broken real directory or a symlink from the firmware module before
+# npm runs, keeps the old entry in a marked rollback directory until the new
+# one passes the lockfile pin and opens :memory:, and refuses npm when a known
+# broken directory could not be repaired.
+
+native_sqlite3_report_paths() {
+    for ns_report in "$@"; do
+        if [ -L "$ns_report" ]; then ns_kind=symlink
+        elif [ -d "$ns_report" ]; then ns_kind=directory
+        elif [ -f "$ns_report" ]; then ns_kind=file
+        elif [ -p "$ns_report" ]; then ns_kind=fifo
+        elif [ -e "$ns_report" ]; then ns_kind=other
+        else ns_kind=absent
+        fi
+        echo "STATE: $ns_kind $ns_report" >&2
+    done
+}
+
+native_sqlite3_pkg_version() {
+    node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$1/package.json" 2>/dev/null || true
+}
+
+native_sqlite3_exact_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const f=require("fs"); const b=f.readFileSync(process.argv[1]); if (!b.equals(Buffer.from(process.argv[2]+"\n"))) process.exit(1)' "$1" "$2"
+}
+
+native_sqlite3_present() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+native_sqlite3_id() {
+    node -p 'const s=require("fs").lstatSync(process.argv[1],{bigint:true}); [s.dev,s.ino].join(":")' "$1" 2>/dev/null
+}
+
+native_sqlite3_new_exact_file() {
+    native_new_path="$1"
+    native_new_value="$2"
+    native_sqlite3_present "$native_new_path" && return 1
+    node -e 'const f=require("fs"),c=f.constants; const p=process.argv[1],v=process.argv[2]+"\n"; const fd=f.openSync(p,c.O_WRONLY|c.O_CREAT|c.O_EXCL|c.O_NOFOLLOW,0o600); try { f.writeFileSync(fd,v); } finally { f.closeSync(fd); }' "$native_new_path" "$native_new_value" || return 1
+    native_sqlite3_exact_file "$native_new_path" "$native_new_value"
+}
+
+# True for a regular file holding a strict prefix (possibly empty) of the
+# owner line: what an interrupted owner write leaves behind.
+native_sqlite3_owner_prefix() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const b=require("fs").readFileSync(process.argv[1]); const w=Buffer.from(process.argv[2]+"\n"); if (!(b.length < w.length && b.equals(w.subarray(0, b.length)))) process.exit(1)' "$1" "$2"
+}
+
+native_sqlite3_restore_original() {
+    native_restore_o="$1"
+    native_restore_d="$2"
+    if ! native_sqlite3_present "$native_restore_o" || native_sqlite3_present "$native_restore_d"; then
+        echo "ERROR: sqlite3 restore needs an original and vacant destination" >&2
+        native_sqlite3_report_paths "$native_restore_o" "$native_restore_d"
+        return 1
+    fi
+    native_restore_id="$(native_sqlite3_id "$native_restore_o")"
+    if [ -z "$native_restore_id" ]; then
+        echo "ERROR: cannot identify sqlite3 original before restore: $native_restore_o" >&2
+        return 1
+    fi
+    if ! mv "$native_restore_o" "$native_restore_d"; then
+        echo "ERROR: sqlite3 restore command failed; inspect surviving paths" >&2
+        native_sqlite3_report_paths "$native_restore_o" "$native_restore_d" "$native_restore_d/original"
+        return 1
+    fi
+    if native_sqlite3_present "$native_restore_o" || ! native_sqlite3_present "$native_restore_d" ||
+       [ "$(native_sqlite3_id "$native_restore_d")" != "$native_restore_id" ]; then
+        echo "ERROR: sqlite3 restore identity differs; retained rollback marker for inspection" >&2
+        native_sqlite3_report_paths "$native_restore_o" "$native_restore_d" "$native_restore_d/original"
+        return 1
+    fi
+    return 0
+}
+
+# Sets NS_B to the single rollback directory, NS_B_EXACT=1 when its owner
+# line is complete, and NS_B_META=1 when it holds no original.
+native_sqlite3_scan_backup() {
+    NS_B=''
+    NS_B_META=0
+    NS_B_EXACT=0
+    ns_root="$NODE_RED_ROOT/node_modules"
+    for ns_b in "$ns_root"/.osi-sqlite3-rollback.*; do
+        native_sqlite3_present "$ns_b" || continue
+        if [ -n "$NS_B" ] || [ ! -d "$ns_b" ] || [ -L "$ns_b" ]; then
+            echo "ERROR: ambiguous sqlite3 rollback entry: $ns_b" >&2
+            return 1
+        fi
+        for ns_child in "$ns_b"/* "$ns_b"/.[!.]* "$ns_b"/..?*; do
+            native_sqlite3_present "$ns_child" || continue
+            case "$ns_child" in
+                "$ns_b/.owner")
+                    if [ ! -f "$ns_child" ] || [ -L "$ns_child" ]; then
+                        echo "ERROR: invalid sqlite3 rollback owner type: $ns_child" >&2
+                        return 1
+                    fi
+                    ;;
+                "$ns_b/original")
+                    if [ ! -d "$ns_child" ] && [ ! -L "$ns_child" ]; then
+                        echo "ERROR: invalid sqlite3 original type: $ns_child" >&2
+                        return 1
+                    fi
+                    ;;
+                *) echo "ERROR: unknown sqlite3 rollback child: $ns_child" >&2; return 1 ;;
+            esac
+        done
+        ns_b_exact=0
+        if native_sqlite3_exact_file "$ns_b/.owner" 'osi-sqlite3-deploy-v2'; then
+            ns_b_exact=1
+        elif native_sqlite3_present "$ns_b/original" ||
+             { native_sqlite3_present "$ns_b/.owner" &&
+               ! native_sqlite3_owner_prefix "$ns_b/.owner" 'osi-sqlite3-deploy-v2'; }; then
+            # The owner line is complete before anything moves into the backup,
+            # so only an absent or truncated owner beside no original is ours.
+            echo "ERROR: unowned sqlite3 rollback entry: $ns_b" >&2
+            return 1
+        fi
+        NS_B_EXACT="$ns_b_exact"
+        NS_B_META=0
+        if ! native_sqlite3_present "$ns_b/original"; then NS_B_META=1; fi
+        NS_B="$ns_b"
+    done
+    return 0
+}
+
+# Removes a rollback directory the scan proved to hold at most owner metadata.
+# rmdir refuses a directory that gained any other entry since that scan.
+native_sqlite3_clear_metadata_backup() {
+    if ! rm -f "$NS_B/.owner" || ! rmdir "$NS_B" || native_sqlite3_present "$NS_B"; then
+        echo "ERROR: metadata-only sqlite3 rollback cleanup failed or was partial; inspect $NS_B" >&2
+        native_sqlite3_report_paths "$NS_B" "$NS_B/.owner"
+        return 1
+    fi
+    return 0
+}
+
+native_sqlite3_owned_final() {
+    ns_final="$NODE_RED_ROOT/node_modules/sqlite3"
+    [ -d "$ns_final" ] && [ ! -L "$ns_final" ] || return 1
+    native_sqlite3_exact_file "$ns_final/.osi-sqlite3-candidate-owner" "$1"
+}
+
+native_sqlite3_recovery_lock() {
+    NS_LOCKED=''
+    ns_lock="$TMP_DIR/preflight-package-lock.json"
+    if ! fetch 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json' "$ns_lock"; then
+        echo 'ERROR: could not fetch the shipped package-lock.json for sqlite3 recovery' >&2
+        return 1
+    fi
+    if ! NS_LOCKED="$(node -p 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); const p=(l.packages&&l.packages["node_modules/sqlite3"])||{}; p.version||""' "$ns_lock" 2>/dev/null)"; then
+        echo 'ERROR: shipped package-lock.json is not valid JSON during sqlite3 recovery' >&2
+        return 1
+    fi
+    if [ -z "$NS_LOCKED" ]; then
+        echo 'ERROR: shipped package-lock.json has no sqlite3 pin during recovery' >&2
+        return 1
+    fi
+    return 0
+}
+
+native_sqlite3_recover_early() {
+    ns_d="$NODE_RED_ROOT/node_modules/sqlite3"
+    ns_o="$NS_B/original"
+    if [ "$NS_B_META" = 1 ] && ! native_sqlite3_owned_final "$NS_B"; then
+        # Nothing is left in this backup and the final path is not its
+        # candidate: the old-path rename never ran, or an earlier rollback
+        # already put the original back. Only owner metadata remains.
+        # A restore into an occupied final path moves the original to
+        # $ns_d/original instead. That backup stays as the record of the
+        # refused restore: clearing it would let the next ordinary repair
+        # move the occupant, with the original inside, into a new backup and
+        # delete it.
+        if native_sqlite3_present "$ns_d/original"; then
+            echo "ERROR: $ns_d/original is present beside metadata-only rollback $NS_B; an earlier restore may have nested the old module there; preserving both for inspection" >&2
+            native_sqlite3_report_paths "$NS_B" "$ns_d" "$ns_d/original"
+            return 1
+        fi
+        native_sqlite3_clear_metadata_backup || return 1
+        if native_sqlite3_present "$ns_d"; then
+            echo "WARN: cleared metadata-only sqlite3 rollback; $ns_d was not touched; retry deploy" >&2
+        else
+            echo 'WARN: cleared marker-only sqlite3 rollback; retry deploy' >&2
+        fi
+        return 1
+    fi
+    if [ "$NS_B_EXACT" != 1 ]; then
+        echo "ERROR: sqlite3 rollback owner metadata is incomplete beside an owned final: $NS_B" >&2
+        return 1
+    fi
+    if native_sqlite3_present "$ns_o" && ! native_sqlite3_present "$ns_d"; then
+        native_sqlite3_restore_original "$ns_o" "$ns_d" || return 1
+        if ! rm -rf "$NS_B"; then
+            echo "ERROR: sqlite3 rollback cleanup failed; inspect surviving paths in $NS_B" >&2
+            return 1
+        fi
+        echo "WARN: restored interrupted sqlite3 swap at $ns_d; retry deploy" >&2
+        return 1
+    fi
+    if ! native_sqlite3_present "$ns_d"; then
+        echo "ERROR: sqlite3 rollback state is not recognised: $NS_B" >&2
+        return 1
+    fi
+    if ! native_sqlite3_owned_final "$NS_B"; then
+        echo "ERROR: sqlite3 final path is not owned by rollback $NS_B; preserving both" >&2
+        return 1
+    fi
+    native_sqlite3_recovery_lock || return 1
+    if [ "$(native_sqlite3_pkg_version "$ns_d")" = "$NS_LOCKED" ] && native_sqlite3_dir_loads "$ns_d" >/dev/null 2>&1; then
+        if ! rm -rf "$NS_B"; then
+            echo "ERROR: verified sqlite3 is installed but old backup cleanup partially failed; inspect $NS_B" >&2
+            return 1
+        fi
+        if ! rm -f "$ns_d/.osi-sqlite3-candidate-owner"; then
+            echo "ERROR: verified sqlite3 orphan marker cleanup failed: $ns_d" >&2
+            return 1
+        fi
+        echo "WARN: verified interrupted sqlite3 promotion; retry deploy" >&2
+        return 1
+    fi
+    if ! rm -rf "$ns_d" || native_sqlite3_present "$ns_d"; then
+        echo "ERROR: promoted sqlite3 removal failed or was partial; inspect $ns_d and $NS_B" >&2
+        return 1
+    fi
+    if native_sqlite3_present "$ns_o"; then
+        native_sqlite3_restore_original "$ns_o" "$ns_d" || return 1
+    fi
+    if ! rm -rf "$NS_B"; then
+        echo "ERROR: sqlite3 rollback cleanup may be partial; inspect $NS_B" >&2
+        return 1
+    fi
+    echo "ERROR: invalid interrupted sqlite3 candidate rolled back; retry deploy" >&2
+    return 1
+}
+
+native_sqlite3_rollback_failed_final() {
+    native_failed_b="$1"
+    native_failed_d="$NODE_RED_ROOT/node_modules/sqlite3"
+    if [ -z "$NS_LOCKED" ] ||
+       ! native_sqlite3_exact_file "$native_failed_b/.owner" 'osi-sqlite3-deploy-v2' ||
+       ! native_sqlite3_owned_final "$native_failed_b"; then
+        echo "ERROR: failed final sqlite3 is not owned by this validated attempt; inspect $native_failed_b and $native_failed_d" >&2
+        return 1
+    fi
+    if ! rm -rf "$native_failed_d" || native_sqlite3_present "$native_failed_d"; then
+        echo "ERROR: failed final sqlite3 removal may be partial; inspect $native_failed_d and $native_failed_b" >&2
+        return 1
+    fi
+    if native_sqlite3_present "$native_failed_b/original"; then
+        native_sqlite3_restore_original "$native_failed_b/original" "$native_failed_d" || return 1
+    fi
+    if ! rm -rf "$native_failed_b"; then
+        echo "ERROR: sqlite3 rollback cleanup may be partial: $native_failed_b" >&2
+        return 1
+    fi
+    echo 'ERROR: failed final sqlite3 rolled back using the validated attempt pin; retry deploy' >&2
+    return 1
+}
+
+native_sqlite3_unrepaired() {
+    echo "WARN: sqlite3 was not repaired: $1" >&2
+    if [ "$2" = 1 ] || native_sqlite3_reinstall_impossible; then
+        echo 'ERROR: refusing to continue to npm with an unrepaired sqlite3 path' >&2
+        return 1
+    fi
+    echo 'SKIP: npm may replace or supply sqlite3; post-npm verification remains required'
+    return 0
+}
+
 run_native_sqlite3_preflight() {
-    echo "--- Native sqlite3 preflight ---"
+    echo '--- Native sqlite3 preflight ---'
+    NS_LOCKED=''
+    native_sqlite3_scan_backup || return 1
+    if [ -n "$NS_B" ]; then
+        # This is the only preflight path allowed to restore a module or clear
+        # a rollback directory. It always stops before the ordinary deploy
+        # writes and requires a retry.
+        native_sqlite3_recover_early
+        return 1
+    fi
     nsp_installed="$NODE_RED_ROOT/node_modules/sqlite3"
-    nsp_which="installed"
-    nsp_pkg=""
+    if native_sqlite3_present "$nsp_installed" &&
+       [ ! -d "$nsp_installed" ] && [ ! -L "$nsp_installed" ]; then
+        echo "ERROR: unexpected sqlite3 destination type before deploy writes: $nsp_installed" >&2
+        return 1
+    fi
+    if [ -d "$nsp_installed" ] && [ ! -L "$nsp_installed" ] && native_sqlite3_present "$nsp_installed/.osi-sqlite3-candidate-owner"; then
+        nsp_marker="$nsp_installed/.osi-sqlite3-candidate-owner"
+        if [ ! -f "$nsp_marker" ] || [ -L "$nsp_marker" ]; then
+            echo "ERROR: invalid orphan sqlite3 candidate marker: $nsp_marker" >&2
+            return 1
+        fi
+        nsp_named="$(cat "$nsp_marker" 2>/dev/null || true)"
+        case "$nsp_named" in "$NODE_RED_ROOT/node_modules"/.osi-sqlite3-rollback.*) ;; *) echo 'ERROR: invalid orphan sqlite3 backup name' >&2; return 1 ;; esac
+        if native_sqlite3_present "$nsp_named" || ! native_sqlite3_exact_file "$nsp_marker" "$nsp_named"; then
+            echo 'ERROR: orphan sqlite3 marker does not name an absent owned backup' >&2
+            return 1
+        fi
+        native_sqlite3_recovery_lock || return 1
+        if [ "$(native_sqlite3_pkg_version "$nsp_installed")" != "$NS_LOCKED" ] || ! native_sqlite3_dir_loads "$nsp_installed" >/dev/null 2>&1; then
+            echo 'ERROR: orphan-marked sqlite3 failed pin/load validation; retaining it' >&2
+            return 1
+        fi
+        if ! rm -f "$nsp_marker"; then
+            echo "ERROR: could not remove verified orphan marker: $nsp_marker" >&2
+            return 1
+        fi
+    fi
+    nsp_which=installed
+    nsp_pkg=''
+    # A dangling symlink is not a module. As at P, it falls through to the
+    # firmware version, which is the one materialisation would install.
     if [ -e "$nsp_installed" ]; then
         nsp_pkg="$nsp_installed/package.json"
-    elif [ -d "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
-        # Nothing at the path: a fresh tree, a dangling symlink, or a deploy
-        # killed between the unlink and the move of the swap below. In all
-        # three the module that ends up there is the firmware one, so its
-        # version is the one that has to match the lockfile.
-        nsp_which="firmware"
+    elif [ -d "$NATIVE_SQLITE3_FIRMWARE_DIR" ] && [ ! -L "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
+        nsp_which=firmware
         nsp_pkg="$NATIVE_SQLITE3_FIRMWARE_DIR/package.json"
     fi
     if [ -z "$nsp_pkg" ]; then
-        echo "SKIP: no sqlite3 module at $nsp_installed and none in the firmware; npm install will provide one"
+        echo 'SKIP: no sqlite3 module or firmware source; npm install will provide one'
         return 0
     fi
     nsp_lock="$TMP_DIR/preflight-package-lock.json"
-    if ! fetch "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json" "$nsp_lock"; then
-        echo "ERROR: could not fetch the shipped package-lock.json for the sqlite3 preflight; refusing to start the deploy; nothing has been changed" >&2
+    if ! fetch 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/package-lock.json' "$nsp_lock"; then
+        echo 'ERROR: could not fetch the shipped package-lock.json for the sqlite3 preflight; refusing to start the deploy; nothing has been changed' >&2
         return 1
     fi
-    if ! nsp_locked="$(node -p 'const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = (l.packages && l.packages["node_modules/sqlite3"]) || {}; p.version || ""' "$nsp_lock" 2>/dev/null)"; then
-        echo "ERROR: the shipped package-lock.json is not valid JSON; refusing to start the deploy; nothing has been changed" >&2
+    if ! NS_LOCKED="$(node -p 'const l = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); const p = (l.packages && l.packages["node_modules/sqlite3"]) || {}; p.version || ""' "$nsp_lock" 2>/dev/null)"; then
+        echo 'ERROR: the shipped package-lock.json is not valid JSON; refusing to start the deploy; nothing has been changed' >&2
         return 1
     fi
-    nsp_have="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version || ""' "$nsp_pkg" 2>/dev/null || true)"
-    if [ -z "$nsp_locked" ]; then
-        echo "WARN: the shipped package-lock.json pins no sqlite3 version; skipping the preflight"
+    nsp_have="$(native_sqlite3_pkg_version "$(dirname "$nsp_pkg")")"
+    if [ -z "$NS_LOCKED" ]; then
+        echo 'WARN: the shipped package-lock.json pins no sqlite3 version; skipping the preflight'
         return 0
     fi
     if [ -z "$nsp_have" ]; then
         echo "WARN: could not read the $nsp_which sqlite3 version from $nsp_pkg; skipping the preflight"
         return 0
     fi
-    if [ "$nsp_have" = "$nsp_locked" ]; then
+    if [ "$nsp_have" = "$NS_LOCKED" ]; then
         echo "OK: $nsp_which sqlite3 $nsp_have matches the shipped lockfile"
         return 0
     fi
     if native_sqlite3_reinstall_impossible; then
-        echo "ERROR: this gateway's $nsp_which sqlite3 is $nsp_have but the shipped package-lock.json pins sqlite3 $nsp_locked." >&2
+        echo "ERROR: this gateway's $nsp_which sqlite3 is $nsp_have but the shipped package-lock.json pins sqlite3 $NS_LOCKED." >&2
         echo "ERROR: npm would have to install sqlite3 itself, and on $NATIVE_ARCH + musl no sqlite3 prebuilt is published and this gateway has no build toolchain, so that can only fail." >&2
-        echo "ERROR: refusing to start the deploy; nothing has been changed. Ship an image whose node-red-node-sqlite provides sqlite3 $nsp_locked, or pin the lockfile back to $nsp_have." >&2
+        echo "ERROR: refusing to start the deploy; nothing has been changed. Ship an image whose node-red-node-sqlite provides sqlite3 $NS_LOCKED, or pin the lockfile back to $nsp_have." >&2
         return 1
     fi
-    echo "WARN: the $nsp_which sqlite3 $nsp_have differs from the locked $nsp_locked; npm will install it, which needs registry access and a prebuilt for this platform"
+    echo "WARN: the $nsp_which sqlite3 $nsp_have differs from the locked $NS_LOCKED; npm will install it, which needs registry access and a prebuilt for this platform"
     return 0
 }
 
-# Replaces the firmware symlink with a real directory holding the same module,
-# so npm has nothing to retire. Safety: the copy is staged beside the target
-# and proved loadable BEFORE the swap, the swap itself destroys only a symlink
-# (the module stays where the firmware put it), and any failure puts the
-# symlink back.
-#
-# rename(2) cannot replace a symlink with a directory, so the swap has to
-# unlink before it moves. A deploy killed in that instant -- SSH drop, power
-# loss, OOM -- leaves nothing at node_modules/sqlite3, which breaks Node-RED's
-# sqlite nodes on the next boot and makes the next deploy the repair path. So
-# an empty path is not "npm's problem": if the firmware module is still at its
-# canonical location, this restores from it exactly as it would from a
-# symlink, and it clears any staging directory that same kill left behind.
 materialize_native_sqlite3() {
-    echo "--- Native sqlite3 module (materialise before npm) ---"
+    echo '--- Native sqlite3 module (materialise before npm) ---'
     mns_modules="$NODE_RED_ROOT/node_modules"
     mns_path="$mns_modules/sqlite3"
-    mns_link_target=""
-    mns_source=""
-
-    # Only this function's own staging name, only directly inside
-    # node_modules. npm ignores dot-directories, so a leftover is not a
-    # correctness problem, but 22 MB per interrupted deploy is not free.
+    native_sqlite3_scan_backup || return 1
+    if [ -n "$NS_B" ]; then
+        echo "ERROR: sqlite3 rollback appeared after preflight: $NS_B" >&2
+        return 1
+    fi
     for mns_stale in "$mns_modules"/.osi-sqlite3-stage.*; do
-        case "$mns_stale" in
-            *'/.osi-sqlite3-stage.*') continue ;;
-        esac
-        if [ -d "$mns_stale" ]; then
-            echo "WARN: removing a staging directory left behind by an interrupted deploy: $mns_stale" >&2
-            rm -rf "$mns_stale"
+        native_sqlite3_present "$mns_stale" || continue
+        if [ ! -d "$mns_stale" ] || [ -L "$mns_stale" ]; then
+            echo "ERROR: unexpected sqlite3 stage type: $mns_stale" >&2
+            return 1
+        fi
+        echo "WARN: removing a staging directory left behind by an interrupted deploy: $mns_stale" >&2
+        if ! rm -rf "$mns_stale" || native_sqlite3_present "$mns_stale"; then
+            echo "ERROR: sqlite3 stage cleanup failed or was partial: $mns_stale" >&2
+            return 1
         fi
     done
-
+    mns_broken_real=0
+    mns_source=''
     if [ -L "$mns_path" ]; then
-        mns_link_target="$(readlink "$mns_path" 2>/dev/null || true)"
         mns_source="$(readlink -f "$mns_path" 2>/dev/null || true)"
         if [ -z "$mns_source" ] || [ ! -d "$mns_source" ]; then
-            echo "WARN: $mns_path is a dangling symlink -> ${mns_link_target:-?}; removing it" >&2
-            rm -f "$mns_path"
-            mns_link_target=""
-            mns_source=""
+            echo "WARN: dangling symlink at $mns_path; it does not resolve to a sqlite3 module" >&2
+            mns_source=''
+        elif [ "$mns_source" != "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
+            echo "NOTE: resolved sqlite3 symlink source is noncanonical: $mns_source" >&2
         fi
     elif [ -d "$mns_path" ]; then
-        echo "OK: $mns_path is already a real directory; nothing to do"
-        return 0
-    fi
-
-    if [ -z "$mns_source" ]; then
-        if [ ! -d "$NATIVE_SQLITE3_FIRMWARE_DIR" ]; then
-            echo "SKIP: no sqlite3 module at $mns_path and none at $NATIVE_SQLITE3_FIRMWARE_DIR; npm install will provide one"
+        if native_sqlite3_dir_loads "$mns_path" >/dev/null 2>&1; then
+            echo "OK: $mns_path is already a real directory and loads; nothing to do"
             return 0
         fi
+        mns_broken_real=1
+    elif native_sqlite3_present "$mns_path"; then
+        echo "ERROR: unexpected sqlite3 destination type: $mns_path" >&2
+        return 1
+    fi
+    if [ -z "$mns_source" ]; then
         mns_source="$NATIVE_SQLITE3_FIRMWARE_DIR"
-        echo "NOTE: nothing at $mns_path; restoring the module from $mns_source"
     fi
-
+    if [ ! -d "$mns_source" ] || [ -L "$mns_source" ]; then
+        if [ -L "$mns_path" ] && [ "$mns_broken_real" = 0 ] && ! native_sqlite3_reinstall_impossible; then
+            if ! rm -f "$mns_path" || native_sqlite3_present "$mns_path"; then
+                echo 'ERROR: could not remove dangling sqlite3 symlink' >&2
+                return 1
+            fi
+        fi
+        native_sqlite3_unrepaired 'firmware source absent' "$mns_broken_real"
+        return $?
+    fi
+    if [ -z "$NS_LOCKED" ] || [ "$(native_sqlite3_pkg_version "$mns_source")" != "$NS_LOCKED" ]; then
+        native_sqlite3_unrepaired 'source pin missing or source version mismatch' "$mns_broken_real"
+        return $?
+    fi
     if ! native_sqlite3_dir_loads "$mns_source" 2>"$TMP_DIR/sqlite3-source-load.err"; then
-        echo "WARN: the firmware sqlite3 module at $mns_source does not load; leaving the install to npm" >&2
+        echo "WARN: source sqlite3 does not open :memory: at $mns_source" >&2
         tail -5 "$TMP_DIR/sqlite3-source-load.err" >&2 || true
-        return 0
+        native_sqlite3_unrepaired 'source load failed' "$mns_broken_real"
+        return $?
     fi
-
     mns_need_kb="$(du -sk "$mns_source" 2>/dev/null | awk '{print $1}')"
     case "$mns_need_kb" in ''|*[!0-9]*) mns_need_kb=0 ;; esac
     mns_avail_kb="$(df -k "$mns_modules" 2>/dev/null | tail -1 | awk '{print $4}')"
     case "$mns_avail_kb" in ''|*[!0-9]*) mns_avail_kb=0 ;; esac
     if [ "$mns_avail_kb" -gt 0 ] && [ "$mns_avail_kb" -lt $((mns_need_kb + 51200)) ]; then
-        echo "ERROR: $mns_modules has ${mns_avail_kb}K free; materialising sqlite3 needs ${mns_need_kb}K plus 50M of headroom. $mns_path is left as it is." >&2
+        echo "ERROR: $mns_modules has ${mns_avail_kb}K free; materialising sqlite3 needs ${mns_need_kb}K plus 50M of headroom" >&2
         return 1
     fi
-
-    mkdir -p "$mns_modules" 2>/dev/null || true
+    mkdir -p "$mns_modules" || return 1
     mns_stage="$(mktemp -d "$mns_modules/.osi-sqlite3-stage.XXXXXX" 2>/dev/null || true)"
-    if [ -z "$mns_stage" ] || [ ! -d "$mns_stage" ]; then
-        echo "ERROR: could not create a staging directory under $mns_modules; $mns_path is left as it is" >&2
+    if [ -z "$mns_stage" ] || [ ! -d "$mns_stage" ] || [ -L "$mns_stage" ]; then
+        echo 'ERROR: could not create sqlite3 stage' >&2
         return 1
     fi
     if ! cp -a "$mns_source/." "$mns_stage/"; then
-        rm -rf "$mns_stage"
-        echo "ERROR: could not copy $mns_source into $mns_stage; $mns_path is left as it is" >&2
+        if ! rm -rf "$mns_stage" || native_sqlite3_present "$mns_stage"; then
+            echo "ERROR: sqlite3 copy failed and stage cleanup may be partial: $mns_stage" >&2
+        else
+            echo 'ERROR: could not copy sqlite3 into stage' >&2
+        fi
         return 1
     fi
-    # The staged copy resolves its peer packages (bindings, ...) from
-    # $mns_modules instead of from the firmware tree, which is precisely the
-    # resolution the gateway will use after the swap -- so this check, not the
-    # one on the source, is the one that decides.
     if ! native_sqlite3_dir_loads "$mns_stage" 2>"$TMP_DIR/sqlite3-stage-load.err"; then
-        rm -rf "$mns_stage"
-        echo "WARN: the staged copy of sqlite3 does not load from $mns_modules; $mns_path is left as it is and npm decides what to do with it." >&2
+        if ! rm -rf "$mns_stage" || native_sqlite3_present "$mns_stage"; then
+            echo "ERROR: staged sqlite3 failed load and cleanup may be partial: $mns_stage" >&2
+            return 1
+        fi
         tail -5 "$TMP_DIR/sqlite3-stage-load.err" >&2 || true
-        return 0
+        native_sqlite3_unrepaired 'staged copy load failed under installed peers' "$mns_broken_real"
+        return $?
     fi
-
-    if [ -L "$mns_path" ]; then
-        if ! rm -f "$mns_path"; then
-            rm -rf "$mns_stage"
-            echo "ERROR: could not remove the sqlite3 symlink at $mns_path; leaving it untouched" >&2
+    mns_marker="$mns_stage/.osi-sqlite3-candidate-owner"
+    if native_sqlite3_present "$mns_marker"; then
+        echo "ERROR: copied sqlite3 stage already contains an ownership marker: $mns_marker" >&2
+        return 1
+    fi
+    mns_backup="$(mktemp -d "$mns_modules/.osi-sqlite3-rollback.XXXXXX" 2>/dev/null || true)"
+    if [ -z "$mns_backup" ] || [ ! -d "$mns_backup" ] || [ -L "$mns_backup" ]; then
+        echo "ERROR: could not allocate sqlite3 rollback; stage retained at $mns_stage" >&2
+        return 1
+    fi
+    if ! printf '%s\n' 'osi-sqlite3-deploy-v2' > "$mns_backup/.owner" ||
+       ! native_sqlite3_new_exact_file "$mns_marker" "$mns_backup"; then
+        echo "ERROR: sqlite3 ownership marker failed; inspect $mns_backup and $mns_stage" >&2
+        return 1
+    fi
+    if native_sqlite3_present "$mns_path"; then
+        if [ ! -d "$mns_path" ] && [ ! -L "$mns_path" ]; then
+            echo "ERROR: unexpected sqlite3 destination before swap: $mns_path" >&2
+            return 1
+        fi
+        if ! mv "$mns_path" "$mns_backup/original"; then
+            echo "ERROR: old sqlite3 rename reported failure; inspect $mns_path, $mns_backup/original and $mns_stage" >&2
+            native_sqlite3_report_paths "$mns_path" "$mns_backup/original" "$mns_stage" "$mns_backup/.owner"
+            return 1
+        fi
+        if native_sqlite3_present "$mns_path" || ! native_sqlite3_present "$mns_backup/original"; then
+            echo "ERROR: old sqlite3 rename left ambiguous state: $mns_backup" >&2
             return 1
         fi
     fi
+    if native_sqlite3_present "$mns_path"; then
+        echo "ERROR: sqlite3 destination appeared before promotion: $mns_path" >&2
+        return 1
+    fi
     if ! mv "$mns_stage" "$mns_path"; then
-        if [ -n "$mns_link_target" ]; then
-            ln -s "$mns_link_target" "$mns_path" 2>/dev/null || true
-        fi
-        rm -rf "$mns_stage"
-        echo "ERROR: could not move $mns_stage to $mns_path; the previous state is restored" >&2
+        echo "ERROR: sqlite3 stage rename reported failure; inspect $mns_stage, $mns_path and $mns_backup" >&2
+        native_sqlite3_report_paths "$mns_stage" "$mns_path" "$mns_backup/original" "$mns_backup/.owner"
         return 1
     fi
-    if ! native_sqlite3_dir_loads "$mns_path"; then
-        rm -rf "$mns_path"
-        if [ -n "$mns_link_target" ]; then
-            ln -s "$mns_link_target" "$mns_path" 2>/dev/null || true
-        fi
-        echo "ERROR: the materialised sqlite3 at $mns_path does not load; the previous state is restored" >&2
+    if native_sqlite3_present "$mns_stage" || ! native_sqlite3_owned_final "$mns_backup"; then
+        echo "ERROR: sqlite3 promotion left ambiguous state: $mns_backup" >&2
         return 1
     fi
-
+    if [ "$(native_sqlite3_pkg_version "$mns_path")" != "$NS_LOCKED" ] ||
+       ! native_sqlite3_dir_loads "$mns_path" >/dev/null 2>&1; then
+        echo "ERROR: promoted sqlite3 failed final pin/load; rollback retained at $mns_backup" >&2
+        native_sqlite3_rollback_failed_final "$mns_backup"
+        return 1
+    fi
+    if ! rm -rf "$mns_backup"; then
+        echo "ERROR: verified sqlite3 installed but rollback cleanup may be partial: $mns_backup" >&2
+        return 1
+    fi
+    if ! rm -f "$mns_path/.osi-sqlite3-candidate-owner"; then
+        echo "ERROR: verified sqlite3 installed but orphan marker removal failed: $mns_path" >&2
+        return 1
+    fi
     mns_owner="$(ls -ld "$mns_modules" 2>/dev/null | awk '{print $3 ":" $4}')"
-    case "$mns_owner" in
-        ''|:*|*:) ;;
-        *) chown -R "$mns_owner" "$mns_path" 2>/dev/null || true ;;
-    esac
-
+    case "$mns_owner" in ''|:*|*:) ;; *) chown -R "$mns_owner" "$mns_path" 2>/dev/null || true ;; esac
     echo "OK: materialised $mns_path from $mns_source (${mns_need_kb}K); npm now leaves the native module alone"
     return 0
 }
