@@ -1844,3 +1844,202 @@ test('R5 seed occupied restore stays refused across fresh invocations', () => {
     }
   }
 });
+
+// R7: deploy and the seed keep separate rollback prefixes, and each now
+// refuses, before it moves or deletes anything, while an entry under the
+// other's prefix exists. After an occupied restore the original sits nested
+// in the final path beside a metadata-only rollback. Before R7 the other tool
+// took that final for a broken module, moved it into its own rollback and
+// deleted it after a successful repair.
+function r7Snapshot(gw, prefix) {
+  const snapshot = r5Snapshot(gw, prefix);
+  const b = path.join(gw.proj, 'node_modules', r2Names(gw, prefix)[0]);
+  return { ...snapshot, backupId: r4Id(b) };
+}
+function r7AssertDeployRefused(r, label, full) {
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/, label);
+  assert.doesNotMatch(r.stdout, /PREFLIGHT_RC=0|ORDINARY_WRITE/, label);
+  assert.match(r.stderr, /ERROR: seed sqlite3 rollback present: /, label);
+  if (full) {
+    assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/, label);
+    assert.doesNotMatch(r.stdout, /MATERIALIZE_RC=0|VERIFY_RC=/, label);
+  }
+  assert.doesNotMatch(r.stdout + r.stderr, /OK: materialised|cleared|restored|rolled back/, label);
+}
+function r7AssertSeedRefused(r, label) {
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, label);
+  assert.match(r.stdout, /AFTER_SEED/, label);
+  assert.match(r.stderr, /ERROR: deploy sqlite3 rollback present: /, label);
+  assert.doesNotMatch(r.stdout + r.stderr, /SEED_RC=0|OK: (seeded|existing)|cleared|restored|rolled back/, label);
+}
+function r7OccupiedRestore(firstTool) {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const index = path.join(gw.fwSqlite, 'index.js');
+  const cleanIndex = fs.readFileSync(index);
+  fs.appendFileSync(index, '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected final failure for occupied restore");\n');
+  const prefix = firstTool === 'seed' ? '.osi-sqlite3-seed-rollback.' : '.osi-sqlite3-rollback.';
+  const target = firstTool === 'seed' ? '$DST' : '$NODE_RED_ROOT';
+  const occupy = 'mv() { case "$1:$2" in */' + prefix + '*/original:"' + target + '/node_modules/sqlite3")' +
+    ' mkdir -p "$2"; printf "occupant bytes\\n" > "$2/occupant.txt"; command mv "$@" || return $?; echo R7_OCCUPIED_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+  const first = firstTool === 'seed'
+    ? r2SeedHarness(gw, { shellHooks: [occupy] }) : r2DeployCall(gw, { shellHooks: [occupy] });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, firstTool === 'seed' ? /SEED_RC=[1-9][0-9]*/ : /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.match(first.stderr, /R7_OCCUPIED_RESTORE/);
+  assert.match(first.stderr, /restore identity differs/);
+  fs.writeFileSync(index, cleanIndex); // an ordinary repair by either tool would now succeed
+  const snapshot = r7Snapshot(gw, prefix);
+  assert.deepEqual(snapshot.backup.map(([n]) => n),
+    firstTool === 'seed' ? ['.candidate-id', '.owner'] : ['.owner']);
+  assert.deepEqual(snapshot.finalChildren, ['occupant.txt', 'original']);
+  assert.equal(snapshot.occupant, 'occupant bytes\n');
+  assert.equal(snapshot.nestedOriginal, original.toString('latin1'));
+  const otherPrefixes = firstTool === 'seed'
+    ? ['.osi-sqlite3-rollback.', '.osi-sqlite3-stage.'] : ['.osi-sqlite3-seed-'];
+  const otherRuns = firstTool === 'seed'
+    ? [['later deploy preflight', () => r4Preflight(gw), (r, l) => r7AssertDeployRefused(r, l, false)],
+      ['later full deploy', () => r2DeployCall(gw, { verify: false }), (r, l) => r7AssertDeployRefused(r, l, true)]]
+    : [['later seed next boot', () => r2SeedHarness(gw), r7AssertSeedRefused],
+      ['later seed boot after that', () => r2SeedHarness(gw), r7AssertSeedRefused]];
+  for (const [label, run, check] of otherRuns) {
+    check(run(), label);
+    for (const p of otherPrefixes) assert.deepEqual(r2Names(gw, p), [], label);
+    assert.deepEqual(r7Snapshot(gw, prefix), snapshot, label);
+  }
+  const ownRuns = firstTool === 'seed' ? ['seed retry', 'seed retry again'] : ['deploy preflight retry', 'full deploy retry'];
+  for (const label of ownRuns) {
+    if (firstTool === 'seed') {
+      const r = r2SeedHarness(gw);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, label);
+      assert.doesNotMatch(r.stdout, /OK: (seeded|existing)/, label);
+      assert.match(r.stderr, /original is present beside metadata-only seed rollback/, label);
+      assert.doesNotMatch(r.stderr, /cleared/, label);
+    } else {
+      const full = label === 'full deploy retry';
+      const r = full ? r2DeployCall(gw, { verify: false }) : r4Preflight(gw);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/, label);
+      assert.doesNotMatch(r.stdout, /ORDINARY_WRITE/, label);
+      assert.match(r.stderr, /original is present beside metadata-only rollback/, label);
+      assert.doesNotMatch(r.stderr, /cleared/, label);
+      if (full) {
+        assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/, label);
+        assert.match(r.stderr, /rollback appeared after preflight/, label);
+        assert.doesNotMatch(r.stdout, /OK: materialised|VERIFY_RC=/, label);
+      }
+    }
+    assert.deepEqual(r7Snapshot(gw, prefix), snapshot, label);
+  }
+}
+test('R7 seed occupied restore stays refused across later deploys and seeds', () => r7OccupiedRestore('seed'));
+test('R7 deploy occupied restore stays refused across later seeds and deploys', () => r7OccupiedRestore('deploy'));
+test('R7 every entry type under the other rollback prefix blocks both tools before changes', () => {
+  for (const tool of ['deploy', 'seed']) {
+    for (const kind of ['dangling-symlink', 'file', 'fifo', 'directory']) {
+      const label = `${tool}: ${kind}`;
+      const gw = makeGateway('real-without-binary');
+      const { d, original } = r2OldBytes(gw);
+      const mods = path.join(gw.proj, 'node_modules');
+      const f = path.join(mods, (tool === 'deploy' ? '.osi-sqlite3-seed-rollback.' : '.osi-sqlite3-rollback.') + 'r7');
+      if (kind === 'dangling-symlink') fs.symlinkSync(path.join(gw.root, 'r7-absent-target'), f);
+      else if (kind === 'file') fs.writeFileSync(f, 'foreign bytes\n');
+      else if (kind === 'fifo') assert.equal(spawnSync('mkfifo', [f]).status, 0, label);
+      else {
+        fs.mkdirSync(path.join(f, 'original'), { recursive: true });
+        fs.writeFileSync(path.join(f, 'original', 'kept.txt'), 'kept bytes\n');
+      }
+      const state = () => {
+        const s = fs.lstatSync(f, { bigint: true });
+        return {
+          modules: fs.readdirSync(mods).sort(),
+          entry: [s.dev, s.ino, s.mode].join(':'),
+          link: kind === 'dangling-symlink' ? fs.readlinkSync(f) : null,
+          bytes: kind === 'file' ? fs.readFileSync(f, 'latin1')
+            : (kind === 'directory' ? fs.readFileSync(path.join(f, 'original', 'kept.txt'), 'latin1') : null),
+          finalId: r4Id(d),
+          finalChildren: fs.readdirSync(d).sort(),
+          original: fs.readFileSync(path.join(d, 'original.txt'), 'latin1'),
+        };
+      };
+      const before = state();
+      assert.equal(before.original, original.toString('latin1'), label);
+      if (tool === 'deploy') {
+        r7AssertDeployRefused(r4Preflight(gw), label + ' preflight', false);
+        assert.deepEqual(state(), before, label + ' preflight');
+        const m = shellHarness(gw,
+          'if materialize_native_sqlite3; then echo MATERIALIZE_RC=0; else echo MATERIALIZE_RC=$?; fi',
+          { arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false });
+        assert.equal(m.status, 0, m.stderr);
+        assert.match(m.stdout, /MATERIALIZE_RC=[1-9][0-9]*/, label + ' materialise');
+        assert.match(m.stderr, /ERROR: seed sqlite3 rollback present: /, label + ' materialise');
+        assert.doesNotMatch(m.stdout, /MATERIALIZE_RC=0|OK: materialised/, label + ' materialise');
+        assert.deepEqual(state(), before, label + ' materialise');
+        r7AssertDeployRefused(r2DeployCall(gw, { verify: false }), label + ' full deploy', true);
+        assert.deepEqual(state(), before, label + ' full deploy');
+      } else {
+        for (const boot of ['next boot', 'boot after that']) {
+          r7AssertSeedRefused(r2SeedHarness(gw), `${label}: ${boot}`);
+          assert.deepEqual(state(), before, `${label}: ${boot}`);
+        }
+      }
+    }
+  }
+});
+test('R7 an interrupted swap is left for the tool that made it', () => {
+  for (const firstTool of ['seed', 'deploy']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const originalId = r4Id(d);
+    const prefix = firstTool === 'seed' ? '.osi-sqlite3-seed-rollback.' : '.osi-sqlite3-rollback.';
+    const source = firstTool === 'seed' ? '$DST' : '$NODE_RED_ROOT';
+    const interrupt = 'mv() { case "$1:$2" in "' + source + '/node_modules/sqlite3:"*/' + prefix + '*/original)' +
+      ' command mv "$@" || return $?; echo R7_INTERRUPT_AFTER_OLD >&2; exit 26 ;; esac; command mv "$@"; }';
+    const first = firstTool === 'seed'
+      ? r2SeedHarness(gw, { shellHooks: [interrupt] }) : r2DeployCall(gw, { shellHooks: [interrupt] });
+    assert.equal(first.status, 26, first.stderr);
+    assert.match(first.stderr, /R7_INTERRUPT_AFTER_OLD/);
+    assert.equal(fs.existsSync(d) || isSymlink(d), false, firstTool);
+    const names = r2Names(gw, prefix);
+    assert.equal(names.length, 1, firstTool);
+    const b = path.join(gw.proj, 'node_modules', names[0]);
+    assert.equal(r4Id(path.join(b, 'original')), originalId, firstTool);
+    const held = () => ({
+      modules: fs.readdirSync(path.join(gw.proj, 'node_modules')).sort(),
+      backupId: r4Id(b),
+      backup: fs.readdirSync(b).sort(),
+      originalId: r4Id(path.join(b, 'original')),
+      originalBytes: fs.readFileSync(path.join(b, 'original', 'original.txt'), 'latin1'),
+      finalPresent: fs.existsSync(d) || isSymlink(d),
+    });
+    const before = held();
+    if (firstTool === 'seed') r7AssertDeployRefused(r2DeployCall(gw, { verify: false }), 'deploy after interrupted seed', true);
+    else r7AssertSeedRefused(r2SeedHarness(gw), 'seed after interrupted deploy');
+    assert.deepEqual(held(), before, firstTool);
+    const restore = firstTool === 'seed' ? r2SeedHarness(gw) : r4Preflight(gw);
+    assert.equal(restore.status, 0, restore.stderr);
+    assert.match(restore.stdout, firstTool === 'seed' ? /SEED_RC=[1-9][0-9]*/ : /PREFLIGHT_RC=[1-9][0-9]*/, firstTool);
+    assert.match(restore.stderr, firstTool === 'seed' ? /restored interrupted seed swap/ : /restored interrupted sqlite3 swap/, firstTool);
+    assert.equal(r4Id(d), originalId, firstTool);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.deepEqual(r2Names(gw, prefix), [], firstTool);
+    const repair = firstTool === 'seed' ? r2SeedHarness(gw) : r2DeployCall(gw);
+    const after = firstTool === 'seed' ? r2DeployCall(gw) : r2SeedHarness(gw);
+    for (const [r, tool] of [[repair, firstTool], [after, firstTool === 'seed' ? 'deploy' : 'seed']]) {
+      const label = `${firstTool} first: ${tool}`;
+      assert.equal(r.status, 0, r.stderr);
+      if (tool === 'seed') assert.match(r.stdout, /SEED_RC=0/, label);
+      else {
+        assert.match(r.stdout, /PREFLIGHT_RC=0/, label);
+        assert.match(r.stdout, /MATERIALIZE_RC=0/, label);
+        assert.match(r.stdout, /VERIFY_RC=0/, label);
+      }
+    }
+    assert.equal(requireSqlite3(gw.proj).status, 0, firstTool);
+    for (const p of ['.osi-sqlite3-rollback.', '.osi-sqlite3-seed-rollback.']) assert.deepEqual(r2Names(gw, p), [], firstTool);
+  }
+});
