@@ -249,7 +249,7 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // land/network-observations-v1), DeviceRevisionMirrorApplier.
   'DEVICE_INSTALLATION_LOCATION_REVISED',
   'DEVICE_RADIO_CONFIGURATION_REVISED',
-  // Emitted by 0065__zone_daily_agronomy_sync.sql's trg_dp_zone_agronomy_outbox_* triggers, not by flows.json.
+  // Emitted by 0067__zone_daily_agronomy_sync.sql's trg_dp_zone_agronomy_outbox_* triggers, not by flows.json.
   'ZONE_AGRONOMY_UPSERTED',
   // Emitted by 0068__watermark_cloud_parity.sql's retained-calibration triggers,
   // never by raw watermark_readings.

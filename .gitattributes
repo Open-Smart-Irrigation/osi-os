@@ -1,0 +1,9 @@
+# Preserve provider sample bytes and recognize their CRLF terminators.
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/__fixtures__/meta_stations_trimmed.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_d_recent.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_now.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_recent_tail.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/meta_stations_trimmed.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_d_recent.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_now.csv -text whitespace=cr-at-eol
+conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/__fixtures__/pay_h_recent_tail.csv -text whitespace=cr-at-eol
