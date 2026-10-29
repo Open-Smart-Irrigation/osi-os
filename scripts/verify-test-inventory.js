@@ -235,24 +235,28 @@ function parseYaml(text, file) {
 // Splits a run script into commands on newlines, ;, &, &&, || and |,
 // honouring quotes. Each command records the operator that ends it ('\n',
 // ';', '&', '&&', '||', '|' or 'end'). GitHub expressions become a
-// placeholder word.
+// placeholder word. A command records paren: true when it is inside or
+// touches a parenthesis, because the words drop subshells and $(...).
 function shellScript(script) {
   const src = script.replace(/\$\{\{[\s\S]*?\}\}/g, '__EXPR__');
   if (/<<-?\s*['"]?\w/.test(src)) throw new Error('here-documents are not supported in workflow run scripts');
   const commands = [];
   let words = [];
   let word = null;
+  let parenDepth = 0;
+  let sawParen = false;
   const endWord = () => {
     if (word !== null) words.push(word);
     word = null;
   };
   const endCommand = (sep) => {
     endWord();
-    if (words.length) commands.push({ words, sep });
+    if (words.length) commands.push({ words, sep, paren: sawParen || parenDepth > 0 });
     else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
       throw new Error(`a line starts with "${sep}"; continuation lines are not supported`);
     }
     words = [];
+    sawParen = parenDepth > 0;
   };
   for (let j = 0; j < src.length; j += 1) {
     const c = src[j];
@@ -302,7 +306,13 @@ function shellScript(script) {
       continue;
     }
     if (c === '\n' || c === ';') { endCommand(c); continue; }
-    if (c === ' ' || c === '\t' || c === '(' || c === ')') { endWord(); continue; }
+    if (c === '(' || c === ')') {
+      sawParen = true;
+      parenDepth = c === '(' ? parenDepth + 1 : Math.max(0, parenDepth - 1);
+      endWord();
+      continue;
+    }
+    if (c === ' ' || c === '\t') { endWord(); continue; }
     word = (word ?? '') + c;
   }
   endCommand('end');
@@ -570,6 +580,8 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
+const COMPOUND_OPENERS = new Set(['if', 'while', 'until', 'for', 'select', 'case', '{']);
+const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}']);
 const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test[-_]name[-_]pattern|--test[-_]skip[-_]pattern|--test[-_]only|--test[-_]shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
@@ -612,26 +624,53 @@ function checkRunStep(ctx, step) {
   const conditionalCommands = new Set();
   let pipefail = step.pipefail;
   let conditionalDepth = 0;
-  // Commands inside a loop, case, brace group or function body may not run.
-  const blockCommands = new Set();
-  let blockDepth = 0;
-  const startsIf = (words) => words[0] === 'if' || (words[0] === 'then' && words[1] === 'if');
+  // A keyword such as then, else or do puts the next word in command
+  // position, so `else if` and `do if` open a nested if.
+  const commandPosition = (words) => {
+    const out = [];
+    for (const w of words) {
+      out.push(w);
+      if (!SHELL_KEYWORDS.has(w)) break;
+    }
+    return out;
+  };
+  const ifCount = (words) => commandPosition(words).filter((w) => w === 'if').length;
+  // compoundDepth[i]: open if, loop, case, brace group or function body
+  // around command i. A closer without an opener makes the rest uncertain.
+  const compoundDepth = [];
+  let nesting = 0;
+  let nestingUncertain = false;
+  for (const { words } of commands) {
+    compoundDepth.push(nestingUncertain ? Infinity : nesting);
+    const position = commandPosition(words);
+    nesting += position.filter((w) => COMPOUND_OPENERS.has(w)).length
+      + words.slice(position.length).filter((w) => w === '{').length;
+    if (COMPOUND_CLOSERS.has(words[0])) {
+      if (nesting > 0) nesting -= 1;
+      else nestingUncertain = true;
+    }
+  }
+  // Whether command i surely runs in the step's own shell, so a change it
+  // makes to shell state (set -e, pipefail, the tracked environment) holds.
+  const surelyRuns = (i) => {
+    const command = commands[i];
+    const prevSep = i > 0 ? commands[i - 1].sep : '\n';
+    return compoundDepth[i] === 0 && !command.paren && !SHELL_KEYWORDS.has(command.words[0])
+      && !['&&', '||', '|'].includes(prevSep) && !['|', '&'].includes(command.sep);
+  };
   for (let i = 0; i < commands.length; i += 1) {
     const words = commands[i].words;
     const head = words[0];
-    if (startsIf(words)) conditionalDepth += 1;
+    conditionalDepth += ifCount(words);
     if (conditionalDepth > 0) conditionalCommands.add(i);
     if (head === 'fi' && conditionalDepth > 0) conditionalDepth -= 1;
-    blockDepth += words.filter((w) => w === '{' || w === 'do' || w === 'case').length;
-    if (blockDepth > 0) blockCommands.add(i);
-    if (['}', 'done', 'esac'].includes(head) && blockDepth > 0) blockDepth -= 1;
     if (words[0] === 'if' && words[1] === 'false') {
       let depth = 0;
       let end = -1;
       for (let k = i; k < commands.length; k += 1) {
         const nestedHead = commands[k].words[0];
-        if (startsIf(commands[k].words)) depth += 1;
-        else if (nestedHead === 'fi') {
+        depth += ifCount(commands[k].words);
+        if (nestedHead === 'fi') {
           depth -= 1;
           if (depth === 0) { end = k; break; }
         }
@@ -641,12 +680,12 @@ function checkRunStep(ctx, step) {
         let branchEnd = end;
         for (let k = i + 1; k < end; k += 1) {
           const nestedHead = commands[k].words[0];
-          if (startsIf(commands[k].words)) depth += 1;
-          else if (nestedHead === 'fi') depth -= 1;
-          else if (depth === 0 && (nestedHead === 'else' || nestedHead === 'elif')) {
+          if (depth === 0 && (nestedHead === 'else' || nestedHead === 'elif')) {
             branchEnd = k;
             break;
           }
+          depth += ifCount(commands[k].words);
+          if (nestedHead === 'fi') depth -= 1;
         }
         for (let k = i + 1; k < branchEnd; k += 1) unreachable.add(k);
       }
@@ -740,7 +779,9 @@ function checkRunStep(ctx, step) {
     }
     if (!words.length) {
       for (const [, name, value] of prefixAssignments) {
-        if (shellEnv.has(name)) setShellEnv(name, value, shellEnv.get(name).exported);
+        if (!shellEnv.has(name)) continue;
+        if (surelyRuns(i)) setShellEnv(name, value, shellEnv.get(name).exported);
+        else markUnknown(name);
       }
       for (const name of prefixUnknownNames) markUnknown(name);
       return;
@@ -758,6 +799,14 @@ function checkRunStep(ctx, step) {
     if ((cmd === 'export' || cmd === 'unset') && step.shell === 'sh') {
       for (const name of prefixed.keys()) markUnknown(name, true);
       prefixed.clear();
+    }
+    if ((cmd === 'export' || cmd === 'unset') && !surelyRuns(i)) {
+      for (const name of trackedEnvNames) {
+        if (prefixed.has(name) || args.some((arg) => arg.includes(name))) {
+          markUnknown(name, cmd === 'export' || shellEnv.get(name).exported);
+        }
+      }
+      return;
     }
     if (cmd === 'export') {
       let unexport = false;
@@ -814,6 +863,13 @@ function checkRunStep(ctx, step) {
       }
       return;
     }
+    // Other builtins that can write or export a variable named in their arguments.
+    if (['builtin', 'command', 'printf', 'read', 'mapfile', 'readarray', 'getopts'].includes(cmd)) {
+      for (const name of trackedEnvNames) {
+        if (args.some((arg) => arg.includes(name))) markUnknown(name, true);
+      }
+      return;
+    }
     if (['declare', 'local', 'readonly', 'typeset'].includes(cmd)) {
       for (const arg of args) {
         if (/^[+-]/.test(arg)) continue;
@@ -829,19 +885,13 @@ function checkRunStep(ctx, step) {
     // Assignments before a command are temporary, as in `NAME=value command`.
     // They override this command's environment but never the shell's state.
     if (cmd === 'set') {
-      // set -e turns exit on error back on only when it surely runs in this
-      // shell: not conditional, in a block, a pipeline, the background or a
-      // subshell. The parser drops parentheses, so any ( in the step counts.
-      const prevSep = i > 0 ? commands[i - 1].sep : '\n';
-      const resetRuns = command.words[0] === 'set'
-        && !conditionalCommands.has(i) && !blockCommands.has(i)
-        && !['&&', '||', '|'].includes(prevSep) && !['|', '&'].includes(command.sep)
-        && !step.run.replace(/\$\{\{[\s\S]*?\}\}/g, '').includes('(');
+      // set -e and set -o pipefail only hold when the set surely runs here.
+      const resetRuns = surelyRuns(i);
       for (let k = 0; k < args.length; k += 1) {
         const a = args[k];
         if (/^\+[a-z]*e/.test(a) || (a.startsWith('+') && args[k + 1] === 'errexit')) errexitOff = true;
         if (resetRuns && (/^-[a-z]*e/.test(a) || (a.startsWith('-') && args[k + 1] === 'errexit'))) errexitOff = false;
-        if (/^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
+        if (resetRuns && /^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
         if (/^\+[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = false;
       }
       return;

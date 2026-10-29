@@ -972,6 +972,58 @@ test('a set -e that may not run in this shell keeps exit on error off', async (t
   assertRun(plainRoot, 'unconditional set -e after ;');
 });
 
+test('an if after else, elif, then or do nests until its own fi', async (t) => {
+  for (const run of [
+    'set +e\nif true; then :; else if false; then :; fi\nset -e\nfi\nnode --test scripts/a.test.js\necho done',
+    'set +e\nif true; then :; else while false; do if true; then :; fi; done\nset -e\nfi\nnode --test scripts/a.test.js\necho done',
+  ]) {
+    await t.test(run, () => assertBashMasksFailure({ run }, run));
+  }
+  const unreachable = 'if false; then\nfor x in a; do if true; then :; fi; done\nnode --test scripts/a.test.js\nfi\necho done';
+  await t.test(unreachable, () => assertBashSuppressed({ run: unreachable }, unreachable));
+});
+
+test('an environment change that may not run in this shell makes the variable unknown', async (t) => {
+  // OSI_FIXTURE_NEVER is unset, so none of these changes runs in the step's shell.
+  const filter = '--test-skip-pattern=passes';
+  const inherited = { workflowEnv: `env:\n  NODE_OPTIONS: ${filter}` };
+  for (const [spec, env] of [
+    [{ run: `export NODE_OPTIONS=${filter}\nif [ -n "$OSI_FIXTURE_NEVER" ]; then\n  NODE_OPTIONS= export NODE_OPTIONS\nfi\nnode --test scripts/a.test.js` }, {}],
+    [{ run: `export NODE_OPTIONS=${filter}\nreset_filter() {\n  NODE_OPTIONS= export NODE_OPTIONS\n}\nnode --test scripts/a.test.js` }, {}],
+    [{ run: `export NODE_OPTIONS=${filter}\nif [ -n "$OSI_FIXTURE_NEVER" ]; then export NODE_OPTIONS=; fi\nnode --test scripts/a.test.js` }, {}],
+    [{ ...inherited, run: '[ -n "$OSI_FIXTURE_NEVER" ] && export NODE_OPTIONS=\nnode --test scripts/a.test.js' }, { NODE_OPTIONS: filter }],
+    [{ ...inherited, run: 'if [ -n "$OSI_FIXTURE_NEVER" ]; then unset NODE_OPTIONS; fi\nnode --test scripts/a.test.js' }, { NODE_OPTIONS: filter }],
+    [{ ...inherited, run: 'if [ -n "$OSI_FIXTURE_NEVER" ]; then NODE_OPTIONS=; fi\nnode --test scripts/a.test.js' }, { NODE_OPTIONS: filter }],
+    [{ ...inherited, run: 'echo x | export NODE_OPTIONS=\nnode --test scripts/a.test.js' }, { NODE_OPTIONS: filter }],
+    [{ ...inherited, run: '(export NODE_OPTIONS=)\nnode --test scripts/a.test.js' }, { NODE_OPTIONS: filter }],
+  ]) {
+    await t.test(spec.run, () => assertBashSuppressed(spec, spec.run, env, FAIL_MARKER_PASSES));
+  }
+});
+
+test('other builtins that write a tracked variable make it unknown', async (t) => {
+  const benign = '--enable-source-maps';
+  for (const run of [
+    'builtin export NODE_OPTIONS=--test-skip-pattern=passes\nnode --test scripts/a.test.js',
+    'command export NODE_OPTIONS=--test-skip-pattern=passes\nnode --test scripts/a.test.js',
+    'printf -v NODE_OPTIONS %s --test-skip-pattern=passes\nnode --test scripts/a.test.js',
+    'read -r NODE_OPTIONS < opts.txt\nnode --test scripts/a.test.js',
+  ]) {
+    await t.test(run, () => {
+      const spec = { workflowEnv: `env:\n  NODE_OPTIONS: ${benign}`, run };
+      const extra = { 'opts.txt': '--test-skip-pattern=passes\n', 'scripts/a.test.js': MARKER_TEST };
+      const passingRoot = gatedRepo(spec, extra);
+      const passing = bashStep(passingRoot, run, { NODE_OPTIONS: benign });
+      assert.equal(passing.child.status, 0, `FIXTURE_ERROR ${run}: ${passing.child.stdout}${passing.child.stderr}`);
+      assert.equal(fs.existsSync(passing.marker), false, `FIXTURE_ERROR ${run}: Bash reached marker`);
+      const failingRoot = gatedRepo(spec, { ...extra, 'scripts/a.test.js': FAIL_MARKER_PASSES });
+      const failing = bashStep(failingRoot, run, { NODE_OPTIONS: benign });
+      assert.equal(failing.child.status, 0, `FIXTURE_ERROR ${run} failing: ${failing.child.stdout}${failing.child.stderr}`);
+      assertUnrun(passingRoot, run);
+    });
+  }
+});
+
 test('non-executing and filtering node options do not run the test', () => {
   for (const [run, reason] of [
     ['node --check scripts/a.test.js', /--check/],
