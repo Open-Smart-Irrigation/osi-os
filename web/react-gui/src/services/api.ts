@@ -87,6 +87,7 @@ import type {
   ValveScheduleInput,
   ValveSchedulerStatus,
   ValvePlanError,
+  AdminAuthMode,
   AdminUser,
   WatermarkCalibrationState,
   WatermarkCalibrationValues,
@@ -288,14 +289,58 @@ export const authAPI = {
   },
 };
 
+/** The reset route's code for an account that signs in through its cloud link (#521). */
+export const LINKED_PASSWORD_RESET_UNSUPPORTED = 'linked_account_password_reset_unsupported';
+
+/** A local password reset the gateway refused because the account uses linked sign-in. */
+export class LinkedPasswordResetError extends Error {
+  readonly code = LINKED_PASSWORD_RESET_UNSUPPORTED;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'LinkedPasswordResetError';
+  }
+}
+
+export function isLinkedPasswordResetError(error: unknown): error is LinkedPasswordResetError {
+  return error instanceof LinkedPasswordResetError;
+}
+
+// An older gateway sends no auth_mode. Anything other than local or server
+// reads as unknown, so the page never offers a reset it cannot vouch for.
+export function normaliseAdminAuthMode(value: unknown): AdminAuthMode {
+  return value === 'local' || value === 'server' ? value : 'unknown';
+}
+
+function toAdminUser(row: unknown): AdminUser {
+  const raw = (row && typeof row === 'object' ? row : {}) as Partial<AdminUser> & { auth_mode?: unknown };
+  return { ...(raw as AdminUser), auth_mode: normaliseAdminAuthMode(raw.auth_mode) };
+}
+
 export const listUsers = () =>
-  api.get<{ users: AdminUser[] }>('/api/users').then((response) => response.data.users);
+  api.get<{ users?: unknown }>('/api/users').then((response) => {
+    const users = response.data?.users;
+    if (!Array.isArray(users)) throw new Error('The gateway returned an unreadable user list.');
+    return users.map(toAdminUser);
+  });
 
 export const createUser = (body: { username: string; password: string; role: AdminUser['role'] }) =>
-  api.post<AdminUser>('/api/users', body).then((response) => response.data);
+  api.post<unknown>('/api/users', body).then((response) => toAdminUser(response.data));
 
-export const resetPassword = (uuid: string, password: string) =>
-  api.post(`/api/users/${encodeURIComponent(uuid)}/password-reset`, { password });
+// Only HTTP 409 with the exact code is the linked refusal; every other
+// failure, including a 401 the session interceptor already handled, passes
+// through unchanged.
+export const resetPassword = (uuid: string, password: string): Promise<void> =>
+  api.post(`/api/users/${encodeURIComponent(uuid)}/password-reset`, { password }).then(
+    () => undefined,
+    (error: unknown) => {
+      if (axios.isAxiosError<{ code?: unknown }>(error) && error.response?.status === 409
+          && error.response.data?.code === LINKED_PASSWORD_RESET_UNSUPPORTED) {
+        throw new LinkedPasswordResetError(getApiErrorMessage(error, 'This account uses linked sign-in.'));
+      }
+      throw error;
+    },
+  );
 
 export const setUserRole = (uuid: string, role: AdminUser['role']) =>
   api.put(`/api/users/${encodeURIComponent(uuid)}/role`, { role });
