@@ -720,11 +720,13 @@ native_sqlite3_reinstall_impossible() {
 # directory proven to hold only owner metadata; either way it stops before the
 # ordinary deploy writes and the deploy has to be run again. A rollback
 # directory left by a restore that found its destination occupied is kept,
-# and every later deploy refuses until it is inspected. Materialisation
-# repairs a broken real directory or a symlink from the firmware module before
-# npm runs, keeps the old entry in a marked rollback directory until the new
-# one passes the lockfile pin and opens :memory:, and refuses npm when a known
-# broken directory could not be repaired.
+# and every later deploy refuses until it is inspected. Deploy also refuses,
+# before any change, while a seed rollback entry exists; the seed refuses a
+# deploy one the same way. Materialisation repairs a broken real directory or
+# a symlink from the firmware module before npm runs, keeps the old entry in a
+# marked rollback directory until the new one passes the lockfile pin and
+# opens :memory:, and refuses npm when a known broken directory could not be
+# repaired.
 
 native_sqlite3_report_paths() {
     for ns_report in "$@"; do
@@ -798,13 +800,23 @@ native_sqlite3_restore_original() {
     return 0
 }
 
-# Sets NS_B to the single rollback directory, NS_B_EXACT=1 when its owner
-# line is complete, and NS_B_META=1 when it holds no original.
+# Refuses while any seed rollback entry exists. Otherwise sets NS_B to the
+# single rollback directory, NS_B_EXACT=1 when its owner line is complete, and
+# NS_B_META=1 when it holds no original.
 native_sqlite3_scan_backup() {
     NS_B=''
     NS_B_META=0
     NS_B_EXACT=0
     ns_root="$NODE_RED_ROOT/node_modules"
+    # Deploy never recovers a seed rollback. Its original may be inside it, or
+    # nested in the final path after an occupied restore, so an entry of that
+    # name, of any type, stops deploy before it moves or deletes anything.
+    for ns_f in "$ns_root"/.osi-sqlite3-seed-rollback.*; do
+        native_sqlite3_present "$ns_f" || continue
+        echo "ERROR: seed sqlite3 rollback present: $ns_f; deploy leaves sqlite3 for the seed or an operator to resolve" >&2
+        native_sqlite3_report_paths "$ns_f" "$ns_root/sqlite3" "$ns_root/sqlite3/original"
+        return 1
+    done
     for ns_b in "$ns_root"/.osi-sqlite3-rollback.*; do
         native_sqlite3_present "$ns_b" || continue
         if [ -n "$NS_B" ] || [ ! -d "$ns_b" ] || [ -L "$ns_b" ]; then
