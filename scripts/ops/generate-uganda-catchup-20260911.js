@@ -19,10 +19,11 @@
 // clean baseline-stamp this artifact exists to enable. Ordinary applyPending
 // (migrate-cli.js) carries every trigger forward from its 0001 body to its
 // head body via those same later migrations, exactly as it would for any
-// other gateway baselined at N=1. See REHEARSAL-REPORT.md "runbook staleness"
-// section for the full comparison (docs/operations/uganda-catchup-runbook.md
-// Phase 2 item 3 currently says to source triggers from the seed's "current"
-// bodies - that instruction is what this comment, and the artifact, correct).
+// other gateway baselined at N=1. See
+// docs/operations/uganda-catchup-rehearsal-20260911-report.md, "Runbook
+// staleness", for the preserved comparison with the then-current phase-based
+// source. This generator corrected that historical instruction; the later
+// neutral guide does not contain its Phase 2 item 3.
 //
 // Usage:
 //   node generate-uganda-catchup-20260911.js                  # (re)generate the .sql artifact
