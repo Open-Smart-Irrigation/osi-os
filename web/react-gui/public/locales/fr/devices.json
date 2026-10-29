@@ -671,7 +671,8 @@
       "longitudeRange": "La longitude doit être comprise entre -180 et 180.",
       "flowRateRequired": "Le débit (L/min) est requis pour enregistrer le calibrage de l'irrigation.",
       "flowRatePositive": "Le débit (L/min) doit être supérieur à 0.",
-      "saveFailed": "Échec de l'enregistrement"
+      "saveFailed": "Échec de l'enregistrement",
+      "rainChoiceSaveFailed": "Le choix du pluviomètre n’a pas été enregistré. Vérifiez la sélection et réessayez."
     },
     "weatherProvider": "Fournisseur météo",
     "weatherProviderHelpLabel": "À propos du fournisseur météo",
@@ -686,7 +687,13 @@
     "stageStartedOn": "Début du stade",
     "stageStartedOnHelpLabel": "À propos de la date de début du stade",
     "stageStartedOnHelp": "La date à laquelle le stade actuel a commencé (jour 1). Aux stades de développement et d’arrière-saison, le Kc suit la courbe FAO-56 à partir de cette date ; aux autres stades, il garde la valeur du stade. Le stade ne change jamais de lui-même : après la durée typique pour cette culture ({{days}} jours), le Kc reste à la valeur de fin du stade jusqu’à ce que vous choisissiez le stade suivant. Après la chute des feuilles ou la récolte, choisissez Dormance (Kc 0,25, sol nu) ; au printemps, choisissez Phase initiale avec la date du débourrement. Les changements de culture, de stade ou de date de début s’appliquent aux jours calculés après le changement. Laissez vide pour utiliser la valeur du tableau pour ce stade.",
-    "stageStartedOnHelpNoLength": "La date à laquelle le stade actuel a commencé (jour 1). Aux stades de développement et d’arrière-saison, le Kc suit la courbe FAO-56 à partir de cette date ; aux autres stades, il garde la valeur du stade. Le stade ne change jamais de lui-même : après la durée typique pour cette culture, le Kc reste à la valeur de fin du stade jusqu’à ce que vous choisissiez le stade suivant. Après la chute des feuilles ou la récolte, choisissez Dormance (Kc 0,25, sol nu) ; au printemps, choisissez Phase initiale avec la date du débourrement. Les changements de culture, de stade ou de date de début s’appliquent aux jours calculés après le changement. Laissez vide pour utiliser la valeur du tableau pour ce stade."
+    "stageStartedOnHelpNoLength": "La date à laquelle le stade actuel a commencé (jour 1). Aux stades de développement et d’arrière-saison, le Kc suit la courbe FAO-56 à partir de cette date ; aux autres stades, il garde la valeur du stade. Le stade ne change jamais de lui-même : après la durée typique pour cette culture, le Kc reste à la valeur de fin du stade jusqu’à ce que vous choisissiez le stade suivant. Après la chute des feuilles ou la récolte, choisissez Dormance (Kc 0,25, sol nu) ; au printemps, choisissez Phase initiale avec la date du débourrement. Les changements de culture, de stade ou de date de début s’appliquent aux jours calculés après le changement. Laissez vide pour utiliser la valeur du tableau pour ce stade.",
+    "partialSave": {
+      "saved": "Enregistré :",
+      "config": "Paramètres de la zone",
+      "calibration": "Calibration de l’irrigation",
+      "location": "Emplacement de la zone"
+    }
   },
   "irrigationOutcomes": {
     "title": "Irrigations récentes",
@@ -913,7 +920,60 @@
     "sectionExtractionWindows": "Fenêtres d'extraction",
     "sectionTwdMethod": "Méthode TWD",
     "sectionSdVpdCorrelation": "Corrélation SD-VPD",
-    "sectionLatestReasoningTrace": "Dernière trace de raisonnement"
+    "sectionLatestReasoningTrace": "Dernière trace de raisonnement",
+    "tabScheduling": "Planification avancée",
+    "tabAnalysis": "Analyse avancée",
+    "phenologyDescription": "Le stade phénologique adapte les seuils de stress à la phase de croissance actuelle. La clé d’étalonnage sélectionne des seuils absolus de TWD propres à l’espèce.",
+    "stressTriggerLevel": "Seuil de déclenchement du stress",
+    "stressLevel": {
+      "low": "Faible — premiers signes de stress",
+      "medium": "Moyen — stress modéré (recommandé)",
+      "high": "Élevé — stress important",
+      "conservative": "Prudent — stress sévère uniquement"
+    },
+    "stressLevelOther": "Niveau {{level}}",
+    "baseDuration": "Durée de base",
+    "responseModeOption": {
+      "proportional": "Proportionnel — adapter la durée au niveau de stress",
+      "fixed": "Fixe — toujours utiliser la durée de base",
+      "aggressive": "Agressif — prolonger nettement en cas de stress élevé"
+    },
+    "lastTriggered": "Dernier déclenchement",
+    "never": "Jamais",
+    "status": "État",
+    "weatherControlled": "Piloté par l’intégration météo",
+    "noSchedule": "Aucun programme défini",
+    "rainSuppressionDescription": "La suppression prend fin lorsque l’épisode pluvieux sort de la fenêtre météo glissante. La récupération de l’arbre est vérifiée avant toute reprise d’augmentation de l’irrigation.",
+    "recoveryDescription": "Après une irrigation, une pause de récupération de 24 h vérifie si le déficit hydrique de l’arbre avant l’aube (TWD-night) a diminué avant de déclencher la prochaine hausse d’irrigation. Cela évite une irrigation excessive après un épisode d’urgence.",
+    "aggregationDescription": "Le stress de la zone correspond à la médiane (nettoyée par MAD) de tous les arbres suivis. Les arbres atypiques (IQR × 1,5) sont exclus de la recommandation mais restent visibles individuellement. Les jours de faible confiance (indicateurs QA : pic de pluie, signal plat, interruption du signal) sont exclus de l’agrégation.",
+    "timezoneExample": "ex. : Europe/Rome",
+    "timezoneSaveFailed": "Échec de l’enregistrement.",
+    "dmaxWindow": "Fenêtre d_max (avant l’aube)",
+    "dminWindow": "Fenêtre d_min (milieu de journée)",
+    "localWindow": "{{start}} – {{end}} heure locale",
+    "method": "Méthode",
+    "stepwiseEnvelope": "Enveloppe par paliers (Peters et al. 2025)",
+    "twdDescription": "L’enveloppe glissante suit le diamètre maximal de la tige avant l’aube dans la fenêtre de calcul (365 jours). TWD-night = envelopeRef − d_max. TWD-day = envelopeRef − d_min. Les seuils absolus (µm) sont utilisés ; l’étalonnage propre à l’espèce repose sur la clé d’étalonnage ci-dessus.",
+    "baselineR2": "R² de référence",
+    "rolling14DayR2": "R² glissant sur 14 jours",
+    "sdVpdStatusLabel": "État SD-VPD",
+    "sdVpdStatus": {
+      "coupled": "Couplé",
+      "decoupled": "Découplé",
+      "insufficient_data": "Données insuffisantes"
+    },
+    "vpdOverrides": "Ajustements VPD",
+    "vpdOverrideCounts": "{{downgraded}} diminués / {{upgraded}} augmentés",
+    "sdVpdDescription": "L’amplitude journalière du diamètre de la tige (SDA = d_max − d_min) est corrélée au VPD maximal quotidien pour détecter les réponses au stress anormales. La recommandation de zone la plus récente résume le couplage SD-VPD glissant et les ajustements du stress fondés sur le VPD.",
+    "insufficientData": "Données insuffisantes",
+    "diagnosticsUnavailable": "Indisponible dans les diagnostics de recommandation",
+    "loadingRecommendations": "Chargement des recommandations…",
+    "computedAt": "Calculé le",
+    "usableTrees": "Arbres exploitables",
+    "lowConfidenceTrees": "Arbres à faible confiance",
+    "outlierFiltered": "Valeurs aberrantes exclues",
+    "zoneConfidence": "Confiance de la zone",
+    "noRecommendations": "Aucune recommandation n’a encore été calculée pour cette zone. Lancez le calcul dendro ou attendez le traitement quotidien de 08:00 UTC."
   },
   "lsn50Mode": {
     "mod3Description": "Trois canaux ADC plus mode I2C.",
@@ -1000,9 +1060,11 @@
     "optionShared": "{{name}} (station météo partagée)",
     "optionSuggested": "{{label}} — suggéré",
     "ambiguous": "Deux pluviomètres transmettent pour cette zone. Tant que vous n'en choisissez pas un, la zone n'a pas de pluie mesurée.",
-    "onlyCandidate": "Le seul pluviomètre de cette zone est utilisé.",
     "loadFailed": "Les pluviomètres de cette zone n'ont pas pu être chargés.",
-    "banner": "Deux pluviomètres transmettent pour cette zone. Choisissez-en un dans les paramètres de la zone."
+    "banner": "Deux pluviomètres transmettent pour cette zone. Choisissez-en un dans les paramètres de la zone.",
+    "automaticOption": "Automatique : {{name}}",
+    "automaticOnlyCandidate": "{{name}} est utilisé automatiquement, car c’est le seul pluviomètre de cette zone.",
+    "bannerReadOnly": "Demandez à une personne autorisée à modifier cette zone de choisir un pluviomètre dans ses paramètres."
   },
   "soilTension": {
     "sectionTitle": "Tension de l'eau du sol",

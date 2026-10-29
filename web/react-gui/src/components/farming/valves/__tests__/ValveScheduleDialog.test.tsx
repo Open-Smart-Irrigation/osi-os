@@ -443,7 +443,7 @@ describe('ValveScheduleDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Tue' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0]);
 
-    expect(await screen.findByText('Overlaps another window on Tue.')).toBeInTheDocument();
+    expect(await screen.findByText('Overlaps another window on Tue. (Existing window)')).toBeInTheDocument();
   });
 
   it('renders a generic conflict message when the API rejects without weekday details', async () => {

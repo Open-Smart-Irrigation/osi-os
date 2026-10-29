@@ -671,7 +671,8 @@
       "longitudeRange": "Der Längengrad muss zwischen -180 und 180 liegen.",
       "flowRateRequired": "Für die Bewässerungskalibrierung ist der Durchfluss (l/min) erforderlich.",
       "flowRatePositive": "Der Durchfluss (l/min) muss grösser als 0 sein.",
-      "saveFailed": "Speichern fehlgeschlagen"
+      "saveFailed": "Speichern fehlgeschlagen",
+      "rainChoiceSaveFailed": "Die Regenmesserauswahl wurde nicht gespeichert. Prüfen Sie die Auswahl und versuchen Sie erneut, sie zu speichern."
     },
     "weatherProvider": "Wetteranbieter",
     "weatherProviderHelpLabel": "Über den Wetteranbieter",
@@ -686,7 +687,13 @@
     "stageStartedOn": "Phase begonnen am",
     "stageStartedOnHelpLabel": "Info zum Startdatum der Phase",
     "stageStartedOnHelp": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur ({{days}} Tage) bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden.",
-    "stageStartedOnHelpNoLength": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden."
+    "stageStartedOnHelpNoLength": "Das Datum, an dem die aktuelle Phase begonnen hat (Tag 1). In der Entwicklungsphase und in der Spätphase folgt Kc ab diesem Datum der FAO-56-Kurve; in den anderen Phasen bleibt er beim Wert der Phase. Die Phase wechselt nie von selbst: Nach der typischen Dauer für diese Kultur bleibt Kc beim Endwert der Phase, bis Sie die nächste Phase wählen. Wählen Sie nach dem Laubfall oder der Ernte die Ruhephase (Kc 0,25, offener Boden); wählen Sie im Frühling die Anfangsphase mit dem Datum des Austriebs. Änderungen an Kultur, Phase oder Startdatum gelten für Tage, die nach der Änderung berechnet werden. Leer lassen, um den Tabellenwert der Phase zu verwenden.",
+    "partialSave": {
+      "saved": "Gespeichert:",
+      "config": "Zoneneinstellungen",
+      "calibration": "Bewässerungskalibrierung",
+      "location": "Zonenstandort"
+    }
   },
   "irrigationOutcomes": {
     "title": "Letzte Bewässerungen",
@@ -913,7 +920,60 @@
     "sectionExtractionWindows": "Extraktionsfenster",
     "sectionTwdMethod": "TWD-Methode",
     "sectionSdVpdCorrelation": "SD-VPD-Korrelation",
-    "sectionLatestReasoningTrace": "Neueste Begründungsspur"
+    "sectionLatestReasoningTrace": "Neueste Begründungsspur",
+    "tabScheduling": "Erweiterte Planung",
+    "tabAnalysis": "Erweiterte Analyse",
+    "phenologyDescription": "Das phänologische Stadium passt die Stressschwellen an die aktuelle Wachstumsphase an. Der Kalibrierungsschlüssel wählt artspezifische absolute TWD-Schwellen.",
+    "stressTriggerLevel": "Stress-Auslöseschwelle",
+    "stressLevel": {
+      "low": "Niedrig — erste Anzeichen von Stress",
+      "medium": "Mittel — mässiger Stress (empfohlen)",
+      "high": "Hoch — deutlicher Stress",
+      "conservative": "Zurückhaltend — nur bei starkem Stress"
+    },
+    "stressLevelOther": "Stufe {{level}}",
+    "baseDuration": "Basisdauer",
+    "responseModeOption": {
+      "proportional": "Proportional — Dauer an das Stressniveau anpassen",
+      "fixed": "Fest — immer die Basisdauer verwenden",
+      "aggressive": "Aggressiv — bei starkem Stress deutlich verlängern"
+    },
+    "lastTriggered": "Zuletzt ausgelöst",
+    "never": "Nie",
+    "status": "Status",
+    "weatherControlled": "Durch Wetterintegration gesteuert",
+    "noSchedule": "Kein Zeitplan festgelegt",
+    "rainSuppressionDescription": "Die Unterdrückung endet, sobald das Regenereignis aus dem gleitenden Wetterfenster fällt. Bevor eine Bewässerungserhöhung fortgesetzt wird, wird die Erholung der Bäume geprüft.",
+    "recoveryDescription": "Nach einer Bewässerung prüft eine 24-h-Erholungspause, ob das Wasserdefizit des Baums vor Tagesanbruch (TWD-night) gesunken ist, bevor die nächste Bewässerungserhöhung ausgelöst wird. So wird eine Überbewässerung nach Notfällen verhindert.",
+    "aggregationDescription": "Der Zonenstress ist der Median (um MAD-Ausreisser bereinigt) aller überwachten Bäume. Ausreisser (IQR × 1,5) fliessen nicht in die Empfehlung ein, bleiben aber je Baum sichtbar. Tage mit geringer Zuverlässigkeit (QA-Kennzeichen: Regenspitze, konstantes Signal, Signallücke) fliessen nicht in die Aggregation ein.",
+    "timezoneExample": "z. B. Europe/Rome",
+    "timezoneSaveFailed": "Speichern fehlgeschlagen.",
+    "dmaxWindow": "d_max-Fenster (vor Tagesanbruch)",
+    "dminWindow": "d_min-Fenster (mittags)",
+    "localWindow": "{{start}} – {{end}} Ortszeit",
+    "method": "Methode",
+    "stepwiseEnvelope": "Stufenweise Hüllkurve (Peters et al. 2025)",
+    "twdDescription": "Die Hüllkurve über ein rollendes Fenster erfasst den maximalen Stammdurchmesser vor Tagesanbruch im Berechnungszeitraum (365 Tage). TWD-night = envelopeRef − d_max. TWD-day = envelopeRef − d_min. Es gelten absolute Schwellen (µm); die artspezifische Kalibrierung erfolgt über den obigen Kalibrierungsschlüssel.",
+    "baselineR2": "Basis-R²",
+    "rolling14DayR2": "R² der letzten 14 Tage",
+    "sdVpdStatusLabel": "SD-VPD-Status",
+    "sdVpdStatus": {
+      "coupled": "Gekoppelt",
+      "decoupled": "Entkoppelt",
+      "insufficient_data": "Nicht genügend Daten"
+    },
+    "vpdOverrides": "VPD-Anpassungen",
+    "vpdOverrideCounts": "{{downgraded}} herabgestuft / {{upgraded}} heraufgestuft",
+    "sdVpdDescription": "Die tägliche Stammdurchmesseramplitude (SDA = d_max − d_min) wird mit dem maximalen täglichen VPD verglichen, um auffällige Stressreaktionen zu erkennen. Die neueste Zonenempfehlung fasst sowohl die rollende SD-VPD-Kopplung als auch VPD-basierte Stressanpassungen zusammen.",
+    "insufficientData": "Nicht genügend Daten",
+    "diagnosticsUnavailable": "In den Empfehlungsdiagnosen nicht verfügbar",
+    "loadingRecommendations": "Empfehlungen werden geladen…",
+    "computedAt": "Berechnet am",
+    "usableTrees": "Verwertbare Bäume",
+    "lowConfidenceTrees": "Bäume mit geringer Zuverlässigkeit",
+    "outlierFiltered": "Ausreisser ausgeschlossen",
+    "zoneConfidence": "Zuverlässigkeit der Zone",
+    "noRecommendations": "Für diese Zone wurden noch keine Empfehlungen berechnet. Starten Sie die Dendro-Berechnung oder warten Sie auf den täglichen Lauf um 08:00 UTC."
   },
   "lsn50Mode": {
     "mod3Description": "Drei ADC-Kanäle plus I2C-Modus.",
@@ -1000,9 +1060,11 @@
     "optionShared": "{{name}} (gemeinsame Wetterstation)",
     "optionSuggested": "{{label}} — vorgeschlagen",
     "ambiguous": "Zwei Regenmesser melden für diese Zone. Bis Sie einen wählen, hat die Zone keinen gemessenen Regen.",
-    "onlyCandidate": "Der einzige Regenmesser dieser Zone wird verwendet.",
     "loadFailed": "Die Regenmesser dieser Zone konnten nicht geladen werden.",
-    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen."
+    "banner": "Zwei Regenmesser melden für diese Zone. Wählen Sie einen in den Zoneneinstellungen.",
+    "automaticOption": "Automatisch: {{name}}",
+    "automaticOnlyCandidate": "{{name}} wird automatisch als einziger Regenmesser für diese Zone verwendet.",
+    "bannerReadOnly": "Bitten Sie jemanden mit Bearbeitungsrechten für diese Zone, in den Zoneneinstellungen einen Regenmesser auszuwählen."
   },
   "soilTension": {
     "sectionTitle": "Bodenwasserspannung",

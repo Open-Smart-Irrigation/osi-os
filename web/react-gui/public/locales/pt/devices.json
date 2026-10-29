@@ -671,7 +671,8 @@
       "longitudeRange": "A longitude deve estar entre -180 e 180.",
       "flowRateRequired": "O caudal (L/min) é necessário para guardar a calibração da rega.",
       "flowRatePositive": "O caudal (L/min) deve ser maior que 0.",
-      "saveFailed": "Não foi possível guardar"
+      "saveFailed": "Não foi possível guardar",
+      "rainChoiceSaveFailed": "A escolha do pluviómetro não foi guardada. Reveja a seleção e tente novamente."
     },
     "weatherProvider": "Fornecedor meteorológico",
     "weatherProviderHelpLabel": "Sobre o fornecedor meteorológico",
@@ -686,7 +687,13 @@
     "stageStartedOn": "Início da fase",
     "stageStartedOnHelpLabel": "Sobre a data de início da fase",
     "stageStartedOnHelp": "A data em que a fase atual começou (dia 1). Nas fases de desenvolvimento e final, o Kc segue a curva FAO-56 a partir desta data; nas outras fases mantém o valor da fase. A fase nunca avança sozinha: após a duração típica para esta cultura ({{days}} dias), o Kc fica no valor final da fase até escolher a fase seguinte. Após a queda das folhas ou a colheita, escolha Dormência (Kc 0,25, solo nu); na primavera, escolha Fase inicial com a data do abrolhamento. As alterações de cultura, fase ou data de início aplicam-se aos dias calculados depois da alteração. Deixe vazio para usar o valor da tabela para a fase.",
-    "stageStartedOnHelpNoLength": "A data em que a fase atual começou (dia 1). Nas fases de desenvolvimento e final, o Kc segue a curva FAO-56 a partir desta data; nas outras fases mantém o valor da fase. A fase nunca avança sozinha: após a duração típica para esta cultura, o Kc fica no valor final da fase até escolher a fase seguinte. Após a queda das folhas ou a colheita, escolha Dormência (Kc 0,25, solo nu); na primavera, escolha Fase inicial com a data do abrolhamento. As alterações de cultura, fase ou data de início aplicam-se aos dias calculados depois da alteração. Deixe vazio para usar o valor da tabela para a fase."
+    "stageStartedOnHelpNoLength": "A data em que a fase atual começou (dia 1). Nas fases de desenvolvimento e final, o Kc segue a curva FAO-56 a partir desta data; nas outras fases mantém o valor da fase. A fase nunca avança sozinha: após a duração típica para esta cultura, o Kc fica no valor final da fase até escolher a fase seguinte. Após a queda das folhas ou a colheita, escolha Dormência (Kc 0,25, solo nu); na primavera, escolha Fase inicial com a data do abrolhamento. As alterações de cultura, fase ou data de início aplicam-se aos dias calculados depois da alteração. Deixe vazio para usar o valor da tabela para a fase.",
+    "partialSave": {
+      "saved": "Guardado:",
+      "config": "Definições da zona",
+      "calibration": "Calibração da irrigação",
+      "location": "Localização da zona"
+    }
   },
   "irrigationOutcomes": {
     "title": "Regas recentes",
@@ -913,7 +920,60 @@
     "sectionExtractionWindows": "Janelas de extração",
     "sectionTwdMethod": "Método TWD",
     "sectionSdVpdCorrelation": "Correlação SD-VPD",
-    "sectionLatestReasoningTrace": "Último registo de raciocínio"
+    "sectionLatestReasoningTrace": "Último registo de raciocínio",
+    "tabScheduling": "Programação avançada",
+    "tabAnalysis": "Análise avançada",
+    "phenologyDescription": "O estádio fenológico ajusta os limiares de stress à fase de crescimento atual. A chave de calibração seleciona limiares absolutos de TWD específicos da espécie.",
+    "stressTriggerLevel": "Nível de ativação por stress",
+    "stressLevel": {
+      "low": "Baixo — primeiros sinais de stress",
+      "medium": "Médio — stress moderado (recomendado)",
+      "high": "Alto — stress significativo",
+      "conservative": "Conservador — apenas stress grave"
+    },
+    "stressLevelOther": "Nível {{level}}",
+    "baseDuration": "Duração base",
+    "responseModeOption": {
+      "proportional": "Proporcional — ajustar a duração ao nível de stress",
+      "fixed": "Fixo — usar sempre a duração base",
+      "aggressive": "Agressivo — prolongar bastante com stress elevado"
+    },
+    "lastTriggered": "Última ativação",
+    "never": "Nunca",
+    "status": "Estado",
+    "weatherControlled": "Controlado pela integração meteorológica",
+    "noSchedule": "Sem programação definida",
+    "rainSuppressionDescription": "A supressão termina quando o episódio de chuva sai da janela meteorológica móvel. A recuperação da árvore é verificada antes de retomar qualquer aumento da rega.",
+    "recoveryDescription": "Após uma rega, uma pausa de recuperação de 24 h verifica se o défice hídrico da árvore antes do amanhecer (TWD-night) diminuiu antes de iniciar o próximo aumento da rega. Evita rega excessiva após episódios de emergência.",
+    "aggregationDescription": "O stress da zona é calculado como a mediana (limpa com MAD) de todas as árvores monitorizadas. Árvores atípicas (IQR × 1,5) são excluídas da recomendação, mas continuam visíveis individualmente. Dias de baixa confiança (marcas QA: pico de chuva, sinal plano, falha de sinal) são excluídos da agregação.",
+    "timezoneExample": "por ex., Europe/Rome",
+    "timezoneSaveFailed": "Falha ao guardar.",
+    "dmaxWindow": "Janela d_max (antes do amanhecer)",
+    "dminWindow": "Janela d_min (meio do dia)",
+    "localWindow": "{{start}} – {{end}} hora local",
+    "method": "Método",
+    "stepwiseEnvelope": "Envolvente por etapas (Peters et al. 2025)",
+    "twdDescription": "A envolvente móvel acompanha o diâmetro máximo do caule antes do amanhecer durante a janela de cálculo (365 dias). TWD-night = envelopeRef − d_max. TWD-day = envelopeRef − d_min. São usados limiares absolutos (µm); a calibração específica da espécie aplica a chave de calibração acima.",
+    "baselineR2": "R² de referência",
+    "rolling14DayR2": "R² móvel de 14 dias",
+    "sdVpdStatusLabel": "Estado SD-VPD",
+    "sdVpdStatus": {
+      "coupled": "Acoplado",
+      "decoupled": "Desacoplado",
+      "insufficient_data": "Dados insuficientes"
+    },
+    "vpdOverrides": "Ajustes de VPD",
+    "vpdOverrideCounts": "{{downgraded}} reduzidos / {{upgraded}} aumentados",
+    "sdVpdDescription": "A amplitude diária do diâmetro do caule (SDA = d_max − d_min) é correlacionada com o VPD máximo diário para detetar respostas de stress anómalas. A recomendação mais recente da zona resume o acoplamento SD-VPD móvel e os ajustes de stress baseados no VPD.",
+    "insufficientData": "Dados insuficientes",
+    "diagnosticsUnavailable": "Indisponível nos diagnósticos de recomendação",
+    "loadingRecommendations": "A carregar recomendações…",
+    "computedAt": "Calculado em",
+    "usableTrees": "Árvores utilizáveis",
+    "lowConfidenceTrees": "Árvores com baixa confiança",
+    "outlierFiltered": "Valores atípicos excluídos",
+    "zoneConfidence": "Confiança da zona",
+    "noRecommendations": "Ainda não foi calculada qualquer recomendação para esta zona. Execute o cálculo dendro ou aguarde pelo processo diário das 08:00 UTC."
   },
   "lsn50Mode": {
     "mod3Description": "Três canais ADC mais modo I2C.",
@@ -1000,9 +1060,11 @@
     "optionShared": "{{name}} (estação meteorológica partilhada)",
     "optionSuggested": "{{label}} — sugerido",
     "ambiguous": "Dois pluviómetros reportam para esta zona. Enquanto não escolher um, a zona não tem chuva medida.",
-    "onlyCandidate": "É usado o único pluviómetro desta zona.",
     "loadFailed": "Não foi possível carregar os pluviómetros desta zona.",
-    "banner": "Dois pluviómetros reportam para esta zona. Escolha um nas definições da zona."
+    "banner": "Dois pluviómetros reportam para esta zona. Escolha um nas definições da zona.",
+    "automaticOption": "Automático: {{name}}",
+    "automaticOnlyCandidate": "{{name}} é usado automaticamente, por ser o único pluviómetro desta zona.",
+    "bannerReadOnly": "Peça a alguém que possa editar esta zona para escolher um pluviómetro nas definições da zona."
   },
   "soilTension": {
     "sectionTitle": "Tensão hídrica do solo",

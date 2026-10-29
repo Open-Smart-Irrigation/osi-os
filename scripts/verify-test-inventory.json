@@ -25,6 +25,11 @@
       "path": "web/react-gui/tests/browser/conditional-irrigation.spec.ts",
       "runner": "web/react-gui/playwright.conditional.config.ts",
       "note": "The existing frontend CI job runs the Playwright config through test:browser:conditional."
+    },
+    {
+      "path": "web/react-gui/tests/browser/device-registration.spec.ts",
+      "runner": "web/react-gui/playwright.device-registration.config.ts",
+      "note": "The GUI browser job runs this Playwright config through test:browser:device-registration."
     }
   ],
   "excluded": [

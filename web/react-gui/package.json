@@ -31,6 +31,7 @@
     "demo:test": "node scripts/run-tsx-tests.mjs 'demo/tests/*.test.ts'",
     "demo:test:browser": "playwright test --config demo/playwright.config.ts",
     "test:browser:conditional": "playwright test --config playwright.conditional.config.ts",
+    "test:browser:device-registration": "playwright test --config playwright.device-registration.config.ts",
     "test:browser:mobile-history": "node scripts/run-mobile-tension-build-matrix.mjs"
   },
   "dependencies": {

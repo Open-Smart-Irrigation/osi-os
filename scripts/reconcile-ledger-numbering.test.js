@@ -8,6 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const { cliRunner } = require('../lib/osi-migrate/runner-iface');
+const { createTestScratch } = require('./helpers/test-owned-scratch');
 const { bootstrapFresh, applyPending, verifyHead } = require('../lib/osi-migrate');
 const { loadMigrations } = require('../lib/osi-migrate/migrations-loader');
 const {
@@ -31,7 +32,7 @@ const REPO = path.resolve(__dirname, '..');
 const MAIN_MIGRATIONS_DIR = path.join(REPO, 'database/migrations/ordered');
 const REAL_FIXTURES_DIR = path.join(REPO, 'scripts/fixtures/lineages');
 
-function scratch() { return fs.mkdtempSync(path.join(os.tmpdir(), 'reconcile-test-')); }
+const scratch = createTestScratch('reconcile-test-');
 
 function writeMigration(dir, filename, body) {
   fixtureWrite(path.join(dir, filename), body);

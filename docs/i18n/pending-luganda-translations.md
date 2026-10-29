@@ -104,6 +104,17 @@ above. A human Luganda pass must drop the key from that set and from the
 table above in the same change; the test fails otherwise, so the two cannot
 drift apart.
 
+## `devices.json` — Advanced Schedule drawer copy
+
+| Keys | Reason |
+|---|---|
+| `advancedSchedule.aggregationDescription`, `advancedSchedule.baseDuration`, `advancedSchedule.baselineR2`, `advancedSchedule.computedAt`, `advancedSchedule.diagnosticsUnavailable`, `advancedSchedule.dmaxWindow`, `advancedSchedule.dminWindow`, `advancedSchedule.insufficientData`, `advancedSchedule.lastTriggered`, `advancedSchedule.loadingRecommendations`, `advancedSchedule.localWindow`, `advancedSchedule.lowConfidenceTrees`, `advancedSchedule.method`, `advancedSchedule.never`, `advancedSchedule.noRecommendations`, `advancedSchedule.noSchedule`, `advancedSchedule.outlierFiltered`, `advancedSchedule.phenologyDescription`, `advancedSchedule.rainSuppressionDescription`, `advancedSchedule.recoveryDescription`, `advancedSchedule.responseModeOption.aggressive`, `advancedSchedule.responseModeOption.fixed`, `advancedSchedule.responseModeOption.proportional`, `advancedSchedule.rolling14DayR2`, `advancedSchedule.sdVpdDescription`, `advancedSchedule.sdVpdStatus.coupled`, `advancedSchedule.sdVpdStatus.decoupled`, `advancedSchedule.sdVpdStatus.insufficient_data`, `advancedSchedule.sdVpdStatusLabel`, `advancedSchedule.status`, `advancedSchedule.stepwiseEnvelope`, `advancedSchedule.stressLevel.conservative`, `advancedSchedule.stressLevel.high`, `advancedSchedule.stressLevel.low`, `advancedSchedule.stressLevel.medium`, `advancedSchedule.stressLevelOther`, `advancedSchedule.stressTriggerLevel`, `advancedSchedule.tabAnalysis`, `advancedSchedule.tabScheduling`, `advancedSchedule.timezoneExample`, `advancedSchedule.timezoneSaveFailed`, `advancedSchedule.twdDescription`, `advancedSchedule.usableTrees`, `advancedSchedule.vpdOverrideCounts`, `advancedSchedule.vpdOverrides`, `advancedSchedule.weatherControlled`, `advancedSchedule.zoneConfidence` (47 keys in `devices.json`) | The Advanced Schedule drawer previously hardcoded this scheduling and analysis copy in English. `lg` ships the English source text until a native Luganda speaker reviews and translates these keys. The de-CH, es, fr, it and pt values are localized, but still await human review. |
+
+Tracked in code at `web/react-gui/tests/f37Locales.test.ts`
+(`ADVANCED_SCHEDULE_PENDING_KEYS` within `PENDING_HUMAN_LUGANDA`), which
+asserts each `lg` value is byte-identical to `en`. A native-speaker pass must
+remove each key from the test set and this section in the same change.
+
 ## `devices.json` — the two irrigation forms, and the Water tab's own keys
 
 | Keys | Reason |
@@ -237,6 +248,7 @@ and from the table above in the same change.
 | Keys | Reason |
 |---|---|
 | `analysis.export.allZonesCsvBusy`, `analysis.export.errors.tooLarge`, `busy`, `invalidRange`, `failed`; `analysis.views.confirmDelete` (6 keys in `common.json`) | Added with the analysis page's all-zones CSV export (its busy label and the messages for a refused or failed export) and the confirmation before a saved view is deleted. No human Luganda pass yet, so `lg` ships the English source text. de-CH/es/fr/it/pt were translated in the same change. |
+| `analysis.export.allZonesCsv` | Restored in PR #422; available history does not establish a human Luganda author or speaker confirmation (#440). Ships the English source "Export all zones CSV" pending a human Luganda pass. Remove this row and its entry in the all-zones export test's `PENDING_HUMAN_LUGANDA` set together when a human supplies or confirms the translation. |
 
 Tracked in code at `web/react-gui/tests/analysis-locales.test.ts`
 (`PENDING_HUMAN_LUGANDA` in the all-zones export test), which asserts each

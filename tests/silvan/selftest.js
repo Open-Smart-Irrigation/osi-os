@@ -98,6 +98,11 @@ function refuses(name, cfgOverrides, envVars = {}) {
 }
 
 async function main() {
+  await check('selftest source has no tailnet hostname', () => {
+    const source = fs.readFileSync(__filename, 'utf8');
+    const hasTailnetHost = /[a-z0-9-]+\.tail[a-z0-9-]+\.ts\.net/i.test(source);
+    assert.strictEqual(hasTailnetHost, false, 'selftest source contains a tailnet hostname');
+  });
   console.log('\n-- endpoint guard: accepts the intended setup');
   await check('the default configuration passes and is marked as guarded', () => {
     const cfg = config();
@@ -123,8 +128,13 @@ async function main() {
   console.log('\n-- endpoint guard: the deny-list applies to every endpoint, unconditionally');
   // The escape hatch is set in every one of these: it must not help.
   const ALT = { SILVAN_ALLOW_ALT_HOST: '1' };
+  const tailnetHosts = configLib.FORBIDDEN_HOSTS.filter((host) =>
+    /^[a-z0-9-]+\.tail[a-z0-9-]+\.ts\.net$/i.test(host));
+  assert.strictEqual(tailnetHosts.length, 1, 'expected one tailnet deny-list member');
+  const tailnetHost = tailnetHosts[0];
+  assert.strictEqual(configLib.isForbiddenHost(tailnetHost), true, 'tailnet deny-list member must be forbidden');
   refuses('an SSH host on the deny-list is refused even with SILVAN_ALLOW_ALT_HOST',
-    { sshHost: 'osi-uganda-01.tail77bd41.ts.net' }, ALT);
+    { sshHost: tailnetHost }, ALT);
   refuses('a deny-listed IP as the SSH host is refused even with SILVAN_ALLOW_ALT_HOST',
     { sshHost: '100.69.51.98' }, ALT);
   refuses('a deny-listed host in SILVAN_API_BASE is refused even with SILVAN_ALLOW_ALT_HOST',

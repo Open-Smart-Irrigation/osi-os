@@ -46,6 +46,7 @@ jobs:
             scripts/deploy-local-server.test.js \
             scripts/diagnose-sensor-history-gap.test.js \
             scripts/fixtures/device-integration/uc512/codec.test.js \
+            scripts/test-valve-ack-time-selector.test.js \
             scripts/test-deploy-node-red-service-state.js \
             web/react-gui/scripts/css-rule-diff.test.mjs
       - name: Shell tests

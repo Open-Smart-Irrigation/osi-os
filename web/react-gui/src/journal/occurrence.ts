@@ -56,6 +56,54 @@ export interface ResolvedOccurrence {
   localDate: string;
 }
 
+export interface CurrentOccurrenceDefault {
+  localTime: string;
+  offsetMinutes: number;
+}
+
+/**
+ * Format the current instant for a local datetime input and keep the offset
+ * from that same instant so an automatically generated fold time can resolve.
+ * Callers clear the offset when a user edits the local time or timezone.
+ */
+export function currentOccurrenceDefault(
+  timezone: string,
+  fallbackTimezone: string,
+): CurrentOccurrenceDefault {
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  };
+  let formatter: Intl.DateTimeFormat;
+  try {
+    formatter = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: timezone });
+  } catch {
+    formatter = new Intl.DateTimeFormat('en-CA', { ...options, timeZone: fallbackTimezone });
+  }
+
+  const now = new Date();
+  const values = new Map(formatter.formatToParts(now).map(({ type, value }) => [type, value]));
+  const year = Number(values.get('year'));
+  const month = Number(values.get('month'));
+  const day = Number(values.get('day'));
+  const hour = Number(values.get('hour'));
+  const minute = Number(values.get('minute'));
+  const localTime = `${values.get('year')}-${values.get('month')}-${values.get('day')}T${values.get('hour')}:${values.get('minute')}`;
+  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute);
+  const nowAsUtc = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    now.getUTCHours(),
+    now.getUTCMinutes(),
+  );
+
+  return {
+    localTime,
+    offsetMinutes: Math.round((localAsUtc - nowAsUtc) / 60_000),
+  };
+}
+
 interface LocalTimestampParts {
   year: number;
   month: number;

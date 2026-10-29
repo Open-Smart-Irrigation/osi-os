@@ -40,6 +40,8 @@ jobs:
       - run: npm run demo:test
       - name: Conditional irrigation browser tests
         run: npm run test:browser:conditional
+      - name: Device registration browser tests
+        run: npm run test:browser:device-registration
   # Upgrade lane: does the same lockfile still install on the next Node LTS
   # (npm 11)? Informational: with job-level continue-on-error a failure
   # shows this job red in the checks list while the workflow run stays

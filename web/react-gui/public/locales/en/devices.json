@@ -668,7 +668,8 @@
       "longitudeRange": "Longitude must be between -180 and 180.",
       "flowRateRequired": "Flow rate (L/min) is required to save irrigation calibration.",
       "flowRatePositive": "Flow rate (L/min) must be greater than 0.",
-      "saveFailed": "Failed to save"
+      "saveFailed": "Failed to save",
+      "rainChoiceSaveFailed": "Rain gauge choice was not saved. Review the selection and retry Save."
     },
     "weatherProvider": "Weather provider",
     "weatherProviderHelpLabel": "About the weather provider",
@@ -683,7 +684,13 @@
     "stageStartedOn": "Stage started on",
     "stageStartedOnHelpLabel": "About the stage start date",
     "stageStartedOnHelp": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop ({{days}} days) Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.",
-    "stageStartedOnHelpNoLength": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value."
+    "stageStartedOnHelpNoLength": "The date the current stage began (day 1). In the development and late-season stages Kc moves along the FAO-56 curve from this date; in the other stages it stays at the stage's value. The stage never advances by itself: after the typical length for this crop Kc stays at the stage's end value until you choose the next stage. After leaf fall or harvest choose Dormancy (Kc 0.25, bare soil); in spring choose Initial with the green-up date. Changes to crop, stage or start date apply to days calculated after the change. Leave empty to use the stage's table value.",
+    "partialSave": {
+      "saved": "Saved:",
+      "config": "Zone settings",
+      "calibration": "Irrigation calibration",
+      "location": "Zone location"
+    }
   },
   "irrigationOutcomes": {
     "title": "Recent irrigations",
@@ -910,7 +917,60 @@
     "sectionExtractionWindows": "Extraction windows",
     "sectionTwdMethod": "TWD method",
     "sectionSdVpdCorrelation": "SD-VPD correlation",
-    "sectionLatestReasoningTrace": "Latest reasoning trace"
+    "sectionLatestReasoningTrace": "Latest reasoning trace",
+    "tabScheduling": "Advanced Scheduling",
+    "tabAnalysis": "Advanced Analysis",
+    "phenologyDescription": "Phenological stage adjusts stress thresholds for the current growth phase. Calibration key selects species-specific absolute TWD thresholds.",
+    "stressTriggerLevel": "Stress trigger level",
+    "stressLevel": {
+      "low": "Low — first signs of stress",
+      "medium": "Medium — moderate stress (recommended)",
+      "high": "High — significant stress",
+      "conservative": "Conservative — severe stress only"
+    },
+    "stressLevelOther": "Level {{level}}",
+    "baseDuration": "Base duration",
+    "responseModeOption": {
+      "proportional": "Proportional — scale with stress level",
+      "fixed": "Fixed — always use base duration",
+      "aggressive": "Aggressive — extend strongly at high stress"
+    },
+    "lastTriggered": "Last triggered",
+    "never": "Never",
+    "status": "Status",
+    "weatherControlled": "Controlled by weather integration",
+    "noSchedule": "No schedule set",
+    "rainSuppressionDescription": "Suppression lifts once the rain event is cleared from the rolling weather window. Tree recovery is verified before resuming any irrigation increase.",
+    "recoveryDescription": "After an irrigation event, a 24 h recovery hold checks whether the pre-dawn tree water deficit (TWD-night) has decreased before issuing the next irrigation increase. Prevents over-irrigation after emergency events.",
+    "aggregationDescription": "Zone stress is computed as the median (MAD-cleaned) across all monitored trees. Outlier trees (IQR × 1.5) are excluded from the recommendation but remain visible per-tree. Low-confidence days (QA flags: rain spike, flat-line, signal gap) are excluded from aggregation.",
+    "timezoneExample": "e.g. Europe/Rome",
+    "timezoneSaveFailed": "Failed to save.",
+    "dmaxWindow": "d_max window (pre-dawn)",
+    "dminWindow": "d_min window (midday)",
+    "localWindow": "{{start}} – {{end}} local",
+    "method": "Method",
+    "stepwiseEnvelope": "Stepwise envelope (Peters et al. 2025)",
+    "twdDescription": "The rolling-window envelope tracks the maximum pre-dawn stem diameter within the computation window (365 days). TWD-night = envelopeRef − d_max. TWD-day = envelopeRef − d_min. Absolute thresholds (µm) are used; species-specific calibration applies via the calibration key above.",
+    "baselineR2": "Baseline R²",
+    "rolling14DayR2": "Rolling 14-day R²",
+    "sdVpdStatusLabel": "SD-VPD status",
+    "sdVpdStatus": {
+      "coupled": "Coupled",
+      "decoupled": "Decoupled",
+      "insufficient_data": "Insufficient data"
+    },
+    "vpdOverrides": "VPD overrides",
+    "vpdOverrideCounts": "{{downgraded}} downgraded / {{upgraded}} upgraded",
+    "sdVpdDescription": "Stem diameter daily amplitude (SDA = d_max − d_min) is correlated with maximum daily VPD to detect anomalous stress response. The latest zone recommendation now summarizes both rolling SD-VPD coupling and any VPD-based stress overrides.",
+    "insufficientData": "Insufficient data",
+    "diagnosticsUnavailable": "Unavailable in recommendation diagnostics",
+    "loadingRecommendations": "Loading recommendations…",
+    "computedAt": "Computed at",
+    "usableTrees": "Usable trees",
+    "lowConfidenceTrees": "Low-confidence trees",
+    "outlierFiltered": "Outlier-filtered",
+    "zoneConfidence": "Zone confidence",
+    "noRecommendations": "No zone recommendations computed yet. Run dendro compute or wait for the daily 08:00 UTC job."
   },
   "lsn50Mode": {
     "mod3Description": "Three ADC channels plus I2C mode.",
@@ -997,9 +1057,11 @@
     "optionShared": "{{name}} (shared weather station)",
     "optionSuggested": "{{label}} — suggested",
     "ambiguous": "Two rain gauges report for this zone. Until you choose one, the zone has no measured rain.",
-    "onlyCandidate": "The only rain gauge of this zone is used.",
     "loadFailed": "The rain gauges of this zone could not be loaded.",
-    "banner": "Two rain gauges report for this zone. Choose one in the zone settings."
+    "banner": "Two rain gauges report for this zone. Choose one in the zone settings.",
+    "automaticOption": "Automatic: {{name}}",
+    "automaticOnlyCandidate": "Automatically using {{name}}, the only rain gauge for this zone.",
+    "bannerReadOnly": "Ask someone who can edit this zone to choose a rain gauge in zone settings."
   },
   "soilTension": {
     "sectionTitle": "Soil tension",

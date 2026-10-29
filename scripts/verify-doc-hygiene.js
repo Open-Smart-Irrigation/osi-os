@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const SCOPE = ['README.md', 'AGENTS.md', 'CLAUDE.md', 'CHANGELOG.md', 'docs', '.claude/skills', '.github', 'analysis'];
+const SCOPE = ['README.md', 'AGENTS.md', 'CLAUDE.md', 'CHANGELOG.md', 'docs', '.claude/skills', '.github', 'analysis', 'web/react-gui/src/components/farming/__tests__/ValveCard.test.tsx'];
 const ALLOWLIST_FILE = 'scripts/verify-doc-hygiene-allowlist.json';
 const BASELINE_REASON = 'baseline, removed by the documentation run';
 
