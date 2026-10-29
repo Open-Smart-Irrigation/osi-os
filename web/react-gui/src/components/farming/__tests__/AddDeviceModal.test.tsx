@@ -246,3 +246,89 @@ describe('AddDeviceModal generation control', () => {
     expect(devicesAPI.add).not.toHaveBeenCalled();
   });
 });
+
+describe('AddDeviceModal credential normalization', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(devicesAPI.getCatalog).mockResolvedValue(catalog as any);
+    vi.mocked(devicesAPI.add).mockResolvedValue({} as any);
+  });
+
+  it('removes pasted whitespace before validation and submits the selected type', async () => {
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await screen.findByLabelText('Device Name');
+
+    const deveui = screen.getByLabelText('DevEUI') as HTMLInputElement;
+    const appkey = screen.getByLabelText('AppKey') as HTMLInputElement;
+
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+    fireEvent.change(deveui, {
+      target: { value: ` \t${Array(8).fill('00').join(' \t\n\u00a0 ')}\n ` },
+    });
+    fireEvent.change(appkey, {
+      target: { value: ` \t${Array(16).fill('ab').join(' \t\n\u00a0 ')}\n ` },
+    });
+
+    expect(deveui).toHaveValue('0000000000000000');
+    expect(appkey).toHaveValue('AB'.repeat(16));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+
+    await waitFor(() => expect(devicesAPI.add).toHaveBeenCalledWith({
+      deveui: '0000000000000000',
+      name: 'North Valve',
+      type_id: 'STREGA_VALVE',
+      appkey: 'AB'.repeat(16),
+      strega_generation: 'GEN1',
+    }));
+  });
+
+  it('keeps malformed or overlong normalized credentials visible and rejects them', async () => {
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await screen.findByLabelText('Device Name');
+
+    const deveui = screen.getByLabelText('DevEUI');
+    const appkey = screen.getByLabelText('AppKey');
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+
+    for (const value of ['0'.repeat(17), '000000000000000G']) {
+      fireEvent.change(deveui, { target: { value } });
+      expect(deveui).toHaveValue(value);
+      fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+      expect(devicesAPI.add).not.toHaveBeenCalled();
+    }
+
+    fireEvent.change(deveui, { target: { value: '0000000000000000' } });
+    for (const value of ['A'.repeat(33), `${'A'.repeat(31)}G`]) {
+      fireEvent.change(appkey, { target: { value } });
+      expect(appkey).toHaveValue(value);
+      fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+      expect(devicesAPI.add).not.toHaveBeenCalled();
+    }
+  });
+
+  it('keeps a blank AppKey optional', async () => {
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await screen.findByLabelText('Device Name');
+    fireEvent.change(screen.getByLabelText('Device Type'), { target: { value: 'STREGA_VALVE' } });
+    fireEvent.change(screen.getByLabelText('Device Name'), { target: { value: 'North Valve' } });
+    fireEvent.change(screen.getByLabelText('DevEUI'), { target: { value: '0011223344556677' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Device' }));
+
+    await waitFor(() => expect(devicesAPI.add).toHaveBeenCalledWith(expect.objectContaining({
+      deveui: '0011223344556677',
+      type_id: 'STREGA_VALVE',
+      appkey: undefined,
+    })));
+  });
+
+  it('does not cap credential fields with native maxLength', async () => {
+    render(<AddDeviceModal isOpen onClose={vi.fn()} onDeviceAdded={vi.fn()} />);
+    await screen.findByLabelText('Device Name');
+
+    expect(screen.getByLabelText('DevEUI')).not.toHaveAttribute('maxLength');
+    expect(screen.getByLabelText('AppKey')).not.toHaveAttribute('maxLength');
+  });
+});
