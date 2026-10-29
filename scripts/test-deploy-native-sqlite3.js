@@ -292,6 +292,7 @@ function shellHarness(gw, body, opts = {}) {
     `NODE_RED_ROOT=${JSON.stringify(gw.proj)}`,
     `NATIVE_SQLITE3_FIRMWARE_DIR=${JSON.stringify(firmwareDir)}`,
     `TMP_DIR=${JSON.stringify(tmp)}`,
+    'NS_LOCKED=5.1.7',
     `NATIVE_ARCH=${JSON.stringify(opts.arch || 'armv7l')}`,
     `MUSL_LOADER_GLOB=${JSON.stringify(opts.muslGlob || path.join(gw.root, 'fake-libc', 'ld-musl-*.so.1'))}`,
   ];
@@ -308,12 +309,14 @@ function shellHarness(gw, body, opts = {}) {
     extractFunction('native_sqlite3_dir_loads'),
     extractFunction('native_build_toolchain_present'),
     extractFunction('native_sqlite3_reinstall_impossible'),
+    ...r2OptionalDeployHelpers(),
     extractFunction('run_native_sqlite3_preflight'),
     extractFunction('materialize_native_sqlite3'),
     extractFunction('verify_native_sqlite3_after_npm'),
     opts.toolchain === false
       ? 'native_build_toolchain_present() { return 1; }'
       : (opts.toolchain === true ? 'native_build_toolchain_present() { return 0; }' : ''),
+    ...(opts.shellHooks || []),
     body,
   ].join('\n');
   return spawnSync('sh', ['-c', script], { encoding: 'utf8' });
@@ -543,21 +546,6 @@ function stagingLeftovers(gw) {
   return fs.readdirSync(path.join(gw.proj, 'node_modules')).filter((n) => n.startsWith('.osi-sqlite3-stage.'));
 }
 
-test('materialize_native_sqlite3 does not touch a real directory that has no binary', () => {
-  // npm will leave it alone too (the version matches the lock), so the
-  // post-npm verification is what stops the deploy here.
-  const gw = makeGateway('real-without-binary');
-  const sqlitePath = path.join(gw.proj, 'node_modules', 'sqlite3');
-
-  const r = shellHarness(gw, 'materialize_native_sqlite3');
-  assert.equal(r.status, 0, `materialise should be a no-op here: ${r.stderr}`);
-  assert.equal(hasBinding(sqlitePath), false, 'materialise must not invent a binary');
-
-  const verify = shellHarness(gw, 'verify_native_sqlite3_after_npm');
-  assert.notEqual(verify.status, 0, 'the post-npm verification must refuse a module that cannot load');
-  assert.match(verify.stderr, /require\('sqlite3'\) failed/);
-});
-
 test('verify_native_sqlite3_after_npm passes on a working module', () => {
   const gw = makeGateway('real-with-binary');
   const r = shellHarness(gw, 'verify_native_sqlite3_after_npm');
@@ -728,21 +716,6 @@ test('deploy.sh wires the three native-sqlite3 steps in the right order', () => 
     'deploy.sh must not install with --ignore-scripts');
 });
 
-test('the firmware seed scripts hand npm a real sqlite3 directory, identically on both profiles', () => {
-  const profiles = ['full_raspberrypi_bcm27xx_bcm2712', 'full_raspberrypi_bcm27xx_bcm2709'];
-  const seeds = profiles.map((p) => fs.readFileSync(
-    path.join(REPO, 'conf', p, 'files/etc/uci-defaults/98_osi_node_red_seed'), 'utf8'));
-
-  assert.equal(seeds[0], seeds[1], 'the two profiles must ship the same seed script');
-  const seed = seeds[0];
-  assert.match(seed, /cp -a "\$SQLITE_SRC" "\$DST\/node_modules\/sqlite3"/,
-    'the seed must copy the firmware sqlite3, not link it: a Link at that path is what npm retires');
-  // The symlink survives as the fallback when the copy cannot be made, and
-  // deploy.sh has to keep handling it either way because field images ship it.
-  assert.match(seed, /ln -s "\$SQLITE_SRC" "\$DST\/node_modules\/sqlite3"/);
-  assert.match(DEPLOY, /materialize_native_sqlite3\(\) \{/);
-});
-
 test('materialize_native_sqlite3 does not abort a gateway that has no node_modules at all', () => {
   // A brand-new gateway: deploy.sh creates /srv/node-red but not
   // node_modules, so mktemp -d would fail inside a missing directory. Nothing
@@ -757,4 +730,1117 @@ test('materialize_native_sqlite3 does not abort a gateway that has no node_modul
   assert.equal(fs.existsSync(path.join(gw.proj, 'node_modules', 'sqlite3')), false,
     'nothing unverified may be swapped in');
   assert.deepEqual(stagingLeftovers(gw), [], 'and no staging directory may be left behind');
+});
+
+// Native sqlite3 recovery cases. The deploy cases run the actual deploy.sh
+// helper text; the seed cases run the exact BEGIN/END block of the mirrored
+// 98_osi_node_red_seed script, without its broad copy, helper loop or chown.
+function r2Quote(s) { return "'" + s.replaceAll("'", "'\\''") + "'"; }
+function r2OptionalDeployHelpers() {
+  return ['native_sqlite3_report_paths', 'native_sqlite3_pkg_version', 'native_sqlite3_exact_file',
+    'native_sqlite3_present', 'native_sqlite3_id', 'native_sqlite3_new_exact_file',
+    'native_sqlite3_restore_original', 'native_sqlite3_scan_backup',
+    'native_sqlite3_owned_final', 'native_sqlite3_recovery_lock',
+    'native_sqlite3_recover_early', 'native_sqlite3_rollback_failed_final',
+    'native_sqlite3_unrepaired', 'native_sqlite3_owner_prefix',
+    'native_sqlite3_clear_metadata_backup']
+    .filter(n => new RegExp('^' + n + '\\(\\) \\{', 'm').test(DEPLOY))
+    .map(extractFunction);
+}
+function r2SeedHarness(gw, opts = {}) {
+  const rel = p => path.join(REPO, 'conf', p,
+    'files/etc/uci-defaults/98_osi_node_red_seed');
+  const a = fs.readFileSync(rel('full_raspberrypi_bcm27xx_bcm2712'), 'utf8');
+  const b = fs.readFileSync(rel('full_raspberrypi_bcm27xx_bcm2709'), 'utf8');
+  assert.equal(a, b, 'seed profile bytes differ');
+  const sourceLine = 'SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3';
+  const oldRemove = 'rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"';
+  const oldSource = [sourceLine, 'if [ -d "$SQLITE_SRC" ]; then',
+    '    if ! cp -a "$SQLITE_SRC" "$DST/node_modules/sqlite3"; then',
+    '        rm -rf "$DST/node_modules/sqlite3"',
+    '        ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"',
+    '    fi', 'fi'].join('\n');
+  let body;
+  const begin = '# BEGIN native sqlite3 seed';
+  const end = '# END native sqlite3 seed';
+  if (a.includes(begin) || a.includes(end)) {
+    assert.equal(a.split(begin).length, 2, 'candidate seed BEGIN count');
+    assert.equal(a.split(end).length, 2, 'candidate seed END count');
+    const segment = a.slice(a.indexOf(begin) + begin.length, a.indexOf(end)).trim();
+    assert.match(segment, /seed_native_sqlite3\(\) \{/);
+    assert.match(segment, /\nseed_native_sqlite3 \|\| exit 1$/);
+    body = segment.replace(/\nseed_native_sqlite3 \|\| exit 1$/, '');
+  } else {
+    assert.ok(a.includes('\n' + oldRemove + '\n'), 'BASE deletion bytes changed');
+    assert.ok(a.includes('\n' + oldSource + '\n'), 'BASE source block bytes changed');
+    body = 'seed_native_sqlite3() {\n' + oldRemove + '\n' + oldSource + '\n}';
+  }
+  const src = path.join(gw.root, 'share', 'node-red');
+  const sqliteSrc = opts.firmware === false
+    ? path.join(gw.root, 'firmware-that-was-removed', 'sqlite3') : gw.fwSqlite;
+  fs.mkdirSync(src, { recursive: true });
+  const lock = opts.sourceLock || writeLockFixture(gw, LOCKED_VERSION);
+  fs.copyFileSync(lock, path.join(src, 'package-lock.json'));
+  assert.equal(body.split(sourceLine).length, 2, 'firmware assignment count');
+  body = body.replace(sourceLine, 'SQLITE_SRC=' + r2Quote(sqliteSrc));
+  const script = ['set -eu', 'SRC=' + r2Quote(src),
+    'DST=' + r2Quote(gw.proj), body, ...(opts.shellHooks || []),
+    'if seed_native_sqlite3; then echo SEED_RC=0; else echo SEED_RC=$?; fi',
+    'echo AFTER_SEED'].join('\n');
+  return spawnSync('sh', ['-c', script], { encoding: 'utf8' });
+}
+function r2DeployCall(gw, opts = {}) {
+  // deploy.sh runs `materialize_native_sqlite3 || exit 1`, so the post-npm
+  // verifier never follows a refused materialisation. `verify: false` stops
+  // at the same point for a case that must refuse; every other case verifies.
+  const verify = opts.verify === false ? []
+    : ['if verify_native_sqlite3_after_npm; then echo VERIFY_RC=0; else echo VERIFY_RC=$?; fi'];
+  const body = [
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; else echo PREFLIGHT_RC=$?; fi',
+    'if materialize_native_sqlite3; then echo MATERIALIZE_RC=0; else echo MATERIALIZE_RC=$?; fi',
+    ...verify,
+    'echo AFTER_MATERIALIZE',
+  ].join('\n');
+  return shellHarness(gw, body, {
+    lockFixture: opts.lockFixture || writeLockFixture(gw, LOCKED_VERSION),
+    arch: opts.arch || 'armv7l', muslGlob: opts.muslGlob || muslPresent(gw),
+    toolchain: opts.toolchain === undefined ? false : opts.toolchain,
+    shellHooks: opts.shellHooks || [], firmware: opts.firmware,
+  });
+}
+function r2Names(gw, prefix) {
+  return fs.readdirSync(path.join(gw.proj, 'node_modules'))
+    .filter(n => n.startsWith(prefix)).sort();
+}
+function r2OldBytes(gw) {
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  fs.writeFileSync(path.join(d, 'original.txt'), 'old bytes\n');
+  return { d, original: fs.readFileSync(path.join(d, 'original.txt')) };
+}
+
+test('R2 RED broken matching-version real directory repairs before npm on impossible target', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d } = r2OldBytes(gw);
+  const r = r2DeployCall(gw);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT_RC=0/);
+  assert.match(r.stdout, /MATERIALIZE_RC=0/);
+  assert.match(r.stdout, /VERIFY_RC=0/); // P predicts VERIFY_RC=1
+  assert.match(r.stdout, /AFTER_MATERIALIZE/);
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+  assert.equal(fs.existsSync(path.join(d, 'original.txt')), false);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-stage.'), []);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+test('R2 RED absent seed source preserves both installed entries', () => {
+  const gw = makeGateway('real-with-binary');
+  const { d, original } = r2OldBytes(gw);
+  const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+  fs.mkdirSync(peer, { recursive: true });
+  fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+  const r = r2SeedHarness(gw, { firmware: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/); // P predicts SEED_RC=0
+  assert.match(r.stdout, /AFTER_SEED/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+});
+test('R2 broken matching-version real directory refuses a failed repair even when reinstall is viable', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const peer = path.join(gw.proj, 'node_modules', 'fixture-peer');
+  fs.rmSync(peer, { recursive: true, force: true }); // source peer remains
+  const r = r2DeployCall(gw, { arch: 'aarch64' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT_RC=0/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.match(r.stdout, /AFTER_MATERIALIZE/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+test('R2 deploy copy fault matches source-dot and stage-slash arguments', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  // `${n-}` keeps the hook safe under `set -u` for the harness's own
+  // two-argument fetch copy; every call that does not match is forwarded.
+  const hook = 'cp() { case "${1-}:${2-}:${3-}" in "-a:$NATIVE_SQLITE3_FIRMWARE_DIR/.:"*/.osi-sqlite3-stage.*/)' +
+    ' echo DEPLOY_CP_HOOK >&2; return 23 ;; esac; command cp "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /DEPLOY_CP_HOOK/);
+  assert.match(r.stderr, /ERROR: could not copy sqlite3 into stage/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-stage.'), []);
+});
+test('R2 deploy ordinary old-path mv failure before rename retains old path', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const hook = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+    ' echo MV_BEFORE >&2; return 27 ;; esac; command mv "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /MV_BEFORE/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.equal(r2Names(gw, '.osi-sqlite3-rollback.').length, 1);
+});
+test('R2 deploy bounded interruption after real old-path rename restores before ordinary write', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const hook = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+    ' command mv "$@" || return $?; echo INTERRUPT_AFTER_OLD >&2; exit 26 ;; esac; command mv "$@"; }';
+  const first = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(first.status, 26, first.stderr);
+  assert.match(first.stderr, /INTERRUPT_AFTER_OLD/);
+  assert.doesNotMatch(first.stdout, /AFTER_MATERIALIZE/);
+  assert.equal(fs.existsSync(d), false);
+  assert.equal(r2Names(gw, '.osi-sqlite3-rollback.').length, 1);
+  const second = shellHarness(gw, [
+    'fetch() { return 22; }', // lock unavailable; restoration must precede it
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; echo ORDINARY_WRITE; else echo PREFLIGHT_RC=$?; fi',
+    'test -f "$NODE_RED_ROOT/node_modules/sqlite3/original.txt" || exit 29',
+    'echo AFTER_PREFLIGHT',
+  ].join('\n'), { arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.match(second.stdout, /AFTER_PREFLIGHT/);
+  assert.doesNotMatch(second.stdout, /ORDINARY_WRITE/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+});
+test('R2 deploy status failure after old rename is distinct from interruption', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const hook = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+    ' command mv "$@" || return $?; echo MV_AFTER_STATUS >&2; return 28 ;; esac; command mv "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /MV_AFTER_STATUS/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.equal(fs.existsSync(d), false);
+  const b = path.join(gw.proj, 'node_modules', r2Names(gw, '.osi-sqlite3-rollback.')[0]);
+  assert.deepEqual(fs.readFileSync(path.join(b, 'original', 'original.txt')), original);
+});
+test('R2 seed copy fault matches source and candidate arguments; verified link is fallback', () => {
+  const gw = makeGateway('real-without-binary');
+  const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+  fs.mkdirSync(peer, { recursive: true });
+  fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+  const hook = 'cp() { case "$1:$2:$3" in "-a:$SQLITE_SRC:"*/.osi-sqlite3-seed-stage.*/candidate)' +
+    ' echo SEED_CP_HOOK >&2; return 23 ;; esac; command cp "$@"; }';
+  const r = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /SEED_CP_HOOK/);
+  assert.match(r.stdout, /SEED_RC=0/);
+  assert.equal(fs.lstatSync(path.join(gw.proj, 'node_modules', 'sqlite3')).isSymbolicLink(), true);
+  assert.equal(requireSqlite3Through(gw), 0);
+  assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+});
+test('R2 seed same-target replacement symlink cannot borrow promotion identity', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  fs.rmSync(path.join(gw.proj, 'node_modules', 'fixture-peer'), { recursive: true, force: true });
+  const hook = 'mv() { case "$1:$2" in */.osi-sqlite3-seed-stage.*/link:"$DST/node_modules/sqlite3")' +
+    ' command mv "$@" || return $?; echo INTERRUPT_AFTER_LINK >&2; exit 26 ;; esac; command mv "$@"; }';
+  const first = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(first.status, 26, first.stderr);
+  assert.match(first.stderr, /INTERRUPT_AFTER_LINK/);
+  assert.doesNotMatch(first.stdout, /AFTER_SEED/);
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  assert.equal(fs.lstatSync(d).isSymbolicLink(), true);
+  fs.unlinkSync(d);
+  fs.symlinkSync(gw.fwSqlite, d); // same target text, different symlink inode
+  const second = r2SeedHarness(gw);
+  assert.match(second.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.equal(fs.lstatSync(d).isSymbolicLink(), true);
+  assert.equal(r2Names(gw, '.osi-sqlite3-seed-rollback.').length, 1);
+});
+test('R2 seed orphan real marker validates pin and load before removal', () => {
+  const gw = makeGateway('real-with-binary');
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const missingB = path.join(gw.proj, 'node_modules', '.osi-sqlite3-seed-rollback.missing');
+  fs.writeFileSync(path.join(d, '.osi-sqlite3-candidate-owner'), missingB + '\n');
+  const r = r2SeedHarness(gw);
+  assert.match(r.stdout, /SEED_RC=0/);
+  assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false);
+});
+test('R2 unknown destination file, FIFO and rollback marker types fail closed', () => {
+  for (const kind of ['file', 'fifo']) {
+    const gw = makeGateway('absent');
+    const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+    if (kind === 'file') fs.writeFileSync(d, 'unrelated\n');
+    else assert.equal(spawnSync('mkfifo', [d]).status, 0);
+    const before = fs.lstatSync(d).mode;
+    // require('sqlite3') opens a FIFO at the final path and blocks with no
+    // writer, so the FIFO case stops after the refused materialisation.
+    const r = r2DeployCall(gw, { verify: kind !== 'fifo' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+    assert.match(r.stderr, /unexpected sqlite3 destination type before deploy writes/);
+    assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+    assert.match(r.stderr, /ERROR: unexpected sqlite3 destination type: /);
+    if (kind === 'fifo') assert.doesNotMatch(r.stdout, /VERIFY_RC=/);
+    assert.match(r.stdout, /AFTER_MATERIALIZE/);
+    assert.equal(fs.lstatSync(d).mode, before);
+  }
+  const gw = makeGateway('real-without-binary');
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const b = path.join(gw.proj, 'node_modules', '.osi-sqlite3-rollback.unknown');
+  fs.mkdirSync(b);
+  fs.symlinkSync(d, path.join(b, '.owner'));
+  const before = fs.readdirSync(path.join(gw.proj, 'node_modules')).sort();
+  const r = r2DeployCall(gw);
+  assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules')).sort(), before);
+});
+test('R2 seed rejects file, FIFO and malformed candidate identity without deleting entries', () => {
+  for (const kind of ['file', 'fifo']) {
+    const gw = makeGateway('real-with-binary');
+    const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+    fs.rmSync(d, { recursive: true, force: true });
+    if (kind === 'file') fs.writeFileSync(d, 'unrelated\n');
+    else assert.equal(spawnSync('mkfifo', [d]).status, 0);
+    const before = fs.lstatSync(d).mode;
+    const r = r2SeedHarness(gw);
+    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+    assert.equal(fs.lstatSync(d).mode, before);
+  }
+  const gw = makeGateway('real-with-binary');
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const b = path.join(gw.proj, 'node_modules', '.osi-sqlite3-seed-rollback.bad-id');
+  fs.mkdirSync(b);
+  fs.writeFileSync(path.join(b, '.owner'), 'osi-sqlite3-seed-v2\n');
+  fs.writeFileSync(path.join(b, '.candidate-id'), 'unverified identity\n');
+  const before = fs.readdirSync(path.dirname(d)).sort();
+  const r = r2SeedHarness(gw);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readdirSync(path.dirname(d)).sort(), before);
+  assert.equal(fs.lstatSync(d).isDirectory(), true);
+});
+test('R2 wrong firmware version and missing pin retain broken real bytes', () => {
+  for (const fault of ['wrong-source-version', 'missing-pin']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    let lock = writeLockFixture(gw, LOCKED_VERSION);
+    if (fault === 'wrong-source-version') {
+      const pkg = path.join(gw.fwSqlite, 'package.json');
+      const parsed = JSON.parse(fs.readFileSync(pkg, 'utf8'));
+      parsed.version = '5.1.8';
+      fs.writeFileSync(pkg, JSON.stringify(parsed));
+    } else {
+      lock = path.join(gw.root, 'missing-pin.json');
+      fs.writeFileSync(lock, JSON.stringify({ lockfileVersion: 3, packages: {} }));
+    }
+    const r = r2DeployCall(gw, { lockFixture: lock });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+    if (fault === 'wrong-source-version')
+      assert.match(r.stderr, /source pin missing or source version mismatch/);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+  }
+});
+test('R2 seed source mismatch and invalid image pins preserve both entries', () => {
+  for (const fault of ['wrong-source-version', 'malformed-lock', 'missing-pin']) {
+    const gw = makeGateway('real-with-binary');
+    const { d, original } = r2OldBytes(gw);
+    const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+    fs.mkdirSync(peer, { recursive: true });
+    fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+    let lock = writeLockFixture(gw, LOCKED_VERSION);
+    if (fault === 'wrong-source-version') {
+      const pkg = path.join(gw.fwSqlite, 'package.json');
+      const parsed = JSON.parse(fs.readFileSync(pkg, 'utf8'));
+      parsed.version = '5.1.8';
+      fs.writeFileSync(pkg, JSON.stringify(parsed));
+    } else if (fault === 'malformed-lock') {
+      lock = path.join(gw.root, 'malformed-lock.json');
+      fs.writeFileSync(lock, '{"packages":{"node_modules/sqlite3":');
+    } else {
+      lock = path.join(gw.root, 'missing-pin.json');
+      fs.writeFileSync(lock, JSON.stringify({ lockfileVersion: 3, packages: {} }));
+    }
+    const r = r2SeedHarness(gw, { sourceLock: lock });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+  }
+});
+test('R2 copied seed stage uses installed peers and falls back to firmware link', () => {
+  const gw = makeGateway('real-without-binary');
+  fs.rmSync(path.join(gw.proj, 'node_modules', 'fixture-peer'), { recursive: true, force: true });
+  const r = r2SeedHarness(gw);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=0/);
+  assert.match(r.stderr, /temporary and npm can retire/);
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  assert.equal(fs.lstatSync(d).isSymbolicLink(), true);
+  assert.equal(requireSqlite3Through(gw), 0);
+});
+test('R2 failed seed fallback link retains the old real directory', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.rmSync(path.join(gw.proj, 'node_modules', 'fixture-peer'), { recursive: true, force: true });
+  const hook = 'ln() { case "$1:$2:$3" in "-s:$SQLITE_SRC:"*/.osi-sqlite3-seed-stage.*/link)' +
+    ' echo SEED_LN_HOOK >&2; return 25 ;; esac; command ln "$@"; }';
+  const r = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /SEED_LN_HOOK/);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+});
+test('R2 seed successful copied real directory repeats without swapping', () => {
+  const gw = makeGateway('real-without-binary');
+  const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+  fs.mkdirSync(peer, { recursive: true });
+  fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+  const first = r2SeedHarness(gw);
+  assert.match(first.stdout, /SEED_RC=0/);
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  assert.equal(fs.lstatSync(d).isDirectory(), true);
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+  fs.writeFileSync(path.join(d, 'repeat.txt'), 'repeat bytes\n');
+  const second = r2SeedHarness(gw);
+  assert.match(second.stdout, /SEED_RC=0/);
+  assert.equal(fs.readFileSync(path.join(d, 'repeat.txt'), 'utf8'), 'repeat bytes\n');
+  assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+});
+test('R2 deploy final-path load fault restores old real directory', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected final-path failure");\n');
+  const r = r2DeployCall(gw);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+test('R2 seed final-path load fault restores old real directory', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected seed final-path failure");\n');
+  const r = r2SeedHarness(gw);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+  // The emptied stage is retained with its owner line; the next run removes it.
+  const stages = r2Names(gw, '.osi-sqlite3-seed-stage.');
+  assert.equal(stages.length, 1);
+  assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', stages[0])), ['.owner']);
+  const again = r2SeedHarness(gw);
+  assert.match(again.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.ok(again.stderr.includes('removing seed stage left by an earlier attempt: ' +
+    path.join(gw.proj, 'node_modules', stages[0])), again.stderr);
+  assert.equal(r2Names(gw, '.osi-sqlite3-seed-stage.').length, 1);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+});
+test('R2 partial promoted-candidate removal retains backup and reports surviving paths', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected final-path failure");\n');
+  const hook = 'rm() { case "$1:$2" in "-rf:$NODE_RED_ROOT/node_modules/sqlite3")' +
+    ' command rm -f "$2/index.js"; echo PARTIAL_RM_HOOK >&2; return 30 ;; esac; command rm "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /PARTIAL_RM_HOOK/);
+  assert.match(r.stderr, /may be partial/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  const names = r2Names(gw, '.osi-sqlite3-rollback.');
+  assert.equal(names.length, 1);
+  const b = path.join(gw.proj, 'node_modules', names[0]);
+  assert.deepEqual(fs.readFileSync(path.join(b, 'original', 'original.txt')), original);
+  assert.equal(fs.existsSync(path.join(d, 'index.js')), false);
+});
+test('R2 deploy orphan real marker requires pin and load before cleanup', () => {
+  const gw = makeGateway('real-with-binary');
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const missingB = path.join(gw.proj, 'node_modules', '.osi-sqlite3-rollback.missing');
+  fs.writeFileSync(path.join(d, '.osi-sqlite3-candidate-owner'), missingB + '\n');
+  const r = r2DeployCall(gw);
+  assert.match(r.stdout, /PREFLIGHT_RC=0/);
+  assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false);
+});
+test('R2 deploy stage allocation fault never touches old real directory', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  // deploy.sh discards mktemp's stderr, so the hook records its call in a
+  // file the fixture owns, outside node_modules.
+  const marker = path.join(gw.root, 'stage-alloc-hook.marker');
+  assert.equal(fs.existsSync(marker), false);
+  const hook = 'mktemp() { case "${1-}:${2-}" in "-d:"*/.osi-sqlite3-stage.*)' +
+    ' printf "STAGE_ALLOC_HOOK\\n" >> ' + r2Quote(marker) + '; return 24 ;; esac; command mktemp "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'STAGE_ALLOC_HOOK\n');
+  assert.match(r.stderr, /ERROR: could not create sqlite3 stage/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-stage.'), []);
+});
+test('R2 multiple or unknown-child rollback entries retain destination', () => {
+  for (const fault of ['multiple', 'unknown-child']) {
+    const gw = makeGateway('real-with-binary');
+    const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+    const mods = path.dirname(d);
+    const b1 = path.join(mods, '.osi-sqlite3-rollback.first');
+    fs.mkdirSync(b1);
+    fs.writeFileSync(path.join(b1, '.owner'), 'osi-sqlite3-deploy-v2\n');
+    if (fault === 'multiple') {
+      const b2 = path.join(mods, '.osi-sqlite3-rollback.second');
+      fs.mkdirSync(b2);
+      fs.writeFileSync(path.join(b2, '.owner'), 'osi-sqlite3-deploy-v2\n');
+    } else fs.writeFileSync(path.join(b1, 'unknown'), 'keep\n');
+    const before = fs.readdirSync(mods).sort();
+    const r = r2DeployCall(gw);
+    assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+    assert.deepEqual(fs.readdirSync(mods).sort(), before);
+    assert.equal(fs.lstatSync(d).isDirectory(), true);
+  }
+});
+test('R2 no installed or firmware module remains an npm fallback only when reinstall is viable', () => {
+  const gw = makeGateway('absent');
+  const r = shellHarness(gw,
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; else echo PREFLIGHT_RC=$?; fi',
+    { firmware: false, arch: 'aarch64', toolchain: false });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PREFLIGHT_RC=0/);
+  assert.match(r.stdout, /SKIP/);
+});
+test('R2 deploy bounded interruption after stage promotion validates final before ordinary write', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const hook = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/".osi-sqlite3-stage.*:"$NODE_RED_ROOT/node_modules/sqlite3")' +
+    ' command mv "$@" || return $?; echo INTERRUPT_AFTER_FINAL >&2; exit 26 ;; esac; command mv "$@"; }';
+  const first = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(first.status, 26, first.stderr);
+  assert.match(first.stderr, /INTERRUPT_AFTER_FINAL/);
+  assert.doesNotMatch(first.stdout, /AFTER_MATERIALIZE/);
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+  const names = r2Names(gw, '.osi-sqlite3-rollback.');
+  assert.equal(names.length, 1);
+  const b = path.join(gw.proj, 'node_modules', names[0]);
+  assert.deepEqual(fs.readFileSync(path.join(b, 'original', 'original.txt')), original);
+  const second = shellHarness(gw, [
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; echo ORDINARY_WRITE; else echo PREFLIGHT_RC=$?; fi',
+    'echo AFTER_PREFLIGHT',
+  ].join('\n'), { lockFixture: writeLockFixture(gw, LOCKED_VERSION),
+    arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.doesNotMatch(second.stdout, /ORDINARY_WRITE/);
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+  assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false);
+});
+test('R2 seed bounded interruption after old rename restores existing entry', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const hook = 'mv() { case "$1:$2" in "$DST/node_modules/sqlite3:"*/.osi-sqlite3-seed-rollback.*/original)' +
+    ' command mv "$@" || return $?; echo SEED_INTERRUPT_AFTER_OLD >&2; exit 26 ;; esac; command mv "$@"; }';
+  const first = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(first.status, 26, first.stderr);
+  assert.match(first.stderr, /SEED_INTERRUPT_AFTER_OLD/);
+  assert.doesNotMatch(first.stdout, /AFTER_SEED/);
+  assert.equal(fs.existsSync(d), false);
+  const second = r2SeedHarness(gw);
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+});
+
+test('R3 copied deploy marker symlink cannot overwrite its target or the old module', () => {
+  for (const present of [true, false]) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const target = path.join(gw.root, present ? 'external-marker.txt' : 'dangling-marker.txt');
+    if (present) fs.writeFileSync(target, 'external bytes\n');
+    fs.symlinkSync(target, path.join(gw.fwSqlite, '.osi-sqlite3-candidate-owner'));
+    const r = r2DeployCall(gw);
+    assert.equal(r.status, 0, r.stderr);
+    if (present) assert.equal(fs.readFileSync(target, 'utf8'), 'external bytes\n');
+    else assert.equal(fs.existsSync(target), false);
+    assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+    assert.match(r.stderr, /already contains an ownership marker/);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+    // The refused stage is retained; the next materialise removes it first.
+    const stages = r2Names(gw, '.osi-sqlite3-stage.');
+    assert.equal(stages.length, 1);
+    const again = r2DeployCall(gw);
+    assert.ok(again.stderr.includes('left behind by an interrupted deploy: ' +
+      path.join(gw.proj, 'node_modules', stages[0])), again.stderr);
+    assert.match(again.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+    assert.equal(r2Names(gw, '.osi-sqlite3-stage.').length, 1);
+    if (present) assert.equal(fs.readFileSync(target, 'utf8'), 'external bytes\n');
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  }
+});
+test('R3 copied seed marker symlink cannot overwrite its target or the old module', () => {
+  for (const present of [true, false]) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const target = path.join(gw.root, present ? 'external-seed-marker.txt' : 'dangling-seed-marker.txt');
+    if (present) fs.writeFileSync(target, 'external seed bytes\n');
+    fs.symlinkSync(target, path.join(gw.fwSqlite, '.osi-sqlite3-candidate-owner'));
+    const r = r2SeedHarness(gw);
+    assert.equal(r.status, 0, r.stderr);
+    if (present) assert.equal(fs.readFileSync(target, 'utf8'), 'external seed bytes\n');
+    else assert.equal(fs.existsSync(target), false);
+    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+    assert.match(r.stderr, /already contains an ownership marker/);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+    // The refused stage keeps its owner line and copied candidate; the next
+    // run removes it before trying again.
+    const stages = r2Names(gw, '.osi-sqlite3-seed-stage.');
+    assert.equal(stages.length, 1);
+    assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', stages[0])).sort(),
+      ['.owner', 'candidate']);
+    const again = r2SeedHarness(gw);
+    assert.ok(again.stderr.includes('removing seed stage left by an earlier attempt: ' +
+      path.join(gw.proj, 'node_modules', stages[0])), again.stderr);
+    assert.match(again.stdout, /SEED_RC=[1-9][0-9]*/);
+    assert.equal(r2Names(gw, '.osi-sqlite3-seed-stage.').length, 1);
+    if (present) assert.equal(fs.readFileSync(target, 'utf8'), 'external seed bytes\n');
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  }
+});
+test('R3 deploy final failure restores old module without a second lock fetch', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const lock = writeLockFixture(gw, LOCKED_VERSION);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected final failure before lock reread");\n');
+  const hook = 'fetch() { if [ -f "$TMP_DIR/first-fetch" ]; then echo SECOND_LOCK_READ >&2; return 22; fi; : > "$TMP_DIR/first-fetch"; command cp ' +
+    r2Quote(lock) + ' "$2"; }';
+  const r = r2DeployCall(gw, { lockFixture: lock, shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.doesNotMatch(r.stderr, /SECOND_LOCK_READ/);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+test('R3 seed final failure restores old module after the source lock disappears', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const sourceLock = path.join(gw.root, 'share', 'node-red', 'package-lock.json');
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') { require("fs").unlinkSync(' + JSON.stringify(sourceLock) +
+    '); throw new Error("injected seed final failure after lock removal"); }\n');
+  const r = r2SeedHarness(gw);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.equal(fs.existsSync(sourceLock), false);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+});
+test('R3 occupied deploy restore retains the marker and nested original for inspection', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected deploy final failure for occupied restore");\n');
+  const hook = 'mv() { case "$1:$2" in */.osi-sqlite3-rollback.*/original:"$NODE_RED_ROOT/node_modules/sqlite3")' +
+    ' mkdir -p "$2"; printf "occupant bytes\\n" > "$2/occupant.txt"; command mv "$@" || return $?; echo OCCUPIED_DEPLOY_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+  const r = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /OCCUPIED_DEPLOY_RESTORE/);
+  assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  assert.equal(fs.readFileSync(path.join(d, 'occupant.txt'), 'utf8'), 'occupant bytes\n');
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original', 'original.txt')), original);
+  assert.equal(r2Names(gw, '.osi-sqlite3-rollback.').length, 1);
+  assert.match(r.stderr, /restore identity differs/);
+});
+test('R3 occupied seed restore retains the marker and nested original for inspection', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.appendFileSync(path.join(gw.fwSqlite, 'index.js'),
+    '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected seed final failure for occupied restore");\n');
+  const hook = 'mv() { case "$1:$2" in */.osi-sqlite3-seed-rollback.*/original:"$DST/node_modules/sqlite3")' +
+    ' mkdir -p "$2"; printf "occupant bytes\\n" > "$2/occupant.txt"; command mv "$@" || return $?; echo OCCUPIED_SEED_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+  const r = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /OCCUPIED_SEED_RESTORE/);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.equal(fs.readFileSync(path.join(d, 'occupant.txt'), 'utf8'), 'occupant bytes\n');
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original', 'original.txt')), original);
+  assert.equal(r2Names(gw, '.osi-sqlite3-seed-rollback.').length, 1);
+  assert.match(r.stderr, /restore identity differs/);
+});
+test('R3 early deploy recovery refuses an occupied restore before ordinary writes', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const interrupt = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+    ' command mv "$@" || return $?; echo INTERRUPT_EARLY_RESTORE >&2; exit 26 ;; esac; command mv "$@"; }';
+  const first = r2DeployCall(gw, { shellHooks: [interrupt] });
+  assert.equal(first.status, 26, first.stderr);
+  assert.match(first.stderr, /INTERRUPT_EARLY_RESTORE/);
+  assert.doesNotMatch(first.stdout, /AFTER_MATERIALIZE/);
+  const occupy = 'mv() { case "$1:$2" in */.osi-sqlite3-rollback.*/original:"$NODE_RED_ROOT/node_modules/sqlite3")' +
+    ' mkdir -p "$2"; printf "new occupant\\n" > "$2/new.txt"; command mv "$@" || return $?; echo OCCUPIED_EARLY_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+  const second = shellHarness(gw, [
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; echo ORDINARY_WRITE; else echo PREFLIGHT_RC=$?; fi',
+    'echo AFTER_PREFLIGHT',
+  ].join('\n'), { shellHooks: [occupy], fetchFails: true });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stderr, /OCCUPIED_EARLY_RESTORE/);
+  assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.doesNotMatch(second.stdout, /ORDINARY_WRITE/);
+  assert.equal(fs.readFileSync(path.join(d, 'new.txt'), 'utf8'), 'new occupant\n');
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original', 'original.txt')), original);
+  assert.equal(r2Names(gw, '.osi-sqlite3-rollback.').length, 1);
+});
+test('R3 failing fallback-link probe preserves the old seed entry', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  fs.rmSync(path.join(gw.proj, 'node_modules', 'fixture-peer'), { recursive: true, force: true });
+  // The seed discards the probe's output, so the hook records its call in a
+  // file the fixture owns, outside node_modules.
+  const marker = path.join(gw.root, 'link-probe-hook.marker');
+  assert.equal(fs.existsSync(marker), false);
+  const hook = `seed_sqlite3_loads() {
+    case "$1" in */.osi-sqlite3-seed-stage.*/link) printf 'LINK_PROBE_HOOK\\n' >> ${r2Quote(marker)}; return 17 ;; esac
+    node -e '
+      const sqlite3 = require(process.argv[1]);
+      const db = new sqlite3.Database(":memory:", function (err) {
+        if (err) { console.error("sqlite3 could not open :memory: -- " + (err && err.message ? err.message : err)); process.exit(1); }
+        db.close(function () { process.exit(0); });
+      });
+    ' "$1" >/dev/null
+  }`;
+  const r = r2SeedHarness(gw, { shellHooks: [hook] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'LINK_PROBE_HOOK\n');
+  assert.match(r.stderr, /ERROR: verified firmware-link fallback unavailable/);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-stage.'), []);
+});
+
+// R4: a rollback directory that never received the original, or whose
+// original was already put back, holds only owner metadata. The next run
+// clears it without touching the final path and stops; the run after that is
+// an ordinary eligible attempt. Directories that still hold an original, have
+// a foreign owner, or are symlinks stay exactly as they were.
+function r4Id(p) {
+  const s = fs.lstatSync(p, { bigint: true });
+  return `${s.dev}:${s.ino}`;
+}
+function r4Preflight(gw, opts = {}) {
+  return shellHarness(gw, [
+    'if run_native_sqlite3_preflight; then echo PREFLIGHT_RC=0; echo ORDINARY_WRITE; else echo PREFLIGHT_RC=$?; fi',
+    'echo AFTER_PREFLIGHT',
+  ].join('\n'), { lockFixture: writeLockFixture(gw, LOCKED_VERSION),
+    arch: 'armv7l', muslGlob: muslPresent(gw), toolchain: false,
+    shellHooks: opts.shellHooks || [] });
+}
+test('R4 dangling installed symlink still compares the firmware version before writes', () => {
+  const gw = makeGateway('dangling-symlink');
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  const link = fs.readlinkSync(d);
+  const bad = shellHarness(gw, PREFLIGHT_IN_CONDITION, {
+    lockFixture: writeLockFixture(gw, '5.1.8'), arch: 'armv7l',
+    muslGlob: muslPresent(gw), toolchain: false });
+  assert.equal(bad.status, 0, bad.stderr);
+  assert.match(bad.stdout, /PREFLIGHT-RC=[1-9]/, `${bad.stdout}${bad.stderr}`);
+  assert.match(bad.stderr, /firmware sqlite3 is 5\.1\.7/);
+  assert.match(bad.stderr, /5\.1\.8/);
+  assert.equal(fs.readlinkSync(d), link);
+  const good = shellHarness(gw, PREFLIGHT_IN_CONDITION, {
+    lockFixture: writeLockFixture(gw, LOCKED_VERSION), arch: 'armv7l',
+    muslGlob: muslPresent(gw), toolchain: false });
+  assert.match(good.stdout, /PREFLIGHT-RC=0/, `${good.stdout}${good.stderr}`);
+  assert.match(good.stdout, /firmware sqlite3 5\.1\.7 matches the shipped lockfile/);
+});
+test('R4 deploy metadata-only rollback after a failed or interrupted old-path rename clears and retries', () => {
+  for (const fault of ['status', 'interrupt']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const before = r4Id(d);
+    const action = fault === 'status'
+      ? 'echo OLD_MV_STATUS >&2; return 27' : 'echo OLD_MV_INTERRUPT >&2; exit 26';
+    const hook = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+      ' ' + action + ' ;; esac; command mv "$@"; }';
+    const first = r2DeployCall(gw, { shellHooks: [hook] });
+    if (fault === 'status') {
+      assert.equal(first.status, 0, first.stderr);
+      assert.match(first.stderr, /OLD_MV_STATUS/);
+      assert.match(first.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+    } else {
+      assert.equal(first.status, 26, first.stderr);
+      assert.match(first.stderr, /OLD_MV_INTERRUPT/);
+      assert.doesNotMatch(first.stdout, /AFTER_MATERIALIZE/);
+    }
+    const names = r2Names(gw, '.osi-sqlite3-rollback.');
+    assert.equal(names.length, 1);
+    assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', names[0])), ['.owner']);
+    assert.equal(r2Names(gw, '.osi-sqlite3-stage.').length, 1);
+    assert.equal(r4Id(d), before);
+    const second = r4Preflight(gw);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+    assert.doesNotMatch(second.stdout, /ORDINARY_WRITE/);
+    assert.match(second.stderr, /cleared metadata-only sqlite3 rollback/);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+    assert.equal(r4Id(d), before);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    const third = r2DeployCall(gw);
+    assert.equal(third.status, 0, third.stderr);
+    assert.match(third.stdout, /PREFLIGHT_RC=0/);
+    assert.match(third.stdout, /MATERIALIZE_RC=0/);
+    assert.match(third.stdout, /VERIFY_RC=0/);
+    assert.match(third.stderr, /interrupted deploy/);
+    assert.equal(requireSqlite3(gw.proj).status, 0);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-stage.'), []);
+  }
+});
+test('R4 deploy truncated owner metadata and a partial cleanup converge to an eligible retry', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const before = r4Id(d);
+  const b = path.join(gw.proj, 'node_modules', '.osi-sqlite3-rollback.partial');
+  fs.mkdirSync(b);
+  fs.writeFileSync(path.join(b, '.owner'), 'osi-sqlite3-dep'); // interrupted owner write
+  const rmdirHook = 'rmdir() { case "$1" in */.osi-sqlite3-rollback.*) echo RMDIR_HOOK >&2; return 31 ;; esac; command rmdir "$@"; }';
+  const first = r4Preflight(gw, { shellHooks: [rmdirHook] });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stderr, /RMDIR_HOOK/);
+  assert.match(first.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.doesNotMatch(first.stdout, /ORDINARY_WRITE/);
+  assert.match(first.stderr, /cleanup failed or was partial/);
+  assert.deepEqual(fs.readdirSync(b), []);
+  const second = r4Preflight(gw);
+  assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.match(second.stderr, /cleared metadata-only sqlite3 rollback/);
+  assert.equal(fs.existsSync(b), false);
+  assert.equal(r4Id(d), before);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  const third = r2DeployCall(gw);
+  assert.match(third.stdout, /PREFLIGHT_RC=0/);
+  assert.match(third.stdout, /MATERIALIZE_RC=0/);
+  assert.match(third.stdout, /VERIFY_RC=0/);
+});
+test('R4 deploy leftover metadata after an already restored rollback clears without moving the restored module', () => {
+  const gw = makeGateway('real-without-binary');
+  const { d, original } = r2OldBytes(gw);
+  const index = path.join(gw.fwSqlite, 'index.js');
+  const cleanIndex = fs.readFileSync(index);
+  fs.appendFileSync(index, '\nif (__dirname === ' + JSON.stringify(d) +
+    ') throw new Error("injected final failure before rollback cleanup");\n');
+  const hook = 'rm() { case "$1:$2" in "-rf:"*/.osi-sqlite3-rollback.*)' +
+    ' echo RM_BACKUP_HOOK >&2; return 32 ;; esac; command rm "$@"; }';
+  const first = r2DeployCall(gw, { shellHooks: [hook] });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stderr, /RM_BACKUP_HOOK/);
+  assert.match(first.stdout, /MATERIALIZE_RC=[1-9][0-9]*/);
+  const names = r2Names(gw, '.osi-sqlite3-rollback.');
+  assert.equal(names.length, 1);
+  assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', names[0])), ['.owner']);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  const restored = r4Id(d);
+  const second = r4Preflight(gw);
+  assert.match(second.stdout, /PREFLIGHT_RC=[1-9][0-9]*/);
+  assert.doesNotMatch(second.stdout, /ORDINARY_WRITE/);
+  assert.match(second.stderr, /cleared metadata-only sqlite3 rollback/);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+  assert.equal(r4Id(d), restored);
+  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+  fs.writeFileSync(index, cleanIndex); // the image fault is gone before the retry
+  const third = r2DeployCall(gw);
+  assert.match(third.stdout, /MATERIALIZE_RC=0/);
+  assert.match(third.stdout, /VERIFY_RC=0/);
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+test('R4 deploy unsafe rollback states are retained, not cleared', () => {
+  for (const fault of ['original-beside-unowned', 'symlink-backup', 'foreign-owner', 'truncated-owner-with-original']) {
+    const gw = makeGateway('real-with-binary');
+    const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+    const mods = path.dirname(d);
+    const b = path.join(mods, '.osi-sqlite3-rollback.unsafe');
+    const target = path.join(gw.root, 'symlinked-backup');
+    if (fault === 'symlink-backup') {
+      fs.mkdirSync(target);
+      fs.writeFileSync(path.join(target, '.owner'), 'osi-sqlite3-deploy-v2\n');
+      fs.symlinkSync(target, b);
+    } else {
+      fs.mkdirSync(b);
+      fs.writeFileSync(path.join(b, '.owner'), {
+        'original-beside-unowned': 'osi-sqlite3-deploy-v2\n',
+        'foreign-owner': 'someone-else\n',
+        'truncated-owner-with-original': 'osi-sqlite3',
+      }[fault]);
+      if (fault !== 'foreign-owner') {
+        fs.mkdirSync(path.join(b, 'original'));
+        fs.writeFileSync(path.join(b, 'original', 'kept.txt'), 'kept bytes\n');
+      }
+    }
+    const before = fs.readdirSync(mods).sort();
+    const bBefore = fs.readdirSync(b).sort();
+    const dId = r4Id(d);
+    const r = r4Preflight(gw);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/, fault);
+    assert.doesNotMatch(r.stdout, /ORDINARY_WRITE/, fault);
+    assert.doesNotMatch(r.stderr, /cleared/, fault);
+    assert.deepEqual(fs.readdirSync(mods).sort(), before, fault);
+    assert.deepEqual(fs.readdirSync(b).sort(), bBefore, fault);
+    assert.equal(r4Id(d), dId, fault);
+    if (fault === 'symlink-backup') assert.equal(fs.lstatSync(b).isSymbolicLink(), true);
+    if (fault === 'original-beside-unowned' || fault === 'truncated-owner-with-original')
+      assert.equal(fs.readFileSync(path.join(b, 'original', 'kept.txt'), 'utf8'), 'kept bytes\n');
+  }
+});
+test('R4 seed metadata-only rollback after a failed or interrupted old-path rename clears and retries', () => {
+  for (const fault of ['status', 'interrupt']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+    fs.mkdirSync(peer, { recursive: true });
+    fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+    const before = r4Id(d);
+    const action = fault === 'status'
+      ? 'echo SEED_OLD_MV_STATUS >&2; return 27' : 'echo SEED_OLD_MV_INTERRUPT >&2; exit 26';
+    const hook = 'mv() { case "$1:$2" in "$DST/node_modules/sqlite3:"*/.osi-sqlite3-seed-rollback.*/original)' +
+      ' ' + action + ' ;; esac; command mv "$@"; }';
+    const first = r2SeedHarness(gw, { shellHooks: [hook] });
+    if (fault === 'status') {
+      assert.equal(first.status, 0, first.stderr);
+      assert.match(first.stderr, /SEED_OLD_MV_STATUS/);
+      assert.match(first.stdout, /SEED_RC=[1-9][0-9]*/);
+    } else {
+      assert.equal(first.status, 26, first.stderr);
+      assert.match(first.stderr, /SEED_OLD_MV_INTERRUPT/);
+      assert.doesNotMatch(first.stdout, /AFTER_SEED/);
+    }
+    const names = r2Names(gw, '.osi-sqlite3-seed-rollback.');
+    assert.equal(names.length, 1);
+    assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', names[0])).sort(),
+      ['.candidate-id', '.owner']);
+    assert.equal(r2Names(gw, '.osi-sqlite3-seed-stage.').length, 1);
+    assert.equal(r4Id(d), before);
+    const second = r2SeedHarness(gw);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /SEED_RC=[1-9][0-9]*/);
+    assert.match(second.stderr, /cleared metadata-only seed rollback/);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-rollback.'), []);
+    assert.equal(r4Id(d), before);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+    const third = r2SeedHarness(gw);
+    assert.equal(third.status, 0, third.stderr);
+    assert.match(third.stdout, /SEED_RC=0/);
+    assert.equal(requireSqlite3(gw.proj).status, 0);
+    assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+  }
+});
+test('R4 seed partial candidate identity is metadata only and clears before an eligible retry', () => {
+  for (const id of ['', '2049:1234']) {
+    const gw = makeGateway('real-with-binary');
+    const { d, original } = r2OldBytes(gw);
+    const before = r4Id(d);
+    const b = path.join(gw.proj, 'node_modules', '.osi-sqlite3-seed-rollback.partial');
+    fs.mkdirSync(b);
+    fs.writeFileSync(path.join(b, '.owner'), 'osi-sqlite3-seed-v2\n');
+    fs.writeFileSync(path.join(b, '.candidate-id'), id); // interrupted identity write
+    const second = r2SeedHarness(gw);
+    assert.equal(second.status, 0, second.stderr);
+    assert.match(second.stdout, /SEED_RC=[1-9][0-9]*/, JSON.stringify(id));
+    assert.match(second.stderr, /cleared metadata-only seed rollback/);
+    assert.equal(fs.existsSync(b), false);
+    assert.equal(r4Id(d), before);
+    const third = r2SeedHarness(gw);
+    assert.match(third.stdout, /SEED_RC=0/);
+    assert.match(third.stdout, /existing real sqlite3 matches image pin and loads/);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
+    assert.equal(r4Id(d), before);
+  }
+});
+test('R4 seed stage with only an interrupted owner write is removed; a stage with payload and no owner is retained', () => {
+  const gw = makeGateway('real-with-binary');
+  const mods = path.join(gw.proj, 'node_modules');
+  const partial = path.join(mods, '.osi-sqlite3-seed-stage.partial');
+  fs.mkdirSync(partial);
+  fs.writeFileSync(path.join(partial, '.owner'), 'osi-sqlite3-seed-st');
+  const r = r2SeedHarness(gw);
+  assert.match(r.stdout, /SEED_RC=0/, r.stderr);
+  assert.equal(fs.existsSync(partial), false);
+  const unowned = path.join(mods, '.osi-sqlite3-seed-stage.unowned');
+  fs.mkdirSync(path.join(unowned, 'candidate'), { recursive: true });
+  fs.writeFileSync(path.join(unowned, 'candidate', 'kept.txt'), 'kept bytes\n');
+  const refused = r2SeedHarness(gw);
+  assert.match(refused.stdout, /SEED_RC=[1-9][0-9]*/);
+  assert.match(refused.stderr, /unowned seed stage/);
+  assert.equal(fs.readFileSync(path.join(unowned, 'candidate', 'kept.txt'), 'utf8'), 'kept bytes\n');
+});
+test('R4 seed unsafe rollback states are retained, not cleared', () => {
+  for (const fault of ['original-beside-unowned', 'foreign-owner', 'identity-beside-truncated-owner', 'partial-identity-with-original']) {
+    const gw = makeGateway('real-with-binary');
+    const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+    const mods = path.dirname(d);
+    const b = path.join(mods, '.osi-sqlite3-seed-rollback.unsafe');
+    fs.mkdirSync(b);
+    const files = {
+      'original-beside-unowned': { '.owner': 'osi-sqlite3-seed-v2\n', '.candidate-id': '1:2:3\n' },
+      'foreign-owner': { '.owner': 'someone-else\n' },
+      'identity-beside-truncated-owner': { '.owner': 'osi-sqlite3', '.candidate-id': '1:2:3\n' },
+      'partial-identity-with-original': { '.owner': 'osi-sqlite3-seed-v2\n', '.candidate-id': '1:2' },
+    }[fault];
+    for (const [name, value] of Object.entries(files)) fs.writeFileSync(path.join(b, name), value);
+    if (fault === 'original-beside-unowned' || fault === 'partial-identity-with-original') {
+      fs.mkdirSync(path.join(b, 'original'));
+      fs.writeFileSync(path.join(b, 'original', 'kept.txt'), 'kept bytes\n');
+    }
+    const before = fs.readdirSync(mods).sort();
+    const bBefore = fs.readdirSync(b).sort();
+    const dId = r4Id(d);
+    const r = r2SeedHarness(gw);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, fault);
+    assert.doesNotMatch(r.stderr, /cleared/, fault);
+    assert.deepEqual(fs.readdirSync(mods).sort(), before, fault);
+    assert.deepEqual(fs.readdirSync(b).sort(), bBefore, fault);
+    assert.equal(r4Id(d), dId, fault);
+    if (fault === 'original-beside-unowned' || fault === 'partial-identity-with-original')
+      assert.equal(fs.readFileSync(path.join(b, 'original', 'kept.txt'), 'utf8'), 'kept bytes\n');
+  }
+});
+
+// R5: a restore that found the final path occupied moved the original to
+// <final>/original and kept its rollback directory, which now holds only
+// metadata. Every later run must keep refusing. Clearing that directory would
+// let the next ordinary repair move the occupant, with the original inside it,
+// into a new rollback directory and delete it after a successful promotion.
+// The image fault is removed first, so such a repair would succeed.
+function r5Snapshot(gw, prefix) {
+  const mods = path.join(gw.proj, 'node_modules');
+  const d = path.join(mods, 'sqlite3');
+  const nested = path.join(d, 'original');
+  const backups = r2Names(gw, prefix);
+  assert.equal(backups.length, 1);
+  const b = path.join(mods, backups[0]);
+  return {
+    modules: fs.readdirSync(mods).sort(),
+    backup: fs.readdirSync(b).sort().map(n => [n, fs.readFileSync(path.join(b, n), 'latin1')]),
+    finalId: r4Id(d),
+    finalChildren: fs.readdirSync(d).sort(),
+    occupant: fs.readFileSync(path.join(d, 'occupant.txt'), 'latin1'),
+    nestedId: r4Id(nested),
+    nestedChildren: fs.readdirSync(nested).sort(),
+    nestedOriginal: fs.readFileSync(path.join(nested, 'original.txt'), 'latin1'),
+  };
+}
+test('R5 deploy occupied restore stays refused across fresh invocations', () => {
+  for (const origin of ['final-failure', 'early']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const index = path.join(gw.fwSqlite, 'index.js');
+    const cleanIndex = fs.readFileSync(index);
+    const occupy = 'mv() { case "$1:$2" in */.osi-sqlite3-rollback.*/original:"$NODE_RED_ROOT/node_modules/sqlite3")' +
+      ' mkdir -p "$2"; printf "occupant bytes\\n" > "$2/occupant.txt"; command mv "$@" || return $?; echo R5_OCCUPIED_DEPLOY_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+    let refused;
+    if (origin === 'final-failure') {
+      fs.appendFileSync(index, '\nif (__dirname === ' + JSON.stringify(d) +
+        ') throw new Error("injected deploy final failure for occupied restore");\n');
+      refused = r2DeployCall(gw, { shellHooks: [occupy] });
+      assert.match(refused.stdout, /MATERIALIZE_RC=[1-9][0-9]*/, origin);
+    } else {
+      const interrupt = 'mv() { case "$1:$2" in "$NODE_RED_ROOT/node_modules/sqlite3:"*/.osi-sqlite3-rollback.*/original)' +
+        ' command mv "$@" || return $?; echo R5_DEPLOY_INTERRUPT_AFTER_OLD >&2; exit 26 ;; esac; command mv "$@"; }';
+      const first = r2DeployCall(gw, { shellHooks: [interrupt] });
+      assert.equal(first.status, 26, first.stderr);
+      assert.match(first.stderr, /R5_DEPLOY_INTERRUPT_AFTER_OLD/);
+      refused = r4Preflight(gw, { shellHooks: [occupy] });
+      assert.match(refused.stdout, /PREFLIGHT_RC=[1-9][0-9]*/, origin);
+      assert.doesNotMatch(refused.stdout, /ORDINARY_WRITE/, origin);
+    }
+    assert.equal(refused.status, 0, refused.stderr);
+    assert.match(refused.stderr, /R5_OCCUPIED_DEPLOY_RESTORE/, origin);
+    assert.match(refused.stderr, /restore identity differs/, origin);
+    fs.writeFileSync(index, cleanIndex); // an ordinary repair would now succeed
+    const snapshot = r5Snapshot(gw, '.osi-sqlite3-rollback.');
+    assert.deepEqual(snapshot.backup, [['.owner', 'osi-sqlite3-deploy-v2\n']], origin);
+    assert.deepEqual(snapshot.finalChildren, ['occupant.txt', 'original'], origin);
+    assert.equal(snapshot.occupant, 'occupant bytes\n', origin);
+    assert.equal(snapshot.nestedOriginal, original.toString('latin1'), origin);
+    for (const run of ['preflight', 'full deploy']) {
+      const r = run === 'preflight' ? r4Preflight(gw) : r2DeployCall(gw);
+      const label = `${origin}: ${run}`;
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /PREFLIGHT_RC=[1-9][0-9]*/, label);
+      assert.doesNotMatch(r.stdout, /ORDINARY_WRITE/, label);
+      assert.doesNotMatch(r.stderr, /cleared/, label);
+      assert.match(r.stderr, /original is present beside metadata-only rollback/, label);
+      if (run === 'full deploy') {
+        assert.match(r.stdout, /MATERIALIZE_RC=[1-9][0-9]*/, label);
+        assert.match(r.stderr, /rollback appeared after preflight/, label);
+        assert.doesNotMatch(r.stdout, /OK: materialised/, label);
+      }
+      assert.deepEqual(r5Snapshot(gw, '.osi-sqlite3-rollback.'), snapshot, label);
+    }
+  }
+});
+test('R5 seed occupied restore stays refused across fresh invocations', () => {
+  for (const origin of ['final-failure', 'early']) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+    fs.mkdirSync(peer, { recursive: true });
+    fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+    const index = path.join(gw.fwSqlite, 'index.js');
+    const cleanIndex = fs.readFileSync(index);
+    const occupy = 'mv() { case "$1:$2" in */.osi-sqlite3-seed-rollback.*/original:"$DST/node_modules/sqlite3")' +
+      ' mkdir -p "$2"; printf "occupant bytes\\n" > "$2/occupant.txt"; command mv "$@" || return $?; echo R5_OCCUPIED_SEED_RESTORE >&2; return 0 ;; esac; command mv "$@"; }';
+    if (origin === 'final-failure') {
+      fs.appendFileSync(index, '\nif (__dirname === ' + JSON.stringify(d) +
+        ') throw new Error("injected seed final failure for occupied restore");\n');
+    } else {
+      const interrupt = 'mv() { case "$1:$2" in "$DST/node_modules/sqlite3:"*/.osi-sqlite3-seed-rollback.*/original)' +
+        ' command mv "$@" || return $?; echo R5_SEED_INTERRUPT_AFTER_OLD >&2; exit 26 ;; esac; command mv "$@"; }';
+      const first = r2SeedHarness(gw, { shellHooks: [interrupt] });
+      assert.equal(first.status, 26, first.stderr);
+      assert.match(first.stderr, /R5_SEED_INTERRUPT_AFTER_OLD/);
+    }
+    const refused = r2SeedHarness(gw, { shellHooks: [occupy] });
+    assert.equal(refused.status, 0, refused.stderr);
+    assert.match(refused.stdout, /SEED_RC=[1-9][0-9]*/, origin);
+    assert.match(refused.stderr, /R5_OCCUPIED_SEED_RESTORE/, origin);
+    assert.match(refused.stderr, /restore identity differs/, origin);
+    fs.writeFileSync(index, cleanIndex); // an ordinary seed would now succeed
+    const snapshot = r5Snapshot(gw, '.osi-sqlite3-seed-rollback.');
+    assert.deepEqual(snapshot.backup.map(([n]) => n), ['.candidate-id', '.owner'], origin);
+    assert.equal(snapshot.backup[1][1], 'osi-sqlite3-seed-v2\n', origin);
+    assert.deepEqual(snapshot.finalChildren, ['occupant.txt', 'original'], origin);
+    assert.equal(snapshot.occupant, 'occupant bytes\n', origin);
+    assert.equal(snapshot.nestedOriginal, original.toString('latin1'), origin);
+    for (const boot of ['next boot', 'boot after that']) {
+      const r = r2SeedHarness(gw);
+      const label = `${origin}: ${boot}`;
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, label);
+      assert.doesNotMatch(r.stdout, /OK: (seeded|existing)/, label);
+      assert.doesNotMatch(r.stderr, /cleared/, label);
+      assert.match(r.stderr, /original is present beside metadata-only seed rollback/, label);
+      assert.deepEqual(r5Snapshot(gw, '.osi-sqlite3-seed-rollback.'), snapshot, label);
+      assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n', label);
+    }
+  }
 });
