@@ -58,14 +58,22 @@ MDS/TWD already work this way.
 writes one row per zone per completed local day into `zone_daily_agronomy`,
 resolving ET0 through three tiers, the first complete one winning for that
 day:
-1. **`station_fao56`** — daily FAO-56 Penman-Monteith (`et0.js`'s
-   `fao56Et0`, ported from the cloud's `WeatherMath.fao56Et0`) from a
-   SenseCAP S2120 assigned to the zone (`weather_station_zones`), whose
-   uplinks `osi-station-hours` aggregates into `weather_station_hours`
-   (radiation from `light_lux / luxPerWm2`). A day whose radiation sum is
-   below 0.15 × Ra, or that reads 0 in an hour whose extraterrestrial
-   radiation exceeds 1 MJ/m², falls to the next tier (covered or failing
-   light sensor).
+1. **`station_fao56`** — hourly FAO-56 Penman-Monteith (eq. 53), summed
+   over the local day: `resolveDay` calls `et0.js`'s `fao56Et0HourlyDay`,
+   and the row stores `et0_tier` `station_fao56` with `et0_source`
+   `fao56_hourly`. The input is a SenseCAP S2120 assigned to the zone
+   (`weather_station_zones`), whose uplinks `osi-station-hours` aggregates
+   into `weather_station_hours` (radiation from `light_lux / luxPerWm2`).
+   Every hour of the local day (23 or 25 across a DST change) needs mean
+   temperature, humidity, wind and non-negative radiation from at least
+   three uplinks; this tier does not use daily minimum or maximum
+   temperature. The zone also needs a longitude, which hourly Ra requires.
+   The signed hourly values are summed, clamped at 0 once and rounded to 2
+   decimals. A day whose radiation sum is 0, or strictly below 0.06 × Ra, or
+   that reads 0 in an hour whose extraterrestrial radiation exceeds
+   1 MJ/m², falls to the next tier (covered or failing light sensor). The
+   daily `fao56Et0` helper remains in `et0.js`, but `resolveDay` does not
+   call it.
 2. **`<provider>_hourly_sum`** — the sum of the zone's stored
    `weather_provider_hours` (Open-Meteo or MeteoSwiss, fetched by
    `osi-weather-provider`) over the local day, only when every hour is
