@@ -714,3 +714,63 @@ test('GET /api/system/settings: field-tester presence does not affect the other 
   assert.equal(out.payload.gatewayHubModuleEnabled, MODULE_DEFAULTS.gatewayHubModuleEnabled);
   assert.equal(out.payload.journalModuleEnabled, MODULE_DEFAULTS.journalModuleEnabled);
 });
+
+test('issue 434 system-settings PUT uses fresh role while GET and flag-off stay open',
+  { concurrency: false }, async () => {
+    const dbPath = await tempDb();
+    const scope434 = require('../osi-scope-helper');
+    scope434._resetForTests();
+    try {
+      insertUser(dbPath, { id: 1, username: 'admin1', role: 'admin' });
+      const raw = new DatabaseSync(dbPath);
+      let uuid;
+      try {
+        uuid = raw.prepare('SELECT user_uuid FROM users WHERE id=1').get().user_uuid;
+        assert.ok(uuid, 'seed trigger assigned a scope key');
+      } finally { raw.close(); }
+      const warmDb = TestDatabase(dbPath);
+      try {
+        // Leave this admin scope cached across the out-of-band demotion.
+        assert.equal((await scope434.resolveScope(warmDb, uuid, { scopedMode: true })).role, 'admin');
+      } finally { await new Promise((resolve) => warmDb.close(resolve)); }
+      const demoteRaw = new DatabaseSync(dbPath);
+      try { demoteRaw.exec("UPDATE users SET role='viewer' WHERE id=1"); }
+      finally { demoteRaw.close(); }
+
+      const denied = await callScoped(dbPath,
+        reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'admin1'));
+      assert.equal(denied.statusCode, 403);
+      const inspectDenied = new DatabaseSync(dbPath);
+      try {
+        assert.equal(inspectDenied.prepare(
+          "SELECT value FROM app_settings WHERE key='gateway_timezone'").get(), undefined);
+      } finally { inspectDenied.close(); }
+
+      const viewerGet = await callScoped(dbPath, reqAs('GET', undefined, 1, 'admin1'));
+      assert.equal(viewerGet.statusCode, 200);
+      const flagOff = await handleHttpRequest({
+        msg: reqAs('PUT', { gatewayTimezone: 'UTC' }, 1, 'admin1'),
+        Database: TestDatabase,
+        environment: { authTokenSecret: SECRET, dbPath },
+        scope: { assertAuthenticatedRole() { throw new Error('flag-off scope call'); } },
+        warn: () => {},
+      });
+      assert.equal(flagOff.statusCode, 200);
+
+      const restoreRaw = new DatabaseSync(dbPath);
+      try { restoreRaw.exec("UPDATE users SET role='admin' WHERE id=1"); }
+      finally { restoreRaw.close(); }
+      const allowed = await callScoped(dbPath,
+        reqAs('PUT', { gatewayTimezone: 'Europe/Zurich' }, 1, 'admin1'));
+      assert.equal(allowed.statusCode, 200);
+      const inspectAllowed = new DatabaseSync(dbPath);
+      try {
+        assert.equal(inspectAllowed.prepare(
+          "SELECT value FROM app_settings WHERE key='gateway_timezone'").get().value,
+          'Europe/Zurich');
+      } finally { inspectAllowed.close(); }
+    } finally {
+      scope434._resetForTests();
+      fs.rmSync(path.dirname(dbPath), { recursive: true, force: true });
+    }
+  });

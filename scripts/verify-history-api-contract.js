@@ -472,4 +472,8 @@ if (require.main === module) {
   }
 }
 
-module.exports = { verifyAnalysisRouterImplementation, verifyZoneCsvResponseContract };
+module.exports = {
+  verifyAnalysisRouterImplementation,
+  verifyHistoryRouterImplementation,
+  verifyZoneCsvResponseContract,
+};
