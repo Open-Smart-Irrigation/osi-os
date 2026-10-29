@@ -9,10 +9,12 @@
 // New features go into tested osi-* modules; there is no growth budget for them.
 // The only way past 1-3 is a fix exception in scripts/flows-growth-exceptions.json,
 // and only as that file stands at --base-ref: a PR cannot grant itself growth.
-// An exception gives absolute ceilings (per node and per profile total), so it
-// never re-grants once used. It grants for EXCEPTION_WINDOW_DAYS after `granted`;
-// after that the profile total must be back at or below `payback_total`, or every
-// run fails until the growth is extracted into a module.
+// An exception gives absolute per-node ceilings, so it never re-grants once used,
+// and only growth in its listed nodes may raise the total. It grants for
+// EXCEPTION_WINDOW_DAYS from `granted`; from then on every run fails until the
+// profile total is at or below `payback_total`. A merged entry cannot be edited,
+// and cannot be deleted before it is paid back. Function code is func plus the
+// node's On Start (initialize) and On Stop (finalize) code.
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -105,6 +107,8 @@ function parseDate(value) {
   return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value ? ms : null;
 }
 
+function isoDate(ms) { return new Date(ms).toISOString().slice(0, 10); }
+
 function isCount(v) { return Number.isSafeInteger(v) && v >= 0; }
 
 // Schema errors for one exception entry; [] when well formed.
@@ -117,11 +121,9 @@ function exceptionErrors(e) {
   if (!Number.isSafeInteger(e.issue) || e.issue <= 0) errs.push(label + ': issue must be the GitHub issue number of the bug');
   if (parseDate(e.granted) === null) errs.push(label + ': granted must be a YYYY-MM-DD date');
   if (typeof e.reason !== 'string' || e.reason.trim() === '') errs.push(label + ': reason must be non-empty');
-  if (!e.nodes || typeof e.nodes !== 'object' || Array.isArray(e.nodes)) errs.push(label + ': nodes must map node id to max_chars');
+  if (!e.nodes || typeof e.nodes !== 'object' || Array.isArray(e.nodes) || !Object.keys(e.nodes).length) errs.push(label + ': nodes must map at least one node id to max_chars');
   else for (const [id, max] of Object.entries(e.nodes)) if (!isCount(max)) errs.push(label + ': nodes.' + id + ' must be a non-negative integer');
-  if (!isCount(e.total_max)) errs.push(label + ': total_max must be a non-negative integer');
   if (!isCount(e.payback_total)) errs.push(label + ': payback_total must be a non-negative integer');
-  else if (isCount(e.total_max) && e.payback_total > e.total_max) errs.push(label + ': payback_total must not exceed total_max');
   return errs;
 }
 
@@ -142,43 +144,67 @@ function parseExceptions(raw, where) {
   return { list, errors };
 }
 
-// Exceptions as they stand at the base ref. Missing file = no exceptions.
+// Exceptions as they stand at the base ref. Only a missing path counts as
+// "no exceptions"; any other git failure fails closed.
 function baseExceptions(gitRoot, baseRef, rel) {
   let raw;
   try {
     raw = execFileSync('git', ['-C', gitRoot, 'show', baseRef + ':' + rel], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: GIT_MAX_BUFFER,
     });
-  } catch {
-    return { list: [], errors: [] };
+  } catch (e) {
+    const stderr = e.stderr ? e.stderr.toString() : String(e.message);
+    if (/does not exist in|exists on disk, but not in/.test(stderr)) return { list: [], errors: [] };
+    throw new Error('base ref unusable, failing closed: cannot read ' + rel + ' (' + baseRef + '): ' + stderr.trim());
   }
   return parseExceptions(raw, rel + ' at ' + baseRef);
 }
 
-// The working-tree file is only validated; its new entries take effect once merged.
-function headExceptionErrors(root, rel, base, todayMs) {
+function headExceptions(root, rel) {
   const file = path.join(root, rel);
-  if (!fs.existsSync(file)) return [];
-  const head = parseExceptions(fs.readFileSync(file, 'utf8'), rel);
+  if (!fs.existsSync(file)) return { list: [], errors: [] };
+  return parseExceptions(fs.readFileSync(file, 'utf8'), rel);
+}
+
+// The working-tree file is only validated; its new entries take effect once
+// merged. A merged entry may not change, and may not be deleted until every
+// profile total is at or below its payback_total.
+function headExceptionErrors(rel, head, base, todayMs, baseTotals, headTotals) {
   const errors = [...head.errors];
   const baseById = new Map(base.list.map((e) => [e.id, e]));
+  const headIds = new Set(head.list.map((e) => e && e.id));
+  const minBase = Math.min(...baseTotals);
+  const maxHead = Math.max(...headTotals);
   for (const e of head.list) {
     if (!e || typeof e.id !== 'string') continue;
     const prior = baseById.get(e.id);
     if (prior) {
-      if (JSON.stringify(prior) !== JSON.stringify(e)) errors.push(rel + ': exception ' + e.id + ' changed after it was granted; add a new entry or delete this one');
-    } else if (parseDate(e.granted) !== null && parseDate(e.granted) > todayMs) {
+      if (JSON.stringify(prior) !== JSON.stringify(e)) errors.push(rel + ': exception ' + e.id + ' changed after it was granted; add a new entry instead');
+      continue;
+    }
+    if (parseDate(e.granted) !== null && parseDate(e.granted) > todayMs) {
       errors.push(rel + ': exception ' + e.id + ' is granted in the future (' + e.granted + ')');
+    }
+    if (isCount(e.payback_total) && e.payback_total > minBase) {
+      errors.push(rel + ': exception ' + e.id + ' payback_total ' + e.payback_total + ' is above the current total ' + minBase + '; set it to the total before the fix');
+    }
+  }
+  for (const e of base.list) {
+    if (!e || headIds.has(e.id)) continue;
+    if (maxHead > e.payback_total) {
+      errors.push(rel + ': exception ' + e.id + ' cannot be deleted before it is paid back (total ' + maxHead + ' > ' + e.payback_total + ')');
     }
   }
   return errors;
 }
 
+function isActive(e, todayMs) {
+  const g = parseDate(e.granted);
+  return g !== null && todayMs >= g && todayMs < g + EXCEPTION_WINDOW_DAYS * DAY_MS;
+}
+
 function activeExceptions(list, todayMs) {
-  return list.filter((e) => {
-    const g = parseDate(e.granted);
-    return g !== null && todayMs >= g && todayMs <= g + EXCEPTION_WINDOW_DAYS * DAY_MS;
-  });
+  return list.filter((e) => isActive(e, todayMs));
 }
 
 function checkSurface(rel, headFlows, baseFlows, active) {
@@ -192,18 +218,23 @@ function checkSurface(rel, headFlows, baseFlows, active) {
     return max;
   };
   const grown = {};
+  let excepted = 0; // growth that active fix exceptions cover; only it may raise the total
 
   for (const [id, { chars }] of head.sizes) {
     const baseEntry = base.sizes.get(id);
+    const baseChars = baseEntry ? baseEntry.chars : 0;
     const ceiling = nodeCeiling(id);
-    if (baseEntry) {
-      if (chars > baseEntry.chars && (ceiling === null || chars > ceiling)) {
-        failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseEntry.chars + ' at base' + (ceiling !== null ? '; fix exception ceiling ' + ceiling : '') + ')');
+    if (ceiling !== null) {
+      if (chars > baseChars && chars > ceiling) {
+        failures.push(rel + ': ' + (baseEntry ? 'node ' + id + ' grew (' + chars + ' > ' + baseChars + ' at base; ' : 'new node ' + id + ' (' + chars + ' chars; ')
+          + 'fix exception ceiling ' + ceiling + ')');
         grown[id] = chars;
+      } else {
+        excepted += Math.max(0, chars - baseChars);
       }
-    } else if (ceiling !== null) {
-      if (chars > ceiling) {
-        failures.push(rel + ': new node ' + id + ' is ' + chars + ' chars, exceeding its fix exception ceiling of ' + ceiling);
+    } else if (baseEntry) {
+      if (chars > baseChars) {
+        failures.push(rel + ': node ' + id + ' grew (' + chars + ' > ' + baseChars + ' at base)');
         grown[id] = chars;
       }
     } else {
@@ -213,23 +244,26 @@ function checkSurface(rel, headFlows, baseFlows, active) {
       }
       const node = headFlows.find((n) => n && n.id === id);
       const thin = isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX });
-      if (!thin.ok) failures.push(rel + ': new node ' + id + ' - ' + thin.reason);
+      if (!thin.ok) {
+        failures.push(rel + ': new node ' + id + ' - ' + thin.reason);
+        grown[id] = chars;
+      }
     }
   }
-  const totalCeiling = exceptions.reduce((m, e) => Math.max(m, e.total_max), base.total);
+  const totalCeiling = base.total + excepted;
   const totalFailed = head.total > totalCeiling;
   if (totalFailed) {
     failures.push(rel + ': total embedded JS increased (' + head.total + ' > ' + base.total + ' at base'
-      + (totalCeiling > base.total ? '; fix exception ceiling ' + totalCeiling : '') + ')');
+      + (excepted ? ' + ' + excepted + ' covered by fix exceptions' : '') + ')');
   }
   const suggestion = (failures.length && (totalFailed || Object.keys(grown).length))
-    ? { nodes: grown, total_max: head.total, payback_total: base.total } : null;
-  return { failures, headTotal: head.total, baseTotal: base.total, suggestion };
+    ? { nodes: grown, payback_total: base.total } : null;
+  return { failures, headTotal: head.total, baseTotal: base.total, totalCeiling, suggestion };
 }
 
-// After its window an exception grants nothing, and the profile total must be
-// back at or below payback_total. Entries stay in force (from the base ref)
-// until paid back, so deleting an entry does not escape this check.
+// An exception grants growth for EXCEPTION_WINDOW_DAYS from `granted`. From
+// then on the profile total must be at or below payback_total. Entries stay in
+// force (from the base ref) until paid back; deletion before payback is refused.
 function checkPayback(rel, headTotal, list, todayMs) {
   const failures = [];
   const notes = [];
@@ -237,9 +271,11 @@ function checkPayback(rel, headTotal, list, todayMs) {
     const g = parseDate(e.granted);
     if (g === null) continue;
     const due = g + EXCEPTION_WINDOW_DAYS * DAY_MS;
-    if (todayMs <= due) {
-      notes.push(rel + ': fix exception ' + e.id + ' is active until ' + new Date(due).toISOString().slice(0, 10)
-        + '; total must then be at or below ' + e.payback_total + ' (now ' + headTotal + ')');
+    if (todayMs < g) {
+      notes.push(rel + ': fix exception ' + e.id + ' is not active until ' + e.granted);
+    } else if (todayMs < due) {
+      notes.push(rel + ': fix exception ' + e.id + ' is active through ' + isoDate(due - DAY_MS)
+        + '; from ' + isoDate(due) + ' the total must be at or below ' + e.payback_total + ' (now ' + headTotal + ')');
     } else if (headTotal <= e.payback_total) {
       notes.push(rel + ': fix exception ' + e.id + ' is paid back (total ' + headTotal + ' <= ' + e.payback_total + '); delete the entry');
     } else {
@@ -258,7 +294,6 @@ function suggestionText(suggestion, today) {
     granted: today,
     reason: '<the bug, and why the fix cannot go into a module first>',
     nodes: suggestion.nodes,
-    total_max: suggestion.total_max,
     payback_total: suggestion.payback_total,
   };
   return 'Features get no exceptions: move the logic into an osi-* module and load it with osiLib.require.\n'
@@ -298,9 +333,8 @@ function writeBaselineFile(o) {
   return baseline;
 }
 
-function verifyDocBaseline(o, active) {
+function verifyDocBaseline(o, ceilings) {
   const baseline = JSON.parse(fs.readFileSync(o.baselinePath, 'utf8'));
-  const headroom = (active || []).reduce((m, e) => Math.max(m, e.total_max), 0);
   const failures = [];
   const notes = [];
   for (const rel of o.surfaces) {
@@ -308,8 +342,8 @@ function verifyDocBaseline(o, active) {
     const { total } = measure(surfaceHead(o.root, rel));
     if (!expected) {
       failures.push(rel + ': committed baseline missing this surface');
-    } else if (total > Math.max(expected.total, headroom)) {
-      failures.push(rel + ': HEAD total ' + total + ' exceeds committed baseline ' + expected.total + ' (regenerate with --write-baseline if gate 1 allowed this growth under a fix exception)');
+    } else if (total > Math.max(expected.total, (ceilings && ceilings[rel]) || 0)) {
+      failures.push(rel + ': HEAD total ' + total + ' exceeds committed baseline ' + expected.total + ' (regenerate with --write-baseline)');
     } else if (total < expected.total) {
       notes.push(rel + ': HEAD total ' + total + ' is below committed baseline ' + expected.total + ' - a shrink not yet reflected in the doc (ok; refresh with --write-baseline when convenient)');
     }
@@ -317,14 +351,21 @@ function verifyDocBaseline(o, active) {
   return { failures, notes };
 }
 
-function headCommitDate(gitRoot) {
-  try {
-    return execFileSync('git', ['-C', gitRoot, 'log', '-1', '--format=%cs', 'HEAD'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-  } catch {
-    return new Date().toISOString().slice(0, 10);
-  }
+// "Today" for the exception window: the later of the HEAD and base-ref commit
+// times, as a UTC date. Deterministic for a given pair of commits; a CI re-run
+// against a newer base moves forward with it.
+function gateDate(gitRoot, baseRef) {
+  const ct = (ref) => {
+    try {
+      return Number(execFileSync('git', ['-C', gitRoot, 'log', '-1', '--format=%ct', ref], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim()) * 1000;
+    } catch {
+      return 0;
+    }
+  };
+  const ms = Math.max(ct('HEAD'), ct(baseRef));
+  return isoDate(ms || Date.now());
 }
 
 function run() {
@@ -336,29 +377,33 @@ function run() {
     return;
   }
 
-  const today = o.today || headCommitDate(o.gitRoot);
+  const today = o.today || gateDate(o.gitRoot, o.baseRef);
   const todayMs = parseDate(today);
   if (todayMs === null) raise('--today must be YYYY-MM-DD, got ' + today);
   const base = baseExceptions(o.gitRoot, o.baseRef, o.exceptionsRel);
-  const failures = [...base.errors, ...headExceptionErrors(o.root, o.exceptionsRel, base, todayMs)];
+  const head = headExceptions(o.root, o.exceptionsRel);
   const valid = base.errors.length ? [] : base.list;
   const active = activeExceptions(valid, todayMs);
+  const failures = [...base.errors];
   const notes = [];
+  const ceilings = {};
+  const baseTotals = [];
+  const headTotals = [];
   let suggestion = null;
-  let headTotal = 0;
-  let baseTotal = 0;
   for (const rel of o.surfaces) {
-    const head = surfaceHead(o.root, rel);
+    const headFlows = surfaceHead(o.root, rel);
     const baseFlows = surfaceBase(o.gitRoot, o.baseRef, rel);
-    const res = checkSurface(rel, head, baseFlows, active);
+    const res = checkSurface(rel, headFlows, baseFlows, active);
     const payback = checkPayback(rel, res.headTotal, valid, todayMs);
     failures.push(...res.failures, ...payback.failures);
     notes.push(...payback.notes);
     if (res.suggestion && !suggestion) suggestion = res.suggestion;
-    headTotal += res.headTotal;
-    baseTotal += res.baseTotal;
+    if (res.totalCeiling > res.baseTotal) ceilings[rel] = res.totalCeiling; // growth a fix exception covers
+    baseTotals.push(res.baseTotal);
+    headTotals.push(res.headTotal);
     if (!res.failures.length && !payback.failures.length) console.log('OK ' + rel + ' (total ' + res.headTotal + ')');
   }
+  failures.push(...headExceptionErrors(o.exceptionsRel, head, base, todayMs, baseTotals, headTotals));
   for (const n of notes) console.log('NOTE ' + n);
   if (failures.length) {
     for (const f of failures) console.error('FAIL ' + f);
@@ -366,15 +411,17 @@ function run() {
     process.exit(1);
   }
 
-  const doc = verifyDocBaseline(o, active);
+  const doc = verifyDocBaseline(o, ceilings);
   for (const n of doc.notes) console.log('NOTE ' + n);
   if (doc.failures.length) {
     for (const f of doc.failures) console.error('FAIL ' + f);
     process.exit(1);
   }
 
-  console.log('verify-flows-size-ratchet: OK (HEAD total ' + headTotal + ' <= ' + o.baseRef + ' total ' + baseTotal
-    + (active.length ? ' or its fix exception ceilings' : '') + '; committed baseline not exceeded)');
+  const headSum = headTotals.reduce((a, b) => a + b, 0);
+  const baseSum = baseTotals.reduce((a, b) => a + b, 0);
+  console.log('verify-flows-size-ratchet: OK (HEAD total ' + headSum + ', ' + o.baseRef + ' total ' + baseSum
+    + (headSum > baseSum ? ', growth covered by fix exceptions' : '') + '; committed baseline not exceeded)');
 }
 
 if (require.main === module) {

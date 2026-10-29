@@ -35,9 +35,11 @@ The only exception is for a bug fix that cannot wait for an extraction. Run the
 ratchet on the fix branch; on failure it prints the entry to add to
 `scripts/flows-growth-exceptions.json`. Merge that entry in its own PR first:
 the gate reads the file from the base ref, so a PR cannot grant itself growth.
-The entry allows growth for 14 days. After that every run fails until the
-per-profile total is back at or below the entry's `payback_total`, so plan the
-extraction when you file the exception.
+The entry lets its listed nodes grow for 14 days; other code cannot use that
+room. From day 14 every run fails until the per-profile total is back at or
+below the entry's `payback_total`, and the entry cannot be deleted before then,
+so plan the extraction when you file the exception. Size counts a node's On
+Start and On Stop code too.
 
 ## When to use / When NOT to use
 

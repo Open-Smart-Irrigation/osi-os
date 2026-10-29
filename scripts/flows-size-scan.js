@@ -13,11 +13,18 @@ function isFunctionNode(node) {
   return node && node.type === 'function' && typeof node.func === 'string';
 }
 
+// Code Node-RED runs for a function node: the body plus its On Start and On Stop code.
+function codeChars(node) {
+  return node.func.length
+    + (typeof node.initialize === 'string' ? node.initialize.length : 0)
+    + (typeof node.finalize === 'string' ? node.finalize.length : 0);
+}
+
 function nodeSizes(flows) {
   const sizes = new Map();
   for (const node of flows) {
     if (!isFunctionNode(node)) continue;
-    sizes.set(node.id, { name: node.name || node.id, chars: node.func.length });
+    sizes.set(node.id, { name: node.name || node.id, chars: codeChars(node) });
   }
   return sizes;
 }
@@ -26,7 +33,7 @@ function totalChars(flows) {
   let total = 0;
   for (const node of flows) {
     if (!isFunctionNode(node)) continue;
-    total += node.func.length;
+    total += codeChars(node);
   }
   return total;
 }
@@ -50,7 +57,7 @@ function hasOversizedSqlLiteral(func, sqlLiteralMax) {
 // a node that loads its logic through osiLib.require and embeds no large SQL.
 // Feature logic belongs in a tested osi-* module, not in flows.json.
 function isThinNewNode(node, { floor, sqlLiteralMax }) {
-  const func = String(node.func || '');
+  const func = [node.func, node.initialize, node.finalize].filter((c) => typeof c === 'string').join('\n');
   if (func.length <= floor) return { ok: true };
   if (!loadsViaOsiLib(node)) {
     return {

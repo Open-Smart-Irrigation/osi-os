@@ -91,7 +91,9 @@ moved out of it on 2026-10-22 and carries the same authority.
 `scripts/verify-migrations.js` each compare HEAD against a base ref that
 defaults to `origin/main`, overridable with `OSI_FLOWS_SIZE_BASE_REF`,
 `OSI_DDL_BASE_REF`, and `OSI_MIGRATIONS_BASE_REF` respectively. The size
-ratchet also reads `scripts/flows-growth-exceptions.json` from that base ref.
+ratchet also reads `scripts/flows-growth-exceptions.json` from that base ref,
+so a pinned base also hides exceptions granted, and payback due, on current
+`origin/main`; run the gate once unpinned after the rebase.
 
 A branch built as a multi-commit stack can sit unmerged through several
 unrelated merges into `origin/main`. Each merge moves the default base out

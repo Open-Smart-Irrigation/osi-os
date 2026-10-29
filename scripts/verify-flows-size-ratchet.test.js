@@ -166,7 +166,7 @@ test('missing exceptions file is treated as zero exceptions', () => {
 // Fix exceptions. BASE totals 211 chars (11 + 200).
 const fixEntry = (over = {}) => ({
   id: 'fix-1-shrinkme', kind: 'fix', issue: 1, granted: TODAY, reason: 'test bug',
-  nodes: { shrinkme: 300 }, total_max: 311, payback_total: 211, ...over,
+  nodes: { shrinkme: 300 }, payback_total: 211, ...over,
 });
 const GROWN = [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(300))];
 
@@ -175,7 +175,7 @@ test('exception: an entry at the base ref lets a fix grow a node up to its ceili
   writeFlows(dir, GROWN);
   const r = run(dir, ['--baseline', path.join(dir, 'baseline.json')]);
   assert.equal(r.status, 0, r.stderr || r.stdout);
-  assert.match(r.stdout, /fix exception fix-1-shrinkme is active until 2026-11-12/);
+  assert.match(r.stdout, /fix exception fix-1-shrinkme is active through 2026-11-11; from 2026-11-12/);
 });
 
 test('exception: growth past the ceiling still fails', () => {
@@ -213,14 +213,22 @@ test('exception: kind other than fix is rejected', () => {
   assert.match(r.stderr, /kind must be "fix"/);
 });
 
-test('exception: missing issue, reason or payback_total above total_max is rejected', () => {
+test('exception: missing issue, reason or nodes is rejected', () => {
   const dir = initRepo(BASE); writeBaseline(dir);
-  writeExceptions(dir, [fixEntry({ issue: 0, reason: ' ', payback_total: 400 })]);
+  writeExceptions(dir, [fixEntry({ issue: 0, reason: ' ', nodes: {} })]);
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /issue must be/);
   assert.match(r.stderr, /reason must be non-empty/);
-  assert.match(r.stderr, /payback_total must not exceed total_max/);
+  assert.match(r.stderr, /nodes must map at least one node id/);
+});
+
+test('exception: a new entry with payback_total above the current total is rejected', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeExceptions(dir, [fixEntry({ payback_total: 100010 })]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /payback_total 100010 is above the current total 211/);
 });
 
 test('exception: a granted date in the future is rejected', () => {
@@ -233,18 +241,25 @@ test('exception: a granted date in the future is rejected', () => {
 
 test('exception: an entry edited after it merged is rejected', () => {
   const dir = initRepo(BASE, [fixEntry()]); writeBaseline(dir);
-  writeExceptions(dir, [fixEntry({ total_max: 5000 })]);
+  writeExceptions(dir, [fixEntry({ payback_total: 100 })]);
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /changed after it was granted/);
 });
 
-test('exception: after 14 days an entry grants nothing', () => {
-  const dir = initRepo(BASE, [fixEntry({ granted: '2026-10-14' })]); writeBaseline(dir);
+test('exception: on day 14 an entry grants nothing', () => {
+  const dir = initRepo(BASE, [fixEntry({ granted: '2026-10-15' })]); writeBaseline(dir);
   writeFlows(dir, GROWN);
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /node shrinkme grew \(300 > 200 at base\)/);
+});
+
+test('exception: on day 13 an entry still grants', () => {
+  const dir = initRepo(BASE, [fixEntry({ granted: '2026-10-16' })]); writeBaseline(dir);
+  writeFlows(dir, GROWN);
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
 test('exception: an overdue entry fails every run until paid back, even if the PR deletes it', () => {
@@ -253,6 +268,41 @@ test('exception: an overdue entry fails every run until paid back, even if the P
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /fix exception fix-1-shrinkme \(issue #1, granted 2026-10-14\) is overdue: total 311 must be back at or below 211 \(extract 100 chars/);
+  assert.match(r.stderr, /cannot be deleted before it is paid back/);
+});
+
+test('exception: deleting an active entry in the PR that uses it is refused', () => {
+  const dir = initRepo(BASE, [fixEntry()]); writeBaseline(dir);
+  writeFlows(dir, GROWN);
+  writeExceptions(dir, []);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /exception fix-1-shrinkme cannot be deleted before it is paid back \(total 311 > 211\)/);
+});
+
+test('exception: deleting the whole file before payback is refused', () => {
+  const dir = initRepo(GROWN, [fixEntry()]); writeBaseline(dir);
+  fs.rmSync(path.join(dir, 'exceptions.json'));
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /cannot be deleted before it is paid back/);
+});
+
+test('exception: an unrelated new node cannot spend an active entry\'s headroom', () => {
+  const dir = initRepo(BASE, [fixEntry()]); writeBaseline(dir);
+  writeFlows(dir, [...BASE, fn('feat', 'f'.repeat(100))]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /total embedded JS increased \(311 > 211 at base\)/);
+});
+
+test('exception: two active entries on different nodes stack', () => {
+  const two = [fn('keep', 'k'.repeat(100)), fn('shrinkme', 'x'.repeat(200))];
+  const dir = initRepo(two, [fixEntry(), fixEntry({ id: 'fix-2-keep', issue: 2, nodes: { keep: 150 }, payback_total: 300 })]);
+  writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'k'.repeat(150)), fn('shrinkme', 'x'.repeat(300))]);
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
 test('exception: paying back clears the overdue entry and asks for its deletion', () => {
@@ -264,7 +314,7 @@ test('exception: paying back clears the overdue entry and asks for its deletion'
 });
 
 test('exception: a node listed in an active entry may be added above the new-node rules', () => {
-  const dir = initRepo(BASE, [fixEntry({ nodes: { hotfix: 2000 }, total_max: 2300 })]); writeBaseline(dir);
+  const dir = initRepo(BASE, [fixEntry({ nodes: { hotfix: 2000 } })]); writeBaseline(dir);
   writeFlows(dir, [...BASE, fn('hotfix', 'h'.repeat(2000))]);
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr || r.stdout);
@@ -277,6 +327,47 @@ test('exception: an invalid exceptions file at the base ref fails closed', () =>
   const r = run(dir);
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /exceptions\.json at HEAD: exception x: kind must be "fix"/);
+});
+
+test('On Start and On Stop code counts toward node size', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'return msg;', { initialize: 'i'.repeat(5000) }), fn('shrinkme', 'x'.repeat(200))]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /node keep grew \(5011 > 11 at base\)/);
+});
+
+test('the printed entry also names a new node that fails only the wiring rule', () => {
+  const dir = initRepo([fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(2000))]); writeBaseline(dir);
+  writeFlows(dir, [fn('keep', 'return msg;'), fn('shrinkme', 'x'.repeat(10)), fn('logic', 'l'.repeat(1000))]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /"logic": 1000/);
+});
+
+test('invalid JSON in the working-tree exceptions file fails', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  fs.writeFileSync(path.join(dir, 'exceptions.json'), '{');
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /exceptions\.json is not valid JSON/);
+});
+
+test('without --today the gate date is the later of the HEAD and base commit dates in UTC', () => {
+  const dir = initRepo(BASE, [fixEntry({ granted: '2026-10-01' })]);
+  git(dir, ['commit', '-q', '--amend', '--no-edit', '--date', '2026-10-20T23:30:00-05:00']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '--amend', '--no-edit'], {
+    env: { ...process.env, GIT_COMMITTER_DATE: '2026-10-20T23:30:00-05:00' },
+  });
+  writeBaseline(dir);
+  writeFlows(dir, GROWN);
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'), '--exceptions', 'exceptions.json', ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8' });
+  // 2026-10-20T23:30-05:00 is 2026-10-21 UTC, day 20 after 2026-10-01: the entry is expired.
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /node shrinkme grew \(300 > 200 at base\)/);
 });
 
 test('accepts the committed shipped baseline against origin/main', () => {
