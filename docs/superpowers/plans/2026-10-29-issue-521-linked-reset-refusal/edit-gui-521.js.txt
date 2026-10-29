@@ -1,0 +1,231 @@
+#!/usr/bin/env node
+'use strict';
+// #521 GUI, locale, Luganda-tracking and CI editor (plan R2). Runs from a
+// scratch copy outside the repository, with cwd at the root of the admitted
+// implementation worktree:
+//   node <scratch>/edit-gui-521.js <scratch>/UsersPage.candidate.tsx            dry run
+//   node <scratch>/edit-gui-521.js <scratch>/UsersPage.candidate.tsx --write    applies every edit
+// Every trusted digest is a constant in this reviewed file; nothing is read
+// from the environment or from a caller-supplied summary. The three GUI
+// sources must carry their reviewed bytes, every anchor must occur exactly
+// once and every locale file must round-trip.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
+function fail(message) { console.error('edit-gui-521: FAIL - ' + message); process.exit(1); }
+
+if (!fs.existsSync('.git') || !fs.existsSync('web/react-gui/package.json')) fail('run from the root of the implementation worktree');
+if (path.resolve(__dirname).startsWith(path.resolve('.') + path.sep)) {
+  fail('run the scratch copy outside the repository');
+}
+
+// UsersPage.tsx is replaced whole, so it must carry the reviewed bytes
+// (identical at f6682ef6 and 74ff869e). farming.ts and api.ts may carry
+// unrelated hunks from other work: their edit anchors must occur exactly once,
+// and in api.ts the session interceptors and getApiErrorMessage, which the
+// new error typing relies on, must keep their reviewed digests.
+const FILE_PINS = {
+  'web/react-gui/src/pages/admin/UsersPage.tsx': '0b8e7833b7c9b1108a9be0fd870ff18e1004a70b649521e8fbac0dd101e9c6fd',
+};
+const API_SEAMS = { interceptors: 'b0a18d1a6cb8b1c164cc8e658c5c360b1f424024de5ef5e97037d7e69beb7377', errorMessage: '4246ce7796e0996b69c7c9638ef0042355abddb8045e2795c267288690e2bccd' };
+function apiSeams(text) {
+  const once = (find) => text.split(find).length - 1 === 1;
+  if (!once('api.interceptors.request.use(') || !once('api.interceptors.response.use(') || !once('export function getApiErrorMessage(')) return null;
+  const start = text.indexOf('api.interceptors.request.use(');
+  const end = text.indexOf('\n);\n', text.indexOf('api.interceptors.response.use(')) + 4;
+  const errStart = text.indexOf('export function getApiErrorMessage(');
+  const errEnd = text.indexOf('\n}\n', errStart) + 3;
+  return { interceptors: sha(text.slice(start, end)), errorMessage: sha(text.slice(errStart, errEnd)) };
+}
+const USERS_PAGE_CANDIDATE_SHA256 = '1b1c9976faf53230275ed5dc828b1bf149072a9a847ab20251eafc6f1381be37';
+
+function replaceOnce(text, find, replace, label) {
+  const count = text.split(find).length - 1;
+  if (count !== 1) fail(`${label}: anchor occurs ${count} times`);
+  return text.replace(find, () => replace);
+}
+
+const edits = new Map();
+function pinned(rel) {
+  const text = fs.readFileSync(rel, 'utf8');
+  if (sha(text) !== FILE_PINS[rel]) fail(`${rel} is not the reviewed bytes (${sha(text)}); revise the plan`);
+  return text;
+}
+
+// 1. Domain type.
+{
+  const rel = 'web/react-gui/src/types/farming.ts';
+  edits.set(rel, replaceOnce(fs.readFileSync(rel, 'utf8'),
+    'export interface AdminUser {\n  username: string;\n  user_uuid: string;\n  role: \'admin\' | \'researcher\' | \'viewer\';\n  disabled_at: string | null;\n  created_at: string;\n}\n',
+    '/** How an account signs in; `server` is linked sign-in through the cloud (#521). */\n' +
+    "export type AdminAuthMode = 'local' | 'server' | 'unknown';\n\n" +
+    'export interface AdminUser {\n  username: string;\n  user_uuid: string;\n  role: \'admin\' | \'researcher\' | \'viewer\';\n  disabled_at: string | null;\n  created_at: string;\n' +
+    '  /** Normalized in services/api.ts; rows from an older gateway read as unknown. */\n  auth_mode: AdminAuthMode;\n}\n',
+    rel));
+}
+
+// 2. Service boundary.
+{
+  const rel = 'web/react-gui/src/services/api.ts';
+  let text = fs.readFileSync(rel, 'utf8');
+  const seams = apiSeams(text);
+  if (!seams || seams.interceptors !== API_SEAMS.interceptors || seams.errorMessage !== API_SEAMS.errorMessage) {
+    fail(`${rel}: the session interceptors or getApiErrorMessage changed (${JSON.stringify(seams)}); revise the plan`);
+  }
+  text = replaceOnce(text, '  AdminUser,\n  WatermarkCalibrationState,', '  AdminAuthMode,\n  AdminUser,\n  WatermarkCalibrationState,', rel + ' import');
+  text = replaceOnce(text,
+    "export const listUsers = () =>\n  api.get<{ users: AdminUser[] }>('/api/users').then((response) => response.data.users);\n\n" +
+    "export const createUser = (body: { username: string; password: string; role: AdminUser['role'] }) =>\n  api.post<AdminUser>('/api/users', body).then((response) => response.data);\n\n" +
+    'export const resetPassword = (uuid: string, password: string) =>\n  api.post(`/api/users/${encodeURIComponent(uuid)}/password-reset`, { password });\n',
+    '/** The reset route\'s code for an account that signs in through its cloud link (#521). */\n' +
+    "export const LINKED_PASSWORD_RESET_UNSUPPORTED = 'linked_account_password_reset_unsupported';\n\n" +
+    '/** A local password reset the gateway refused because the account uses linked sign-in. */\n' +
+    'export class LinkedPasswordResetError extends Error {\n' +
+    '  readonly code = LINKED_PASSWORD_RESET_UNSUPPORTED;\n\n' +
+    '  constructor(message: string) {\n    super(message);\n    this.name = \'LinkedPasswordResetError\';\n  }\n}\n\n' +
+    'export function isLinkedPasswordResetError(error: unknown): error is LinkedPasswordResetError {\n' +
+    '  return error instanceof LinkedPasswordResetError;\n}\n\n' +
+    '// An older gateway sends no auth_mode. Anything other than local or server\n' +
+    '// reads as unknown, so the page never offers a reset it cannot vouch for.\n' +
+    'export function normaliseAdminAuthMode(value: unknown): AdminAuthMode {\n' +
+    "  return value === 'local' || value === 'server' ? value : 'unknown';\n}\n\n" +
+    'function toAdminUser(row: unknown): AdminUser {\n' +
+    "  const raw = (row && typeof row === 'object' ? row : {}) as Partial<AdminUser> & { auth_mode?: unknown };\n" +
+    '  return { ...(raw as AdminUser), auth_mode: normaliseAdminAuthMode(raw.auth_mode) };\n}\n\n' +
+    'export const listUsers = () =>\n' +
+    "  api.get<{ users?: unknown }>('/api/users').then((response) => {\n" +
+    '    const users = response.data?.users;\n' +
+    "    if (!Array.isArray(users)) throw new Error('The gateway returned an unreadable user list.');\n" +
+    '    return users.map(toAdminUser);\n  });\n\n' +
+    "export const createUser = (body: { username: string; password: string; role: AdminUser['role'] }) =>\n" +
+    "  api.post<unknown>('/api/users', body).then((response) => toAdminUser(response.data));\n\n" +
+    '// Only HTTP 409 with the exact code is the linked refusal; every other\n' +
+    '// failure, including a 401 the session interceptor already handled, passes\n' +
+    '// through unchanged.\n' +
+    'export const resetPassword = (uuid: string, password: string): Promise<void> =>\n' +
+    '  api.post(`/api/users/${encodeURIComponent(uuid)}/password-reset`, { password }).then(\n' +
+    '    () => undefined,\n' +
+    '    (error: unknown) => {\n' +
+    '      if (axios.isAxiosError<{ code?: unknown }>(error) && error.response?.status === 409\n' +
+    '          && error.response.data?.code === LINKED_PASSWORD_RESET_UNSUPPORTED) {\n' +
+    "        throw new LinkedPasswordResetError(getApiErrorMessage(error, 'This account uses linked sign-in.'));\n" +
+    '      }\n      throw error;\n    },\n  );\n',
+    rel + ' users block');
+  edits.set(rel, text);
+}
+
+// 3. Page.
+{
+  const rel = 'web/react-gui/src/pages/admin/UsersPage.tsx';
+  pinned(rel);
+  const candidatePath = process.argv.slice(2).find((a) => !a.startsWith('--'));
+  if (!candidatePath) fail('usage: edit-gui-521.js <UsersPage.candidate.tsx> [--write]');
+  const candidate = fs.readFileSync(candidatePath, 'utf8');
+  if (sha(candidate) !== USERS_PAGE_CANDIDATE_SHA256) {
+    fail(`UsersPage candidate is not the reviewed bytes (${sha(candidate)})`);
+  }
+  edits.set(rel, candidate);
+}
+
+// 4. Locales: a `users` block after `grants` in every settings.json.
+const USERS = {
+  en: {
+    linkedSignIn: 'Linked sign-in',
+    linkedResetGuidance: 'Password changes for this account use the approved linked-identity recovery process. Ask the linked-identity administrator for the correct steps.',
+    signInUnknown: 'Sign-in type unavailable. Ask the gateway administrator.',
+    linkedResetRefused: 'This account uses linked sign-in, so its password cannot be reset on this gateway. Ask the linked-identity administrator for the approved recovery process.',
+    resetError: 'The password could not be reset.',
+    resetRefreshFailed: 'The password reset was sent, but the user list could not be reloaded. The reset may already have been applied; reload the page before trying again.',
+  },
+  'de-CH': {
+    linkedSignIn: 'Verknüpfte Anmeldung',
+    linkedResetGuidance: 'Passwortänderungen für dieses Konto laufen über das freigegebene Wiederherstellungsverfahren der verknüpften Identität. Fragen Sie die zuständige Administration der verknüpften Identität nach den richtigen Schritten.',
+    signInUnknown: 'Anmeldeart nicht verfügbar. Fragen Sie die Gateway-Administration.',
+    linkedResetRefused: 'Dieses Konto verwendet die verknüpfte Anmeldung, daher kann sein Passwort auf diesem Gateway nicht zurückgesetzt werden. Fragen Sie die zuständige Administration der verknüpften Identität nach dem freigegebenen Wiederherstellungsverfahren.',
+    resetError: 'Das Passwort konnte nicht zurückgesetzt werden.',
+    resetRefreshFailed: 'Die Passwortzurücksetzung wurde gesendet, aber die Benutzerliste konnte nicht neu geladen werden. Die Zurücksetzung wurde möglicherweise bereits ausgeführt; laden Sie die Seite neu, bevor Sie es erneut versuchen.',
+  },
+  es: {
+    linkedSignIn: 'Inicio de sesión vinculado',
+    linkedResetGuidance: 'Los cambios de contraseña de esta cuenta usan el proceso de recuperación aprobado de la identidad vinculada. Pida los pasos correctos al administrador de la identidad vinculada.',
+    signInUnknown: 'Tipo de inicio de sesión no disponible. Consulte al administrador de la pasarela.',
+    linkedResetRefused: 'Esta cuenta usa un inicio de sesión vinculado, por lo que su contraseña no se puede restablecer en esta pasarela. Pida al administrador de la identidad vinculada el proceso de recuperación aprobado.',
+    resetError: 'No se pudo restablecer la contraseña.',
+    resetRefreshFailed: 'Se envió el restablecimiento de la contraseña, pero no se pudo recargar la lista de usuarios. Es posible que el restablecimiento ya se haya aplicado; recargue la página antes de volver a intentarlo.',
+  },
+  fr: {
+    linkedSignIn: 'Connexion liée',
+    linkedResetGuidance: "Les changements de mot de passe de ce compte passent par la procédure de récupération approuvée de l'identité liée. Demandez les étapes à suivre à l'administrateur de l'identité liée.",
+    signInUnknown: "Type de connexion indisponible. Adressez-vous à l'administrateur de la passerelle.",
+    linkedResetRefused: "Ce compte utilise une connexion liée : son mot de passe ne peut pas être réinitialisé sur cette passerelle. Demandez la procédure de récupération approuvée à l'administrateur de l'identité liée.",
+    resetError: "Le mot de passe n'a pas pu être réinitialisé.",
+    resetRefreshFailed: "La réinitialisation du mot de passe a été envoyée, mais la liste des utilisateurs n'a pas pu être rechargée. La réinitialisation a peut-être déjà été appliquée ; rechargez la page avant de réessayer.",
+  },
+  it: {
+    linkedSignIn: 'Accesso collegato',
+    linkedResetGuidance: "Le modifiche della password di questo account seguono la procedura di recupero approvata dell'identità collegata. Chiedi i passaggi corretti all'amministratore dell'identità collegata.",
+    signInUnknown: "Tipo di accesso non disponibile. Rivolgiti all'amministratore del gateway.",
+    linkedResetRefused: "Questo account usa l'accesso collegato, quindi la sua password non può essere reimpostata su questo gateway. Chiedi la procedura di recupero approvata all'amministratore dell'identità collegata.",
+    resetError: 'Impossibile reimpostare la password.',
+    resetRefreshFailed: "La reimpostazione della password è stata inviata, ma non è stato possibile ricaricare l'elenco utenti. La reimpostazione potrebbe essere già stata applicata; ricarica la pagina prima di riprovare.",
+  },
+  pt: {
+    linkedSignIn: 'Início de sessão associado',
+    linkedResetGuidance: 'As alterações de palavra-passe desta conta usam o processo de recuperação aprovado da identidade associada. Peça os passos corretos ao administrador da identidade associada.',
+    signInUnknown: 'Tipo de início de sessão indisponível. Contacte o administrador do gateway.',
+    linkedResetRefused: 'Esta conta usa um início de sessão associado, pelo que a palavra-passe não pode ser reposta neste gateway. Peça o processo de recuperação aprovado ao administrador da identidade associada.',
+    resetError: 'Não foi possível repor a palavra-passe.',
+    resetRefreshFailed: 'A reposição da palavra-passe foi enviada, mas não foi possível recarregar a lista de utilizadores. A reposição pode já ter sido aplicada; recarregue a página antes de tentar novamente.',
+  },
+};
+USERS.lg = { ...USERS.en }; // English source text until a human Luganda pass.
+
+for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
+  const rel = `web/react-gui/public/locales/${locale}/settings.json`;
+  const raw = fs.readFileSync(rel, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (JSON.stringify(parsed, null, 2) + '\n' !== raw) fail(`${rel} does not round-trip; stop`);
+  if (Object.prototype.hasOwnProperty.call(parsed, 'users')) fail(`${rel} already has users`);
+  const keys = Object.keys(parsed);
+  if (keys[keys.length - 1] !== 'grants') fail(`${rel}: grants is not the last key`);
+  edits.set(rel, JSON.stringify({ ...parsed, users: USERS[locale] }, null, 2) + '\n');
+}
+
+// 5. Luganda tracking: append one section (the file's last section varies by base).
+{
+  const rel = 'docs/i18n/pending-luganda-translations.md';
+  const raw = fs.readFileSync(rel, 'utf8');
+  if (!raw.startsWith('# Pending human Luganda translations\n')) fail(`${rel} is not the Luganda tracker`);
+  if (raw.includes('settings.json` — Users page')) fail(`${rel} already tracks the Users keys`);
+  if (!raw.endsWith('\n') || raw.endsWith('\n\n')) fail(`${rel} does not end with exactly one newline`);
+  edits.set(rel, raw + '\n## `settings.json` — Users page sign-in type and linked reset refusal\n\n' +
+    '| Keys | Reason |\n|---|---|\n' +
+    '| `users.linkedSignIn`, `linkedResetGuidance`, `signInUnknown`, `linkedResetRefused`, `resetError`, `resetRefreshFailed` (6 keys in `settings.json`) | ' +
+    'Added by #521: the Users page labels linked and unknown sign-in types, explains that a linked account\'s password is recovered through the linked identity, ' +
+    'and reports a refused reset or a reset whose list reload failed. The texts tell an administrator who can recover an account, so no machine translation is shipped: ' +
+    '`lg` ships the English source text until a human Luganda pass. de-CH/es/fr/it/pt are translated (native review pending). |\n\n' +
+    'Tracked in code at `web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts`\n' +
+    '(`PENDING_HUMAN_LUGANDA`), which asserts each key\'s `lg` value is still\n' +
+    'byte-identical to `en`. A human Luganda pass must drop the key from that set\n' +
+    'and from the table above in the same change.\n');
+}
+
+// 6. CI: run the new route suite next to the scoped-access write suite.
+{
+  const rel = '.github/workflows/migrations.yml';
+  edits.set(rel, replaceOnce(fs.readFileSync(rel, 'utf8'),
+    '      - name: Scoped-access write suite (registration fences, zone guards)\n        run: node --test scripts/test-scoped-access-writes.js\n',
+    '      - name: Scoped-access write suite (registration fences, zone guards)\n        run: node --test scripts/test-scoped-access-writes.js\n' +
+    '      - name: Linked-account password reset refusal (#521, both profiles)\n        run: node --test scripts/test-linked-password-reset.js\n',
+    rel));
+}
+
+for (const rel of edits.keys()) console.log('ready ' + rel);
+if (!process.argv.includes('--write')) {
+  console.log('edit-gui-521: dry run OK (nothing written)');
+  process.exit(0);
+}
+for (const [rel, text] of edits) fs.writeFileSync(rel, text);
+console.log('edit-gui-521: OK (' + edits.size + ' files written)');

@@ -1,0 +1,316 @@
+return (async () => {
+const respond = function(statusCode, payload) {
+  msg.statusCode = statusCode;
+  msg.payload = payload;
+  msg.headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*'
+  };
+  return msg;
+};
+if (String(env.get('OSI_SCOPED_ACCESS') || '') !== '1') {
+  return respond(404, { message: 'Not found' });
+}
+let db;
+const closeDb = function() {
+  return db ? new Promise(function(resolve) { db.close(function() { resolve(); }); }) : Promise.resolve();
+};
+const run = function(sql, params) {
+  return new Promise(function(resolve, reject) {
+    db.run(sql, params || [], function(error) {
+      if (error) return reject(error);
+      resolve({ changes: Number(this && this.changes || 0), lastID: Number(this && this.lastID || 0) });
+    });
+  });
+};
+const all = function(sql, params) {
+  return new Promise(function(resolve, reject) {
+    db.all(sql, params || [], function(error, rows) {
+      error ? reject(error) : resolve(rows || []);
+    });
+  });
+};
+try {
+  const scopeLoad = osiLib.require('scope');
+  if (!scopeLoad.ok) {
+    node.error('admin account API: scope module unavailable: ' + scopeLoad.error, msg);
+    throw Object.assign(new Error('scope resolver unavailable'), { statusCode: 500 });
+  }
+  const scope = scopeLoad.value;
+  const auth = scope.verifyBearer(
+    msg.req && msg.req.headers && msg.req.headers.authorization,
+    {
+      configuredSecret: env.get('AUTH_TOKEN_SECRET') || env.get('JWT_SECRET'),
+      fs: global.get('fs'),
+      warn: function(message) { node.warn(message); }
+    }
+  );
+  db = new osiDb.Database('/data/db/farming.db');
+  const actor = await db.get(
+    'SELECT user_uuid,role FROM users WHERE id=? AND username=? LIMIT 1',
+    [auth.userId, auth.username]
+  );
+  if (!actor || !actor.user_uuid) {
+    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
+  }
+  await scope.assertFreshRole(
+    db,
+    actor.user_uuid,
+    'admin',
+    { scopedMode: true }
+  );
+  const method = String(msg.req && msg.req.method || '').toUpperCase();
+  const requestPath = String(msg.req && (msg.req.path || msg.req.url) || '').split('?')[0];
+  const body = msg.req && msg.req.body || msg.payload || {};
+  const now = new Date().toISOString();
+
+  if (method === 'GET' && requestPath === '/api/users') {
+    // auth_mode tells the GUI which accounts a local reset can serve (#521).
+    // Any stored value other than local/server is reported as unknown.
+    const users = await all(
+      'SELECT username,user_uuid,role,disabled_at,created_at,' +
+        "CASE auth_mode WHEN 'local' THEN 'local' WHEN 'server' THEN 'server' ELSE 'unknown' END AS auth_mode " +
+        'FROM users ORDER BY username'
+    );
+    return respond(200, { users });
+  }
+  if (method === 'POST' && requestPath === '/api/users') {
+    const username = String(body.username || '').trim();
+    const password = String(body.password || '');
+    const role = String(body.role || 'researcher').trim().toLowerCase();
+    if (!username || password.length < 6 || !['admin', 'researcher', 'viewer'].includes(role)) {
+      throw Object.assign(new Error('Valid username, password, and role are required'), { statusCode: 400 });
+    }
+    const userUuid = crypto.randomUUID();
+    await run(
+      'INSERT INTO users ' +
+        '(username,password_hash,created_at,updated_at,user_uuid,role,edge_originated,sync_version) ' +
+        'VALUES(?,?,?,?,?,?,1,1)',
+      [username, bcrypt.hashSync(password, 10), now, now, userUuid, role]
+    );
+    scope.invalidateScope(userUuid);
+    return respond(201, {
+      username,
+      user_uuid: userUuid,
+      role,
+      disabled_at: null,
+      created_at: now,
+      auth_mode: 'local'
+    });
+  }
+  const userUuid = String(msg.req && msg.req.params && msg.req.params.uuid || '').trim();
+  if (method === 'POST' && /\/api\/users\/[^/]+\/password-reset$/.test(requestPath)) {
+    const password = String(body.password || body.temporary_password || '');
+    if (password.length < 6) {
+      throw Object.assign(new Error('Password must be at least 6 characters'), { statusCode: 400 });
+    }
+    // #521: a linked account (auth_mode='server') signs in with its linked
+    // credential, never password_hash, so a local reset cannot change its
+    // login. Refuse it; reset only local accounts. Unknown modes fail closed.
+    const signInType = function(row) {
+      if (!row) return 'missing';
+      return row.auth_mode === 'local' || row.auth_mode === 'server' ? row.auth_mode : 'unknown';
+    };
+    const targetModeSql = 'SELECT auth_mode FROM users WHERE user_uuid=? LIMIT 1';
+    const refuse = function(type) {
+      if (type === 'missing') return respond(404, { message: 'User not found' });
+      if (type === 'server') {
+        return respond(409, {
+          code: 'linked_account_password_reset_unsupported',
+          message: 'This account uses linked sign-in. Its password cannot be reset on this gateway. ' +
+            'Ask the linked-identity administrator for the approved recovery process.'
+        });
+      }
+      return respond(500, { message: 'The account sign-in type is not recognized. The password was not changed.' });
+    };
+    let outcome;
+    try {
+      // Read-only preflight: refuse without hashing; it grants no write.
+      const preflight = signInType(await db.get(targetModeSql, [userUuid]));
+      if (preflight !== 'local') return refuse(preflight);
+      const passwordHash = bcrypt.hashSync(password, 10);
+      // Short write transaction after hashing. Re-check the actor and the
+      // target on the transaction connection only (tx), never the queued db.
+      outcome = await db.transaction(async function(tx) {
+        const current = await tx.get(
+          'SELECT user_uuid FROM users WHERE id=? AND username=? LIMIT 1',
+          [auth.userId, auth.username]
+        );
+        if (!current || current.user_uuid !== actor.user_uuid) {
+          throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
+        }
+        await scope.assertFreshRole(tx, actor.user_uuid, 'admin', { scopedMode: true });
+        const target = signInType(await tx.get(targetModeSql, [userUuid]));
+        if (target !== 'local') return target;
+        await tx.run(
+          "UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=? AND auth_mode='local'",
+          [passwordHash, now, userUuid]
+        );
+        const counted = await tx.get('SELECT changes() AS n');
+        const n = counted ? counted.n : undefined;
+        if (n === 1) return 'reset';
+        if (n === 0) {
+          const after = signInType(await tx.get(targetModeSql, [userUuid]));
+          if (after === 'missing' || after === 'server') return after;
+        }
+        throw new Error('password reset matched ' + String(n) + ' rows');
+      });
+    } catch (resetError) {
+      // A failed ROLLBACK leaves the transaction state unknown, so it outranks
+      // an authorization refusal raised inside the transaction.
+      const rollbackError = resetError && resetError.rollbackError;
+      if (!rollbackError && resetError && (resetError.statusCode === 401 || resetError.statusCode === 403)) throw resetError;
+      node.warn('admin account API password reset failed: ' +
+        String(resetError && resetError.message ? resetError.message : resetError) +
+        (rollbackError ? ' (rollback also failed: ' +
+          String(rollbackError.message ? rollbackError.message : rollbackError) + ')' : ''));
+      return respond(500, { message: 'The password reset could not be completed. Reload the user list before trying again.' });
+    }
+    if (outcome !== 'reset') return refuse(outcome);
+    return respond(200, { success: true });
+  }
+  if (method === 'PUT' && /\/api\/users\/[^/]+\/role$/.test(requestPath)) {
+    const role = String(body.role || '').trim().toLowerCase();
+    if (!['admin', 'researcher', 'viewer'].includes(role)) {
+      throw Object.assign(new Error('Invalid role'), { statusCode: 400 });
+    }
+    const roleGuardedSql = scope.buildDeroleUserGuardedSql();
+    const guardedSql = roleGuardedSql.replace(
+      'SET role = ?',
+      'SET role = ?, updated_at = ?, sync_version = sync_version + 1'
+    );
+    if (guardedSql === roleGuardedSql) {
+      throw Object.assign(new Error('role guard SQL anchor is missing'), { statusCode: 500 });
+    }
+    const changed = await run(guardedSql, [role, now, userUuid, role]);
+    if (!changed.changes) {
+      const exists = await db.get('SELECT 1 AS found FROM users WHERE user_uuid=?', [userUuid]);
+      throw Object.assign(
+        new Error(exists ? 'Cannot remove the last enabled admin' : 'User not found'),
+        { statusCode: exists ? 409 : 404 }
+      );
+    }
+    scope.invalidateScope(userUuid);
+    return respond(200, { success: true, user_uuid: userUuid, role });
+  }
+  if (method === 'PUT' && /\/api\/users\/[^/]+\/disabled$/.test(requestPath)) {
+    if (typeof body.disabled !== 'boolean') {
+      throw Object.assign(new Error('disabled must be boolean'), { statusCode: 400 });
+    }
+    let changed;
+    if (body.disabled) {
+      const disableGuardedSql = scope.buildDisableUserGuardedSql();
+      const guardedSql = disableGuardedSql.replace(
+        'SET disabled_at =',
+        'SET updated_at = ?, sync_version = sync_version + 1, disabled_at ='
+      );
+      if (guardedSql === disableGuardedSql) {
+        throw Object.assign(new Error('disabled guard SQL anchor is missing'), { statusCode: 500 });
+      }
+      changed = await run(guardedSql, [now, userUuid]);
+    } else {
+      changed = await run(
+        'UPDATE users SET disabled_at=NULL,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=?',
+        [now, userUuid]
+      );
+    }
+    if (!changed.changes) {
+      const exists = await db.get('SELECT 1 AS found FROM users WHERE user_uuid=?', [userUuid]);
+      throw Object.assign(
+        new Error(exists ? 'Cannot disable the last enabled admin' : 'User not found'),
+        { statusCode: exists ? 409 : 404 }
+      );
+    }
+    scope.invalidateScope(userUuid);
+    return respond(200, { success: true, user_uuid: userUuid, disabled: body.disabled });
+  }
+  const isZoneGrant = requestPath === '/api/grants/zone';
+  const isPlotGrant = requestPath === '/api/grants/plot';
+  if (method === 'POST' && (isZoneGrant || isPlotGrant)) {
+    const targetUserUuid = String(body.user_uuid || '').trim();
+    // Precedence fix: without the parens around the ternary, `||` bound to the
+    // plot_uuid branch only (`isZoneGrant ? body.zone_uuid : (body.plot_uuid || '')`),
+    // so a missing body.zone_uuid on a zone grant produced the literal string
+    // 'undefined' instead of '', which then failed the resource lookup and was
+    // misreported as a 404 instead of a 400 validation error.
+    const resourceUuid = String((isZoneGrant ? body.zone_uuid : body.plot_uuid) || '').trim();
+    if (!targetUserUuid || !resourceUuid) {
+      throw Object.assign(
+        new Error((isZoneGrant ? 'zone_uuid' : 'plot_uuid') + ' and user_uuid are required'),
+        { statusCode: 400 }
+      );
+    }
+    const user = await db.get(
+      'SELECT user_uuid FROM users WHERE user_uuid=? LIMIT 1',
+      [targetUserUuid]
+    );
+    const resource = await db.get(
+      isZoneGrant
+        ? 'SELECT zone_uuid FROM irrigation_zones WHERE zone_uuid=? AND deleted_at IS NULL LIMIT 1'
+        : 'SELECT plot_uuid FROM journal_plots WHERE plot_uuid=? AND deleted_at IS NULL LIMIT 1',
+      [resourceUuid]
+    );
+    if (!user || !resource) {
+      throw Object.assign(new Error('User or resource not found'), { statusCode: 404 });
+    }
+    const assignmentUuid = crypto.randomBytes(16).toString('hex');
+    const table = isZoneGrant ? 'user_zone_assignments' : 'user_plot_assignments';
+    const column = isZoneGrant ? 'zone_uuid' : 'plot_uuid';
+    await run(
+      'INSERT INTO ' + table + ' ' +
+        '(assignment_uuid,user_uuid,' + column + ',assigned_by_user_uuid,' +
+        'gateway_device_eui,sync_version,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)',
+      [
+        assignmentUuid,
+        targetUserUuid,
+        resourceUuid,
+        actor.user_uuid,
+        String(env.get('DEVICE_EUI') || 'UNKNOWN').trim().toUpperCase(),
+        now,
+        now
+      ]
+    );
+    scope.invalidateScope(targetUserUuid);
+    return respond(201, {
+      assignment_uuid: assignmentUuid,
+      user_uuid: targetUserUuid,
+      [column]: resourceUuid
+    });
+  }
+  const zoneGrantDelete = method === 'DELETE' && /\/api\/grants\/zone\/[^/]+$/.test(requestPath);
+  const plotGrantDelete = method === 'DELETE' && /\/api\/grants\/plot\/[^/]+$/.test(requestPath);
+  if (zoneGrantDelete || plotGrantDelete) {
+    const assignmentUuid = String(
+      msg.req && msg.req.params && msg.req.params.assignmentUuid || ''
+    ).trim();
+    const table = zoneGrantDelete ? 'user_zone_assignments' : 'user_plot_assignments';
+    const assignment = await db.get(
+      'SELECT user_uuid FROM ' + table + ' WHERE assignment_uuid=? AND deleted_at IS NULL LIMIT 1',
+      [assignmentUuid]
+    );
+    if (!assignment) {
+      throw Object.assign(new Error('Grant not found'), { statusCode: 404 });
+    }
+    await run(
+      'UPDATE ' + table + ' SET deleted_at=?,updated_at=?,sync_version=sync_version+1 ' +
+        'WHERE assignment_uuid=? AND deleted_at IS NULL',
+      [now, now, assignmentUuid]
+    );
+    scope.invalidateScope(assignment.user_uuid);
+    return respond(200, { success: true, assignment_uuid: assignmentUuid });
+  }
+  return respond(404, { message: 'Not found' });
+} catch (error) {
+  const statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;
+  const constraint = /(?:SQLITE_CONSTRAINT|UNIQUE constraint)/.test(String(error && error.message || error));
+  return respond(constraint ? 409 : statusCode, {
+    message: statusCode === 403 ? 'Forbidden' : String(error && error.message || error)
+  });
+} finally {
+  try {
+    await closeDb();
+  } catch (closeError) {
+    node.warn('admin account API close: ' + String(closeError && closeError.message ? closeError.message : closeError));
+  }
+}
+})();

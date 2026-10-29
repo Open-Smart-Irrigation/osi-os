@@ -1,0 +1,182 @@
+#!/usr/bin/env node
+'use strict';
+// #521 one-shot flow editor (plan R3). Runs from a scratch copy outside the
+// repository, with cwd at the root of the admitted implementation worktree:
+//   node <scratch>/edit-flows-521.js <scratch>/scoped-admin-account-router.candidate.func.js
+//       dry run (default): every check, nothing written
+//   node <scratch>/edit-flows-521.js <scratch>/scoped-admin-account-router.candidate.func.js --write
+//       replaces one function body in both profiles, adds the node allowance,
+//       raises the total allowance and its identity pin only when the measured
+//       total needs it, then re-reads and re-checks every written file.
+// Fails closed unless both profiles round-trip byte-identically, are identical
+// to each other and carry the reviewed base router body.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const PROFILES = [
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json',
+  'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
+];
+const ALLOWANCES = 'scripts/verify-flows-size-ratchet-allowances.json';
+const BASELINE = 'scripts/verify-flows-size-ratchet-baseline.json';
+const IDENTITY = 'scripts/verify-live-gateway-identity.js';
+const NODE_ID = 'scoped-admin-account-router';
+// Reviewed base body: identical at f6682ef6 and at 74ff869e, both profiles.
+const BASE_FUNC_SHA256 = '9ef24ba1a3b2e44e7658735deded78ee457f5962c52462fd6f826ec951d34e6f';
+const BASE_FUNC_LENGTH = 10508;
+const CANDIDATE_FUNC_SHA256 = '538bde95bd36d564b41662217fd6091eb5c86aa8ffef61a494245749b9b7fb1f';
+const CANDIDATE_FUNC_LENGTH = 14087;
+const DELTA = CANDIDATE_FUNC_LENGTH - BASE_FUNC_LENGTH; // 3579
+const NODE_REASON =
+  '#521 linked-account password reset refusal. Measured with verify-flows-size-ratchet nodeSizes ' +
+  '(func.length) over both byte-identical maintained profiles: origin/main ' + BASE_FUNC_LENGTH + ' -> HEAD ' +
+  CANDIDATE_FUNC_LENGTH + ' = +' + DELTA + '. GET /api/users adds a normalized auth_mode ' +
+  '(local/server/unknown); POST /api/users answers auth_mode local; the password-reset branch adds a ' +
+  'read-only target preflight before bcrypt, a short transaction that rechecks the token-bound actor ' +
+  '(assertFreshRole on the transaction scope) and the target, a conditional UPDATE bound to ' +
+  "auth_mode='local', an exact changes() check, a 409 linked_account_password_reset_unsupported answer, " +
+  'and a safe 500 for reset faults in which a failed ROLLBACK outranks a 401 or 403 raised inside the transaction.';
+
+const sha = (text) => crypto.createHash('sha256').update(text).digest('hex');
+function fail(message) { console.error('edit-flows-521: FAIL - ' + message); process.exit(1); }
+function serialize(value) { return JSON.stringify(value, null, 2) + '\n'; }
+function roundTrip(rel, raw) {
+  const parsed = JSON.parse(raw);
+  const same = Buffer.compare(Buffer.from(serialize(parsed)), Buffer.from(raw)) === 0;
+  console.log('roundtrip ' + rel + ' byte-identical: ' + same);
+  if (!same) fail(rel + ' does not round-trip; stop before mutating');
+  return parsed;
+}
+function countOf(text, find) { return text.split(find).length - 1; }
+
+if (!fs.existsSync('.git') || !fs.existsSync(PROFILES[0])) fail('run from the root of the implementation worktree');
+if (path.resolve(__dirname).startsWith(path.resolve('.') + path.sep)) {
+  fail('run the scratch copy outside the repository (osi-flows-json-editing: editors never run from the repo)');
+}
+const { totalChars } = require(path.resolve('scripts/flows-size-scan.js'));
+
+const args = process.argv.slice(2);
+const candidatePath = args.find((a) => !a.startsWith('--'));
+const write = args.includes('--write');
+if (!candidatePath) fail('usage: edit-flows-521.js <candidate.func.js> [--write]');
+const candidate = fs.readFileSync(candidatePath, 'utf8');
+if (sha(candidate) !== CANDIDATE_FUNC_SHA256 || candidate.length !== CANDIDATE_FUNC_LENGTH) {
+  fail('candidate body is not the reviewed bytes (' + sha(candidate) + ', ' + candidate.length + ')');
+}
+try {
+  // eslint-disable-next-line no-new-func
+  new Function('msg', 'node', 'env', 'global', 'osiLib', 'osiDb', 'crypto', 'bcrypt', candidate);
+} catch (error) {
+  fail('candidate does not parse: ' + error.message);
+}
+
+const raws = PROFILES.map((rel) => fs.readFileSync(rel, 'utf8'));
+if (raws[0] !== raws[1]) fail('profiles differ before the edit');
+const before = PROFILES.map((rel, i) => roundTrip(rel, raws[i]));
+const edited = before.map((flows, i) => {
+  const matches = flows.filter((node) => node.id === NODE_ID);
+  if (matches.length !== 1) fail(PROFILES[i] + ': expected one ' + NODE_ID + ', found ' + matches.length);
+  const router = matches[0];
+  if (router.type !== 'function') fail(NODE_ID + ' is not a function node');
+  if (sha(router.func) !== BASE_FUNC_SHA256 || router.func.length !== BASE_FUNC_LENGTH) {
+    fail(PROFILES[i] + ': ' + NODE_ID + ' is not the reviewed base body (' + sha(router.func) +
+      '); a changed router needs a revised candidate and a focused review (plan, "Composition")');
+  }
+  const copy = JSON.parse(JSON.stringify(flows));
+  copy.find((node) => node.id === NODE_ID).func = candidate;
+  copy.forEach((node, index) => {
+    const original = flows[index];
+    if (node.id !== original.id) fail('node order changed at ' + index);
+    if (node.id === NODE_ID) {
+      const { func: _a, ...restNew } = node;
+      const { func: _b, ...restOld } = original;
+      if (JSON.stringify(restNew) !== JSON.stringify(restOld)) fail('router keys other than func changed');
+    } else if (JSON.stringify(node) !== JSON.stringify(original)) {
+      fail('unrelated node changed: ' + node.id);
+    }
+  });
+  return copy;
+});
+const outputs = edited.map(serialize);
+if (outputs[0] !== outputs[1]) fail('edited profiles differ');
+
+// Size accounting, measured with the ratchet's own totalChars.
+const baseTotal = totalChars(before[0]);
+const headTotal = totalChars(edited[0]);
+if (headTotal - baseTotal !== DELTA) fail('measured total growth ' + (headTotal - baseTotal) + ' is not +' + DELTA);
+const baseline = JSON.parse(fs.readFileSync(BASELINE, 'utf8'));
+const committed = PROFILES.map((rel) => baseline.files && baseline.files[rel] && baseline.files[rel].total);
+if (!Number.isSafeInteger(committed[0]) || committed[0] !== committed[1]) fail('committed baseline totals missing or unequal');
+const allowanceRaw = fs.readFileSync(ALLOWANCES, 'utf8');
+const allowances = roundTrip(ALLOWANCES, allowanceRaw);
+if (allowances.node_allowances[NODE_ID]) {
+  fail('a node allowance for ' + NODE_ID + ' already exists; the router changed on this base (plan, "Composition")');
+}
+allowances.node_allowances[NODE_ID] = { delta: DELTA, reason: NODE_REASON };
+const currentDelta = allowances.total_allowance && allowances.total_allowance.delta;
+if (!Number.isSafeInteger(currentDelta)) fail('total_allowance.delta is missing');
+const needed = headTotal - committed[0];
+console.log('totals: base ' + baseTotal + ' -> head ' + headTotal + ' (+' + DELTA + '); committed baseline ' +
+  committed[0] + ' + delta ' + currentDelta + ' = ' + (committed[0] + currentDelta) + '; head needs ' + needed);
+let identityText = null;
+if (needed > currentDelta) {
+  // The standing total no longer covers this growth (for example after a
+  // base that set the delta to exactly its own need). Raise it by the exact
+  // measured amount and move the identity verifier's strict pin with it.
+  const identity = fs.readFileSync(IDENTITY, 'utf8');
+  const pin = '  expectCondition(sizeAllowances.total_allowance?.delta === ' + currentDelta + ',\n';
+  // Two reviewed label forms follow the pin: main's "exact cumulative delta"
+  // and the "exact delta" block the #356 R4 editor writes (apply-repo-edits.cjs
+  // e3d95770...). Exactly one form must occur exactly once; it is kept and
+  // only its number moves.
+  const labelBlock = (words, value) => "    'size total allowance: exact " + words + value + "',\n" +
+    "    'size total allowance: expected exact " + words + value + "');\n";
+  const forms = ['cumulative delta ', 'delta '].filter((words) => countOf(identity, labelBlock(words, currentDelta)) > 0);
+  if (countOf(identity, pin) !== 1 || forms.length !== 1 || countOf(identity, labelBlock(forms[0], currentDelta)) !== 1 ||
+      countOf(identity, pin + labelBlock(forms[0], currentDelta)) !== 1) {
+    fail(IDENTITY + ': total pin and one reviewed label form for ' + currentDelta + ' not found exactly once');
+  }
+  const words = forms[0];
+  const note = '  // ' + needed + ': #521 linked-account password reset refusal (' + NODE_ID + ' +' + DELTA +
+    '). origin/main ' + baseTotal + ' -> HEAD ' + headTotal + '; the baseline ' + committed[0] +
+    ' plus the delta must cover ' + headTotal + ', so the delta rises from ' + currentDelta + ' to ' + needed + '.\n';
+  identityText = identity.replace(pin + labelBlock(words, currentDelta), () => note +
+    '  expectCondition(sizeAllowances.total_allowance?.delta === ' + needed + ',\n' + labelBlock(words, needed));
+  if (countOf(identityText, 'total_allowance?.delta === ' + needed + ',') !== 1 ||
+      countOf(identityText, 'total_allowance?.delta === ' + currentDelta + ',') !== 0 ||
+      countOf(identityText, labelBlock(words, needed)) !== 1 ||
+      identityText.length - identity.length !== note.length + 3 * (String(needed).length - String(currentDelta).length)) {
+    fail('identity pin rewrite did not apply exactly once');
+  }
+  console.log('identity labels: kept the "exact ' + words.trim() + '" form');
+  allowances.total_allowance.delta = needed;
+  allowances.total_allowance.provenance = String(allowances.total_allowance.provenance || '') +
+    ' #521 linked-account password reset refusal: ' + NODE_ID + ' +' + DELTA + ', measured with verify-flows-size-ratchet totalChars, ' +
+    'each byte-identical maintained profile: origin/main ' + baseTotal + ' -> HEAD ' + headTotal + '. The baseline ' +
+    committed[0] + ' plus the delta must cover ' + headTotal + ', so the delta rises from ' + currentDelta + ' to ' + needed +
+    ' and the baseline file is unchanged.';
+  console.log('total allowance: raise ' + currentDelta + ' -> ' + needed + ' and move the identity pin');
+} else {
+  console.log('total allowance: unchanged (' + currentDelta + ' covers ' + needed + ')');
+}
+
+console.log('candidate ' + CANDIDATE_FUNC_SHA256 + ' (' + CANDIDATE_FUNC_LENGTH + ' chars, +' + DELTA + ')');
+if (!write) {
+  console.log('edit-flows-521: dry run OK (nothing written)');
+  process.exit(0);
+}
+PROFILES.forEach((rel, i) => fs.writeFileSync(rel, outputs[i]));
+fs.writeFileSync(ALLOWANCES, serialize(allowances));
+if (identityText !== null) fs.writeFileSync(IDENTITY, identityText);
+
+const after = PROFILES.map((rel) => fs.readFileSync(rel, 'utf8'));
+if (after[0] !== after[1]) fail('profiles differ after the write');
+PROFILES.forEach((rel, i) => {
+  const flows = roundTrip(rel, after[i]);
+  if (sha(flows.find((node) => node.id === NODE_ID).func) !== CANDIDATE_FUNC_SHA256) fail(rel + ': candidate not in place');
+  if (totalChars(flows) !== headTotal) fail(rel + ': total changed between measurement and write');
+});
+const reread = roundTrip(ALLOWANCES, fs.readFileSync(ALLOWANCES, 'utf8'));
+if (reread.node_allowances[NODE_ID].delta !== DELTA) fail('node allowance not in place');
+console.log('edit-flows-521: OK (both profiles, the allowance file' + (identityText !== null ? ' and the identity pin' : '') + ' written)');
