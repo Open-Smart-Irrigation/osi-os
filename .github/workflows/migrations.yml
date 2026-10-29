@@ -264,6 +264,8 @@ jobs:
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.test.js
       - name: Scoped-access write suite (registration fences, zone guards)
         run: node --test scripts/test-scoped-access-writes.js
+      - name: Linked-account password reset refusal (#521, both profiles)
+        run: node --test scripts/test-linked-password-reset.js
       - name: Scoped-access read suite (account-wide reads, preserved gates)
         run: node --test scripts/test-scoped-access-reads.js
       - name: Session required on the sensor export, litres and reference-tree routes (both flag states)

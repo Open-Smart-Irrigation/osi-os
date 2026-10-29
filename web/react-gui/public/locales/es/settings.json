@@ -105,5 +105,13 @@
     "revokeError": "No se pudo revocar el permiso.",
     "kindZone": "zona",
     "kindPlot": "parcela"
+  },
+  "users": {
+    "linkedSignIn": "Inicio de sesión vinculado",
+    "linkedResetGuidance": "Los cambios de contraseña de esta cuenta usan el proceso de recuperación aprobado de la identidad vinculada. Pida los pasos correctos al administrador de la identidad vinculada.",
+    "signInUnknown": "Tipo de inicio de sesión no disponible. Consulte al administrador de la pasarela.",
+    "linkedResetRefused": "Esta cuenta usa un inicio de sesión vinculado, por lo que su contraseña no se puede restablecer en esta pasarela. Pida al administrador de la identidad vinculada el proceso de recuperación aprobado.",
+    "resetError": "No se pudo restablecer la contraseña.",
+    "resetRefreshFailed": "Se envió el restablecimiento de la contraseña, pero no se pudo recargar la lista de usuarios. Es posible que el restablecimiento ya se haya aplicado; recargue la página antes de volver a intentarlo."
   }
 }

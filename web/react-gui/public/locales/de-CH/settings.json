@@ -105,5 +105,13 @@
     "revokeError": "Das Zugriffsrecht konnte nicht entzogen werden.",
     "kindZone": "Zone",
     "kindPlot": "Parzelle"
+  },
+  "users": {
+    "linkedSignIn": "Verknüpfte Anmeldung",
+    "linkedResetGuidance": "Passwortänderungen für dieses Konto laufen über das freigegebene Wiederherstellungsverfahren der verknüpften Identität. Fragen Sie die zuständige Administration der verknüpften Identität nach den richtigen Schritten.",
+    "signInUnknown": "Anmeldeart nicht verfügbar. Fragen Sie die Gateway-Administration.",
+    "linkedResetRefused": "Dieses Konto verwendet die verknüpfte Anmeldung, daher kann sein Passwort auf diesem Gateway nicht zurückgesetzt werden. Fragen Sie die zuständige Administration der verknüpften Identität nach dem freigegebenen Wiederherstellungsverfahren.",
+    "resetError": "Das Passwort konnte nicht zurückgesetzt werden.",
+    "resetRefreshFailed": "Die Passwortzurücksetzung wurde gesendet, aber die Benutzerliste konnte nicht neu geladen werden. Die Zurücksetzung wurde möglicherweise bereits ausgeführt; laden Sie die Seite neu, bevor Sie es erneut versuchen."
   }
 }

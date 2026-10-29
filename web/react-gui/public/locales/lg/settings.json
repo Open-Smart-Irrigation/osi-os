@@ -105,5 +105,13 @@
     "revokeError": "The grant could not be revoked.",
     "kindZone": "zone",
     "kindPlot": "plot"
+  },
+  "users": {
+    "linkedSignIn": "Linked sign-in",
+    "linkedResetGuidance": "Password changes for this account use the approved linked-identity recovery process. Ask the linked-identity administrator for the correct steps.",
+    "signInUnknown": "Sign-in type unavailable. Ask the gateway administrator.",
+    "linkedResetRefused": "This account uses linked sign-in, so its password cannot be reset on this gateway. Ask the linked-identity administrator for the approved recovery process.",
+    "resetError": "The password could not be reset.",
+    "resetRefreshFailed": "The password reset was sent, but the user list could not be reloaded. The reset may already have been applied; reload the page before trying again."
   }
 }

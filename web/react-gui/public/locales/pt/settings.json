@@ -105,5 +105,13 @@
     "revokeError": "Não foi possível revogar a permissão.",
     "kindZone": "zona",
     "kindPlot": "parcela"
+  },
+  "users": {
+    "linkedSignIn": "Início de sessão associado",
+    "linkedResetGuidance": "As alterações de palavra-passe desta conta usam o processo de recuperação aprovado da identidade associada. Peça os passos corretos ao administrador da identidade associada.",
+    "signInUnknown": "Tipo de início de sessão indisponível. Contacte o administrador do gateway.",
+    "linkedResetRefused": "Esta conta usa um início de sessão associado, pelo que a palavra-passe não pode ser reposta neste gateway. Peça o processo de recuperação aprovado ao administrador da identidade associada.",
+    "resetError": "Não foi possível repor a palavra-passe.",
+    "resetRefreshFailed": "A reposição da palavra-passe foi enviada, mas não foi possível recarregar a lista de utilizadores. A reposição pode já ter sido aplicada; recarregue a página antes de tentar novamente."
   }
 }

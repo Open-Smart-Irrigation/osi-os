@@ -384,3 +384,14 @@ Tracked in code at `web/react-gui/tests/devicesI18n.test.ts`
 (`PENDING_HUMAN_LUGANDA` in the removal-notice test), which asserts each key's
 `lg` value is still byte-identical to `en`. A human Luganda pass must drop the
 key from that set and from this table in the same change.
+
+## `settings.json` — Users page sign-in type and linked reset refusal
+
+| Keys | Reason |
+|---|---|
+| `users.linkedSignIn`, `linkedResetGuidance`, `signInUnknown`, `linkedResetRefused`, `resetError`, `resetRefreshFailed` (6 keys in `settings.json`) | Added by #521: the Users page labels linked and unknown sign-in types, explains that a linked account's password is recovered through the linked identity, and reports a refused reset or a reset whose list reload failed. The texts tell an administrator who can recover an account, so no machine translation is shipped: `lg` ships the English source text until a human Luganda pass. de-CH/es/fr/it/pt are translated (native review pending). |
+
+Tracked in code at `web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts`
+(`PENDING_HUMAN_LUGANDA`), which asserts each key's `lg` value is still
+byte-identical to `en`. A human Luganda pass must drop the key from that set
+and from the table above in the same change.
