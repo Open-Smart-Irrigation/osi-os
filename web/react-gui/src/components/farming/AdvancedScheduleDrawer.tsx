@@ -17,40 +17,40 @@ interface Props {
 
 type DrawerTab = 'scheduling' | 'analysis';
 
-const TAB_LABELS: { id: DrawerTab; label: string }[] = [
-  { id: 'scheduling', label: 'Advanced Scheduling' },
-  { id: 'analysis',   label: 'Advanced Analysis' },
-];
+const TAB_LABELS = [
+  { id: 'scheduling', key: 'advancedSchedule.tabScheduling' },
+  { id: 'analysis',   key: 'advancedSchedule.tabAnalysis' },
+] as const;
 
 const CALIBRATION_KEYS = [
-  { value: 'default',   label: 'Default (generic thresholds)' },
-  { value: 'apple',     label: 'Apple' },
-  { value: 'grapevine', label: 'Grapevine' },
-  { value: 'olive',     label: 'Olive' },
-];
+  { value: 'default', key: 'zoneConfig.calibration.default' },
+  { value: 'apple', key: 'zoneConfig.calibration.apple' },
+  { value: 'grapevine', key: 'zoneConfig.calibration.grapevine' },
+  { value: 'olive', key: 'zoneConfig.calibration.olive' },
+] as const;
 
 const RESPONSE_MODES = [
-  { value: 'proportional', label: 'Proportional — scale with stress level' },
-  { value: 'fixed',        label: 'Fixed — always use base duration' },
-  { value: 'aggressive',   label: 'Aggressive — extend strongly at high stress' },
-];
+  { value: 'proportional', key: 'advancedSchedule.responseModeOption.proportional' },
+  { value: 'fixed', key: 'advancedSchedule.responseModeOption.fixed' },
+  { value: 'aggressive', key: 'advancedSchedule.responseModeOption.aggressive' },
+] as const;
 
-/** Decode threshold_kpa (1–4) back to a human-readable stress label for DENDRO mode */
-const DENDRO_STRESS_LABEL: Record<number, string> = {
-  1: 'Low — first signs of stress',
-  2: 'Medium — moderate stress (recommended)',
-  3: 'High — significant stress',
-  4: 'Conservative — severe stress only',
-};
+/** Stable backend codes map to translated display strings; unknown stress retains its numeric level. */
+const DENDRO_STRESS_KEY = {
+  1: 'advancedSchedule.stressLevel.low',
+  2: 'advancedSchedule.stressLevel.medium',
+  3: 'advancedSchedule.stressLevel.high',
+  4: 'advancedSchedule.stressLevel.conservative',
+} as const;
 
-const SD_VPD_STATUS_LABEL: Record<string, string> = {
-  coupled: 'Coupled',
-  decoupled: 'Decoupled',
-  insufficient_data: 'Insufficient data',
-};
+const SD_VPD_STATUS_KEY = {
+  coupled: 'advancedSchedule.sdVpdStatus.coupled',
+  decoupled: 'advancedSchedule.sdVpdStatus.decoupled',
+  insufficient_data: 'advancedSchedule.sdVpdStatus.insufficient_data',
+} as const;
 
-function formatR2(value: number | null | undefined): string {
-  return value != null ? value.toFixed(3) : 'Insufficient data';
+function formatR2(value: number | null | undefined, insufficientData: string): string {
+  return value != null ? value.toFixed(3) : insufficientData;
 }
 
 const Field: React.FC<{ label: string; value: string | number | null | undefined; mono?: boolean }> = ({
@@ -108,7 +108,7 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void; onEd
 
   const thresholdKpa = sched?.thresholdKpa ?? sched?.threshold_kpa;
   const stressLabel  = isDendro && thresholdKpa != null
-    ? (DENDRO_STRESS_LABEL[Number(thresholdKpa)] ?? `Level ${thresholdKpa}`)
+    ? t(DENDRO_STRESS_KEY[Number(thresholdKpa) as keyof typeof DENDRO_STRESS_KEY] ?? 'advancedSchedule.stressLevelOther', { level: thresholdKpa })
     : null;
   const lastTriggered = sched?.lastTriggeredAt ?? (sched as any)?.last_triggered_at;
 
@@ -140,30 +140,29 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void; onEd
             </select>
           </div>
           <div>
-            <p className="text-xs text-[var(--text-secondary)] mb-1">Dendro calibration</p>
+            <p className="text-xs text-[var(--text-secondary)] mb-1">{t('zoneConfig.dendroCalibration')}</p>
             <select
               value={calibKey}
               disabled={configSaving}
               onChange={e => { setCalibKey(e.target.value); handleConfigSave('calibrationKey', e.target.value); }}
               className="w-full bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded-lg px-3 py-1.5 text-xs"
             >
-              {CALIBRATION_KEYS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {CALIBRATION_KEYS.map(o => <option key={o.value} value={o.value}>{t(o.key)}</option>)}
             </select>
           </div>
           <p className="text-xs text-[var(--text-tertiary)] pt-1">
-            Phenological stage adjusts stress thresholds for the current growth phase.
-            Calibration key selects species-specific absolute TWD thresholds.
+            {t('advancedSchedule.phenologyDescription')}
           </p>
         </div>
       </Section>
 
       {/* ── Schedule parameters ── */}
       <Section title={t('advancedSchedule.sectionScheduleParameters', 'Schedule parameters')}>
-        {stressLabel && <Field label="Stress trigger level" value={stressLabel} />}
+        {stressLabel && <Field label={t('advancedSchedule.stressTriggerLevel')} value={stressLabel} />}
 
         {/* Duration — editable */}
         <div className="flex justify-between items-center gap-2 py-1.5 border-b border-[var(--border)]">
-          <span className="text-[var(--text-secondary)] text-xs">Base duration</span>
+          <span className="text-[var(--text-secondary)] text-xs">{t('advancedSchedule.baseDuration')}</span>
           <div className="flex items-center gap-1">
             <input
               type="number"
@@ -178,20 +177,20 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void; onEd
 
         {/* Response mode — editable */}
         <div className="flex justify-between items-center gap-2 py-1.5 border-b border-[var(--border)]">
-          <span className="text-[var(--text-secondary)] text-xs shrink-0">Response mode</span>
+          <span className="text-[var(--text-secondary)] text-xs shrink-0">{t('schedule.responseMode')}</span>
           <select
             value={sched?.responseMode ?? sched?.response_mode ?? 'proportional'}
             onChange={() => {}}
             disabled
             className="text-xs bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded px-2 py-0.5 max-w-[180px]"
           >
-            {RESPONSE_MODES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            {RESPONSE_MODES.map(o => <option key={o.value} value={o.value}>{t(o.key)}</option>)}
           </select>
         </div>
 
         <Field
-          label="Last triggered"
-          value={lastTriggered ? new Date(lastTriggered).toLocaleString() : 'Never'}
+          label={t('advancedSchedule.lastTriggered')}
+          value={lastTriggered ? new Date(lastTriggered).toLocaleString() : t('advancedSchedule.never')}
         />
 
         {/* Save button */}
@@ -214,29 +213,23 @@ const SchedulingTab: React.FC<{ zone: IrrigationZone; onSaved?: () => void; onEd
 
       {/* ── Rain suppression ── */}
       <Section title={t('advancedSchedule.sectionRainSuppression', 'Rain suppression')}>
-        <Field label="Status" value={zone.schedule ? 'Controlled by weather integration' : 'No schedule set'} />
+        <Field label={t('advancedSchedule.status')} value={zone.schedule ? t('advancedSchedule.weatherControlled') : t('advancedSchedule.noSchedule')} />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
-          Suppression lifts once the rain event is cleared from the rolling weather window.
-          Tree recovery is verified before resuming any irrigation increase.
+          {t('advancedSchedule.rainSuppressionDescription')}
         </p>
       </Section>
 
       {/* ── Recovery verification ── */}
       <Section title={t('advancedSchedule.sectionRecoveryVerification', 'Recovery verification')}>
         <p className="text-xs text-[var(--text-tertiary)] py-2">
-          After an irrigation event, a 24 h recovery hold checks whether the pre-dawn tree
-          water deficit (TWD-night) has decreased before issuing the next irrigation increase.
-          Prevents over-irrigation after emergency events.
+          {t('advancedSchedule.recoveryDescription')}
         </p>
       </Section>
 
       {/* ── Zone aggregation ── */}
       <Section title={t('advancedSchedule.sectionZoneAggregation', 'Zone aggregation')}>
         <p className="text-xs text-[var(--text-tertiary)] py-2">
-          Zone stress is computed as the median (MAD-cleaned) across all monitored trees.
-          Outlier trees (IQR × 1.5) are excluded from the recommendation but remain visible
-          per-tree. Low-confidence days (QA flags: rain spike, flat-line, signal gap) are
-          excluded from aggregation.
+          {t('advancedSchedule.aggregationDescription')}
         </p>
       </Section>
     </div>
@@ -259,8 +252,7 @@ const AnalysisTab: React.FC<{
 
   const [timezone, setTimezone]   = useState(zone.timezone ?? 'UTC');
   const [tzSaving, setTzSaving]   = useState(false);
-  const [tzError, setTzError]     = useState('');
-  const [tzSuccess, setTzSuccess] = useState('');
+  const [tzStatus, setTzStatus] = useState<'saved' | 'failed' | null>(null);
 
   useEffect(() => {
     setTimezone(zone.timezone ?? 'UTC');
@@ -268,14 +260,13 @@ const AnalysisTab: React.FC<{
 
   const handleTimezoneSave = async () => {
     setTzSaving(true);
-    setTzError('');
-    setTzSuccess('');
+    setTzStatus(null);
     try {
       await irrigationZonesAPI.updateConfig(zone.id, { timezone });
-      setTzSuccess('Saved.');
+      setTzStatus('saved');
       onSaved?.();
     } catch {
-      setTzError('Failed to save.');
+      setTzStatus('failed');
     } finally {
       setTzSaving(false);
     }
@@ -287,13 +278,13 @@ const AnalysisTab: React.FC<{
       <Section title={t('advancedSchedule.sectionExtractionWindows', 'Extraction windows')}>
         {/* Timezone — inline editable */}
         <div className="py-1.5 border-b border-[var(--border)]">
-          <p className="text-xs text-[var(--text-secondary)] mb-1">Timezone</p>
+          <p className="text-xs text-[var(--text-secondary)] mb-1">{t('zoneConfig.timezone')}</p>
           <div className="flex gap-2 items-center">
             <input
               type="text"
               value={timezone}
               onChange={e => setTimezone(e.target.value)}
-              placeholder="e.g. Europe/Rome"
+              placeholder={t('advancedSchedule.timezoneExample')}
               className="flex-1 text-xs font-mono bg-[var(--card)] border border-[var(--border)] text-[var(--text)] rounded px-2 py-1"
             />
             <button
@@ -301,59 +292,56 @@ const AnalysisTab: React.FC<{
               disabled={tzSaving}
               className="text-xs bg-[var(--primary)] hover:bg-[var(--primary-hover)] disabled:opacity-50 text-[var(--on-primary)] font-semibold px-2.5 py-1 rounded-lg transition-colors shrink-0"
             >
-              {tzSaving ? '…' : 'Save'}
+              {tzSaving ? '…' : t('zoneConfig.save')}
             </button>
           </div>
-          {tzSuccess && <span className="text-xs text-green-600 mt-0.5 block">{tzSuccess}</span>}
-          {tzError   && <span className="text-xs text-red-600 mt-0.5 block">{tzError}</span>}
+          {tzStatus === 'saved' && <span className="text-xs text-green-600 mt-0.5 block">{t('schedule.saved')}</span>}
+          {tzStatus === 'failed' && <span className="text-xs text-red-600 mt-0.5 block">{t('advancedSchedule.timezoneSaveFailed')}</span>}
         </div>
 
-        <Field label="d_max window (pre-dawn)" value="23:00 – 07:00 local" />
-        <Field label="d_min window (midday)"   value="10:00 – 16:00 local" />
+        <Field label={t('advancedSchedule.dmaxWindow')} value={t('advancedSchedule.localWindow', { start: '23:00', end: '07:00' })} />
+        <Field label={t('advancedSchedule.dminWindow')} value={t('advancedSchedule.localWindow', { start: '10:00', end: '16:00' })} />
       </Section>
 
       {/* ── TWD method ── */}
       <Section title={t('advancedSchedule.sectionTwdMethod', 'TWD method')}>
-        <Field label="Method" value="Stepwise envelope (Peters et al. 2025)" />
+        <Field label={t('advancedSchedule.method')} value={t('advancedSchedule.stepwiseEnvelope')} />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
-          The rolling-window envelope tracks the maximum pre-dawn stem diameter within the
-          computation window (365 days). TWD-night = envelopeRef − d_max. TWD-day =
-          envelopeRef − d_min. Absolute thresholds (µm) are used; species-specific
-          calibration applies via the calibration key above.
+          {t('advancedSchedule.twdDescription')}
         </p>
       </Section>
 
       {/* ── SD-VPD correlation ── */}
       <Section title={t('advancedSchedule.sectionSdVpdCorrelation', 'SD-VPD correlation')}>
         <Field
-          label="Baseline R²"
-          value={sdVpdSummary ? formatR2(sdVpdSummary.baselineR2) : 'Unavailable in recommendation diagnostics'}
+          label={t('advancedSchedule.baselineR2')}
+          value={sdVpdSummary ? formatR2(sdVpdSummary.baselineR2, t('advancedSchedule.insufficientData')) : t('advancedSchedule.diagnosticsUnavailable')}
         />
         <Field
-          label="Rolling 14-day R²"
-          value={sdVpdSummary ? formatR2(sdVpdSummary.rolling14dR2) : 'Unavailable in recommendation diagnostics'}
+          label={t('advancedSchedule.rolling14DayR2')}
+          value={sdVpdSummary ? formatR2(sdVpdSummary.rolling14dR2, t('advancedSchedule.insufficientData')) : t('advancedSchedule.diagnosticsUnavailable')}
         />
         <Field
-          label="SD-VPD status"
-          value={sdVpdSummary ? SD_VPD_STATUS_LABEL[sdVpdSummary.status] : 'Unavailable in recommendation diagnostics'}
+          label={t('advancedSchedule.sdVpdStatusLabel')}
+          value={sdVpdSummary
+            ? SD_VPD_STATUS_KEY[sdVpdSummary.status] ? t(SD_VPD_STATUS_KEY[sdVpdSummary.status]) : undefined
+            : t('advancedSchedule.diagnosticsUnavailable')}
         />
         <Field
-          label="VPD overrides"
+          label={t('advancedSchedule.vpdOverrides')}
           value={vpdOverrideSummary
-            ? `${vpdOverrideSummary.downgradedTreeCount} downgraded / ${vpdOverrideSummary.upgradedTreeCount} upgraded`
-            : 'Unavailable in recommendation diagnostics'}
+            ? t('advancedSchedule.vpdOverrideCounts', { downgraded: vpdOverrideSummary.downgradedTreeCount, upgraded: vpdOverrideSummary.upgradedTreeCount })
+            : t('advancedSchedule.diagnosticsUnavailable')}
         />
         <p className="text-xs text-[var(--text-tertiary)] py-2">
-          Stem diameter daily amplitude (SDA = d_max − d_min) is correlated with maximum
-          daily VPD to detect anomalous stress response. The latest zone recommendation now
-          summarizes both rolling SD-VPD coupling and any VPD-based stress overrides.
+          {t('advancedSchedule.sdVpdDescription')}
         </p>
       </Section>
 
       {/* ── Latest reasoning trace ── */}
       {loading && (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-3 text-xs text-[var(--text-tertiary)]">
-          Loading recommendations…
+          {t('advancedSchedule.loadingRecommendations')}
         </div>
       )}
 
@@ -362,12 +350,12 @@ const AnalysisTab: React.FC<{
           <p className="text-xs text-[var(--text)] py-2 leading-relaxed font-mono whitespace-pre-wrap break-words">
             {latest.action_reasoning}
           </p>
-          <Field label="Computed at"          value={new Date(latest.computed_at).toLocaleString()} />
-          <Field label="Usable trees"         value={latest.usable_tree_count} />
-          <Field label="Low-confidence trees" value={latest.low_confidence_tree_count} />
-          <Field label="Outlier-filtered"     value={latest.outlier_filtered_tree_count} />
+          <Field label={t('advancedSchedule.computedAt')} value={new Date(latest.computed_at).toLocaleString()} />
+          <Field label={t('advancedSchedule.usableTrees')} value={latest.usable_tree_count} />
+          <Field label={t('advancedSchedule.lowConfidenceTrees')} value={latest.low_confidence_tree_count} />
+          <Field label={t('advancedSchedule.outlierFiltered')} value={latest.outlier_filtered_tree_count} />
           <Field
-            label="Zone confidence"
+            label={t('advancedSchedule.zoneConfidence')}
             value={latest.zone_confidence_score != null
               ? `${(latest.zone_confidence_score * 100).toFixed(0)}%`
               : '—'}
@@ -377,7 +365,7 @@ const AnalysisTab: React.FC<{
 
       {!loading && !latest && (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-3 text-xs text-[var(--text-tertiary)]">
-          No zone recommendations computed yet. Run dendro compute or wait for the daily 08:00 UTC job.
+          {t('advancedSchedule.noRecommendations')}
         </div>
       )}
     </div>
@@ -389,6 +377,7 @@ const AnalysisTab: React.FC<{
 export const AdvancedScheduleDrawer: React.FC<Props> = ({
   isOpen, zone, onClose, onSaved, onEditSchedule, onEditPolicy,
 }) => {
+  const { t } = useTranslation('devices');
   const { t: valveT } = useTranslation('valves');
   const [tab, setTab] = useState<DrawerTab>('scheduling');
   const [recommendations, setRecommendations] = useState<ZoneRecommendation[]>([]);
@@ -425,7 +414,7 @@ export const AdvancedScheduleDrawer: React.FC<Props> = ({
 
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
-          {TAB_LABELS.map(({ id, label }) => (
+          {TAB_LABELS.map(({ id, key }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
@@ -435,7 +424,7 @@ export const AdvancedScheduleDrawer: React.FC<Props> = ({
                   : 'text-[var(--text-secondary)] hover:text-[var(--text)]'
               }`}
             >
-              {label}
+              {t(key)}
             </button>
           ))}
         </div>

@@ -129,12 +129,66 @@ const DEVICES_KEYS = [
   'lsn50Mode.chameleonNeedsMod3',
 ];
 
+const ADVANCED_SCHEDULE_PENDING_KEYS = [
+  'advancedSchedule.aggregationDescription',
+  'advancedSchedule.baseDuration',
+  'advancedSchedule.baselineR2',
+  'advancedSchedule.computedAt',
+  'advancedSchedule.diagnosticsUnavailable',
+  'advancedSchedule.dmaxWindow',
+  'advancedSchedule.dminWindow',
+  'advancedSchedule.insufficientData',
+  'advancedSchedule.lastTriggered',
+  'advancedSchedule.loadingRecommendations',
+  'advancedSchedule.localWindow',
+  'advancedSchedule.lowConfidenceTrees',
+  'advancedSchedule.method',
+  'advancedSchedule.never',
+  'advancedSchedule.noRecommendations',
+  'advancedSchedule.noSchedule',
+  'advancedSchedule.outlierFiltered',
+  'advancedSchedule.phenologyDescription',
+  'advancedSchedule.rainSuppressionDescription',
+  'advancedSchedule.recoveryDescription',
+  'advancedSchedule.responseModeOption.aggressive',
+  'advancedSchedule.responseModeOption.fixed',
+  'advancedSchedule.responseModeOption.proportional',
+  'advancedSchedule.rolling14DayR2',
+  'advancedSchedule.sdVpdDescription',
+  'advancedSchedule.sdVpdStatus.coupled',
+  'advancedSchedule.sdVpdStatus.decoupled',
+  'advancedSchedule.sdVpdStatus.insufficient_data',
+  'advancedSchedule.sdVpdStatusLabel',
+  'advancedSchedule.status',
+  'advancedSchedule.stepwiseEnvelope',
+  'advancedSchedule.stressLevel.conservative',
+  'advancedSchedule.stressLevel.high',
+  'advancedSchedule.stressLevel.low',
+  'advancedSchedule.stressLevel.medium',
+  'advancedSchedule.stressLevelOther',
+  'advancedSchedule.stressTriggerLevel',
+  'advancedSchedule.tabAnalysis',
+  'advancedSchedule.tabScheduling',
+  'advancedSchedule.timezoneExample',
+  'advancedSchedule.timezoneSaveFailed',
+  'advancedSchedule.twdDescription',
+  'advancedSchedule.usableTrees',
+  'advancedSchedule.vpdOverrideCounts',
+  'advancedSchedule.vpdOverrides',
+  'advancedSchedule.weatherControlled',
+  'advancedSchedule.zoneConfidence',
+];
+
 // Luganda is human translation work product: where no reviewed Luganda
 // exists, the honest shipped value is the English source text, never a
 // machine translation. Every key above is in that state today (tracked in
 // docs/i18n/pending-luganda-translations.md), and this assertion is what
 // forces the doc and the shipped file to move together.
-const PENDING_HUMAN_LUGANDA = new Set<string>([...SETTINGS_KEYS, ...DEVICES_KEYS]);
+const PENDING_HUMAN_LUGANDA = new Set<string>([
+  ...SETTINGS_KEYS,
+  ...DEVICES_KEYS,
+  ...ADVANCED_SCHEDULE_PENDING_KEYS,
+]);
 
 // locale:key pairs where matching English is correct, not an untranslated
 // leak: "MOD3"/"CH0"/"CH1" are firmware/hardware identifiers never
@@ -228,6 +282,19 @@ test('Luganda ships the English source text for F37 keys until a human pass land
         `lg ${namespace}.json ${key} changed; drop it from PENDING_HUMAN_LUGANDA and from docs/i18n/pending-luganda-translations.md`,
       );
     }
+  }
+});
+
+test('Advanced Schedule drawer keys remain tracked as pending Luganda', () => {
+  const english = readNamespace('en', 'devices');
+  const luganda = readNamespace('lg', 'devices');
+  for (const key of ADVANCED_SCHEDULE_PENDING_KEYS) {
+    assert.ok(PENDING_HUMAN_LUGANDA.has(key), `${key} is missing from PENDING_HUMAN_LUGANDA`);
+    assert.equal(
+      getPath(luganda, key),
+      getPath(english, key),
+      `lg devices.json ${key} changed; remove it from PENDING_HUMAN_LUGANDA and docs/i18n/pending-luganda-translations.md after a human pass`,
+    );
   }
 });
 
