@@ -469,6 +469,7 @@ function loadWorkflows(root, errors) {
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
           pipefail: shell === 'bash',
+          shell,
           gate,
         });
       });
@@ -611,6 +612,9 @@ function checkRunStep(ctx, step) {
   const conditionalCommands = new Set();
   let pipefail = step.pipefail;
   let conditionalDepth = 0;
+  // Commands inside a loop, case, brace group or function body may not run.
+  const blockCommands = new Set();
+  let blockDepth = 0;
   const startsIf = (words) => words[0] === 'if' || (words[0] === 'then' && words[1] === 'if');
   for (let i = 0; i < commands.length; i += 1) {
     const words = commands[i].words;
@@ -618,6 +622,9 @@ function checkRunStep(ctx, step) {
     if (startsIf(words)) conditionalDepth += 1;
     if (conditionalDepth > 0) conditionalCommands.add(i);
     if (head === 'fi' && conditionalDepth > 0) conditionalDepth -= 1;
+    blockDepth += words.filter((w) => w === '{' || w === 'do' || w === 'case').length;
+    if (blockDepth > 0) blockCommands.add(i);
+    if (['}', 'done', 'esac'].includes(head) && blockDepth > 0) blockDepth -= 1;
     if (words[0] === 'if' && words[1] === 'false') {
       let depth = 0;
       let end = -1;
@@ -740,13 +747,21 @@ function checkRunStep(ctx, step) {
     }
     lost = lost || groupLost.get(i) || exitStatusLost(commands, i, pipefail);
     const [cmd, ...args] = words;
+    // Bash keeps an assignment before export or unset temporary: the prior value
+    // and export attribute stay, unless export names that variable. sh (dash)
+    // keeps the assignment, so there the variable becomes unknown.
+    const prefixed = new Map();
+    for (const [, name, value] of prefixAssignments) {
+      if (shellEnv.has(name)) prefixed.set(name, value);
+    }
+    for (const name of prefixUnknownNames) prefixed.set(name, undefined);
+    if ((cmd === 'export' || cmd === 'unset') && step.shell === 'sh') {
+      for (const name of prefixed.keys()) markUnknown(name, true);
+      prefixed.clear();
+    }
     if (cmd === 'export') {
       let unexport = false;
       let unsupportedFlag = false;
-      for (const [, name] of prefixAssignments) {
-        if (shellEnv.has(name)) markUnknown(name, false);
-      }
-      for (const name of prefixUnknownNames) markUnknown(name, false);
       for (const arg of args) {
         if (arg === '-n') { unexport = true; continue; }
         if (arg === '-p') continue;
@@ -755,7 +770,12 @@ function checkRunStep(ctx, step) {
         const appendAssignment = /^([A-Za-z_][A-Za-z0-9_]*)\+=(.*)$/.exec(arg);
         const name = assignment ? assignment[1] : appendAssignment ? appendAssignment[1] : arg;
         if (!shellEnv.has(name)) continue;
-        if (unsupportedFlag) markUnknown(name, true);
+        if (prefixed.has(name)) {
+          const value = prefixed.get(name);
+          if (arg === name && !unexport && !unsupportedFlag && value !== undefined) setShellEnv(name, value, true);
+          else markUnknown(name, true);
+        }
+        else if (unsupportedFlag) markUnknown(name, true);
         else if (assignment && arg === `${name}=${assignment[2]}`) setShellEnv(name, assignment[2], !unexport);
         else if (appendAssignment) {
           const state = shellEnv.get(name);
@@ -772,10 +792,6 @@ function checkRunStep(ctx, step) {
       return;
     }
     if (cmd === 'unset') {
-      for (const [, name] of prefixAssignments) {
-        if (shellEnv.has(name)) markUnknown(name, false);
-      }
-      for (const name of prefixUnknownNames) markUnknown(name, false);
       let functionOnly = false;
       let unsupportedFlag = false;
       const names = [];
@@ -787,7 +803,8 @@ function checkRunStep(ctx, step) {
       }
       for (const arg of names) {
         if (shellEnv.has(arg)) {
-          if (unsupportedFlag) markUnknown(arg);
+          if (prefixed.has(arg)) markUnknown(arg, true);
+          else if (unsupportedFlag) markUnknown(arg);
           else if (!functionOnly) shellEnv.set(arg, { value: undefined, exported: false, known: true });
         }
         else {
@@ -799,8 +816,9 @@ function checkRunStep(ctx, step) {
     }
     if (['declare', 'local', 'readonly', 'typeset'].includes(cmd)) {
       for (const arg of args) {
-        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(arg);
-        const name = assignment ? assignment[1] : arg.replace(/^-?[a-zA-Z]+/, '');
+        if (/^[+-]/.test(arg)) continue;
+        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(arg);
+        const name = assignment ? assignment[1] : arg;
         if (shellEnv.has(name)) markUnknown(name, true);
       }
       return;
@@ -811,10 +829,18 @@ function checkRunStep(ctx, step) {
     // Assignments before a command are temporary, as in `NAME=value command`.
     // They override this command's environment but never the shell's state.
     if (cmd === 'set') {
+      // set -e turns exit on error back on only when it surely runs in this
+      // shell: not conditional, in a block, a pipeline, the background or a
+      // subshell. The parser drops parentheses, so any ( in the step counts.
+      const prevSep = i > 0 ? commands[i - 1].sep : '\n';
+      const resetRuns = command.words[0] === 'set'
+        && !conditionalCommands.has(i) && !blockCommands.has(i)
+        && !['&&', '||', '|'].includes(prevSep) && !['|', '&'].includes(command.sep)
+        && !step.run.replace(/\$\{\{[\s\S]*?\}\}/g, '').includes('(');
       for (let k = 0; k < args.length; k += 1) {
         const a = args[k];
         if (/^\+[a-z]*e/.test(a) || (a.startsWith('+') && args[k + 1] === 'errexit')) errexitOff = true;
-        if (/^-[a-z]*e/.test(a) || (a.startsWith('-') && args[k + 1] === 'errexit')) errexitOff = false;
+        if (resetRuns && (/^-[a-z]*e/.test(a) || (a.startsWith('-') && args[k + 1] === 'errexit'))) errexitOff = false;
         if (/^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
         if (/^\+[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = false;
       }

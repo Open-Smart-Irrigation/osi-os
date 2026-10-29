@@ -757,6 +757,51 @@ test('exported shell environment mutations persist and fail closed for direct te
   }
 });
 
+test('an assignment before export or unset leaves an exported filter in place in bash', async (t) => {
+  const filter = '--test-skip-pattern=passes';
+  const spec = (run) => ({ workflowEnv: `env:\n  NODE_OPTIONS: ${filter}`, run });
+  for (const run of [
+    'NODE_OPTIONS= export >/dev/null\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS= export FOO\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS= export -n NODE_OPTIONS\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS+=--enable-source-maps export FOO\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS= unset FOO\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS= unset NODE_OPTIONS\nnode --test scripts/a.test.js',
+  ]) {
+    await t.test(run, () => assertBashSuppressed(spec(run), run, { NODE_OPTIONS: filter }, FAIL_MARKER_PASSES));
+  }
+
+  await t.test('export naming the variable keeps the prefix value', () => {
+    const filtered = 'NODE_OPTIONS=--test-skip-pattern=passes export NODE_OPTIONS\nnode --test scripts/a.test.js';
+    assertBashSuppressed({ workflowEnv: 'env:\n  NODE_OPTIONS: --enable-source-maps', run: filtered }, filtered,
+      { NODE_OPTIONS: '--enable-source-maps' }, FAIL_MARKER_PASSES);
+
+    const benign = 'NODE_OPTIONS=--enable-source-maps export NODE_OPTIONS\nnode --test scripts/a.test.js';
+    const root = gatedRepo(spec(benign), { 'scripts/a.test.js': MARKER_TEST });
+    const control = bashStep(root, benign, { NODE_OPTIONS: filter });
+    assert.equal(control.child.status, 0, `FIXTURE_ERROR named export: ${control.child.stdout}${control.child.stderr}`);
+    assert.equal(fs.existsSync(control.marker), true, 'named export did not replace the inherited filter');
+    assertRun(root, 'named export replaces the inherited filter');
+  });
+
+  await t.test('sh keeps the prefix assignment, so the verifier fails closed', () => {
+    // dash persists an assignment before a special builtin and keeps its export attribute.
+    const run = 'NODE_OPTIONS=--test-skip-pattern=passes export FOO\nnode --test scripts/a.test.js';
+    const root = gatedRepo({ workflowEnv: 'env:\n  NODE_OPTIONS: --enable-source-maps', shell: '        shell: sh', run });
+    assertUnrun(root, 'sh prefix before export');
+  });
+});
+
+test('declare -x and typeset -x export a shell variable filter', async (t) => {
+  for (const run of [
+    'NODE_OPTIONS=--test-skip-pattern=passes\ndeclare -x NODE_OPTIONS\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS=--test-skip-pattern=passes\ntypeset -x NODE_OPTIONS\nnode --test scripts/a.test.js',
+    'NODE_OPTIONS=--enable-source-maps\ndeclare -x NODE_OPTIONS+=" --test-skip-pattern=passes"\nnode --test scripts/a.test.js',
+  ]) {
+    await t.test(run, () => assertBashSuppressed({ run }, run, {}, FAIL_MARKER_PASSES));
+  }
+});
+
 test('shell environment controls stay local, reset cleanly and do not cross steps', () => {
   const inheritedFilter = '--test-skip-pattern=passes';
   const ordinaryUnset = 'unset NODE_OPTIONS\nnode --test scripts/a.test.js';
@@ -900,6 +945,31 @@ test('pipefail, shell: bash and a final && list keep the exit status', () => {
     assert.deepEqual(verify(root).errors, [], JSON.stringify(spec));
     assert.equal(inventoryCli(root).status, 0, JSON.stringify(spec));
   }
+});
+
+test('a set -e that may not run in this shell keeps exit on error off', async (t) => {
+  // OSI_FIXTURE_ERREXIT is unset, so none of these resets runs in the step's shell.
+  for (const run of [
+    'set +e; if [ -n "$OSI_FIXTURE_ERREXIT" ]; then set -e; fi; node --test scripts/a.test.js; echo done',
+    'set +e\n[ -n "$OSI_FIXTURE_ERREXIT" ] && set -e\nnode --test scripts/a.test.js\necho done',
+    'set +e\n[ -z "$OSI_FIXTURE_ERREXIT" ] || set -e\nnode --test scripts/a.test.js\necho done',
+    'set +e\n[ -n "$OSI_FIXTURE_ERREXIT" ] && { set -e; }\nnode --test scripts/a.test.js\necho done',
+    'set +e\nwhile [ -n "$OSI_FIXTURE_ERREXIT" ]; do set -e; break; done\nnode --test scripts/a.test.js\necho done',
+    'set +e\nfor f in $OSI_FIXTURE_ERREXIT; do\nset -e\ndone\nnode --test scripts/a.test.js\necho done',
+    'set +e\ncase "$OSI_FIXTURE_ERREXIT" in\nyes)\nset -e ;;\nesac\nnode --test scripts/a.test.js\necho done',
+    'set +e\nenable_errexit() {\nset -e\n}\nnode --test scripts/a.test.js\necho done',
+    'set +e\n(set -e)\nnode --test scripts/a.test.js\necho done',
+    'set +e\nignored=$(set -e)\nnode --test scripts/a.test.js\necho done',
+    'set +e\necho x | set -e\nnode --test scripts/a.test.js\necho done',
+  ]) {
+    await t.test(run, () => assertBashMasksFailure({ run }, run));
+  }
+
+  const plainReset = 'set +e\necho prep; set -e\nnode --test scripts/a.test.js';
+  const plainRoot = gatedRepo({ run: plainReset }, { 'scripts/a.test.js': FAIL_MARKER_TEST });
+  const plain = bashStep(plainRoot, plainReset);
+  assert.equal(plain.child.status, 1, `FIXTURE_ERROR plain reset: ${plain.child.stdout}${plain.child.stderr}`);
+  assertRun(plainRoot, 'unconditional set -e after ;');
 });
 
 test('non-executing and filtering node options do not run the test', () => {
