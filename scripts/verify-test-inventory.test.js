@@ -1001,6 +1001,44 @@ test('an environment change that may not run in this shell makes the variable un
   }
 });
 
+test('after the first compound or grouping construct no shell state change holds', async (t) => {
+  // OSI_FIXTURE_NEVER is unset. Case labels end in ) and may look like keywords.
+  const filter = '--test-skip-pattern=passes';
+  for (const run of [
+    'set +e\n(\ncase x in\nx) :;;\nesac\nset -e\n)\nnode --test scripts/a.test.js\necho done',
+    'set +e\nif [ -n "$OSI_FIXTURE_NEVER" ]; then\ncase x in\nfi) :;;\nesac\nset -e\nfi\nnode --test scripts/a.test.js\necho done',
+  ]) {
+    await t.test(run, () => assertBashMasksFailure({ run }, run));
+  }
+  for (const run of [
+    `export NODE_OPTIONS=${filter}\n(\ncase x in\nx) :;;\nesac\nNODE_OPTIONS= export NODE_OPTIONS\n)\nnode --test scripts/a.test.js`,
+    `export NODE_OPTIONS=${filter}\nif [ -n "$OSI_FIXTURE_NEVER" ]; then\ncase x in\nfi) :;;\nesac\nNODE_OPTIONS= export NODE_OPTIONS\nfi\nnode --test scripts/a.test.js`,
+  ]) {
+    await t.test(run, () => assertBashSuppressed({ run }, run, {}, FAIL_MARKER_PASSES));
+  }
+  for (const run of [
+    'case x in\nif) :;;\nesac\nexit 0\nnode --test scripts/a.test.js',
+    'if false; then\ny=$(if true; then :; fi)\nnode --test scripts/a.test.js\nfi',
+  ]) {
+    await t.test(run, () => assertBashSuppressed({ run }, run));
+  }
+
+  for (const [run, inherited] of [
+    ['set +e\necho prep\nset -e\nnode --test scripts/a.test.js', {}],
+    [`export NODE_OPTIONS=${filter}\nexport NODE_OPTIONS=--enable-source-maps\nnode --test scripts/a.test.js`, {}],
+    ['NODE_OPTIONS=\nunset NODE_OPTIONS\nnode --test scripts/a.test.js', { NODE_OPTIONS: filter }],
+  ]) {
+    await t.test(`top level: ${run}`, () => {
+      const spec = { workflowEnv: inherited.NODE_OPTIONS ? `env:\n  NODE_OPTIONS: ${filter}` : '', run };
+      const root = gatedRepo(spec, { 'scripts/a.test.js': MARKER_TEST });
+      const control = bashStep(root, run, inherited);
+      assert.equal(control.child.status, 0, `FIXTURE_ERROR ${run}: ${control.child.stdout}${control.child.stderr}`);
+      assert.equal(fs.existsSync(control.marker), true, `FIXTURE_ERROR ${run}: Bash did not reach marker`);
+      assertRun(root, run);
+    });
+  }
+});
+
 test('other builtins that write a tracked variable make it unknown', async (t) => {
   const benign = '--enable-source-maps';
   for (const run of [

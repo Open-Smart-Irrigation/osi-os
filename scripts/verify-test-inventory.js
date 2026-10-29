@@ -235,15 +235,14 @@ function parseYaml(text, file) {
 // Splits a run script into commands on newlines, ;, &, &&, || and |,
 // honouring quotes. Each command records the operator that ends it ('\n',
 // ';', '&', '&&', '||', '|' or 'end'). GitHub expressions become a
-// placeholder word. A command records paren: true when it is inside or
-// touches a parenthesis, because the words drop subshells and $(...).
+// placeholder word. A command records paren: true when a ( or ) or an
+// unquoted backtick appears in it or on an empty line before it.
 function shellScript(script) {
   const src = script.replace(/\$\{\{[\s\S]*?\}\}/g, '__EXPR__');
   if (/<<-?\s*['"]?\w/.test(src)) throw new Error('here-documents are not supported in workflow run scripts');
   const commands = [];
   let words = [];
   let word = null;
-  let parenDepth = 0;
   let sawParen = false;
   const endWord = () => {
     if (word !== null) words.push(word);
@@ -251,12 +250,13 @@ function shellScript(script) {
   };
   const endCommand = (sep) => {
     endWord();
-    if (words.length) commands.push({ words, sep, paren: sawParen || parenDepth > 0 });
-    else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
+    if (words.length) {
+      commands.push({ words, sep, paren: sawParen });
+      sawParen = false;
+    } else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
       throw new Error(`a line starts with "${sep}"; continuation lines are not supported`);
     }
     words = [];
-    sawParen = parenDepth > 0;
   };
   for (let j = 0; j < src.length; j += 1) {
     const c = src[j];
@@ -306,12 +306,8 @@ function shellScript(script) {
       continue;
     }
     if (c === '\n' || c === ';') { endCommand(c); continue; }
-    if (c === '(' || c === ')') {
-      sawParen = true;
-      parenDepth = c === '(' ? parenDepth + 1 : Math.max(0, parenDepth - 1);
-      endWord();
-      continue;
-    }
+    if (c === '(' || c === ')') { sawParen = true; endWord(); continue; }
+    if (c === '`') sawParen = true;
     if (c === ' ' || c === '\t') { endWord(); continue; }
     word = (word ?? '') + c;
   }
@@ -580,8 +576,7 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
-const COMPOUND_OPENERS = new Set(['if', 'while', 'until', 'for', 'select', 'case', '{']);
-const COMPOUND_CLOSERS = new Set(['fi', 'done', 'esac', '}']);
+const COMPOUND_WORDS = new Set(['if', 'then', 'elif', 'else', 'fi', 'case', 'esac', 'for', 'while', 'until', 'select', 'do', 'done', 'function', '{', '}']);
 const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test[-_]name[-_]pattern|--test[-_]skip[-_]pattern|--test[-_]only|--test[-_]shard|--check|-c)(?=$|[\s="'])/;
 
 function nodeOptionsTestFilter(value) {
@@ -635,36 +630,26 @@ function checkRunStep(ctx, step) {
     return out;
   };
   const ifCount = (words) => commandPosition(words).filter((w) => w === 'if').length;
-  // compoundDepth[i]: open if, loop, case, brace group or function body
-  // around command i. A closer without an opener makes the rest uncertain.
-  const compoundDepth = [];
-  let nesting = 0;
-  let nestingUncertain = false;
-  for (const { words } of commands) {
-    compoundDepth.push(nestingUncertain ? Infinity : nesting);
-    const position = commandPosition(words);
-    nesting += position.filter((w) => COMPOUND_OPENERS.has(w)).length
-      + words.slice(position.length).filter((w) => w === '{').length;
-    if (COMPOUND_CLOSERS.has(words[0])) {
-      if (nesting > 0) nesting -= 1;
-      else nestingUncertain = true;
-    }
-  }
-  // Whether command i surely runs in the step's own shell, so a change it
-  // makes to shell state (set -e, pipefail, the tracked environment) holds.
-  const surelyRuns = (i) => {
-    const command = commands[i];
-    const prevSep = i > 0 ? commands[i - 1].sep : '\n';
-    return compoundDepth[i] === 0 && !command.paren && !SHELL_KEYWORDS.has(command.words[0])
-      && !['&&', '||', '|'].includes(prevSep) && !['|', '&'].includes(command.sep);
-  };
+  // A change to shell state (set -e, pipefail, the tracked environment) holds
+  // only before the first compound or grouping construct of the step: a
+  // compound keyword or brace in any word, a parenthesis, or an operator
+  // other than ; and newline. From there on the verifier fails closed.
+  const firstConstruct = commands.findIndex((c) => c.paren
+    || ['&&', '||', '|', '&'].includes(c.sep) || c.words.some((w) => COMPOUND_WORDS.has(w)));
+  const surelyRuns = (i) => firstConstruct < 0 || i < firstConstruct;
+  // A parenthesis or backtick (case label, subshell, command substitution)
+  // can hide or fake if, fi and braces; then exit always ends the step's
+  // coverage, and if false and brace groups fail closed.
+  const grammarTrusted = !commands.some((c) => c.paren);
   for (let i = 0; i < commands.length; i += 1) {
     const words = commands[i].words;
     const head = words[0];
     conditionalDepth += ifCount(words);
     if (conditionalDepth > 0) conditionalCommands.add(i);
     if (head === 'fi' && conditionalDepth > 0) conditionalDepth -= 1;
-    if (words[0] === 'if' && words[1] === 'false') {
+    if (words[0] === 'if' && words[1] === 'false' && !grammarTrusted) {
+      for (let k = i + 1; k < commands.length; k += 1) unreachable.add(k);
+    } else if (words[0] === 'if' && words[1] === 'false') {
       let depth = 0;
       let end = -1;
       for (let k = i; k < commands.length; k += 1) {
@@ -690,7 +675,9 @@ function checkRunStep(ctx, step) {
         for (let k = i + 1; k < branchEnd; k += 1) unreachable.add(k);
       }
     }
-    if (words[0] === '{') {
+    if (words[0] === '{' && !grammarTrusted) {
+      for (let k = i; k < commands.length; k += 1) groupLost.set(k, 'it is inside a brace group in a step with a parenthesis, which the verifier cannot model');
+    } else if (words[0] === '{') {
       let end = i + 1;
       while (end < commands.length && commands[end].words[0] !== '}') end += 1;
       const lost = end < commands.length && exitStatusLost(commands, end, pipefail);
@@ -898,7 +885,7 @@ function checkRunStep(ctx, step) {
     }
     if (cmd === 'exit') {
       const conditionalList = i > 0 && ['||', '&&'].includes(commands[i - 1].sep);
-      if (!conditionalCommands.has(i) && !conditionalList) terminated = true;
+      if (!grammarTrusted || (!conditionalCommands.has(i) && !conditionalList)) terminated = true;
       return;
     }
     if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
