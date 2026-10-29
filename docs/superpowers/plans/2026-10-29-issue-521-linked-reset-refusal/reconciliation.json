@@ -1,0 +1,2233 @@
+{
+  "base": "bd1afcd248616653e1962081c8c9e3d7b19d650f",
+  "M": "74ff869e335529783e9c7a39e9ae1a37a8019711",
+  "N": "0f41ff4b4729085142f973d20996857ffca1e7a1",
+  "custodySha256": "6cbf8357e0873f21423dc4b822ee356a96cba1c2d555cfe9cfcc5aa1ae44f5cc",
+  "classS": {
+    "web/react-gui/src/pages/admin/UsersPage.tsx": {
+      "expected": "0b8e7833b7c9b1108a9be0fd870ff18e1004a70b649521e8fbac0dd101e9c6fd",
+      "actual": "0b8e7833b7c9b1108a9be0fd870ff18e1004a70b649521e8fbac0dd101e9c6fd"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js": {
+      "expected": "ef58d5c5bd1c14db0ed7a940dc63262bbcab326b646c94303e391c733dd6e42f",
+      "actual": "ef58d5c5bd1c14db0ed7a940dc63262bbcab326b646c94303e391c733dd6e42f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json": {
+      "expected": "4537836660c809eed3a887445b7301c5bbbaf6fbcd6d226686f553519732e933",
+      "actual": "4537836660c809eed3a887445b7301c5bbbaf6fbcd6d226686f553519732e933"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js": {
+      "expected": "5c652cf6c7d7ca8f7cc6bf242f5edcb8de6e7fd37f05bee88ce00d93393af63c",
+      "actual": "5c652cf6c7d7ca8f7cc6bf242f5edcb8de6e7fd37f05bee88ce00d93393af63c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json": {
+      "expected": "ae71da37b5eaf326e06bc664c0348b0cfda7f4c4a409baa7cc0f8e0438df7ef9",
+      "actual": "ae71da37b5eaf326e06bc664c0348b0cfda7f4c4a409baa7cc0f8e0438df7ef9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js": {
+      "expected": "f35935a9394b869a14ed50225544fe6b44b397d66282d33f0c5d0be9bc693004",
+      "actual": "f35935a9394b869a14ed50225544fe6b44b397d66282d33f0c5d0be9bc693004"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/package.json": {
+      "expected": "2fec7b49da2faa104b6d3f3c5bf68af9b250212de57394b2cc12f0b3f4b5aba6",
+      "actual": "2fec7b49da2faa104b6d3f3c5bf68af9b250212de57394b2cc12f0b3f4b5aba6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/package.json": {
+      "expected": "ddeec15021f8f246928cc914f665266e60d0f1eaec05a1c333ece29e2bc30195",
+      "actual": "ddeec15021f8f246928cc914f665266e60d0f1eaec05a1c333ece29e2bc30195"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json": {
+      "expected": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+      "actual": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js": {
+      "expected": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4",
+      "actual": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/index.js": {
+      "expected": "ef58d5c5bd1c14db0ed7a940dc63262bbcab326b646c94303e391c733dd6e42f",
+      "actual": "ef58d5c5bd1c14db0ed7a940dc63262bbcab326b646c94303e391c733dd6e42f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/package.json": {
+      "expected": "4537836660c809eed3a887445b7301c5bbbaf6fbcd6d226686f553519732e933",
+      "actual": "4537836660c809eed3a887445b7301c5bbbaf6fbcd6d226686f553519732e933"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/index.js": {
+      "expected": "5c652cf6c7d7ca8f7cc6bf242f5edcb8de6e7fd37f05bee88ce00d93393af63c",
+      "actual": "5c652cf6c7d7ca8f7cc6bf242f5edcb8de6e7fd37f05bee88ce00d93393af63c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/package.json": {
+      "expected": "ae71da37b5eaf326e06bc664c0348b0cfda7f4c4a409baa7cc0f8e0438df7ef9",
+      "actual": "ae71da37b5eaf326e06bc664c0348b0cfda7f4c4a409baa7cc0f8e0438df7ef9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/index.js": {
+      "expected": "f35935a9394b869a14ed50225544fe6b44b397d66282d33f0c5d0be9bc693004",
+      "actual": "f35935a9394b869a14ed50225544fe6b44b397d66282d33f0c5d0be9bc693004"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/package.json": {
+      "expected": "2fec7b49da2faa104b6d3f3c5bf68af9b250212de57394b2cc12f0b3f4b5aba6",
+      "actual": "2fec7b49da2faa104b6d3f3c5bf68af9b250212de57394b2cc12f0b3f4b5aba6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/package.json": {
+      "expected": "ddeec15021f8f246928cc914f665266e60d0f1eaec05a1c333ece29e2bc30195",
+      "actual": "ddeec15021f8f246928cc914f665266e60d0f1eaec05a1c333ece29e2bc30195"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json": {
+      "expected": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a",
+      "actual": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js": {
+      "expected": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4",
+      "actual": "ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#admin-users-list-http": {
+      "expected": "bb943caaf61d8e78937fde82a4d67349e3883e6fe790a15a92a7ec4cc8913242",
+      "actual": "bb943caaf61d8e78937fde82a4d67349e3883e6fe790a15a92a7ec4cc8913242"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#admin-users-create-http": {
+      "expected": "06008e84e9f9226a907d1955b2b2934518658e0f400cc71ec7aed6338e0f09be",
+      "actual": "06008e84e9f9226a907d1955b2b2934518658e0f400cc71ec7aed6338e0f09be"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#admin-users-password-http": {
+      "expected": "047c8ac3faf8ecb0e99760ccafcfa542cf40a4d63ead8ccc58cf3e593c2da018",
+      "actual": "047c8ac3faf8ecb0e99760ccafcfa542cf40a4d63ead8ccc58cf3e593c2da018"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#admin-users-disabled-http": {
+      "expected": "d2ad90ea6e127fcae7b2e9e516752c0edc0f2c3b96468161920a17874b03c163",
+      "actual": "d2ad90ea6e127fcae7b2e9e516752c0edc0f2c3b96468161920a17874b03c163"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#scoped-admin-account-router": {
+      "expected": "8d21d277b20aa087e74571f1af38e335858b325c6e79fb85790c3440832b0a97",
+      "actual": "8d21d277b20aa087e74571f1af38e335858b325c6e79fb85790c3440832b0a97"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-response": {
+      "expected": "e71713b44f441ac29ba59d1313e76199471e51827d2edcaa389a71292a7896ad",
+      "actual": "e71713b44f441ac29ba59d1313e76199471e51827d2edcaa389a71292a7896ad"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-login-http": {
+      "expected": "ce3885fedf63191dd84fc756085540aeece76311c434d64bcac9bcf860674054",
+      "actual": "ce3885fedf63191dd84fc756085540aeece76311c434d64bcac9bcf860674054"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-login-func": {
+      "expected": "d87f15ed8a1e515e18a78f020961403fc84e4b86ab701bb25c93bc5e8b1fc381",
+      "actual": "d87f15ed8a1e515e18a78f020961403fc84e4b86ab701bb25c93bc5e8b1fc381"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-db-query": {
+      "expected": "93ebf3c5bbe949349a37cc721a7ae178166ea83094337b9191643a745ef06e5f",
+      "actual": "93ebf3c5bbe949349a37cc721a7ae178166ea83094337b9191643a745ef06e5f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-process-result": {
+      "expected": "a3adbdf1f776019f60cedb04651cef4fe9e344ea0f38fe77ddf62d45c54bd1c6",
+      "actual": "a3adbdf1f776019f60cedb04651cef4fe9e344ea0f38fe77ddf62d45c54bd1c6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-db-insert": {
+      "expected": "b6deaedd8328759035e0fe966b0e71f5b24287348de887da74f74f9ceb81ded9",
+      "actual": "b6deaedd8328759035e0fe966b0e71f5b24287348de887da74f74f9ceb81ded9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-insert-complete": {
+      "expected": "231452f5dc22d3ad2042a2970cbaed8d9518250ffd080b22ae7a19b006410061",
+      "actual": "231452f5dc22d3ad2042a2970cbaed8d9518250ffd080b22ae7a19b006410061"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#record-error-catch-auth": {
+      "expected": "8efae6a791ba2e697d1b2b767dd286515a70b01c29655be76bc620a15de7c926",
+      "actual": "8efae6a791ba2e697d1b2b767dd286515a70b01c29655be76bc620a15de7c926"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json#auth-catch-http500": {
+      "expected": "d81cdbf1f43546bb177d6953323cd282d8b72fe8707e10affdf8e61462b55a8b",
+      "actual": "d81cdbf1f43546bb177d6953323cd282d8b72fe8707e10affdf8e61462b55a8b"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#admin-users-list-http": {
+      "expected": "bb943caaf61d8e78937fde82a4d67349e3883e6fe790a15a92a7ec4cc8913242",
+      "actual": "bb943caaf61d8e78937fde82a4d67349e3883e6fe790a15a92a7ec4cc8913242"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#admin-users-create-http": {
+      "expected": "06008e84e9f9226a907d1955b2b2934518658e0f400cc71ec7aed6338e0f09be",
+      "actual": "06008e84e9f9226a907d1955b2b2934518658e0f400cc71ec7aed6338e0f09be"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#admin-users-password-http": {
+      "expected": "047c8ac3faf8ecb0e99760ccafcfa542cf40a4d63ead8ccc58cf3e593c2da018",
+      "actual": "047c8ac3faf8ecb0e99760ccafcfa542cf40a4d63ead8ccc58cf3e593c2da018"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#admin-users-disabled-http": {
+      "expected": "d2ad90ea6e127fcae7b2e9e516752c0edc0f2c3b96468161920a17874b03c163",
+      "actual": "d2ad90ea6e127fcae7b2e9e516752c0edc0f2c3b96468161920a17874b03c163"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#scoped-admin-account-router": {
+      "expected": "8d21d277b20aa087e74571f1af38e335858b325c6e79fb85790c3440832b0a97",
+      "actual": "8d21d277b20aa087e74571f1af38e335858b325c6e79fb85790c3440832b0a97"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-response": {
+      "expected": "e71713b44f441ac29ba59d1313e76199471e51827d2edcaa389a71292a7896ad",
+      "actual": "e71713b44f441ac29ba59d1313e76199471e51827d2edcaa389a71292a7896ad"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-login-http": {
+      "expected": "ce3885fedf63191dd84fc756085540aeece76311c434d64bcac9bcf860674054",
+      "actual": "ce3885fedf63191dd84fc756085540aeece76311c434d64bcac9bcf860674054"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-login-func": {
+      "expected": "d87f15ed8a1e515e18a78f020961403fc84e4b86ab701bb25c93bc5e8b1fc381",
+      "actual": "d87f15ed8a1e515e18a78f020961403fc84e4b86ab701bb25c93bc5e8b1fc381"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-db-query": {
+      "expected": "93ebf3c5bbe949349a37cc721a7ae178166ea83094337b9191643a745ef06e5f",
+      "actual": "93ebf3c5bbe949349a37cc721a7ae178166ea83094337b9191643a745ef06e5f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-process-result": {
+      "expected": "a3adbdf1f776019f60cedb04651cef4fe9e344ea0f38fe77ddf62d45c54bd1c6",
+      "actual": "a3adbdf1f776019f60cedb04651cef4fe9e344ea0f38fe77ddf62d45c54bd1c6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-db-insert": {
+      "expected": "b6deaedd8328759035e0fe966b0e71f5b24287348de887da74f74f9ceb81ded9",
+      "actual": "b6deaedd8328759035e0fe966b0e71f5b24287348de887da74f74f9ceb81ded9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-insert-complete": {
+      "expected": "231452f5dc22d3ad2042a2970cbaed8d9518250ffd080b22ae7a19b006410061",
+      "actual": "231452f5dc22d3ad2042a2970cbaed8d9518250ffd080b22ae7a19b006410061"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#record-error-catch-auth": {
+      "expected": "8efae6a791ba2e697d1b2b767dd286515a70b01c29655be76bc620a15de7c926",
+      "actual": "8efae6a791ba2e697d1b2b767dd286515a70b01c29655be76bc620a15de7c926"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json#auth-catch-http500": {
+      "expected": "d81cdbf1f43546bb177d6953323cd282d8b72fe8707e10affdf8e61462b55a8b",
+      "actual": "d81cdbf1f43546bb177d6953323cd282d8b72fe8707e10affdf8e61462b55a8b"
+    }
+  },
+  "classSLinks": {
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-db-helper": {
+      "expected": "../osi-db-helper",
+      "actual": "../osi-db-helper"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-scope-helper": {
+      "expected": "../osi-scope-helper",
+      "actual": "../osi-scope-helper"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-db-helper": {
+      "expected": "../osi-db-helper",
+      "actual": "../osi-db-helper"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-scope-helper": {
+      "expected": "../osi-scope-helper",
+      "actual": "../osi-scope-helper"
+    }
+  },
+  "classA": {
+    ".claude/skills/anti-slop-writing/slop-check.js": {
+      "atM": "d798fef39801c9b935132a91eac3aa1ffcdf633d2f6411ff1744fa9d1c75b7ce",
+      "actual": "d798fef39801c9b935132a91eac3aa1ffcdf633d2f6411ff1744fa9d1c75b7ce"
+    },
+    ".github/workflows/codecs.yml": {
+      "atM": "28e4cfd1e98118e12386862e3b8220a4d8c1179aec2b02a50b7da3fcbfc62cd6",
+      "actual": "28e4cfd1e98118e12386862e3b8220a4d8c1179aec2b02a50b7da3fcbfc62cd6"
+    },
+    ".github/workflows/doc-hygiene.yml": {
+      "atM": "fe9489d07a7524bda84f25904eb842e0f1fa2f3ad6f1f530451a14aa82a1032f",
+      "actual": "fe9489d07a7524bda84f25904eb842e0f1fa2f3ad6f1f530451a14aa82a1032f"
+    },
+    ".github/workflows/field-journal.yml": {
+      "atM": "1b7ee2f70f96d0cea02f3258038e4aec1c07124696c50b7d43febbb50d468eaa",
+      "actual": "1b7ee2f70f96d0cea02f3258038e4aec1c07124696c50b7d43febbb50d468eaa"
+    },
+    ".github/workflows/history-router.yml": {
+      "atM": "d272627f8261918bb9d70bc94d4e1dd79022c186df4810f7dbad9427800d2ee9",
+      "actual": "d272627f8261918bb9d70bc94d4e1dd79022c186df4810f7dbad9427800d2ee9"
+    },
+    ".github/workflows/history-uplot-core.yml": {
+      "atM": "70e956563054b7466fab32223ef3cb96ca1de73cb9fed606a01a98d57698f701",
+      "actual": "70e956563054b7466fab32223ef3cb96ca1de73cb9fed606a01a98d57698f701"
+    },
+    ".github/workflows/journal-catalog.yml": {
+      "atM": "9bb705150554a4bf01b908f66ae74cd3417bab14cd090c2f2f23d65caba4fdd8",
+      "actual": "9bb705150554a4bf01b908f66ae74cd3417bab14cd090c2f2f23d65caba4fdd8"
+    },
+    ".github/workflows/migrations.yml": {
+      "atM": "70983e156cc30dcaf082ce35c30250c68f203d78b061a09a2b4444a81945eac8",
+      "actual": "9e75973e021914ae4df2b59a804b6e325290237cd67e4b8c2bc27a82e2c8a028"
+    },
+    ".github/workflows/test-inventory.yml": {
+      "atM": "2ad200d70b867aed7061226ff1a029aa28613b8f264d59a515eeb8490326689c",
+      "actual": "6a72d6f94441f94f850fa99817255728f441ee12bf58c8fcdfc97a3e2da42be6"
+    },
+    ".github/workflows/typecheck.yml": {
+      "atM": "1af25c9120ef329077d3cf82c79fa23f4c3ca2779e83db7623a5ecc8ad63d70a",
+      "actual": "1af25c9120ef329077d3cf82c79fa23f4c3ca2779e83db7623a5ecc8ad63d70a"
+    },
+    ".github/workflows/ui-core.yml": {
+      "atM": "55da2a96900718f70fcf44279d3799e4991fa5005957e9f2a7244213aa83b8bb",
+      "actual": "55da2a96900718f70fcf44279d3799e4991fa5005957e9f2a7244213aa83b8bb"
+    },
+    ".github/workflows/verify-sync-flow.yml": {
+      "atM": "ada304ff55ed416919cb45e999614c24210109a1c9e3e6fa2c15668b24b5cd51",
+      "actual": "ada304ff55ed416919cb45e999614c24210109a1c9e3e6fa2c15668b24b5cd51"
+    },
+    "AGENTS.md": {
+      "atM": "b6aea35bb435c6f0d61233463bff2bcb74fa1d846ac82dc69c257b7617bb0318",
+      "actual": "b6aea35bb435c6f0d61233463bff2bcb74fa1d846ac82dc69c257b7617bb0318"
+    },
+    "RULES.yaml": {
+      "atM": "7190d8d907065269c9b088fca8065693c3f58d4dc861c46b5095fc63510c503c",
+      "actual": "7190d8d907065269c9b088fca8065693c3f58d4dc861c46b5095fc63510c503c"
+    },
+    "architect.yaml": {
+      "atM": "104a3d8bb900df11dc953cbf9482ab38958a29cee0cc3675ce6a3818018c6c1c",
+      "actual": "104a3d8bb900df11dc953cbf9482ab38958a29cee0cc3675ce6a3818018c6c1c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config": {
+      "atM": "0efa3a6ef96439d244fc55e4d4693d0c651833ee7dd1f3ec7f75f520bc112e9c",
+      "actual": "0efa3a6ef96439d244fc55e4d4693d0c651833ee7dd1f3ec7f75f520bc112e9c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json": {
+      "atM": "542df53f2744dc454ae4c0b27cf3663e83c0b4b870325faed2efa39939dc6117",
+      "actual": "542df53f2744dc454ae4c0b27cf3663e83c0b4b870325faed2efa39939dc6117"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/edge-channels.json": {
+      "atM": "633b985c5ab4a04cdd1fa45b10d413c38fdd7da235496e10c63c226bfe459c48",
+      "actual": "633b985c5ab4a04cdd1fa45b10d413c38fdd7da235496e10c63c226bfe459c48"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.js": {
+      "atM": "57dda37284c5779e2dd8b374561961f0dad2c73938cb707ef7bee5cfc252d8fb",
+      "actual": "57dda37284c5779e2dd8b374561961f0dad2c73938cb707ef7bee5cfc252d8fb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/package.json": {
+      "atM": "68098a3dc0d729292a0093936f4262a5eede1e503e2cdfce1d0f58d2b07e12b2",
+      "actual": "68098a3dc0d729292a0093936f4262a5eede1e503e2cdfce1d0f58d2b07e12b2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-command-ledger/index.js": {
+      "atM": "c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441",
+      "actual": "c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-command-ledger/package.json": {
+      "atM": "3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31",
+      "actual": "3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-dendro-helper/index.js": {
+      "atM": "e562d3a3e6bd85aa0bb0b4856ca7d8b6c4f477accd045e696de942efa9da8f3d",
+      "actual": "e562d3a3e6bd85aa0bb0b4856ca7d8b6c4f477accd045e696de942efa9da8f3d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-dendro-helper/package.json": {
+      "atM": "fdfde46ef7defa5e9b5b57fe398a30311a7449d331b081645c15cea9d2a57334",
+      "actual": "fdfde46ef7defa5e9b5b57fe398a30311a7449d331b081645c15cea9d2a57334"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/commands.js": {
+      "atM": "994048479ac2f6fb3b8b55320876da0f8151206904d0f314509c7869a5a55976",
+      "actual": "994048479ac2f6fb3b8b55320876da0f8151206904d0f314509c7869a5a55976"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/index.js": {
+      "atM": "f7a19f5301b1a8c9ed95e92c9cf5070f9c91d10d7ad43789982ed867ed83abd4",
+      "actual": "f7a19f5301b1a8c9ed95e92c9cf5070f9c91d10d7ad43789982ed867ed83abd4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/package.json": {
+      "atM": "5411ff5c820c93bb803baf2756bfe6a811ede3112c633da75d2e3cca78d4120f",
+      "actual": "5411ff5c820c93bb803baf2756bfe6a811ede3112c633da75d2e3cca78d4120f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/analysis-sources.js": {
+      "atM": "2c8644974b4b86631bd50b03c30d2b85455a9cdb041e513785e8ce0a0f1d5af7",
+      "actual": "2c8644974b4b86631bd50b03c30d2b85455a9cdb041e513785e8ce0a0f1d5af7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/analysis.js": {
+      "atM": "8e645bb4dd80fd4491b1c77c2f90b45caf477fde673859e54b4a28c27fd463f2",
+      "actual": "8e645bb4dd80fd4491b1c77c2f90b45caf477fde673859e54b4a28c27fd463f2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/device-sources.js": {
+      "atM": "0e4f16a37f36a9d60f8a218003cb7f1cd7041302c8a56e97cc7d969f216f90ce",
+      "actual": "0e4f16a37f36a9d60f8a218003cb7f1cd7041302c8a56e97cc7d969f216f90ce"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/index.js": {
+      "atM": "f7a7fec5c1ceda7324ef79414c2628b50e691c4c4912cec84a0e8379d0048273",
+      "actual": "f7a7fec5c1ceda7324ef79414c2628b50e691c4c4912cec84a0e8379d0048273"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/package.json": {
+      "atM": "3576c1e391f9cbe16646434373c0c236d9c740a1074dff4d92c1bf9a3d14da9c",
+      "actual": "3576c1e391f9cbe16646434373c0c236d9c740a1074dff4d92c1bf9a3d14da9c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-router/index.js": {
+      "atM": "239da2e0da1c63f97797c41381cbc9ac1687e16a6bb1b6c7f2b5469fee7d7d43",
+      "actual": "239da2e0da1c63f97797c41381cbc9ac1687e16a6bb1b6c7f2b5469fee7d7d43"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-router/package.json": {
+      "atM": "c8e4577dee10cbbd0e10ba73a0345687f7dc73fc530c03ff3ba066f28cf427c3",
+      "actual": "c8e4577dee10cbbd0e10ba73a0345687f7dc73fc530c03ff3ba066f28cf427c3"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/api.js": {
+      "atM": "2e87a2277381b96ca0fc374c6f01788ed88df44c2141a833362151dacf10412d",
+      "actual": "2e87a2277381b96ca0fc374c6f01788ed88df44c2141a833362151dacf10412d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js": {
+      "atM": "ca6efbb34eef9b75f249eb8d06692e11d58fa607633da977c68fff00a099fa71",
+      "actual": "ca6efbb34eef9b75f249eb8d06692e11d58fa607633da977c68fff00a099fa71"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/clock.js": {
+      "atM": "62288cd17a9f72d959c03acc1da55c48aa88c2b0bddd6e9221562f3ce2181f7d",
+      "actual": "62288cd17a9f72d959c03acc1da55c48aa88c2b0bddd6e9221562f3ce2181f7d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/evaluate.js": {
+      "atM": "2550d812dd5c59ffe48e95557de36c96c2aeafc17c8429d117cbb378e3ef8b42",
+      "actual": "2550d812dd5c59ffe48e95557de36c96c2aeafc17c8429d117cbb378e3ef8b42"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/index.js": {
+      "atM": "7403ad25e4b4935847612bf99fdc397a3f0c43ebed70ed3588c759ab09c53600",
+      "actual": "7403ad25e4b4935847612bf99fdc397a3f0c43ebed70ed3588c759ab09c53600"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js": {
+      "atM": "c8754e5bca791aa676fecff939e96f39074d5ac731f1e2270b368c4390685f44",
+      "actual": "c8754e5bca791aa676fecff939e96f39074d5ac731f1e2270b368c4390685f44"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/model.js": {
+      "atM": "4340d640e20e089f587d093a978a04a93a89b7f040630d8988d49e0e65cd856a",
+      "actual": "4340d640e20e089f587d093a978a04a93a89b7f040630d8988d49e0e65cd856a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/observations.js": {
+      "atM": "1a690e90461f8cb6514a0b65b0cb410b54fd768eb808bf346bf0746bbf29f405",
+      "actual": "1a690e90461f8cb6514a0b65b0cb410b54fd768eb808bf346bf0746bbf29f405"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/occurrences.js": {
+      "atM": "a2b0a3d7c15bb02f842c2eae6d867d4d54f158466a12f868c358064d374d8f9a",
+      "actual": "a2b0a3d7c15bb02f842c2eae6d867d4d54f158466a12f868c358064d374d8f9a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/package.json": {
+      "atM": "579e144544414eb2710e516df3de1ededd663c3f93e3ecce56b3294100d7bf00",
+      "actual": "579e144544414eb2710e516df3de1ededd663c3f93e3ecce56b3294100d7bf00"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/replication.js": {
+      "atM": "3b8654c5ac8eca375ef129ea14b3873df982833341b41c223ebc8e8b8dddd682",
+      "actual": "3b8654c5ac8eca375ef129ea14b3873df982833341b41c223ebc8e8b8dddd682"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/routes.js": {
+      "atM": "dc8028cafe199ad9374e0d9e93479838d1cde9f60693ed2d5dbfb333fd1e45c2",
+      "actual": "dc8028cafe199ad9374e0d9e93479838d1cde9f60693ed2d5dbfb333fd1e45c2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/store.js": {
+      "atM": "92d0837d53bb9b92a07e0243452dd8684bf798d217ad437690c85a84e1c0b976",
+      "actual": "92d0837d53bb9b92a07e0243452dd8684bf798d217ad437690c85a84e1c0b976"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/timestamps.js": {
+      "atM": "c962c85fd287f1a6090ec5363a940e757715ee8cddb4e9ea830209b93067ddad",
+      "actual": "c962c85fd287f1a6090ec5363a940e757715ee8cddb4e9ea830209b93067ddad"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/worker.js": {
+      "atM": "beff4cd504a3a06ec171a7bf86fd44213901b2944d0f2cc0f93655fedfb23faa",
+      "actual": "beff4cd504a3a06ec171a7bf86fd44213901b2944d0f2cc0f93655fedfb23faa"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/canonicalization.js": {
+      "atM": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+      "actual": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/index.js": {
+      "atM": "3a73405c0189dea799364b10ba755ef5a2a6d3b3a641b1d54111579245b6087f",
+      "actual": "3a73405c0189dea799364b10ba755ef5a2a6d3b3a641b1d54111579245b6087f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/package.json": {
+      "atM": "c89a2e2ad1ba4b83bfb3e5570901861f6ea4176ca39416eed0a5ed663125fb8f",
+      "actual": "c89a2e2ad1ba4b83bfb3e5570901861f6ea4176ca39416eed0a5ed663125fb8f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/aggregate.js": {
+      "atM": "0682ac726e3e0c875d9199e5fe986c72bb7654139deff993600a3abede0a4f62",
+      "actual": "0682ac726e3e0c875d9199e5fe986c72bb7654139deff993600a3abede0a4f62"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/api.js": {
+      "atM": "d17661decd626277ce422ecbd2c333c6b63d861181a45eacd1842da340b62d7f",
+      "actual": "d17661decd626277ce422ecbd2c333c6b63d861181a45eacd1842da340b62d7f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/cascade.js": {
+      "atM": "20da42cab9239748b74282ad6bdaeb65d6610d95295436e5e0205e308a791936",
+      "actual": "20da42cab9239748b74282ad6bdaeb65d6610d95295436e5e0205e308a791936"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/catalog.js": {
+      "atM": "eda70ebb85b3e3dae3d030b09d07ce807a19d3d02faf0cc65acc0ba4691d06e8",
+      "actual": "eda70ebb85b3e3dae3d030b09d07ce807a19d3d02faf0cc65acc0ba4691d06e8"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/commands.js": {
+      "atM": "060dd73b84e0c0aab92651dd7e9950ba8f2c5805299b1196e7d0509441c37a5e",
+      "actual": "060dd73b84e0c0aab92651dd7e9950ba8f2c5805299b1196e7d0509441c37a5e"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/context.js": {
+      "atM": "3d6885813b264e85978360ea16c2884f76c44f6b85155d2d130fdbc65583b8bf",
+      "actual": "3d6885813b264e85978360ea16c2884f76c44f6b85155d2d130fdbc65583b8bf"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/definition.js": {
+      "atM": "1d4ade6de0d94e13202e930e9e6a254f00e94cc75fcfa7d6023ce01648fb170d",
+      "actual": "1d4ade6de0d94e13202e930e9e6a254f00e94cc75fcfa7d6023ce01648fb170d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/index.js": {
+      "atM": "2be0afce0cf4c4ffcf4b0e7364c1f06a3d674e938779ec520ae46ee7e25d8dc0",
+      "actual": "2be0afce0cf4c4ffcf4b0e7364c1f06a3d674e938779ec520ae46ee7e25d8dc0"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/lifecycle.js": {
+      "atM": "1420c8f6d1a249c47be3600e62794bcceb9a7a7850a23b28c664b69e4e805823",
+      "actual": "1420c8f6d1a249c47be3600e62794bcceb9a7a7850a23b28c664b69e4e805823"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/package.json": {
+      "atM": "2fbbb2e8295dc6550c76650c68a9da5fed31bdab289cf2ce0c20b3db440be3b6",
+      "actual": "2fbbb2e8295dc6550c76650c68a9da5fed31bdab289cf2ce0c20b3db440be3b6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/unit-family.js": {
+      "atM": "30c11ecaf7c8b3cbad927d5ce58d2e47f832f663d6a589298d8e4b3f4b256447",
+      "actual": "30c11ecaf7c8b3cbad927d5ce58d2e47f832f663d6a589298d8e4b3f4b256447"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/units.js": {
+      "atM": "605f587d942bc0c75b9524999cd50f601b2bf08e729cfa22c43bd2e4e470ea91",
+      "actual": "605f587d942bc0c75b9524999cd50f601b2bf08e729cfa22c43bd2e4e470ea91"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-lib/index.js": {
+      "atM": "4762d039cbf475d2575fab0574108f91e307035001669d90dd4759678113a747",
+      "actual": "4762d039cbf475d2575fab0574108f91e307035001669d90dd4759678113a747"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-lib/package.json": {
+      "atM": "631eea9bb8ea1d711325cf1a1bec29b04569784376db79e21600d6dfefd39b39",
+      "actual": "631eea9bb8ea1d711325cf1a1bec29b04569784376db79e21600d6dfefd39b39"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-matric-potential/index.js": {
+      "atM": "e0833e07df9bbba62c102609c35aa443779566ca17c22b50101ce302c132f37b",
+      "actual": "e0833e07df9bbba62c102609c35aa443779566ca17c22b50101ce302c132f37b"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-matric-potential/package.json": {
+      "atM": "2a66361a30ad45ec9f151b81b652fd8b678d03ea38cb1f1f2f70449b455d29d7",
+      "actual": "2a66361a30ad45ec9f151b81b652fd8b678d03ea38cb1f1f2f70449b455d29d7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-module-defaults/index.js": {
+      "atM": "8e6c77e87bc1224263608cbaba2b29faefac47813e6ba8fdb2dad6e108acbb19",
+      "actual": "8e6c77e87bc1224263608cbaba2b29faefac47813e6ba8fdb2dad6e108acbb19"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-module-defaults/package.json": {
+      "atM": "0bed7dd5be28272deec92506a3f11e8d9a149f512ba0ee154d6fb2bc56bc376e",
+      "actual": "0bed7dd5be28272deec92506a3f11e8d9a149f512ba0ee154d6fb2bc56bc376e"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-rain/index.js": {
+      "atM": "a6e6c4bddaa3387f24a0374e61ee33a1bc6afa75d226d900ef82b7f8f2fa1905",
+      "actual": "a6e6c4bddaa3387f24a0374e61ee33a1bc6afa75d226d900ef82b7f8f2fa1905"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-rain/package.json": {
+      "atM": "89153560c58249e4788edd03ca043ed234dd81096747b69f207887612f57ccb3",
+      "actual": "89153560c58249e4788edd03ca043ed234dd81096747b69f207887612f57ccb3"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scoped-access-commands/index.js": {
+      "atM": "e0056823a9eb36ac0099e2ec19931e95114661551e8998854d00ecba832be20f",
+      "actual": "e0056823a9eb36ac0099e2ec19931e95114661551e8998854d00ecba832be20f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scoped-access-commands/package.json": {
+      "atM": "c20f902bce7e9592085d60d42265a83115601f3a5e388ab4c5103ccc33f4d0cb",
+      "actual": "c20f902bce7e9592085d60d42265a83115601f3a5e388ab4c5103ccc33f4d0cb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/configuration.js": {
+      "atM": "5e739aadf082ef4e61d634922ca0816a1e081cfebe4d488239c0d91da42197a7",
+      "actual": "5e739aadf082ef4e61d634922ca0816a1e081cfebe4d488239c0d91da42197a7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/index.js": {
+      "atM": "93083b61b706b39b1307ec9eee522fd84960bc7d53700a49323b91449b58db23",
+      "actual": "93083b61b706b39b1307ec9eee522fd84960bc7d53700a49323b91449b58db23"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/package.json": {
+      "atM": "3615e380f08804ac3cc48e4686e8d0b9f5e8b42883f5a23ef570d1ade0f2721a",
+      "actual": "3615e380f08804ac3cc48e4686e8d0b9f5e8b42883f5a23ef570d1ade0f2721a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js": {
+      "atM": "e814addd563876bbc1affef41820adb090aa7a5ccedea88ad5df3facd80b10e1",
+      "actual": "e814addd563876bbc1affef41820adb090aa7a5ccedea88ad5df3facd80b10e1"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/ack.js": {
+      "atM": "32c4aa4095785eaf83299a10f4b9d3e6c9c2ca3dd0b97fc0192044e1d9cba7a1",
+      "actual": "32c4aa4095785eaf83299a10f4b9d3e6c9c2ca3dd0b97fc0192044e1d9cba7a1"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/api.js": {
+      "atM": "f33c5a73520c4047bbd4a39664177558641216c4f201ade658658e30b45d10c2",
+      "actual": "f33c5a73520c4047bbd4a39664177558641216c4f201ade658658e30b45d10c2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/cancel.js": {
+      "atM": "f2012aa881162f311b01c45c38c882042425b3f6bed89d2910be4aa142339e28",
+      "actual": "f2012aa881162f311b01c45c38c882042425b3f6bed89d2910be4aa142339e28"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/claim.js": {
+      "atM": "3a5517a3c4f720b539ee088f8f7bb7c05fbf2843ee7b6c359cd13cf02d6d551d",
+      "actual": "3a5517a3c4f720b539ee088f8f7bb7c05fbf2843ee7b6c359cd13cf02d6d551d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/cloud-commands.js": {
+      "atM": "674a8600619b7860a1a39e56b0a5cd495bdee11a2b43ded91ca4ba23f6415fcf",
+      "actual": "674a8600619b7860a1a39e56b0a5cd495bdee11a2b43ded91ca4ba23f6415fcf"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/dispatch.js": {
+      "atM": "de101e79b40ce834b82e58ad195a1110eaeac2bb6c52916e9450d46d4fecc88a",
+      "actual": "de101e79b40ce834b82e58ad195a1110eaeac2bb6c52916e9450d46d4fecc88a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/effects.js": {
+      "atM": "d9b53b591054f32ff55b5b664d93521f31e3310265b4cb55d103958c057d92e0",
+      "actual": "d9b53b591054f32ff55b5b664d93521f31e3310265b4cb55d103958c057d92e0"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/index.js": {
+      "atM": "e31ee35c1bdbf4c3978533fc146aa6453052b6b040a27c828652244056b5f190",
+      "actual": "e31ee35c1bdbf4c3978533fc146aa6453052b6b040a27c828652244056b5f190"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-authorize.js": {
+      "atM": "97e6f2daecb1f35979ac39172c44e0b5694e66780cd7b4f82d6473669e20f645",
+      "actual": "97e6f2daecb1f35979ac39172c44e0b5694e66780cd7b4f82d6473669e20f645"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-telemetry.js": {
+      "atM": "bffecc36431466ef42b85e271a1f541c73c376ae380cd453f8d532741764088c",
+      "actual": "bffecc36431466ef42b85e271a1f541c73c376ae380cd453f8d532741764088c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-transport.js": {
+      "atM": "5b540cb0042289e7c66d00e761f1f17d0b5136a32a9b46f9af790b00f885114c",
+      "actual": "5b540cb0042289e7c66d00e761f1f17d0b5136a32a9b46f9af790b00f885114c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-wrappers.js": {
+      "atM": "2c75aa0ceee29965e83001ef98d815a1b241fe8d1296d416d824448ce84f6494",
+      "actual": "2c75aa0ceee29965e83001ef98d815a1b241fe8d1296d416d824448ce84f6494"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/package.json": {
+      "atM": "d11967e7c81d84e8385ad9f124b0762caeeab5c60317c13ac35b7b117f6057ee",
+      "actual": "d11967e7c81d84e8385ad9f124b0762caeeab5c60317c13ac35b7b117f6057ee"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/plan.js": {
+      "atM": "098e4f17a4137c71347862cc3589dc157ca91d64e888cbbc9610191f81559704",
+      "actual": "098e4f17a4137c71347862cc3589dc157ca91d64e888cbbc9610191f81559704"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/push.js": {
+      "atM": "ca114bef5939d24149799c59d3b6c4401dbc783c8985d8605ab56bab668a29ff",
+      "actual": "ca114bef5939d24149799c59d3b6c4401dbc783c8985d8605ab56bab668a29ff"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/runtime.js": {
+      "atM": "405805a2593c9fb020db0db2c1c9c1f3268aa1b568098ff794e2d00b239b7e04",
+      "actual": "405805a2593c9fb020db0db2c1c9c1f3268aa1b568098ff794e2d00b239b7e04"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/store.js": {
+      "atM": "3fa5372b0b3e65f3fae18b4806b9799da98ed4f8acab08f621ef96baf536c07d",
+      "actual": "3fa5372b0b3e65f3fae18b4806b9799da98ed4f8acab08f621ef96baf536c07d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/unclaim.js": {
+      "atM": "b3f8ddd3be72c1f753a1bb2de1346dc0b0d375f1e8afdd51ff35acff2a7d38a4",
+      "actual": "b3f8ddd3be72c1f753a1bb2de1346dc0b0d375f1e8afdd51ff35acff2a7d38a4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/workers.js": {
+      "atM": "7196c6f37e8965f7692d5a2703a26118901fd84e47de26afddd6763e542e3adb",
+      "actual": "7196c6f37e8965f7692d5a2703a26118901fd84e47de26afddd6763e542e3adb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-watermark-binding/canonicalization.js": {
+      "atM": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+      "actual": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/index.js": {
+      "atM": "9a0ac52651e4b9633a6f98ca2328cf3de2a431c668d1f489dae7ac5f0878dc57",
+      "actual": "9a0ac52651e4b9633a6f98ca2328cf3de2a431c668d1f489dae7ac5f0878dc57"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/package.json": {
+      "atM": "17394deed9e139445ad96fafd28d0eb180da597321ddaa69289b1804e117d2b3",
+      "actual": "17394deed9e139445ad96fafd28d0eb180da597321ddaa69289b1804e117d2b3"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config": {
+      "atM": "0efa3a6ef96439d244fc55e4d4693d0c651833ee7dd1f3ec7f75f520bc112e9c",
+      "actual": "0efa3a6ef96439d244fc55e4d4693d0c651833ee7dd1f3ec7f75f520bc112e9c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh": {
+      "atM": "ce49b969971f2ee76bc981da31eeca811e7c99e75b8bcbd43a714e407523daba",
+      "actual": "ce49b969971f2ee76bc981da31eeca811e7c99e75b8bcbd43a714e407523daba"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh": {
+      "atM": "4159788616507fe77e73b671524917687dc5077efc962b6a621bc8a6afad1e7d",
+      "actual": "4159788616507fe77e73b671524917687dc5077efc962b6a621bc8a6afad1e7d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json": {
+      "atM": "542df53f2744dc454ae4c0b27cf3663e83c0b4b870325faed2efa39939dc6117",
+      "actual": "542df53f2744dc454ae4c0b27cf3663e83c0b4b870325faed2efa39939dc6117"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json": {
+      "atM": "633b985c5ab4a04cdd1fa45b10d413c38fdd7da235496e10c63c226bfe459c48",
+      "actual": "633b985c5ab4a04cdd1fa45b10d413c38fdd7da235496e10c63c226bfe459c48"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js": {
+      "atM": "57dda37284c5779e2dd8b374561961f0dad2c73938cb707ef7bee5cfc252d8fb",
+      "actual": "57dda37284c5779e2dd8b374561961f0dad2c73938cb707ef7bee5cfc252d8fb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json": {
+      "atM": "68098a3dc0d729292a0093936f4262a5eede1e503e2cdfce1d0f58d2b07e12b2",
+      "actual": "68098a3dc0d729292a0093936f4262a5eede1e503e2cdfce1d0f58d2b07e12b2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js": {
+      "atM": "c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441",
+      "actual": "c28b0bceac3c1e2df2a00bbdbea4fde564abc6cc500c9e22c4220c792d02d441"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json": {
+      "atM": "3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31",
+      "actual": "3fe84044e9b569cd201d69464e9f579732e856d279d39d6cc5173766fcad6a31"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js": {
+      "atM": "e562d3a3e6bd85aa0bb0b4856ca7d8b6c4f477accd045e696de942efa9da8f3d",
+      "actual": "e562d3a3e6bd85aa0bb0b4856ca7d8b6c4f477accd045e696de942efa9da8f3d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json": {
+      "atM": "fdfde46ef7defa5e9b5b57fe398a30311a7449d331b081645c15cea9d2a57334",
+      "actual": "fdfde46ef7defa5e9b5b57fe398a30311a7449d331b081645c15cea9d2a57334"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/commands.js": {
+      "atM": "994048479ac2f6fb3b8b55320876da0f8151206904d0f314509c7869a5a55976",
+      "actual": "994048479ac2f6fb3b8b55320876da0f8151206904d0f314509c7869a5a55976"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js": {
+      "atM": "f7a19f5301b1a8c9ed95e92c9cf5070f9c91d10d7ad43789982ed867ed83abd4",
+      "actual": "f7a19f5301b1a8c9ed95e92c9cf5070f9c91d10d7ad43789982ed867ed83abd4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/package.json": {
+      "atM": "5411ff5c820c93bb803baf2756bfe6a811ede3112c633da75d2e3cca78d4120f",
+      "actual": "5411ff5c820c93bb803baf2756bfe6a811ede3112c633da75d2e3cca78d4120f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis-sources.js": {
+      "atM": "2c8644974b4b86631bd50b03c30d2b85455a9cdb041e513785e8ce0a0f1d5af7",
+      "actual": "2c8644974b4b86631bd50b03c30d2b85455a9cdb041e513785e8ce0a0f1d5af7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js": {
+      "atM": "8e645bb4dd80fd4491b1c77c2f90b45caf477fde673859e54b4a28c27fd463f2",
+      "actual": "8e645bb4dd80fd4491b1c77c2f90b45caf477fde673859e54b4a28c27fd463f2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.js": {
+      "atM": "0e4f16a37f36a9d60f8a218003cb7f1cd7041302c8a56e97cc7d969f216f90ce",
+      "actual": "0e4f16a37f36a9d60f8a218003cb7f1cd7041302c8a56e97cc7d969f216f90ce"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js": {
+      "atM": "f7a7fec5c1ceda7324ef79414c2628b50e691c4c4912cec84a0e8379d0048273",
+      "actual": "f7a7fec5c1ceda7324ef79414c2628b50e691c4c4912cec84a0e8379d0048273"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json": {
+      "atM": "3576c1e391f9cbe16646434373c0c236d9c740a1074dff4d92c1bf9a3d14da9c",
+      "actual": "3576c1e391f9cbe16646434373c0c236d9c740a1074dff4d92c1bf9a3d14da9c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js": {
+      "atM": "239da2e0da1c63f97797c41381cbc9ac1687e16a6bb1b6c7f2b5469fee7d7d43",
+      "actual": "239da2e0da1c63f97797c41381cbc9ac1687e16a6bb1b6c7f2b5469fee7d7d43"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/package.json": {
+      "atM": "c8e4577dee10cbbd0e10ba73a0345687f7dc73fc530c03ff3ba066f28cf427c3",
+      "actual": "c8e4577dee10cbbd0e10ba73a0345687f7dc73fc530c03ff3ba066f28cf427c3"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.js": {
+      "atM": "2e87a2277381b96ca0fc374c6f01788ed88df44c2141a833362151dacf10412d",
+      "actual": "2e87a2277381b96ca0fc374c6f01788ed88df44c2141a833362151dacf10412d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js": {
+      "atM": "ca6efbb34eef9b75f249eb8d06692e11d58fa607633da977c68fff00a099fa71",
+      "actual": "ca6efbb34eef9b75f249eb8d06692e11d58fa607633da977c68fff00a099fa71"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock.js": {
+      "atM": "62288cd17a9f72d959c03acc1da55c48aa88c2b0bddd6e9221562f3ce2181f7d",
+      "actual": "62288cd17a9f72d959c03acc1da55c48aa88c2b0bddd6e9221562f3ce2181f7d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/evaluate.js": {
+      "atM": "2550d812dd5c59ffe48e95557de36c96c2aeafc17c8429d117cbb378e3ef8b42",
+      "actual": "2550d812dd5c59ffe48e95557de36c96c2aeafc17c8429d117cbb378e3ef8b42"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/index.js": {
+      "atM": "7403ad25e4b4935847612bf99fdc397a3f0c43ebed70ed3588c759ab09c53600",
+      "actual": "7403ad25e4b4935847612bf99fdc397a3f0c43ebed70ed3588c759ab09c53600"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js": {
+      "atM": "c8754e5bca791aa676fecff939e96f39074d5ac731f1e2270b368c4390685f44",
+      "actual": "c8754e5bca791aa676fecff939e96f39074d5ac731f1e2270b368c4390685f44"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/model.js": {
+      "atM": "4340d640e20e089f587d093a978a04a93a89b7f040630d8988d49e0e65cd856a",
+      "actual": "4340d640e20e089f587d093a978a04a93a89b7f040630d8988d49e0e65cd856a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/observations.js": {
+      "atM": "1a690e90461f8cb6514a0b65b0cb410b54fd768eb808bf346bf0746bbf29f405",
+      "actual": "1a690e90461f8cb6514a0b65b0cb410b54fd768eb808bf346bf0746bbf29f405"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/occurrences.js": {
+      "atM": "a2b0a3d7c15bb02f842c2eae6d867d4d54f158466a12f868c358064d374d8f9a",
+      "actual": "a2b0a3d7c15bb02f842c2eae6d867d4d54f158466a12f868c358064d374d8f9a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/package.json": {
+      "atM": "579e144544414eb2710e516df3de1ededd663c3f93e3ecce56b3294100d7bf00",
+      "actual": "579e144544414eb2710e516df3de1ededd663c3f93e3ecce56b3294100d7bf00"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js": {
+      "atM": "3b8654c5ac8eca375ef129ea14b3873df982833341b41c223ebc8e8b8dddd682",
+      "actual": "3b8654c5ac8eca375ef129ea14b3873df982833341b41c223ebc8e8b8dddd682"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/routes.js": {
+      "atM": "dc8028cafe199ad9374e0d9e93479838d1cde9f60693ed2d5dbfb333fd1e45c2",
+      "actual": "dc8028cafe199ad9374e0d9e93479838d1cde9f60693ed2d5dbfb333fd1e45c2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/store.js": {
+      "atM": "92d0837d53bb9b92a07e0243452dd8684bf798d217ad437690c85a84e1c0b976",
+      "actual": "92d0837d53bb9b92a07e0243452dd8684bf798d217ad437690c85a84e1c0b976"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/timestamps.js": {
+      "atM": "c962c85fd287f1a6090ec5363a940e757715ee8cddb4e9ea830209b93067ddad",
+      "actual": "c962c85fd287f1a6090ec5363a940e757715ee8cddb4e9ea830209b93067ddad"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/worker.js": {
+      "atM": "beff4cd504a3a06ec171a7bf86fd44213901b2944d0f2cc0f93655fedfb23faa",
+      "actual": "beff4cd504a3a06ec171a7bf86fd44213901b2944d0f2cc0f93655fedfb23faa"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js": {
+      "atM": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9",
+      "actual": "47f54594398b2dbe80f61ababe93fe0202f2da935ed12252286150dec38804f9"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/index.js": {
+      "atM": "3a73405c0189dea799364b10ba755ef5a2a6d3b3a641b1d54111579245b6087f",
+      "actual": "3a73405c0189dea799364b10ba755ef5a2a6d3b3a641b1d54111579245b6087f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/package.json": {
+      "atM": "c89a2e2ad1ba4b83bfb3e5570901861f6ea4176ca39416eed0a5ed663125fb8f",
+      "actual": "c89a2e2ad1ba4b83bfb3e5570901861f6ea4176ca39416eed0a5ed663125fb8f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate.js": {
+      "atM": "0682ac726e3e0c875d9199e5fe986c72bb7654139deff993600a3abede0a4f62",
+      "actual": "0682ac726e3e0c875d9199e5fe986c72bb7654139deff993600a3abede0a4f62"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js": {
+      "atM": "d17661decd626277ce422ecbd2c333c6b63d861181a45eacd1842da340b62d7f",
+      "actual": "d17661decd626277ce422ecbd2c333c6b63d861181a45eacd1842da340b62d7f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/cascade.js": {
+      "atM": "20da42cab9239748b74282ad6bdaeb65d6610d95295436e5e0205e308a791936",
+      "actual": "20da42cab9239748b74282ad6bdaeb65d6610d95295436e5e0205e308a791936"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js": {
+      "atM": "eda70ebb85b3e3dae3d030b09d07ce807a19d3d02faf0cc65acc0ba4691d06e8",
+      "actual": "eda70ebb85b3e3dae3d030b09d07ce807a19d3d02faf0cc65acc0ba4691d06e8"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js": {
+      "atM": "060dd73b84e0c0aab92651dd7e9950ba8f2c5805299b1196e7d0509441c37a5e",
+      "actual": "060dd73b84e0c0aab92651dd7e9950ba8f2c5805299b1196e7d0509441c37a5e"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/context.js": {
+      "atM": "3d6885813b264e85978360ea16c2884f76c44f6b85155d2d130fdbc65583b8bf",
+      "actual": "3d6885813b264e85978360ea16c2884f76c44f6b85155d2d130fdbc65583b8bf"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/definition.js": {
+      "atM": "1d4ade6de0d94e13202e930e9e6a254f00e94cc75fcfa7d6023ce01648fb170d",
+      "actual": "1d4ade6de0d94e13202e930e9e6a254f00e94cc75fcfa7d6023ce01648fb170d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.js": {
+      "atM": "2be0afce0cf4c4ffcf4b0e7364c1f06a3d674e938779ec520ae46ee7e25d8dc0",
+      "actual": "2be0afce0cf4c4ffcf4b0e7364c1f06a3d674e938779ec520ae46ee7e25d8dc0"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js": {
+      "atM": "1420c8f6d1a249c47be3600e62794bcceb9a7a7850a23b28c664b69e4e805823",
+      "actual": "1420c8f6d1a249c47be3600e62794bcceb9a7a7850a23b28c664b69e4e805823"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/package.json": {
+      "atM": "2fbbb2e8295dc6550c76650c68a9da5fed31bdab289cf2ce0c20b3db440be3b6",
+      "actual": "2fbbb2e8295dc6550c76650c68a9da5fed31bdab289cf2ce0c20b3db440be3b6"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/unit-family.js": {
+      "atM": "30c11ecaf7c8b3cbad927d5ce58d2e47f832f663d6a589298d8e4b3f4b256447",
+      "actual": "30c11ecaf7c8b3cbad927d5ce58d2e47f832f663d6a589298d8e4b3f4b256447"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/units.js": {
+      "atM": "605f587d942bc0c75b9524999cd50f601b2bf08e729cfa22c43bd2e4e470ea91",
+      "actual": "605f587d942bc0c75b9524999cd50f601b2bf08e729cfa22c43bd2e4e470ea91"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js": {
+      "atM": "4762d039cbf475d2575fab0574108f91e307035001669d90dd4759678113a747",
+      "actual": "4762d039cbf475d2575fab0574108f91e307035001669d90dd4759678113a747"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/package.json": {
+      "atM": "631eea9bb8ea1d711325cf1a1bec29b04569784376db79e21600d6dfefd39b39",
+      "actual": "631eea9bb8ea1d711325cf1a1bec29b04569784376db79e21600d6dfefd39b39"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.js": {
+      "atM": "e0833e07df9bbba62c102609c35aa443779566ca17c22b50101ce302c132f37b",
+      "actual": "e0833e07df9bbba62c102609c35aa443779566ca17c22b50101ce302c132f37b"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/package.json": {
+      "atM": "2a66361a30ad45ec9f151b81b652fd8b678d03ea38cb1f1f2f70449b455d29d7",
+      "actual": "2a66361a30ad45ec9f151b81b652fd8b678d03ea38cb1f1f2f70449b455d29d7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/index.js": {
+      "atM": "8e6c77e87bc1224263608cbaba2b29faefac47813e6ba8fdb2dad6e108acbb19",
+      "actual": "8e6c77e87bc1224263608cbaba2b29faefac47813e6ba8fdb2dad6e108acbb19"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/package.json": {
+      "atM": "0bed7dd5be28272deec92506a3f11e8d9a149f512ba0ee154d6fb2bc56bc376e",
+      "actual": "0bed7dd5be28272deec92506a3f11e8d9a149f512ba0ee154d6fb2bc56bc376e"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/index.js": {
+      "atM": "a6e6c4bddaa3387f24a0374e61ee33a1bc6afa75d226d900ef82b7f8f2fa1905",
+      "actual": "a6e6c4bddaa3387f24a0374e61ee33a1bc6afa75d226d900ef82b7f8f2fa1905"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/package.json": {
+      "atM": "89153560c58249e4788edd03ca043ed234dd81096747b69f207887612f57ccb3",
+      "actual": "89153560c58249e4788edd03ca043ed234dd81096747b69f207887612f57ccb3"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.js": {
+      "atM": "e0056823a9eb36ac0099e2ec19931e95114661551e8998854d00ecba832be20f",
+      "actual": "e0056823a9eb36ac0099e2ec19931e95114661551e8998854d00ecba832be20f"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/package.json": {
+      "atM": "c20f902bce7e9592085d60d42265a83115601f3a5e388ab4c5103ccc33f4d0cb",
+      "actual": "c20f902bce7e9592085d60d42265a83115601f3a5e388ab4c5103ccc33f4d0cb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.js": {
+      "atM": "5e739aadf082ef4e61d634922ca0816a1e081cfebe4d488239c0d91da42197a7",
+      "actual": "5e739aadf082ef4e61d634922ca0816a1e081cfebe4d488239c0d91da42197a7"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js": {
+      "atM": "93083b61b706b39b1307ec9eee522fd84960bc7d53700a49323b91449b58db23",
+      "actual": "93083b61b706b39b1307ec9eee522fd84960bc7d53700a49323b91449b58db23"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json": {
+      "atM": "3615e380f08804ac3cc48e4686e8d0b9f5e8b42883f5a23ef570d1ade0f2721a",
+      "actual": "3615e380f08804ac3cc48e4686e8d0b9f5e8b42883f5a23ef570d1ade0f2721a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js": {
+      "atM": "e814addd563876bbc1affef41820adb090aa7a5ccedea88ad5df3facd80b10e1",
+      "actual": "e814addd563876bbc1affef41820adb090aa7a5ccedea88ad5df3facd80b10e1"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.js": {
+      "atM": "32c4aa4095785eaf83299a10f4b9d3e6c9c2ca3dd0b97fc0192044e1d9cba7a1",
+      "actual": "32c4aa4095785eaf83299a10f4b9d3e6c9c2ca3dd0b97fc0192044e1d9cba7a1"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.js": {
+      "atM": "f33c5a73520c4047bbd4a39664177558641216c4f201ade658658e30b45d10c2",
+      "actual": "f33c5a73520c4047bbd4a39664177558641216c4f201ade658658e30b45d10c2"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js": {
+      "atM": "f2012aa881162f311b01c45c38c882042425b3f6bed89d2910be4aa142339e28",
+      "actual": "f2012aa881162f311b01c45c38c882042425b3f6bed89d2910be4aa142339e28"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/claim.js": {
+      "atM": "3a5517a3c4f720b539ee088f8f7bb7c05fbf2843ee7b6c359cd13cf02d6d551d",
+      "actual": "3a5517a3c4f720b539ee088f8f7bb7c05fbf2843ee7b6c359cd13cf02d6d551d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.js": {
+      "atM": "674a8600619b7860a1a39e56b0a5cd495bdee11a2b43ded91ca4ba23f6415fcf",
+      "actual": "674a8600619b7860a1a39e56b0a5cd495bdee11a2b43ded91ca4ba23f6415fcf"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/dispatch.js": {
+      "atM": "de101e79b40ce834b82e58ad195a1110eaeac2bb6c52916e9450d46d4fecc88a",
+      "actual": "de101e79b40ce834b82e58ad195a1110eaeac2bb6c52916e9450d46d4fecc88a"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects.js": {
+      "atM": "d9b53b591054f32ff55b5b664d93521f31e3310265b4cb55d103958c057d92e0",
+      "actual": "d9b53b591054f32ff55b5b664d93521f31e3310265b4cb55d103958c057d92e0"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js": {
+      "atM": "e31ee35c1bdbf4c3978533fc146aa6453052b6b040a27c828652244056b5f190",
+      "actual": "e31ee35c1bdbf4c3978533fc146aa6453052b6b040a27c828652244056b5f190"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-authorize.js": {
+      "atM": "97e6f2daecb1f35979ac39172c44e0b5694e66780cd7b4f82d6473669e20f645",
+      "actual": "97e6f2daecb1f35979ac39172c44e0b5694e66780cd7b4f82d6473669e20f645"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-telemetry.js": {
+      "atM": "bffecc36431466ef42b85e271a1f541c73c376ae380cd453f8d532741764088c",
+      "actual": "bffecc36431466ef42b85e271a1f541c73c376ae380cd453f8d532741764088c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-transport.js": {
+      "atM": "5b540cb0042289e7c66d00e761f1f17d0b5136a32a9b46f9af790b00f885114c",
+      "actual": "5b540cb0042289e7c66d00e761f1f17d0b5136a32a9b46f9af790b00f885114c"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js": {
+      "atM": "2c75aa0ceee29965e83001ef98d815a1b241fe8d1296d416d824448ce84f6494",
+      "actual": "2c75aa0ceee29965e83001ef98d815a1b241fe8d1296d416d824448ce84f6494"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json": {
+      "atM": "d11967e7c81d84e8385ad9f124b0762caeeab5c60317c13ac35b7b117f6057ee",
+      "actual": "d11967e7c81d84e8385ad9f124b0762caeeab5c60317c13ac35b7b117f6057ee"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.js": {
+      "atM": "098e4f17a4137c71347862cc3589dc157ca91d64e888cbbc9610191f81559704",
+      "actual": "098e4f17a4137c71347862cc3589dc157ca91d64e888cbbc9610191f81559704"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.js": {
+      "atM": "ca114bef5939d24149799c59d3b6c4401dbc783c8985d8605ab56bab668a29ff",
+      "actual": "ca114bef5939d24149799c59d3b6c4401dbc783c8985d8605ab56bab668a29ff"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.js": {
+      "atM": "405805a2593c9fb020db0db2c1c9c1f3268aa1b568098ff794e2d00b239b7e04",
+      "actual": "405805a2593c9fb020db0db2c1c9c1f3268aa1b568098ff794e2d00b239b7e04"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/store.js": {
+      "atM": "3fa5372b0b3e65f3fae18b4806b9799da98ed4f8acab08f621ef96baf536c07d",
+      "actual": "3fa5372b0b3e65f3fae18b4806b9799da98ed4f8acab08f621ef96baf536c07d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.js": {
+      "atM": "b3f8ddd3be72c1f753a1bb2de1346dc0b0d375f1e8afdd51ff35acff2a7d38a4",
+      "actual": "b3f8ddd3be72c1f753a1bb2de1346dc0b0d375f1e8afdd51ff35acff2a7d38a4"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js": {
+      "atM": "7196c6f37e8965f7692d5a2703a26118901fd84e47de26afddd6763e542e3adb",
+      "actual": "7196c6f37e8965f7692d5a2703a26118901fd84e47de26afddd6763e542e3adb"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js": {
+      "atM": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d",
+      "actual": "3c1422dc8fce813b6f5b9d1b205ca983dd8c487d5b5eebc87802c15ecbf9188d"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/index.js": {
+      "atM": "9a0ac52651e4b9633a6f98ca2328cf3de2a431c668d1f489dae7ac5f0878dc57",
+      "actual": "9a0ac52651e4b9633a6f98ca2328cf3de2a431c668d1f489dae7ac5f0878dc57"
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/package.json": {
+      "atM": "17394deed9e139445ad96fafd28d0eb180da597321ddaa69289b1804e117d2b3",
+      "actual": "17394deed9e139445ad96fafd28d0eb180da597321ddaa69289b1804e117d2b3"
+    },
+    "database/seed-blank.sql": {
+      "atM": "c628e6c5ace8006376511bb0dd70b34d87c382bdcbcb95b9fd676c03c53c4efe",
+      "actual": "c628e6c5ace8006376511bb0dd70b34d87c382bdcbcb95b9fd676c03c53c4efe"
+    },
+    "docs/engineering-playbook.md": {
+      "atM": "95289527564af3007a03958d775509f1508dfc1dd250ebdb39ee61cab8fcbd33",
+      "actual": "95289527564af3007a03958d775509f1508dfc1dd250ebdb39ee61cab8fcbd33"
+    },
+    "docs/i18n/pending-luganda-translations.md": {
+      "atM": "5338efe2aabb0e2694c2761d86166084c48ba6662cd67c51ddb640cbe21dba1a",
+      "actual": "b9a0d1ce1f70afa10cd48b08d1eb7f2938147b9c6605906108eb3eac87085c07"
+    },
+    "docs/superpowers/README.md": {
+      "atM": "89a942f80b6943a4fbdde8ee496631bc3cfa16187413020b8f624084b0a19262",
+      "actual": "89a942f80b6943a4fbdde8ee496631bc3cfa16187413020b8f624084b0a19262"
+    },
+    "feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init": {
+      "atM": "50aa413e640a13ab571f4f10816a1764cca0f122f2ae3713e41e66f9b2fc8fd2",
+      "actual": "50aa413e640a13ab571f4f10816a1764cca0f122f2ae3713e41e66f9b2fc8fd2"
+    },
+    "lib/osi-migrate/add-column-compat.js": {
+      "atM": "eac9312c9586a5a851fe19ddef3867b45351ee5367c23a45c573aad3a957f2ab",
+      "actual": "eac9312c9586a5a851fe19ddef3867b45351ee5367c23a45c573aad3a957f2ab"
+    },
+    "lib/osi-migrate/backup.js": {
+      "atM": "5c8f55a2a87aef0d1c581c304a8fedeb4e16285ed6a16631b918edab05b20fd2",
+      "actual": "5c8f55a2a87aef0d1c581c304a8fedeb4e16285ed6a16631b918edab05b20fd2"
+    },
+    "lib/osi-migrate/fingerprints.js": {
+      "atM": "822f62235656a03ebb623846a37d586ba0bedc49a2e31c9ef7c42f71bc5b0818",
+      "actual": "822f62235656a03ebb623846a37d586ba0bedc49a2e31c9ef7c42f71bc5b0818"
+    },
+    "lib/osi-migrate/index.js": {
+      "atM": "3abff623bb4bb52b44e039fa4131ad1da47ddc9abf3073377c13e2ba7e4fe036",
+      "actual": "3abff623bb4bb52b44e039fa4131ad1da47ddc9abf3073377c13e2ba7e4fe036"
+    },
+    "lib/osi-migrate/ledger.js": {
+      "atM": "e3f9cce60474868abbbceec35db5d030e625a824d2cfa1493638a56709d29a4a",
+      "actual": "e3f9cce60474868abbbceec35db5d030e625a824d2cfa1493638a56709d29a4a"
+    },
+    "lib/osi-migrate/migration-manifest.js": {
+      "atM": "cb23c72bab025bc828210b096f177ee5f8bb6ee2fca6fd6a28a0d431b078520c",
+      "actual": "cb23c72bab025bc828210b096f177ee5f8bb6ee2fca6fd6a28a0d431b078520c"
+    },
+    "lib/osi-migrate/migrations-loader.js": {
+      "atM": "5db887b75d8080ce4d6191032962a4b7253757558bac82caacf1e1a46767c67d",
+      "actual": "5db887b75d8080ce4d6191032962a4b7253757558bac82caacf1e1a46767c67d"
+    },
+    "lib/osi-migrate/runner-iface.js": {
+      "atM": "081d20998c95e3f71b519565983e7481216a4fbf5ade99562fb448dd659c44c7",
+      "actual": "081d20998c95e3f71b519565983e7481216a4fbf5ade99562fb448dd659c44c7"
+    },
+    "lib/osi-migrate/runner.js": {
+      "atM": "a9950a20f60d4cc854aacdc335896aeff4e04ab78ac63635bb53d2ba3e76050a",
+      "actual": "a9950a20f60d4cc854aacdc335896aeff4e04ab78ac63635bb53d2ba3e76050a"
+    },
+    "lib/osi-migrate/sql-normalize.js": {
+      "atM": "3658c474ef8b68951de854c55dc60fccce4ba7dff6c1ed060b50c39e8795f6c5",
+      "actual": "3658c474ef8b68951de854c55dc60fccce4ba7dff6c1ed060b50c39e8795f6c5"
+    },
+    "scripts/account-recovery.js": {
+      "atM": "078b392ce192af4c30bc2a71bd2578d127a97bac54264ca3eb2ef998e2916430",
+      "actual": "078b392ce192af4c30bc2a71bd2578d127a97bac54264ca3eb2ef998e2916430"
+    },
+    "scripts/baseline-existing-db.js": {
+      "atM": "c26ce25b511bcd5dd73fdca607b680b77186ab9c15c3349f2898720c7cc51707",
+      "actual": "c26ce25b511bcd5dd73fdca607b680b77186ab9c15c3349f2898720c7cc51707"
+    },
+    "scripts/check-mqtt-topics.sh": {
+      "atM": "0600805830b03cee83bb7aeb5fbfe1b0bd6a87b2937d0cc9210c2a2e76596309",
+      "actual": "0600805830b03cee83bb7aeb5fbfe1b0bd6a87b2937d0cc9210c2a2e76596309"
+    },
+    "scripts/chirpstack-bootstrap.js": {
+      "atM": "75ac1edb644cb37823fdc67e87e295d87d3de20f4c2db55616b36a6a1a61a058",
+      "actual": "75ac1edb644cb37823fdc67e87e295d87d3de20f4c2db55616b36a6a1a61a058"
+    },
+    "scripts/device-health-channel-contract.js": {
+      "atM": "14aaf1c5ca115c4e75250c64a9d88539070a2f0bd2889c8e15f2ba314064693b",
+      "actual": "14aaf1c5ca115c4e75250c64a9d88539070a2f0bd2889c8e15f2ba314064693b"
+    },
+    "scripts/fixtures/account-recovery/resolve.cjs": {
+      "atM": "c8ff395207810e566a791f8c57b20a77b5a8c7e2ab41928efbec56f1ae1fafc1",
+      "actual": "c8ff395207810e566a791f8c57b20a77b5a8c7e2ab41928efbec56f1ae1fafc1"
+    },
+    "scripts/fixtures/account-recovery/sqlite3.cjs": {
+      "atM": "35ccec86a9cfb516d5be956e5d90f84fcbcfa233245cdd25a57ae311470b4a80",
+      "actual": "35ccec86a9cfb516d5be956e5d90f84fcbcfa233245cdd25a57ae311470b4a80"
+    },
+    "scripts/flows-bare-require-scan.js": {
+      "atM": "9f4dbffe78da4e6c1d84cd485a31a506d68c27886a6108c643a038cea0a8aad3",
+      "actual": "9f4dbffe78da4e6c1d84cd485a31a506d68c27886a6108c643a038cea0a8aad3"
+    },
+    "scripts/flows-size-scan.js": {
+      "atM": "ad00172f28b9bc1a86549917a66b06f71cd93016594b5e942326f22d286308e6",
+      "actual": "ad00172f28b9bc1a86549917a66b06f71cd93016594b5e942326f22d286308e6"
+    },
+    "scripts/installation-recovery-adapter.js": {
+      "atM": "838e6c8cc5c3d9b2a802b86af754e06b3f1701cf4c124aa0c5e7d6c5e241e8af",
+      "actual": "838e6c8cc5c3d9b2a802b86af754e06b3f1701cf4c124aa0c5e7d6c5e241e8af"
+    },
+    "scripts/installation-recovery-adapter.test.js": {
+      "atM": "6a3adeba7b2e5fe7c84b4284f7b8b87271a7251fb78b950716c1e996b97298e6",
+      "actual": "6a3adeba7b2e5fe7c84b4284f7b8b87271a7251fb78b950716c1e996b97298e6"
+    },
+    "scripts/lib/account-recovery-transaction.js": {
+      "atM": "3c87c3cbe6855cfee39a37e348228396de551a38d7ea0b22b77ce3ab905a48a8",
+      "actual": "3c87c3cbe6855cfee39a37e348228396de551a38d7ea0b22b77ce3ab905a48a8"
+    },
+    "scripts/lib/bootstrap-auth-harness.js": {
+      "atM": "65b5c020ef08f4b08665d95036e93681300fc3c4c9de7ab7e255ed4f5f8c4486",
+      "actual": "65b5c020ef08f4b08665d95036e93681300fc3c4c9de7ab7e255ed4f5f8c4486"
+    },
+    "scripts/lib/history-hash-v1.js": {
+      "atM": "8a64a019f3a7f46b07d714e9243a07d4e35d68c451d91b5ce37086cedfffa8c9",
+      "actual": "8a64a019f3a7f46b07d714e9243a07d4e35d68c451d91b5ce37086cedfffa8c9"
+    },
+    "scripts/lib/scope-guard-probe.js": {
+      "atM": "0a04f2fb42d088809254101f905d052001f17e0834b403c7ae3424554067cbc7",
+      "actual": "0a04f2fb42d088809254101f905d052001f17e0834b403c7ae3424554067cbc7"
+    },
+    "scripts/lib/scoped-access-harness.js": {
+      "atM": "cc527b7aa70192825212c0a66b79f8cb2a6a13c91e0733e0662114598675d493",
+      "actual": "cc527b7aa70192825212c0a66b79f8cb2a6a13c91e0733e0662114598675d493"
+    },
+    "scripts/migrate-flows-journal-generators.test.js": {
+      "atM": "4d924a0276884f3a5363f2c49b3556110a978ede5e380d7cad3d6bbcc97e4459",
+      "actual": "4d924a0276884f3a5363f2c49b3556110a978ede5e380d7cad3d6bbcc97e4459"
+    },
+    "scripts/migrate-flows-journal-v2-replication.js": {
+      "atM": "2eb37949bfaafc30d7b21358aeb6f7f5eca8a10bdd38f3161e20fbc07f9e87d1",
+      "actual": "2eb37949bfaafc30d7b21358aeb6f7f5eca8a10bdd38f3161e20fbc07f9e87d1"
+    },
+    "scripts/migrate-flows-journal-v2-replication.test.js": {
+      "atM": "9c6dd66cf7eeef26aec78ecfb82b290b51b3f2d027d9e7c1e9e5ca43dc6c85d2",
+      "actual": "9c6dd66cf7eeef26aec78ecfb82b290b51b3f2d027d9e7c1e9e5ca43dc6c85d2"
+    },
+    "scripts/osi-lib-binding-audit.js": {
+      "atM": "48d54336ab2e5032cd10f3654acddf0cda935b32ca88836211eb61f453b1b9a2",
+      "actual": "48d54336ab2e5032cd10f3654acddf0cda935b32ca88836211eb61f453b1b9a2"
+    },
+    "scripts/osi-lib-binding-audit.test.js": {
+      "atM": "f0dd7ab4cf9fa08eb0b775c4c010c3056e912025d90b1a88b7ad0a79e7aebaf3",
+      "actual": "f0dd7ab4cf9fa08eb0b775c4c010c3056e912025d90b1a88b7ad0a79e7aebaf3"
+    },
+    "scripts/repair-pi-schema.js": {
+      "atM": "694d7fbfe798820f68798a59d0f7071933e726bd83f3273d97583684f3f3fa80",
+      "actual": "694d7fbfe798820f68798a59d0f7071933e726bd83f3273d97583684f3f3fa80"
+    },
+    "scripts/seed-db-paths.js": {
+      "atM": "c9273a709fe3d12aeae6c71fe4e7279df8e953a3780f7848be628157ef19bbfb",
+      "actual": "c9273a709fe3d12aeae6c71fe4e7279df8e953a3780f7848be628157ef19bbfb"
+    },
+    "scripts/semantic-schema-compare.js": {
+      "atM": "9f4584293059bbf18343cf1ec1189cbd87ef31dcacc37e5b49e088b167b4016e",
+      "actual": "9f4584293059bbf18343cf1ec1189cbd87ef31dcacc37e5b49e088b167b4016e"
+    },
+    "scripts/sync-protocol-capability-cli.js": {
+      "atM": "04a2ac3ef98d20a8a4c48447c46a83b457bbc7bd7bc64ca7f8fd97e734cb3b11",
+      "actual": "04a2ac3ef98d20a8a4c48447c46a83b457bbc7bd7bc64ca7f8fd97e734cb3b11"
+    },
+    "scripts/test-account-recovery-cli.js": {
+      "atM": "ff3aa84faeec7168c748fe8a33ceb9be534ec0a834378ac98f273e141c9f0516",
+      "actual": "ff3aa84faeec7168c748fe8a33ceb9be534ec0a834378ac98f273e141c9f0516"
+    },
+    "scripts/test-account-recovery.js": {
+      "atM": "ca28db7be86216fea20db141ee71dc06abc3eb8eef8c8bf1737108cb19a1ee96",
+      "actual": "ca28db7be86216fea20db141ee71dc06abc3eb8eef8c8bf1737108cb19a1ee96"
+    },
+    "scripts/test-auth-bootstrap-policy.js": {
+      "atM": "afc6ea760e78ba41c768bb6545e4c0f2f5a4af3a6e30ad02132dc09b3634fd0c",
+      "actual": "afc6ea760e78ba41c768bb6545e4c0f2f5a4af3a6e30ad02132dc09b3634fd0c"
+    },
+    "scripts/test-auth-credential-isolation.js": {
+      "atM": "e8174753d1a706324269bcd8a6037ca9a32875a1727b67dc04691d0c5f44ab6c",
+      "actual": "e8174753d1a706324269bcd8a6037ca9a32875a1727b67dc04691d0c5f44ab6c"
+    },
+    "scripts/test-flows-wiring.js": {
+      "atM": "cf6ea29b55e7aa1f41a4aa8300b320614a1e9bb33ad8cdb122f24f5706210d2f",
+      "actual": "cf6ea29b55e7aa1f41a4aa8300b320614a1e9bb33ad8cdb122f24f5706210d2f"
+    },
+    "scripts/test-history-helper.js": {
+      "atM": "6d655d06086a1116c5241584e53f4ee47ec962fd861ff984f447f4c5d72af254",
+      "actual": "6d655d06086a1116c5241584e53f4ee47ec962fd861ff984f447f4c5d72af254"
+    },
+    "scripts/test-identityd-service-lifecycle.sh": {
+      "atM": "81f81ef2fe9377932485a20d2c0bfedc05b7c629bf733e4eb1b524234a327ab4",
+      "actual": "81f81ef2fe9377932485a20d2c0bfedc05b7c629bf733e4eb1b524234a327ab4"
+    },
+    "scripts/test-journal-bootstrap.js": {
+      "atM": "0fcc4f2c65bec94342354500256c4d3975f5fbeb743734c9a70af2b8eda5a0b2",
+      "actual": "0fcc4f2c65bec94342354500256c4d3975f5fbeb743734c9a70af2b8eda5a0b2"
+    },
+    "scripts/test-journal-v2-config.js": {
+      "atM": "79a3b47da406c65f5f6b42ba678532a80b1e06c8088693909ab3738055dfc23c",
+      "actual": "79a3b47da406c65f5f6b42ba678532a80b1e06c8088693909ab3738055dfc23c"
+    },
+    "scripts/test-journal-v2-worker.js": {
+      "atM": "8029a02eb8894ef0e5d0dbf5c43700b44326955b014d18d04b4b26c88bb54bdb",
+      "actual": "8029a02eb8894ef0e5d0dbf5c43700b44326955b014d18d04b4b26c88bb54bdb"
+    },
+    "scripts/test-scoped-access-writes.js": {
+      "atM": "3b6a5f4690d860fbd53f7bc2a354d194d56a3e64c4cc7c68108e7d3a9cfce876",
+      "actual": "3b6a5f4690d860fbd53f7bc2a354d194d56a3e64c4cc7c68108e7d3a9cfce876"
+    },
+    "scripts/test-strega-gen2-reconcile.js": {
+      "atM": "c1c6a6557b484d22704feda9ab2ded75136530a7e50f88d15dc4a855bd27a522",
+      "actual": "c1c6a6557b484d22704feda9ab2ded75136530a7e50f88d15dc4a855bd27a522"
+    },
+    "scripts/test-sync-history-schema.js": {
+      "atM": "48d0f5da3923cab57874c4ab03725edbef88957513b0b2d99da4e676653653bd",
+      "actual": "48d0f5da3923cab57874c4ab03725edbef88957513b0b2d99da4e676653653bd"
+    },
+    "scripts/test-sync-history-worker.js": {
+      "atM": "6bd76771e064bbe033ee8430fcfb9e7c36a6b6c0fa0323f482ba07e9c8b04c1c",
+      "actual": "6bd76771e064bbe033ee8430fcfb9e7c36a6b6c0fa0323f482ba07e9c8b04c1c"
+    },
+    "scripts/test-terra-selection-edge-acceptance.js": {
+      "atM": "162150a1cd27362107f0e5d002b86505b5302a3654e6da36d61adffdd21c3ea4",
+      "actual": "162150a1cd27362107f0e5d002b86505b5302a3654e6da36d61adffdd21c3ea4"
+    },
+    "scripts/test-verify-flows-output-arity.js": {
+      "atM": "cbc145c506732408cae044427857cefc6cc17f6481d70f85588900c875f1ef08",
+      "actual": "cbc145c506732408cae044427857cefc6cc17f6481d70f85588900c875f1ef08"
+    },
+    "scripts/verify-auth-flag-off-hermetic.js": {
+      "atM": "1f92c15124519a28d81576fd7c680e28ddccecea13ab416a07813a197b27d365",
+      "actual": "1f92c15124519a28d81576fd7c680e28ddccecea13ab416a07813a197b27d365"
+    },
+    "scripts/verify-channel-manifest-parity.js": {
+      "atM": "522be14e5c85c05ca6fb4285ebe9a43e5caaf3c20ec942e98c6876af94c5c256",
+      "actual": "522be14e5c85c05ca6fb4285ebe9a43e5caaf3c20ec942e98c6876af94c5c256"
+    },
+    "scripts/verify-communication-contract.js": {
+      "atM": "00c9422190114b88f5d07bee0a014339b486ef791b5257dadf0ce59fd5346afa",
+      "actual": "00c9422190114b88f5d07bee0a014339b486ef791b5257dadf0ce59fd5346afa"
+    },
+    "scripts/verify-db-schema-consistency.js": {
+      "atM": "6129bb2899a076d04744f492ff6b4d5b7177e9694b077167e2863fcf845ff101",
+      "actual": "6129bb2899a076d04744f492ff6b4d5b7177e9694b077167e2863fcf845ff101"
+    },
+    "scripts/verify-devices-rebuild-fence.js": {
+      "atM": "80490e853f55c4928611c6d0fc97419ab77cc9f6e41f25b1ff3e3ce2289b18ce",
+      "actual": "80490e853f55c4928611c6d0fc97419ab77cc9f6e41f25b1ff3e3ce2289b18ce"
+    },
+    "scripts/verify-doc-hygiene-allowlist.json": {
+      "atM": "d82770bc873694a615ace5828e71449b7b1d9540785df09201afde3b7c7d7c3c",
+      "actual": "d82770bc873694a615ace5828e71449b7b1d9540785df09201afde3b7c7d7c3c"
+    },
+    "scripts/verify-doc-hygiene.js": {
+      "atM": "7b4e074eab640fcf44c4826c98bb3ba67e8a420131ce38a91d2b6736fe96f978",
+      "actual": "7b4e074eab640fcf44c4826c98bb3ba67e8a420131ce38a91d2b6736fe96f978"
+    },
+    "scripts/verify-flows-fn-parse.js": {
+      "atM": "4df27cdb52c5642cc5a57211a125afe96fcc2826645f06eecab624e9015b6ef6",
+      "actual": "4df27cdb52c5642cc5a57211a125afe96fcc2826645f06eecab624e9015b6ef6"
+    },
+    "scripts/verify-flows-output-arity.js": {
+      "atM": "ef15f931fde4b685642bd317722ca43d004431398eb52c98a4cc2688053acdb4",
+      "actual": "ef15f931fde4b685642bd317722ca43d004431398eb52c98a4cc2688053acdb4"
+    },
+    "scripts/verify-flows-size-ratchet-allowances.json": {
+      "atM": "f07d2f1bb1502dba74854e7002cecd79e1259237598b93017852ae47b9f2e161",
+      "actual": "f07d2f1bb1502dba74854e7002cecd79e1259237598b93017852ae47b9f2e161"
+    },
+    "scripts/verify-flows-size-ratchet-baseline.json": {
+      "atM": "8ea3a50771fc7cad4515c71454d6a5dc8cf559c6e4601ae783f394e6f91bcfbb",
+      "actual": "8ea3a50771fc7cad4515c71454d6a5dc8cf559c6e4601ae783f394e6f91bcfbb"
+    },
+    "scripts/verify-flows-size-ratchet.js": {
+      "atM": "4c93ed37982b185b097d9bf601f34354f507e1710ae1d9e8bc43b4cf9339b3da",
+      "actual": "4c93ed37982b185b097d9bf601f34354f507e1710ae1d9e8bc43b4cf9339b3da"
+    },
+    "scripts/verify-history-api-contract.js": {
+      "atM": "6bf21dfda7f090d902f5140c25295c7f8f4373502a36f8cc2a8a6fb67e869598",
+      "actual": "6bf21dfda7f090d902f5140c25295c7f8f4373502a36f8cc2a8a6fb67e869598"
+    },
+    "scripts/verify-history-api-contract.test.js": {
+      "atM": "ce56b27a1b89dcbb28160052d09cf47d6f2ffce6824d6253159f60e88b119592",
+      "actual": "ce56b27a1b89dcbb28160052d09cf47d6f2ffce6824d6253159f60e88b119592"
+    },
+    "scripts/verify-history-hash-fixtures.js": {
+      "atM": "ca5803cac2a4330cc38d066a3d7f28b4c4c5ef59e9b37ec3f4eefc5d8087e5a8",
+      "actual": "ca5803cac2a4330cc38d066a3d7f28b4c4c5ef59e9b37ec3f4eefc5d8087e5a8"
+    },
+    "scripts/verify-live-gateway-identity.js": {
+      "atM": "55e51e2a57211d1d985db496d8508327458ec2d5a1fc4d7028f24a099ddc3e9d",
+      "actual": "55e51e2a57211d1d985db496d8508327458ec2d5a1fc4d7028f24a099ddc3e9d"
+    },
+    "scripts/verify-merge-allowance-preservation.js": {
+      "atM": "e4307be3cd826b39ca3ffd41cb653a0042dab7ee2390d11f6ceb5cedd88d0ff9",
+      "actual": "e4307be3cd826b39ca3ffd41cb653a0042dab7ee2390d11f6ceb5cedd88d0ff9"
+    },
+    "scripts/verify-no-new-silent-catch.js": {
+      "atM": "ef23ff98193d7ad8dbfd115c1926fb29a91e19868b7c0350006b16d35396edc9",
+      "actual": "ef23ff98193d7ad8dbfd115c1926fb29a91e19868b7c0350006b16d35396edc9"
+    },
+    "scripts/verify-no-stray-ddl.js": {
+      "atM": "d370ecae7e4265341cf083bb5c409422cbcc6b23166e60db12efda63b43f9580",
+      "actual": "d370ecae7e4265341cf083bb5c409422cbcc6b23166e60db12efda63b43f9580"
+    },
+    "scripts/verify-profile-parity.js": {
+      "atM": "82af49449cf7dbb1986da7f46f1c71d6b7e6b29f05ae59ddc1122526676a4859",
+      "actual": "82af49449cf7dbb1986da7f46f1c71d6b7e6b29f05ae59ddc1122526676a4859"
+    },
+    "scripts/verify-runtime-schema-parity.js": {
+      "atM": "5289e812ed79f2c8dda6474335329edf94a09dfb86b2f905e5d88fb9ef2c0aad",
+      "actual": "5289e812ed79f2c8dda6474335329edf94a09dfb86b2f905e5d88fb9ef2c0aad"
+    },
+    "scripts/verify-scoped-access.js": {
+      "atM": "14fbba492fbb2698f018bd2631c472683d7fb92f38d60fcd963289d804b28df0",
+      "actual": "14fbba492fbb2698f018bd2631c472683d7fb92f38d60fcd963289d804b28df0"
+    },
+    "scripts/verify-scoped-access.test.js": {
+      "atM": "dfdd0f79e8387b4de982da19a6b25ee382ff0c299a2e23aecfb5a10a2e40bb2f",
+      "actual": "dfdd0f79e8387b4de982da19a6b25ee382ff0c299a2e23aecfb5a10a2e40bb2f"
+    },
+    "scripts/verify-seed-db-ledger.js": {
+      "atM": "4856b13026f7fb7e3e6364158e078cfb70111ea6b84455350d9f4526abaae403",
+      "actual": "4856b13026f7fb7e3e6364158e078cfb70111ea6b84455350d9f4526abaae403"
+    },
+    "scripts/verify-sync-flow.js": {
+      "atM": "52ed31511f611e5ccb90a9dd68d5025f5863f4da48eb17e65be6681e63e20b6a",
+      "actual": "52ed31511f611e5ccb90a9dd68d5025f5863f4da48eb17e65be6681e63e20b6a"
+    },
+    "scripts/verify-test-inventory.js": {
+      "atM": "ce6af4cc69b82a905d733ae3456924a6221185f7e0a399e86093fe939d175c8c",
+      "actual": "ce6af4cc69b82a905d733ae3456924a6221185f7e0a399e86093fe939d175c8c"
+    },
+    "scripts/verify-test-inventory.json": {
+      "atM": "6550885b736f2bcf0a3e1a37730226012f2b63c43327710ed4be723763202441",
+      "actual": "6550885b736f2bcf0a3e1a37730226012f2b63c43327710ed4be723763202441"
+    },
+    "web/react-gui/.npmrc": {
+      "atM": "0ed44e7d606cd7a9eba915a10f13a13a09ea85e4b2bb4415bb0c481dbdcded51",
+      "actual": "0ed44e7d606cd7a9eba915a10f13a13a09ea85e4b2bb4415bb0c481dbdcded51"
+    },
+    "web/react-gui/index.html": {
+      "atM": "8c32a1f15599c085b665d8d8c48a685d4b4ffba710bde914799e92522cf602b0",
+      "actual": "8c32a1f15599c085b665d8d8c48a685d4b4ffba710bde914799e92522cf602b0"
+    },
+    "web/react-gui/package-lock.json": {
+      "atM": "f0c447b636af8b4f70b0b3f02580c435f9d116cd5e63a30c8108a60d324c0473",
+      "actual": "f0c447b636af8b4f70b0b3f02580c435f9d116cd5e63a30c8108a60d324c0473"
+    },
+    "web/react-gui/package.json": {
+      "atM": "97fe067e255c8f8137a67f69b3645282e645ff97278fb932dc86ea223310d281",
+      "actual": "97fe067e255c8f8137a67f69b3645282e645ff97278fb932dc86ea223310d281"
+    },
+    "web/react-gui/postcss.config.js": {
+      "atM": "47f2dff3208826bf663a9ca490b376a130a8153e0e8e713aed09b9f42289a3bd",
+      "actual": "47f2dff3208826bf663a9ca490b376a130a8153e0e8e713aed09b9f42289a3bd"
+    },
+    "web/react-gui/public/locales/de-CH/settings.json": {
+      "atM": "f48b7a1eac4396cdc90ea44d128b3fdb5e10bd111461e2252f72feb2784ae5d9",
+      "actual": "f48b7a1eac4396cdc90ea44d128b3fdb5e10bd111461e2252f72feb2784ae5d9"
+    },
+    "web/react-gui/public/locales/en/settings.json": {
+      "atM": "13f590a2859a38b4fc4990e90473f8d4cd89ad41a771d8fefbb694ed2a57c1d5",
+      "actual": "13f590a2859a38b4fc4990e90473f8d4cd89ad41a771d8fefbb694ed2a57c1d5"
+    },
+    "web/react-gui/public/locales/es/settings.json": {
+      "atM": "a83e08d27169723e591a2f51743107841d03fed2f6223e51ddd9340d5a61ffb3",
+      "actual": "a83e08d27169723e591a2f51743107841d03fed2f6223e51ddd9340d5a61ffb3"
+    },
+    "web/react-gui/public/locales/fr/settings.json": {
+      "atM": "3db14f5b9ae619b58ac6862ba29119dbf9edc59f2c76fc1703bdec187ac5d0a0",
+      "actual": "3db14f5b9ae619b58ac6862ba29119dbf9edc59f2c76fc1703bdec187ac5d0a0"
+    },
+    "web/react-gui/public/locales/it/settings.json": {
+      "atM": "cd0b4ad6de9e5bd5c55e736a8a93b0740340a151bc581c9afd6f89584fa083d9",
+      "actual": "cd0b4ad6de9e5bd5c55e736a8a93b0740340a151bc581c9afd6f89584fa083d9"
+    },
+    "web/react-gui/public/locales/lg/common.json": {
+      "atM": "fe8f2310f593b33a2f81095b57c7539e8ff27272ea30da5b387039c0dc2a4576",
+      "actual": "fe8f2310f593b33a2f81095b57c7539e8ff27272ea30da5b387039c0dc2a4576"
+    },
+    "web/react-gui/public/locales/lg/settings.json": {
+      "atM": "9642b7da25f0d950b439426d6b4d018c87b17c12ae2b2700fbb77f6e8e535cfb",
+      "actual": "9642b7da25f0d950b439426d6b4d018c87b17c12ae2b2700fbb77f6e8e535cfb"
+    },
+    "web/react-gui/public/locales/pt/settings.json": {
+      "atM": "517e6bff3ea0b41d676b8d25aeed09a60eeaba6f01320fc792124eddf010afd5",
+      "actual": "517e6bff3ea0b41d676b8d25aeed09a60eeaba6f01320fc792124eddf010afd5"
+    },
+    "web/react-gui/scripts/run-tsx-tests.mjs": {
+      "atM": "ad5b829d42ccbafc84b6af2cef706f7cfc0a8e2dbdca5f97c9a3407ac1e5a20a",
+      "actual": "ad5b829d42ccbafc84b6af2cef706f7cfc0a8e2dbdca5f97c9a3407ac1e5a20a"
+    },
+    "web/react-gui/src/analysis/edgeAnalysisApi.ts": {
+      "atM": "d82bea83f9bd63afec9d700dfe6237a9aeb892e6fadec06dd098e1a57188673f",
+      "actual": "d82bea83f9bd63afec9d700dfe6237a9aeb892e6fadec06dd098e1a57188673f"
+    },
+    "web/react-gui/src/analysis/range.ts": {
+      "atM": "dcd8fec1727105c745343aba03e97eb315e894ff6dac0d25c22af8fe28fb6d8b",
+      "actual": "dcd8fec1727105c745343aba03e97eb315e894ff6dac0d25c22af8fe28fb6d8b"
+    },
+    "web/react-gui/src/analysis/types.ts": {
+      "atM": "b8e152071ef6a2bc5b932492b8afb6034b06b6141ac6f3d307e320d1a9e18c65",
+      "actual": "b8e152071ef6a2bc5b932492b8afb6034b06b6141ac6f3d307e320d1a9e18c65"
+    },
+    "web/react-gui/src/contexts/AuthContext.tsx": {
+      "atM": "b3e2f67a463457eddc5338a475e7bb6023f7d97fdd7dfcd1e4f80608c2c81ff4",
+      "actual": "b3e2f67a463457eddc5338a475e7bb6023f7d97fdd7dfcd1e4f80608c2c81ff4"
+    },
+    "web/react-gui/src/contexts/__tests__/sessionHarness.tsx": {
+      "atM": "8454cce7562e9aa710c7bed1fbecfe24fbfb198986c8e509355cdde758531ca9",
+      "actual": "8454cce7562e9aa710c7bed1fbecfe24fbfb198986c8e509355cdde758531ca9"
+    },
+    "web/react-gui/src/history/i18nKeys.ts": {
+      "atM": "3d371cea4b403089d97b98839a9a49da83e21d41577d65ee8936114bdd86794a",
+      "actual": "3d371cea4b403089d97b98839a9a49da83e21d41577d65ee8936114bdd86794a"
+    },
+    "web/react-gui/src/history/platformLimits.ts": {
+      "atM": "909b5fe31a5e83a4da701ac4283d042d97ff4a87040b236b0a9d17f84024ab28",
+      "actual": "909b5fe31a5e83a4da701ac4283d042d97ff4a87040b236b0a9d17f84024ab28"
+    },
+    "web/react-gui/src/history/rangeModel.ts": {
+      "atM": "5d45946a07929ad83fbf7efb3310b76b8069a7411962f01057b3fa807ab34311",
+      "actual": "5d45946a07929ad83fbf7efb3310b76b8069a7411962f01057b3fa807ab34311"
+    },
+    "web/react-gui/src/history/sourceSelection.ts": {
+      "atM": "b0db4c701188ea50531a730fd205e02968c8318c17c4e1d44c74b5137227cbfd",
+      "actual": "b0db4c701188ea50531a730fd205e02968c8318c17c4e1d44c74b5137227cbfd"
+    },
+    "web/react-gui/src/history/types.ts": {
+      "atM": "9e5892adc1a34df8bedf2d614f7b9b5ce411270585a904336dd6775e2367b0f3",
+      "actual": "9e5892adc1a34df8bedf2d614f7b9b5ce411270585a904336dd6775e2367b0f3"
+    },
+    "web/react-gui/src/history/workspaceModel.ts": {
+      "atM": "111cf14a66bbf71eafd78cfc3eff67d9942ec9cdf61d1c7f858b6ed2df10921e",
+      "actual": "111cf14a66bbf71eafd78cfc3eff67d9942ec9cdf61d1c7f858b6ed2df10921e"
+    },
+    "web/react-gui/src/i18n/config.ts": {
+      "atM": "03a3cf8e9c4ab132279f828f4888c272714a47e31d45197feac28978dafd739b",
+      "actual": "03a3cf8e9c4ab132279f828f4888c272714a47e31d45197feac28978dafd739b"
+    },
+    "web/react-gui/src/main.jsx": {
+      "atM": "a4cdbe9aa3ea2d1643ec268aff577c728183610effea079e283530d734318bfa",
+      "actual": "a4cdbe9aa3ea2d1643ec268aff577c728183610effea079e283530d734318bfa"
+    },
+    "web/react-gui/src/services/api.ts": {
+      "atM": "b24ed35a265b43a1d5ad5b6f19040c679c0d0b4721504e7603cfbb374fceae48",
+      "actual": "b24ed35a265b43a1d5ad5b6f19040c679c0d0b4721504e7603cfbb374fceae48"
+    },
+    "web/react-gui/src/services/authEvents.ts": {
+      "atM": "d85c37e8f841a74060113db419d0e97550ee077357b38ace64347b3011285e2a",
+      "actual": "d85c37e8f841a74060113db419d0e97550ee077357b38ace64347b3011285e2a"
+    },
+    "web/react-gui/src/services/authSession.ts": {
+      "atM": "2a5887a8065f43b0a41b5a024bd1397a93d158cdfc3c916e4d854b62a6d791ee",
+      "actual": "2a5887a8065f43b0a41b5a024bd1397a93d158cdfc3c916e4d854b62a6d791ee"
+    },
+    "web/react-gui/src/services/valveCancel.ts": {
+      "atM": "c787df5dacfa17c3273b12d3833801715e0f26e892759b86e557a51b7a929204",
+      "actual": "c787df5dacfa17c3273b12d3833801715e0f26e892759b86e557a51b7a929204"
+    },
+    "web/react-gui/src/types/farming.ts": {
+      "atM": "944595f2b21e0868defac5a26fea03b13276bb70db3c95d4667437ebde3de11d",
+      "actual": "944595f2b21e0868defac5a26fea03b13276bb70db3c95d4667437ebde3de11d"
+    },
+    "web/react-gui/src/utils/irrigationPolicy.ts": {
+      "atM": "2ff7f1b13126f73d996e53a3c7995147c21e803df4d50bb71ea1cffa6b2b975f",
+      "actual": "2ff7f1b13126f73d996e53a3c7995147c21e803df4d50bb71ea1cffa6b2b975f"
+    },
+    "web/react-gui/src/utils/rain.ts": {
+      "atM": "0a36beae97204d3ad8b1e908132e4cc335bf9b84b23a6d1a7e7970174880c287",
+      "actual": "0a36beae97204d3ad8b1e908132e4cc335bf9b84b23a6d1a7e7970174880c287"
+    },
+    "web/react-gui/src/utils/zoneRainSource.ts": {
+      "atM": "b61d5873cdf8c6b72362c60ec431a571ea9f06d3578c53cd093916d80b1423f4",
+      "actual": "b61d5873cdf8c6b72362c60ec431a571ea9f06d3578c53cd093916d80b1423f4"
+    },
+    "web/react-gui/tailwind.config.js": {
+      "atM": "927963be4e87249264a321cce1d307a4fccf33c3a030f47d45b953ed04d68182",
+      "actual": "927963be4e87249264a321cce1d307a4fccf33c3a030f47d45b953ed04d68182"
+    },
+    "web/react-gui/tsconfig.json": {
+      "atM": "8200aca94fa149b11f64c4c7d20092b5dcc1127977e0d58847b92dbb9588b54a",
+      "actual": "8200aca94fa149b11f64c4c7d20092b5dcc1127977e0d58847b92dbb9588b54a"
+    },
+    "web/react-gui/tsconfig.node.json": {
+      "atM": "cdb011f00a1142f5a7c24f4e7b3c09ae4ed32f038b72f33c8a9dacfd3e8168f0",
+      "actual": "cdb011f00a1142f5a7c24f4e7b3c09ae4ed32f038b72f33c8a9dacfd3e8168f0"
+    },
+    "web/react-gui/vite.config.js": {
+      "atM": "f9e37e94040abc41260c7bd867310e60bf0331afca5ce41f501fb87e8202b691",
+      "actual": "f9e37e94040abc41260c7bd867310e60bf0331afca5ce41f501fb87e8202b691"
+    },
+    "web/react-gui/vitest.config.ts": {
+      "atM": "3699cfa471e697706d03ccf1cefbfbb6b76df5fa94630341a44c94f2e3ee16f5",
+      "actual": "3699cfa471e697706d03ccf1cefbfbb6b76df5fa94630341a44c94f2e3ee16f5"
+    }
+  },
+  "anchors": {
+    "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json nodes changed since M": {
+      "changed": [],
+      "removed": []
+    },
+    "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json nodes changed since M": {
+      "changed": [],
+      "removed": []
+    },
+    "workflows": [
+      ".github/workflows/codecs.yml",
+      ".github/workflows/doc-hygiene.yml",
+      ".github/workflows/field-journal.yml",
+      ".github/workflows/history-router.yml",
+      ".github/workflows/history-uplot-core.yml",
+      ".github/workflows/journal-catalog.yml",
+      ".github/workflows/migrations.yml",
+      ".github/workflows/test-inventory.yml",
+      ".github/workflows/typecheck.yml",
+      ".github/workflows/ui-core.yml",
+      ".github/workflows/verify-sync-flow.yml"
+    ],
+    "closure": [
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/edge-channels.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-command-ledger/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-command-ledger/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-dendro-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-dendro-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-entity-name/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/analysis-sources.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/analysis.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/device-sources.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-router/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-history-router/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/clock.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/evaluate.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/model.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/observations.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/occurrences.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/replication.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/routes.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/store.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/timestamps.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-irrigation-policy/worker.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/canonicalization.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal-replication/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/aggregate.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/cascade.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/catalog.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/context.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/definition.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/lifecycle.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/unit-family.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-journal/units.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-lib/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-lib/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-matric-potential/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-matric-potential/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-module-defaults/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-module-defaults/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-rain/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-rain/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scoped-access-commands/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scoped-access-commands/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/configuration.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/ack.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/cancel.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/claim.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/cloud-commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/dispatch.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/effects.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-authorize.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-telemetry.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-transport.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/live-wrappers.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/plan.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/push.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/runtime.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/store.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/unclaim.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/workers.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-watermark-binding/canonicalization.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-weather-provider/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/edge-channels.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-command-ledger/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-dendro-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis-sources.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/analysis.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/device-sources.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock-bounds.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/clock.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/evaluate.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/lifecycle.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/model.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/observations.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/occurrences.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/replication.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/routes.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/store.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/timestamps.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-irrigation-policy/worker.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/canonicalization.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal-replication/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/aggregate.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/cascade.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/catalog.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/context.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/definition.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/lifecycle.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/unit-family.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-journal/units.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-lib/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-module-defaults/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-rain/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scoped-access-commands/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/configuration.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-normalize/tensiomark-live.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/ack.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cancel.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/claim.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/cloud-commands.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/dispatch.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/effects.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-authorize.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-telemetry.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-transport.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/live-wrappers.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/package.json",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/plan.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/push.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/runtime.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/store.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/unclaim.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/workers.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-watermark-binding/canonicalization.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/index.js",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-weather-provider/package.json",
+      "lib/osi-migrate/add-column-compat.js",
+      "lib/osi-migrate/backup.js",
+      "lib/osi-migrate/fingerprints.js",
+      "lib/osi-migrate/index.js",
+      "lib/osi-migrate/ledger.js",
+      "lib/osi-migrate/migration-manifest.js",
+      "lib/osi-migrate/migrations-loader.js",
+      "lib/osi-migrate/runner-iface.js",
+      "lib/osi-migrate/runner.js",
+      "lib/osi-migrate/sql-normalize.js",
+      "scripts/account-recovery.js",
+      "scripts/baseline-existing-db.js",
+      "scripts/chirpstack-bootstrap.js",
+      "scripts/device-health-channel-contract.js",
+      "scripts/fixtures/account-recovery/resolve.cjs",
+      "scripts/fixtures/account-recovery/sqlite3.cjs",
+      "scripts/flows-bare-require-scan.js",
+      "scripts/flows-size-scan.js",
+      "scripts/installation-recovery-adapter.js",
+      "scripts/installation-recovery-adapter.test.js",
+      "scripts/lib/account-recovery-transaction.js",
+      "scripts/lib/bootstrap-auth-harness.js",
+      "scripts/lib/history-hash-v1.js",
+      "scripts/lib/scope-guard-probe.js",
+      "scripts/lib/scoped-access-harness.js",
+      "scripts/migrate-flows-journal-generators.test.js",
+      "scripts/migrate-flows-journal-v2-replication.js",
+      "scripts/migrate-flows-journal-v2-replication.test.js",
+      "scripts/osi-lib-binding-audit.js",
+      "scripts/osi-lib-binding-audit.test.js",
+      "scripts/repair-pi-schema.js",
+      "scripts/seed-db-paths.js",
+      "scripts/semantic-schema-compare.js",
+      "scripts/sync-protocol-capability-cli.js",
+      "scripts/test-account-recovery-cli.js",
+      "scripts/test-account-recovery.js",
+      "scripts/test-auth-bootstrap-policy.js",
+      "scripts/test-auth-credential-isolation.js",
+      "scripts/test-flows-wiring.js",
+      "scripts/test-history-helper.js",
+      "scripts/test-journal-bootstrap.js",
+      "scripts/test-journal-v2-config.js",
+      "scripts/test-journal-v2-worker.js",
+      "scripts/test-scoped-access-writes.js",
+      "scripts/test-strega-gen2-reconcile.js",
+      "scripts/test-sync-history-schema.js",
+      "scripts/test-sync-history-worker.js",
+      "scripts/test-terra-selection-edge-acceptance.js",
+      "scripts/test-verify-flows-output-arity.js",
+      "scripts/verify-auth-flag-off-hermetic.js",
+      "scripts/verify-channel-manifest-parity.js",
+      "scripts/verify-communication-contract.js",
+      "scripts/verify-db-schema-consistency.js",
+      "scripts/verify-devices-rebuild-fence.js",
+      "scripts/verify-doc-hygiene.js",
+      "scripts/verify-flows-fn-parse.js",
+      "scripts/verify-flows-output-arity.js",
+      "scripts/verify-flows-size-ratchet.js",
+      "scripts/verify-history-api-contract.js",
+      "scripts/verify-history-api-contract.test.js",
+      "scripts/verify-history-hash-fixtures.js",
+      "scripts/verify-live-gateway-identity.js",
+      "scripts/verify-merge-allowance-preservation.js",
+      "scripts/verify-no-new-silent-catch.js",
+      "scripts/verify-no-stray-ddl.js",
+      "scripts/verify-profile-parity.js",
+      "scripts/verify-runtime-schema-parity.js",
+      "scripts/verify-scoped-access.js",
+      "scripts/verify-scoped-access.test.js",
+      "scripts/verify-seed-db-ledger.js",
+      "scripts/verify-sync-flow.js",
+      "scripts/verify-test-inventory.js"
+    ],
+    "usersSeam": {
+      "sha256": "cb9859de09909f92a658926d2b7c2231e69a4d908000e93c62ae29241d0a5670",
+      "counts": {
+        "users table": 1,
+        "users index": 1,
+        "users triggers": 4,
+        "sync_outbox table": 1,
+        "scoped_access_emit table": 1
+      }
+    },
+    "apiSeams": {
+      "interceptors": "b0a18d1a6cb8b1c164cc8e658c5c360b1f424024de5ef5e97037d7e69beb7377",
+      "errorMessage": "4246ce7796e0996b69c7c9638ef0042355abddb8045e2795c267288690e2bccd"
+    },
+    "totalDelta": 47589,
+    "identityLabels": {
+      "counts": {
+        "cumulative": 1,
+        "plain": 0
+      },
+      "form": "cumulative"
+    },
+    "ciNeighbourSteps": [],
+    "ignored": []
+  },
+  "tree": {
+    "root": "2c5b4c4ebd1590c163bead185905a0482b3fbab6",
+    "rootAtM": "79d95a607f1924b14e956af6ecef85da6e4057d7",
+    "reviewedMain": {
+      "commit": "0f41ff4b4729085142f973d20996857ffca1e7a1",
+      "entries": 38,
+      "sha256": "83ecb46ddd1bd6c457c0e25333ea96b3d46facdeeaef60391eb5c5e159aedb4d"
+    },
+    "gitlinks": [],
+    "classSModes": {
+      "web/react-gui/src/pages/admin/UsersPage.tsx": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/package.json": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs/umd/index.js": "100644",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-db-helper": "120000",
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-scope-helper": "120000",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-db-helper": "120000",
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-scope-helper": "120000"
+    },
+    "resolution": {
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-db-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-installation-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/bcryptjs": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-db-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/node_modules/osi-scope-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-db-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scope-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-installation-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/bcryptjs": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-db-helper": [],
+      "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/node_modules/osi-scope-helper": []
+    },
+    "diff": [
+      {
+        "status": "A",
+        "path": ".gitattributes",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "3de548de7528c800b268346eb0523ac2699de509",
+        "cls": "tree",
+        "reviewedAtN": false
+      },
+      {
+        "status": "M",
+        "path": ".github/workflows/migrations.yml",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "1f6e82516d232f4d0c4710ce19fd0f74cd4becae",
+        "newOid": "0f85889917df371245e3d058e8afa281dd6747f6",
+        "cls": "named",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": ".github/workflows/test-inventory.yml",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "13845b9c690b41ed3c14c21e487e3d112a07a80b",
+        "newOid": "6ffb6c5d5e1bf3be6c485a9d08c31153086440ee",
+        "cls": "named",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "CHANGELOG.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "f741c5dc08f4b4f6ff05558120e4b38fd493221d",
+        "newOid": "ead1bc2d5a3ba7dc425e41961bf4a750fb77459a",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-valve-control/api.test.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "df2b9a72c2e4cc00c572fd718fc94cb738f60dca",
+        "newOid": "19976944f16fdc8bf47a1a34886aa98fdae46aec",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-valve-control/api.test.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "df2b9a72c2e4cc00c572fd718fc94cb738f60dca",
+        "newOid": "19976944f16fdc8bf47a1a34886aa98fdae46aec",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/architecture/refactor-program-2026-open-decisions.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "ba15e33274343221c7ed7055e56904d7cf93c5bf",
+        "newOid": "c521f45bc7d4ed2ef4f9b82d5f0851708db02d4a",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/i18n/pending-luganda-translations.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "a84e9820cfc5fb9cf9fdc7269de8adf8184c8a70",
+        "newOid": "8d9f326af0e1e8e6541f38883a5de5699ba500a8",
+        "cls": "named",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/operations/deploying-over-a-flaky-link.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "a4e7942c61630d59785ce53cd5551ce9178b7039",
+        "newOid": "9cbc3a9467774102a7d188ad65defce4d6dc6b3c",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "docs/operations/ledger-catchup-runbook.md",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "968e8977da8bbe5374e5a8513076d349621b2141",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/operations/uganda-catchup-rehearsal-20260911-report.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "1f5478d4892c3078369f9c2d74f7725e3aecbccc",
+        "newOid": "b779fd65f9a6b95cb3c1eb79d8ab54e116d4f1e7",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "D",
+        "path": "docs/operations/uganda-catchup-runbook.md",
+        "oldMode": "100644",
+        "newMode": "000000",
+        "oldOid": "bccbf92b44330db13504aa685283d759768f3ecf",
+        "newOid": "0000000000000000000000000000000000000000",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/superpowers/plans/2026-09-12-boot-node-schema-safety.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "6c8d4030f604987957fadfda490716d53ee2d83a",
+        "newOid": "91f860de1485ff4c1494dee89b214f48198b19c8",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "docs/superpowers/plans/2026-10-27-issue-410-exact-calibration-test-repair.md",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "a9a5ec6f37a0c77584483ac01d7fa60da73f6fab",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "docs/versioning-workflow.md",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "2355a0bf67628e254f4a13faeee9947f0e97498b",
+        "newOid": "1bf1754e66ce18c4d5c9da52d5d6dc193e7ff295",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "scripts/helpers/test-owned-scratch.js",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "f2f3c7bbd0c825d24d488adeb0233946a2e4b60e",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "scripts/ops/generate-uganda-catchup-20260911.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "908eac74fc2819aead190e9f4f522b1fee53a733",
+        "newOid": "1557145e8855c613f378d9a69bd4240565f50c48",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "scripts/reconcile-ledger-numbering.test.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "b2798391dcf1c58c0660c218240fd373e273f314",
+        "newOid": "ad7fa3c66911ee7c8a65239d63b55a7b86d96778",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "scripts/reconcile-ledger-scratch-cleanup.test.js",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "3460763130f756fc6bae44f5c026750b88b1e491",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "scripts/test-apply-chameleon-calibration-seed.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "c74609a103acb96a55ab3be2024db78997292d8c",
+        "newOid": "c005009b6e989d057c429467ddb08b1268fc34b2",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "scripts/test-valve-ack-time-selector.test.js",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "7a6940e2ee047d0e7b85a87918cb0b1d94335947",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "scripts/verify-sync-op-parity.js",
+        "oldMode": "100755",
+        "newMode": "100755",
+        "oldOid": "140509b4afd6c18fe034dd1cb78c2789a9204d95",
+        "newOid": "f161d5675693c819b0c1dd39238e7cf5d309197f",
+        "cls": "tree",
+        "reviewedAtN": false
+      },
+      {
+        "status": "M",
+        "path": "scripts/watermark-drydown-analysis.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "183bf152ddcffcf958062f1a4c689e1ac7a34ecf",
+        "newOid": "d246bebb4912bb928cc20b4182243292a3799ef1",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "scripts/watermark-drydown-analysis.test.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "1ae02d6437b93daf9842c5b022613ce7d0ca63e4",
+        "newOid": "337aacc8b1c492912dc295183bbf640687bcfbda",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "tests/silvan/cases/V2-valve-acks.js",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "c9b011cb9a076a12560e24df1eb34d180772db55",
+        "newOid": "f2696a6d078c21cf4e33a01da7bc567d8dd8bf7b",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "tests/silvan/selftest.js",
+        "oldMode": "100755",
+        "newMode": "100755",
+        "oldOid": "6d4bddb8292b488175d2dbbab0a460da83ec1c8c",
+        "newOid": "b1339ca884ad0cf6bbd82ea1026d7b63938d5092",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/de-CH/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "1a5e44a25a56333f563b64ec7e0d21c142574568",
+        "newOid": "d22463252d797ab8c44d279df9d49d819f9ae185",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/en/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "723d7de74948ee5c7d4576d1f41752755bd70633",
+        "newOid": "ba43af3a52d0a9aee9d9c3e66cfadae7b3c05bfe",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/es/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "c8ef1b42c4539816831bed034e86e35b9cc57282",
+        "newOid": "cef997743b3ce9ccec323ee092a0047b0ea8a150",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/fr/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "30c1c1d270358acd5b8ba948ea9b9842352b7374",
+        "newOid": "5b7d1a32998f0446fa464c89d384af1302aa6b25",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/it/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "b9730dd833b57988b4401d20c269e42e047fe46d",
+        "newOid": "2fbdbcc6d833245d1167ad08b77144eaf330aa85",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/lg/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "4574ca1c16048bed7c1ef6351f05e72376365ff6",
+        "newOid": "13b6d506ab0234b065128708c5f5501a1533d319",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/public/locales/pt/devices.json",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "7c3c8f800c00391a2d810112034c2c3451ce9ca4",
+        "newOid": "c7e7e906df2814ce2043a2cee316e9276110841f",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/src/components/analysis/__tests__/AnalysisSeriesTray.test.tsx",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "f483269e7e233de1b6d368a8a010d32b4e3a95af",
+        "newOid": "15de688f4ad3f8cde5dac51c66b642661a54165a",
+        "cls": "tree",
+        "reviewedAtN": false
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/src/components/farming/AdvancedScheduleDrawer.tsx",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "60002a8f8f0e88a580dcd3842433b165a2938eb2",
+        "newOid": "24009016023629e4f3ac02fbffb5f27e5fa801f4",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/src/components/farming/__tests__/AdvancedScheduleDrawer.test.tsx",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "e4106dab6915d9ae2d438f140ea6d62d971f1af5",
+        "newOid": "000cc829d5311ddc70b75b4c934d74866c60d017",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/src/components/farming/valves/ValveScheduleDialog.tsx",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "d74e2fd3365868a16b56ee7152ad2651d0515f17",
+        "newOid": "3e2f6eafa11d12d36d49e0f2928f2c0be4f4b044",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "web/react-gui/src/components/farming/valves/__tests__/ValveScheduleDialog.conflicts.integration.test.tsx",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "fb60c10f620610502ae64f30c9cfa84e53d9563c",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/src/components/farming/valves/__tests__/ValveScheduleDialog.test.tsx",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "fee60346ef697b9f7ef8880b997fd34329aa37db",
+        "newOid": "83b25d320331bd4fb592136140da749eabedcfc4",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "A",
+        "path": "web/react-gui/src/components/farming/valves/__tests__/fixtures/planConflict422.json",
+        "oldMode": "000000",
+        "newMode": "100644",
+        "oldOid": "0000000000000000000000000000000000000000",
+        "newOid": "7c9d459a354777603244f923a11c1781e10d3359",
+        "cls": "tree",
+        "reviewedAtN": true
+      },
+      {
+        "status": "M",
+        "path": "web/react-gui/tests/f37Locales.test.ts",
+        "oldMode": "100644",
+        "newMode": "100644",
+        "oldOid": "8f91c97e30dd4009b6ccfbe8ae7c7d68e5dc3a75",
+        "newOid": "fc5419837d1c19a00c4fcfd00df09ad5ccd6b7ce",
+        "cls": "tree",
+        "reviewedAtN": true
+      }
+    ],
+    "needsReview": [
+      ".gitattributes",
+      "scripts/verify-sync-op-parity.js",
+      "web/react-gui/src/components/analysis/__tests__/AnalysisSeriesTray.test.tsx"
+    ]
+  },
+  "drift": [
+    ".github/workflows/migrations.yml",
+    ".github/workflows/test-inventory.yml",
+    "docs/i18n/pending-luganda-translations.md"
+  ],
+  "failures": []
+}
