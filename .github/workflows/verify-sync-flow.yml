@@ -58,7 +58,7 @@ jobs:
           conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-sdi12-commissioning/index.test.js
       # Tensiomark storage, sync and precision; the shared matric-potential
       # conversion; the clipped-WATERMARK and Tensiomark history repair CLIs;
-      # the unified soil-tension scheduler.
+      # the unified soil-tension scheduler and the durable Chameleon diagnostic link.
       - name: Tensiomark, matric potential and soil-tension repairs
         run: >-
           node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-matric-potential/index.test.js
@@ -66,6 +66,7 @@ jobs:
           scripts/test-tensiomark-runtime.js scripts/test-tensiomark-schema.js
           scripts/repair-watermark-clipped.test.js scripts/test-repair-tensiomark-history.js
           scripts/test-unified-soil-tension-scheduler.js
+          scripts/test-chameleon-reading-links-schema.js scripts/test-chameleon-reading-link-ingest.js
       # WATERMARK LSN50 profile 3: FPort 11 dispatch in lsn50-decode-fn, the
       # config-query drop and watermark-ingest-fn, run against the real
       # osi-db-helper facade; FPort 2 formattedData pinned to origin/main; Build
