@@ -155,7 +155,7 @@ with the release change.
 
 The following commands are future release steps. The operator supplies
 `CALIBRATION_ADMIN_TOKEN` privately in the shell environment. The placeholder
-is not a token or a retrieval step for this campaign. If a parity gate fails
+is not a token, and this document does not describe how to obtain one. If a parity gate fails
 or a collision is disapproved, stop before the next command.
 
 ```bash
