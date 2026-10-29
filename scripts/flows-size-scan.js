@@ -38,10 +38,14 @@ function totalChars(flows) {
   return total;
 }
 
+function allCode(node) {
+  return [node.func, node.initialize, node.finalize].filter((c) => typeof c === 'string').join('\n');
+}
+
 function loadsViaOsiLib(node) {
   const declaresLib = Array.isArray(node.libs)
     && node.libs.some((l) => l && l.var === 'osiLib' && l.module === 'osi-lib');
-  const callsRequire = /osiLib\.require\s*\(/.test(node.func);
+  const callsRequire = /osiLib\.require\s*\(/.test(allCode(node));
   return declaresLib && callsRequire;
 }
 
@@ -57,7 +61,7 @@ function hasOversizedSqlLiteral(func, sqlLiteralMax) {
 // a node that loads its logic through osiLib.require and embeds no large SQL.
 // Feature logic belongs in a tested osi-* module, not in flows.json.
 function isThinNewNode(node, { floor, sqlLiteralMax }) {
-  const func = [node.func, node.initialize, node.finalize].filter((c) => typeof c === 'string').join('\n');
+  const func = allCode(node);
   if (func.length <= floor) return { ok: true };
   if (!loadsViaOsiLib(node)) {
     return {

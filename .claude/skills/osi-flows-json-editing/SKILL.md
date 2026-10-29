@@ -38,8 +38,10 @@ the gate reads the file from the base ref, so a PR cannot grant itself growth.
 The entry lets its listed nodes grow for 14 days; other code cannot use that
 room. From day 14 every run fails until the per-profile total is back at or
 below the entry's `payback_total`, and the entry cannot be deleted before then,
-so plan the extraction when you file the exception. Size counts a node's On
-Start and On Stop code too.
+so plan the extraction when you file the exception. Payback is measured on the
+total, so a second fix filed while an earlier entry is outstanding is due by the
+earlier date, and a new entry cannot be added until expired ones are deleted.
+Size counts a node's On Start and On Stop code too.
 
 ## When to use / When NOT to use
 

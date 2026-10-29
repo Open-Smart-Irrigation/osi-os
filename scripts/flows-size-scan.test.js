@@ -66,6 +66,12 @@ test('isThinNewNode: osiLib.require without the libs declaration does not count'
   assert.equal(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }).ok, false);
 });
 
+test('isThinNewNode: osiLib.require in On Start code counts as loading via osiLib', () => {
+  const node = fn('adapter', 'const v = context.get("h").run(msg);\n'.repeat(8),
+    { initialize: "context.set('h', osiLib.require('zone-env').value);", libs: [{ var: 'osiLib', module: 'osi-lib' }] });
+  assert.deepEqual(isThinNewNode(node, { floor: THIN_NODE_FLOOR, sqlLiteralMax: SQL_LITERAL_MAX }), { ok: true });
+});
+
 test('exported constants have the documented values', () => {
   assert.equal(NEW_NODE_CEILING, 1536);
   assert.equal(THIN_NODE_FLOOR, 400);

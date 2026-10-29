@@ -19,8 +19,11 @@ const TODAY = '2026-10-29';
 function writeExceptions(dir, exceptions) {
   fs.writeFileSync(path.join(dir, 'exceptions.json'), JSON.stringify({ exceptions }, null, 2) + '\n');
 }
+const scratch = [];
+test.after(() => { for (const d of scratch) fs.rmSync(d, { recursive: true, force: true }); });
 function initRepo(nodes, exceptions) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'flows-size-ratchet-'));
+  scratch.push(dir);
   git(dir, ['init', '-q']);
   git(dir, ['config', 'user.email', 't@e.com']);
   git(dir, ['config', 'user.name', 'T']);
@@ -368,6 +371,26 @@ test('without --today the gate date is the later of the HEAD and base commit dat
   // 2026-10-20T23:30-05:00 is 2026-10-21 UTC, day 20 after 2026-10-01: the entry is expired.
   assert.notEqual(r.status, 0, r.stdout);
   assert.match(r.stderr, /node shrinkme grew \(300 > 200 at base\)/);
+});
+
+test('exception: a new entry cannot be added while an expired one is still in the file', () => {
+  const dir = initRepo(BASE, [fixEntry({ granted: '2026-10-01' })]); writeBaseline(dir);
+  writeExceptions(dir, [fixEntry({ granted: '2026-10-01' }), fixEntry({ id: 'fix-2-keep', issue: 2, nodes: { keep: 50 } })]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, /expired exception fix-1-shrinkme must be deleted .* before fix-2-keep is added/);
+  writeExceptions(dir, [fixEntry({ id: 'fix-2-keep', issue: 2, nodes: { keep: 50 } })]);
+  const ok = run(dir);
+  assert.equal(ok.status, 0, ok.stderr || ok.stdout);
+});
+
+test('a base ref without the exceptions file counts as no exceptions under a non-English locale', () => {
+  const dir = initRepo(BASE); writeBaseline(dir);
+  const r = spawnSync(process.execPath, [
+    script, '--root', dir, '--git-root', dir, '--base-ref', 'HEAD',
+    '--baseline', path.join(dir, 'baseline.json'), '--exceptions', 'exceptions.json', '--today', TODAY, ...SURFACE_ARGS,
+  ], { cwd: dir, encoding: 'utf8', env: { ...process.env, LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' } });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
 });
 
 test('accepts the committed shipped baseline against origin/main', () => {

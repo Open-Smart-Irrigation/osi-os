@@ -37,6 +37,7 @@ const DEFAULT_SURFACES = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ];
 const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+const GIT_ENV = { ...process.env, LC_ALL: 'C' }; // git messages are matched in English
 
 function raise(msg) { throw new Error(msg); }
 
@@ -84,7 +85,7 @@ function surfaceBase(gitRoot, baseRef, rel) {
   try {
     raw = execFileSync('git', ['-C', gitRoot, 'show', baseRef + ':' + rel], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV,
       maxBuffer: GIT_MAX_BUFFER,
     });
   } catch (e) {
@@ -150,7 +151,7 @@ function baseExceptions(gitRoot, baseRef, rel) {
   let raw;
   try {
     raw = execFileSync('git', ['-C', gitRoot, 'show', baseRef + ':' + rel], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: GIT_MAX_BUFFER,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV, maxBuffer: GIT_MAX_BUFFER,
     });
   } catch (e) {
     const stderr = e.stderr ? e.stderr.toString() : String(e.message);
@@ -193,6 +194,17 @@ function headExceptionErrors(rel, head, base, todayMs, baseTotals, headTotals) {
     if (!e || headIds.has(e.id)) continue;
     if (maxHead > e.payback_total) {
       errors.push(rel + ': exception ' + e.id + ' cannot be deleted before it is paid back (total ' + maxHead + ' > ' + e.payback_total + ')');
+    }
+  }
+  // An expired entry left in the file would report itself overdue as soon as
+  // the next fix raises the total, so a new entry first clears it out.
+  const added = head.list.filter((e) => e && typeof e.id === 'string' && !baseById.has(e.id));
+  if (added.length) {
+    for (const e of base.list) {
+      if (!e || !headIds.has(e.id) || parseDate(e.granted) === null) continue;
+      if (todayMs >= parseDate(e.granted) + EXCEPTION_WINDOW_DAYS * DAY_MS) {
+        errors.push(rel + ': expired exception ' + e.id + ' must be deleted (it is paid back or overdue) before ' + added.map((x) => x.id).join(', ') + ' is added');
+      }
     }
   }
   return errors;
@@ -358,7 +370,7 @@ function gateDate(gitRoot, baseRef) {
   const ct = (ref) => {
     try {
       return Number(execFileSync('git', ['-C', gitRoot, 'log', '-1', '--format=%ct', ref], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: GIT_ENV,
       }).trim()) * 1000;
     } catch {
       return 0;

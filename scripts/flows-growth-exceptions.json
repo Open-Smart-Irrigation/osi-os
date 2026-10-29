@@ -3,7 +3,7 @@
     "Fix-only exceptions to scripts/verify-flows-size-ratchet.js. Features get none: they go into a tested osi-* module that a thin flow node loads with osiLib.require.",
     "The gate reads this file from the base ref (origin/main), so an entry takes effect only after it merges in its own PR. Run the ratchet on the fix branch; on failure it prints the entry to add.",
     "Fields: id (slug), kind \"fix\", issue (GitHub issue number), granted (YYYY-MM-DD, not in the future), reason, nodes (node id -> absolute max chars, counting On Start and On Stop code), payback_total (the per-profile total before the fix, at or below the current total).",
-    "An entry lets its listed nodes grow for 14 days from granted; only that growth may raise the total. From day 14 every run fails until each profile total is at or below payback_total. A merged entry is never edited, and is deleted only once paid back."
+    "An entry lets its listed nodes grow for 14 days from granted; only that growth may raise the total. From day 14 every run fails until each profile total is at or below payback_total. Payback is measured on the total, so while an earlier entry is outstanding, a later entry's growth is due by the earlier entry's date. A merged entry is never edited, and is deleted only once paid back; a new entry cannot be added while an expired one is still in the file."
   ],
   "exceptions": []
 }
