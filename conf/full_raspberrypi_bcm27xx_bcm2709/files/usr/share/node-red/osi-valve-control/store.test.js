@@ -248,6 +248,64 @@ test('pushSummary (PR-H): the 30-day lookback is computed against an injected `n
   db.close();
 });
 
+test('pushSummary #412: GEN1 selects the newest inserted slot before applying the 30-day window', async () => {
+  const { db } = await tempDb();
+  const { FIXTURE_EUI } = require('./test-helpers');
+  const now = new Date('2026-09-01T12:00:00Z');
+  await store.insertPushes(db, [
+    { push_id: 'g1-old', device_eui: FIXTURE_EUI, purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload_hex: '00', plan_hash: 'h-old' },
+    { push_id: 'g1-new', device_eui: FIXTURE_EUI, purpose: 'WEEKDAY_PLAN', weekday: 1, fport: 15, payload_hex: '01', plan_hash: 'h-new' },
+    { push_id: 'g1-valid', device_eui: FIXTURE_EUI, purpose: 'WEEKDAY_PLAN', weekday: 2, fport: 16, payload_hex: '02', plan_hash: 'h-valid' },
+    { push_id: 'g1-at-cutoff', device_eui: FIXTURE_EUI, purpose: 'WEEKDAY_PLAN', weekday: 3, fport: 17, payload_hex: '03', plan_hash: 'h-cutoff' },
+    { push_id: 'g1-lost', device_eui: FIXTURE_EUI, purpose: 'WEEKDAY_PLAN', weekday: 4, fport: 18, payload_hex: '04', plan_hash: 'h-lost' },
+  ]);
+  for (const [pushId, queuedAt] of [
+    ['g1-old', '2026-08-20 12:00:00'],
+    ['g1-new', '2026-08-01 11:00:00'],
+    ['g1-valid', '2026-08-02 12:00:01'],
+    ['g1-at-cutoff', '2026-08-02 12:00:00'],
+    ['g1-lost', '2026-08-01 11:00:00'],
+  ]) {
+    await db.run('UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id=?', [queuedAt, pushId]);
+  }
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id='g1-old'");
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id='g1-at-cutoff'");
+  await db.run("UPDATE valve_schedule_pushes SET state='FAILED', error='stale_unconfirmed' WHERE push_id='g1-lost'");
+
+  const summary = await store.pushSummary(db, FIXTURE_EUI, now);
+  assert.equal(summary.acked, 0, 'the out-of-window newest insert suppresses the older in-window ACKED row');
+  assert.equal(summary.queued, 1, 'the independent slot one second after cutoff counts');
+  assert.equal(summary.failed, 1, 'the selected old LOST slot remains counted');
+  assert.equal(summary.lost, 1, 'the old LOST slot remains visible past the window');
+  db.close();
+});
+
+test('pushSummary #412: GEN2 partial daymask overlap selects each newest slot before applying the window', async () => {
+  const { db } = await tempDb();
+  const { FIXTURE_EUI } = require('./test-helpers');
+  const now = new Date('2026-09-01T12:00:00Z');
+  await store.insertPushes(db, [
+    { push_id: 'g2-old', device_eui: FIXTURE_EUI, purpose: 'DAYMASK_PLAN', weekday: null, fport: 25, payload_hex: '0399151930', plan_hash: 'h-old' },
+    { push_id: 'g2-new', device_eui: FIXTURE_EUI, purpose: 'DAYMASK_PLAN', weekday: null, fport: 25, payload_hex: '0199151930', plan_hash: 'h-new' },
+    { push_id: 'g2-valid', device_eui: FIXTURE_EUI, purpose: 'DAYMASK_PLAN', weekday: null, fport: 25, payload_hex: '0499151930', plan_hash: 'h-valid' },
+  ]);
+  for (const [pushId, queuedAt] of [
+    ['g2-old', '2026-08-20 12:00:00'],
+    ['g2-new', '2026-08-01 11:00:00'],
+    ['g2-valid', '2026-08-02 12:00:01'],
+  ]) {
+    await db.run('UPDATE valve_schedule_pushes SET queued_at=? WHERE push_id=?', [queuedAt, pushId]);
+  }
+  await db.run("UPDATE valve_schedule_pushes SET state='ACKED' WHERE push_id='g2-old'");
+
+  const summary = await store.pushSummary(db, FIXTURE_EUI, now);
+  assert.equal(summary.acked, 1, 'the recent mask 0x03 ACKED row remains selected for uncovered day 1 only');
+  assert.equal(summary.queued, 1, 'the independent recent day 2 slot counts');
+  assert.equal(summary.failed, 0);
+  assert.equal(summary.lost, 0);
+  db.close();
+});
+
 test('pushSummary: with no `now` argument, defaults to the real wall clock (unchanged behaviour for existing callers)', async () => {
   const { db } = await tempDb();
   await store.insertPushes(db, [{ push_id: 'fresh', device_eui: '0016C001F1000001', purpose: 'WEEKDAY_PLAN', weekday: 0, fport: 30, payload_hex: '00', plan_hash: 'h1' }]);
