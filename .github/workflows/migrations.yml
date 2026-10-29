@@ -66,6 +66,7 @@ jobs:
             lib/osi-migrate/__tests__/backup.test.js \
             lib/osi-migrate/__tests__/fingerprint-refresh.test.js \
             lib/osi-migrate/__tests__/fingerprint-sort.test.js \
+            lib/osi-migrate/__tests__/fingerprints-batched-introspection.test.js \
             lib/osi-migrate/__tests__/fingerprints-boot-rewrite-rehearsal.test.js \
             lib/osi-migrate/__tests__/fingerprints-gateway-eui.test.js \
             lib/osi-migrate/__tests__/fingerprints-sql-comments.test.js \
