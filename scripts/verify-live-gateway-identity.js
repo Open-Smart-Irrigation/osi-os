@@ -1116,9 +1116,12 @@ if (silentCatchBaseline) {
   // with one silent close() catch, are replaced by s2120-ingest-fn (none): 84 -> 82.
   // 81: zone-day projection -- lsn50-zone-agg-fn's silent close() catch is replaced by a
   // close in finally: 82 -> 81.
-  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 80 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 80,
-    'silent-catch baseline records 80 for both maintained profiles',
-    'silent-catch baseline must be 80 for both maintained profiles');
+  // 77: issue #356 durable Chameleon diagnostic link -- Insert Chameleon Reading's
+  // close() catch and calibration-local-backfill's ROLLBACK and close() catches become
+  // visible node.warn while both nodes move to one scoped db.transaction: 80 -> 77.
+  expectCondition(silentCatchBaseline.profiles?.bcm2712?.silentCatchCount === 77 && silentCatchBaseline.profiles?.bcm2709?.silentCatchCount === 77,
+    'silent-catch baseline records 77 for both maintained profiles',
+    'silent-catch baseline must be 77 for both maintained profiles');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'removed three silent fan-detection catches from sys-stats-fn', 'records the Task 5 catch cleanup');
   expectIncludes('silent-catch baseline', String(silentCatchBaseline.generatedFrom || ''), 'shares the persisted auth-secret resolver', 'records the pick-list commit 65 shared auth-secret cleanup');
 }
@@ -1659,9 +1662,14 @@ if (sizeAllowances) {
   // Rebased after #477 (+706) and #478-#485 (42092, +4983): each total of this branch rises accordingly.
   // 47589: partial-opening and flushing ports pinned (Route Command -54); re-measured on
   // 7157ef0fa: origin/main 1658111 -> HEAD 1663608 = +5497, so 42092 + 5497 = 47589.
-  expectCondition(sizeAllowances.total_allowance?.delta === 47589,
-    'size total allowance: exact cumulative delta 47589',
-    'size total allowance: expected exact cumulative delta 47589');
+  // 6830: issue #356 durable Chameleon diagnostic link (d0b2b1c1a937e16d +2171, chameleon-readings-insert-fn +2011,
+  // 460e0bfd95f89e67 +172, d20948dd9120a3d2 +994), measured on bd1afcd24: 1617501 -> HEAD 1622849 = +5348.
+  // The committed baseline 1616019 plus the delta must cover 1622849, so the delta is set
+  // to exactly 1622849 - 1616019 = 6830, not 47589 + 5348: headroom left unused at bd1afcd24
+  // is not carried forward. The baseline doc is unchanged.
+  expectCondition(sizeAllowances.total_allowance?.delta === 6830,
+    'size total allowance: exact delta 6830',
+    'size total allowance: expected exact delta 6830');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'provider-weather stack', 'declares the provider-weather stack merge within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'rak10701-coverage', 'declares this branch\'s provenance within the re-measured total');
   expectIncludes('size total allowance', String(sizeAllowances.total_allowance?.reason || ''), 'watermark-lsn50', 'declares the WATERMARK provenance within the re-measured total');

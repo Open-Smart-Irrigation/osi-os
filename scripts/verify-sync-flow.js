@@ -2863,9 +2863,22 @@ expectIncludesById('bf93cd55db0eb57f', 'deleted_at IS NULL', 'chameleon-depth-sa
 expectIncludesById('bf93cd55db0eb57f', 'user_id = ?', 'chameleon-depth-save limits depth updates to the authenticated user');
 expectIncludesById('bf93cd55db0eb57f', 'if (changes === 0)', 'chameleon-depth-save returns 404 when no device row was updated');
 expectIncludesById('bf93cd55db0eb57f', "Device not found", 'chameleon-depth-save reports missing devices honestly');
-expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
+// Issue #356: the legacy threshold scheduler query reads each channel raw, keeps it
+// only for an eligible row and channel inside its source's domain, and associates a
+// Chameleon diagnostic only through chameleon_reading_links. These pin its shape;
+// scripts/test-unified-soil-tension-scheduler.js carries the behaviour.
+expectIncludesById('d0b2b1c1a937e16d', 'if (metric === "SWT_WM3" || metric === "SWT_3") rowValue = "v3";', 'scheduler can evaluate Chameleon SWT channel 3');
+expectIncludesById('d0b2b1c1a937e16d', 'dd.swt_3 AS raw3', 'scheduler reads canonical SWT channel 3, which has no legacy alias');
+expectIncludesById('d0b2b1c1a937e16d', "CASE WHEN row_ok = 1 AND ch3_ok = 1 AND typeof(raw3) IN ('integer','real') AND raw3 BETWEEN 0 AND max_kpa THEN raw3 END AS v3", 'scheduler keeps SWT channel 3 only for an eligible row and channel, as a number inside its source domain');
 expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
-expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
+expectIncludesById('d0b2b1c1a937e16d', '* 1.0 / ((v1 IS NOT NULL) + (v2 IS NOT NULL) + (v3 IS NOT NULL))', 'scheduler SWT average counts Chameleon channel 3 only when eligible');
+expectIncludesById('d0b2b1c1a937e16d', "CASE WHEN ds.type_id = 'DRAGINO_LSN50' THEN 300 ELSE 1000000 END AS max_kpa", 'scheduler bounds Chameleon at 300 kPa and KIWI, CLOVER and SDI-12 at 1,000,000 kPa');
+expectIncludesById('d0b2b1c1a937e16d', 'LEFT JOIN chameleon_reading_links crl', 'scheduler joins the durable Chameleon diagnostic link');
+expectIncludesById('d0b2b1c1a937e16d', 'ON crl.device_data_id = dd.id', 'scheduler links a diagnostic by device_data row id');
+expectIncludesById('d0b2b1c1a937e16d', 'ON cr.id = crl.chameleon_reading_id AND cr.deveui = dd.deveui', 'scheduler reads only the linked diagnostic of the same device');
+expectIncludesById('d0b2b1c1a937e16d', 'WHEN cr.id IS NOT NULL AND cr.i2c_missing IS NOT 1 AND cr.timeout IS NOT 1 AND cr.data_invalid IS NOT 1 THEN 1', 'scheduler counts a Chameleon row only with a clean linked diagnostic');
+expectIncludesById('d0b2b1c1a937e16d', 'AND NOT EXISTS (SELECT 1 FROM watermark_readings wr WHERE wr.device_data_id = dd.id)', 'scheduler keeps the WATERMARK interlock');
+expectExcludesById('d0b2b1c1a937e16d', 'cr.recorded_at = dd.recorded_at', 'timestamp association of a Chameleon diagnostic');
 expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
 expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
 expectIncludesById('dendro-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy dendro history and delegates scoped access separately');
