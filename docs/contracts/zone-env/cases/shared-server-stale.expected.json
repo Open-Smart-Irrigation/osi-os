@@ -423,6 +423,11 @@
     "waterNeededDeltaMm": 1.4,
     "next24hRainDeltaMm": 11.1,
     "balanceDeltaMm": 7.77,
-    "canSwitchScheduling": true
+    "canSwitchScheduling": true,
+    "reasonCodes": [
+      "irrigation_action_conflict",
+      "forecast_rain_difference",
+      "water_balance_difference"
+    ]
   }
 }

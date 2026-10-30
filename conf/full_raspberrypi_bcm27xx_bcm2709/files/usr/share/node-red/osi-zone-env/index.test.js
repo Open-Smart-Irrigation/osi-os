@@ -123,8 +123,90 @@ test('configuration, display, and drift helpers preserve current behavior', () =
       next24hRainDeltaMm: 3,
       balanceDeltaMm: 4,
       canSwitchScheduling: false,
+      reasonCodes: ['irrigation_action_conflict', 'water_need_difference', 'forecast_rain_difference', 'water_balance_difference'],
     },
   );
+});
+
+test('recommendation drift reason codes mirror the prose branches', () => {
+  const severeConflictOnly = ZE.computeRecommendationDrift(
+    { id: 1 },
+    { action: { code: 'increase_10' }, waterNeededTodayMm: 4.4, next24hRainMm: 1, balanceTodayMm: -5 },
+    { action: { code: 'delay_irrigation' }, waterNeededTodayMm: 5.8, next24hRainMm: 2.5, balanceTodayMm: -5.4 },
+    'cloud',
+  );
+  assert.deepEqual(severeConflictOnly.reasonCodes, ['irrigation_action_conflict']);
+  assert.equal(severeConflictOnly.severity, 'high');
+  assert.deepEqual(
+    [severeConflictOnly.waterNeededDeltaMm, severeConflictOnly.next24hRainDeltaMm, severeConflictOnly.balanceDeltaMm],
+    [1.4, 1.5, 0.4],
+  );
+
+  const mildMismatchOnly = ZE.computeRecommendationDrift(
+    { id: 2 },
+    { action: { code: 'irrigate_today' }, waterNeededTodayMm: 4.4, next24hRainMm: 1, balanceTodayMm: -1 },
+    { action: { code: 'increase_10' }, waterNeededTodayMm: 5.8, next24hRainMm: 2.5, balanceTodayMm: -1.5 },
+    'cloud',
+  );
+  assert.deepEqual(mildMismatchOnly.reasonCodes, ['recommendation_action_difference']);
+  assert.equal(mildMismatchOnly.severity, 'medium');
+  assert.equal(mildMismatchOnly.reason, 'Local and OSI Server recommendations differ.');
+
+  const waterNeedAtThreshold = ZE.computeRecommendationDrift(
+    { id: 3 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 0, next24hRainMm: 2, balanceTodayMm: -1 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 2, next24hRainMm: 2, balanceTodayMm: -1 },
+    'cloud',
+  );
+  assert.deepEqual(waterNeedAtThreshold.reasonCodes, ['water_need_difference']);
+  assert.equal(waterNeedAtThreshold.reason, 'Estimated water need differs by 2.0 mm.');
+
+  const rainOnly = ZE.computeRecommendationDrift(
+    { id: 4 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 3, next24hRainMm: 0, balanceTodayMm: 0 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 3, next24hRainMm: 2.2, balanceTodayMm: 0 },
+    'cloud',
+  );
+  assert.deepEqual(rainOnly.reasonCodes, ['forecast_rain_difference']);
+
+  const balanceOnly = ZE.computeRecommendationDrift(
+    { id: 5 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 3, next24hRainMm: 1, balanceTodayMm: -1 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 3, next24hRainMm: 1, balanceTodayMm: 1.2 },
+    'cloud',
+  );
+  assert.deepEqual(balanceOnly.reasonCodes, ['water_balance_difference']);
+
+  const missingSharedNumbers = ZE.computeRecommendationDrift(
+    { id: 6 },
+    { action: { code: 'irrigate_today' }, waterNeededTodayMm: 5, next24hRainMm: 3, balanceTodayMm: -2 },
+    { action: { code: 'increase_10' } },
+    'cloud',
+  );
+  assert.deepEqual(missingSharedNumbers.reasonCodes, ['recommendation_action_difference']);
+  assert.deepEqual(
+    [missingSharedNumbers.waterNeededDeltaMm, missingSharedNumbers.next24hRainDeltaMm, missingSharedNumbers.balanceDeltaMm],
+    [null, null, null],
+  );
+
+  assert.equal(ZE.computeRecommendationDrift(
+    { id: 7 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 5 },
+    null,
+    'cloud',
+  ), null);
+  assert.equal(ZE.computeRecommendationDrift(
+    { id: 8 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 5, next24hRainMm: 1, balanceTodayMm: -1 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 6.4, next24hRainMm: 2.5, balanceTodayMm: -1.4 },
+    'cloud',
+  ), null);
+  assert.equal(ZE.computeRecommendationDrift(
+    { id: 9 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 5, next24hRainMm: 1, balanceTodayMm: -1 },
+    { action: { code: 'maintain' }, waterNeededTodayMm: 5, next24hRainMm: 1, balanceTodayMm: -1 },
+    'cloud',
+  ), null);
 });
 
 test('forecast helpers preserve deterministic provider normalization', () => {

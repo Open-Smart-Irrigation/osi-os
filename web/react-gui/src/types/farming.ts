@@ -739,6 +739,14 @@ export interface RecommendationDrift {
   active: boolean;
   severity: 'low' | 'medium' | 'high' | string;
   reason: string;
+  /**
+   * Machine-readable drift reason codes (open vocabulary): stable identifiers such
+   * as 'irrigation_action_conflict' or 'water_need_difference', one per difference
+   * that fired. Newer gateways may emit codes this GUI does not know; treat
+   * unknown codes (and the field's absence on older gateways) as "no codes" and
+   * never render a raw identifier. No GUI reader exists yet.
+   */
+  reasonCodes?: string[];
   localActionCode: string | null;
   serverActionCode: string | null;
   waterNeededDeltaMm: number | null;
