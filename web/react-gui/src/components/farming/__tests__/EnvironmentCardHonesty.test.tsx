@@ -48,6 +48,31 @@ const baseSummary = {
   drift: null,
 } as unknown as ZoneEnvironmentSummary;
 
+function forecastOnlySummary(
+  rainFocus: ZoneEnvironmentSummary['forecast']['rainFocus'],
+): ZoneEnvironmentSummary {
+  return {
+    ...baseSummary,
+    location: { source: 'zone', latitude: 47.3769, longitude: 8.5417, timezone: 'Europe/Zurich' },
+    online: {
+      available: false,
+      source: 'unavailable',
+      cacheStatus: 'miss',
+      observedAt: null,
+      expiresAt: null,
+      current: null,
+    },
+    forecast: {
+      available: true,
+      source: 'open_meteo',
+      cacheStatus: 'live',
+      observedAt: '2026-07-08T10:00:00.000Z',
+      expiresAt: '2026-07-08T11:00:00.000Z',
+      rainFocus,
+    },
+  };
+}
+
 async function buildI18n(language: string): Promise<I18n> {
   const instance = i18next.createInstance();
   await instance.use(initReactI18next).init({
@@ -79,6 +104,65 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe('EnvironmentCard forecast-only honesty (#310)', () => {
+  it('shows forecast totals when current weather is unavailable after selecting Weather', async () => {
+    apiMocks.getSummary.mockResolvedValue(forecastOnlySummary({
+      totalNext24hMm: 3,
+      totalNext72hMm: 4,
+      maxHourlyRainMm: 0,
+      maxHourlyRainAt: null,
+      nextRainEta: null,
+      rainHoursNext24h: 0,
+      daily: [],
+      hourly: [],
+    }));
+    await renderExpanded('en');
+
+    const waterTab = await screen.findByRole('button', { name: enDevices.environment.tabs.water });
+    const weatherTab = screen.getByRole('button', { name: enDevices.environment.tabs.weather });
+    expect(waterTab).toHaveClass('text-[var(--primary)]');
+    expect(weatherTab).not.toHaveClass('text-[var(--primary)]');
+    expect(screen.queryByText(enDevices.environment.forecast.next24h)).not.toBeInTheDocument();
+
+    fireEvent.click(weatherTab);
+    expect(await screen.findByText(enDevices.environment.forecast.next24h)).toBeInTheDocument();
+    expect(screen.getByText('3.0 mm')).toBeInTheDocument();
+    expect(screen.getByText(enDevices.environment.forecast.next72h)).toBeInTheDocument();
+    expect(screen.getByText('4.0 mm')).toBeInTheDocument();
+    expect(screen.queryByText(/°C/)).not.toBeInTheDocument();
+    expect(screen.queryByText(enDevices.environment.forecast.noData)).not.toBeInTheDocument();
+  });
+
+  it('shows the existing unavailable message when available forecast has no rain focus', async () => {
+    apiMocks.getSummary.mockResolvedValue(forecastOnlySummary(null));
+    await renderExpanded('en');
+
+    fireEvent.click(await screen.findByRole('button', { name: enDevices.environment.tabs.weather }));
+    expect(await screen.findByText(enDevices.environment.forecast.noData)).toBeInTheDocument();
+  });
+
+  it('keeps a null 24-hour rain total unknown instead of rendering zero', async () => {
+    apiMocks.getSummary.mockResolvedValue(forecastOnlySummary({
+      totalNext24hMm: null,
+      totalNext72hMm: 4,
+      maxHourlyRainMm: 0,
+      maxHourlyRainAt: null,
+      nextRainEta: null,
+      rainHoursNext24h: 0,
+      daily: [],
+      hourly: [],
+    }));
+    await renderExpanded('en');
+
+    fireEvent.click(await screen.findByRole('button', { name: enDevices.environment.tabs.weather }));
+    const next24hLabel = await screen.findByText(enDevices.environment.forecast.next24h);
+    const rainPill = next24hLabel.parentElement;
+    expect(rainPill).not.toBeNull();
+    expect(rainPill).toHaveTextContent('—');
+    expect(rainPill).not.toHaveTextContent('0.0 mm');
+  });
 });
 
 describe('EnvironmentCard fallbackReason honesty (F100/X-16)', () => {
