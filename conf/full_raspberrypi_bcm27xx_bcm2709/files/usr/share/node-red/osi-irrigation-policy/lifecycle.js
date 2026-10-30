@@ -11,6 +11,7 @@ const push = require('../osi-valve-control/push');
 const store = require('../osi-valve-control/store');
 const valveCancel = require('../osi-valve-control/cancel');
 const policyStore = require('./store');
+const crypto = require('node:crypto');
 
 const EUI_RE = /^[0-9A-F]{16}$/;
 const MAX_RETRIES = 3;
@@ -18,6 +19,14 @@ const OPERATIONS = new Set([
   'legacy_schedule_write', 'disable_all', 'zone_delete',
   'device_assign', 'device_unassign', 'device_unclaim',
 ]);
+
+// Issue #233 Phase A (SENSECAP_S2120 weather links). A local zone detach removes the selected
+// (station, zone) pair. Only applyS2120CloudUnclaim sets CLOUD_S2120_UNCLAIM, which is not
+// exported, so a local DELETE /api/devices/:deveui never gains the all-links cleanup.
+const S2120_TYPE = 'SENSECAP_S2120';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const S2120_WEATHER_PAIR = Symbol('s2120WeatherPair');
+const CLOUD_S2120_UNCLAIM = Symbol('cloudS2120Unclaim');
 
 // Keep the lifecycle transaction-only helpers behind the same account-link
 // fence as the policy API.  A pending link attempt may change the authoritative
@@ -132,6 +141,7 @@ async function stateForOperation(db, operation, input = {}) {
     const device = await db.get('SELECT * FROM devices WHERE UPPER(deveui)=UPPER(?) LIMIT 1', [deviceEui]);
     if (device && device.irrigation_zone_id != null) await add(device.irrigation_zone_id, { includeDeleted: true });
     if (operation === 'device_assign') await add(input.zoneId !== undefined ? input.zoneId : (input.zoneUuid || input.zone_uuid));
+    if (operation === 'device_unassign' && input[S2120_WEATHER_PAIR] === true) await add(input.zoneId);
   }
   return { states, deviceEui: input.deviceEui || input.device_eui || input.deveui ? deviceKey(input.deviceEui || input.device_eui || input.deveui) : null };
 }
@@ -451,6 +461,9 @@ async function applyOperationTx(tx, operation, input = {}) {
   if (input.requireOwner && Number(current.user_id) !== Number(input.actor && input.actor.user_id)) {
     throw lifecycleError(404, 'device_not_found', 'device does not exist', undefined, [deviceEui]);
   }
+  if (operation === 'device_unassign' && input[S2120_WEATHER_PAIR] === true) {
+    return detachS2120WeatherPairTx(tx, input, current, discovered, at);
+  }
   if (operation === 'device_unassign' && input.zoneId != null && Number(current.irrigation_zone_id) !== Number(input.zoneId)) {
     throw lifecycleError(404, 'device_not_found', 'device is not assigned to this zone', undefined, [deviceEui]);
   }
@@ -525,6 +538,7 @@ async function applyOperationTx(tx, operation, input = {}) {
     const params = operation === 'device_unclaim'
       ? [input.gatewayDeviceEui || input.gateway_device_eui || null, at, syncVersion, deviceEui]
       : [at, syncVersion, deviceEui];
+    if (operation === 'device_unclaim' && input[CLOUD_S2120_UNCLAIM] === true) await clearCloudS2120WeatherLinksTx(tx, current, at, input.gatewayDeviceEui);
     await tx.run(`UPDATE devices SET ${fields}, updated_at=?, sync_version=? WHERE UPPER(deveui)=UPPER(?) AND deleted_at IS NULL`, params);
   } else if (operation === 'device_assign') {
     if (input.requireUnassigned && current.irrigation_zone_id != null && Number(current.irrigation_zone_id) !== Number(targetState.zone.id)) {
@@ -547,6 +561,459 @@ async function applyOperationTx(tx, operation, input = {}) {
     schedules_cleared: (retiredByEui.get(deviceEui) || []).length,
     valve_euis: uniqueEuis([deviceEui].concat(discovered.states.flatMap(stateValveEuis))),
   };
+}
+
+// Issue #233 Phase A helpers. tx.run resolves undefined on the production facade, so every
+// write below is proven by a read inside the same BEGIN IMMEDIATE transaction.
+function s2120Error(status, code, text) {
+  return lifecycleError(status, code, code + ': ' + text);
+}
+
+function s2120Eui(value) {
+  const result = typeof value === 'string' ? value.trim().toUpperCase() : '';
+  return EUI_RE.test(result) ? result : null;
+}
+
+function s2120OptionalGateway(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const result = s2120Eui(String(value));
+  if (!result) throw s2120Error(409, 'invalid_gateway_binding', 'a stored gateway binding is not a 16-hex EUI');
+  return result;
+}
+
+function s2120Version(value) {
+  if (!Number.isSafeInteger(value) || value < 0) throw s2120Error(409, 'invalid_version', 'a stored sync version is not a safe non-negative integer');
+  return value;
+}
+
+function s2120Next(value) {
+  const current = s2120Version(value);
+  if (current >= Number.MAX_SAFE_INTEGER) throw s2120Error(409, 'version_overflow', 'the sync version cannot advance');
+  return current + 1;
+}
+
+function s2120Nullable(value) {
+  return value == null ? null : Number(value);
+}
+
+async function s2120GatewayContextTx(tx, device, zones, runtimeGatewayEui) {
+  const link = await tx.get("SELECT linked, gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'", []);
+  const linked = Boolean(link) && Number(link.linked) === 1;
+  const runtime = s2120Eui(runtimeGatewayEui);
+  if (linked && !runtime) throw s2120Error(503, 'runtime_gateway_unavailable', 'the trusted gateway identity is unavailable');
+  const linkGateway = s2120OptionalGateway(link && link.gateway_device_eui);
+  if (linked && linkGateway && linkGateway !== runtime) throw s2120Error(503, 'link_gateway_transition', 'the gateway identity is changing');
+  const deviceGateway = s2120OptionalGateway(device.gateway_device_eui);
+  if (deviceGateway && runtime && deviceGateway !== runtime) throw s2120Error(409, 'device_gateway_mismatch', 'the station belongs to another gateway');
+  for (const zone of zones) {
+    const zoneGateway = s2120OptionalGateway(zone.gateway_device_eui);
+    if (zoneGateway && runtime && zoneGateway !== runtime) throw s2120Error(409, 'zone_gateway_mismatch', 'the zone belongs to another gateway');
+    if (!runtime && deviceGateway && zoneGateway && deviceGateway !== zoneGateway) throw s2120Error(409, 'zone_gateway_mismatch', 'the zone belongs to another gateway');
+  }
+  return { linked, runtime, deviceGateway };
+}
+
+async function s2120BindGatewayTx(tx, device, runtime) {
+  await tx.run(
+    "UPDATE devices SET gateway_device_eui=? WHERE deveui=? AND (gateway_device_eui IS NULL OR trim(gateway_device_eui)='') AND deleted_at IS NULL",
+    [runtime, device.deveui]
+  );
+  const bound = await tx.get('SELECT gateway_device_eui FROM devices WHERE deveui=?', [device.deveui]);
+  if (!bound || s2120Eui(bound.gateway_device_eui) !== runtime) throw s2120Error(500, 'gateway_postcondition_failed', 'the station gateway binding did not persist');
+}
+
+async function s2120BumpWeatherTx(tx, deveui, oldState, at) {
+  if (!oldState) {
+    await tx.run(
+      'INSERT INTO weather_station_zone_state(deveui,sync_version,last_applied_at,updated_at) VALUES (?,0,NULL,?)',
+      [deveui, at]
+    );
+    return 1;
+  }
+  const target = s2120Next(Number(oldState.sync_version));
+  await tx.run(
+    'UPDATE weather_station_zone_state SET sync_version=?,last_applied_at=NULL,updated_at=? WHERE deveui=? AND sync_version=?',
+    [target, at, deveui, oldState.sync_version]
+  );
+  return target;
+}
+
+async function s2120OutboxAfterTx(tx, start, deveui) {
+  return tx.all('SELECT rowid, op, payload_json FROM sync_outbox WHERE rowid>? AND aggregate_key=? ORDER BY rowid', [start, deveui]);
+}
+
+async function detachS2120WeatherPairTx(tx, input, current, discovered, at) {
+  const deviceEui = String(current.deveui);
+  if (String(current.type_id || '').toUpperCase() !== S2120_TYPE) throw s2120Error(404, 'device_not_found', 'the device is not a weather station');
+  const zoneId = Number(input.zoneId);
+  if (!Number.isSafeInteger(zoneId) || zoneId <= 0) throw s2120Error(400, 'invalid_zone_id', 'the zone id must be a positive integer');
+  const zone = await tx.get('SELECT id, zone_uuid, gateway_device_eui FROM irrigation_zones WHERE id=? AND deleted_at IS NULL', [zoneId]);
+  if (!zone || !UUID_RE.test(String(zone.zone_uuid || ''))) throw s2120Error(404, 'zone_not_found', 'the zone does not exist');
+  const pair = await tx.get('SELECT 1 AS present FROM weather_station_zones WHERE deveui=? AND zone_id=?', [deviceEui, zoneId]);
+  const primary = current.irrigation_zone_id != null && Number(current.irrigation_zone_id) === zoneId;
+  if (!pair && !primary) throw s2120Error(404, 'device_not_found', 'the station is not assigned to this zone');
+  const gateway = await s2120GatewayContextTx(tx, current, [zone], input.runtimeGatewayEui);
+  const oldVersion = s2120Version(Number(current.sync_version == null ? 0 : current.sync_version));
+  const state = await tx.get('SELECT sync_version FROM weather_station_zone_state WHERE deveui=?', [deviceEui]);
+  if (state) s2120Version(Number(state.sync_version));
+  if (gateway.linked && !gateway.deviceGateway) await s2120BindGatewayTx(tx, current, gateway.runtime);
+  // The station leaves the selected zone, so that zone's policy work matches a primary detach.
+  // When the primary is a different zone the station stays there and that zone gets none.
+  const selectedState = discovered.states.find((item) => Number(item.zone.id) === zoneId) || null;
+  const changedPolicy = [];
+  const retiredByEui = new Map();
+  if (selectedState && selectedState.policy && affectedPoliciesForDevice(selectedState, deviceEui, 'device_unassign').length) {
+    await pausePolicyTx(tx, selectedState.policy, at, 'source_removed');
+    changedPolicy.push(selectedState.policy.policy_uuid);
+    for (const row of selectedState.schedules.filter((item) => item.condition_policy_uuid === selectedState.policy.policy_uuid)) {
+      const key = String(row.device_eui).toUpperCase();
+      const list = retiredByEui.get(key) || [];
+      list.push(row);
+      retiredByEui.set(key, list);
+    }
+  }
+  const start = await tx.get('SELECT COALESCE(MAX(rowid),0) AS n FROM sync_outbox', []);
+  if (pair) await tx.run('DELETE FROM weather_station_zones WHERE deveui=? AND zone_id=?', [deviceEui, zoneId]);
+  const deviceVersion = primary ? s2120Next(oldVersion) : oldVersion;
+  if (primary) {
+    await tx.run(
+      'UPDATE devices SET irrigation_zone_id=NULL, sync_version=?, updated_at=? WHERE deveui=? AND COALESCE(sync_version,0)=? AND irrigation_zone_id=? AND deleted_at IS NULL',
+      [deviceVersion, at, deviceEui, oldVersion, zoneId]
+    );
+  }
+  const weatherVersion = pair ? await s2120BumpWeatherTx(tx, deviceEui, state, at) : (state ? Number(state.sync_version) : 0);
+  const after = await tx.get('SELECT * FROM devices WHERE deveui=? AND deleted_at IS NULL', [deviceEui]);
+  const stillPaired = await tx.get('SELECT 1 AS present FROM weather_station_zones WHERE deveui=? AND zone_id=?', [deviceEui, zoneId]);
+  const remaining = await tx.all(
+    'SELECT wsz.zone_id, iz.zone_uuid FROM weather_station_zones wsz JOIN irrigation_zones iz ON iz.id=wsz.zone_id WHERE wsz.deveui=? AND iz.deleted_at IS NULL ORDER BY iz.zone_uuid',
+    [deviceEui]
+  );
+  const afterState = await tx.get('SELECT sync_version FROM weather_station_zone_state WHERE deveui=?', [deviceEui]);
+  if (!after || Number(after.sync_version) !== deviceVersion || stillPaired ||
+      s2120Nullable(after.irrigation_zone_id) !== (primary ? null : s2120Nullable(current.irrigation_zone_id)) ||
+      Number(afterState ? afterState.sync_version : 0) !== weatherVersion) {
+    throw s2120Error(500, 'detach_postcondition_failed', 'the selected weather pair detach did not persist');
+  }
+  const emitted = await s2120OutboxAfterTx(tx, start.n, deviceEui);
+  const weather = emitted.filter((row) => row.op === 'WEATHER_STATION_ZONES_REPLACED');
+  if (weather.length !== (pair && gateway.linked ? 1 : 0)) {
+    throw s2120Error(500, 'weather_outbox_postcondition_failed', 'the weather set event count is wrong');
+  }
+  if (weather.length && JSON.stringify(JSON.parse(weather[0].payload_json).zone_uuids) !== JSON.stringify(remaining.map((row) => row.zone_uuid))) {
+    throw s2120Error(500, 'weather_set_postcondition_failed', 'the weather set event does not list the remaining zones');
+  }
+  const clears = [];
+  for (const [valveEui, rows] of retiredByEui) {
+    const valve = await tx.get('SELECT * FROM devices WHERE UPPER(deveui)=UPPER(?)', [valveEui]);
+    if (!valve || String(valve.type_id).toUpperCase() !== 'STREGA_VALVE') continue;
+    const policy = await tx.get('SELECT * FROM irrigation_policies WHERE policy_uuid=?', [selectedState.policy.policy_uuid]);
+    const prepared = await prepareValveClearTx(tx, valveEui, at, { retiredSchedules: rows, policy });
+    if (prepared) clears.push({ device_eui: valveEui, ...prepared });
+  }
+  return {
+    device: after,
+    changed_policies: changedPolicy,
+    clears,
+    schedules_cleared: 0,
+    valve_euis: uniqueEuis([deviceEui].concat(discovered.states.flatMap(stateValveEuis))),
+    weather_pair: {
+      zone_id: zoneId,
+      primary_cleared: primary,
+      weather_sync_version: weatherVersion,
+      zone_uuids: remaining.map((row) => row.zone_uuid),
+    },
+  };
+}
+
+// Runs only for the trusted cloud path (CLOUD_S2120_UNCLAIM), inside its device_unclaim
+// transaction and before the device UPDATE, so the empty weather set event precedes
+// DEVICE_UNCLAIMED while the station is still claimed and gateway-bound.
+async function clearCloudS2120WeatherLinksTx(tx, current, at, gatewayDeviceEui) {
+  if (String(current.type_id || '').toUpperCase() !== S2120_TYPE) throw s2120Error(409, 'device_type_changed', 'the cloud weather unclaim needs a weather station');
+  const deviceEui = String(current.deveui);
+  const runtime = s2120Eui(gatewayDeviceEui);
+  if (!runtime) throw s2120Error(503, 'runtime_gateway_unavailable', 'the trusted gateway identity is unavailable');
+  if (!s2120OptionalGateway(current.gateway_device_eui)) await s2120BindGatewayTx(tx, current, runtime);
+  const links = await tx.all('SELECT zone_id FROM weather_station_zones WHERE deveui=?', [deviceEui]);
+  if (!links.length) return;
+  const state = await tx.get('SELECT sync_version FROM weather_station_zone_state WHERE deveui=?', [deviceEui]);
+  if (state) s2120Version(Number(state.sync_version));
+  await tx.run('DELETE FROM weather_station_zones WHERE deveui=?', [deviceEui]);
+  const weatherVersion = await s2120BumpWeatherTx(tx, deviceEui, state, at);
+  const left = await tx.get('SELECT COUNT(*) AS n FROM weather_station_zones WHERE deveui=?', [deviceEui]);
+  const afterState = await tx.get('SELECT sync_version FROM weather_station_zone_state WHERE deveui=?', [deviceEui]);
+  if (!left || Number(left.n) !== 0 || !afterState || Number(afterState.sync_version) !== weatherVersion) {
+    throw s2120Error(500, 'weather_postcondition_failed', 'the cloud weather unclaim did not clear every link');
+  }
+}
+
+function s2120Sorted(value) {
+  if (Array.isArray(value)) return value.map(s2120Sorted);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((out, key) => {
+      out[key] = s2120Sorted(value[key] === undefined ? null : value[key]);
+      return out;
+    }, {});
+  }
+  return value === undefined ? null : value;
+}
+
+function s2120BindingHash(envelope, gateway) {
+  const bound = {
+    commandId: envelope.commandId,
+    eventUuid: envelope.eventUuid,
+    commandType: envelope.commandType,
+    aggregateType: envelope.aggregateType,
+    aggregateKey: envelope.aggregateKey,
+    appliedSyncVersion: envelope.appliedSyncVersion,
+    effectKey: envelope.effectKey,
+    leasedToGateway: envelope.leasedToGateway,
+    payload: envelope.payload,
+    runtimeGatewayDeviceEui: gateway,
+  };
+  return crypto.createHash('sha256').update(JSON.stringify(s2120Sorted(bound))).digest('hex');
+}
+
+// The legacy camelCase contract the server issues (DeviceController): exactly deviceEui,
+// gatewayDeviceEui and syncVersion, optionally commandType UNCLAIM_DEVICE.
+function s2120ParseLegacy(envelope, gateway, deviceEui) {
+  const payload = envelope.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw s2120Error(400, 'malformed_command', 'the payload is not an object');
+  if (!Number.isSafeInteger(payload.syncVersion) || payload.syncVersion <= 0) throw s2120Error(400, 'invalid_version', 'syncVersion must be a positive safe integer');
+  const allowed = new Set(['deviceEui', 'gatewayDeviceEui', 'syncVersion', 'commandType']);
+  const has = (key) => Object.prototype.hasOwnProperty.call(payload, key);
+  if (Object.keys(payload).some((key) => !allowed.has(key)) ||
+      !['deviceEui', 'gatewayDeviceEui', 'syncVersion'].every(has) ||
+      (has('commandType') && payload.commandType !== 'UNCLAIM_DEVICE') ||
+      s2120Eui(payload.deviceEui) !== deviceEui ||
+      s2120Eui(payload.gatewayDeviceEui) !== gateway ||
+      envelope.commandType !== 'UNCLAIM_DEVICE' ||
+      envelope.aggregateType !== 'DEVICE' ||
+      s2120Eui(envelope.aggregateKey) !== deviceEui ||
+      typeof envelope.eventUuid !== 'string' || !UUID_RE.test(envelope.eventUuid) ||
+      envelope.effectKey != null ||
+      envelope.appliedSyncVersion !== payload.syncVersion) {
+    throw s2120Error(400, 'malformed_command', 'the S2120 unclaim command does not match the legacy contract');
+  }
+  return payload.syncVersion;
+}
+
+function s2120Ack(ctx, result, version, code, duplicate, cleanup) {
+  const envelope = ctx.envelope;
+  const aggregateKey = s2120Eui(envelope.aggregateKey) === ctx.deviceEui ? envelope.aggregateKey : null;
+  return {
+    commandId: envelope.commandId,
+    status: result === 'APPLIED' ? 'ACKED' : (result === 'CONFLICT' ? 'CONFLICT' : 'NACKED'),
+    result,
+    appliedAt: ctx.at,
+    appliedSyncVersion: version,
+    duplicate: duplicate === true,
+    reason: code,
+    detail: null,
+    eventUuid: typeof envelope.eventUuid === 'string' && UUID_RE.test(envelope.eventUuid) ? envelope.eventUuid : null,
+    commandType: envelope.commandType === 'UNCLAIM_DEVICE' ? 'UNCLAIM_DEVICE' : null,
+    aggregateType: envelope.aggregateType === 'DEVICE' ? 'DEVICE' : null,
+    aggregateKey,
+    effectKey: null,
+    gatewayDeviceEui: ctx.gateway,
+    resourceUuid: aggregateKey,
+    payloadHash: null,
+    reasonCode: code,
+    valveCleanup: cleanup,
+  };
+}
+
+// One pending REST ACK per command id, byte-identical to the stored decision. A different or
+// second pending row is never deleted or replaced: it fails closed.
+async function s2120QueueAckTx(tx, commandId, raw, createdAt) {
+  const id = String(commandId);
+  const pending = await tx.all('SELECT id, payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [id]);
+  if (pending.length > 1 || (pending.length === 1 && pending[0].payload_json !== raw)) {
+    throw s2120Error(500, 'ack_outbox_binding_conflict', 'another pending ACK exists for this command');
+  }
+  if (pending.length) return;
+  await tx.run('INSERT INTO command_ack_outbox(command_id,payload_json,created_at) VALUES (?,?,?)', [id, raw, createdAt]);
+  const queued = await tx.all('SELECT payload_json FROM command_ack_outbox WHERE command_id=? AND delivered_at IS NULL', [id]);
+  if (queued.length !== 1 || queued[0].payload_json !== raw) throw s2120Error(500, 'ack_outbox_postcondition_failed', 'the pending ACK did not persist');
+}
+
+async function s2120TerminalTx(tx, ctx, result, version, code, duplicate, cleanup) {
+  const ack = s2120Ack(ctx, result, version, code, duplicate, cleanup);
+  const raw = JSON.stringify(ack);
+  const id = String(ctx.envelope.commandId);
+  await tx.run(
+    'INSERT INTO applied_commands(command_id,device_eui,command_type,effect_key,applied_at,result,result_detail,originator,binding_hash,resource_type,resource_id,gateway_device_eui) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [id, ctx.deviceEui, 'UNCLAIM_DEVICE', null, ack.appliedAt, result, raw, 'cloud', ctx.hash, 'DEVICE', ctx.deviceEui, ctx.gateway]
+  );
+  const stored = await tx.get('SELECT result_detail, binding_hash FROM applied_commands WHERE command_id=?', [id]);
+  if (!stored || stored.result_detail !== raw || stored.binding_hash !== ctx.hash) throw s2120Error(500, 'ledger_postcondition_failed', 'the terminal decision did not persist');
+  await s2120QueueAckTx(tx, ctx.envelope.commandId, raw, ack.appliedAt);
+  return { ack, clears: [] };
+}
+
+// Classifies both identities of a cloud UNCLAIM_DEVICE. A disagreement is handled as a
+// malformed S2120 command, never passed to the generic path.
+async function s2120UnclaimIdentity(db, envelope) {
+  const payload = envelope && envelope.payload && typeof envelope.payload === 'object' && !Array.isArray(envelope.payload) ? envelope.payload : {};
+  const fromPayload = s2120Eui(payload.deviceEui);
+  const candidates = [...new Set([s2120Eui(envelope && envelope.aggregateKey), fromPayload].filter(Boolean))];
+  if (!candidates.length) return { station: null, userId: null };
+  const rows = await db.all(
+    'SELECT UPPER(deveui) AS deveui, type_id, user_id FROM devices WHERE deleted_at IS NULL AND UPPER(deveui) IN (' + candidates.map(() => '?').join(',') + ')',
+    candidates
+  );
+  const stations = rows.filter((row) => String(row.type_id || '').toUpperCase() === S2120_TYPE);
+  if (!stations.length) return { station: null, userId: null };
+  const chosen = stations.find((row) => row.deveui === fromPayload) || stations[0];
+  return { station: chosen.deveui, userId: chosen.user_id == null ? null : chosen.user_id };
+}
+
+async function s2120CloudUnclaimTx(tx, ctx) {
+  const { envelope, gateway, deviceEui, hash } = ctx;
+  const link = await tx.get("SELECT linked, gateway_device_eui FROM sync_link_state WHERE peer_node='cloud'", []);
+  if (!link || Number(link.linked) !== 1) return { hold: 'link_inactive' };
+  const linkGateway = link.gateway_device_eui == null ? '' : String(link.gateway_device_eui).trim();
+  if (linkGateway !== '' && s2120Eui(linkGateway) !== gateway) return { hold: 'link_gateway_transition' };
+  try {
+    await assertLinkFence(tx);
+  } catch (error) {
+    if (error && error.code === 'link_in_progress') return { hold: 'link_in_progress' };
+    throw error;
+  }
+  const prior = await tx.get(
+    'SELECT command_id, device_eui, command_type, originator, binding_hash, gateway_device_eui, result_detail FROM applied_commands WHERE command_id=?',
+    [String(envelope.commandId)]
+  );
+  if (prior) {
+    if (prior.command_type !== 'UNCLAIM_DEVICE' || prior.originator !== 'cloud' ||
+        prior.device_eui !== deviceEui || prior.gateway_device_eui !== gateway ||
+        prior.binding_hash !== hash) {
+      throw s2120Error(409, 'command_id_binding_conflict', 'this command id is bound to a different decision');
+    }
+    let stored;
+    try {
+      stored = JSON.parse(prior.result_detail);
+    } catch (parseError) {
+      throw s2120Error(409, 'command_id_binding_conflict', 'the stored decision is unreadable: ' + String(parseError && parseError.message || parseError));
+    }
+    if (!stored || stored.commandId !== envelope.commandId || stored.commandType !== 'UNCLAIM_DEVICE' ||
+        (stored.aggregateKey !== null && stored.aggregateKey !== envelope.aggregateKey) ||
+        (stored.eventUuid !== null && stored.eventUuid !== envelope.eventUuid)) {
+      throw s2120Error(409, 'command_id_binding_conflict', 'the stored decision names another command');
+    }
+    await s2120QueueAckTx(tx, envelope.commandId, prior.result_detail, ctx.at);
+    return { ack: stored, replay: true, clears: [] };
+  }
+  const device = await tx.get(
+    'SELECT deveui, type_id, user_id, irrigation_zone_id, sync_version, gateway_device_eui FROM devices WHERE UPPER(deveui)=? AND deleted_at IS NULL',
+    [deviceEui]
+  );
+  if (!device || String(device.type_id || '').toUpperCase() !== S2120_TYPE) return { hold: 'type_changed_or_missing' };
+  const terminal = (result, version, code, duplicate, cleanup) => s2120TerminalTx(tx, ctx, result, version, code, duplicate, cleanup);
+  const refused = (code) => unclaimValveCleanup({ deviceEui, refused: { code } });
+  let current;
+  try {
+    current = s2120Version(Number(device.sync_version == null ? 0 : device.sync_version));
+  } catch (error) {
+    return terminal('REJECTED_PERMANENT', 0, 'invalid_version', false, refused('invalid_version'));
+  }
+  let target;
+  try {
+    target = s2120ParseLegacy(envelope, gateway, deviceEui);
+  } catch (error) {
+    if (!error || !['malformed_command', 'invalid_version'].includes(error.code)) throw error;
+    return terminal('REJECTED_PERMANENT', current, error.code, false, refused(error.code));
+  }
+  const zones = await tx.all(
+    'SELECT wsz.zone_id, iz.zone_uuid, iz.gateway_device_eui, iz.deleted_at FROM weather_station_zones wsz LEFT JOIN irrigation_zones iz ON iz.id=wsz.zone_id WHERE wsz.deveui=? ORDER BY wsz.zone_id',
+    [device.deveui]
+  );
+  try {
+    const deviceGateway = s2120OptionalGateway(device.gateway_device_eui);
+    if (deviceGateway && deviceGateway !== gateway) throw s2120Error(409, 'device_gateway_mismatch', 'the station belongs to another gateway');
+    for (const zone of zones) {
+      const zoneGateway = s2120OptionalGateway(zone.gateway_device_eui);
+      if (zoneGateway && zoneGateway !== gateway) throw s2120Error(409, 'zone_gateway_mismatch', 'a linked zone belongs to another gateway');
+    }
+  } catch (error) {
+    if (!error || !['invalid_gateway_binding', 'device_gateway_mismatch', 'zone_gateway_mismatch'].includes(error.code)) throw error;
+    return terminal('CONFLICT', current, error.code, false, refused(error.code));
+  }
+  if (target < current) return terminal('CONFLICT', current, 'stale_sync_version', false, refused('stale_sync_version'));
+  if (target === current) {
+    const complete = device.user_id == null && device.irrigation_zone_id == null && zones.length === 0;
+    return complete
+      ? terminal('APPLIED', current, null, true, unclaimValveCleanup({ deviceEui, mutation: { device } }))
+      : terminal('CONFLICT', current, 'equal_version_postcondition_failed', false, refused('equal_version_postcondition_failed'));
+  }
+  if (current >= Number.MAX_SAFE_INTEGER || target !== current + 1) return terminal('CONFLICT', current, 'version_gap', false, refused('version_gap'));
+  if (device.user_id == null) {
+    const code = zones.length || device.irrigation_zone_id != null ? 'orphaned_weather_links' : 'version_gap';
+    return terminal('CONFLICT', current, code, false, refused(code));
+  }
+  if (ctx.expectedUserId == null || Number(ctx.expectedUserId) !== Number(device.user_id)) {
+    return terminal('CONFLICT', current, 'stale_device_state', false, refused('stale_device_state'));
+  }
+  const start = await tx.get('SELECT COALESCE(MAX(rowid),0) AS n FROM sync_outbox', []);
+  const input = Object.assign({}, ctx.input, { syncVersion: target });
+  const held = await discoverAffectedWriters(tx, 'device_unclaim', input);
+  assertHeld(ctx.heldValveEuis, held.valveEuis, 'device_unclaim');
+  const mutation = await applyLifecycleMutationTx(tx, 'device_unclaim', input);
+  const post = await discoverAffectedWriters(tx, 'device_unclaim', input);
+  assertHeld(ctx.heldValveEuis, post.valveEuis, 'device_unclaim');
+  const after = await tx.get('SELECT user_id, irrigation_zone_id, sync_version FROM devices WHERE deveui=? AND deleted_at IS NULL', [device.deveui]);
+  const left = await tx.get('SELECT COUNT(*) AS n FROM weather_station_zones WHERE deveui=?', [device.deveui]);
+  if (!after || after.user_id != null || after.irrigation_zone_id != null ||
+      Number(after.sync_version) !== target || !left || Number(left.n) !== 0) {
+    throw s2120Error(500, 'unclaim_postcondition_failed', 'the cloud unclaim did not persist');
+  }
+  const emitted = await s2120OutboxAfterTx(tx, start.n, device.deveui);
+  const weather = emitted.filter((row) => row.op === 'WEATHER_STATION_ZONES_REPLACED');
+  const unclaimed = emitted.filter((row) => row.op === 'DEVICE_UNCLAIMED');
+  if (weather.length !== (zones.length ? 1 : 0) || unclaimed.length !== 1 ||
+      (weather.length && weather[0].rowid >= unclaimed[0].rowid) ||
+      (weather.length && JSON.stringify(JSON.parse(weather[0].payload_json).zone_uuids) !== '[]')) {
+    throw s2120Error(500, 'unclaim_outbox_postcondition_failed', 'the empty weather set must precede DEVICE_UNCLAIMED');
+  }
+  const done = await terminal('APPLIED', target, null, false, unclaimValveCleanup({ deviceEui, mutation }));
+  return { ack: done.ack, clears: mutation.clears || [] };
+}
+
+// Issue #233 Phase A: the cloud UNCLAIM_DEVICE of a SENSECAP_S2120. Holds return { hold } and
+// write nothing; a terminal decision returns { ack } after its COMMIT. It never answers
+// FAILED_RETRYABLE: the server makes the fifth retryable answer for this unprotected command
+// terminal, so a transient state must not consume that budget.
+async function applyS2120CloudUnclaim(options = {}) {
+  const db = options.db;
+  if (!db || typeof db.transaction !== 'function') throw new TypeError('applyS2120CloudUnclaim requires a transactional db facade');
+  const envelope = options.envelope && typeof options.envelope === 'object' && !Array.isArray(options.envelope) ? options.envelope : null;
+  if (!envelope || !Number.isSafeInteger(envelope.commandId) || envelope.commandId <= 0) return { hold: 'invalid_command_id' };
+  const gateway = s2120Eui(options.runtimeGatewayEui);
+  const lease = s2120Eui(envelope.leasedToGateway);
+  if (!gateway || !lease || lease !== gateway) return { hold: 'lease_gateway_unavailable_or_mismatch' };
+  const payload = envelope.payload && typeof envelope.payload === 'object' && !Array.isArray(envelope.payload) ? envelope.payload : {};
+  const deviceEui = s2120Eui(options.stationEui);
+  if (!deviceEui || (deviceEui !== s2120Eui(envelope.aggregateKey) && deviceEui !== s2120Eui(payload.deviceEui))) return { hold: 'unidentifiable_device' };
+  const at = instant(options.now);
+  const input = { deviceEui, gatewayDeviceEui: gateway, now: at, [CLOUD_S2120_UNCLAIM]: true };
+  const ctx = { envelope, gateway, deviceEui, hash: s2120BindingHash(envelope, gateway), at, input, expectedUserId: options.expectedUserId };
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+    const discovered = await discoverAffectedWriters(db, 'device_unclaim', input);
+    try {
+      return await dispatch.withValveWriters(discovered.valveEuis, async () => {
+        const outcome = await db.transaction((tx) => s2120CloudUnclaimTx(tx, Object.assign({}, ctx, { heldValveEuis: discovered.valveEuis })));
+        if (outcome.hold) return outcome;
+        const clearResults = outcome.clears && outcome.clears.length
+          ? await sendClears(db, outcome.clears, { transport: options.transport, warn: options.warn }, at)
+          : [];
+        return { ack: outcome.ack, gateway, replay: outcome.replay === true, clear_results: clearResults };
+      });
+    } catch (error) {
+      if (error && error.code === 'membership_drift') continue;
+      throw error;
+    }
+  }
+  return { hold: 'membership_drift' };
 }
 
 async function applyLegacyWriteTx(tx, input = {}) {
@@ -792,6 +1259,9 @@ function unclaimAckReason(cleanup) {
 
 module.exports = {
   OPERATIONS,
+  S2120_WEATHER_PAIR,
+  s2120UnclaimIdentity,
+  applyS2120CloudUnclaim,
   unclaimValveCleanup,
   unclaimAckReason,
   cancelUnclaimedValveActuations,
