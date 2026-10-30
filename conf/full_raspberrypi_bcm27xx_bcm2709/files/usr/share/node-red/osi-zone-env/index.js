@@ -359,7 +359,27 @@ function isIrrigationActionConflict(localAction, serverAction) {
   return (irrigateLike.has(left) && suppressLike.has(right)) || (suppressLike.has(left) && irrigateLike.has(right));
 }
 
-function buildDisplayStatus(mode, schedulingMode, sourceLabel, sharedGeneratedAt, sharedObservedAt, lastReceivedAt, fallbackReason) {
+// The two fallback banner sentences this edge's zone-env flow node writes
+// (its shared-bundle catch paths). Paired with the display mode they identify
+// the edge's own producer branch, which is what makes a derived code
+// trustworthy: 'Using last synced OSI Server values.' only ever leaves the
+// node under mode shared_server_stale, and 'Using local fallback because the
+// OSI Server bundle is unavailable.' only under mode local_fallback. Prose a
+// linked cloud bundle authored can reach display.fallbackReason too, but only
+// under mode shared_server, so it never satisfies either pairing and keeps a
+// null code.
+const KNOWN_FALLBACK_REASONS = [
+  { mode: 'shared_server_stale', sentence: 'Using last synced OSI Server values.', code: 'using_last_synced' },
+  { mode: 'local_fallback', sentence: 'Using local fallback because the OSI Server bundle is unavailable.', code: 'bundle_unavailable' }
+];
+
+function buildDisplayStatus(mode, schedulingMode, sourceLabel, sharedGeneratedAt, sharedObservedAt, lastReceivedAt, fallbackReason, fallbackReasonCode) {
+  const reason = trimToNull(fallbackReason);
+  let code = trimToNull(fallbackReasonCode);
+  if (!code && reason) {
+    const known = KNOWN_FALLBACK_REASONS.find(entry => entry.mode === mode && entry.sentence === reason);
+    if (known) code = known.code;
+  }
   return {
     mode,
     schedulingMode,
@@ -367,7 +387,8 @@ function buildDisplayStatus(mode, schedulingMode, sourceLabel, sharedGeneratedAt
     sharedGeneratedAt: trimToNull(sharedGeneratedAt),
     sharedObservedAt: trimToNull(sharedObservedAt),
     lastReceivedAt: trimToNull(lastReceivedAt),
-    fallbackReason: trimToNull(fallbackReason)
+    fallbackReason: reason,
+    fallbackReasonCode: code
   };
 }
 

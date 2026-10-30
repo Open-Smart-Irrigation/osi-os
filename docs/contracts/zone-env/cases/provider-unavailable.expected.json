@@ -362,7 +362,8 @@
     "sharedGeneratedAt": null,
     "sharedObservedAt": "2026-07-11T09:58:00.000Z",
     "lastReceivedAt": null,
-    "fallbackReason": null
+    "fallbackReason": null,
+    "fallbackReasonCode": null
   },
   "drift": null
 }

@@ -104,7 +104,28 @@ test('configuration, display, and drift helpers preserve current behavior', () =
       sharedObservedAt: '2026-07-11T09:50:00.000Z',
       lastReceivedAt: null,
       fallbackReason: 'offline',
+      fallbackReasonCode: null,
     },
+  );
+  // #310: the two sentences this edge's zone-env flow writes pair with their
+  // display mode, and only that pairing earns a fallbackReasonCode. Inherited
+  // cloud prose (mode shared_server) and unknown sentences keep null; an
+  // explicit code passes through untouched (open vocabulary).
+  assert.equal(
+    ZE.buildDisplayStatus('shared_server_stale', 'local', 'OSI Server', null, null, null, 'Using last synced OSI Server values.').fallbackReasonCode,
+    'using_last_synced',
+  );
+  assert.equal(
+    ZE.buildDisplayStatus('local_fallback', 'local', 'Local fallback', null, null, null, 'Using local fallback because the OSI Server bundle is unavailable.').fallbackReasonCode,
+    'bundle_unavailable',
+  );
+  assert.equal(
+    ZE.buildDisplayStatus('shared_server', 'local', 'OSI Server', null, null, null, 'Using last synced OSI Server values.').fallbackReasonCode,
+    null,
+  );
+  assert.equal(
+    ZE.buildDisplayStatus('shared_server', 'local', 'OSI Server', null, null, null, 'Cloud authored banner.', 'future_reason_code').fallbackReasonCode,
+    'future_reason_code',
   );
   assert.deepEqual(
     ZE.computeRecommendationDrift(

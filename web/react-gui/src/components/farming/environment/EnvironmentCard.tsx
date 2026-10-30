@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { useDateFormat } from '../../../utils/datetime';
+import { formatDisplayFallbackReason } from '../../../utils/displayFallback';
 import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 import { environmentAPI } from '../../../services/api';
 import { LocalTab } from './LocalTab';
@@ -24,30 +24,6 @@ interface Props {
 }
 
 type Tab = 'water' | 'soil' | 'weather' | 'agronomic' | 'sensors';
-type Translate = TFunction<'devices'>;
-
-// Mirrors IrrigationZoneCard's mapping for the same banner field
-// (`display.fallbackReason`): the zone-env-fn flow node still emits these
-// two sentences as plain English (flows.json, "Get Zone Environment
-// Summary", ~L769/772), and the cloud's own linked bundle can populate the
-// same field with its own English prose (F100/X-16). Map the two known
-// sentences and fall back to the generic key for anything else instead of
-// printing raw prose.
-const FALLBACK_REASON_CODES: Record<string, string> = {
-  'Using last synced OSI Server values.': 'using_last_synced',
-  'Using local fallback because the OSI Server bundle is unavailable.': 'bundle_unavailable',
-};
-
-function formatFallbackReason(t: Translate, fallbackReason: string | null | undefined): string | null {
-  if (!fallbackReason) return null;
-  const code = FALLBACK_REASON_CODES[fallbackReason];
-  if (!code) {
-    // eslint-disable-next-line no-console
-    console.debug('[EnvironmentCard] unmapped display.fallbackReason', fallbackReason);
-    return t('zone.water.source.fallback_generic', { defaultValue: 'Showing data from a fallback source.' });
-  }
-  return t(`zone.water.source.${code}`, { defaultValue: fallbackReason });
-}
 
 const CloudIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -162,7 +138,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
 
   const cropType = zone.cropType ?? zone.crop_type ?? null;
   const phenologicalStage = zone.phenologicalStage ?? zone.phenological_stage ?? null;
-  const fallbackReasonText = data ? formatFallbackReason(t, data.display?.fallbackReason) : null;
+  const fallbackReasonText = data ? formatDisplayFallbackReason(t, data.display) : null;
   const preferredTab = data ? preferredEnvironmentTab(data, devices) : null;
   const activeTab = manualTab ?? preferredTab ?? 'water';
 

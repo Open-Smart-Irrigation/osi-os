@@ -378,4 +378,26 @@ describe('IrrigationZoneCard reason-code honesty (F100/X-01/X-16)', () => {
     expect(card).toHaveTextContent(frDevices.zone.water.source.fallback_generic);
     expect(card).not.toHaveTextContent('A brand new banner the flow node does not emit yet.');
   });
+
+  it('prefers the stable fallbackReasonCode over the legacy sentence reading', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      display: { ...summary.display, fallbackReasonCode: 'using_last_synced', fallbackReason: 'Using local fallback because the OSI Server bundle is unavailable.' },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent(frDevices.zone.water.source.using_last_synced);
+    expect(card).not.toHaveTextContent('Using local fallback because the OSI Server bundle is unavailable.');
+  });
+
+  it('renders the generic key for an unrecognized fallbackReasonCode instead of a raw identifier', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...summary,
+      display: { ...summary.display, fallbackReasonCode: 'future_gateway_code' },
+    });
+    await renderIn('fr');
+    const card = screen.getByTestId('water-today-card');
+    expect(card).toHaveTextContent(frDevices.zone.water.source.fallback_generic);
+    expect(card).not.toHaveTextContent('future_gateway_code');
+  });
 });

@@ -733,6 +733,15 @@ export interface DisplayStatus {
   sharedObservedAt: string | null;
   lastReceivedAt: string | null;
   fallbackReason: string | null;
+  /**
+   * Stable machine-readable reason for the fallback banner (#310, open
+   * vocabulary): 'using_last_synced' or 'bundle_unavailable' from the edge's
+   * own catch paths today; null when the reason is inherited cloud prose or
+   * unknown. Absent on older gateways, which still carry the legacy English
+   * `fallbackReason` sentence. Consumers must render their own generic
+   * wording for unrecognized codes, never a raw identifier or the prose.
+   */
+  fallbackReasonCode?: string | null;
 }
 
 export interface RecommendationDrift {
