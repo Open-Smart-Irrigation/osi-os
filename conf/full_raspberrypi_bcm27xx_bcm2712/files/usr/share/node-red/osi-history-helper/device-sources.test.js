@@ -56,8 +56,7 @@ test('source policy covers every seeded device type', () => {
 test('LoRain declares exactly its persisted environment channels', () => {
   const source = describeDeviceSource({ type_id: 'AQUASCOPE_LORAIN', deveui: 'A840410000000077' });
   assert.deepEqual(source.families.flatMap((family) => family.channelKeys).sort(), [
-    'ambient_temperature', 'rain_tips_delta', 'rain_mm_delta', 'rain_mm_today',
-    'rain_mm_per_hour', 'rain_mm_per_10min', 'bat_v',
+    'ambient_temperature', 'rain_tips_delta', 'rain_mm_delta', 'rain_mm_today', 'bat_v',
   ].sort());
 });
 

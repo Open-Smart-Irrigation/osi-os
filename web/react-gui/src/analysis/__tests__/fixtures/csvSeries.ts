@@ -37,7 +37,7 @@ export const rain: AnalysisSeries = {
 const deviceEntry = (seriesId: string, extra: Partial<AnalysisCatalogEntry>): AnalysisCatalogEntry => ({
   seriesId, hubEui: 'HUB-1', zoneId: 12, zoneName: 'North, Plot A', cardType: 'environment', sourceKey: 'environment-src-1',
   channelKey: 'rain_mm_delta', displayName: '', unit: 'mm', availability: 'available', deviceName: null, depthCm: null,
-  depthReference: null, sourceKind: 'device', configurationState: 'current', legacy: false, ...extra,
+  depthReference: null, sourceKind: 'device', configurationState: 'current', ...extra,
 });
 
 export const catalogById = new Map<string, AnalysisCatalogEntry>([

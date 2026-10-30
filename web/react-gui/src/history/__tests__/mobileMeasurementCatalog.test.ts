@@ -32,7 +32,6 @@ describe('edge mobile measurement catalog', () => {
       entry('other', { configurationState: 'other_supported', sourceKey: 'device-other' }),
       entry('wrong-zone', { zoneId: 8 }),
       entry('rain', { channelKey: 'rain_mm_delta' }),
-      entry('legacy', { legacy: true }),
     ]), '7');
 
     expect(sources).toEqual(expect.arrayContaining([

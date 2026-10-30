@@ -15,8 +15,7 @@ function isEligibleCatalogEntry(entry: AnalysisCatalogEntry, zoneId: number): bo
     && entry.cardType === 'soil'
     && /^swt_[123]$/.test(entry.channelKey)
     && entry.unit === 'kPa'
-    && entry.availability === 'available'
-    && entry.legacy !== true;
+    && entry.availability === 'available';
 }
 
 export function normalizeMobileTensionCatalog(
@@ -37,7 +36,6 @@ export function normalizeMobileTensionCatalog(
       deviceName: entry.deviceName ?? undefined,
       depthCm: entry.depthCm,
       available: entry.availability === 'available',
-      legacy: entry.legacy === true,
       status: entry.configurationState ?? 'unknown',
       measurementKind: 'soil' as const,
     }));

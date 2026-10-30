@@ -10,8 +10,9 @@ const DEVICE_TYPE_IDS = Object.freeze([
 ]);
 
 const LO_RAIN_CHANNELS = Object.freeze([
-  'ambient_temperature', 'rain_tips_delta', 'rain_mm_delta', 'rain_mm_today',
-  'rain_mm_per_hour', 'rain_mm_per_10min', 'bat_v',
+  // No rate: a LoRain report carries no verified measurement window
+  // (docs/contracts/rainfall/lorain.md).
+  'ambient_temperature', 'rain_tips_delta', 'rain_mm_delta', 'rain_mm_today', 'bat_v',
 ]);
 const SOIL_CHANNELS = Object.freeze([
   'swt_1', 'swt_2', 'swt_3',
