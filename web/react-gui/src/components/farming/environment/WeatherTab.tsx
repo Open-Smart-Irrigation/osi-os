@@ -11,6 +11,7 @@ import { toCompassDirection } from '../../../utils/wind';
 import { WeatherIcon } from './WeatherIcon';
 import { useDateFormat, type DateFormatter } from '../../../utils/datetime';
 import { HelpTip } from '../shared/HelpTip';
+import { isForecastHourVisible } from './tabContent';
 
 interface Props {
   online: OnlineEnvironment;
@@ -128,8 +129,14 @@ function coverageLabel(rf: RainFocus, t: Translate): string | null {
 const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isToday }) => {
   const { t } = useTranslation('devices');
   const fmt = useDateFormat();
-  const rain = day.rainMm ?? 0;
+  const rain = day.rainMm;
   const highLow = formatForecastHighLow(day.maxTempC, day.minTempC);
+  const endpoint = (value: number | null) => value != null && Number.isFinite(value)
+    ? `${Math.round(value)}°` : '—';
+  const hasTemperature = [day.maxTempC, day.minTempC].some((value) => value != null && Number.isFinite(value));
+  const temperature = highLow !== 'Unavailable' ? highLow
+    : hasTemperature ? `${endpoint(day.maxTempC)}/${endpoint(day.minTempC)}`
+    : t('environment.forecast.unavailable', { defaultValue: 'Unavailable' });
   return (
     <div className={`snap-start flex-shrink-0 w-24 flex flex-col items-center gap-1 rounded-xl p-2 border
       ${isToday
@@ -138,18 +145,16 @@ const DayCard: React.FC<{ day: DailyForecast; isToday: boolean }> = ({ day, isTo
       <span className="text-xs font-semibold text-[var(--text-secondary)]">{fmtDay(day.date, fmt, t)}</span>
       <WeatherIcon code={day.weatherCode} description={day.description} size={40} animated={!isToday} />
       <span className="min-h-[16px] text-xs font-medium tabular-nums text-[var(--text)] whitespace-nowrap">
-        {highLow === 'Unavailable'
-          ? t('environment.forecast.unavailable', { defaultValue: 'Unavailable' })
-          : highLow}
+        {temperature}
       </span>
-      {rain > 0 && (
+      {rain != null && Number.isFinite(rain) && (
         <span className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 border ${rainClass(rain)}`}>
           {rain.toFixed(1)} mm
         </span>
       )}
-      {(day.rainProbabilityPct ?? 0) > 20 && (
+      {day.rainProbabilityPct != null && Number.isFinite(day.rainProbabilityPct) && (
         <span className="text-[10px] text-sky-600">
-          {day.rainProbabilityPct!.toFixed(0)}%
+          {day.rainProbabilityPct.toFixed(0)}%
         </span>
       )}
     </div>
@@ -172,9 +177,8 @@ const HourlyChart: React.FC<{ hourly: HourlyForecast[]; source?: string | null }
   const creditOnly = credit ? <div className="flex justify-end">{credit}</div> : null;
   if (hourly.length === 0) return creditOnly;
 
-  const cutoff = Date.now() + 24 * 60 * 60 * 1000;
   const points: ChartPoint[] = hourly
-    .filter(h => new Date(h.time).getTime() <= cutoff)
+    .filter(h => isForecastHourVisible(h.time))
     .map(h => ({
       hour: fmtHour(h.time, fmt),
       rain: h.rainMm ?? 0,

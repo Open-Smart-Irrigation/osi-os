@@ -468,6 +468,7 @@
     "sectionTitle": "Environnement et prévisions météo",
     "loading": "Chargement des données environnementales…",
     "loadFailed": "Échec du chargement des données environnementales",
+    "noData": "Aucune donnée environnementale pour le moment.",
     "tabs": {
       "water": "Eau",
       "soil": "Sol",

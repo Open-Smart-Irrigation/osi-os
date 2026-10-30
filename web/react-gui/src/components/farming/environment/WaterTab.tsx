@@ -14,12 +14,11 @@ import type { LegendProps } from 'recharts';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { parseCalendarDay, useDateFormat } from '../../../utils/datetime';
-import { zoneHasFlowMeter, zoneHasRainGauge, zoneHasValve } from '../../../utils/zoneSoil';
 import { cropById, normalizeStage, stageLengths } from '../../../agronomy/cropKc';
 import { STAGE_FALLBACK } from '../../../agronomy/stageLabels';
 import type { Device, WaterEnvironment } from '../../../types/farming';
 import { HelpTip } from '../shared/HelpTip';
-import { buildWaterChartRows, hasWaterTrendData, waterChartMaxMm, waterChartSeries, type WaterChartKey, type WaterChartRow, type WaterChartSeries } from './waterChart';
+import { buildWaterChartRows, hasWaterTrendData, waterChartMaxMm, waterChartSeries, waterSourceVisibility, type WaterChartKey, type WaterChartRow, type WaterChartSeries } from './waterChart';
 
 interface Props {
   water: WaterEnvironment;
@@ -388,14 +387,11 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
     defaultValue: '{{value}} effective',
   });
   const fmt = useDateFormat();
-  const hasSetup = water.areaM2 != null && water.irrigationEfficiencyPct != null;
   // Each tile needs something that measures or computes it. The daily
   // aggregation writes 0 for a day with no sample, so an ungated tile reports
   // an invented dry day as a measurement — the zone card two rows above
   // already gates its own tiles this way.
-  const hasRainGauge = zoneHasRainGauge(devices) || water.sensorHealth.rainGaugePresent;
-  const hasFlowMeter = zoneHasFlowMeter(devices) || water.sensorHealth.flowMeterPresent;
-  const hasValve = zoneHasValve(devices);
+  const { hasSetup, hasRainGauge, hasFlowMeter, hasValve, showRainTile } = waterSourceVisibility(water, devices);
   const measuredLiters = water.irrigationTodayMeasuredLiters ?? null;
   const estimatedLiters = water.irrigationTodayEstimatedLiters ?? null;
   const measuredNetMm = water.measuredIrrigationNetMm ?? null;
@@ -420,9 +416,6 @@ export const WaterTab: React.FC<Props> = ({ water, devices = [] }) => {
   const rainCoverageDetail = water.rainTodayMm != null
     ? rainCoverageNote(t, water.rainTodayCoverage, water.rainSource)
     : null;
-  const showRainTile = hasRainGauge
-    || water.rainTodayReceivedMm != null
-    || (rainSourceHelp != null && water.rainTodayMm != null);
   const todayDate = water.todayDate ?? null;
   const chartData = buildWaterChartRows(water);
   // One decision for the bars, the axis and the legend (see waterChartSeries).

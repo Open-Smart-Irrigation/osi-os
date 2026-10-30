@@ -1,4 +1,18 @@
-import type { WaterDay, WaterEnvironment } from '../../../types/farming';
+import type { Device, WaterDay, WaterEnvironment } from '../../../types/farming';
+import { zoneHasFlowMeter, zoneHasRainGauge, zoneHasValve } from '../../../utils/zoneSoil';
+
+/** Source gates shared by the Water renderer and automatic tab selection. */
+export function waterSourceVisibility(water: WaterEnvironment, devices: Device[]) {
+  const hasRainGauge = zoneHasRainGauge(devices) || water.sensorHealth.rainGaugePresent;
+  const hasFlowMeter = zoneHasFlowMeter(devices) || water.sensorHealth.flowMeterPresent;
+  const hasValve = zoneHasValve(devices);
+  const hasSetup = water.areaM2 != null && water.irrigationEfficiencyPct != null;
+  const rainProviderPresent = water.rainSource === 'weather_service'
+    || (water.rainSource === 'meteoswiss_station' && water.rainStation != null);
+  const showRainTile = hasRainGauge || water.rainTodayReceivedMm != null
+    || (rainProviderPresent && water.rainTodayMm != null);
+  return { hasRainGauge, hasFlowMeter, hasValve, hasSetup, showRainTile };
+}
 
 /** The y axis never drops below this, so a dry week does not zoom into drizzle. */
 export const WATER_CHART_MIN_MM = 10;

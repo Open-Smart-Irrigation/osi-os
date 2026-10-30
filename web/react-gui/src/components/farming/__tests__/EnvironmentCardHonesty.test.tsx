@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe('EnvironmentCard forecast-only honesty (#310)', () => {
-  it('shows forecast totals when current weather is unavailable after selecting Weather', async () => {
+  it('opens on Weather with forecast totals when only forecast content exists', async () => {
     apiMocks.getSummary.mockResolvedValue(forecastOnlySummary({
       totalNext24hMm: 3,
       totalNext72hMm: 4,
@@ -120,13 +120,12 @@ describe('EnvironmentCard forecast-only honesty (#310)', () => {
     }));
     await renderExpanded('en');
 
-    const waterTab = await screen.findByRole('button', { name: enDevices.environment.tabs.water });
-    const weatherTab = screen.getByRole('button', { name: enDevices.environment.tabs.weather });
-    expect(waterTab).toHaveClass('text-[var(--primary)]');
-    expect(weatherTab).not.toHaveClass('text-[var(--primary)]');
-    expect(screen.queryByText(enDevices.environment.forecast.next24h)).not.toBeInTheDocument();
-
-    fireEvent.click(weatherTab);
+    // #310 follow-up: real forecast content (the rain-focus totals) makes
+    // Weather the default opening tab; PR #579 pinned Water here instead.
+    const weatherTab = await screen.findByRole('button', { name: enDevices.environment.tabs.weather });
+    const waterTab = screen.getByRole('button', { name: enDevices.environment.tabs.water });
+    expect(weatherTab).toHaveClass('text-[var(--primary)]');
+    expect(waterTab).not.toHaveClass('text-[var(--primary)]');
     expect(await screen.findByText(enDevices.environment.forecast.next24h)).toBeInTheDocument();
     expect(screen.getByText('3.0 mm')).toBeInTheDocument();
     expect(screen.getByText(enDevices.environment.forecast.next72h)).toBeInTheDocument();
