@@ -106,6 +106,39 @@ test('shipped encoder uses the live composition for an untrusted-clock safety CL
   fixture.cleanup();
 });
 
+// The host-clock test above depends on the machine's actual uptime; this one
+// pins the 2.01 s reading that parseFloat * 1000 turns into 2009.9999999999998.
+function fixedUptimeControl(uptimeText) {
+  const bootId = 'live-wrapper-uptime-boot';
+  const fs = { readFileSync(file) {
+    if (file === '/proc/sys/kernel/random/boot_id') return bootId + '\n';
+    if (file === '/proc/uptime') return uptimeText;
+    throw Object.assign(new Error('missing test clock path'), { code: 'ENOENT' });
+  } };
+  return { ...control, executeValveAttempt(args) {
+    return control.executeValveAttempt({ ...args, trustedContext: { clockOptions: { fs, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime', markerPath: '/var/run/osi-irrigation-clock.json', rejectionPath: '/tmp/live-wrapper-uptime-rejection.json', fallbackPath: '/tmp/live-wrapper-uptime-rejection-fallback.json' } } });
+  } };
+}
+
+test('shipped encoder enqueues one untrusted-clock safety CLOSE at a 2.01 s uptime', async () => {
+  const fixture = await tempDb();
+  const calls = [];
+  const events = [];
+  const result = await invoke(encoder, fixture.db, { async enqueueDownlink(item) { calls.push(item); return { id: 'live-safe-close-uptime' }; } }, {
+    payload: { type: 'actuator_command', device: { devEui: EUI }, data: { action: 'CLOSE', commandType: 'CLOSE' } },
+  }, events, fixedUptimeControl('2.01 0.00\n'));
+  assert.equal(result[0], null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].expiresAt, undefined);
+  assert.equal(result[1]._log_ctx.action, 'CLOSE');
+  const row = await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations ORDER BY rowid DESC LIMIT 1');
+  const state = JSON.parse(row.transport_json);
+  assert.equal(state.effect_snapshot.timing_contract, 'UNBOUNDED_SAFE_CLOSE_V1');
+  assert.deepEqual(state.effect_snapshot.reservation_receipt, { boot_id: 'live-wrapper-uptime-boot', uptime_ms: 2010 });
+  assert.deepEqual(state.attempt_receipt, { boot_id: 'live-wrapper-uptime-boot', uptime_ms: 2010 });
+  fixture.cleanup();
+});
+
 test('shipped encoder restores an actual timed OPEN and accepted replay emits no second actuator log', async () => {
   const fixture = await tempDb();
   const calls = [];

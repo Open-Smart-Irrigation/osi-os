@@ -208,3 +208,149 @@ test('CLOSED evidence before the bounded CLOSE claim does not settle that owner'
   assert.equal(after.reconciliation_state, 'PENDING_OBSERVATION');
   fixture.cleanup();
 });
+
+// Untrusted-clock runtime whose /proc/uptime reads come from a fixed list (the
+// last entry repeats). No NTP marker, so a permanent CLOSE takes the unbounded
+// safety variant. The listed two-decimal values are those parseFloat * 1000
+// turns into fractions (2.01 -> 2009.9999999999998).
+function fixedUptimeRuntime(uptimeReads, { bootId = 'fixed-uptime-boot', at = '2026-10-18T10:00:00.000Z' } = {}) {
+  const reads = Array.isArray(uptimeReads) ? uptimeReads : [uptimeReads];
+  let read = 0;
+  const fs = {
+    readFileSync(file) {
+      if (file === '/proc/sys/kernel/random/boot_id') {
+        if (bootId == null) throw Object.assign(new Error('boot id unavailable'), { code: 'ENOENT' });
+        return `${bootId}\n`;
+      }
+      if (file === '/proc/uptime') {
+        const text = reads[Math.min(read++, reads.length - 1)];
+        if (text == null) throw Object.assign(new Error('uptime unavailable'), { code: 'ENOENT' });
+        return text;
+      }
+      throw Object.assign(new Error('fixture path unavailable'), { code: 'ENOENT' });
+    },
+  };
+  return {
+    runtimeNow: () => Date.parse(at),
+    clockOptions: { fs, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime', markerPath: '/var/run/osi-irrigation-clock.json', rejectionPath: '/tmp/fixed-uptime-rejection.json', fallbackPath: '/tmp/fixed-uptime-rejection-fallback.json' },
+  };
+}
+
+function safeCloseFrame() {
+  return { fPort: 1, data: Buffer.from([0x30]).toString('base64'), confirmed: false, encrypted: false, provenance: { source: 'local_encoder' } };
+}
+
+test('untrusted-clock safety CLOSE enqueues once with integer receipts at two-decimal uptimes', async () => {
+  for (const [text, uptimeMs] of [['2.01 0.00\n', 2010], ['1.12 0.00\n', 1120], ['1.13 0.00\n', 1130]]) {
+    const fixture = await tempDb();
+    const calls = [];
+    const commandId = `safe-close-uptime-${uptimeMs}`;
+    const out = await dispatch.executeValveAttempt({
+      db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: commandId, action: 'CLOSE' }, frame: safeCloseFrame(),
+      transport: { async enqueueDownlink(item) { calls.push(item); return { id: `${commandId}-q` }; } },
+      now: '2026-10-18T10:00:00.000Z', trustedContext: fixedUptimeRuntime(text),
+    });
+    assert.equal(out.phase, 'ACCEPTED', text);
+    assert.equal(calls.length, 1, text);
+    assert.equal(calls[0].expiresAt, undefined, text);
+    const row = await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', [commandId]);
+    const state = JSON.parse(row.transport_json);
+    assert.equal(state.effect_snapshot.timing_contract, 'UNBOUNDED_SAFE_CLOSE_V1', text);
+    assert.deepEqual(state.effect_snapshot.reservation_receipt, { boot_id: 'fixed-uptime-boot', uptime_ms: uptimeMs }, text);
+    assert.deepEqual(state.attempt_receipt, { boot_id: 'fixed-uptime-boot', uptime_ms: uptimeMs }, text);
+    fixture.cleanup();
+  }
+});
+
+test('safety CLOSE receipts follow rising centisecond uptimes across second boundaries', async () => {
+  const fixture = await tempDb();
+  const calls = [];
+  const readings = ['2.01', '2.03', '4.02', '4.03', '4.06', '4.07', '8.03', '8.04'];
+  const out = await dispatch.executeValveAttempt({
+    db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: 'safe-close-uptime-rising', action: 'CLOSE' }, frame: safeCloseFrame(),
+    transport: { async enqueueDownlink(item) { calls.push(item); return { id: 'safe-close-uptime-rising-q' }; } },
+    now: '2026-10-18T10:00:00.000Z', trustedContext: fixedUptimeRuntime(readings.map((value) => `${value} 0.00\n`)),
+  });
+  assert.equal(out.phase, 'ACCEPTED');
+  assert.equal(calls.length, 1);
+  const state = JSON.parse((await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', ['safe-close-uptime-rising'])).transport_json);
+  const allowed = [2010, 2030, 4020, 4030, 4060, 4070, 8030, 8040];
+  const reserved = state.effect_snapshot.reservation_receipt.uptime_ms;
+  const attempted = state.attempt_receipt.uptime_ms;
+  assert.ok(allowed.includes(reserved), String(reserved));
+  assert.ok(allowed.includes(attempted), String(attempted));
+  assert.ok(attempted > reserved, `${attempted} > ${reserved}`);
+  fixture.cleanup();
+});
+
+test('safety CLOSE refuses an attempt receipt that runs backward from its reservation receipt', async () => {
+  const fixture = await tempDb();
+  let calls = 0;
+  const readings = ['8.04', '8.03', '4.07', '4.06', '4.03', '4.02', '2.03', '2.01'];
+  await assert.rejects(dispatch.executeValveAttempt({
+    db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: 'safe-close-uptime-backward', action: 'CLOSE' }, frame: safeCloseFrame(),
+    transport: { async enqueueDownlink() { calls += 1; return { id: 'backward-must-not-enqueue' }; } },
+    now: '2026-10-18T10:00:00.000Z', trustedContext: fixedUptimeRuntime(readings.map((value) => `${value} 0.00\n`)),
+  }), (error) => error && error.code === 'close_receipt_unproven');
+  assert.equal(calls, 0);
+  const state = JSON.parse((await fixture.db.get('SELECT transport_json FROM valve_actuation_expectations WHERE command_id=?', ['safe-close-uptime-backward'])).transport_json);
+  assert.equal(Number.isInteger(state.effect_snapshot.reservation_receipt.uptime_ms), true);
+  assert.equal(state.attempt_receipt, undefined);
+  assert.equal(state.phase, undefined);
+  fixture.cleanup();
+});
+
+test('safety CLOSE still refuses missing, malformed, non-finite or negative uptime and a missing boot id', async () => {
+  const cases = [
+    ['missing uptime', fixedUptimeRuntime(null)],
+    ['non-numeric uptime', fixedUptimeRuntime('abc 0.00\n')],
+    ['NaN uptime', fixedUptimeRuntime('NaN 0.00\n')],
+    ['infinite uptime', fixedUptimeRuntime('Infinity 0.00\n')],
+    ['negative uptime', fixedUptimeRuntime('-2.00 0.00\n')],
+    ['sub-millisecond uptime', fixedUptimeRuntime('2.0001 0.00\n')],
+    ['missing boot id', fixedUptimeRuntime('2.01 0.00\n', { bootId: null })],
+    ['empty boot id', fixedUptimeRuntime('2.01 0.00\n', { bootId: '' })],
+  ];
+  for (const [label, trustedContext] of cases) {
+    const fixture = await tempDb();
+    let calls = 0;
+    await assert.rejects(dispatch.executeValveAttempt({
+      db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: `safe-close-refused-${label.replace(/\W+/g, '-')}`, action: 'CLOSE' }, frame: safeCloseFrame(),
+      transport: { async enqueueDownlink() { calls += 1; return { id: 'refused-must-not-enqueue' }; } },
+      now: '2026-10-18T10:00:00.000Z', trustedContext,
+    }), (error) => error && error.code === 'clock_untrusted', label);
+    assert.equal(calls, 0, label);
+    assert.equal((await fixture.db.get('SELECT COUNT(*) AS count FROM valve_actuation_expectations')).count, 0, label);
+    fixture.cleanup();
+  }
+});
+
+test('CLOSED evidence read in the marker centisecond settles a 2.01 s safety CLOSE with an integer receipt', async () => {
+  const fixture = await tempDb();
+  await dispatch.executeValveAttempt({
+    db: fixture.db, deviceEui: EUI, command: { device_eui: EUI, command_id: 'safe-close-uptime-evidence', action: 'CLOSE' }, frame: safeCloseFrame(),
+    transport: { async enqueueDownlink() { return { id: 'safe-close-uptime-evidence-q' }; } },
+    now: '2026-10-18T10:00:00.000Z', trustedContext: fixedUptimeRuntime('2.01 0.00\n'),
+  });
+  // The stratum hook wrote uptime_ms 2030 for a 2.03 s reading (awk %.0f); the
+  // runtime reads the same centisecond, so uptime has not moved backward.
+  const epoch = Date.parse('2026-10-18T10:00:00.000Z');
+  const fs = { readFileSync(file) {
+    if (file === '/proc/sys/kernel/random/boot_id') return 'fixed-uptime-boot\n';
+    if (file === '/proc/uptime') return '2.03 0.00\n';
+    if (file === '/var/run/osi-irrigation-clock.json') return JSON.stringify({ boot_id: 'fixed-uptime-boot', epoch_ms: epoch, uptime_ms: 2030, stratum: 1 });
+    throw Object.assign(new Error('fixture path unavailable'), { code: 'ENOENT' });
+  } };
+  const settled = await dispatch.observeClosedEvidence({
+    db: fixture.db, deviceEui: EUI, observedState: 'CLOSED', observedAt: '2026-10-18T10:00:00.000Z', event_identity: { fPort: 10, fCnt: 4 },
+    runtimeContext: { runtimeNow: () => epoch, clockOptions: { fs, bootPath: '/proc/sys/kernel/random/boot_id', uptimePath: '/proc/uptime', markerPath: '/var/run/osi-irrigation-clock.json', rejectionPath: '/tmp/fixed-uptime-evidence-rejection.json', fallbackPath: '/tmp/fixed-uptime-evidence-rejection-fallback.json' } },
+  });
+  assert.equal(settled.quiesced.length, 1);
+  const row = await fixture.db.get('SELECT observed_close_at, reconciliation_state, transport_json FROM valve_actuation_expectations WHERE command_id=?', ['safe-close-uptime-evidence']);
+  assert.equal(row.observed_close_at, '2026-10-18T10:00:00.000Z');
+  assert.equal(row.reconciliation_state, 'OBSERVED_CLOSED');
+  const state = JSON.parse(row.transport_json);
+  assert.deepEqual(state.attempt_receipt, { boot_id: 'fixed-uptime-boot', uptime_ms: 2010 });
+  assert.deepEqual(state.closed_observation.receipt, { boot_id: 'fixed-uptime-boot', uptime_ms: 2030 });
+  fixture.cleanup();
+});
