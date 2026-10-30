@@ -44,7 +44,7 @@ export function formatDisplayFallbackReason(
 ): string | null {
   const code = display?.fallbackReasonCode ?? null;
   if (code) {
-    const key = CODE_KEYS[code];
+    const key = Object.prototype.hasOwnProperty.call(CODE_KEYS, code) ? CODE_KEYS[code] : undefined;
     if (!key) {
       // eslint-disable-next-line no-console
       console.debug('[displayFallback] unmapped display.fallbackReasonCode', code);
@@ -54,7 +54,12 @@ export function formatDisplayFallbackReason(
   }
   const reason = display?.fallbackReason ?? null;
   if (!reason) return null;
-  const legacyCode = LEGACY_SENTENCE_CODES[reason];
+  if (display?.fallbackReasonCode !== undefined) {
+    return t('zone.water.source.fallback_generic');
+  }
+  const legacyCode = Object.prototype.hasOwnProperty.call(LEGACY_SENTENCE_CODES, reason)
+    ? LEGACY_SENTENCE_CODES[reason]
+    : undefined;
   if (!legacyCode) {
     // eslint-disable-next-line no-console
     console.debug('[displayFallback] unmapped display.fallbackReason', reason);

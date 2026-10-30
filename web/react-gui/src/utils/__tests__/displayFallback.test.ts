@@ -78,6 +78,23 @@ describe('formatDisplayFallbackReason (#310)', () => {
     expect(formatDisplayFallbackReason(fr, { fallbackReason: '', fallbackReasonCode: '' })).toBeNull();
   });
 
+  it.each(['constructor', 'toString', '__proto__'])('treats prototype name %s as unknown in both fields', (value) => {
+    expect(formatDisplayFallbackReason(fr, { fallbackReasonCode: value }))
+      .toBe(frDevices.zone.water.source.fallback_generic);
+    expect(formatDisplayFallbackReason(fr, { fallbackReason: value }))
+      .toBe(frDevices.zone.water.source.fallback_generic);
+  });
+
+  it.each([
+    'Using last synced OSI Server values.',
+    'Using local fallback because the OSI Server bundle is unavailable.',
+  ])('does not reclassify explicitly unrecognized prose: %s', (reason) => {
+    expect(formatDisplayFallbackReason(fr, { fallbackReasonCode: null, fallbackReason: reason }))
+      .toBe(frDevices.zone.water.source.fallback_generic);
+    expect(formatDisplayFallbackReason(fr, { fallbackReasonCode: undefined, fallbackReason: reason }))
+      .not.toBe(frDevices.zone.water.source.fallback_generic);
+  });
+
   it('prefers an explicit code over the legacy sentence reading', () => {
     // A newer gateway that says bundle_unavailable while its prose is a
     // sentence the legacy table maps elsewhere: the code wins.
