@@ -173,7 +173,7 @@ Two ways to get OSI OS running on a Raspberry Pi 5:
 2. Flash it to a microSD card (e.g. with [Raspberry Pi Imager](https://www.raspberrypi.com/software/) or `dd`).
 3. Boot the Pi — OSI OS starts automatically.
 4. Connect to the Wi-Fi AP `OSI-OS-<mac>` (password `opensmartirrigation`) and open the configuration page at 192.168.0.1
-5. Proceed the intial Chirpstack setup using the guide (https://www.chirpstack.io/docs/chirpstack-gateway-os/getting-started.html).
+5. Proceed with the initial ChirpStack setup using the guide (https://www.chirpstack.io/docs/chirpstack-gateway-os/getting-started.html).
 6. Navigate to `http://<device-ip>:1880/gui`.
 
 No further setup required. See [Step 4 — Install Tailscale](#step-4--install-tailscale-remote-access) if you want remote access.
