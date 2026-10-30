@@ -70,7 +70,7 @@ describe('LoRainGaugeCard', () => {
     expect(screen.getByText('loRain.temperatureHint')).toBeInTheDocument();
     unmount();
 
-    const noTemperature = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, ambient_temperature: null } } as Device;
+    const noTemperature = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, ambient_temperature: null } } as unknown as Device;
     render(<LoRainGaugeCard device={noTemperature} removeContext="farm" />);
     expect(screen.getByText('loRain.temperature')).toBeInTheDocument();
     expect(screen.queryByText('loRain.temperatureHint')).not.toBeInTheDocument();
