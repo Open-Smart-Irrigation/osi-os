@@ -78,6 +78,7 @@ const LOG_WRITE = idOf('Zone id known?');
 const EXECUTED = new Set([
   'sync-pending-split',
   'reject-indefinite-open',
+  's2120-unclaim-gate',
   'command-dedupe-dispatch',
   ROUTE,
   'write-strega-expectation',

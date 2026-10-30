@@ -264,6 +264,8 @@ jobs:
       - run: node --test scripts/rehearse-weather-station-zone-sync.test.js
       - run: node --test scripts/test-zone-command-path.js
       - run: node --test conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-device-commands/weather.test.js
+      - name: Issue 233 S2120 pair detach and cloud unclaim
+        run: node --test scripts/test-issue-233-weather-detach.js
       - run: |
           node scripts/run-module-tests.js \
             conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-entity-name/commands.test.js \
