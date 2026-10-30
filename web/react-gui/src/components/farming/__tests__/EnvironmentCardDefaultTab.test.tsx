@@ -15,7 +15,7 @@ import i18next, { type i18n as I18n } from 'i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EnvironmentCard } from '../environment/EnvironmentCard';
-import type { Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
+import type { DailyForecast, Device, IrrigationZone, ZoneEnvironmentSummary } from '../../../types/farming';
 
 import enDevices from '../../../../public/locales/en/devices.json';
 
@@ -189,6 +189,30 @@ describe('EnvironmentCard default tab (#310)', () => {
 
     expect(await screen.findAllByText('0.0 mm')).toHaveLength(2);
     expect(tabButton('weather')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it.each<[Partial<DailyForecast>, string]>([
+    [{ maxTempC: 17 }, '17°/—'],
+    [{ minTempC: 6 }, '—/6°'],
+    [{ maxTempC: 0 }, '0°/—'],
+    [{ rainMm: 0 }, '0.0 mm'],
+    [{ rainProbabilityPct: 10 }, '10%'],
+    [{ rainProbabilityPct: 0 }, '0%'],
+  ])('displays the partial daily forecast that selects Weather: %j', async (fields, visibleValue) => {
+    const day: DailyForecast = {
+      date: '2026-10-30', description: null, weatherCode: null,
+      maxTempC: null, minTempC: null, rainMm: null, rainProbabilityPct: null,
+      windSpeedMps: null, et0MmDay: null, etcMmDay: null, ...fields,
+    };
+    apiMocks.getSummary.mockResolvedValue(buildSummary({
+      water: { available: true, waterNeededTodayMm: 2.5 },
+      forecast: { available: true, rainFocus: { ...emptyRainFocus, daily: [day] } },
+    }));
+    await renderExpanded();
+
+    expect(await screen.findByText(visibleValue)).toBeInTheDocument();
+    expect(tabButton('weather')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('2.5 mm')).not.toBeInTheDocument();
   });
 
   it('does not open on Weather for an available online section whose current object is empty', async () => {

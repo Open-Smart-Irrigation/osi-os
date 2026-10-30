@@ -173,8 +173,16 @@ describe('hasUsableForecastContent', () => {
       daily: [{ date: '2026-10-30', description: null, weatherCode: 3, maxTempC: null, minTempC: null, rainMm: null, rainProbabilityPct: null, windSpeedMps: null, et0MmDay: null, etcMmDay: null }],
     }))).toBe(true);
     expect(hasUsableForecastContent(forecastWith({
-      hourly: [{ time: '2026-10-30T14:00', rainMm: null, rainProbabilityPct: 0, tempC: null, windSpeedMps: null }],
+      hourly: [{ time: new Date(Date.now() + 60 * 60 * 1000).toISOString(), rainMm: null, rainProbabilityPct: 0, tempC: null, windSpeedMps: null }],
     }))).toBe(true);
+  });
+
+  it('rejects hourly-only values outside the chart horizon or without a valid time', () => {
+    for (const time of ['invalid', new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()]) {
+      expect(hasUsableForecastContent(forecastWith({
+        hourly: [{ time, rainMm: 1, rainProbabilityPct: null, tempC: null, windSpeedMps: null }],
+      }))).toBe(false);
+    }
   });
 });
 

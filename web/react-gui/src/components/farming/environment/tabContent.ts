@@ -58,9 +58,15 @@ function hasUsableDailyForecast(day: DailyForecast): boolean {
     || finite(day.rainProbabilityPct);
 }
 
+/** Match the hourly plot's upper time boundary; an invalid time is not plotted. */
+export function isForecastHourVisible(time: string, nowMs = Date.now()): boolean {
+  const instant = new Date(time).getTime();
+  return Number.isFinite(instant) && instant <= nowMs + 24 * 60 * 60 * 1000;
+}
+
 function hasUsableHourlyForecast(hour: HourlyForecast): boolean {
   // The hourly chart draws rain and probability; `time` alone is a timestamp.
-  return finite(hour.rainMm) || finite(hour.rainProbabilityPct);
+  return isForecastHourVisible(hour.time) && (finite(hour.rainMm) || finite(hour.rainProbabilityPct));
 }
 
 /**
