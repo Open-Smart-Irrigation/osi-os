@@ -103,6 +103,8 @@ growth. When that happens, pin the stack against the commit it actually
 branched from and set all three env vars to that commit for every verifier run
 until the stack is rebased onto the current `origin/main`.
 
+`scripts/verify-flows-size-ratchet-allowances.json` is retired and frozen by policy. The size ratchet ignores it; do not edit, extend or delete it. Growth permission comes only from `scripts/flows-growth-exceptions.json` at the base ref. The retired file remains for the merge-reconciliation rule: its verifier requires both source blobs and preserves their entries semantically. That verifier does not enforce the byte-freeze policy; compare the retained file to the pinned source when integrating this change.
+
 ## Common Mistakes
 
 - Requiring `verify-migrations.js` to print an exact OK string; use exit 0

@@ -400,3 +400,50 @@ test('accepts the committed shipped baseline against origin/main', () => {
   assert.equal(r.status, 0, r.stderr || r.stdout);
   assert.match(r.stdout, /verify-flows-size-ratchet: OK/);
 });
+
+// Retired-ledger regressions: the legacy verify-flows-size-ratchet-allowances.json
+// stays in the tree, frozen, only for verify-merge-allowance-preservation.js.
+// These prove the size gate ignores it: growth matching a retained legacy
+// allowance fails unless flows-growth-exceptions.json at the base ref grants it.
+const LEGACY_ALLOWANCES = path.join(repoRoot, 'scripts', 'verify-flows-size-ratchet-allowances.json');
+const LEGACY_NODE = 'sync-bootstrap-build';
+
+function legacyDelta() {
+  const ledger = JSON.parse(fs.readFileSync(LEGACY_ALLOWANCES, 'utf8'));
+  const delta = ledger.node_allowances[LEGACY_NODE] && ledger.node_allowances[LEGACY_NODE].delta;
+  assert.equal(typeof delta, 'number', 'frozen legacy ledger must keep node_allowances.' + LEGACY_NODE);
+  assert.ok(delta > 0, 'frozen legacy delta for ' + LEGACY_NODE + ' must stay positive');
+  return delta;
+}
+
+test('retired ledger: growth matching a retained legacy allowance still FAILS', () => {
+  const delta = legacyDelta();
+  const dir = initRepo([fn(LEGACY_NODE, 'x'.repeat(1000))]);
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.copyFileSync(LEGACY_ALLOWANCES, path.join(dir, 'scripts', 'verify-flows-size-ratchet-allowances.json'));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'legacy ledger present at base']);
+  writeBaseline(dir);
+  writeFlows(dir, [fn(LEGACY_NODE, 'x'.repeat(1000 + delta))]);
+  const r = run(dir);
+  assert.notEqual(r.status, 0, r.stdout);
+  assert.match(r.stderr, new RegExp('node ' + LEGACY_NODE + ' grew \\(' + (1000 + delta) + ' > 1000 at base\\)'));
+});
+
+test('retired ledger: only a fix exception at the base ref grants that same growth', () => {
+  const delta = legacyDelta();
+  const ceiling = 1000 + delta;
+  const dir = initRepo([fn(LEGACY_NODE, 'x'.repeat(1000))], [{
+    id: 'fix-legacy-' + LEGACY_NODE, kind: 'fix', issue: 1, granted: TODAY,
+    reason: 'test bug', nodes: { [LEGACY_NODE]: ceiling }, payback_total: 1000,
+  }]);
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  fs.copyFileSync(LEGACY_ALLOWANCES, path.join(dir, 'scripts', 'verify-flows-size-ratchet-allowances.json'));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'legacy ledger present at base']);
+  writeBaseline(dir);
+  writeFlows(dir, [fn(LEGACY_NODE, 'x'.repeat(ceiling))]);
+  const r = run(dir);
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  assert.match(r.stdout, /fix exception fix-legacy-sync-bootstrap-build is active through/);
+});

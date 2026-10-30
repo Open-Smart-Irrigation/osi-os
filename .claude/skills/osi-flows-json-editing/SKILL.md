@@ -43,6 +43,8 @@ total, so a second fix filed while an earlier entry is outstanding is due by the
 earlier date, and a new entry cannot be added until expired ones are deleted.
 Size counts a node's On Start and On Stop code too.
 
+`scripts/verify-flows-size-ratchet-allowances.json` is retired and frozen by policy. The size ratchet ignores it; do not edit, extend or delete it. Growth permission comes only from `scripts/flows-growth-exceptions.json` at the base ref. The retired file remains for the merge-reconciliation rule: its verifier requires both source blobs and preserves their entries semantically. That verifier does not enforce the byte-freeze policy; compare the retained file to the pinned source when integrating this change.
+
 ## When to use / When NOT to use
 
 Use this skill when you are about to:
