@@ -30,6 +30,7 @@ import { classifySwtWaterStatus, formatSwtCardValue } from '../../utils/swt';
 import { SwtStatusIndicator } from './shared/SwtStatusIndicator';
 import { summarizeZoneSoil, zoneHasFlowMeter, zoneHasRainGauge, type SoilChannelSelection } from '../../utils/zoneSoil';
 import { useDateFormat } from '../../utils/datetime';
+import { formatDisplayFallbackReason } from '../../utils/displayFallback';
 import { isDesktopBrowser } from '../../utils/isDesktopBrowser';
 
 interface IrrigationZoneCardProps {
@@ -125,29 +126,11 @@ function formatWaterReason(t: Translate, reasonCode: string | null | undefined):
     : t('zone.water.reason.default', { defaultValue: 'Waiting for more data' });
 }
 
-// The zone-env-fn flow node (flows.json, "Get Zone Environment Summary",
-// ~L769/772) still emits these two banners as plain English; the cloud's own
-// linked bundle can land its own English prose in the same
-// `display.fallbackReason` field (F100/X-16). Mapping the two known
-// sentences to keys here is a stop-gap for the honesty gap until the flow
-// itself emits a code — a follow-up (see FINDINGS.md F100), not this change.
-// Anything unrecognised gets the generic fallback-source key instead of raw
-// prose.
-const FALLBACK_REASON_CODES: Record<string, string> = {
-  'Using last synced OSI Server values.': 'using_last_synced',
-  'Using local fallback because the OSI Server bundle is unavailable.': 'bundle_unavailable',
-};
-
-function formatFallbackReason(t: Translate, fallbackReason: string | null | undefined): string | null {
-  if (!fallbackReason) return null;
-  const code = FALLBACK_REASON_CODES[fallbackReason];
-  if (!code) {
-    // eslint-disable-next-line no-console
-    console.debug('[IrrigationZoneCard] unmapped display.fallbackReason', fallbackReason);
-    return t('zone.water.source.fallback_generic', { defaultValue: 'Showing data from a fallback source.' });
-  }
-  return t(`zone.water.source.${code}`, { defaultValue: fallbackReason });
-}
+// The fallback banner (`display.fallbackReason` legacy prose, and the stable
+// `display.fallbackReasonCode` newer gateways send, #310) is formatted by the
+// shared util both this card and EnvironmentCard consume, so the honesty
+// rules — recognized code or sentence translates, anything unrecognized gets
+// the generic key, never raw prose — cannot drift between the two cards.
 
 /**
  * The "why" under the water-balance title. A `reasonCode` (F100/T13m) is
@@ -349,7 +332,7 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
     environmentSummary?.water.action,
     t('zone.water.subtitle', { defaultValue: 'Daily rain, irrigation, and crop demand summary for this zone.' }),
   );
-  const fallbackReasonText = formatFallbackReason(t, environmentSummary?.display?.fallbackReason);
+  const fallbackReasonText = formatDisplayFallbackReason(t, environmentSummary?.display);
 
   const soilValue = soilNow.value === null
     ? null

@@ -45,3 +45,35 @@ a separate change.
 `reasonCodes` exists only in this local REST response. Nothing stores it,
 syncs it, or mirrors it to osi-server, and no contract schema or gateway
 capability reports it.
+
+## Display fallback reason codes
+
+The `display` object carries a stable `fallbackReasonCode` next to the legacy
+`fallbackReason` English sentence (#310). The sentence stays byte-for-byte for
+older clients; retiring it is a separate change. Codes:
+
+| Code | Fires when |
+|---|---|
+| `using_last_synced` | the bundle fetch failed and the cached bundle is at most 180 minutes old (`mode: "shared_server_stale"`) |
+| `bundle_unavailable` | the bundle fetch failed and the cache had expired, so the zone answers from local data (`mode: "local_fallback"`) |
+
+The code is set only where the edge itself knows the reason. It is derived
+from the pairing of display mode and the exact sentence, because each catch
+path in the flow node is the sole producer of its sentence under its mode. A
+sentence a linked cloud bundle authored can land in `display.fallbackReason`
+too (mode `shared_server`); it never satisfies either pairing and keeps
+`fallbackReasonCode: null`, so a consumer must not guess a code from prose it
+did not write. No fallback reason at all means both fields are null.
+
+The vocabulary is open. Newer gateways may emit codes not listed here. A
+consumer prefers the code, translates recognized codes, and shows its own
+generic fallback wording for unrecognized codes, for prose without a code it
+does not recognize, and for a null code with prose — never a raw identifier
+and never the raw sentence. Responses without the field (older gateways) keep
+the legacy sentence matching: the two sentences above translate, anything
+else gets the generic wording. With neither sentence nor code, no banner
+renders.
+
+Like the drift codes, `fallbackReasonCode` exists only in this local REST
+response. Nothing stores it, syncs it, or mirrors it to osi-server, and no
+contract schema or gateway capability reports it.

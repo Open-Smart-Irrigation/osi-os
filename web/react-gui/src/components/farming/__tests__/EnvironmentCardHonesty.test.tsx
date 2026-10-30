@@ -188,6 +188,29 @@ describe('EnvironmentCard fallbackReason honesty (F100/X-16)', () => {
     expect(await screen.findByText(frDevices.zone.water.source.fallback_generic)).toBeInTheDocument();
     expect(screen.queryByText('A brand new banner the flow node does not emit yet.')).not.toBeInTheDocument();
   });
+
+  it('prefers the stable fallbackReasonCode and translates it without any prose', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...baseSummary,
+      display: { ...baseSummary.display, fallbackReasonCode: 'bundle_unavailable' },
+    });
+    await renderExpanded('fr');
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+
+    expect(await screen.findByText(frDevices.zone.water.source.bundle_unavailable)).toBeInTheDocument();
+  });
+
+  it('renders the generic key for an unrecognized fallbackReasonCode instead of a raw identifier', async () => {
+    apiMocks.getSummary.mockResolvedValue({
+      ...baseSummary,
+      display: { ...baseSummary.display, fallbackReasonCode: 'future_gateway_code' },
+    });
+    await renderExpanded('fr');
+    await waitFor(() => expect(apiMocks.getSummary).toHaveBeenCalled());
+
+    expect(await screen.findByText(frDevices.zone.water.source.fallback_generic)).toBeInTheDocument();
+    expect(screen.queryByText('future_gateway_code')).not.toBeInTheDocument();
+  });
 });
 
 describe('EnvironmentCard load-failure honesty (X-10)', () => {
