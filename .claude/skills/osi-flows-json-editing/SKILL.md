@@ -21,6 +21,30 @@ This skill covers the mechanics of making a safe, wiring-correct edit to that
 file — not deploying it, diagnosing a live symptom, schema/migration changes,
 sensor semantics, or env-var/flag semantics (see "When NOT to use").
 
+## Where new logic goes
+
+New features do not go into `flows.json`. Put the logic in a tested `osi-*`
+module, register it in `osi-lib`, and add a thin function node that loads it with
+`osiLib.require`. `verify-flows-size-ratchet.js` enforces this against
+`origin/main`: no existing node may grow, the total may not increase, and a new
+node is at most 1,536 chars and over 400 chars only if it loads its logic through
+`osiLib.require`. When a bug fix has to touch a large node, move the code you
+touch into a module so the node shrinks.
+
+The only exception is for a bug fix that cannot wait for an extraction. Run the
+ratchet on the fix branch; on failure it prints the entry to add to
+`scripts/flows-growth-exceptions.json`. Merge that entry in its own PR first:
+the gate reads the file from the base ref, so a PR cannot grant itself growth.
+The entry lets its listed nodes grow for 14 days; other code cannot use that
+room. From day 14 every run fails until the per-profile total is back at or
+below the entry's `payback_total`, and the entry cannot be deleted before then,
+so plan the extraction when you file the exception. Payback is measured on the
+total, so a second fix filed while an earlier entry is outstanding is due by the
+earlier date, and a new entry cannot be added until expired ones are deleted.
+Size counts a node's On Start and On Stop code too.
+
+`scripts/verify-flows-size-ratchet-allowances.json` is retired and frozen by policy. The size ratchet ignores it; do not edit, extend or delete it. Growth permission comes only from `scripts/flows-growth-exceptions.json` at the base ref. The retired file remains for the merge-reconciliation rule: its verifier requires both source blobs and preserves their entries semantically. That verifier does not enforce the byte-freeze policy; compare the retained file to the pinned source when integrating this change.
+
 ## When to use / When NOT to use
 
 Use this skill when you are about to:
@@ -106,7 +130,7 @@ from the repo root.
 | Flow wiring guards | `node scripts/test-flows-wiring.js` | ends `PASS: STREGA wiring + osiDb close + WS2/WS3 wiring guards all passed`, exit 0 |
 | Silent catch ratchet | `node scripts/verify-no-new-silent-catch.js` | exit 0; no new or worsened empty catches in maintained flow nodes |
 | Stray DDL ratchet | `node scripts/verify-no-stray-ddl.js` | exit 0; no unreviewed DDL-marker count increase in flows/deploy surfaces |
-| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | exit 0; no node grew, no new node exceeds 4 KB, total embedded JS did not increase |
+| Flows size ratchet | `node scripts/verify-flows-size-ratchet.js` | exit 0; no node grew, new nodes are wiring (≤ 1,536 chars; over 400 only via `osiLib.require`), total embedded JS did not increase |
 | Bare require scan | `node scripts/flows-bare-require-scan.js` | exit 0; no function node uses bare `require()` instead of `osiLib.require()` |
 | Function-node parse | `node scripts/verify-flows-fn-parse.js` | ends `verify-flows-fn-parse: OK`, exit 0 — required for any function-node edit |
 | Helper registration (only when adding or moving a helper/seam module) | `node scripts/verify-helper-registration.js` | exit 0; registry, loader test, and deploy.sh coverage all match |

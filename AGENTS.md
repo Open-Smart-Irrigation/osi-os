@@ -216,6 +216,8 @@ Broker URL, heartbeat error counters, fan telemetry/control (`pwmfan` hwmon firs
 - BusyBox case conversion: use `tr 'abcdef' 'ABCDEF'`; `tr '[:lower:]' '[:upper:]'` is unreliable on the Pi image.
 - Treat `flows.json` as the main edge backend: most API and scheduler changes live there.
 - Empty `catch` blocks in `flows.json`: `scripts/verify-no-new-silent-catch.js` ratchets the maintained-profile baseline. When touching any function node, convert empty `catch(_){}` / `catch(e){}` / `catch {}` blocks in that node to a visible warning such as `catch (e) { node.warn('<node/context>: ' + (e && e.message ? e.message : e)); }`; new function code must not swallow errors silently. Load in-repo helper modules via `osiLib.require('<name>')` with `{"var": "osiLib", "module": "osi-lib"}` declared in the node's `libs` (bare `require()` of a non-builtin fails CI via the ratchet in `scripts/verify-sync-flow.js`); beyond such declared helpers, keep function-node `libs` minimal.
+- **New features go into modules, not `flows.json`:** a tested `osi-*` module loaded by a thin node through `osiLib.require`. `scripts/verify-flows-size-ratchet.js` (CI-gated) fails if a node grows, the total grows or a new node is more than wiring. Only a bug fix may get an exception, merged separately into `scripts/flows-growth-exceptions.json` and paid back by extraction within 14 days. Rules: `osi-flows-json-editing`, "Where new logic goes".
+  `scripts/verify-flows-size-ratchet-allowances.json` is retired and frozen by policy. The size ratchet ignores it; do not edit, extend or delete it. Growth permission comes only from `scripts/flows-growth-exceptions.json` at the base ref. The retired file remains for the merge-reconciliation rule: its verifier requires both source blobs and preserves their entries semantically. That verifier does not enforce the byte-freeze policy; compare the retained file to the pinned source when integrating this change.
 - **MQTT IN topic rule:** all Node-RED MQTT IN nodes must subscribe to `application/+/device/+/event/up`. ChirpStack generates per-installation application UUIDs at bootstrap; hardcoded UUIDs break silently. Device-type discrimination is done downstream via `CHIRPSTACK_PROFILE_*` env vars and `deviceProfileName` fallback. Check with `scripts/check-mqtt-topics.sh` (manual; no CI workflow runs it).
 - `MqttPublisherService` on the cloud is deprecated (kept for potential future use); all cloud→edge commands are REST.
 - **No deployment identities in public text.** Documents, guidance files,
@@ -279,11 +281,11 @@ cd web/react-gui && npm run test:unit         # frontend unit tests
 cd web/react-gui && npm run build             # frontend build
 ```
 
-**Base ref for a stacked branch:** the size-ratchet, stray-DDL, migration and
-live-identity verifiers compare against `origin/main` by default. A stack that
-sat unmerged through other merges pins all four
-(`OSI_FLOWS_SIZE_BASE_REF`, `OSI_DDL_BASE_REF`, `OSI_MIGRATIONS_BASE_REF`,
-`OSI_IDENTITY_BASE_REF`) to the commit it branched from until it is rebased.
+**Base ref for a stacked branch:** the size-ratchet, stray-DDL and migration
+verifiers compare against `origin/main` by default. A stack that sat unmerged
+through other merges pins all three (`OSI_FLOWS_SIZE_BASE_REF`,
+`OSI_DDL_BASE_REF`, `OSI_MIGRATIONS_BASE_REF`) to the commit it branched from
+until it is rebased.
 Long form: `osi-verification-commands`, "Base ref for a stacked branch".
 
 ---
