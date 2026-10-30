@@ -289,6 +289,12 @@
       "issue": 384
     },
     {
+      "path": "docs/superpowers/plans/issue-233-exact-plan.md",
+      "max": 6,
+      "reason": "Node-RED node ids quoted in the issue 233 exact plan wiring hunks; the EUI pattern cannot tell them apart",
+      "issue": 233
+    },
+    {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
