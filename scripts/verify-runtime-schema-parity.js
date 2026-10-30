@@ -13,6 +13,11 @@ const FLOWS = [
   'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json',
 ].map((p) => path.join(repo, p));
 const MIGRATION_OWNED_TRIGGERS = new Map([
+  // 0078__chameleon_reading_links.sql (issue #356) guards the durable Chameleon diagnostic
+  // link. These are integrity guards, not sync emitters: seed DB and
+  // deploy-time migration runner delivery, never the frozen sync-init-fn boot DDL.
+  ['trg_chameleon_reading_links_identity_bi', '0078__chameleon_reading_links.sql'],
+  ['trg_chameleon_reading_links_immutable_bu', '0078__chameleon_reading_links.sql'],
   ['trg_device_installation_location_revisions_outbox_ai', '0056__installation_revision_outbox.sql'],
   ['trg_device_radio_configuration_revisions_outbox_ai', '0056__installation_revision_outbox.sql'],
   // 0005__field_work_requests.sql is delivered by seed DBs and deploy.sh's

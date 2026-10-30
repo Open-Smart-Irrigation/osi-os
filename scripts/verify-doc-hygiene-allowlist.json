@@ -289,6 +289,36 @@
       "issue": 384
     },
     {
+      "path": "docs/superpowers/plans/2026-10-28-issue-356-chameleon-reading-links.md",
+      "max": 20,
+      "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
+      "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/issue-356-chameleon-reading-links/apply-flow-edits.cjs",
+      "max": 11,
+      "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
+      "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/issue-356-chameleon-reading-links/apply-repo-edits.cjs",
+      "max": 12,
+      "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
+      "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/issue-356-chameleon-reading-links/proposed-test-chameleon-reading-link-ingest.js",
+      "max": 8,
+      "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
+      "issue": 356
+    },
+    {
+      "path": "docs/superpowers/plans/issue-356-chameleon-reading-links/proposed-test-unified-soil-tension-scheduler.js",
+      "max": 2,
+      "reason": "Node-RED node ids in the issue #356 plan packet; the EUI pattern cannot tell them apart",
+      "issue": 356
+    },
+    {
       "path": "docs/superpowers/specs/2026-07-07-deploy-canary-gate-design.md",
       "max": 2,
       "reason": "Node-RED node ids and synthetic test identifiers; the EUI pattern cannot tell them apart",
