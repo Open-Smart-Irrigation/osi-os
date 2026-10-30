@@ -386,21 +386,26 @@ function computeRecommendationDrift(zone, localWater, sharedWater, schedulingMod
     (balanceDeltaMm != null && balanceDeltaMm >= 2);
   if (!actionMismatch && !exceedsThreshold) return null;
   const reasonParts = [];
+  const reasonCodes = [];
   if (actionMismatch) {
     reasonParts.push(
       severeConflict
         ? 'Local and OSI Server recommendations disagree on whether to irrigate.'
         : 'Local and OSI Server recommendations differ.'
     );
+    reasonCodes.push(severeConflict ? 'irrigation_action_conflict' : 'recommendation_action_difference');
   }
   if (waterNeededDeltaMm != null && waterNeededDeltaMm >= 2) {
     reasonParts.push('Estimated water need differs by ' + waterNeededDeltaMm.toFixed(1) + ' mm.');
+    reasonCodes.push('water_need_difference');
   }
   if (next24hRainDeltaMm != null && next24hRainDeltaMm >= 2) {
     reasonParts.push('Forecast rain differs by ' + next24hRainDeltaMm.toFixed(1) + ' mm.');
+    reasonCodes.push('forecast_rain_difference');
   }
   if (balanceDeltaMm != null && balanceDeltaMm >= 2) {
     reasonParts.push('Water balance differs by ' + balanceDeltaMm.toFixed(1) + ' mm.');
+    reasonCodes.push('water_balance_difference');
   }
   return {
     active: true,
@@ -411,7 +416,8 @@ function computeRecommendationDrift(zone, localWater, sharedWater, schedulingMod
     waterNeededDeltaMm,
     next24hRainDeltaMm,
     balanceDeltaMm,
-    canSwitchScheduling: String(zone && zone.schedule_trigger_metric || '').toUpperCase() === 'DENDRO' && schedulingMode !== 'server_preferred'
+    canSwitchScheduling: String(zone && zone.schedule_trigger_metric || '').toUpperCase() === 'DENDRO' && schedulingMode !== 'server_preferred',
+    reasonCodes
   };
 }
 
