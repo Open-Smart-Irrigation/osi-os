@@ -468,6 +468,7 @@
     "sectionTitle": "Umgebung & Wettervorhersage",
     "loading": "Umweltdaten werden geladen…",
     "loadFailed": "Umweltdaten konnten nicht geladen werden",
+    "noData": "Noch keine Umgebungsdaten.",
     "tabs": {
       "water": "Wasser",
       "soil": "Boden",

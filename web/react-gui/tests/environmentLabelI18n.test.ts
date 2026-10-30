@@ -42,6 +42,8 @@ const REQUIRED_KEYS = [
   'environment.cache.miss',
   'environment.loading',
   'environment.loadFailed',
+  // The card's explicit state when no tab has content (#310 follow-up).
+  'environment.noData',
   // Weather-card tile labels (the metric keys already existed and were unused).
   'environment.metrics.air_temperature_c',
   'environment.metrics.relative_humidity_pct',

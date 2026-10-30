@@ -468,6 +468,7 @@
     "sectionTitle": "Ambiente e previsão do tempo",
     "loading": "A carregar dados ambientais…",
     "loadFailed": "Não foi possível carregar os dados ambientais",
+    "noData": "Ainda não há dados do ambiente.",
     "tabs": {
       "water": "Água",
       "soil": "Solo",

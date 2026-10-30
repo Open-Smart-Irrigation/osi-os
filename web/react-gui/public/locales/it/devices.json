@@ -468,6 +468,7 @@
     "sectionTitle": "Ambiente e previsioni meteo",
     "loading": "Caricamento dei dati ambientali…",
     "loadFailed": "Impossibile caricare i dati ambientali",
+    "noData": "Ancora nessun dato ambientale.",
     "tabs": {
       "water": "Acqua",
       "soil": "Suolo",

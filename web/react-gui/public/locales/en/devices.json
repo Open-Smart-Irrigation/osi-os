@@ -465,6 +465,7 @@
     "sectionTitle": "Environment & weather forecast",
     "loading": "Loading environment data…",
     "loadFailed": "Failed to load environment data",
+    "noData": "No environment data yet.",
     "tabs": {
       "water": "Water",
       "soil": "Soil",
