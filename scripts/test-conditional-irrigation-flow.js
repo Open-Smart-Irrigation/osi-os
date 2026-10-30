@@ -52,7 +52,9 @@ for (const profile of ['bcm2712', 'bcm2709']) {
   assert.doesNotMatch(legacyQuery.func, /p\.enabled\s*=\s*1/);
   const lifecycleCommand = flow.find((node) => node.id === 'conditional-lifecycle-command-adapter');
   assert.ok(lifecycleCommand, `${profile}: cloud lifecycle adapter is installed`);
-  assert.deepEqual(lifecycleCommand.wires, [['4f4a765f36cee6f3'], ['command-ack-queue-rest']], `${profile}: lifecycle adapter owns raw fallback and durable ACK outputs`);
+  assert.equal(lifecycleCommand.outputs, 3, `${profile}: lifecycle adapter has raw fallback, durable ACK and S2120 unclaim ACK outputs`);
+  assert.deepEqual(lifecycleCommand.wires, [['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['9d5e3035c3d069c4']], `${profile}: lifecycle adapter owns raw fallback and durable ACK outputs; its S2120 unclaim ACK goes to MQTT only (issue #233)`);
+  console.log(`OK ${profile}: issue 233 lifecycle adapter outputs and wires checked`);
   assert.match(lifecycleCommand.func, /routes\.conditionalLifecycleCommand/);
   assert.deepEqual(flow.find((node) => node.id === '934bf2bc19a8ce22').wires[1], ['conditional-lifecycle-command-adapter'], `${profile}: pending command mutations enter lifecycle adapter before raw SQL`);
   for (const id of ['delete-zone-unassign', 'assign-device-update', 'unassign-device-update', 'delete-device-unlink']) {

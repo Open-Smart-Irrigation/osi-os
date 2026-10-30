@@ -749,3 +749,54 @@ test('valve reassignment retires the old policy binding instead of publishing a 
     assert.equal(payload.zone_uuid, ZONE_UUID);
   } finally { closeFixture(f); }
 });
+
+test('flowPeerDb runs a transaction over the flow connection and commits it (issue #233)', async () => {
+  const calls = [];
+  const rows = { 'SELECT 1': [{ one: 1 }] };
+  const q = async (sql, params) => { calls.push(['q', sql, params]); return rows[sql] || []; };
+  const run = async (sql, params) => { calls.push(['run', sql, params]); };
+  const warnings = [];
+  const db = replication.flowPeerDb(q, run, (text) => warnings.push(text), 'Peer capture');
+  assert.deepEqual(await db.get('SELECT 1'), { one: 1 });
+  assert.equal(await db.get('SELECT 2', ['x']), null);
+  const value = await db.transaction(async (tx) => {
+    assert.deepEqual(await tx.get('SELECT 1', [7]), { one: 1 });
+    await tx.run('UPDATE t SET v=?', [1]);
+    return 'done';
+  });
+  assert.equal(value, 'done');
+  assert.deepEqual(calls, [
+    ['q', 'SELECT 1', []],
+    ['q', 'SELECT 2', ['x']],
+    ['run', 'BEGIN IMMEDIATE', undefined],
+    ['q', 'SELECT 1', [7]],
+    ['run', 'UPDATE t SET v=?', [1]],
+    ['run', 'COMMIT', undefined],
+  ]);
+  assert.deepEqual(warnings, []);
+});
+
+test('flowPeerDb rolls back a failed transaction and rethrows its error without a warning (issue #233)', async () => {
+  const calls = [];
+  const warnings = [];
+  const failure = new Error('peer write failed');
+  const db = replication.flowPeerDb(async () => [], async (sql) => { calls.push(sql); }, (text) => warnings.push(text), 'Peer capture');
+  await assert.rejects(db.transaction(async () => { throw failure; }), (error) => error === failure);
+  assert.deepEqual(calls, ['BEGIN IMMEDIATE', 'ROLLBACK']);
+  assert.deepEqual(warnings, []);
+});
+
+test('flowPeerDb reports a failed rollback with its label and still rethrows the original error (issue #233)', async () => {
+  const calls = [];
+  const warnings = [];
+  const failure = new Error('commit failed');
+  const run = async (sql) => {
+    calls.push(sql);
+    if (sql === 'COMMIT') throw failure;
+    if (sql === 'ROLLBACK') throw new Error('database is locked');
+  };
+  const db = replication.flowPeerDb(async () => [], run, (text) => warnings.push(text), 'Peer invalidation');
+  await assert.rejects(db.transaction(async () => 'value'), (error) => error === failure);
+  assert.deepEqual(calls, ['BEGIN IMMEDIATE', 'COMMIT', 'ROLLBACK']);
+  assert.deepEqual(warnings, ['Peer invalidation rollback failed: database is locked']);
+});

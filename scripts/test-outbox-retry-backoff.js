@@ -58,7 +58,7 @@ function extractPendingSelect(func) {
   // the ordering/limit.  The backoff fixtures use WORK_REQUEST rows, so the
   // extracted statement intentionally omits that conditional predicate while
   // retaining the exact pending/cooldown SELECT and its LIMIT.
-  const m = func.match(/await q\("(SELECT event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at FROM sync_outbox[^"]*)"\s*\+\s*conditionalOutboxEligibility\s*\+\s*"( ORDER BY occurred_at ASC LIMIT 100)"\)/);
+  const m = func.match(/await q\("(SELECT event_uuid, aggregate_type, aggregate_key, op, payload_json, sync_version, occurred_at FROM sync_outbox[^"]*)"\s*\+\s*conditionalOutboxEligibility\s*\+\s*"( ORDER BY occurred_at ASC, rowid ASC LIMIT 100)"\)/);
   assert.ok(m, 'pending-events SELECT not found in node func');
   return m[1] + m[2];
 }
