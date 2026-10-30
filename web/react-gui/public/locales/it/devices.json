@@ -1051,7 +1051,9 @@
     "lastReport": "Ultima rilevazione",
     "tips_one": "{{count}} ribaltamento",
     "tips_other": "{{count}} ribaltamenti",
-    "tipsUnavailable": "Numero di ribaltamenti non disponibile"
+    "tipsUnavailable": "Numero di ribaltamenti non disponibile",
+    "temperature": "Temperatura dell’involucro del pluviometro",
+    "temperatureHint": "Misurata nell’involucro, non è la temperatura dell’aria · ultimo invio {{time}}"
   },
   "zoneRainGauge": {
     "label": "Pluviometro per questa zona",

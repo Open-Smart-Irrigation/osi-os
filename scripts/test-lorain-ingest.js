@@ -173,6 +173,17 @@ test('invalid tips are rejected; the device_data row keeps the diagnostic status
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM zone_daily_environment'), 0);
 });
 
+test('the housing temperature is stored as decoded, and an open-thermistor value as null', async () => {
+  const [first, second] = fixture('wet-ordinary').frames;
+  const decoded = (frame) => decodeUplink({ fPort: frame.fPort, bytes: Buffer.from(frame.bytesHex, 'hex') }).data;
+  const db = seed();
+  await ingest(db, { ...first, object: { ...decoded(first), ambient_temperature: 18.4 } });
+  // An open or shorted thermistor reads as absolute zero.
+  await ingest(db, { ...second, object: { ...decoded(second), ambient_temperature: -273.1 } });
+  assert.deepEqual(rows(db, 'SELECT ambient_temperature FROM device_data ORDER BY recorded_at'),
+    [{ ambient_temperature: 18.4 }, { ambient_temperature: null }]);
+});
+
 // Every contract fixture through the node: after the replay each frame's
 // stored state matches the fixture's received-only column (the shipped pinned
 // set is empty, so nothing is promoted), and the zone day is the sum of the
