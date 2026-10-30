@@ -10,6 +10,8 @@ The complete Git tree diff from M to that main, `0f41ff4b4729085142f973d20996857
 
 Author: Opus, under the maintainer's 2026-10-29 interim arrangement while the third council provider is unavailable. The third vote is missing; this is not a full council. Merging stays with the maintainer.
 
+The accepted reconciliation record exists only in the plan commit `00a6005081e86a0a47869aab892a2268f085e9e3` (blob `ca2131ca8d6648d42eb1283b497a479f42dc5d21`, SHA-256 `16b171361901bd3ed8be1164a727d1051f229263cf164b0b85b137c529f6c6bf`). A later commit on this branch replaced the file with a redacted display copy for the public documentation scan. The copy replaces two `tree.diff` path values with `[redacted]` and the SHA-256 of each original path, and its `redactedDisplay` field names the original. Every other field keeps the original value, including both rows' status, modes, object ids, class and `reviewedAtN`. The display copy is not a custody input: `custody-521.js recheck` refuses it, because the recomputed tree record no longer equals it. Task 1 already requires HEAD to be the plan commit, so a historical replay checks out that commit and reads its unchanged record.
+
 ## 1. Decision and scope
 
 The maintainer selected a bounded refusal: a local administrator's password reset for a cloud-linked account (`auth_mode='server'`) answers a stable 409 and changes nothing, instead of answering 200 while the account keeps signing in with its linked credential. A cloud account-recovery feature is a separate design and authorization.

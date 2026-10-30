@@ -1,4 +1,28 @@
 {
+  "redactedDisplay": {
+    "note": "Redacted display copy for the public documentation scan. This is not a custody input: custody-521.js recheck refuses it. The accepted record is the unchanged file in the plan commit named below; replay Task 1 there.",
+    "redacted": "Two tree.diff path values (rows below), each replaced by \"[redacted]\" and the SHA-256 of the original UTF-8 path in pathSha256. Status, modes, object ids, class and reviewedAtN are unchanged.",
+    "originalRecord": {
+      "planCommit": "00a6005081e86a0a47869aab892a2268f085e9e3",
+      "path": "docs/superpowers/plans/2026-10-29-issue-521-linked-reset-refusal/reconciliation.json",
+      "blob": "ca2131ca8d6648d42eb1283b497a479f42dc5d21",
+      "sha256": "16b171361901bd3ed8be1164a727d1051f229263cf164b0b85b137c529f6c6bf"
+    },
+    "rows": [
+      {
+        "diffIndex": 24,
+        "pathSha256": "c53b7f38c57d33b63195b993066ae6e9b0e1c153b76e4a4a16a45ef4cf15f544",
+        "oldOid": "c9b011cb9a076a12560e24df1eb34d180772db55",
+        "newOid": "f2696a6d078c21cf4e33a01da7bc567d8dd8bf7b"
+      },
+      {
+        "diffIndex": 25,
+        "pathSha256": "1cc4737cb5abf3db4e022809e63dd73de627f77d34955e6da66a9c3ab7fb5b3b",
+        "oldOid": "6d4bddb8292b488175d2dbbab0a460da83ec1c8c",
+        "newOid": "b1339ca884ad0cf6bbd82ea1026d7b63938d5092"
+      }
+    ]
+  },
   "base": "bd1afcd248616653e1962081c8c9e3d7b19d650f",
   "M": "74ff869e335529783e9c7a39e9ae1a37a8019711",
   "N": "0f41ff4b4729085142f973d20996857ffca1e7a1",
@@ -2049,7 +2073,8 @@
       },
       {
         "status": "M",
-        "path": "tests/silvan/cases/V2-valve-acks.js",
+        "path": "[redacted]",
+        "pathSha256": "c53b7f38c57d33b63195b993066ae6e9b0e1c153b76e4a4a16a45ef4cf15f544",
         "oldMode": "100644",
         "newMode": "100644",
         "oldOid": "c9b011cb9a076a12560e24df1eb34d180772db55",
@@ -2059,7 +2084,8 @@
       },
       {
         "status": "M",
-        "path": "tests/silvan/selftest.js",
+        "path": "[redacted]",
+        "pathSha256": "1cc4737cb5abf3db4e022809e63dd73de627f77d34955e6da66a9c3ab7fb5b3b",
         "oldMode": "100755",
         "newMode": "100755",
         "oldOid": "6d4bddb8292b488175d2dbbab0a460da83ec1c8c",
