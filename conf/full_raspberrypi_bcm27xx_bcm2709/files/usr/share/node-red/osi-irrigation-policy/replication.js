@@ -1026,6 +1026,37 @@ async function notifyProjectionKeys(dbOrOptions, maybeOptions) {
   return results;
 }
 
+// Issue #233: the conditional peer database of a flow node, built over that node's own
+// connection. q(sql, params) resolves rows and run(sql, params) executes; the peer verbs above
+// use only get and transaction. A transaction runs fn between BEGIN IMMEDIATE and COMMIT. When
+// fn or COMMIT throws it rolls back, reports a failed rollback through
+// warn(label + ' rollback failed: ...') and rethrows that error.
+function flowPeerDb(q, run, warn, label) {
+  const get = async (sql, params = []) => (await q(sql, params))[0] || null;
+  return {
+    get,
+    transaction: async (fn) => {
+      await run('BEGIN IMMEDIATE');
+      const tx = {
+        get,
+        run: async (sql, params = []) => run(sql, params)
+      };
+      try {
+        const value = await fn(tx);
+        await run('COMMIT');
+        return value;
+      } catch (error) {
+        try {
+          await run('ROLLBACK');
+        } catch (rollbackError) {
+          warn(label + ' rollback failed: ' + String(rollbackError && rollbackError.message ? rollbackError.message : rollbackError));
+        }
+        throw error;
+      }
+    }
+  };
+}
+
 module.exports = {
   CONDITIONAL_CAPABILITY,
   readPeerContext,
@@ -1034,6 +1065,7 @@ module.exports = {
   capturePeerRequest: beginPeerRequest,
   acceptPeerCapabilities,
   invalidatePeerRequest,
+  flowPeerDb,
   beginLinkAttempt,
   validateLinkAttempt,
   finalizePeerContext,
