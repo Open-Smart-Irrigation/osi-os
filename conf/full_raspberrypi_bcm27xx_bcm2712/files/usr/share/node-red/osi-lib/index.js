@@ -18,6 +18,10 @@ const NAME_TO_PATH = {
   'installation-location': 'osi-installation-location-helper',
   'installation': 'osi-installation-helper',
   'history-router': 'osi-history-router',
+  // #564: Merge Data (GET /api/devices) dates the latest rain value through
+  // osiLib.require('history-helper'). Without this entry the lookup failed on
+  // every gateway and rain_day was never sent, although the package shipped.
+  'history-helper': 'osi-history-helper',
   'osi-db-helper': 'osi-db-helper',
   'osi-command-ledger': 'osi-command-ledger',
   'scoped-access-commands': 'osi-scoped-access-commands',
