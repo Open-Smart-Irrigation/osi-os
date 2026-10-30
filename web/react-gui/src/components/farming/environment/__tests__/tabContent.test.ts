@@ -192,21 +192,33 @@ describe('hasUsableWaterContent', () => {
     expect(hasUsableWaterContent({ ...emptyWater, next24hRainMm: 0 })).toBe(true);
   });
 
-  it('treats today\'s litre and mm irrigation values as content only above zero', () => {
+  it('counts irrigation only when a configured source makes its tile visible', () => {
     expect(hasUsableWaterContent({ ...emptyWater, irrigationTodayMeasuredLiters: 0, measuredIrrigationNetMm: 0 })).toBe(false);
-    expect(hasUsableWaterContent({ ...emptyWater, irrigationTodayEstimatedLiters: 12.5 })).toBe(true);
+    expect(hasUsableWaterContent({ ...emptyWater, irrigationTodayEstimatedLiters: 12.5 })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, irrigationTodayEstimatedLiters: 12.5 }, [{ type_id: 'STREGA_VALVE' } as Device])).toBe(true);
+    expect(hasUsableWaterContent(emptyWater, [{ flow_meter_enabled: 1 } as Device])).toBe(true);
   });
 
-  it('reads the seven-day history: demand any value, rain only above zero', () => {
+  it('counts source-supported historical rain, including measured zero', () => {
     expect(hasUsableWaterContent({ ...emptyWater, daily: [
-      { date: '2026-10-24', rainMm: 0, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null, demandMm: 0 },
+      { date: '2026-10-24', rainMm: null, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null, demandMm: 0, demandSource: 'calculated' },
     ] })).toBe(true);
     expect(hasUsableWaterContent({ ...emptyWater, daily: [
       { date: '2026-10-24', rainMm: 0, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null, demandMm: null },
-    ] })).toBe(false);
+    ] })).toBe(true);
     expect(hasUsableWaterContent({ ...emptyWater, daily: [
       { date: '2026-10-24', rainMm: 4.2, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null, demandMm: null },
     ] })).toBe(true);
+  });
+
+  it('rejects unavailable Water and historical fields without a rendered series', () => {
+    const daily = [{ date: '2026-10-24', rainMm: 0, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null }];
+    expect(hasUsableWaterContent({ ...emptyWater, available: false, daily })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, sensorHealth: { ...emptyWater.sensorHealth, rainGaugePresent: false }, daily })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, daily: [{ ...daily[0], rainMm: null, rainReceivedMm: 2, et0Mm: 3 }] })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, daily: [{ ...daily[0], rainMm: null, demandMm: 3, demandSource: 'forecast' }] })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, daily: [{ ...daily[0], rainMm: null, measuredIrrigationNetMm: 3 }] })).toBe(false);
+    expect(hasUsableWaterContent({ ...emptyWater, areaM2: 100, irrigationEfficiencyPct: 80, daily: [{ ...daily[0], rainMm: null, measuredIrrigationNetMm: 3 }] })).toBe(true);
   });
 });
 

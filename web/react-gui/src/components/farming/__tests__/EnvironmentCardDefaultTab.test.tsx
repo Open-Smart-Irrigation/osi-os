@@ -126,15 +126,15 @@ function tabButton(id: keyof typeof tabs) {
   return screen.getByRole('button', { name: tabs[id] });
 }
 
-async function renderExpanded(zone: IrrigationZone = zoneA) {
+async function renderExpanded(zone: IrrigationZone = zoneA, zoneDevices: Device[] = devices) {
   const instance = await buildI18n();
   const view = render(
     <I18nextProvider i18n={instance}>
-      <EnvironmentCard zone={zone} devices={devices} />
+      <EnvironmentCard zone={zone} devices={zoneDevices} />
     </I18nextProvider>,
   );
   fireEvent.click(screen.getByRole('button', { expanded: false }));
-  return view;
+  return { ...view, instance };
 }
 
 function deferred<T>() {
@@ -145,12 +145,18 @@ function deferred<T>() {
 
 beforeEach(() => {
   apiMocks.getSummary.mockReset();
+  vi.stubGlobal('ResizeObserver', class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe('EnvironmentCard default tab (#310)', () => {
@@ -260,9 +266,59 @@ describe('EnvironmentCard default tab (#310)', () => {
     expect(await screen.findByText(enDevices.environment.local.noData)).toBeInTheDocument();
     expect(tabButton('sensors')).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('skips unavailable Water history for a visible device soil reading', async () => {
+    apiMocks.getSummary.mockResolvedValue(buildSummary({ water: {
+      available: false,
+      daily: [{ date: '2026-10-29', rainMm: 4, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null }],
+    } }));
+    await renderExpanded(zoneA, [{ latest_data: { swt_1: 25 } } as Device]);
+
+    expect(await screen.findByText('25.0 kPa')).toBeInTheDocument();
+    expect(tabButton('soil')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('opens Water for source-supported historical zero rain and displays its chart', async () => {
+    apiMocks.getSummary.mockResolvedValue(buildSummary({ local: sensorsOnly.local, water: {
+      available: true,
+      sensorHealth: { sensorCount: 1, freshSensorCount: 1, staleSensorCount: 0, rainGaugePresent: true, flowMeterPresent: false, warnings: [] },
+      daily: [{ date: '2026-10-29', rainMm: 0, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null }],
+    } }));
+    await renderExpanded();
+
+    expect(await screen.findByTestId('water-trend-chart')).toBeInTheDocument();
+    expect(tabButton('water')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('skips historical received-only rain that the Water chart does not display', async () => {
+    apiMocks.getSummary.mockResolvedValue(buildSummary({ local: soilOnly.local, water: {
+      available: true,
+      daily: [{ date: '2026-10-29', rainMm: null, rainReceivedMm: 2, irrigationLiters: null, irrigationNetMm: null, totalWaterMm: null }],
+    } }));
+    await renderExpanded();
+
+    expect(await screen.findByText(enDevices.environment.soil.moistureVwc)).toBeInTheDocument();
+    expect(tabButton('soil')).toHaveAttribute('aria-pressed', 'true');
+  });
 });
 
 describe('EnvironmentCard selection persistence (#310)', () => {
+  it('updates the automatic tab on device refresh and preserves a later manual choice', async () => {
+    apiMocks.getSummary.mockResolvedValue(buildSummary());
+    const { rerender, instance } = await renderExpanded();
+    await screen.findByText(enDevices.environment.noData);
+
+    const soilDevices = [{ latest_data: { swt_1: 25 } } as Device];
+    rerender(<I18nextProvider i18n={instance}><EnvironmentCard zone={zoneA} devices={soilDevices} /></I18nextProvider>);
+    expect(await screen.findByText('25.0 kPa')).toBeInTheDocument();
+    expect(tabButton('soil')).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(tabButton('weather'));
+    rerender(<I18nextProvider i18n={instance}><EnvironmentCard zone={zoneA} devices={devices} /></I18nextProvider>);
+    expect(tabButton('weather')).toHaveAttribute('aria-pressed', 'true');
+    expect(apiMocks.getSummary).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a manually chosen tab across the 5-minute refresh even when its data disappears', async () => {
     vi.useFakeTimers();
     apiMocks.getSummary.mockResolvedValueOnce(forecastOnly);

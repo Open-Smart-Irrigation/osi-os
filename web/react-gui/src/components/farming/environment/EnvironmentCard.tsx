@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { useDateFormat } from '../../../utils/datetime';
@@ -25,14 +25,6 @@ interface Props {
 
 type Tab = 'water' | 'soil' | 'weather' | 'agronomic' | 'sensors';
 type Translate = TFunction<'devices'>;
-
-/**
- * A tab choice: `manual` once the user picked it by hand (kept across the
- * 5-minute refresh, even one that takes its data away), data-driven
- * otherwise, so the default follows the data as it changes. A zone switch
- * returns the choice to the data-driven state.
- */
-type TabSelection = { manual: boolean; tab: Tab };
 
 // Mirrors IrrigationZoneCard's mapping for the same banner field
 // (`display.fallbackReason`): the zone-env-fn flow node still emits these
@@ -126,12 +118,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ZoneEnvironmentSummary | null>(null);
-  const [selection, setSelection] = useState<TabSelection>({ manual: false, tab: 'water' });
-  const activeTab = selection.tab;
-  // The load effect only re-runs on a zone change; the devices list can move
-  // under it, so the interval's load reads it through this ref.
-  const devicesRef = useRef(devices);
-  devicesRef.current = devices;
+  const [manualTab, setManualTab] = useState<Tab | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +128,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
     // resolution of the previous zone's fetch is dropped by `cancelled`.
     setData(null);
     setError(null);
-    setSelection({ manual: false, tab: 'water' });
+    setManualTab(null);
 
     const load = async () => {
       setLoading(true);
@@ -150,13 +137,6 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         const summary = await environmentAPI.getSummary(zone.id);
         if (cancelled) return;
         setData(summary);
-        // A tab chosen by hand survives every refresh; without a manual
-        // choice the opening tab follows the data (#310: Weather when real
-        // current or forecast content exists, then Water/Soil/Sensors/
-        // Agronomy in that order).
-        setSelection((previous) => (previous.manual
-          ? previous
-          : { manual: false, tab: preferredEnvironmentTab(summary, devicesRef.current) ?? 'water' }));
       } catch (e: any) {
         // Never the backend's own prose (`data.message`/`data.error`, or
         // axios's own English `e.message`) — only the translated generic
@@ -184,9 +164,10 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
   const phenologicalStage = zone.phenologicalStage ?? zone.phenological_stage ?? null;
   const fallbackReasonText = data ? formatFallbackReason(t, data.display?.fallbackReason) : null;
   const preferredTab = data ? preferredEnvironmentTab(data, devices) : null;
+  const activeTab = manualTab ?? preferredTab ?? 'water';
 
   const tabs: { id: Tab; label: string; available: boolean }[] = [
-    { id: 'water', label: t('environment.tabs.water', { defaultValue: 'Water' }), available: data == null || hasUsableWaterContent(data.water) },
+    { id: 'water', label: t('environment.tabs.water', { defaultValue: 'Water' }), available: data == null || hasUsableWaterContent(data.water, devices) },
     { id: 'soil', label: t('environment.tabs.soil', { defaultValue: 'Soil' }), available: data == null || hasUsableSoilContent(data.local, devices) },
     { id: 'weather', label: t('environment.tabs.weather', { defaultValue: 'Weather' }), available: data == null || hasUsableWeatherContent(data.online, data.forecast) },
     { id: 'agronomic', label: t('environment.tabs.agronomic', { defaultValue: 'Agronomy' }), available: data == null || hasUsableAgronomicContent(data.agronomic) },
@@ -202,9 +183,9 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
         onClick={() => setCollapsed((value) => !value)}
       >
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="flex items-center gap-2">
-            <CloudIcon className="text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]" />
-            <span className="text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]">
+          <span className="flex min-w-0 items-center gap-2">
+            <CloudIcon className="shrink-0 text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text)]" />
+            <span className="min-w-0 text-xs font-bold uppercase tracking-widest text-[var(--text-tertiary)] transition-colors [overflow-wrap:anywhere] group-hover:text-[var(--text)]">
               {t('environment.sectionTitle', { defaultValue: 'Environment' })}
             </span>
           </span>
@@ -258,7 +239,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setSelection({ manual: true, tab: tab.id })}
+                      onClick={() => setManualTab(tab.id)}
                       aria-pressed={isActive}
                       className={`relative flex min-h-[48px] min-w-[88px] flex-1 items-center justify-center rounded-t-lg px-3 py-2 text-sm font-medium leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus)] ${
                         isActive
@@ -268,7 +249,7 @@ export const EnvironmentCard: React.FC<Props> = ({ zone, devices }) => {
                             : 'text-[var(--text-tertiary)] opacity-50'
                       }`}
                     >
-                      <span className="text-center">{tab.label}</span>
+                      <span className="min-w-0 text-center [overflow-wrap:anywhere]">{tab.label}</span>
                       {isActive && <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-t bg-[var(--primary)]" />}
                     </button>
                   );

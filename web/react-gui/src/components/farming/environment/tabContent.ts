@@ -6,11 +6,11 @@ import type {
   HourlyForecast,
   LocalEnvironment,
   OnlineEnvironment,
-  WaterDay,
   WaterEnvironment,
   ZoneEnvironmentSummary,
 } from '../../../types/farming';
 import { collectDeviceSwtValues } from '../../../utils/swt';
+import { buildWaterChartRows, hasWaterTrendData, waterChartSeries, waterSourceVisibility } from './waterChart';
 
 /**
  * Content-availability rules for the Environment card's tab selection (#310
@@ -28,16 +28,6 @@ export type EnvironmentTabId = 'water' | 'soil' | 'weather' | 'agronomic' | 'sen
 
 function finite(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
-}
-
-/**
- * Fields the edge fills with 0 when nothing was measured (the daily
- * aggregation writes 0 for a day without a sample, and today's flow/estimated
- * litres default to 0 without a row) only count above zero. Fields with a
- * null-when-unknown contract keep their zero as a real measurement.
- */
-function positive(value: number | null | undefined): boolean {
-  return finite(value) && value > 0;
 }
 
 function nonEmptyText(value: string | null | undefined): boolean {
@@ -94,34 +84,20 @@ export function hasUsableWeatherContent(
   return hasUsableCurrentConditions(online) || hasUsableForecastContent(forecast);
 }
 
-function hasUsableWaterDay(day: WaterDay): boolean {
-  return positive(day.rainMm)
-    || finite(day.rainReceivedMm)
-    || finite(day.demandMm)
-    || finite(day.et0Mm)
-    || positive(day.measuredIrrigationLiters)
-    || positive(day.estimatedIrrigationLiters)
-    || positive(day.measuredIrrigationNetMm)
-    || positive(day.estimatedIrrigationNetMm);
-}
-
-/**
- * Whether the Water tab has a value to render. The edge sets
- * `water.available` as soon as any section has anything, so the flag alone is
- * not content; the check is on the fields the tab draws. Rain, demand,
- * balance and the forecast total are null when unknown, so their zero is a
- * real value; the litre and daily-rain fields are 0-by-default on the edge
- * and only count above zero.
- */
-export function hasUsableWaterContent(water: WaterEnvironment): boolean {
-  if (!water) return false;
-  if (finite(water.rainTodayMm)
-    || finite(water.rainTodayReceivedMm)
-    || finite(water.waterNeededTodayMm)
+/** Count only values behind a visible Water tile, forecast line or trend. */
+export function hasUsableWaterContent(water: WaterEnvironment, devices: Device[] = []): boolean {
+  if (!water?.available) return false;
+  const visibility = waterSourceVisibility(water, devices);
+  if (finite(water.waterNeededTodayMm)
     || finite(water.balanceTodayMm)
     || finite(water.next24hRainMm)) return true;
-  if (positive(water.irrigationTodayMeasuredLiters) || positive(water.irrigationTodayEstimatedLiters)) return true;
-  return water.daily.some(hasUsableWaterDay);
+  if (visibility.showRainTile && (finite(water.rainTodayMm) || finite(water.rainTodayReceivedMm))) return true;
+  if (visibility.hasFlowMeter && (finite(water.irrigationTodayMeasuredLiters)
+    || (visibility.hasSetup && finite(water.measuredIrrigationNetMm)))) return true;
+  if (visibility.hasValve && (finite(water.irrigationTodayEstimatedLiters)
+    || (visibility.hasSetup && finite(water.estimatedIrrigationNetMm)))) return true;
+  const rows = buildWaterChartRows(water);
+  return hasWaterTrendData(waterChartSeries(water, rows, visibility), rows);
 }
 
 /**
@@ -131,7 +107,7 @@ export function hasUsableWaterContent(water: WaterEnvironment): boolean {
  */
 export function hasUsableSoilContent(
   local: LocalEnvironment,
-  devices: Array<Pick<Device, 'latest_data'>>,
+  devices: Device[],
 ): boolean {
   if (collectDeviceSwtValues(devices ?? []).length > 0) return true;
   const metrics = local?.metrics ?? [];
@@ -170,10 +146,10 @@ export function hasUsableAgronomicContent(agronomic: AgronomicEnvironment): bool
  */
 export function preferredEnvironmentTab(
   summary: ZoneEnvironmentSummary,
-  devices: Array<Pick<Device, 'latest_data'>>,
+  devices: Device[],
 ): EnvironmentTabId | null {
   if (hasUsableWeatherContent(summary.online, summary.forecast)) return 'weather';
-  if (hasUsableWaterContent(summary.water)) return 'water';
+  if (hasUsableWaterContent(summary.water, devices)) return 'water';
   if (hasUsableSoilContent(summary.local, devices)) return 'soil';
   if (hasUsableSensorsContent(summary.local)) return 'sensors';
   if (hasUsableAgronomicContent(summary.agronomic)) return 'agronomic';
