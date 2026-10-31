@@ -1,0 +1,367 @@
+{
+  "format": 1,
+  "contract": "journal-mutation-rejection-v1.schema.json",
+  "valid_vectors": [
+    {
+      "name": "ENTRY_CREATE refused for a missing final plot",
+      "emitted_by_s1": true,
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "ENTRY_CREATE refused for a missing required catalog value",
+      "emitted_by_s1": true,
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000448",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000448",
+        "payload_sha256": "a54b0061c753519fff6527a0827dbe3c44865cd0a54b0061c753519fff6527a0",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_final_required_value_missing",
+        "message": "attr.crop is required for this final journal entry",
+        "field_paths": ["/candidate/entry/values"]
+      }
+    },
+    {
+      "name": "schema-valid pair that S1 never emits: ENTRY_CORRECT with a value code",
+      "emitted_by_s1": false,
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000449",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CORRECT",
+        "resource_uuid": "30000000-0000-4000-8000-000000000448",
+        "payload_sha256": "b54b0061c753519fff6527a0827dbe3c44865cd0a54b0061c753519fff6527a0",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_final_required_value_missing",
+        "message": "attr.crop is required for this final journal entry",
+        "field_paths": []
+      }
+    },
+    {
+      "name": "message at the 512-character bound and four field paths",
+      "emitted_by_s1": false,
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000450",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000450",
+        "payload_sha256": "c54b0061c753519fff6527a0827dbe3c44865cd0a54b0061c753519fff6527a0",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_final_required_value_missing",
+        "message": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "field_paths": ["/candidate/entry/values", "/candidate/entry/plot_uuid", "/candidate/entry/a~1b", "/candidate/entry/c~0d"]
+      }
+    }
+  ],
+  "invalid_vectors": [
+    {
+      "name": "extra key",
+      "error": "additional property detail",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"],
+        "detail": "internal"
+      }
+    },
+    {
+      "name": "missing field_paths",
+      "error": "required property field_paths",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries"
+      }
+    },
+    {
+      "name": "unknown code",
+      "error": "code enum",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "dependency_unavailable",
+        "message": "plot snapshot unavailable",
+        "field_paths": []
+      }
+    },
+    {
+      "name": "wrong kind",
+      "error": "kind const",
+      "input": {
+        "kind": "ENTRY_MUTATION_RESULT",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "version 2",
+      "error": "version const",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 2,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "disposition other than not_applied",
+      "error": "disposition const",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "non-canonical mutation UUID",
+      "error": "mutation_uuid pattern",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "1000000A-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "short payload hash",
+      "error": "payload_sha256 pattern",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec81684440",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "lowercase gateway identifier",
+      "error": "actor_identifier pattern",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016c001f1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "user actor",
+      "error": "actor_type const",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "user",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "empty message",
+      "error": "message minLength",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "message over 512 characters",
+      "error": "message maxLength",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "field_paths": ["/candidate/entry/plot_uuid"]
+      }
+    },
+    {
+      "name": "five field paths",
+      "error": "field_paths maxItems",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["/a", "/b", "/c", "/d", "/e"]
+      }
+    },
+    {
+      "name": "field path that is not a JSON pointer",
+      "error": "field_paths item pattern",
+      "input": {
+        "kind": "JOURNAL_MUTATION_REJECTION",
+        "version": 1,
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "workspace_uuid": "20000000-0000-4000-8000-000000000447",
+        "operation": "ENTRY_CREATE",
+        "resource_uuid": "30000000-0000-4000-8000-000000000447",
+        "payload_sha256": "0a3e9641114bc1f13bbfa32208e8d2cce7824e5b32f27d15113d3ec816844406",
+        "actor_type": "gateway",
+        "actor_identifier": "0016C001F1000001",
+        "disposition": "not_applied",
+        "code": "entry_plot_required_for_final",
+        "message": "plot_uuid is required for non-farm-wide final entries",
+        "field_paths": ["candidate.entry.plot_uuid"]
+      }
+    },
+    {
+      "name": "success-shaped body on HTTP 400",
+      "error": "not a receipt",
+      "input": {
+        "kind": "ENTRY_MUTATION_RESULT",
+        "mutation_uuid": "10000000-0000-4000-8000-000000000447",
+        "outcome": "applied",
+        "head": { "entry_uuid": "30000000-0000-4000-8000-000000000447", "version": 1 },
+        "revision_uuid": "b0000000-0000-4000-8000-000000000447",
+        "conflict_uuid": null
+      }
+    },
+    {
+      "name": "generic validation error body",
+      "error": "not a receipt",
+      "input": { "error": "invalid_journal_v2_request" }
+    }
+  ]
+}

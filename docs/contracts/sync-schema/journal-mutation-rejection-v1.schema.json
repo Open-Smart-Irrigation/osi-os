@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://contracts.opensmartirrigation.org/sync-schema/journal-mutation-rejection-v1.schema.json",
+  "title": "Field Journal V2 Mutation Rejection Receipt v1",
+  "description": "The HTTP 400 body of POST /api/v2/journal/gateways/{eui}/mutations when the server refused one identified mutation without applying it. Any other 400 body, including the generic invalid_journal_v2_request, is not a receipt and leaves the outcome unknown. A receipt does not enable a producer or an issuer.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "mutation_uuid",
+    "workspace_uuid",
+    "operation",
+    "resource_uuid",
+    "payload_sha256",
+    "actor_type",
+    "actor_identifier",
+    "disposition",
+    "code",
+    "message",
+    "field_paths"
+  ],
+  "properties": {
+    "kind": { "const": "JOURNAL_MUTATION_REJECTION" },
+    "version": { "const": 1 },
+    "mutation_uuid": { "$ref": "#/definitions/canonicalUuid" },
+    "workspace_uuid": { "$ref": "#/definitions/canonicalUuid" },
+    "operation": {
+      "enum": [
+        "ENTRY_CREATE",
+        "ENTRY_CORRECT",
+        "ENTRY_VOID",
+        "PRODUCT_UPSERT",
+        "CUSTOM_VOCAB_UPSERT",
+        "PLOT_SNAPSHOT",
+        "PLOT_GROUP_SNAPSHOT",
+        "CUTOVER_BARRIER_RECEIPT"
+      ]
+    },
+    "resource_uuid": { "$ref": "#/definitions/canonicalUuid" },
+    "payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "actor_type": { "const": "gateway" },
+    "actor_identifier": { "type": "string", "pattern": "^[0-9A-F]{16}$" },
+    "disposition": { "const": "not_applied" },
+    "code": {
+      "enum": [
+        "entry_plot_required_for_final",
+        "entry_final_required_value_missing"
+      ]
+    },
+    "message": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "field_paths": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "string",
+        "maxLength": 256,
+        "pattern": "^(/([^/~]|~[01])*)+$"
+      }
+    }
+  },
+  "definitions": {
+    "canonicalUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    }
+  }
+}
