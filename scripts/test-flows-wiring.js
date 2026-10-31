@@ -196,6 +196,7 @@ const OSI_INSTALLATION_LOCATION_BINDING = {
 };
 const OSI_ENTITY_NAME_BINDING = { variable: 'entityName', module: 'entity-name' };
 const OSI_CHIRPSTACK_BINDING = { variable: 'chirpstack', module: 'chirpstack' };
+const OSI_IRRIGATION_POLICY_BINDING = { variable: 'osiIrrigationPolicy', module: 'osi-irrigation-policy' };
 
 function requireOsiLibContract(node, expectedBindings, label, unavailableErrorPrefix = 'Journal helpers unavailable:') {
     if (!node || typeof node.func !== 'string') return false;
@@ -505,6 +506,20 @@ if (!dedupe || !requireOsiLibContract(
     !/node\.error/.test(dedupe.func || '') || /dispatching command/.test(dedupe.func || '')) {
     failures.push('journal commands: dedupe must delegate exact replay via the shared command ledger, fail closed, and bypass ACK reclassification');
 }
+const s2120UnclaimGate = byId['s2120-unclaim-gate'];
+if (!s2120UnclaimGate || !requireOsiLibContract(
+    s2120UnclaimGate,
+    [OSI_IRRIGATION_POLICY_BINDING],
+    'S2120 unclaim gate',
+    'S2120 unclaim owner unavailable:'
+) || s2120UnclaimGate.outputs !== 2 ||
+    JSON.stringify(s2120UnclaimGate.wires) !== JSON.stringify([['command-dedupe-dispatch'], ['journal-command-apply-fn']]) ||
+    !pendingGuard || JSON.stringify(pendingGuard.wires) !== JSON.stringify([['s2120-unclaim-gate'], ['command-ack-queue-rest']]) ||
+    !/routes\.s2120UnclaimGate\(/.test(s2120UnclaimGate.func || '')) {
+    failures.push('S2120 unclaim gate: every guarded cloud command must pass the issue #233 owner gate before the generic replay check, and only the owner may send it past that check');
+} else {
+    console.log('OK  S2120 unclaim gate runs before the generic replay check; only the irrigation-policy owner sends a command past it');
+}
 if (!journalApply || !requireOsiLibContract(
     journalApply,
     [OSI_DB_BINDING, OSI_JOURNAL_BINDING],
@@ -617,6 +632,14 @@ async function runJournalHelperFailureMatrix() {
             expected: [null, null],
         },
         {
+            node: s2120UnclaimGate,
+            label: 'S2120 unclaim helper failure: gate',
+            commandType: 'UNCLAIM_DEVICE',
+            helpers: ['osi-irrigation-policy'],
+            errorPrefix: 'S2120 unclaim owner unavailable: ',
+            expected: [null, null],
+        },
+        {
             node: journalApply,
             label: 'journal helper failure: apply',
             helpers: ['osi-db-helper', 'osi-journal'],
@@ -725,6 +748,19 @@ async function runJournalHelperFailureMatrix() {
 
     if (!failures.some((failure) => failure.toLowerCase().includes('helper failure:'))) {
         console.log('OK  command helper failure paths return exact fail-closed outputs');
+    }
+}
+
+// Issue #233: both batch builders get their conditional peer database from
+// replication.flowPeerDb, and each call keeps its own rollback warning label.
+for (const [nodeId, labels] of [
+    ['sync-outbox-build', ['Peer capture']],
+    ['sync-force-build', ['Peer capture', 'Peer capability', 'Peer invalidation']],
+]) {
+    const source = (byId[nodeId] || {}).func || '';
+    const calls = labels.map((label) => `conditionalReplication.flowPeerDb(q, run, (text) => node.warn(text), '${label}')`);
+    if (calls.some((call) => source.split(call).length !== 2) || /const peerDb = \{/.test(source)) {
+        failures.push(`conditional peer: ${nodeId} must build each peer database through replication.flowPeerDb with its own rollback label`);
     }
 }
 
@@ -1189,10 +1225,11 @@ assertWires('934bf2bc19a8ce22',
     'C5b: Route Command output 0 reaches write-strega-expectation only via link-out (no double-invoke)');
 const lifecycleCommandAdapter = byId['conditional-lifecycle-command-adapter'];
 if (!lifecycleCommandAdapter || !/routes\.conditionalLifecycleCommand/.test(lifecycleCommandAdapter.func || '') ||
-    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest']])) {
-    failures.push('lifecycle command adapter must own schedule/device mutations and durable ACKs before the legacy SQL builder');
+    lifecycleCommandAdapter.outputs !== 3 ||
+    JSON.stringify(lifecycleCommandAdapter.wires || []) !== JSON.stringify([['4f4a765f36cee6f3'], ['command-ack-queue-rest'], ['9d5e3035c3d069c4']])) {
+    failures.push('lifecycle command adapter must own schedule/device mutations and durable ACKs before the legacy SQL builder, and send its S2120 unclaim ACK (issue #233) to the MQTT ACK node only');
 } else {
-    console.log('OK  lifecycle command adapter delegates canonical mutation and durable ACK atomically');
+    console.log('OK  lifecycle command adapter delegates canonical mutation and durable ACK atomically; its S2120 unclaim ACK goes to MQTT only');
 }
 
 // C5c: behavioral single-invocation guard. Counts how many times a single

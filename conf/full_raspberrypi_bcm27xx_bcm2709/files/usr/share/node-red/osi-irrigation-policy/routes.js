@@ -303,7 +303,27 @@ if (!scope.canMutate(actorScope.role)) {
   await scope.assertFreshDeviceAccess(db, actor.user_uuid, deveui, { scopedMode: true });
   const lifecycleLoad = osiLib.require('osi-irrigation-policy');
   if (!lifecycleLoad.ok) throw Object.assign(new Error('conditional lifecycle service unavailable'), { statusCode: 503 });
+  // Issue #233: an S2120 leaves the selected zone's weather pair, not only the primary field.
+  // The same grants are re-read inside the lifecycle transaction (fresh role, selected-zone
+  // grant, the #404 weather-device access rule); no owner equality is added.
+  const weatherKind = await db.get('SELECT type_id FROM devices WHERE UPPER(deveui)=UPPER(?) AND deleted_at IS NULL', [deveui]);
+  const s2120Pair = Boolean(weatherKind) && String(weatherKind.type_id || '').toUpperCase() === 'SENSECAP_S2120';
+  const s2120Options = s2120Pair ? {
+    [lifecycleLoad.value.S2120_WEATHER_PAIR]: true,
+    runtimeGatewayEui: env.get('DEVICE_EUI'),
+    authorizeTx: async function(tx) {
+      const txActor = await tx.get('SELECT user_uuid, role FROM users WHERE id=? AND username=? LIMIT 1', [actor.id, auth.username]);
+      if (!txActor || !txActor.user_uuid) throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
+      const txRole = await scope.assertFreshRole(tx, txActor.user_uuid, txActor.role, { scopedMode: true });
+      if (!scope.canMutate(txRole.role)) throw Object.assign(new Error('insufficient role'), { statusCode: 403 });
+      const txZone = await tx.get('SELECT zone_uuid FROM irrigation_zones WHERE id=? AND deleted_at IS NULL', [zoneId]);
+      if (!txZone || !txZone.zone_uuid) throw Object.assign(new Error('zone not found'), { statusCode: 404 });
+      await scope.assertFreshZoneAccess(tx, txActor.user_uuid, txZone.zone_uuid, { scopedMode: true });
+      await scope.assertFreshDeviceAccess(tx, txActor.user_uuid, deveui, { scopedMode: true });
+    },
+  } : {};
   const lifecycleResult = await lifecycleLoad.value.applyLifecycleMutation({
+    ...s2120Options,
     db,
     operation: 'device_unassign',
     deviceEui: deveui,
@@ -321,7 +341,7 @@ if (!scope.canMutate(actorScope.role)) {
   });
   const unassigned = lifecycleResult.device || await db.get('SELECT gateway_device_eui, sync_version FROM devices WHERE UPPER(deveui)=UPPER(?)', [deveui]);
   msg.statusCode = lifecycleResult.status || 200;
-  msg.payload = { message: 'Device removed from zone successfully', deveui, irrigation_zone_id: null, gateway_device_eui: unassigned && unassigned.gateway_device_eui || null, sync_version: Number(unassigned && unassigned.sync_version || 0), deleted_at: null, clear_results: lifecycleResult.clear_results || [] };
+  msg.payload = { message: 'Device removed from zone successfully', deveui, irrigation_zone_id: s2120Pair && unassigned && unassigned.irrigation_zone_id != null ? Number(unassigned.irrigation_zone_id) : null, gateway_device_eui: unassigned && unassigned.gateway_device_eui || null, sync_version: Number(unassigned && unassigned.sync_version || 0), deleted_at: null, clear_results: lifecycleResult.clear_results || [] };
   return [null, msg];
 } catch (error) {
   msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;
@@ -586,6 +606,46 @@ async function conditionalLifecycleCommand(context) {
   const commandType = String(envelope.commandType || command.commandType || command.command_type || '').trim().toUpperCase();
   const supported = new Set(['UPDATE_SCHEDULE', 'UPSERT_SCHEDULE', 'ASSIGN_DEVICE_TO_ZONE', 'REMOVE_DEVICE_FROM_ZONE', 'UNCLAIM_DEVICE']);
   if (!supported.has(commandType)) return [msg, null];
+  // Issue #233 Phase A: an UNCLAIM_DEVICE that names a live SENSECAP_S2120 by its outer or raw
+  // identity is decided by applyS2120CloudUnclaim. A lease, link or runtime hold sends no ACK;
+  // a terminal decision is one bound ledger row and one REST ACK row, committed before this
+  // output 2 MQTT copy. It never takes the FAILED_RETRYABLE path below or the generic ACK
+  // queue (output 1), which turns CONFLICT into FAILED_RETRYABLE. Other devices keep the
+  // unchanged path below.
+  if (commandType === 'UNCLAIM_DEVICE') {
+    const s2120Db = new dbLoad.value.Database('/data/db/farming.db');
+    let s2120Transport = null;
+    try {
+      const identity = await policyLoad.value.s2120UnclaimIdentity(s2120Db, envelope);
+      if (identity.station) {
+        s2120Transport = unclaimTransport(typeof chirpstack === 'undefined' ? null : chirpstack, env, osiLib, node);
+        const outcome = await policyLoad.value.applyS2120CloudUnclaim({
+          db: s2120Db,
+          envelope,
+          stationEui: identity.station,
+          expectedUserId: identity.userId,
+          runtimeGatewayEui: env.get('DEVICE_EUI') || env.get('GATEWAY_DEVICE_EUI'),
+          transport: s2120Transport,
+          warn: (message) => node.warn(String(message)),
+        });
+        if (outcome.hold) {
+          node.warn('S2120 unclaim held, command ' + String(envelope.commandId) + ': ' + outcome.hold);
+          return [null, null, null];
+        }
+        return [null, null, { topic: 'devices/' + outcome.gateway + '/command_ack', payload: JSON.stringify(outcome.ack), qos: 1 }];
+      }
+    } catch (unclaimError) {
+      node.error('S2120 unclaim failed closed without ACK: ' + String(unclaimError && unclaimError.code || 'error') + ': ' + String(unclaimError && unclaimError.message || unclaimError), msg);
+      return [null, null, null];
+    } finally {
+      closeUnclaimTransport(s2120Transport);
+      try {
+        await new Promise((resolve) => s2120Db.close(() => resolve()));
+      } catch (closeError) {
+        node.warn('S2120 unclaim DB close failed: ' + String(closeError && closeError.message || closeError));
+      }
+    }
+  }
   const gateway = String(env.get('DEVICE_EUI') || env.get('GATEWAY_DEVICE_EUI') || '').trim().toUpperCase();
   if (!/^[0-9A-F]{16}$/.test(gateway) || !Number.isSafeInteger(envelope.commandId) || envelope.commandId <= 0) {
     node.error('lifecycle command adapter has no trusted gateway or command id', msg);
@@ -1138,10 +1198,23 @@ try {
   lifecycleDb = new osiDb.Database('/data/db/farming.db');
   const policyLoad = osiLib.require('osi-irrigation-policy');
   if (!policyLoad.ok) throw Object.assign(new Error('conditional lifecycle service unavailable'), { statusCode: 503 });
-  const lifecycleResult = await policyLoad.value.applyLifecycleMutation({ db: lifecycleDb, operation: 'device_unassign', deviceEui: deveui, zoneId, actor: { user_id: userId }, requireOwner: true, now: new Date().toISOString() });
+  // Issue #233: flag-off keeps the current device-claim predicate (requireOwner, checked inside
+  // the transaction). An S2120 also re-reads the signed live account there and detaches the
+  // selected weather pair.
+  const weatherKind = await lifecycleDb.get('SELECT type_id FROM devices WHERE UPPER(deveui)=UPPER(?) AND deleted_at IS NULL', [deveui]);
+  const s2120Pair = Boolean(weatherKind) && String(weatherKind.type_id || '').toUpperCase() === 'SENSECAP_S2120';
+  const s2120Options = s2120Pair ? {
+    [policyLoad.value.S2120_WEATHER_PAIR]: true,
+    runtimeGatewayEui: env.get('DEVICE_EUI'),
+    authorizeTx: async function(tx) {
+      const live = await tx.get('SELECT id, disabled_at FROM users WHERE id=? AND username=? LIMIT 1', [userId, String(msg.authUsername || '')]);
+      if (!live || live.disabled_at) throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
+    },
+  } : {};
+  const lifecycleResult = await policyLoad.value.applyLifecycleMutation({ ...s2120Options, db: lifecycleDb, operation: 'device_unassign', deviceEui: deveui, zoneId, actor: { user_id: userId }, requireOwner: true, now: new Date().toISOString() });
   const removed = lifecycleResult.device || await lifecycleDb.get('SELECT gateway_device_eui,sync_version FROM devices WHERE UPPER(deveui)=UPPER(?)', [deveui]);
   msg.statusCode = lifecycleResult.status || 200;
-  msg.payload = { message: 'Device removed from zone successfully', deveui, irrigation_zone_id: null, gateway_device_eui: removed && removed.gateway_device_eui || null, sync_version: Number(removed && removed.sync_version || 0), deleted_at: null, clear_results: lifecycleResult.clear_results || [] };
+  msg.payload = { message: 'Device removed from zone successfully', deveui, irrigation_zone_id: s2120Pair && removed && removed.irrigation_zone_id != null ? Number(removed.irrigation_zone_id) : null, gateway_device_eui: removed && removed.gateway_device_eui || null, sync_version: Number(removed && removed.sync_version || 0), deleted_at: null, clear_results: lifecycleResult.clear_results || [] };
   return [null, msg];
 } catch (error) {
   msg.statusCode = Number(error && (error.statusCode || error.status) || 500) || 500;
@@ -1192,4 +1265,36 @@ try {
 }
 }
 
-module.exports = Object.freeze({ scopedZoneDelete, scopedDeviceAssign, scopedDeviceUnassign, scopedDeviceDelete, conditionalLegacySchedule, conditionalLifecycleCommand, conditionalPolicyCommand, zoneDelete, deviceAssign, deviceUnassign, deviceUnclaim });
+// Issue #233 Phase A: the S2120 unclaim gate node (s2120-unclaim-gate) hands every cloud
+// UNCLAIM_DEVICE here before the generic replay check (command-dedupe-dispatch). The
+// pending-command builders set command.leasedToGateway from the cloud response after the raw
+// payload, so it is the trusted lease; it joins the protected envelope that
+// applyS2120CloudUnclaim binds. A command that names a live SENSECAP_S2120 returns on output 2
+// and never reaches the generic replay check, which refuses the bound ledger row of a replay;
+// conditionalLifecycleCommand decides it. Anything else returns on output 1. A helper or
+// lookup failure fails closed: one node.error, no output and no write.
+async function s2120UnclaimGate(context) {
+  const { msg, node, osiLib, policy, command, envelope } = context;
+  envelope.leasedToGateway = command.leasedToGateway == null ? null : command.leasedToGateway;
+  const dbLoad = osiLib.require('osi-db-helper');
+  if (!dbLoad.ok) {
+    node.error('S2120 unclaim owner unavailable: ' + String(dbLoad.error), msg);
+    return [null, null];
+  }
+  const db = new dbLoad.value.Database('/data/db/farming.db');
+  try {
+    const identity = await policy.s2120UnclaimIdentity(db, envelope);
+    return identity.station ? [null, msg] : [msg, null];
+  } catch (error) {
+    node.error('S2120 unclaim check failed closed: ' + String(error && error.message ? error.message : error), msg);
+    return [null, null];
+  } finally {
+    try {
+      await new Promise((resolve, reject) => db.close((closeError) => closeError ? reject(closeError) : resolve()));
+    } catch (closeError) {
+      node.warn('S2120 unclaim check DB close failed: ' + String(closeError && closeError.message ? closeError.message : closeError));
+    }
+  }
+}
+
+module.exports = Object.freeze({ scopedZoneDelete, scopedDeviceAssign, scopedDeviceUnassign, scopedDeviceDelete, conditionalLegacySchedule, conditionalLifecycleCommand, conditionalPolicyCommand, s2120UnclaimGate, zoneDelete, deviceAssign, deviceUnassign, deviceUnclaim });
