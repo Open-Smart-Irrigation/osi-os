@@ -85,8 +85,6 @@ export function CrossZoneAnalysisPage() {
     () => new Map(displayedCatalog.map((c) => [c.seriesId, c])),
     [displayedCatalog],
   );
-  // Legacy estimates are not offered as presets; the tray lists them on request.
-  const offeredChannels = useMemo(() => displayedCatalog.filter((c) => !c.legacy), [displayedCatalog]);
   const zoneNameById = useMemo(
     () => new Map(
       displayedCatalog
@@ -97,16 +95,15 @@ export function CrossZoneAnalysisPage() {
   );
   const appliedAggregation = data?.aggregation.applied;
   // A rain amount is named for the applied aggregation ("this interval" raw,
-  // "amount" summed) and a legacy estimate says so; a user's rename still wins.
+  // "amount" summed); a user's rename still wins.
   const presentedSeries = useMemo(
     () => presentSwtSeries(data?.series ?? [], swtUnit).map((item) => {
       const entry = catalogById.get(item.seriesId);
       if (!entry) return item;
-      const name = presentRainfallName(entry, appliedAggregation);
-      const label = entry.legacy ? `${name} (${t('analysis.legacyEstimate')})` : name;
+      const label = presentRainfallName(entry, appliedAggregation);
       return label === item.label ? item : { ...item, label };
     }),
-    [appliedAggregation, catalogById, data, swtUnit, t],
+    [appliedAggregation, catalogById, data, swtUnit],
   );
   const displayedSeries = useMemo(
     () => applyLabelOverrides(presentedSeries, activeWorkspace.labelOverrides),
@@ -158,7 +155,6 @@ export function CrossZoneAnalysisPage() {
         channel.sourceKind === 'device'
         && channel.availability === 'available'
         && channel.zoneId !== null
-        && !channel.legacy
         && canonicalize(channel.channelKey) === canonicalChannelKey
       ))
       .map((channel) => ({ seriesId: channel.seriesId }));
@@ -261,7 +257,7 @@ export function CrossZoneAnalysisPage() {
               ) : null}
               {activeWorkspace.mode === 'timeline' && activeWorkspace.layout === 'overlaid' ? (
                 <MetricAcrossZonesPicker
-                  channels={offeredChannels}
+                  channels={displayedCatalog}
                   onApply={applyMetricPreset}
                 />
               ) : null}

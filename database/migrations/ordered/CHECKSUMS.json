@@ -75,5 +75,6 @@
   "0074__tensiomark_observations.sql": "bfb3690f8639a4589dadb2f5b7d334d2164a3992a7595c974d794ae057e55d37",
   "0075__tensiomark_observation_history.sql": "7bbb6a92d1deccd764499124fcad13d70eab10f6f08775fc2c3ac9ef7d5decf4",
   "0076__conditional_irrigation.sql": "af5475f85ca2e5ede9fc114e2d2169cb00e948862f057db8e9e2784e58acfbc4",
-  "0077__conditional_irrigation_sync.sql": "e37e715cdf60d66903377046db44ce3feea1ed80805dbed067b0a84b54b3e34c"
+  "0077__conditional_irrigation_sync.sql": "e37e715cdf60d66903377046db44ce3feea1ed80805dbed067b0a84b54b3e34c",
+  "0078__clear_lorain_legacy_rain_rate.sql": "85c1740c7800112f390c1cad320d28597410a8a6eccaec80b4da91c37e249da9"
 }

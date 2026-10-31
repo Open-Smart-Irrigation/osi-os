@@ -63,8 +63,7 @@
       "reason": {
         "unsupported": "Nicht unterstützt",
         "available_no_recent_data": "Keine aktuellen Daten verfügbar"
-      },
-      "showLegacy": "Schätzungen nach alter Methode anzeigen"
+      }
     },
     "range": {
       "label": "Analysezeitraum",
@@ -136,8 +135,7 @@
       "partialDays": " ({{count}} von {{expected}} Tagen)",
       "reportsReceived_one": " · {{count}} Meldung empfangen",
       "reportsReceived_other": " · {{count}} Meldungen empfangen"
-    },
-    "legacyEstimate": "Schätzung, alte Methode"
+    }
   },
   "restart": {
     "gateway_identity_change": "Gateway-Identität aktualisiert. Die Dienste starten in {{count}} s neu.",

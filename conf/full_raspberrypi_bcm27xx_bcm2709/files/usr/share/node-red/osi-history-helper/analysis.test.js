@@ -674,40 +674,34 @@ test('LoRain rain amount is labelled "Rainfall amount" under its unchanged key a
     assert.equal(rain.unit, 'mm');
     const savedAmountId = analysisModule.analysisSeriesId(1, 'environment', rain.sourceKey, 'rain_mm_delta');
     assert.equal(rain.seriesId, savedAmountId);
-    const rate = result.channels.find((c) => c.deviceName === 'Rain' && c.channelKey === 'rain_mm_per_hour');
-    const savedRateId = analysisModule.analysisSeriesId(1, 'environment', rate.sourceKey, 'rain_mm_per_hour');
-    assert.equal(rate.seriesId, savedRateId);
+    // A view saved while the LoRain rate was still listed drops it and keeps the amount.
+    const savedRateId = analysisModule.analysisSeriesId(1, 'environment', rain.sourceKey, 'rain_mm_per_hour');
 
     raw.exec(analysisModule.ANALYSIS_VIEWS_SCHEMA);
     raw.prepare('INSERT INTO analysis_views (user_id, name, view_json) VALUES (1, ?, ?)')
       .run('rain-before-relabel', JSON.stringify({ schemaVersion: 1, name: 'rain-before-relabel', selectors: [{ seriesId: savedAmountId }, { seriesId: savedRateId }] }));
     const [view] = await hh.listAnalysisViews(facade(raw), { userId: 1, deviceEui: HUB, weatherProviderDefault: 'open_meteo' });
-    assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId, savedRateId]);
-    assert.deepEqual(view.droppedSeriesIds, []);
+    assert.deepEqual(view.selectors.map((s) => s.seriesId), [savedAmountId]);
+    assert.deepEqual(view.droppedSeriesIds, [savedRateId]);
   } finally {
     raw.close();
   }
 });
 
-// D4: a LoRain's rate and 10-minute value are elapsed-time estimates. They stay
-// in the catalogue under their keys (saved views and exports resolve them) but
-// are flagged legacy; the S2120's intensity is a measured channel and is not.
-test('LoRain rate and 10-minute value are catalogued as legacy; the S2120 ones are not', async () => {
+// A LoRain report carries no verified measurement window, so the gauge lists no
+// rate; the S2120's intensity is a measured channel and stays.
+test('LoRain lists no rate or 10-minute value; the S2120 keeps both', async () => {
   const raw = weatherDb();
   try {
     const result = await catalog(raw);
-    const flag = (deviceName, channelKey) => {
-      const found = result.channels.find((c) => c.deviceName === deviceName && c.channelKey === channelKey);
-      assert.ok(found, `${deviceName} ${channelKey}`);
-      return found.legacy;
-    };
-    assert.equal(flag('Rain', 'rain_mm_per_hour'), true);
-    assert.equal(flag('Rain', 'rain_mm_per_10min'), true);
-    assert.equal(flag('Rain', 'rain_mm_delta'), false);
-    assert.equal(flag('Rain', 'rain_mm_today'), false);
-    assert.equal(flag('demo-s2120', 'rain_mm_per_hour'), false);
-    assert.equal(flag('demo-s2120', 'rain_mm_per_10min'), false);
-    assert.ok(result.channels.filter((c) => c.sourceKind !== 'device').every((c) => c.legacy === false));
+    const has = (deviceName, channelKey) => result.channels.some((c) => c.deviceName === deviceName && c.channelKey === channelKey);
+    assert.equal(has('Rain', 'rain_mm_per_hour'), false);
+    assert.equal(has('Rain', 'rain_mm_per_10min'), false);
+    assert.equal(has('Rain', 'rain_mm_delta'), true);
+    assert.equal(has('Rain', 'rain_mm_today'), true);
+    assert.equal(has('demo-s2120', 'rain_mm_per_hour'), true);
+    assert.equal(has('demo-s2120', 'rain_mm_per_10min'), true);
+    assert.ok(result.channels.every((c) => !('legacy' in c)));
   } finally {
     raw.close();
   }
