@@ -1051,7 +1051,9 @@
     "lastReport": "Dernier relevé",
     "tips_one": "{{count}} basculement",
     "tips_other": "{{count}} basculements",
-    "tipsUnavailable": "Nombre de basculements indisponible"
+    "tipsUnavailable": "Nombre de basculements indisponible",
+    "temperature": "Température du boîtier du pluviomètre",
+    "temperatureHint": "Mesurée dans le boîtier, pas la température de l’air · dernier relevé {{time}}"
   },
   "zoneRainGauge": {
     "label": "Pluviomètre de cette zone",

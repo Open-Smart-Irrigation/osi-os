@@ -38,6 +38,19 @@ function formatNumber(value: number | null | undefined, decimals: number, unit: 
   return `${numeric.toFixed(decimals)} ${unit}`;
 }
 
+// The thermistor sits on the gauge's circuit board and its value travels only with a report, so a
+// dry gauge can show a reading hours old. The time is the last report in the farm timezone.
+function reportTime(lastSeen: string | null | undefined, timeZone: string, language: string | undefined): string | null {
+  const parsed = Date.parse(lastSeen ?? '');
+  if (!Number.isFinite(parsed)) return null;
+  const options: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' };
+  try {
+    return new Intl.DateTimeFormat(language || 'en', { ...options, timeZone }).format(parsed);
+  } catch {
+    return new Intl.DateTimeFormat(language || 'en', { ...options, timeZone: 'UTC' }).format(parsed);
+  }
+}
+
 function formatCounterStatus(status: string | null | undefined): string | null {
   switch (status) {
     case 'duplicate_or_out_of_order':
@@ -58,7 +71,7 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
   readOnly = false,
   removeContext,
 }) => {
-  const { t } = useTranslation('devices');
+  const { t, i18n } = useTranslation('devices');
 
   const handleRename = async (nextName: string) => {
     await devicesAPI.rename(device.deveui, nextName);
@@ -70,6 +83,11 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
 
   const statusLabel = formatCounterStatus(data.rain_delta_status);
   const intervalRainfall = t('loRain.intervalRainfall', { defaultValue: 'Rainfall this interval' });
+  const housingTemperature = t('loRain.temperature', { defaultValue: 'Gauge housing temperature' });
+  const hasTemperature = Number.isFinite(Number(data.ambient_temperature)) && data.ambient_temperature != null;
+  const temperatureTime = hasTemperature
+    ? reportTime(device.last_seen, typeof data.rain_day_timezone === 'string' ? data.rain_day_timezone : 'UTC', i18n?.language)
+    : null;
   const tipsLine = data.rain_tips_delta != null
     ? t('loRain.tips', { count: data.rain_tips_delta, defaultValue: '{{count}} tips' })
     : t('loRain.tipsUnavailable', { defaultValue: 'Tip count unavailable' });
@@ -156,11 +174,11 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
         />
 
         <div className="rounded-lg bg-[var(--card)] p-3">
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Temperature</p>
-          {Number.isFinite(Number(data.ambient_temperature)) && data.ambient_temperature != null ? (
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">{housingTemperature}</p>
+          {hasTemperature ? (
             <button
               type="button"
-              onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: 'Temperature', unit: '°C', color: '#f97316', decimals: 1 })}
+              onClick={() => setSensorMonitor({ field: 'ambient_temperature', label: housingTemperature, unit: '°C', color: '#f97316', decimals: 1 })}
               className={`cursor-pointer text-left text-2xl font-bold tabular-nums text-[var(--text)] underline decoration-dotted underline-offset-4 transition-colors hover:text-[var(--primary)] ${FOCUS_VISIBLE_RING}`}
               title={t('common.viewHistory', { defaultValue: 'View history' })}
             >
@@ -168,6 +186,11 @@ export const LoRainGaugeCard: React.FC<LoRainGaugeCardProps> = ({
             </button>
           ) : (
             <p className="text-2xl font-bold tabular-nums text-[var(--text)]">—</p>
+          )}
+          {temperatureTime && (
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              {t('loRain.temperatureHint', { time: temperatureTime, defaultValue: 'Measured inside the gauge, not air temperature · last report {{time}}' })}
+            </p>
           )}
         </div>
       </div>

@@ -64,6 +64,18 @@ describe('LoRainGaugeCard', () => {
     vi.clearAllMocks();
   });
 
+  it('names the temperature as the gauge housing and dates it, only when there is a reading', () => {
+    const { unmount } = render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
+    expect(screen.getByText('loRain.temperature')).toBeInTheDocument();
+    expect(screen.getByText('loRain.temperatureHint')).toBeInTheDocument();
+    unmount();
+
+    const noTemperature = { ...lorainDevice, latest_data: { ...lorainDevice.latest_data, ambient_temperature: null } } as unknown as Device;
+    render(<LoRainGaugeCard device={noTemperature} removeContext="farm" />);
+    expect(screen.getByText('loRain.temperature')).toBeInTheDocument();
+    expect(screen.queryByText('loRain.temperatureHint')).not.toBeInTheDocument();
+  });
+
   it('renders LoRain identity and rain telemetry', () => {
     render(<LoRainGaugeCard device={lorainDevice} removeContext="farm" />);
 

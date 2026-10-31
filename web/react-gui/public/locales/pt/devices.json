@@ -1051,7 +1051,9 @@
     "lastReport": "Último registo",
     "tips_one": "{{count}} basculamento",
     "tips_other": "{{count}} basculamentos",
-    "tipsUnavailable": "Número de basculamentos indisponível"
+    "tipsUnavailable": "Número de basculamentos indisponível",
+    "temperature": "Temperatura da caixa do pluviómetro",
+    "temperatureHint": "Medida dentro da caixa, não é a temperatura do ar · último relatório {{time}}"
   },
   "zoneRainGauge": {
     "label": "Pluviómetro desta zona",

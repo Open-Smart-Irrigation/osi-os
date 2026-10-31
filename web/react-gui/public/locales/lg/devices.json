@@ -1051,7 +1051,9 @@
     "lastReport": "Last report",
     "tips_one": "{{count}} tip",
     "tips_other": "{{count}} tips",
-    "tipsUnavailable": "Tip count unavailable"
+    "tipsUnavailable": "Tip count unavailable",
+    "temperature": "Gauge housing temperature",
+    "temperatureHint": "Measured inside the gauge, not air temperature · last report {{time}}"
   },
   "zoneRainGauge": {
     "label": "Rain gauge for this zone",

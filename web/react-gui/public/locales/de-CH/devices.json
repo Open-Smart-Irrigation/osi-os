@@ -1051,7 +1051,9 @@
     "lastReport": "Letzte Meldung",
     "tips_one": "{{count}} Kippung",
     "tips_other": "{{count}} Kippungen",
-    "tipsUnavailable": "Anzahl Kippungen nicht verfügbar"
+    "tipsUnavailable": "Anzahl Kippungen nicht verfügbar",
+    "temperature": "Gehäusetemperatur des Regenmessers",
+    "temperatureHint": "Im Gehäuse gemessen, nicht die Lufttemperatur · letzte Meldung {{time}}"
   },
   "zoneRainGauge": {
     "label": "Regenmesser für diese Zone",

@@ -385,3 +385,14 @@ Tracked in code at `web/react-gui/tests/devicesI18n.test.ts`
 (`PENDING_HUMAN_LUGANDA` in the removal-notice test), which asserts each key's
 `lg` value is still byte-identical to `en`. A human Luganda pass must drop the
 key from that set and from this table in the same change.
+
+## `devices.json` — LoRain housing temperature
+
+| Keys | Reason |
+|---|---|
+| `loRain.temperature`, `loRain.temperatureHint` (2 keys in `devices.json`) | Added when the LoRain card started to name its temperature as the gauge housing temperature and to date it with the last report: the thermistor sits on the gauge's circuit board, and a dry gauge can show a value hours old. de-CH/es/fr/it/pt carry translations; `lg` ships the English source text until a human Luganda pass. |
+
+Tracked in code at `web/react-gui/tests/lorainViewLocales.test.ts`
+(`PENDING_HUMAN_LUGANDA`, derived from its `KEYS`), which asserts each key's
+`lg` value is still byte-identical to `en`. A human Luganda pass must drop the
+key from that set and from this table in the same change.
