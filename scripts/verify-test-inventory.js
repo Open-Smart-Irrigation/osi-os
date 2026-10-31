@@ -235,21 +235,25 @@ function parseYaml(text, file) {
 // Splits a run script into commands on newlines, ;, &, &&, || and |,
 // honouring quotes. Each command records the operator that ends it ('\n',
 // ';', '&', '&&', '||', '|' or 'end'). GitHub expressions become a
-// placeholder word.
+// placeholder word. A command records paren: true when a ( or ) or an
+// unquoted backtick appears in it or on an empty line before it.
 function shellScript(script) {
   const src = script.replace(/\$\{\{[\s\S]*?\}\}/g, '__EXPR__');
   if (/<<-?\s*['"]?\w/.test(src)) throw new Error('here-documents are not supported in workflow run scripts');
   const commands = [];
   let words = [];
   let word = null;
+  let sawParen = false;
   const endWord = () => {
     if (word !== null) words.push(word);
     word = null;
   };
   const endCommand = (sep) => {
     endWord();
-    if (words.length) commands.push({ words, sep });
-    else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
+    if (words.length) {
+      commands.push({ words, sep, paren: sawParen });
+      sawParen = false;
+    } else if (commands.length && sep !== '\n' && sep !== 'end' && commands[commands.length - 1].sep === '\n') {
       throw new Error(`a line starts with "${sep}"; continuation lines are not supported`);
     }
     words = [];
@@ -302,7 +306,9 @@ function shellScript(script) {
       continue;
     }
     if (c === '\n' || c === ';') { endCommand(c); continue; }
-    if (c === ' ' || c === '\t' || c === '(' || c === ')') { endWord(); continue; }
+    if (c === '(' || c === ')') { sawParen = true; endWord(); continue; }
+    if (c === '`') sawParen = true;
+    if (c === ' ' || c === '\t') { endWord(); continue; }
     word = (word ?? '') + c;
   }
   endCommand('end');
@@ -465,9 +471,11 @@ function loadWorkflows(root, errors) {
           label,
           uses: step.uses,
           with: step.with || {},
+          env: { ...(doc.env || {}), ...(job.env || {}), ...(step.env || {}) },
           run: step.run,
           dir: step['working-directory'] || jobDir || wfDir || '.',
           pipefail: shell === 'bash',
+          shell,
           gate,
         });
       });
@@ -568,6 +576,14 @@ const NODE_SKIP = new Set(['-e', '--eval', '-p', '--print', '-v', '--version', '
 const NODE_RUN_OPTIONS = /^(--test|--no-warnings|--trace-warnings|--test-concurrency=\S+|--test-timeout=\S+|--test-reporter=\S+|--test-reporter-destination=\S+|--experimental-[\w-]+)$/;
 const NODE_PARTIAL_OPTIONS = /^(--check|-c|--test-name-pattern(=.*)?|--test-skip-pattern(=.*)?|--test-only)$/;
 const CONDITION_WORDS = new Set(['if', 'elif', 'while', 'until', '!']);
+const COMPOUND_WORDS = new Set(['if', 'then', 'elif', 'else', 'fi', 'case', 'esac', 'for', 'while', 'until', 'select', 'do', 'done', 'function', '{', '}']);
+const NODE_OPTIONS_TEST_FILTER = /(?:^|[\s"'])(--test[-_]name[-_]pattern|--test[-_]skip[-_]pattern|--test[-_]only|--test[-_]shard|--check|-c)(?=$|[\s="'])/;
+
+function nodeOptionsTestFilter(value) {
+  if (value === undefined || value === null || String(value) === '') return null;
+  const match = NODE_OPTIONS_TEST_FILTER.exec(String(value));
+  return match ? `NODE_OPTIONS ${match[1]} does not run every test in the file` : null;
+}
 
 // Why a failing command would not fail the step under bash -e, or null.
 function exitStatusLost(commands, i, pipefail) {
@@ -598,6 +614,82 @@ function checkRunStep(ctx, step) {
     return;
   }
   const hits = []; // { file, via, lost }
+  const unreachable = new Set();
+  const groupLost = new Map();
+  const conditionalCommands = new Set();
+  let pipefail = step.pipefail;
+  let conditionalDepth = 0;
+  // A keyword such as then, else or do puts the next word in command
+  // position, so `else if` and `do if` open a nested if.
+  const commandPosition = (words) => {
+    const out = [];
+    for (const w of words) {
+      out.push(w);
+      if (!SHELL_KEYWORDS.has(w)) break;
+    }
+    return out;
+  };
+  const ifCount = (words) => commandPosition(words).filter((w) => w === 'if').length;
+  // A change to shell state (set -e, pipefail, the tracked environment) holds
+  // only before the first compound or grouping construct of the step: a
+  // compound keyword or brace in any word, a parenthesis, or an operator
+  // other than ; and newline. From there on the verifier fails closed.
+  const firstConstruct = commands.findIndex((c) => c.paren
+    || ['&&', '||', '|', '&'].includes(c.sep) || c.words.some((w) => COMPOUND_WORDS.has(w)));
+  const surelyRuns = (i) => firstConstruct < 0 || i < firstConstruct;
+  // A parenthesis or backtick (case label, subshell, command substitution)
+  // can hide or fake if, fi and braces; then exit always ends the step's
+  // coverage, and if false and brace groups fail closed.
+  const grammarTrusted = !commands.some((c) => c.paren);
+  for (let i = 0; i < commands.length; i += 1) {
+    const words = commands[i].words;
+    const head = words[0];
+    conditionalDepth += ifCount(words);
+    if (conditionalDepth > 0) conditionalCommands.add(i);
+    if (head === 'fi' && conditionalDepth > 0) conditionalDepth -= 1;
+    if (words[0] === 'if' && words[1] === 'false' && !grammarTrusted) {
+      for (let k = i + 1; k < commands.length; k += 1) unreachable.add(k);
+    } else if (words[0] === 'if' && words[1] === 'false') {
+      let depth = 0;
+      let end = -1;
+      for (let k = i; k < commands.length; k += 1) {
+        const nestedHead = commands[k].words[0];
+        depth += ifCount(commands[k].words);
+        if (nestedHead === 'fi') {
+          depth -= 1;
+          if (depth === 0) { end = k; break; }
+        }
+      }
+      if (end >= 0) {
+        depth = 0;
+        let branchEnd = end;
+        for (let k = i + 1; k < end; k += 1) {
+          const nestedHead = commands[k].words[0];
+          if (depth === 0 && (nestedHead === 'else' || nestedHead === 'elif')) {
+            branchEnd = k;
+            break;
+          }
+          depth += ifCount(commands[k].words);
+          if (nestedHead === 'fi') depth -= 1;
+        }
+        for (let k = i + 1; k < branchEnd; k += 1) unreachable.add(k);
+      }
+    }
+    if (words[0] === '{' && !grammarTrusted) {
+      for (let k = i; k < commands.length; k += 1) groupLost.set(k, 'it is inside a brace group in a step with a parenthesis, which the verifier cannot model');
+    } else if (words[0] === '{') {
+      let end = i + 1;
+      while (end < commands.length && commands[end].words[0] !== '}') end += 1;
+      const lost = end < commands.length && exitStatusLost(commands, end, pipefail);
+      if (lost) {
+        for (let k = i; k <= end; k += 1) groupLost.set(k, `it is inside a brace group whose ${lost}`);
+      }
+    }
+    if (words.length === 1 && (words[0] === 'true' || words[0] === ':')
+      && commands[i].sep === '||' && i + 1 < commands.length) {
+      unreachable.add(i + 1);
+    }
+  }
   const resolveToken = (token, mode) => {
     if (token.includes('$') || token.includes('__EXPR__') || token.startsWith('/')) return null;
     if (!SCRIPT_EXT.test(token)) {
@@ -625,34 +717,186 @@ function checkRunStep(ctx, step) {
       else if (isTestFile(rel)) hits.push({ file: rel, via: where, lost: lost || `it is passed as an argument to ${scriptRel}, which is not a test runner` });
     }
   };
-  let pipefail = step.pipefail;
   let errexitOff = false;
+  let terminated = false;
+  const trackedEnvNames = ['NODE_OPTIONS', 'NODE_TEST_CONTEXT'];
+  const shellEnv = new Map(trackedEnvNames.map((name) => {
+    if (Object.prototype.hasOwnProperty.call(step.env || {}, name)) {
+      const value = String(step.env[name] ?? '');
+      return [name, { value, exported: true, known: !/[${}]/.test(value) }];
+    }
+    return [name, { value: undefined, exported: false, known: true }];
+  }));
+  const markUnknown = (name, exported = shellEnv.get(name).exported) => {
+    shellEnv.set(name, { value: undefined, exported, known: false });
+  };
+  const setShellEnv = (name, value, exported) => {
+    shellEnv.set(name, { value, exported, known: !/[${}]/.test(value) });
+  };
   commands.forEach((command, i) => {
+    if (unreachable.has(i) || terminated) return;
     let words = command.words;
     let lost = null;
-    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]))) {
+    const commandEnv = {};
+    const unknownCommandEnv = new Set();
+    for (const [name, state] of shellEnv) {
+      if (state.exported) {
+        if (state.known) commandEnv[name] = state.value;
+        else unknownCommandEnv.add(name);
+      }
+    }
+    const prefixAssignments = [];
+    const prefixUnknownNames = [];
+    while (words.length && (SHELL_KEYWORDS.has(words[0]) || /^\w+=/.test(words[0]) || /^(NODE_OPTIONS|NODE_TEST_CONTEXT)\+=/.test(words[0]))) {
       if (CONDITION_WORDS.has(words[0])) lost = lost || `its exit status is the condition of ${words[0]}`;
+      const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(words[0]);
+      const appendAssignment = /^(NODE_OPTIONS|NODE_TEST_CONTEXT)\+=/.exec(words[0]);
+      if (assignment) {
+        commandEnv[assignment[1]] = assignment[2];
+        prefixAssignments.push(assignment);
+        if (shellEnv.has(assignment[1])) {
+          if (/[${}]/.test(assignment[2])) unknownCommandEnv.add(assignment[1]);
+          else unknownCommandEnv.delete(assignment[1]);
+        }
+      } else if (appendAssignment) {
+        prefixUnknownNames.push(appendAssignment[1]);
+        unknownCommandEnv.add(appendAssignment[1]);
+      }
       words = words.slice(1);
     }
-    if (!words.length) return;
-    lost = lost || exitStatusLost(commands, i, pipefail);
+    if (!words.length) {
+      for (const [, name, value] of prefixAssignments) {
+        if (!shellEnv.has(name)) continue;
+        if (surelyRuns(i)) setShellEnv(name, value, shellEnv.get(name).exported);
+        else markUnknown(name);
+      }
+      for (const name of prefixUnknownNames) markUnknown(name);
+      return;
+    }
+    lost = lost || groupLost.get(i) || exitStatusLost(commands, i, pipefail);
     const [cmd, ...args] = words;
+    // Bash keeps an assignment before export or unset temporary: the prior value
+    // and export attribute stay, unless export names that variable. sh (dash)
+    // keeps the assignment, so there the variable becomes unknown.
+    const prefixed = new Map();
+    for (const [, name, value] of prefixAssignments) {
+      if (shellEnv.has(name)) prefixed.set(name, value);
+    }
+    for (const name of prefixUnknownNames) prefixed.set(name, undefined);
+    if ((cmd === 'export' || cmd === 'unset') && step.shell === 'sh') {
+      for (const name of prefixed.keys()) markUnknown(name, true);
+      prefixed.clear();
+    }
+    if ((cmd === 'export' || cmd === 'unset') && !surelyRuns(i)) {
+      for (const name of trackedEnvNames) {
+        if (prefixed.has(name) || args.some((arg) => arg.includes(name))) {
+          markUnknown(name, cmd === 'export' || shellEnv.get(name).exported);
+        }
+      }
+      return;
+    }
+    if (cmd === 'export') {
+      let unexport = false;
+      let unsupportedFlag = false;
+      for (const arg of args) {
+        if (arg === '-n') { unexport = true; continue; }
+        if (arg === '-p') continue;
+        if (/^[+-]/.test(arg)) { unsupportedFlag = true; continue; }
+        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(arg);
+        const appendAssignment = /^([A-Za-z_][A-Za-z0-9_]*)\+=(.*)$/.exec(arg);
+        const name = assignment ? assignment[1] : appendAssignment ? appendAssignment[1] : arg;
+        if (!shellEnv.has(name)) continue;
+        if (prefixed.has(name)) {
+          const value = prefixed.get(name);
+          if (arg === name && !unexport && !unsupportedFlag && value !== undefined) setShellEnv(name, value, true);
+          else markUnknown(name, true);
+        }
+        else if (unsupportedFlag) markUnknown(name, true);
+        else if (assignment && arg === `${name}=${assignment[2]}`) setShellEnv(name, assignment[2], !unexport);
+        else if (appendAssignment) {
+          const state = shellEnv.get(name);
+          if (!state.known) markUnknown(name, !unexport);
+          else setShellEnv(name, `${state.value ?? ''}${appendAssignment[2]}`, !unexport);
+        }
+        else if (assignment) markUnknown(name, !unexport);
+        else {
+          const state = shellEnv.get(name);
+          if (state.value === undefined && state.known) markUnknown(name, !unexport);
+          else shellEnv.set(name, { ...state, exported: !unexport });
+        }
+      }
+      return;
+    }
+    if (cmd === 'unset') {
+      let functionOnly = false;
+      let unsupportedFlag = false;
+      const names = [];
+      for (const arg of args) {
+        if (arg === '--') continue;
+        if (arg === '-f') { functionOnly = true; continue; }
+        if (arg.startsWith('-')) { unsupportedFlag = true; continue; }
+        names.push(arg);
+      }
+      for (const arg of names) {
+        if (shellEnv.has(arg)) {
+          if (prefixed.has(arg)) markUnknown(arg, true);
+          else if (unsupportedFlag) markUnknown(arg);
+          else if (!functionOnly) shellEnv.set(arg, { value: undefined, exported: false, known: true });
+        }
+        else {
+          const name = trackedEnvNames.find((key) => arg.includes(key));
+          if (name) markUnknown(name);
+        }
+      }
+      return;
+    }
+    // Other builtins that can write or export a variable named in their arguments.
+    if (['builtin', 'command', 'printf', 'read', 'mapfile', 'readarray', 'getopts'].includes(cmd)) {
+      for (const name of trackedEnvNames) {
+        if (args.some((arg) => arg.includes(name))) markUnknown(name, true);
+      }
+      return;
+    }
+    if (['declare', 'local', 'readonly', 'typeset'].includes(cmd)) {
+      for (const arg of args) {
+        if (/^[+-]/.test(arg)) continue;
+        const assignment = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(arg);
+        const name = assignment ? assignment[1] : arg;
+        if (shellEnv.has(name)) markUnknown(name, true);
+      }
+      return;
+    }
+    if (cmd === 'eval' || cmd === '.' || cmd === 'source') {
+      for (const name of trackedEnvNames) markUnknown(name, true);
+    }
+    // Assignments before a command are temporary, as in `NAME=value command`.
+    // They override this command's environment but never the shell's state.
     if (cmd === 'set') {
+      // set -e and set -o pipefail only hold when the set surely runs here.
+      const resetRuns = surelyRuns(i);
       for (let k = 0; k < args.length; k += 1) {
         const a = args[k];
         if (/^\+[a-z]*e/.test(a) || (a.startsWith('+') && args[k + 1] === 'errexit')) errexitOff = true;
-        if (/^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
+        if (resetRuns && (/^-[a-z]*e/.test(a) || (a.startsWith('-') && args[k + 1] === 'errexit'))) errexitOff = false;
+        if (resetRuns && /^-[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = true;
         if (/^\+[a-z]*o$/.test(a) && args[k + 1] === 'pipefail') pipefail = false;
       }
       return;
     }
+    if (cmd === 'exit') {
+      const conditionalList = i > 0 && ['||', '&&'].includes(commands[i - 1].sep);
+      if (!grammarTrusted || (!conditionalCommands.has(i) && !conditionalList)) terminated = true;
+      return;
+    }
     if (errexitOff) lost = lost || 'set +e turns off exit on error before it';
+    const unknownName = [...unknownCommandEnv][0];
+    const commandLost = lost || (unknownName && `cannot model exported ${unknownName} after a shell mutation`);
     if (cmd === 'npm') {
       const sub = args.find((a) => !a.startsWith('-'));
       if (['install', 'i', 'add', 'update', 'upgrade', 'isntall', 'in'].includes(sub)) errors.push(`${where}: npm ${sub}: use npm ci so the lockfile decides`);
       if (args.includes('--legacy-peer-deps')) errors.push(`${where}: --legacy-peer-deps is not allowed`);
       if (args.includes('--force')) errors.push(`${where}: --force is not allowed`);
-      const add = (file, via) => hits.push({ file, via, lost });
+      const add = (file, via) => hits.push({ file, via, lost: commandLost });
       if (sub === 'run' || sub === 'run-script') npmCollection(ctx, step.dir, args[args.indexOf(sub) + 1], where, add);
       else if (sub === 'test' || sub === 't') npmCollection(ctx, step.dir, 'test', where, add);
       return;
@@ -668,13 +912,16 @@ function checkRunStep(ctx, step) {
         if (NODE_PARTIAL_OPTIONS.test(o)) partial = partial || `node option ${o.split('=')[0]} does not run every test in the file`;
         else if (!NODE_RUN_OPTIONS.test(o)) errors.push(`${where}: node option ${o} is not modelled by this verifier`);
       }
-      const itemLost = lost || partial;
+      const nodeOptionsLost = nodeOptionsTestFilter(commandEnv.NODE_OPTIONS);
+      const itemLost = commandLost || partial || nodeOptionsLost;
       if (options.includes('--test')) {
+        const contextLost = commandEnv.NODE_TEST_CONTEXT !== undefined
+          ? 'NODE_TEST_CONTEXT suppresses direct node --test collection' : null;
         if (!rest.length) errors.push(`${where}: node --test without explicit test files collects whatever matches`);
         for (const a of rest) {
           if (a.startsWith('-')) { errors.push(`${where}: node option ${a} after the test files is not modelled`); continue; }
           const rel = resolveToken(a, 'test');
-          if (rel) hits.push({ file: rel, via: where, lost: itemLost });
+          if (rel) hits.push({ file: rel, via: where, lost: itemLost || contextLost });
         }
         return;
       }
@@ -694,14 +941,14 @@ function checkRunStep(ctx, step) {
         const firstLine = fs.readFileSync(path.join(root, scriptRel), 'utf8').split('\n', 1)[0];
         if (/^#!.*\bbash\b/.test(firstLine)) errors.push(`${where}: ${scriptRel}: a bash script (shebang ${firstLine.slice(2).trim()}) run with sh; run it with bash`);
       }
-      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
-      scriptArgs(scriptRel || args[idx], args.slice(idx + 1), lost);
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost: commandLost });
+      scriptArgs(scriptRel || args[idx], args.slice(idx + 1), commandLost);
       return;
     }
     if (SCRIPT_EXT.test(cmd) && cmd.includes('/')) {
       const scriptRel = resolveToken(cmd, 'script');
-      if (scriptRel) hits.push({ file: scriptRel, via: where, lost });
-      scriptArgs(scriptRel || cmd, args, lost);
+      if (scriptRel) hits.push({ file: scriptRel, via: where, lost: commandLost });
+      scriptArgs(scriptRel || cmd, args, commandLost);
     }
   });
   if (hits.length && step.gate.undecidable.length) {
