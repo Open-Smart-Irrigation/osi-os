@@ -1,0 +1,631 @@
+#!/usr/bin/env node
+'use strict';
+// #521 custody checker (plan R4). Run a scratch copy outside the repository,
+// with cwd at the root of the admitted implementation worktree. Commands:
+//   verify-inputs [--record <file>]      on a clean checkout of the base: check
+//                                        every consumed input, write the record
+//   materialize <packetRoot> <record> <planSha256>
+//                                        copy the plan, its support files and the
+//                                        record into the worktree (base checkout)
+//   recheck <committedRecord> <planCommit>
+//                                        on the reviewed plan commit: the parent
+//                                        is the recorded base, the commit adds only
+//                                        the plan files, and every recorded input
+//                                        hash and anchor is unchanged
+//   extract <fromDir> <toDir>            copy the reviewed payloads to scratch
+//   stage-tests <scratchDir>             copy the five reviewed tests into place
+//   seam-digest <seed.sql>               print the users-seam digest of a seed
+// Exit codes: 0 clean; 3 (verify-inputs only) the base differs from M in its
+// tree (class-A drift or any other tree entry), recorded for the plan-commit
+// review; 1 any class-S drift, failed anchor or resolution guard, gitlink,
+// changed recorded input, hash mismatch or refused write (stop).
+//
+// Every trusted digest is a constant here or a Git object at M or N. This
+// file's own digest is pinned by the plan document, which is bound by its
+// reviewed commit; nothing here pins the plan document, so there is no hash
+// cycle.
+//
+// Completeness rests on the tree rule, not on the named lists: the record
+// holds the base commit, its root tree id, and every entry of the raw Git
+// tree diff from M to the base (path, status, both modes, both object ids).
+// Commands that collect inputs dynamically (git ls-files, directory test
+// collection, the GUI build, path-built requires) read that tree, the
+// history behind the base commit (fixed by its id), the ignored paths listed
+// in the record and the tools Task 1 prints. A changed tracked input is
+// therefore a named entry or a tree-diff entry, and the plan-commit review
+// dispositions every entry the packet review did not.
+const { execFileSync } = require('node:child_process');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const M = '74ff869e335529783e9c7a39e9ae1a37a8019711';
+// Main as reconciled by the R4 packet and its independent review. The raw
+// tree diff M -> N (38 entries) was read entry by entry there; an entry of
+// the base diff identical to one of these is marked reviewedAtN.
+const N = '0f41ff4b4729085142f973d20996857ffca1e7a1';
+const REVIEWED_MAIN_DIFF = { entries: 38, sha256: '83ecb46ddd1bd6c457c0e25333ea96b3d46facdeeaef60391eb5c5e159aedb4d' };
+const PLAN_DOC = 'docs/superpowers/plans/2026-10-29-issue-521-linked-reset-refusal.md';
+const SUPPORT_DIR = 'docs/superpowers/plans/2026-10-29-issue-521-linked-reset-refusal';
+const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+const SELF_SHA256 = sha(fs.readFileSync(__filename));
+
+// Reviewed payloads, stored in SUPPORT_DIR as <name>.txt (inert in the repo).
+const PAYLOADS = {
+  'edit-flows-521.js': { sha256: '5357ed66c67656eba5d75c3d02fbd40dc32e3c23adf44b1be82ef4ce467c1837' },
+  'edit-gui-521.js': { sha256: '47e5219999ad4e983d820f6631d8c747389795128c7b8b37de543ffdb2f42cae' },
+  'scoped-admin-account-router.candidate.func.js': { sha256: '538bde95bd36d564b41662217fd6091eb5c86aa8ffef61a494245749b9b7fb1f' },
+  'UsersPage.candidate.tsx': { sha256: '1b1c9976faf53230275ed5dc828b1bf149072a9a847ab20251eafc6f1381be37' },
+  'test-linked-password-reset.js': { sha256: 'cee7cefa491835e47aa36525ef44b959e61fc0541719fc623fdbe83bd953f78d', dest: 'scripts/test-linked-password-reset.js' },
+  'api.adminUsers.test.ts': { sha256: '0d85b791e49837b0faa9bf7f0495546df98936da015250aa4a28173c73d4e206', dest: 'web/react-gui/src/services/__tests__/api.adminUsers.test.ts' },
+  'api.adminUsersExports.test.ts': { sha256: '73d80647d42ea1095be3beacb11a66d10368ab4fef6a1f7c8dc28c0981a12b87', dest: 'web/react-gui/src/services/__tests__/api.adminUsersExports.test.ts' },
+  'UsersPage.linkedReset.test.tsx': { sha256: '3bc0f2cf7eef9b8fa692b6c6c225c99dc415d76f934f2fbe626e1ca61bb0c6b1', dest: 'web/react-gui/src/pages/__tests__/UsersPage.linkedReset.test.tsx' },
+  'usersLocaleValues.test.ts': { sha256: '322431e6303e0b8e9a669458be8988967020eaf9c84dd8a6cc02e0809a58f238', dest: 'web/react-gui/src/pages/__tests__/usersLocaleValues.test.ts' },
+};
+// The exact paths the plan commit adds, and nothing else.
+const PLAN_PATHS = [
+  PLAN_DOC,
+  `${SUPPORT_DIR}/custody-521.js.txt`,
+  `${SUPPORT_DIR}/reconciliation.json`,
+  ...Object.keys(PAYLOADS).map((name) => `${SUPPORT_DIR}/${name}.txt`),
+].sort();
+
+// Class S: security seams, their module entrypoints and the code the tests
+// execute. Exact bytes at M; any change stops the run.
+const PROFILE_ROOTS = ['conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share', 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share'];
+const CLASS_S_FILES = {
+  'web/react-gui/src/pages/admin/UsersPage.tsx': '0b8e7833b7c9b1108a9be0fd870ff18e1004a70b649521e8fbac0dd101e9c6fd',
+};
+for (const root of PROFILE_ROOTS) {
+  Object.assign(CLASS_S_FILES, {
+    [`${root}/node-red/osi-db-helper/index.js`]: 'ef58d5c5bd1c14db0ed7a940dc63262bbcab326b646c94303e391c733dd6e42f',
+    [`${root}/node-red/osi-db-helper/package.json`]: '4537836660c809eed3a887445b7301c5bbbaf6fbcd6d226686f553519732e933',
+    [`${root}/node-red/osi-scope-helper/index.js`]: '5c652cf6c7d7ca8f7cc6bf242f5edcb8de6e7fd37f05bee88ce00d93393af63c',
+    [`${root}/node-red/osi-scope-helper/package.json`]: 'ae71da37b5eaf326e06bc664c0348b0cfda7f4c4a409baa7cc0f8e0438df7ef9',
+    [`${root}/node-red/osi-installation-helper/index.js`]: 'f35935a9394b869a14ed50225544fe6b44b397d66282d33f0c5d0be9bc693004',
+    [`${root}/node-red/osi-installation-helper/package.json`]: '2fec7b49da2faa104b6d3f3c5bf68af9b250212de57394b2cc12f0b3f4b5aba6',
+    [`${root}/node-red/node_modules/bcryptjs/package.json`]: 'ddeec15021f8f246928cc914f665266e60d0f1eaec05a1c333ece29e2bc30195',
+    [`${root}/node-red/node_modules/bcryptjs/umd/package.json`]: '8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a',
+    [`${root}/node-red/node_modules/bcryptjs/umd/index.js`]: 'ed01b52b436504d8bb7086d93fee4bd8edbb22d8ed88e1b456e0c604f30e79c4',
+  });
+}
+// Class S symbolic links: verify-sync-flow loads the DB helper through
+// node_modules/osi-db-helper before the direct path, and the scope helper
+// has the same link. Exact mode 120000 and target, as at M.
+const CLASS_S_LINKS = {};
+for (const root of PROFILE_ROOTS) {
+  CLASS_S_LINKS[`${root}/node-red/node_modules/osi-db-helper`] = '../osi-db-helper';
+  CLASS_S_LINKS[`${root}/node-red/node_modules/osi-scope-helper`] = '../osi-scope-helper';
+}
+// Directories that tests and gates load by path. Node tries <dir>.js,
+// <dir>.json and <dir>.node before <dir>/package.json, so none may exist.
+const RESOLUTION_GUARDS = PROFILE_ROOTS.flatMap((root) => ['osi-db-helper', 'osi-scope-helper', 'osi-installation-helper', 'node_modules/bcryptjs',
+  'node_modules/osi-db-helper', 'node_modules/osi-scope-helper'].map((d) => `${root}/node-red/${d}`));
+// Class S flow nodes: sha256 of JSON.stringify(node) at M, both profiles.
+const CLASS_S_NODES = {
+  'admin-users-list-http': 'bb943caaf61d8e78937fde82a4d67349e3883e6fe790a15a92a7ec4cc8913242',
+  'admin-users-create-http': '06008e84e9f9226a907d1955b2b2934518658e0f400cc71ec7aed6338e0f09be',
+  'admin-users-password-http': '047c8ac3faf8ecb0e99760ccafcfa542cf40a4d63ead8ccc58cf3e593c2da018',
+  'admin-users-disabled-http': 'd2ad90ea6e127fcae7b2e9e516752c0edc0f2c3b96468161920a17874b03c163',
+  'scoped-admin-account-router': '8d21d277b20aa087e74571f1af38e335858b325c6e79fb85790c3440832b0a97',
+  'auth-response': 'e71713b44f441ac29ba59d1313e76199471e51827d2edcaa389a71292a7896ad',
+  'auth-login-http': 'ce3885fedf63191dd84fc756085540aeece76311c434d64bcac9bcf860674054',
+  'auth-login-func': 'd87f15ed8a1e515e18a78f020961403fc84e4b86ab701bb25c93bc5e8b1fc381',
+  'auth-db-query': '93ebf3c5bbe949349a37cc721a7ae178166ea83094337b9191643a745ef06e5f',
+  'auth-process-result': 'a3adbdf1f776019f60cedb04651cef4fe9e344ea0f38fe77ddf62d45c54bd1c6',
+  'auth-db-insert': 'b6deaedd8328759035e0fe966b0e71f5b24287348de887da74f74f9ceb81ded9',
+  'auth-insert-complete': '231452f5dc22d3ad2042a2970cbaed8d9518250ffd080b22ae7a19b006410061',
+  'record-error-catch-auth': '8efae6a791ba2e697d1b2b767dd286515a70b01c29655be76bc620a15de7c926',
+  'auth-catch-http500': 'd81cdbf1f43546bb177d6953323cd282d8b72fe8707e10affdf8e61462b55a8b',
+};
+// Class A: consumed by editors, gates or tests; drift is admitted only with
+// its actual hash in the record reviewed with the plan commit, and only while
+// the anchors below hold. Reference digests are constants or Git objects at M.
+// The seed is class A: unrelated schema may drift, but the users seam
+// (users DDL, its unique index, every trigger ON users, sync_outbox and
+// scoped_access_emit DDL) must keep this digest.
+const USERS_SEAM_SHA256 = 'cb9859de09909f92a658926d2b7c2231e69a4d908000e93c62ae29241d0a5670';
+// farming.ts and api.ts may carry unrelated hunks; the edit anchors must
+// occur once and the api.ts session seams must keep these digests.
+const API_SEAMS = { interceptors: 'b0a18d1a6cb8b1c164cc8e658c5c360b1f424024de5ef5e97037d7e69beb7377', errorMessage: '4246ce7796e0996b69c7c9638ef0042355abddb8045e2795c267288690e2bccd' };
+const CLASS_A_FILES = {
+  'database/seed-blank.sql': 'c628e6c5ace8006376511bb0dd70b34d87c382bdcbcb95b9fd676c03c53c4efe',
+  'web/react-gui/src/types/farming.ts': '944595f2b21e0868defac5a26fea03b13276bb70db3c95d4667437ebde3de11d',
+  'web/react-gui/src/services/api.ts': 'b24ed35a265b43a1d5ad5b6f19040c679c0d0b4721504e7603cfbb374fceae48',
+  'scripts/lib/scoped-access-harness.js': 'cc527b7aa70192825212c0a66b79f8cb2a6a13c91e0733e0662114598675d493',
+  'web/react-gui/src/contexts/__tests__/sessionHarness.tsx': '8454cce7562e9aa710c7bed1fbecfe24fbfb198986c8e509355cdde758531ca9',
+  'AGENTS.md': 'b6aea35bb435c6f0d61233463bff2bcb74fa1d846ac82dc69c257b7617bb0318',
+  'docs/engineering-playbook.md': '95289527564af3007a03958d775509f1508dfc1dd250ebdb39ee61cab8fcbd33',
+};
+// The workflow set at M. verify-test-inventory reads every workflow, so a
+// workflow added on the base is recorded with its hash as drift.
+const WORKFLOWS_AT_M = ['codecs.yml', 'doc-hygiene.yml', 'field-journal.yml', 'history-router.yml', 'history-uplot-core.yml',
+  'journal-catalog.yml', 'migrations.yml', 'test-inventory.yml', 'typecheck.yml', 'ui-core.yml', 'verify-sync-flow.yml']
+  .map((name) => `.github/workflows/${name}`);
+const CLASS_A_REPORT = [
+  'docs/superpowers/README.md', 'architect.yaml', 'RULES.yaml',
+  'scripts/verify-flows-size-ratchet-allowances.json', 'scripts/verify-flows-size-ratchet.js',
+  'scripts/verify-flows-size-ratchet-baseline.json', 'scripts/flows-size-scan.js', 'scripts/verify-live-gateway-identity.js',
+  'scripts/verify-merge-allowance-preservation.js', 'scripts/lib/scope-guard-probe.js', 'scripts/lib/account-recovery-transaction.js',
+  'scripts/lib/bootstrap-auth-harness.js', 'scripts/test-scoped-access-writes.js', 'scripts/verify-scoped-access.js',
+  'scripts/verify-scoped-access.test.js', 'scripts/test-auth-bootstrap-policy.js', 'scripts/test-account-recovery.js',
+  'scripts/test-account-recovery-cli.js', 'scripts/test-auth-credential-isolation.js', 'scripts/verify-flows-fn-parse.js',
+  'scripts/test-flows-wiring.js', 'scripts/verify-flows-output-arity.js', 'scripts/test-verify-flows-output-arity.js',
+  'scripts/verify-no-new-silent-catch.js', 'scripts/flows-bare-require-scan.js', 'scripts/verify-no-stray-ddl.js',
+  'scripts/check-mqtt-topics.sh', 'scripts/verify-auth-flag-off-hermetic.js', 'scripts/verify-profile-parity.js',
+  'scripts/verify-sync-flow.js', 'scripts/verify-seed-db-ledger.js', 'scripts/verify-test-inventory.js', 'scripts/verify-test-inventory.json',
+  'scripts/verify-doc-hygiene.js', 'scripts/verify-doc-hygiene-allowlist.json', '.claude/skills/anti-slop-writing/slop-check.js',
+  'web/react-gui/package.json', 'web/react-gui/package-lock.json', 'web/react-gui/vitest.config.ts', 'web/react-gui/tsconfig.json',
+  'web/react-gui/vite.config.js', 'docs/i18n/pending-luganda-translations.md', 'web/react-gui/public/locales/lg/common.json',
+  ...WORKFLOWS_AT_M,
+  ...PROFILE_ROOTS.map((r) => `${r}/flows.json`),
+  ...PROFILE_ROOTS.map((r) => `${r}/node-red/osi-scoped-access-commands/index.js`),
+  ...['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt'].map((l) => `web/react-gui/public/locales/${l}/settings.json`),
+];
+// Programs the run starts in child processes, copies and executes, or
+// preloads, and the files they hand to an interpreter. Sources: the account
+// recovery CLI test (copies account-recovery.js, installs the sqlite3.cjs
+// driver, preloads resolve.cjs); verify-sync-flow.js (ten execFileSync
+// children, seven runQuietNodeScript children, then the identity and parity
+// verifiers); test-history-helper.js (repair-pi-schema.js);
+// test-flows-wiring.js (journal bootstrap and Gen2 reconcile harnesses);
+// verify-live-gateway-identity.js (the identityd lifecycle shell test and the
+// two libexec scripts it drives); test-journal-v2-config.js (sources
+// node-red.init with the two uci-defaults files).
+const EXEC_INPUTS = [
+  'scripts/account-recovery.js', 'scripts/fixtures/account-recovery/sqlite3.cjs', 'scripts/fixtures/account-recovery/resolve.cjs',
+  'scripts/verify-communication-contract.js', 'scripts/verify-db-schema-consistency.js', 'scripts/test-sync-history-schema.js',
+  'scripts/test-sync-history-worker.js', 'scripts/verify-history-hash-fixtures.js', 'scripts/verify-history-api-contract.js',
+  'scripts/test-terra-selection-edge-acceptance.js', 'scripts/verify-history-api-contract.test.js', 'scripts/installation-recovery-adapter.test.js',
+  'scripts/osi-lib-binding-audit.test.js', 'scripts/migrate-flows-journal-generators.test.js', 'scripts/migrate-flows-journal-v2-replication.test.js',
+  'scripts/test-journal-v2-config.js', 'scripts/test-journal-v2-worker.js', 'scripts/test-history-helper.js',
+  'scripts/verify-channel-manifest-parity.js', 'scripts/repair-pi-schema.js', 'scripts/test-journal-bootstrap.js',
+  'scripts/test-strega-gen2-reconcile.js', 'scripts/test-identityd-service-lifecycle.sh', 'scripts/chirpstack-bootstrap.js',
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-identityd.sh',
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/libexec/osi-gateway-identity.sh',
+  'feeds/chirpstack-openwrt-feed/apps/node-red/files/node-red.init',
+  'conf/full_raspberrypi_bcm27xx_bcm2712/files/etc/uci-defaults/96_osi_server_config',
+  'conf/full_raspberrypi_bcm27xx_bcm2709/files/etc/uci-defaults/96_osi_server_config',
+];
+// Helper packages loaded through a computed path: verify-sync-flow's
+// candidate lists (ChirpStack, dendro, history, DB, matric-potential, rain),
+// the harness's moduleByName table and osi-lib registry, scope-guard-probe's
+// loadRealModule, test-flows-wiring's valve-control pair and the journal and
+// Gen2 harnesses. Each package.json, its index.js and the listed extra
+// entrypoints are closure roots in both profiles.
+const MODULE_PACKAGES = ['osi-chirpstack-helper', 'osi-dendro-helper', 'osi-lib', 'osi-journal', 'osi-journal-replication', 'osi-command-ledger',
+  'osi-valve-control', 'osi-irrigation-policy', 'osi-rain', 'osi-matric-potential', 'osi-module-defaults', 'osi-entity-name',
+  'osi-scoped-access-commands', 'osi-history-helper', 'osi-history-router'];
+const MODULE_EXTRA = ['osi-journal/commands.js', 'osi-valve-control/live-authorize.js'];
+// GUI: the ES-import closure of the four new tests and the candidate page at
+// M and N (31 files; vitest mocks react-i18next in the page test), the build
+// entry and the tool configuration npm, tsc, vite and vitest read. The rest
+// of web/react-gui is bound by the tree rule (test:unit collects directories,
+// typecheck reads src/, the build reads everything main.jsx reaches).
+const GUI_INPUTS = [
+  'src/analysis/edgeAnalysisApi.ts', 'src/analysis/range.ts', 'src/analysis/types.ts', 'src/contexts/AuthContext.tsx',
+  'src/history/i18nKeys.ts', 'src/history/platformLimits.ts', 'src/history/rangeModel.ts', 'src/history/sourceSelection.ts',
+  'src/history/types.ts', 'src/history/workspaceModel.ts', 'src/services/authEvents.ts', 'src/services/authSession.ts',
+  'src/services/valveCancel.ts', 'src/utils/irrigationPolicy.ts', 'src/utils/rain.ts', 'src/utils/zoneRainSource.ts',
+  'src/i18n/config.ts', 'src/main.jsx', 'index.html', '.npmrc', 'tsconfig.node.json', 'postcss.config.js', 'tailwind.config.js',
+  'scripts/run-tsx-tests.mjs',
+].map((rel) => `web/react-gui/${rel}`);
+// Roots of the require closure. The edge suite requires the harness; the
+// harness requires bcryptjs, osi-history-helper and osi-history-router by
+// directory or path in both profiles; the gate scripts and the programs above
+// are run directly. Every file reached through a literal relative require
+// (including require.resolve, and .cjs files) is hashed into the record; a
+// dependency that cannot be resolved stops the run.
+const CLOSURE_ROOTS = [
+  'scripts/lib/scoped-access-harness.js',
+  ...PROFILE_ROOTS.flatMap((r) => [
+    `${r}/node-red/node_modules/bcryptjs/package.json`, `${r}/node-red/node_modules/bcryptjs/umd/package.json`,
+    `${r}/node-red/node_modules/bcryptjs/umd/index.js`,
+    ...['osi-db-helper', 'osi-scope-helper', 'osi-installation-helper', ...MODULE_PACKAGES]
+      .flatMap((d) => [`${r}/node-red/${d}/package.json`, `${r}/node-red/${d}/index.js`]),
+    ...MODULE_EXTRA.map((rel) => `${r}/node-red/${rel}`),
+  ]),
+  ...CLASS_A_REPORT.filter((rel) => rel.startsWith('scripts/') && rel.endsWith('.js')),
+  ...EXEC_INPUTS.filter((rel) => /\.c?js$/.test(rel)),
+];
+const CI_ANCHOR = '      - name: Scoped-access write suite (registration fences, zone guards)\n        run: node --test scripts/test-scoped-access-writes.js\n';
+
+function die(message) { console.error('custody-521: FAIL - ' + message); process.exit(1); }
+function insideRepo(p) { return path.resolve(p).startsWith(path.resolve('.') + path.sep); }
+function git(args) { return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] }); }
+function checkRoot() {
+  if (!fs.existsSync('.git') || !fs.existsSync('scripts/verify-sync-flow.js')) die('run from the root of the implementation worktree');
+  if (insideRepo(__dirname)) die('run the scratch copy outside the repository');
+}
+function requireClean() {
+  const status = git(['status', '--porcelain', '--untracked-files=all']);
+  if (status.trim()) die('the worktree is not clean:\n' + status);
+}
+function headCommit() { return git(['rev-parse', 'HEAD']).trim(); }
+function gitShowAt(ref, rel) {
+  try {
+    return execFileSync('git', ['show', `${ref}:${rel}`], { maxBuffer: 1 << 28, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (_) {
+    return null;
+  }
+}
+const gitShow = (rel) => gitShowAt(M, rel);
+function countOf(text, find) { return text.split(find).length - 1; }
+function canon(value) {
+  if (Array.isArray(value)) return value.map(canon);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map((k) => [k, canon(value[k])]));
+  return value;
+}
+function apiSeams(text) {
+  const once = (find) => text.split(find).length - 1 === 1;
+  if (!once('api.interceptors.request.use(') || !once('api.interceptors.response.use(') || !once('export function getApiErrorMessage(')) return null;
+  const start = text.indexOf('api.interceptors.request.use(');
+  const end = text.indexOf('\n);\n', text.indexOf('api.interceptors.response.use(')) + 4;
+  const errStart = text.indexOf('export function getApiErrorMessage(');
+  const errEnd = text.indexOf('\n}\n', errStart) + 3;
+  return { interceptors: sha(text.slice(start, end)), errorMessage: sha(text.slice(errStart, errEnd)) };
+}
+function usersSeam(text) {
+  const groups = [
+    ['users table', /CREATE TABLE (?:IF NOT EXISTS )?"?users"?\s*\([\s\S]*?\);[ \t]*\n/g],
+    ['users index', /CREATE UNIQUE INDEX [^;]*\bON\s+"?users"?\s*\([^;]*;/g],
+    ['users triggers', /CREATE TRIGGER [^;]*?\bON\s+"?users"?\b[\s\S]*?\bEND;/g],
+    ['sync_outbox table', /CREATE TABLE (?:IF NOT EXISTS )?"?sync_outbox"?\s*\([\s\S]*?\);[ \t]*\n/g],
+    ['scoped_access_emit table', /CREATE TABLE (?:IF NOT EXISTS )?"?scoped_access_emit"?\s*\([\s\S]*?\);[ \t]*\n/g],
+  ];
+  const counts = {};
+  const parts = [];
+  for (const [label, re] of groups) {
+    const found = text.match(re) || [];
+    counts[label] = found.length;
+    parts.push(...found);
+  }
+  return { sha256: sha(parts.join('\n--\n')), counts };
+}
+// Literal relative requires, resolved like the CommonJS loader: file, .js,
+// .json, .node, directory package.json main, directory index.js. An explicit
+// .cjs name resolves as a file.
+function isFile(rel) { try { return fs.statSync(rel).isFile(); } catch (_) { return false; } }
+function resolveLocal(fromRel, spec) {
+  const base = path.posix.normalize(path.posix.join(path.posix.dirname(fromRel), spec));
+  for (const cand of [base, base + '.js', base + '.json', base + '.node']) if (isFile(cand)) return [cand];
+  const out = [];
+  if (isFile(base + '/package.json')) {
+    out.push(base + '/package.json');
+    const main = JSON.parse(fs.readFileSync(base + '/package.json', 'utf8')).main;
+    if (main) {
+      const entry = path.posix.normalize(path.posix.join(base, main));
+      for (const cand of [entry, entry + '.js', entry + '/index.js']) if (isFile(cand)) { out.push(cand); return out; }
+    }
+  }
+  if (isFile(base + '/index.js')) { out.push(base + '/index.js'); return out; }
+  return null;
+}
+function requireClosure(roots, failures) {
+  const seen = new Set();
+  const stack = [...roots];
+  while (stack.length) {
+    const rel = stack.pop();
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    if (!isFile(rel)) { failures.push(`closure input missing: ${rel}`); continue; }
+    if (!/\.c?js$/.test(rel)) continue;
+    const text = fs.readFileSync(rel, 'utf8');
+    for (const m of text.matchAll(/require(?:\.resolve)?\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*\)/g)) {
+      const resolved = resolveLocal(rel, m[2]);
+      if (!resolved) failures.push(`unresolved dependency: ${rel} -> ${m[2]}`);
+      else stack.push(...resolved);
+    }
+  }
+  return [...seen].sort();
+}
+
+// Git tree rule. Entries come from Git objects only, never from the checkout.
+function lsTree(commit) {
+  const out = git(['ls-tree', '-r', '-z', '--full-tree', commit]);
+  const map = new Map();
+  for (const rec of out.split('\0').filter(Boolean)) {
+    const tab = rec.indexOf('\t');
+    const [mode, type, oid] = rec.slice(0, tab).split(' ');
+    map.set(rec.slice(tab + 1), { mode, type, oid });
+  }
+  return map;
+}
+function rawDiff(from, to) {
+  const parts = git(['diff-tree', '-r', '-z', '--raw', '--no-renames', '--full-index', from, to]).split('\0').filter(Boolean);
+  const entries = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const [oldMode, newMode, oldOid, newOid, status] = parts[i].slice(1).split(' ');
+    entries.push({ status, path: parts[i + 1], oldMode, newMode, oldOid, newOid });
+  }
+  return entries;
+}
+function treeRecord(base, classAKeys, failures) {
+  let reviewed = [];
+  try { reviewed = rawDiff(M, N); } catch (_) { failures.push(`cannot read ${N}; fetch main first`); }
+  if (reviewed.length !== REVIEWED_MAIN_DIFF.entries || sha(JSON.stringify(reviewed)) !== REVIEWED_MAIN_DIFF.sha256) {
+    failures.push('the reviewed tree diff M -> N does not reproduce');
+  }
+  const reviewedKeys = new Set(reviewed.map((e) => JSON.stringify(e)));
+  const baseTree = lsTree(base);
+  const gitlinks = [...baseTree.entries()].filter(([, e]) => e.mode === '160000').map(([p, e]) => ({ path: p, oid: e.oid }));
+  if (gitlinks.length) failures.push(`the base tree has gitlinks, whose content the record cannot bind: ${gitlinks.map((g) => g.path).join(', ')}`);
+  const sPaths = new Set([...Object.keys(CLASS_S_FILES), ...Object.keys(CLASS_S_LINKS)]);
+  const diff = rawDiff(M, base).map((e) => ({
+    ...e,
+    cls: sPaths.has(e.path) ? 'S' : classAKeys.has(e.path) ? 'named' : 'tree',
+    reviewedAtN: reviewedKeys.has(JSON.stringify(e)),
+  }));
+  for (const e of diff) if (e.cls === 'S') failures.push(`class S tree entry changed: ${e.path} (${e.status} ${e.oldMode}->${e.newMode})`);
+  const mTree = lsTree(M);
+  const modes = {};
+  for (const rel of sPaths) {
+    const atM = mTree.get(rel);
+    const atBase = baseTree.get(rel);
+    modes[rel] = atBase ? atBase.mode : null;
+    if (!atM || !atBase || atM.mode !== atBase.mode || atM.oid !== atBase.oid) failures.push(`class S entry differs from M in the base tree: ${rel}`);
+  }
+  const resolution = {};
+  for (const dir of RESOLUTION_GUARDS) {
+    const shadows = ['.js', '.json', '.node'].map((ext) => dir + ext).filter((p) => baseTree.has(p) || fs.existsSync(p));
+    resolution[dir] = shadows;
+    if (shadows.length) failures.push(`a file shadows the directory load of ${dir}: ${shadows.join(', ')}`);
+  }
+  return {
+    root: git(['rev-parse', `${base}^{tree}`]).trim(),
+    rootAtM: git(['rev-parse', `${M}^{tree}`]).trim(),
+    reviewedMain: { commit: N, ...REVIEWED_MAIN_DIFF },
+    gitlinks,
+    classSModes: modes,
+    resolution,
+    diff,
+    needsReview: diff.filter((e) => !e.reviewedAtN).map((e) => e.path),
+  };
+}
+// Ignored paths can change module or tool resolution (an ignored
+// node_modules directory, for example) but are not in any Git tree; they are
+// listed, collapsed per directory as git status prints them.
+function ignoredPaths() {
+  return git(['status', '--porcelain=v1', '-z', '--ignored=traditional', '--untracked-files=normal']).split('\0')
+    .filter((rec) => rec.startsWith('!! ')).map((rec) => rec.slice(3)).sort();
+}
+
+// The record describes the checked-out tree and the base commit's Git tree.
+// It is written at the base and recomputed on the plan commit; both must be
+// identical apart from `base`.
+function computeRecord(base) {
+  const failures = [];
+  const drift = [];
+  const record = { M, N, custodySha256: SELF_SHA256, classS: {}, classSLinks: {}, classA: {}, anchors: {} };
+  for (const [rel, expected] of Object.entries(CLASS_S_FILES)) {
+    const actual = isFile(rel) ? sha(fs.readFileSync(rel)) : null;
+    record.classS[rel] = { expected, actual };
+    if (actual !== expected) failures.push(`class S file changed: ${rel} (${actual})`);
+  }
+  for (const [rel, expected] of Object.entries(CLASS_S_LINKS)) {
+    let actual = null;
+    try { if (fs.lstatSync(rel).isSymbolicLink()) actual = fs.readlinkSync(rel); } catch (_) { actual = null; }
+    record.classSLinks[rel] = { expected, actual };
+    if (actual !== expected) failures.push(`class S link changed: ${rel} (${actual})`);
+  }
+  const raws = PROFILE_ROOTS.map((r) => fs.readFileSync(`${r}/flows.json`, 'utf8'));
+  if (raws[0] !== raws[1]) failures.push('the two maintained flows.json profiles differ');
+  raws.forEach((raw, i) => {
+    const flows = JSON.parse(raw);
+    if (JSON.stringify(flows, null, 2) + '\n' !== raw) failures.push(`${PROFILE_ROOTS[i]}/flows.json does not round-trip`);
+    const byId = new Map(flows.map((n) => [n.id, n]));
+    for (const [id, expected] of Object.entries(CLASS_S_NODES)) {
+      const actual = byId.has(id) ? sha(JSON.stringify(byId.get(id))) : null;
+      record.classS[`${PROFILE_ROOTS[i]}/flows.json#${id}`] = { expected, actual };
+      if (actual !== expected) failures.push(`class S node changed: ${id} in ${PROFILE_ROOTS[i]} (${actual})`);
+    }
+    const atM = gitShow(`${PROFILE_ROOTS[i]}/flows.json`);
+    if (atM) {
+      const old = new Map(JSON.parse(atM.toString('utf8')).map((n) => [n.id, JSON.stringify(n)]));
+      const changed = flows.filter((n) => old.get(n.id) !== JSON.stringify(n)).map((n) => ({ id: n.id, sha256: sha(JSON.stringify(n)) }));
+      const removed = [...old.keys()].filter((id) => !byId.has(id));
+      record.anchors[`${PROFILE_ROOTS[i]}/flows.json nodes changed since M`] = { changed, removed };
+    } else {
+      failures.push(`cannot read ${PROFILE_ROOTS[i]}/flows.json at ${M}; fetch main first`);
+    }
+  });
+  const workflowDir = fs.readdirSync('.github/workflows').filter((f) => /\.ya?ml$/.test(f)).sort().map((f) => `.github/workflows/${f}`);
+  record.anchors.workflows = workflowDir;
+  const closure = requireClosure(CLOSURE_ROOTS, failures);
+  record.anchors.closure = closure;
+  const classA = new Set([...Object.keys(CLASS_A_FILES), ...CLASS_A_REPORT, ...workflowDir, ...EXEC_INPUTS, ...GUI_INPUTS,
+    ...closure.filter((rel) => !Object.prototype.hasOwnProperty.call(CLASS_S_FILES, rel))]);
+  for (const rel of [...classA].sort()) {
+    const actual = isFile(rel) ? sha(fs.readFileSync(rel)) : null;
+    const shown = Object.prototype.hasOwnProperty.call(CLASS_A_FILES, rel) ? null : gitShow(rel);
+    const atM = CLASS_A_FILES[rel] || (shown ? sha(shown) : null);
+    record.classA[rel] = { atM, actual };
+    if (actual === null) failures.push(`class A input missing: ${rel}`);
+    else if (actual !== atM) drift.push(rel);
+  }
+  // Anchors the editors and gates rely on.
+  const seam = usersSeam(fs.readFileSync('database/seed-blank.sql', 'utf8'));
+  record.anchors.usersSeam = seam;
+  if (seam.sha256 !== USERS_SEAM_SHA256) failures.push(`seed users seam changed (${seam.sha256}): composition path`);
+  const api = fs.readFileSync('web/react-gui/src/services/api.ts', 'utf8');
+  const seams = apiSeams(api);
+  record.anchors.apiSeams = seams;
+  if (!seams || seams.interceptors !== API_SEAMS.interceptors || seams.errorMessage !== API_SEAMS.errorMessage) failures.push('api.ts session interceptors or getApiErrorMessage changed');
+  for (const anchor of ["export const listUsers = () =>\n  api.get<{ users: AdminUser[] }>('/api/users')", 'export const resetPassword = (uuid: string, password: string) =>\n', '  AdminUser,\n  WatermarkCalibrationState,']) {
+    if (countOf(api, anchor) !== 1) failures.push(`api.ts anchor not found exactly once: ${anchor.slice(0, 40)}`);
+  }
+  if (countOf(fs.readFileSync('web/react-gui/src/types/farming.ts', 'utf8'), 'export interface AdminUser {\n') !== 1) failures.push('farming.ts AdminUser anchor not found exactly once');
+  const allowanceRaw = fs.readFileSync('scripts/verify-flows-size-ratchet-allowances.json', 'utf8');
+  const allowances = JSON.parse(allowanceRaw);
+  if (JSON.stringify(allowances, null, 2) + '\n' !== allowanceRaw) failures.push('allowances do not round-trip');
+  if (allowances.node_allowances['scoped-admin-account-router']) failures.push('a router node allowance already exists: composition path');
+  const delta = allowances.total_allowance && allowances.total_allowance.delta;
+  record.anchors.totalDelta = delta;
+  const identity = fs.readFileSync('scripts/verify-live-gateway-identity.js', 'utf8');
+  if (countOf(identity, `  expectCondition(sizeAllowances.total_allowance?.delta === ${delta},\n`) !== 1) failures.push(`identity pin for total delta ${delta} not found exactly once`);
+  // Two reviewed label forms: main's "exact cumulative delta" and the
+  // "exact delta" block written by the #356 R4 editor.
+  const labelForms = {
+    cumulative: `    'size total allowance: exact cumulative delta ${delta}',\n    'size total allowance: expected exact cumulative delta ${delta}');\n`,
+    plain: `    'size total allowance: exact delta ${delta}',\n    'size total allowance: expected exact delta ${delta}');\n`,
+  };
+  const labelCounts = Object.fromEntries(Object.entries(labelForms).map(([k, v]) => [k, countOf(identity, v)]));
+  const forms = Object.keys(labelCounts).filter((k) => labelCounts[k] > 0);
+  record.anchors.identityLabels = { counts: labelCounts, form: forms.length === 1 && labelCounts[forms[0]] === 1 ? forms[0] : null };
+  if (!record.anchors.identityLabels.form) failures.push(`identity labels for total delta ${delta}: expected exactly one reviewed form once (${JSON.stringify(labelCounts)})`);
+  const workflow = fs.readFileSync('.github/workflows/migrations.yml', 'utf8');
+  if (countOf(workflow, CI_ANCHOR) !== 1) failures.push('migrations.yml scoped-access write step anchor not found exactly once');
+  record.anchors.ciNeighbourSteps = workflow.split('\n').filter((l) => /- name: .*(issue 443|#443|Registration zone authority)/.test(l));
+  const typecheck = fs.readFileSync('.github/workflows/typecheck.yml', 'utf8');
+  for (const line of ['run: npm ci', 'run: npm run typecheck', 'run: npm run test:unit']) if (!typecheck.includes(line)) failures.push(`typecheck.yml lacks "${line}"`);
+  const pkg = JSON.parse(fs.readFileSync('web/react-gui/package.json', 'utf8'));
+  if (pkg.scripts.typecheck !== 'tsc --noEmit' || pkg.scripts.build !== 'vite build') failures.push('GUI typecheck or build script changed');
+  for (const dir of ['src/pages/__tests__', 'src/services/__tests__']) if (!String(pkg.scripts['test:unit:vitest']).includes(dir)) failures.push(`test:unit:vitest no longer collects ${dir}`);
+  for (const locale of ['en', 'de-CH', 'es', 'fr', 'it', 'lg', 'pt']) {
+    const rel = `web/react-gui/public/locales/${locale}/settings.json`;
+    const raw = fs.readFileSync(rel, 'utf8');
+    const parsed = JSON.parse(raw);
+    const keys = Object.keys(parsed);
+    if (JSON.stringify(parsed, null, 2) + '\n' !== raw) failures.push(`${rel} does not round-trip`);
+    if (Object.prototype.hasOwnProperty.call(parsed, 'users')) failures.push(`${rel} already has users`);
+    if (keys[keys.length - 1] !== 'grants') failures.push(`${rel}: grants is not the last key`);
+  }
+  const tracker = fs.readFileSync('docs/i18n/pending-luganda-translations.md', 'utf8');
+  if (!tracker.startsWith('# Pending human Luganda translations\n') || !tracker.endsWith('\n') || tracker.endsWith('\n\n')) failures.push('Luganda tracker header or ending changed');
+  if (tracker.includes('settings.json` — Users page')) failures.push('Luganda tracker already has the Users section');
+  for (const { dest } of Object.values(PAYLOADS)) if (dest && fs.existsSync(dest)) failures.push(`test destination already exists: ${dest}`);
+  record.tree = treeRecord(base, classA, failures);
+  record.anchors.ignored = ignoredPaths();
+  record.drift = drift;
+  record.failures = failures;
+  return record;
+}
+function withoutBase(record) { const { base: _b, ...rest } = record; return JSON.stringify(canon(rest)); }
+
+function verifyInputs(recordPath) {
+  checkRoot();
+  requireClean();
+  const head = headCommit();
+  const record = { base: head, ...computeRecord(head) };
+  if (recordPath) {
+    if (insideRepo(recordPath)) die('write the record to scratch; materialize copies it into the plan');
+    fs.writeFileSync(recordPath, JSON.stringify(record, null, 2) + '\n');
+  }
+  console.log(JSON.stringify({
+    base: record.base, custody: SELF_SHA256, drift: record.drift, failures: record.failures, totalDelta: record.anchors.totalDelta,
+    identityLabels: record.anchors.identityLabels.form, workflows: record.anchors.workflows.length, closure: record.anchors.closure.length,
+    classA: Object.keys(record.classA).length, treeDiff: record.tree.diff.length,
+    reviewedAtN: record.tree.diff.filter((e) => e.reviewedAtN).length, needsReview: record.tree.needsReview, ignored: record.anchors.ignored,
+    flowNodesChangedSinceM: Object.values(record.anchors).filter((v) => v && v.changed).map((v) => v.changed.map((c) => c.id)),
+  }, null, 2));
+  if (record.failures.length) process.exit(1);
+  const moved = record.drift.length || record.tree.diff.length;
+  console.log(moved ? 'custody-521: drift from M without class-S change; review the record with the plan commit' : 'custody-521: inputs match the reviewed base');
+  process.exit(moved ? 3 : 0);
+}
+
+function copyVerified(from, to, expected) {
+  const bytes = fs.readFileSync(from);
+  if (sha(bytes) !== expected) die(`${from} is not the reviewed bytes (${sha(bytes)})`);
+  if (fs.existsSync(to)) die(`refusing to overwrite ${to}`);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.writeFileSync(to, bytes);
+  if (sha(fs.readFileSync(to)) !== expected) die(`${to} differs after the write`);
+}
+
+function readRecord(recordFile) {
+  const record = JSON.parse(fs.readFileSync(recordFile, 'utf8'));
+  if (record.M !== M || record.N !== N || record.custodySha256 !== SELF_SHA256 || !Array.isArray(record.failures) || record.failures.length ||
+      !record.tree || !Array.isArray(record.tree.diff) || !/^[0-9a-f]{40}$/.test(String(record.base))) {
+    die('the reconciliation record is not a passing record written by this checker');
+  }
+  return record;
+}
+
+function materialize(packetRoot, recordFile, planSha256) {
+  checkRoot();
+  if (!packetRoot || !recordFile || !/^[0-9a-f]{64}$/.test(String(planSha256))) die('usage: materialize <packetRoot> <recordFile> <planSha256>');
+  requireClean();
+  const record = readRecord(recordFile);
+  if (record.base !== headCommit()) die(`the record was written at ${record.base}, not at HEAD`);
+  if (withoutBase(computeRecord(record.base)) !== withoutBase(record)) die('the inputs changed after the record was written');
+  if (fs.existsSync(PLAN_DOC) || fs.existsSync(SUPPORT_DIR)) die('the plan is already materialized');
+  const planBytes = fs.readFileSync(path.join(packetRoot, PLAN_DOC));
+  if (sha(planBytes) !== planSha256) die(`the plan document is not the reviewed bytes (${sha(planBytes)})`);
+  const selfBytes = fs.readFileSync(path.join(packetRoot, SUPPORT_DIR, 'custody-521.js.txt'));
+  if (sha(selfBytes) !== SELF_SHA256) die('the packet custody checker differs from the running copy');
+  fs.mkdirSync(SUPPORT_DIR, { recursive: true });
+  fs.writeFileSync(PLAN_DOC, planBytes);
+  for (const [name, { sha256 }] of Object.entries(PAYLOADS)) {
+    copyVerified(path.join(packetRoot, SUPPORT_DIR, `${name}.txt`), path.join(SUPPORT_DIR, `${name}.txt`), sha256);
+  }
+  fs.writeFileSync(path.join(SUPPORT_DIR, 'custody-521.js.txt'), selfBytes);
+  fs.writeFileSync(path.join(SUPPORT_DIR, 'reconciliation.json'), JSON.stringify(record, null, 2) + '\n');
+  console.log(JSON.stringify({ base: record.base, plan: sha(planBytes), custody: SELF_SHA256, reconciliation: sha(fs.readFileSync(path.join(SUPPORT_DIR, 'reconciliation.json'))), paths: PLAN_PATHS.length }, null, 2));
+}
+
+function recheck(recordFile, planCommit) {
+  checkRoot();
+  if (!recordFile || !/^[0-9a-f]{40}$/.test(String(planCommit))) die('usage: recheck <committedRecord> <planCommit>');
+  requireClean();
+  const head = headCommit();
+  if (head !== planCommit) die(`HEAD ${head} is not the reviewed plan commit ${planCommit}`);
+  const record = readRecord(recordFile);
+  const parents = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim().split(/\s+/).slice(1);
+  if (parents.length !== 1 || parents[0] !== record.base) die(`the plan commit's parent ${parents.join(',')} is not the recorded base ${record.base}`);
+  // Exactly the plan files, each added as a regular file (mode 100644).
+  const added = rawDiff(record.base, 'HEAD').map((e) => `${e.status} ${e.oldMode} ${e.newMode}\t${e.path}`);
+  const expected = PLAN_PATHS.map((rel) => `A 000000 100644\t${rel}`);
+  if (JSON.stringify(added.slice().sort()) !== JSON.stringify(expected.slice().sort())) die('the plan commit does not add exactly the plan files:\n' + added.join('\n'));
+  // The record must describe the Git objects at the base, not only this tree.
+  for (const [group, entries] of [['classS', record.classS], ['classA', record.classA]]) {
+    for (const [key, { actual }] of Object.entries(entries)) {
+      if (key.includes('#')) continue;
+      const shown = gitShowAt(record.base, key);
+      if ((shown ? sha(shown) : null) !== actual) die(`${group} ${key}: the record does not match the base object`);
+    }
+  }
+  for (const [key, { actual }] of Object.entries(record.classSLinks)) {
+    const shown = gitShowAt(record.base, key);
+    if ((shown ? shown.toString('utf8') : null) !== actual) die(`classSLinks ${key}: the record does not match the base object`);
+  }
+  const fresh = computeRecord(record.base);
+  if (fresh.failures.length) die('inputs now fail: ' + fresh.failures.join('; '));
+  if (withoutBase(fresh) !== withoutBase(record)) {
+    const changed = [];
+    if (JSON.stringify(canon(fresh.tree)) !== JSON.stringify(canon(record.tree))) changed.push('tree');
+    for (const group of ['classS', 'classSLinks', 'classA']) {
+      const keys = new Set([...Object.keys(fresh[group]), ...Object.keys(record[group])]);
+      for (const key of keys) if (JSON.stringify(fresh[group][key]) !== JSON.stringify(record[group][key])) changed.push(`${group} ${key}`);
+    }
+    for (const key of new Set([...Object.keys(fresh.anchors), ...Object.keys(record.anchors)])) {
+      if (JSON.stringify(canon(fresh.anchors[key])) !== JSON.stringify(canon(record.anchors[key]))) changed.push(`anchor ${key}`);
+    }
+    die('recorded inputs changed since the reviewed reconciliation: ' + (changed.join('; ') || 'drift list'));
+  }
+  console.log(`custody-521: plan commit ${head} on base ${record.base}: every recorded input unchanged`);
+}
+
+function extract(fromDir, toDir) {
+  checkRoot();
+  if (!fromDir || !toDir) die('usage: extract <fromDir> <toDir>');
+  if (insideRepo(toDir)) die('extract into scratch outside the repository');
+  for (const [name, { sha256 }] of Object.entries(PAYLOADS)) copyVerified(path.join(fromDir, `${name}.txt`), path.join(toDir, name), sha256);
+  console.log(`custody-521: ${Object.keys(PAYLOADS).length} payloads extracted to ${toDir}`);
+}
+
+function stageTests(scratchDir) {
+  checkRoot();
+  if (!scratchDir) die('usage: stage-tests <scratchDir>');
+  for (const [name, { sha256, dest }] of Object.entries(PAYLOADS)) if (dest) copyVerified(path.join(scratchDir, name), dest, sha256);
+  console.log('custody-521: five tests staged');
+}
+
+const [command, ...rest] = process.argv.slice(2);
+if (command === 'verify-inputs') verifyInputs(rest[0] === '--record' ? rest[1] : null);
+else if (command === 'materialize') materialize(rest[0], rest[1], rest[2]);
+else if (command === 'recheck') recheck(rest[0], rest[1]);
+else if (command === 'extract') extract(rest[0], rest[1]);
+else if (command === 'stage-tests') stageTests(rest[0]);
+else if (command === 'seam-digest') console.log(JSON.stringify(usersSeam(fs.readFileSync(rest[0], 'utf8'))));
+else die('usage: custody-521.js verify-inputs [--record <file>] | materialize <packetRoot> <record> <planSha256> | recheck <record> <planCommit> | extract <fromDir> <toDir> | stage-tests <scratchDir> | seam-digest <seed.sql>');
