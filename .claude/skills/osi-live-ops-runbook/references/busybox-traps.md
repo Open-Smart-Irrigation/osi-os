@@ -15,9 +15,12 @@ alone):
   — the POSIX character-class form is unreliable on this image. This is also called
   out in `AGENTS.md` under "Conventions".
 - **`localhost` resolves to IPv6 `::1` first** under the minimal `wget`/resolver on
-  this image, which often has nothing listening on `::1`. Always target `127.0.0.1`
-  explicitly in on-Pi curl/wget calls, including in the verification checklist
-  above and in the reverse-tunnel deploy command.
+  this image, which often has nothing listening on `::1` (operator report; this
+  repo has not re-tested it on a current image). Always target `127.0.0.1`
+  explicitly in on-Pi curl/wget calls, including the post-deploy checklist and
+  the reverse-tunnel deploy command in `deploy.md`. `deploy.sh` itself still
+  fetches from `http://localhost:$PORT`; `deploy.md`, "Deploy runbook
+  (reverse-tunnel flow)", step 4 states what that depends on.
 - **The SSH "post-quantum" banner is harmless.** Every SSH connection to these
   gateways prints a post-quantum key exchange notice from the server side. Filter it
   out of scripted output rather than treating it as an error:

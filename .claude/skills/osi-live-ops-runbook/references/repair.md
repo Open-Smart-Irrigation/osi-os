@@ -4,23 +4,45 @@ Part of the osi-live-ops-runbook skill; read SKILL.md first.
 
 ## Pre-repair backup script
 
+The script stops at the first required artifact it cannot secure and prints
+`Backup at` only after all of them are in place. A `FATAL` line means there is
+no rollback set: do not start the repair. The required set is `farming.db`
+(an online `.backup` that passes `integrity_check`, or a raw copy taken with
+Node-RED stopped), `flows.json`, `settings.js`, `flows_cred.json` and the GUI
+directory. Flows, settings, credentials and GUI contents are copied with `-L`.
+The script also checks that the flows, settings and credential backups are
+regular files and compares those three files with their sources.
+
+This script gives no rollback copy for a direct `chirpstack.sqlite` edit. Its
+only ChirpStack copy is raw, taken while ChirpStack may be writing, and nothing
+here shows that copy is consistent. When the repair edits `chirpstack.sqlite`,
+change the `NEED_CHIRPSTACK=0` line in the script to `1`; the script then
+refuses before it writes anything. Edit the line itself: a value exported in
+the shell beforehand is overwritten by it. With `0`, a present
+`chirpstack.sqlite` is copied to `chirpstack.sqlite.raw` for reference only.
+
 ```sh
 # Run on the Pi (ash-compatible)
+NEED_CHIRPSTACK=0           # 1 = the repair edits chirpstack.sqlite: refuse
+die() { echo "FATAL: $* - do NOT proceed with the repair"; exit 1; }
+[ "$NEED_CHIRPSTACK" = 0 ] \
+  || die "this script makes no rollback copy for a chirpstack.sqlite edit"
 TS=$(date +%Y%m%d-%H%M%S)
 LABEL="pre-repair"          # e.g. "pre-eui-fix", "pre-fingerprint-restamp"
 BK="/data/db/backups/${LABEL}-${TS}"
-mkdir -p "$BK"
+mkdir -p "$BK" || die "cannot create $BK"
 # Raw copy, ONLY with the writer stopped: a raw copy of farming.db and its
 # sidecars taken while Node-RED writes is not a consistent backup.
 raw_copy_stopped() {
   /etc/init.d/node-red stop
   trap '/etc/init.d/node-red start' EXIT  # remove if the repair needs it stopped
   i=0; while pgrep -f '[n]ode-red' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do sleep 1; i=$((i + 1)); done
-  pgrep -f '[n]ode-red' >/dev/null 2>&1 && { echo "FATAL: Node-RED still running - no raw copy"; exit 1; }
-  cp -a /data/db/farming.db "$BK/farming.db" \
-    || { echo "FATAL: primary DB backup failed - do NOT proceed with the repair"; exit 1; }
+  pgrep -f '[n]ode-red' >/dev/null 2>&1 && die "Node-RED still running - no raw copy"
+  cp -a /data/db/farming.db "$BK/farming.db" || die "primary DB backup failed"
   for f in farming.db-wal farming.db-shm farming.db-journal; do
-    [ -e "/data/db/$f" ] && cp -a "/data/db/$f" "$BK/$f"
+    if [ -e "/data/db/$f" ]; then
+      cp -a "/data/db/$f" "$BK/$f" || die "$f copy failed"
+    fi
   done
 }
 if command -v sqlite3 >/dev/null 2>&1; then
@@ -29,23 +51,49 @@ if command -v sqlite3 >/dev/null 2>&1; then
   sqlite3 -cmd ".timeout 5000" /data/db/farming.db ".backup '$BK/farming.db'" || raw_copy_stopped
   # Same check as scripts/pi/backup-pre-deploy.sh: the copy must pass integrity_check.
   INTEG=$(sqlite3 "$BK/farming.db" "PRAGMA integrity_check" 2>&1) || true
-  [ "$INTEG" = "ok" ] || { echo "FATAL: backup integrity_check failed: $INTEG - do NOT proceed"; exit 1; }
+  [ "$INTEG" = "ok" ] || die "backup integrity_check failed: $INTEG"
 else
   raw_copy_stopped
   echo "WARN: no sqlite3 - integrity unchecked"
 fi
-# flows.json is a SYMLINK into /srv/node-red/payloads/<stamp>; -L copies the
-# active payload's contents, not a dangling link.
-cp -aL /srv/node-red/flows.json "$BK/flows.json"
-cp -a /srv/node-red/settings.js "$BK/settings.js"
-cp -a /srv/node-red/flows_cred.json "$BK/flows_cred.json" 2>/dev/null || true  # MQTT credentials
-# ChirpStack state — REQUIRED before any direct chirpstack.sqlite edit
-[ -e /srv/chirpstack/chirpstack.sqlite ] && cp -a /srv/chirpstack/chirpstack.sqlite "$BK/chirpstack.sqlite"
-mkdir -p "$BK/gui"
-cp -a /usr/lib/node-red/gui/. "$BK/gui/" 2>/dev/null || true
+# Required files: -L stores the target's bytes, never a link, and a dangling
+# link fails the copy. The backup must be a regular file equal to its source.
+copy_required() {  # source, destination, name
+  cp -aL "$1" "$2" || die "$3 copy failed"
+  [ -f "$2" ] && [ ! -L "$2" ] || die "$3 backup is not a regular file"
+  cmp -s "$1" "$2" || die "$3 backup differs from its source"
+}
+# flows.json is a SYMLINK into /srv/node-red/payloads/<stamp>.
+copy_required /srv/node-red/flows.json "$BK/flows.json" flows.json
+[ -s "$BK/flows.json" ] || die "flows.json backup is empty"
+copy_required /srv/node-red/settings.js "$BK/settings.js" settings.js
+copy_required /srv/node-red/flows_cred.json "$BK/flows_cred.json" "flows_cred.json (MQTT credentials)"
+# The GUI dir is a symlink into payloads/<stamp>; -L also copies the targets of
+# links inside it, and a dangling link inside it fails the copy.
+[ -d /usr/lib/node-red/gui ] || die "no /usr/lib/node-red/gui directory"
+mkdir -p "$BK/gui" || die "cannot create $BK/gui"
+cp -aL /usr/lib/node-red/gui/. "$BK/gui/" || die "GUI copy failed"
+[ -n "$(ls -A "$BK/gui")" ] || die "GUI backup is empty"
+GUI_LINKS=$(find "$BK/gui" -type l) || die "cannot scan the GUI backup"
+[ -z "$GUI_LINKS" ] || die "GUI backup still contains symbolic links"
+# Optional reference copy, NOT a rollback copy (see above).
+if [ -e /srv/chirpstack/chirpstack.sqlite ]; then
+  cp -aL /srv/chirpstack/chirpstack.sqlite "$BK/chirpstack.sqlite.raw" \
+    || die "chirpstack.sqlite.raw copy failed"
+  echo "NOTE: chirpstack.sqlite.raw is a raw copy, not a rollback copy"
+else
+  echo "NOTE: no chirpstack.sqlite on this gateway; not copied"
+fi
 echo "Backup at $BK"
 ls -la "$BK"
 ```
+
+The script checks copy-command completion, compares the flows, settings and
+credential files with their sources, and requires those three backups to be
+regular files rather than links. It also requires nonempty flows and GUI copies
+and a GUI tree without symbolic links. It does not compare each GUI file with
+its source. The farming database follows the backup and integrity-check
+branches above; `chirpstack.sqlite.raw` remains an unqualified reference copy.
 
 ## Stale-fingerprint recovery
 
@@ -211,32 +259,95 @@ runs, and the writer leaves its contents root-owned mode `0600` inside a mode
 copy of the key that run created, so keep it until the gateway provisions
 cleanly, then remove it the same way.
 
-### Changing DEVICE_EUI breaks linked login
+### Changing DEVICE_EUI and linked offline login
 
-The offline verifier is `bcrypt(password::DEVICE_EUI)` (see `AGENTS.md` "Security").
-If the EUI changes (fixing a wrong one, replacing hardware), every stored verifier
-for that gateway stops matching and logins fail. Repair sequence:
+Only accounts with `auth_mode = 'server'` (linked to the cloud) use the offline
+verifier. A local account compares its password against its own
+`password_hash`, and the EUI does not affect it. For a linked account,
+`auth-process-result` in `flows.json` decides as follows:
 
-1. Fix the UCI value:
-   ```bash
-   uci set osi-server.cloud.device_eui='<CORRECT_EUI_UPPERCASE>'
-   uci commit osi-server
-   ```
-2. Regenerate the verifier on the Pi with `bcryptjs` (placeholders `<password>` /
-   `<eui>` — uppercase EUI, same delimiter):
-   ```bash
-   node -e "const b=require('/srv/node-red/node_modules/bcryptjs'); console.log(b.hashSync('<password>::<eui>', 10))"
-   ```
-3. Write the new hash into the DB:
-   ```bash
-   sqlite3 /data/db/farming.db "UPDATE users SET server_offline_verifier = '<hash>' WHERE username = '<username>';"
-   ```
-4. Restart Node-RED, then have the operator unlink and re-link the cloud account so
-   a fresh sync token issues for the corrected EUI.
+- **A stored verifier.** When `server_offline_verifier` is not blank, the node
+  builds a subject with `verifierSubject` in
+  `osi-installation-helper/index.js` and compares it against that bcrypt hash.
+  The stored `server_offline_verifier_version` selects the subject; missing,
+  NULL or 0 is read as 1.
+  - **Version 2 and higher:** `password::<installation UUID>`. The UUID comes
+    from the gateway's single `installation_identity` row (the login query
+    selects it with `singleton_id = 1`; it is not a `users` column). It is
+    trimmed and lowercased and must have the version-4 UUID shape. A change of
+    EUI alone does not change this subject.
+  - **Below 2:** `password::<EUI>`. The EUI is the first valid value of, in
+    order, `LINK_GATEWAY_DEVICE_EUI` (from UCI
+    `osi-server.cloud.link_gateway_device_eui`), the `gateway_device_eui`
+    inside the stored sync token, and `DEVICE_EUI`. Valid means 16 hex digits
+    after separators are removed and the value is uppercased, other than
+    `0101010101010101`, or a 12-digit MAC, which is expanded with `FFFE` in
+    the middle. The subject follows that effective EUI, so a login fails when
+    the effective EUI no longer matches the EUI the cloud hashed. While an
+    earlier source holds a valid EUI, a different `DEVICE_EUI` does not change
+    the subject.
+- **The subject cannot be built.** A version 2 row whose installation UUID is
+  missing or malformed, or a version 1 row with no valid EUI from any of the
+  three sources, makes `verifierSubject` throw. The node logs a warning and
+  falls back to `server_password_hash`: the login succeeds only if that column
+  holds a hash that matches the password. Account link (`al-link-finalize`)
+  and an applied `SYNC_LINKED_AUTH` (`cs-reg-cloud-fn`) set that column to
+  NULL, so rows they wrote are refused. A row neither writer has updated, for
+  example because every later auth sync was ignored as stale or already
+  applied, can still hold a usable hash.
+- **A valid subject that does not match the stored verifier.** The login is
+  refused. This case has no fallback.
+- **No stored verifier** (NULL or blank): the node checks
+  `server_password_hash` directly, with the same rule as the fallback above.
 
-Also check `irrigation_zones` rows created before the fix — a sync trigger applies a
-`COALESCE(gateway_device_eui, <fallback>)` only on `INSERT`, so already-existing zone
-rows keep whatever EUI they were created with and need an explicit `UPDATE`.
+The cloud computes the verifier and the gateway stores it. Account link
+(`al-link-handle-auth`, then `al-link-finalize`) and the `SYNC_LINKED_AUTH`
+command (`cs-reg-cloud-fn`, for example after a cloud password change) store
+the cloud's `offlineVerifier` and `offlineVerifierVersion`. In osi-server,
+`LocalSyncService` issues version 2, bound to the installation UUID, when the
+link request reports `installation_recovery_v1`, and version 1, bound to the
+gateway EUI, otherwise. A password change through `LinkedGatewaySyncService`
+issues `max(current, 2) + 1` for an installation-bound account and 1 for an
+EUI-bound one. The version is therefore both the subject selector and an
+ordering counter. `cs-reg-cloud-fn` ignores an incoming version below the
+stored one (`STALE_IGNORED`), leaves an equal version with the same hash
+alone (`ALREADY_APPLIED`), and stores the incoming hash for an equal version
+with a different hash or for a higher version.
+
+**This runbook has no manual procedure for a linked offline verifier.** Its
+supported writers are account link and cloud auth sync. Do not construct a
+linked verifier yourself, and do not overwrite `server_offline_verifier` or
+`server_offline_verifier_version` as a repair. A hand-written subject or
+version that differs from what the login expects refuses the login. A
+hand-written version above the one the cloud issues next makes
+`cs-reg-cloud-fn` ignore that later cloud update as stale. A password typed
+into a command line lands in process arguments and can land in shell history.
+None of this concerns a local account's own `password_hash`.
+
+To see which case applies, inspect read-only. These queries print no password,
+hash or token:
+
+```sh
+sqlite3 /data/db/farming.db "SELECT username, server_username, server_offline_verifier_version, COALESCE(TRIM(server_offline_verifier), '') <> '' AS has_verifier, server_password_hash IS NOT NULL AS has_fallback_hash FROM users WHERE auth_mode = 'server';"
+sqlite3 /data/db/farming.db "SELECT installation_uuid FROM installation_identity WHERE singleton_id = 1;"
+```
+
+This section explains linked login. It is not an EUI transition procedure and
+does not tell you to set `osi-server.cloud.device_eui`, restart Node-RED or
+rewrite `irrigation_zones` rows. Live gateway identity belongs to
+`osi-identityd`, which resolves, repairs and re-resolves the identity,
+persists it, checks the durable readback and owns the coordinated Node-RED
+restart: `docs/sync/gateway-identity-convergence.md`, and for the configuration
+side `osi-config-and-flags` (`references/uci-and-identity.md`). Setting one UCI
+key does not decide the effective identity, because the resolver takes the
+concentrator runtime and configuration and the linked value before the
+persisted `cloud.device_eui`.
+
+If a linked login fails, stop and ask the operator (SKILL.md, "Never reset
+credentials to unblock yourself"). Unlink and re-link is an account operation,
+not a credential shortcut: `al-unlink-db` returns the account to local mode and
+clears the stored verifier, its version and the sync token, so it needs the
+operator's consent.
 
 ### ChirpStack v4 has no plain REST API
 
@@ -244,8 +355,11 @@ ChirpStack v4.x is gRPC-web only; `curl http://127.0.0.1:8080/api/...` 404s
 regardless of payload. To inspect or change ChirpStack config on a live Pi:
 
 - **Read:** `sqlite3 /srv/chirpstack/chirpstack.sqlite "SELECT ...;"`
-- **Write:** stop ChirpStack first (the DB is locked while it runs), modify via
-  `sqlite3`, then start it again:
+- **Write:** the pre-repair backup script above makes no rollback copy for this
+  write and refuses with `NEED_CHIRPSTACK=1`. This runbook has no reviewed
+  procedure for one, so do not start a write on the strength of that backup.
+  The mechanics: stop ChirpStack first (the DB is locked while it runs), modify
+  via `sqlite3`, then start it again:
   ```bash
   /etc/init.d/chirpstack stop
   sqlite3 /srv/chirpstack/chirpstack.sqlite "UPDATE ... ;"
