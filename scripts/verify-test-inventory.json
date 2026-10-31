@@ -78,14 +78,6 @@
       "reason": "needs a production GUI build (web/react-gui/build/index.html); all 16 tests fail without one, and CI builds no GUI"
     },
     {
-      "path": "scripts/deploy-push-bundle.test.sh",
-      "reason": "fails on main under CI's /bin/sh (dash) (#390): the test starts the bash script deploy-push-bundle.sh with sh, which stops at its first array (Syntax error: \"(\" unexpected); passes only where sh is bash"
-    },
-    {
-      "path": "scripts/deploy-offline.test.sh",
-      "reason": "needs BusyBox ash, wget and setsid as on the gateway (#390; run it in a node:22-alpine container, see its header); fails under dash"
-    },
-    {
       "path": "scripts/test-valve-schedule-timestamp-wire-format.js",
       "reason": "slow (#391): passes (32/32) but took about 17 minutes locally, a full migration replay per case through the sqlite3 CLI; too slow for a per-pull-request gate until it gets a faster fixture or a decided lane"
     },
