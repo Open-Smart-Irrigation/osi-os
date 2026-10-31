@@ -803,9 +803,9 @@ test('#403: a zone-only entry needs the grant on its zone', async () => {
   );
 });
 
-// #403, by the owner's decision: with scoped access on, a farm-wide entry (no
-// zone, no plot) is voided, updated or discarded only by the account that wrote
-// it or by an admin. Another account gets the answer a missing entry gets.
+// With scoped access on, farm-wide finals (no zone, no plot) require the farm
+// owner or an admin, including finals written by another account. Farm-wide
+// drafts remain writable only by their writer or an admin (#403, PR #446).
 test('#403: a farm-wide final is changed only by the farm owner or an admin, a draft by its writer', async () => {
   const db = new TestDb('scoped-entry-farm-wide');
   seedIdentity(db);
