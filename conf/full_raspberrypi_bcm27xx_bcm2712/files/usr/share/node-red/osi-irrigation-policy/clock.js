@@ -37,10 +37,24 @@ function clockStatus({ bootId, marker, uptime, now = Date.now(), lastDue, latest
   return { trusted: true, reason: 'trusted' };
 }
 
+// /proc/uptime prints seconds with two decimals. Multiplying the parsed float
+// does not give whole milliseconds (parseFloat('2.01') * 1000 is
+// 2009.9999999999998), and the dispatcher only accepts an integer receipt, so
+// the decimal digits are converted directly. Up to three fractional digits are
+// exact and keep reading order; any other token leaves uptime untrusted (null).
+const UPTIME_SECONDS = /^(\d+)(?:\.(\d{1,3}))?$/;
+
+function uptimeMilliseconds(token) {
+  const match = UPTIME_SECONDS.exec(token);
+  if (!match) return null;
+  const ms = Number(match[1]) * 1000 + Number((match[2] || '').padEnd(3, '0'));
+  return Number.isSafeInteger(ms) ? ms : null;
+}
+
 function readRuntimeClock({ fs = fsDefault, bootPath = '/proc/sys/kernel/random/boot_id', uptimePath = '/proc/uptime', markerPath = '/var/run/osi-irrigation-clock.json' } = {}) {
   let bootId = null; let uptime = null; let marker = null;
   try { bootId = fs.readFileSync(bootPath, 'utf8').trim() || null; } catch (_) { /* untrusted */ }
-  try { const value = Number.parseFloat(fs.readFileSync(uptimePath, 'utf8').trim().split(/\s+/)[0]); uptime = Number.isFinite(value) ? value * 1000 : null; } catch (_) { /* untrusted */ }
+  try { uptime = uptimeMilliseconds(fs.readFileSync(uptimePath, 'utf8').trim().split(/\s+/)[0]); } catch (_) { /* untrusted */ }
   try { marker = JSON.parse(fs.readFileSync(markerPath, 'utf8')); } catch (_) { /* untrusted */ }
   return { bootId, uptime, marker };
 }

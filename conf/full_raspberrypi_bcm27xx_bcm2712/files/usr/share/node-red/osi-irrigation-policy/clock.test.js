@@ -248,3 +248,82 @@ test('readRuntimeClock reads procfs through injectable paths and missing marker 
   } };
   assert.deepEqual(readRuntimeClock({ fs, markerPath: '/missing' }), { bootId: 'boot-a', uptime: 55000, marker: null });
 });
+
+function uptimeReading(text) {
+  return readRuntimeClock({ markerPath: '/missing', fs: { readFileSync(file) {
+    if (file.endsWith('boot_id')) return 'boot-a\n';
+    if (file.endsWith('uptime')) return text;
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+  } } }).uptime;
+}
+
+test('readRuntimeClock converts real procfs-format uptime files to exact integer milliseconds', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-clock-uptime-'));
+  try {
+    const bootPath = path.join(dir, 'boot_id');
+    const uptimePath = path.join(dir, 'uptime');
+    fs.writeFileSync(bootPath, 'boot-a\n');
+    assert.equal(Number.parseFloat('2.01') * 1000, 2009.9999999999998);
+    for (const [text, expected] of [['2.01 0.00\n', 2010], ['1.12 3.40\n', 1120], ['1.13 3.40\n', 1130]]) {
+      fs.writeFileSync(uptimePath, text);
+      const runtime = readRuntimeClock({ bootPath, uptimePath, markerPath: path.join(dir, 'missing-marker') });
+      assert.deepEqual(runtime, { bootId: 'boot-a', uptime: expected, marker: null }, text);
+      assert.equal(Number.isInteger(runtime.uptime), true, text);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readRuntimeClock maps every centisecond reading to exact, strictly increasing milliseconds', () => {
+  let previous = -1;
+  for (let centiseconds = 0; centiseconds <= 20000; centiseconds += 1) {
+    const text = `${Math.floor(centiseconds / 100)}.${String(centiseconds % 100).padStart(2, '0')} 0.00\n`;
+    const uptime = uptimeReading(text);
+    assert.equal(uptime, centiseconds * 10, text);
+    assert.ok(uptime > previous, text);
+    previous = uptime;
+  }
+  for (const [text, expected] of [['55.0 0.0\n', 55000], ['100.000 0.00\n', 100000], ['0 0\n', 0], ['7 0\n', 7000],
+    ['0.001 0\n', 1], ['9007199254740.991 0\n', 9007199254740991]]) {
+    assert.equal(uptimeReading(text), expected, text);
+  }
+});
+
+test('readRuntimeClock leaves missing, malformed, negative, non-finite and sub-millisecond uptime untrusted', () => {
+  for (const text of ['', '\n', 'abc 0', 'NaN 0', 'Infinity 0', '-2.00 0', '+1.00 0', '1e3 0', '0x10 0', '2.01abc 0',
+    '2. 0', '.5 0', '2.0001 0', '9007199254740.992 0', `${'9'.repeat(400)} 0`]) {
+    assert.equal(uptimeReading(text), null, JSON.stringify(text));
+  }
+  const noUptime = readRuntimeClock({ markerPath: '/missing', fs: { readFileSync(file) {
+    if (file.endsWith('boot_id')) return 'boot-a\n';
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+  } } });
+  assert.deepEqual(noUptime, { bootId: 'boot-a', uptime: null, marker: null });
+  const noBoot = readRuntimeClock({ markerPath: '/missing', fs: { readFileSync(file) {
+    if (file.endsWith('uptime')) return '2.01 0.00\n';
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+  } } });
+  assert.deepEqual(noBoot, { bootId: null, uptime: 2010, marker: null });
+});
+
+test('a stratum marker written at 2.01 s uptime stays trusted when read in the same centisecond', () => {
+  const files = new Map([['/clock/boot', 'boot-a\n'], ['/clock/uptime', '2.01 0.00\n'],
+    ['/clock/marker', JSON.stringify({ boot_id: 'boot-a', epoch_ms: 1800000000000, uptime_ms: 2010, stratum: 2 })]]);
+  const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
+  const fs = {
+    readFileSync(file) { if (files.has(file)) return files.get(file); throw missing(); },
+    writeFileSync(file, value) { files.set(file, value); },
+    mkdirSync() {},
+    renameSync(from, to) { files.set(to, files.get(from)); files.delete(from); },
+    unlinkSync(file) { if (!files.delete(file)) throw missing(); },
+  };
+  const status = runtimeClockStatus({ fs, bootPath: '/clock/boot', uptimePath: '/clock/uptime', markerPath: '/clock/marker',
+    rejectionPath: '/clock/rejection', fallbackPath: '/clock/rejection-fallback', now: 1800000000000 });
+  assert.deepEqual(status, { trusted: true, reason: 'trusted' });
+  assert.equal(files.has('/clock/rejection'), false);
+  assert.equal(files.has('/clock/rejection-fallback'), false);
+});
