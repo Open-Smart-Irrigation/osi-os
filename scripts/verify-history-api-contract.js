@@ -208,7 +208,9 @@ function verifyHistoryRouterImplementation(flows, failures, extractedModuleSourc
   assertContains(failures, adapterSource, 'osiHistory.buildLocalInterpretations', 'helper-owned local interpretations');
   assertContains(failures, adapterSource, 'osiHistory.buildAdvancedDiagnostics', 'helper-owned advanced diagnostic availability');
   assertContains(failures, adapterSource, 'osiHistory.buildZoneExportCsv', 'helper-owned zone CSV export');
-  assertContains(failures, adapterSource, "assertRole(db, user.user_uuid, 'admin', { scopedMode: true })", 'gateway history stays admin-only (P2)');
+  assertContains(failures, adapterSource,
+    "assertAuthenticatedRole(db, principal, 'admin', { scopedMode: true })",
+    'gateway history uses fresh token-bound admin role (P2)');
   assertContains(failures, adapterSource, 'channels', 'zone CSV export forwards channels query param');
   assertContains(failures, adapterSource, 'site:', 'zone CSV export forwards gateway site id');
   assertContains(failures, adapterSource, 'respondCsv(200, filename, osiHistory.toCsv(result.columns, result.rows))', 'CSV download response');
@@ -426,4 +428,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { verifyAnalysisRouterImplementation };
+module.exports = { verifyAnalysisRouterImplementation, verifyHistoryRouterImplementation };
