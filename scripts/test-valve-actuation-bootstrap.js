@@ -143,7 +143,7 @@ async function main() {
         raw.close();
       });
 
-      await test(`[${profile}/${nodeId}] shape matches VALVE_ACTUATION_ARCHIVED's own payload (field-for-field), zone_id resolved to zone_uuid, archived_at fallback chain`, async () => {
+      await test(`[${profile}/${nodeId}] shape matches VALVE_ACTUATION_ARCHIVED's own payload (field-for-field), zone_id resolved to zone_uuid`, async () => {
         const raw = await tempDb();
         raw.exec("INSERT INTO irrigation_zones(name, user_id, created_at, updated_at) VALUES ('Z1',1,datetime('now'),datetime('now'))");
         const zone = raw.prepare('SELECT id, zone_uuid FROM irrigation_zones LIMIT 1').get();
@@ -152,8 +152,8 @@ async function main() {
           commanded_at: '2026-08-20T10:00:00.000Z', commanded_duration_seconds: 900, expected_close_at: '2026-08-20T10:15:00.000Z',
           observed_open_at: '2026-08-20T10:00:05.000Z', observed_close_at: '2026-08-20T10:15:03.000Z', volume_source: 'estimated_duration_flow_rate',
         });
-        // A terminal row that never observed a close at all -- archived_at must fall back to
-        // expected_close_at (the same COALESCE order runtime.js's buildActuationPayload uses).
+        // A terminal row that never observed a close. Its archive time is asserted in the
+        // dedicated archive-order cases below, so this case stays a shape control.
         insertExpectation(raw, {
           expectation_id: 'e2', reconciliation_state: 'STALE_NO_OBSERVATION',
           commanded_at: '2026-08-21T10:00:00.000Z', expected_close_at: '2026-08-21T10:15:00.000Z',
@@ -182,7 +182,89 @@ async function main() {
         });
         assert.equal(byId.e2.status, 'OPEN_TIMEOUT');
         assert.equal(byId.e2.zone_uuid, null);
-        assert.equal(byId.e2.archived_at, '2026-08-21T10:15:00.000Z', 'no observed_close_at -- falls back to expected_close_at');
+        assert.equal(byId.e2.expected_close_at, '2026-08-21T10:15:00.000Z');
+        assert.equal(byId.e2.observed_close_at, null);
+        assert.equal(byId.e2.device_eui, EUI);
+        raw.close();
+      });
+
+      // Issue #331: archived_at is the observed close when one exists, otherwise the command
+      // time -- the rule runtime.js's buildActuationPayload already uses. The planned
+      // expected_close_at stays in the payload but never orders the archive.
+
+      await test(`[${profile}/${nodeId}] an observed close orders archived_at, whether it lands after or before the planned close`, async () => {
+        const raw = await tempDb();
+        insertExpectation(raw, {
+          expectation_id: 'late-observed', reconciliation_state: 'OBSERVED_COMPLETE',
+          commanded_at: '2026-08-22T10:00:00.000Z', expected_close_at: '2026-08-22T12:00:00.000Z',
+          observed_open_at: '2026-08-22T10:00:05.000Z', observed_close_at: '2026-08-22T12:05:00.000Z',
+        });
+        insertExpectation(raw, {
+          expectation_id: 'early-observed', reconciliation_state: 'OBSERVED_COMPLETE',
+          commanded_at: '2026-08-23T10:00:00.000Z', expected_close_at: '2026-08-23T12:00:00.000Z',
+          observed_open_at: '2026-08-23T10:00:05.000Z', observed_close_at: '2026-08-23T11:00:00.000Z',
+        });
+        const rows = await runBlock(block, raw, profile);
+        const byId = Object.fromEntries(rows.map((r) => [r.expectation_id, r]));
+        assert.deepEqual(Object.keys(byId).sort(), ['early-observed', 'late-observed']);
+        assert.equal(byId['late-observed'].status, 'COMPLETED');
+        assert.equal(byId['late-observed'].commanded_at, '2026-08-22T10:00:00.000Z');
+        assert.equal(byId['late-observed'].expected_close_at, '2026-08-22T12:00:00.000Z');
+        assert.equal(byId['late-observed'].observed_close_at, '2026-08-22T12:05:00.000Z');
+        assert.equal(byId['late-observed'].device_eui, EUI);
+        assert.equal(byId['early-observed'].status, 'COMPLETED');
+        assert.equal(byId['early-observed'].commanded_at, '2026-08-23T10:00:00.000Z');
+        assert.equal(byId['early-observed'].expected_close_at, '2026-08-23T12:00:00.000Z');
+        assert.equal(byId['early-observed'].observed_close_at, '2026-08-23T11:00:00.000Z');
+        assert.equal(byId['early-observed'].device_eui, EUI);
+        assert.deepEqual(
+          { 'late-observed': byId['late-observed'].archived_at, 'early-observed': byId['early-observed'].archived_at },
+          { 'late-observed': '2026-08-22T12:05:00.000Z', 'early-observed': '2026-08-23T11:00:00.000Z' },
+          'an observed close is the archive time'
+        );
+        raw.close();
+      });
+
+      await test(`[${profile}/${nodeId}] without an observed close, archived_at is commanded_at, never the planned close`, async () => {
+        const raw = await tempDb();
+        insertExpectation(raw, {
+          expectation_id: 'stale-no-close', reconciliation_state: 'STALE_NO_OBSERVATION',
+          commanded_at: '2026-08-21T10:00:00.000Z', expected_close_at: '2026-08-21T12:00:00.000Z',
+        });
+        insertExpectation(raw, {
+          expectation_id: 'open-no-close', reconciliation_state: 'STALE_OPEN_OBSERVED',
+          commanded_at: '2026-08-24T10:00:00.000Z', expected_close_at: '2026-08-24T12:00:00.000Z',
+          observed_open_at: '2026-08-24T10:00:05.000Z',
+        });
+        insertExpectation(raw, {
+          expectation_id: 'cancelled-no-close', reconciliation_state: 'CANCELLED', cancel_reason: 'operator_cancel',
+          commanded_at: '2026-08-25T10:00:00.000Z', expected_close_at: '2026-08-25T12:00:00.000Z',
+        });
+        const rows = await runBlock(block, raw, profile);
+        const byId = Object.fromEntries(rows.map((r) => [r.expectation_id, r]));
+        const field = (name) => Object.fromEntries(Object.entries(byId).map(([id, r]) => [id, r[name]]));
+        assert.deepEqual(Object.keys(byId).sort(), ['cancelled-no-close', 'open-no-close', 'stale-no-close']);
+        assert.deepEqual(field('status'), {
+          'stale-no-close': 'OPEN_TIMEOUT', 'open-no-close': 'CLOSE_TIMEOUT', 'cancelled-no-close': 'CANCELLED',
+        });
+        assert.deepEqual(field('observed_close_at'), {
+          'stale-no-close': null, 'open-no-close': null, 'cancelled-no-close': null,
+        });
+        assert.deepEqual(field('expected_close_at'), {
+          'stale-no-close': '2026-08-21T12:00:00.000Z',
+          'open-no-close': '2026-08-24T12:00:00.000Z',
+          'cancelled-no-close': '2026-08-25T12:00:00.000Z',
+        });
+        assert.deepEqual(field('device_eui'), {
+          'stale-no-close': EUI, 'open-no-close': EUI, 'cancelled-no-close': EUI,
+        });
+        // Last on purpose: the pre-#331 chain picks the planned 12:00 close for all three
+        // rows, and this one comparison reports every archived_at it produced.
+        assert.deepEqual(field('archived_at'), {
+          'stale-no-close': '2026-08-21T10:00:00.000Z',
+          'open-no-close': '2026-08-24T10:00:00.000Z',
+          'cancelled-no-close': '2026-08-25T10:00:00.000Z',
+        }, 'a planned close must not order an archive that has no observed close');
         raw.close();
       });
 
@@ -230,6 +312,15 @@ async function main() {
       });
     }
   }
+
+  const canonicalBlock = loadBlock(PROFILES[0], NODE_IDS[0]);
+  await test('snapshot valve blocks match canonical bootstrap in both profiles', () => {
+    for (const profile of PROFILES) {
+      for (const nodeId of NODE_IDS) {
+        assert.equal(loadBlock(profile, nodeId), canonicalBlock, `${profile}/${nodeId}`);
+      }
+    }
+  });
 }
 
 main();
