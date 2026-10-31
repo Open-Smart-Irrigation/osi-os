@@ -20,6 +20,7 @@ jobs:
           set -eu
           test "$(readlink -f /bin/sh)" = "$(command -v dash)"
           echo "/bin/sh -> $(readlink -f /bin/sh)"
+          dpkg-query -W dash bash
           for tool in bash node tar sha256sum wget setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
             tool_path=$(command -v "$tool") || { echo "missing $tool" >&2; exit 127; }
             echo "$tool=$tool_path"
