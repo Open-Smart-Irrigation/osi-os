@@ -326,6 +326,51 @@ function verifyPortableHistoryImplementation(flows, failures, moduleSource) {
   assertNotContains(failures, moduleSource, 'sync_outbox', 'edge sync outbox mutation from local-only portable history');
 }
 
+
+function verifyZoneCsvResponseContract(flows, failures) {
+  const one = (id, type) => {
+    const matches = flows.filter((node) => node.id === id);
+    if (matches.length !== 1 || matches[0].type !== type) {
+      failures.push('per-zone CSV response: expected one ' + type + ' ' + id);
+      return null;
+    }
+    return matches[0];
+  };
+  const route = one('history-zone-export-csv-http', 'http in');
+  const router = one('history-api-router-fn', 'function');
+  const response = one('history-api-response', 'http response');
+  if (!route || !router || !response) return;
+  if (route.method !== 'get' || route.url !== '/api/history/zones/:zoneId/export.csv') {
+    failures.push('per-zone CSV response: route method/path changed');
+  }
+  if (JSON.stringify(route.wires) !== JSON.stringify([[router.id]]) ||
+      JSON.stringify(router.wires) !== JSON.stringify([[response.id]])) {
+    failures.push('per-zone CSV response: route/router/response wiring changed');
+  }
+  const headers = response.headers || {};
+  if (Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+    failures.push('per-zone CSV response: fixed Content-Type overrides CSV message');
+  }
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+  };
+  for (const [name, value] of Object.entries(cors)) {
+    if (headers[name] !== value) failures.push('per-zone CSV response: missing fixed CORS ' + name);
+  }
+  const source = String(router.func || '');
+  if (!source.includes("'Content-Type': 'application/json'")) {
+    failures.push('per-zone CSV response: JSON message type is not explicit');
+  }
+  if (!source.includes("'Content-Type': 'text/csv; charset=utf-8'")) {
+    failures.push('per-zone CSV response: CSV message type is not explicit');
+  }
+  if (!source.includes("'Content-Disposition': 'attachment; filename=")) {
+    failures.push('per-zone CSV response: attachment disposition is absent');
+  }
+}
+
 function readFlows(flowPath) {
   const source = fs.readFileSync(flowPath, 'utf8');
   const parsed = JSON.parse(source);
@@ -396,6 +441,7 @@ function verify(options) {
 
   if (!allowPendingMissing) {
     verifyHistoryRouterImplementation(flows, failures, moduleSource);
+    verifyZoneCsvResponseContract(flows, failures);
     verifyAnalysisRouterImplementation(flows, failures);
     verifyPortableHistoryImplementation(flows, failures, moduleSource);
   }
@@ -426,4 +472,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { verifyAnalysisRouterImplementation };
+module.exports = { verifyAnalysisRouterImplementation, verifyZoneCsvResponseContract };
