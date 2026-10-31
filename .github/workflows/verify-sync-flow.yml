@@ -232,6 +232,11 @@ jobs:
         run: |
           node --test scripts/test-chirpstack-bootstrap-clover.js
           node scripts/test-clover-ingest-flow.js
+      - name: ChirpStack helper metadata safety
+        run: >-
+          node --test
+          conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
+          conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-chirpstack-helper/index.test.js
       # G1: the candidate T0-T10 root suite. The TAP is kept as an artifact;
       # with pipefail a failing test still fails this step.
       - name: ChirpStack credential env-file safety
