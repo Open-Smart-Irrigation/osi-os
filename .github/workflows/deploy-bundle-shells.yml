@@ -1,0 +1,104 @@
+name: Deploy bundle shell fixtures
+on:
+  pull_request:
+    branches: [main, master]
+jobs:
+  dash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check dash fixture prerequisites
+        run: |
+          set -eu
+          test "$(readlink -f /bin/sh)" = "$(command -v dash)"
+          echo "/bin/sh -> $(readlink -f /bin/sh)"
+          for tool in bash node tar sha256sum wget setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
+            tool_path=$(command -v "$tool") || { echo "missing $tool" >&2; exit 127; }
+            echo "$tool=$tool_path"
+          done
+          node --version
+      - name: Bundle upload and offline fixtures under dash
+        env:
+          DEPLOY_TEST_EXPECT_SH: dash
+        run: |
+          set -eu
+          sh scripts/deploy-push-bundle.test.sh
+          sh scripts/deploy-offline.test.sh
+          premarker_log=$(mktemp)
+          if DEPLOY_TEST_PREMARKER_CONTROL=1 sh scripts/deploy-offline.test.sh >"$premarker_log" 2>&1; then
+            cat "$premarker_log"
+            echo 'premarker control unexpectedly passed' >&2
+            exit 1
+          else
+            premarker_rc=$?
+          fi
+          cat "$premarker_log"
+          [ "$premarker_rc" -eq 19 ] || exit 1
+          grep -Fq 'premarker delay running before forced marker timeout' "$premarker_log"
+          grep -Fq 'premarker child status=1, expected=1' "$premarker_log"
+          [ "$(grep -Fxc 'fixture cleanup: missing marker only; quiescent' "$premarker_log")" -eq 2 ] || exit 1
+          grep -Fq 'premarker parent second cleanup exit=1' "$premarker_log"
+          grep -Fq 'premarker parent second audit exit=0' "$premarker_log"
+          grep -Fxq 'fixture audit: quiescent' "$premarker_log"
+          grep -Eq 'fixture sweep: signaled [0-9]+/[0-9]+/delay SIGTERM' "$premarker_log"
+          grep -Fq 'premarker unrelated canary: OK' "$premarker_log"
+          grep -Fq 'premarker cleanup control: expected uncertainty retained' "$premarker_log"
+          rm -f "$premarker_log"
+  ash:
+    runs-on: ubuntu-latest
+    container: node:22-alpine
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Install fixture prerequisites
+        run: apk add --no-cache bash coreutils util-linux wget tar git
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check ash fixture prerequisites
+        run: |
+          set -eu
+          busybox --list | grep -qx ash
+          test "$(readlink -f /bin/sh)" = "$(command -v busybox)"
+          echo "/bin/sh -> $(readlink -f /bin/sh)"
+          for tool in bash node tar sha256sum wget setsid awk df tail date mktemp cmp grep cut head wc tr seq stat sleep; do
+            tool_path=$(command -v "$tool") || { echo "missing $tool" >&2; exit 127; }
+            echo "$tool=$tool_path"
+          done
+          node --version
+      - name: Bundle upload and offline fixtures under ash
+        env:
+          DEPLOY_TEST_EXPECT_SH: ash
+        run: |
+          set -eu
+          sh scripts/deploy-push-bundle.test.sh
+          sh scripts/deploy-offline.test.sh
+          premarker_log=$(mktemp)
+          if DEPLOY_TEST_PREMARKER_CONTROL=1 sh scripts/deploy-offline.test.sh >"$premarker_log" 2>&1; then
+            cat "$premarker_log"
+            echo 'premarker control unexpectedly passed' >&2
+            exit 1
+          else
+            premarker_rc=$?
+          fi
+          cat "$premarker_log"
+          [ "$premarker_rc" -eq 19 ] || exit 1
+          grep -Fq 'premarker delay running before forced marker timeout' "$premarker_log"
+          grep -Fq 'premarker child status=1, expected=1' "$premarker_log"
+          [ "$(grep -Fxc 'fixture cleanup: missing marker only; quiescent' "$premarker_log")" -eq 2 ] || exit 1
+          grep -Fq 'premarker parent second cleanup exit=1' "$premarker_log"
+          grep -Fq 'premarker parent second audit exit=0' "$premarker_log"
+          grep -Fxq 'fixture audit: quiescent' "$premarker_log"
+          grep -Eq 'fixture sweep: signaled [0-9]+/[0-9]+/delay SIGTERM' "$premarker_log"
+          grep -Fq 'premarker unrelated canary: OK' "$premarker_log"
+          grep -Fq 'premarker cleanup control: expected uncertainty retained' "$premarker_log"
+          rm -f "$premarker_log"
