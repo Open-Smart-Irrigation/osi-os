@@ -33,7 +33,7 @@
   "predictionAdvisoryWarning": "Experimental, no usar en producción.",
   "waterCard": "Balance hídrico",
   "irrigationSchedule": "Riego activado por sensor",
-  "valveControl": "Valve control",
+  "valveControl": "Control de válvulas",
   "environmentCard": "Entorno y previsión meteorológica",
   "dataModule": "Vista de datos",
   "networkModule": "Red",
