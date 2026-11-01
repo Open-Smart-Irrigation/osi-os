@@ -619,12 +619,15 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                                   if (el) deleteButtonRefs.current.set(schedule.scheduleUuid, el);
                                   else deleteButtonRefs.current.delete(schedule.scheduleUuid);
                                 }}
-                                onClick={() => setDeleteSelection({
-                                  valveEui: valve.deviceEui,
-                                  scheduleUuid: schedule.scheduleUuid,
-                                  content: deletionContent(schedule),
-                                })}
-                                disabled={rowBusyUuid === schedule.scheduleUuid}
+                                onClick={() => {
+                                  if (deleteInFlight.current) return;
+                                  setDeleteSelection({
+                                    valveEui: valve.deviceEui,
+                                    scheduleUuid: schedule.scheduleUuid,
+                                    content: deletionContent(schedule),
+                                  });
+                                }}
+                                disabled={deleting || rowBusyUuid === schedule.scheduleUuid}
                                 className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
                               >
                                 {t('scheduleDialog.delete')}

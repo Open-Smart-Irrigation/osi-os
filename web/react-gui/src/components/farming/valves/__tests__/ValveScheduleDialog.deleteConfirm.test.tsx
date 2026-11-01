@@ -368,6 +368,54 @@ describe('ValveScheduleDialog delete confirmation', () => {
     expect(within(rowByLabel('Morning soak')).getByRole('button', { name: 'Delete' })).toBeEnabled();
   });
 
+  it.each(['delete request', 'refresh'] as const)('blocks a second delete selection during the pending %s, then restores confirmation focus', async (phase) => {
+    const user = userEvent.setup();
+    const rows = responseWithTwoWeeklyRows();
+    let settle: () => void = () => {};
+    const pending = new Promise<void>((resolve) => { settle = resolve; });
+    schedulesMock.mockResolvedValue(rows);
+    if (phase === 'delete request') {
+      deleteScheduleMock.mockReturnValueOnce(pending.then(() => ({ pushesQueued: 1 })));
+    } else {
+      schedulesMock.mockResolvedValueOnce(rows).mockReturnValueOnce(pending.then(() => rows));
+    }
+    const onChanged = vi.fn();
+    renderDialog(makeValve(), onChanged);
+    try {
+      const first = await openDeleteConfirmation('Morning soak');
+      await user.click(within(first).getByRole('button', { name: 'Yes, delete' }));
+      if (phase === 'refresh') await waitFor(() => expect(schedulesMock).toHaveBeenCalledTimes(2));
+      const secondTrigger = within(rowByLabel('Evening')).getByRole('button', { name: 'Delete' });
+      await user.click(secondTrigger);
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(secondTrigger).toBeDisabled();
+      expect(deleteScheduleMock).toHaveBeenCalledExactlyOnceWith('0016C001F1000001', 'sched-a');
+      expect(onChanged).not.toHaveBeenCalled();
+      await act(async () => { settle(); await pending; });
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+      expect(within(rowByLabel('Evening')).getByRole('button', { name: 'Delete' })).toBeEnabled();
+      const second = await openDeleteConfirmation('Evening');
+      const cancel = within(second).getByRole('button', { name: 'Cancel' });
+      const confirm = within(second).getByRole('button', { name: 'Yes, delete' });
+      expect(cancel).toBeEnabled();
+      expect(confirm).toBeEnabled();
+      expect(cancel).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(confirm).toHaveFocus();
+      await user.tab();
+      expect(cancel).toHaveFocus();
+      within(rowByLabel('Morning soak')).getByRole('checkbox', { name: 'Enabled' }).focus();
+      expect(cancel).toHaveFocus();
+      await user.keyboard(' ');
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(updateScheduleMock).not.toHaveBeenCalled();
+      expect(createScheduleMock).not.toHaveBeenCalled();
+      expect(deleteScheduleMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => { settle(); await pending; });
+    }
+  });
+
   it('resets an edit bound to the deleted schedule before refreshing', async () => {
     schedulesMock.mockResolvedValue(responseWithTwoWeeklyRows());
     renderDialog();
