@@ -138,6 +138,11 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   };
 
   const onMenuTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Escape' && menuOpen) {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     event.preventDefault();
     const focusLast = event.key === 'ArrowUp';

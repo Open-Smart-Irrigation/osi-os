@@ -513,6 +513,23 @@ describe('ValveTile cancel help (D04)', () => {
 });
 
 describe('ValveTile overflow menu keyboard and focus (#162)', () => {
+  it('dismisses with Escape after focus returns to the More trigger', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({}, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    await user.click(trigger);
+    expect(screen.getByRole('menu', { name: 'More' })).toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+    expectNoValveActions(actions);
+  });
+
   it('names the menu and wraps through enabled items, skipping native disabled Skip today', () => {
     const actions = makeActionSpies();
     renderTile({ schedulerStatus: 'SKIP_TODAY' }, actions);
