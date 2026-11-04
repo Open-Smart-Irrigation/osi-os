@@ -162,10 +162,18 @@ confirming `uci show osi-server` matches concentratord) lives in
 `osi-live-ops-runbook` — this section only documents the mechanism and the
 trap.
 
-**Consequence:** changing `DEVICE_EUI` invalidates the linked-login offline
-verifier, which is `bcrypt(password::DEVICE_EUI)` — any EUI change forces a
-verifier regeneration. The repair sequence for this is also in
-`osi-live-ops-runbook`.
+**Consequence:** whether a `DEVICE_EUI` change breaks linked offline login
+depends on the verifier version stored for the account (`AGENTS.md`
+"Security"). Version 2 and higher hash `password::installation_uuid` and do
+not depend on the EUI. Version 1 (also missing, NULL or 0) hashes
+`password::<EUI>`, where the gateway takes the first valid value of
+`LINK_GATEWAY_DEVICE_EUI`, the sync token's `gateway_device_eui` and
+`DEVICE_EUI`; it breaks when that EUI no longer matches the one the cloud
+hashed. The cloud computes verifiers; account link and cloud auth sync are
+the supported writers, and there is no manual verifier repair. Subject
+failures, the fallback hash and a read-only inspection are in
+`osi-live-ops-runbook` (`references/repair.md`, "Changing DEVICE_EUI and
+linked offline login").
 
 **Account-link gate:** flows.json's account-link node explicitly refuses to
 link while `gatewayDeviceEuiConfidence === 'provisional'` (HTTP 503, "Gateway
@@ -183,8 +191,8 @@ production path is a configured concentrator, which resolves an
 `authoritative` EUI at step 1 and needs no override. The risk: linking under a
 hand-picked EUI on a gateway that later gets a real concentrator (or a
 different MAC-derived fallback) leaves the cloud holding a stale EUI. Linked
-history strands under the old value, and offline login breaks because the
-verifier is `bcrypt(password::DEVICE_EUI)` (see the Consequence note above).
+history strands under the old value, and a version-1 offline login breaks if
+the linked EUI later changes (see the Consequence note above).
 
 **Re-verify:**
 ```
