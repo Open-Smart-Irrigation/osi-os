@@ -12,7 +12,7 @@ test('demo-only machine Luganda fills valve fallback strings and preserves inter
   // (docs/i18n/pending-luganda-translations.md). The demo shows the English source
   // text for it, never machine Luganda; a human pass drops the key from this list.
   const pendingPrefixes=['irrigationPolicy.','irrigationPreference.','cancelOutcome.','cancelCollateral.'];
-  const pendingKeys=new Set(['planLost','schedulerStatusLost','scheduleDialog.push.LOST','resumeRefusedClearPending','cancelHelp','cancelHelpLabel']);
+  const pendingKeys=new Set(['planLost','schedulerStatusLost','scheduleDialog.push.LOST','resumeRefusedClearPending','cancelHelp','cancelHelpLabel','scheduleDialog.deleteConfirmTitle','scheduleDialog.deleteConfirmBody','scheduleDialog.deleteConfirmButton']);
   const pendingHuman=(key:string)=>pendingKeys.has(key)||pendingPrefixes.some((prefix)=>key.startsWith(prefix));
   assert.deepEqual(Object.keys(copy).sort(),Object.keys(english).sort());
   for(const [key,value] of Object.entries(english)) {
