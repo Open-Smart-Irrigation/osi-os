@@ -660,6 +660,10 @@
     "zone-command-apply-fn": {
       "delta": 136,
       "reason": "Task 7b2 inherited silent-catch repair: transport construction failures are surfaced with node.warn while the durable command remains pending and existing ACK behavior is unchanged: pinned 55b3d4b7b, 2427 -> 2563 (+136)."
+    },
+    "scoped-admin-account-router": {
+      "delta": 3579,
+      "reason": "#521 linked-account password reset refusal. Measured with verify-flows-size-ratchet nodeSizes (func.length) over both byte-identical maintained profiles: origin/main 10508 -> HEAD 14087 = +3579. GET /api/users adds a normalized auth_mode (local/server/unknown); POST /api/users answers auth_mode local; the password-reset branch adds a read-only target preflight before bcrypt, a short transaction that rechecks the token-bound actor (assertFreshRole on the transaction scope) and the target, a conditional UPDATE bound to auth_mode='local', an exact changes() check, a 409 linked_account_password_reset_unsupported answer, and a safe 500 for reset faults in which a failed ROLLBACK outranks a 401 or 403 raised inside the transaction."
     }
   },
   "total_allowance": {
@@ -699,10 +703,6 @@
     "scoped-zone-delete-router": {
       "max_chars": 5023,
       "reason": "Exact measured size after commit E6 (adapted from AgroLink 17462573a): Wave 3 scoped-access port, commit E6 (adapted from AgroLink 17462573a, \"fix(scope): replace viewer-denylist with a canMutate() allowlist on every mutation gate\"): role === 'viewer' denylist checks replaced with !scope.canMutate(role) allowlist checks. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles. Supersedes prior entry: Wave 3 scoped-access port (AgroLink bc156fb2, feat(api): enforce scoped zone lifecycle): new function node measured at exactly 5018 chars on both maintained profiles, over this ratchet's 4096-char new-node ceiling. Zone delete under OSI_SCOPED_ACCESS=1 is inherently larger than a typical scoped-gate wrapper: it resolves the target zone and its grantees, requires either sole ownership/grant or an admin role for non-owner deletion, and runs a 5-statement transaction (devices, journal_plots, user_zone_assignments, irrigation_schedules, irrigation_zones) with per-grantee scope-cache invalidation. Ported as-is rather than re-architected mid-port."
-    },
-    "scoped-admin-account-router": {
-      "max_chars": 10508,
-      "reason": "Supersedes the prior ceiling (10117). Wave 3 scoped-access port, pick-list commit 65 (AgroLink d2e81bd6a, \"fix(edge): close auth and scoped-access review gaps\"): getAuthSecret() now delegates to osi-scope-helper's shared resolveAuthSecret via osiLib.require('scope') instead of duplicating the persisted-secret file-read/generate/write logic inline, and verifyBearer tags each failure with a stable _osiAuthFailure {format,code,sourceId} for the shared auth-catch-http500 response node to surface as a real HTTP error instead of an unhandled-exception 500. Re-measured fresh with verify-flows-size-ratchet nodeSizes (func.length) over both maintained profiles, exact delta vs origin/main. Also hardens the guarded derole/disable SQL anchor comparisons (buildDeroleUserGuardedSql/buildDisableUserGuardedSql) per X12."
     },
     "scoped-device-claim-router": {
       "max_chars": 4354,

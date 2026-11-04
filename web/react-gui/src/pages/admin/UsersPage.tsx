@@ -1,9 +1,11 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import type { AdminUser } from '../../types/farming';
 import {
   createUser,
   getApiErrorMessage,
+  isLinkedPasswordResetError,
   listUsers,
   resetPassword,
   setUserDisabled,
@@ -14,6 +16,7 @@ const INPUT = 'rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3
 const BUTTON = 'btn-liquid rounded-lg px-4 py-2 font-semibold text-[var(--text)]';
 
 export function UsersPage() {
+  const { t } = useTranslation('settings');
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -24,13 +27,17 @@ export function UsersPage() {
   const [resetValue, setResetValue] = useState('');
   const [resetConfirmation, setResetConfirmation] = useState('');
 
-  const refresh = useCallback(async () => {
+  // Returns whether the list loaded, so a caller can tell a failed reload
+  // from a successful one.
+  const refresh = useCallback(async (): Promise<boolean> => {
     setLoading(true);
     try {
       setUsers(await listUsers());
       setError('');
+      return true;
     } catch (cause) {
       setError(getApiErrorMessage(cause, 'Unable to load users.'));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -57,6 +64,8 @@ export function UsersPage() {
     setPassword('');
   }
 
+  // The form keeps its account and both password fields until the reset and
+  // the reload have both succeeded (#521).
   async function submitReset(event: FormEvent) {
     event.preventDefault();
     if (!resetFor) return;
@@ -64,10 +73,42 @@ export function UsersPage() {
       setError('The passwords do not match.');
       return;
     }
-    await run(() => resetPassword(resetFor.user_uuid, resetValue));
+    setError('');
+    try {
+      await resetPassword(resetFor.user_uuid, resetValue);
+    } catch (cause) {
+      setError(isLinkedPasswordResetError(cause)
+        ? t('users.linkedResetRefused', 'This account uses linked sign-in, so its password cannot be reset on this gateway. Ask the linked-identity administrator for the approved recovery process.')
+        : getApiErrorMessage(cause, t('users.resetError', 'The password could not be reset.')));
+      return;
+    }
+    if (!(await refresh())) {
+      setError(t('users.resetRefreshFailed', 'The password reset was sent, but the user list could not be reloaded. The reset may already have been applied; reload the page before trying again.'));
+      return;
+    }
     setResetFor(null);
     setResetValue('');
     setResetConfirmation('');
+  }
+
+  function resetAction(user: AdminUser) {
+    if (user.auth_mode === 'local') {
+      return <button className={BUTTON} type="button" onClick={() => setResetFor(user)}>Reset password</button>;
+    }
+    if (user.auth_mode === 'server') {
+      return (
+        <p className="text-sm text-[var(--text-secondary)]">
+          <span className="font-semibold">{t('users.linkedSignIn', 'Linked sign-in')}</span>
+          {' '}
+          {t('users.linkedResetGuidance', 'Password changes for this account use the approved linked-identity recovery process. Ask the linked-identity administrator for the correct steps.')}
+        </p>
+      );
+    }
+    return (
+      <p className="text-sm text-[var(--text-secondary)]">
+        {t('users.signInUnknown', 'Sign-in type unavailable. Ask the gateway administrator.')}
+      </p>
+    );
   }
 
   return (
@@ -129,9 +170,9 @@ export function UsersPage() {
                     <td className="p-4">{user.disabled_at ? 'Disabled' : 'Enabled'}</td>
                     <td className="p-4">{new Date(user.created_at).toLocaleDateString()}</td>
                     <td className="p-4">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button className={BUTTON} type="button" onClick={() => void run(() => setUserDisabled(user.user_uuid, !user.disabled_at))}>{user.disabled_at ? 'Enable' : 'Disable'}</button>
-                        <button className={BUTTON} type="button" onClick={() => setResetFor(user)}>Reset password</button>
+                        {resetAction(user)}
                       </div>
                     </td>
                   </tr>
