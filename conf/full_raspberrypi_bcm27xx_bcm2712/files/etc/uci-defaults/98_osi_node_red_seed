@@ -37,7 +37,517 @@ if [ -d "$SRC/node_modules" ]; then
 fi
 
 # Native sqlite must come from the OpenWrt package built for the target CPU.
-rm -rf "$DST/node_modules/sqlite3" "$DST/node_modules/node-red-node-sqlite"
+# npm leaves a real directory at the locked version alone and retires a
+# symlink, so the block below installs a verified real copy when it can and a
+# verified firmware symlink only as a temporary fallback. It checks the
+# firmware module against the image's package-lock pin before it replaces
+# anything, keeps the old entry in a marked rollback directory until the
+# replacement opens :memory:, and never removes the node-red-node-sqlite peer
+# entry. A rollback directory left by a restore that found its destination
+# occupied is kept and refused on every run until it is inspected. The seed
+# also refuses, before any change, while a deploy rollback entry exists.
+# A refusal, or a recovery step that asks for a retry, exits 1: the
+# rest of this script is skipped for this boot and OpenWrt keeps the defaults
+# script, so it runs again on the next boot.
+# BEGIN native sqlite3 seed
+seed_sqlite3_report_paths() {
+    for seed_report in "$@"; do
+        if [ -L "$seed_report" ]; then seed_kind=symlink
+        elif [ -d "$seed_report" ]; then seed_kind=directory
+        elif [ -f "$seed_report" ]; then seed_kind=file
+        elif [ -p "$seed_report" ]; then seed_kind=fifo
+        elif [ -e "$seed_report" ]; then seed_kind=other
+        else seed_kind=absent
+        fi
+        echo "STATE: $seed_kind $seed_report" >&2
+    done
+}
+seed_sqlite3_present() { [ -e "$1" ] || [ -L "$1" ]; }
+seed_sqlite3_new_exact_file() {
+    seed_new_path="$1"
+    seed_new_value="$2"
+    seed_sqlite3_present "$seed_new_path" && return 1
+    node -e 'const f=require("fs"),c=f.constants; const p=process.argv[1],v=process.argv[2]+"\n"; const fd=f.openSync(p,c.O_WRONLY|c.O_CREAT|c.O_EXCL|c.O_NOFOLLOW,0o600); try { f.writeFileSync(fd,v); } finally { f.closeSync(fd); }' "$seed_new_path" "$seed_new_value" || return 1
+    seed_sqlite3_exact_file "$seed_new_path" "$seed_new_value"
+}
+seed_sqlite3_exact_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const f=require("fs"); const b=f.readFileSync(process.argv[1]); if (!b.equals(Buffer.from(process.argv[2]+"\n"))) process.exit(1)' "$1" "$2"
+}
+# A regular file holding a strict prefix (possibly empty) of an owner line:
+# what an interrupted owner write leaves behind.
+seed_sqlite3_owner_prefix() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const b=require("fs").readFileSync(process.argv[1]); const w=Buffer.from(process.argv[2]+"\n"); if (!(b.length < w.length && b.equals(w.subarray(0, b.length)))) process.exit(1)' "$1" "$2"
+}
+seed_sqlite3_id() {
+    node -p 'const s=require("fs").lstatSync(process.argv[1],{bigint:true}); [s.dev,s.ino,s.mtimeNs].join(":")' "$1" 2>/dev/null
+}
+seed_sqlite3_restore_id() {
+    node -p 'const s=require("fs").lstatSync(process.argv[1],{bigint:true}); [s.dev,s.ino].join(":")' "$1" 2>/dev/null
+}
+seed_sqlite3_restore_original() {
+    seed_restore_o="$1"
+    seed_restore_d="$2"
+    if ! seed_sqlite3_present "$seed_restore_o" || seed_sqlite3_present "$seed_restore_d"; then
+        echo 'ERROR: seed restore needs an original and vacant destination' >&2
+        seed_sqlite3_report_paths "$seed_restore_o" "$seed_restore_d"
+        return 1
+    fi
+    seed_restore_expected="$(seed_sqlite3_restore_id "$seed_restore_o")"
+    if [ -z "$seed_restore_expected" ]; then
+        echo "ERROR: cannot identify seed original before restore: $seed_restore_o" >&2
+        return 1
+    fi
+    if ! mv "$seed_restore_o" "$seed_restore_d"; then
+        echo 'ERROR: seed restore command failed; inspect surviving paths' >&2
+        seed_sqlite3_report_paths "$seed_restore_o" "$seed_restore_d" "$seed_restore_d/original"
+        return 1
+    fi
+    if seed_sqlite3_present "$seed_restore_o" || ! seed_sqlite3_present "$seed_restore_d" ||
+       [ "$(seed_sqlite3_restore_id "$seed_restore_d")" != "$seed_restore_expected" ]; then
+        echo 'ERROR: seed restore identity differs; retained rollback marker for inspection' >&2
+        seed_sqlite3_report_paths "$seed_restore_o" "$seed_restore_d" "$seed_restore_d/original"
+        return 1
+    fi
+    return 0
+}
+seed_sqlite3_exact_id_file() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const b=require("fs").readFileSync(process.argv[1]); if (!/^[0-9]+:[0-9]+:[0-9]+\n$/.test(b.toString("utf8")) || !b.equals(Buffer.from(b.toString("utf8")))) process.exit(1)' "$1"
+}
+# A regular file holding a strict prefix of a dev:ino:mtime identity line,
+# without its newline: what an interrupted identity write leaves behind.
+seed_sqlite3_id_prefix() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    node -e 'const s=require("fs").readFileSync(process.argv[1]).toString("latin1"); if (!/^[0-9]*(:[0-9]*){0,2}$/.test(s)) process.exit(1)' "$1"
+}
+seed_sqlite3_version() {
+    node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version || ""' "$1/package.json" 2>/dev/null || true
+}
+seed_sqlite3_loads() {
+    node -e '
+      const sqlite3 = require(process.argv[1]);
+      const db = new sqlite3.Database(":memory:", function (err) {
+        if (err) { console.error("sqlite3 could not open :memory: -- " + (err && err.message ? err.message : err)); process.exit(1); }
+        db.close(function () { process.exit(0); });
+      });
+    ' "$1" >/dev/null
+}
+seed_sqlite3_pin() {
+    SEED_PIN=''
+    if [ ! -f "$SRC/package-lock.json" ] || [ -L "$SRC/package-lock.json" ]; then
+        echo 'ERROR: image sqlite3 lock missing' >&2
+        return 1
+    fi
+    if ! SEED_PIN="$(node -p 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); const p=(l.packages&&l.packages["node_modules/sqlite3"])||{}; p.version||""' "$SRC/package-lock.json" 2>/dev/null)"; then
+        echo 'ERROR: image sqlite3 lock invalid JSON' >&2
+        return 1
+    fi
+    if [ -z "$SEED_PIN" ]; then
+        echo 'ERROR: image sqlite3 pin missing' >&2
+        return 1
+    fi
+    return 0
+}
+# Refuses while any deploy rollback entry exists. Otherwise sets SEED_B to the
+# single rollback directory, SEED_B_EXACT=1 when its owner line is complete,
+# and SEED_B_META=1 when it holds no original.
+seed_sqlite3_scan_backup() {
+    SEED_B=''
+    SEED_B_META=0
+    SEED_B_EXACT=0
+    seed_modules="$DST/node_modules"
+    # The seed never recovers a deploy rollback. Its original may be inside
+    # it, or nested in the final path after an occupied restore, so an entry
+    # of that name, of any type, stops the seed before it moves or deletes
+    # anything.
+    for seed_f in "$seed_modules"/.osi-sqlite3-rollback.*; do
+        seed_sqlite3_present "$seed_f" || continue
+        echo "ERROR: deploy sqlite3 rollback present: $seed_f; seed leaves sqlite3 for deploy or an operator to resolve" >&2
+        seed_sqlite3_report_paths "$seed_f" "$seed_modules/sqlite3" "$seed_modules/sqlite3/original"
+        return 1
+    done
+    for seed_b in "$seed_modules"/.osi-sqlite3-seed-rollback.*; do
+        seed_sqlite3_present "$seed_b" || continue
+        if [ -n "$SEED_B" ] || [ ! -d "$seed_b" ] || [ -L "$seed_b" ]; then
+            echo "ERROR: ambiguous or unowned seed rollback: $seed_b" >&2
+            return 1
+        fi
+        seed_b_id=0
+        for seed_child in "$seed_b"/* "$seed_b"/.[!.]* "$seed_b"/..?*; do
+            seed_sqlite3_present "$seed_child" || continue
+            case "$seed_child" in
+                "$seed_b/.owner")
+                    if [ ! -f "$seed_child" ] || [ -L "$seed_child" ]; then
+                        echo "ERROR: seed rollback metadata type: $seed_child" >&2
+                        return 1
+                    fi ;;
+                "$seed_b/.candidate-id")
+                    if [ ! -f "$seed_child" ] || [ -L "$seed_child" ]; then
+                        echo "ERROR: seed rollback metadata type: $seed_child" >&2
+                        return 1
+                    fi
+                    seed_b_id=1 ;;
+                "$seed_b/original")
+                    if [ ! -d "$seed_child" ] && [ ! -L "$seed_child" ]; then
+                        echo "ERROR: seed original type: $seed_child" >&2
+                        return 1
+                    fi ;;
+                *) echo "ERROR: unknown seed rollback child: $seed_child" >&2; return 1 ;;
+            esac
+        done
+        seed_b_exact=0
+        if seed_sqlite3_exact_file "$seed_b/.owner" 'osi-sqlite3-seed-v2'; then
+            seed_b_exact=1
+        elif seed_sqlite3_present "$seed_b/original" || [ "$seed_b_id" = 1 ] ||
+             { seed_sqlite3_present "$seed_b/.owner" &&
+               ! seed_sqlite3_owner_prefix "$seed_b/.owner" 'osi-sqlite3-seed-v2'; }; then
+            # The owner line is written first, then the candidate identity;
+            # only after both can anything move into the backup.
+            echo "ERROR: ambiguous or unowned seed rollback: $seed_b" >&2
+            return 1
+        fi
+        if [ "$seed_b_id" = 1 ] && ! seed_sqlite3_exact_id_file "$seed_b/.candidate-id"; then
+            if seed_sqlite3_present "$seed_b/original" ||
+               ! seed_sqlite3_id_prefix "$seed_b/.candidate-id"; then
+                echo "ERROR: invalid seed candidate identity: $seed_b/.candidate-id" >&2
+                return 1
+            fi
+        fi
+        SEED_B_EXACT="$seed_b_exact"
+        SEED_B_META=0
+        if ! seed_sqlite3_present "$seed_b/original"; then SEED_B_META=1; fi
+        SEED_B="$seed_b"
+    done
+    return 0
+}
+# Removes a rollback directory the scan proved to hold at most owner and
+# identity metadata. rmdir refuses a directory that gained another entry.
+seed_sqlite3_clear_metadata_backup() {
+    if ! rm -f "$SEED_B/.candidate-id" "$SEED_B/.owner" || ! rmdir "$SEED_B" ||
+       seed_sqlite3_present "$SEED_B"; then
+        echo "ERROR: metadata-only seed rollback cleanup failed or was partial; inspect $SEED_B" >&2
+        seed_sqlite3_report_paths "$SEED_B" "$SEED_B/.owner" "$SEED_B/.candidate-id"
+        return 1
+    fi
+    return 0
+}
+seed_sqlite3_owned_final() {
+    seed_d="$DST/node_modules/sqlite3"
+    seed_sqlite3_exact_id_file "$1/.candidate-id" || return 1
+    if [ -L "$seed_d" ]; then
+        seed_expected="$(cat "$1/.candidate-id" 2>/dev/null || true)"
+        [ -n "$seed_expected" ] && [ "$(seed_sqlite3_id "$seed_d" 2>/dev/null || true)" = "$seed_expected" ] || return 1
+        [ "$(readlink "$seed_d" 2>/dev/null || true)" = "$SQLITE_SRC" ] || return 1
+        return 0
+    fi
+    [ -d "$seed_d" ] && [ ! -L "$seed_d" ] || return 1
+    seed_sqlite3_exact_file "$seed_d/.osi-sqlite3-candidate-owner" "$1"
+}
+seed_sqlite3_recover() {
+    seed_d="$DST/node_modules/sqlite3"
+    seed_o="$SEED_B/original"
+    if [ "$SEED_B_META" = 1 ] && ! seed_sqlite3_owned_final "$SEED_B"; then
+        # Nothing is left in this backup and the final path is not its
+        # candidate: the old-path rename never ran, or an earlier rollback
+        # already put the original back. Only metadata remains.
+        # A restore into an occupied final path moves the original to
+        # $seed_d/original instead. That backup stays as the record of the
+        # refused restore: clearing it would let the next seed move the
+        # occupant, with the original inside, into a new backup and delete it.
+        if seed_sqlite3_present "$seed_d/original"; then
+            echo "ERROR: $seed_d/original is present beside metadata-only seed rollback $SEED_B; an earlier restore may have nested the old module there; preserving both for inspection" >&2
+            seed_sqlite3_report_paths "$SEED_B" "$seed_d" "$seed_d/original"
+            return 1
+        fi
+        seed_sqlite3_clear_metadata_backup || return 1
+        if seed_sqlite3_present "$seed_d"; then
+            echo "WARN: cleared metadata-only seed rollback; $seed_d was not touched; retry seed" >&2
+        else
+            echo 'WARN: cleared marker-only seed backup; retry seed' >&2
+        fi
+        return 1
+    fi
+    if [ "$SEED_B_EXACT" != 1 ]; then
+        echo "ERROR: seed rollback owner metadata is incomplete beside an owned final: $SEED_B" >&2
+        return 1
+    fi
+    if seed_sqlite3_present "$seed_o" && ! seed_sqlite3_present "$seed_d"; then
+        seed_sqlite3_restore_original "$seed_o" "$seed_d" || return 1
+        if ! rm -rf "$SEED_B"; then
+            echo "ERROR: seed backup cleanup may be partial: $SEED_B" >&2
+            return 1
+        fi
+        echo 'WARN: restored interrupted seed swap; retry seed' >&2
+        return 1
+    fi
+    if ! seed_sqlite3_present "$seed_d"; then
+        echo "ERROR: seed rollback state is not recognised: $SEED_B" >&2
+        return 1
+    fi
+    if ! seed_sqlite3_owned_final "$SEED_B"; then
+        echo "ERROR: unowned final sqlite3 beside retained seed original: $SEED_B" >&2
+        return 1
+    fi
+    seed_sqlite3_pin || return 1
+    if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+        if ! rm -rf "$SEED_B"; then
+            echo "ERROR: verified seed final but backup cleanup may be partial: $SEED_B" >&2
+            return 1
+        fi
+        if [ -d "$seed_d" ] && [ ! -L "$seed_d" ] &&
+           ! rm -f "$seed_d/.osi-sqlite3-candidate-owner"; then
+            echo "ERROR: seed orphan marker cleanup failed: $seed_d" >&2
+            return 1
+        fi
+        echo 'WARN: verified interrupted seed promotion; retry seed' >&2
+        return 1
+    fi
+    if ! rm -rf "$seed_d" || seed_sqlite3_present "$seed_d"; then
+        echo "ERROR: seed candidate removal failed or was partial; inspect $seed_d and $SEED_B" >&2
+        return 1
+    fi
+    if seed_sqlite3_present "$seed_o"; then
+        seed_sqlite3_restore_original "$seed_o" "$seed_d" || return 1
+    fi
+    if ! rm -rf "$SEED_B"; then
+        echo "ERROR: seed rollback cleanup may be partial: $SEED_B" >&2
+        return 1
+    fi
+    echo 'ERROR: invalid seed candidate rolled back; retry seed' >&2
+    return 1
+}
+seed_sqlite3_rollback_failed_final() {
+    seed_failed_b="$1"
+    seed_failed_d="$DST/node_modules/sqlite3"
+    if [ -z "$SEED_PIN" ] ||
+       ! seed_sqlite3_exact_file "$seed_failed_b/.owner" 'osi-sqlite3-seed-v2' ||
+       ! seed_sqlite3_owned_final "$seed_failed_b"; then
+        echo "ERROR: failed seed final is not owned by this validated attempt; inspect $seed_failed_b and $seed_failed_d" >&2
+        return 1
+    fi
+    if ! rm -rf "$seed_failed_d" || seed_sqlite3_present "$seed_failed_d"; then
+        echo "ERROR: failed seed final removal may be partial; inspect $seed_failed_d and $seed_failed_b" >&2
+        return 1
+    fi
+    if seed_sqlite3_present "$seed_failed_b/original"; then
+        seed_sqlite3_restore_original "$seed_failed_b/original" "$seed_failed_d" || return 1
+    fi
+    if ! rm -rf "$seed_failed_b"; then
+        echo "ERROR: seed rollback cleanup may be partial: $seed_failed_b" >&2
+        return 1
+    fi
+    echo 'ERROR: failed seed final rolled back using the validated attempt pin; retry seed' >&2
+    return 1
+}
+# Removes stages left by an earlier attempt. A stage holding a candidate or
+# link needs its complete owner line; a stage holding only an absent or
+# truncated owner line is what an interrupted owner write leaves behind.
+seed_sqlite3_scan_stage() {
+    for seed_s in "$DST/node_modules"/.osi-sqlite3-seed-stage.*; do
+        seed_sqlite3_present "$seed_s" || continue
+        if [ ! -d "$seed_s" ] || [ -L "$seed_s" ]; then
+            echo "ERROR: unowned seed stage: $seed_s" >&2
+            return 1
+        fi
+        seed_s_payload=0
+        for seed_child in "$seed_s"/* "$seed_s"/.[!.]* "$seed_s"/..?*; do
+            seed_sqlite3_present "$seed_child" || continue
+            case "$seed_child" in
+                "$seed_s/.owner")
+                    if [ ! -f "$seed_child" ] || [ -L "$seed_child" ]; then
+                        echo "ERROR: seed stage metadata type: $seed_child" >&2
+                        return 1
+                    fi ;;
+                "$seed_s/candidate")
+                    if [ ! -d "$seed_child" ] || [ -L "$seed_child" ]; then
+                        echo "ERROR: seed stage candidate type: $seed_child" >&2
+                        return 1
+                    fi
+                    seed_s_payload=1 ;;
+                "$seed_s/link")
+                    if [ ! -L "$seed_child" ]; then
+                        echo "ERROR: seed stage link type: $seed_child" >&2
+                        return 1
+                    fi
+                    seed_s_payload=1 ;;
+                *) echo "ERROR: unknown seed stage child: $seed_child" >&2; return 1 ;;
+            esac
+        done
+        if ! seed_sqlite3_exact_file "$seed_s/.owner" 'osi-sqlite3-seed-stage-v2'; then
+            if [ "$seed_s_payload" = 1 ] ||
+               { seed_sqlite3_present "$seed_s/.owner" &&
+                 ! seed_sqlite3_owner_prefix "$seed_s/.owner" 'osi-sqlite3-seed-stage-v2'; }; then
+                echo "ERROR: unowned seed stage: $seed_s" >&2
+                return 1
+            fi
+        fi
+        echo "WARN: removing seed stage left by an earlier attempt: $seed_s" >&2
+        if ! rm -rf "$seed_s" || seed_sqlite3_present "$seed_s"; then
+            echo "ERROR: seed stage cleanup failed or was partial: $seed_s" >&2
+            return 1
+        fi
+    done
+    return 0
+}
+
+seed_native_sqlite3() {
+    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3
+    seed_d="$DST/node_modules/sqlite3"
+    seed_sqlite3_scan_backup || return 1
+    if [ -n "$SEED_B" ]; then
+        seed_sqlite3_recover
+        return 1
+    fi
+    if [ -d "$seed_d" ] && [ ! -L "$seed_d" ] && seed_sqlite3_present "$seed_d/.osi-sqlite3-candidate-owner"; then
+        seed_marker="$seed_d/.osi-sqlite3-candidate-owner"
+        if [ ! -f "$seed_marker" ] || [ -L "$seed_marker" ]; then
+            echo 'ERROR: invalid seed orphan marker type' >&2
+            return 1
+        fi
+        seed_named="$(cat "$seed_marker" 2>/dev/null || true)"
+        case "$seed_named" in "$DST/node_modules"/.osi-sqlite3-seed-rollback.*) ;; *) echo 'ERROR: invalid seed orphan backup name' >&2; return 1 ;; esac
+        if seed_sqlite3_present "$seed_named" || ! seed_sqlite3_exact_file "$seed_marker" "$seed_named"; then
+            echo 'ERROR: seed orphan marker does not name an absent backup' >&2
+            return 1
+        fi
+        seed_sqlite3_pin || return 1
+        if [ "$(seed_sqlite3_version "$seed_d")" != "$SEED_PIN" ] || ! seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+            echo 'ERROR: seed orphan-marked final failed pin/load; retaining it' >&2
+            return 1
+        fi
+        if ! rm -f "$seed_marker"; then
+            echo 'ERROR: seed orphan marker cleanup failed' >&2
+            return 1
+        fi
+    fi
+    seed_sqlite3_scan_stage || return 1
+    seed_sqlite3_pin || return 1
+    if [ ! -d "$SQLITE_SRC" ] || [ -L "$SQLITE_SRC" ]; then
+        echo 'ERROR: firmware sqlite3 source missing or not a real directory' >&2
+        return 1
+    fi
+    if [ "$(seed_sqlite3_version "$SQLITE_SRC")" != "$SEED_PIN" ]; then
+        echo 'ERROR: firmware sqlite3 source version mismatch' >&2
+        return 1
+    fi
+    if ! seed_sqlite3_loads "$SQLITE_SRC" >/dev/null 2>&1; then
+        echo 'ERROR: firmware sqlite3 source does not open :memory:' >&2
+        return 1
+    fi
+    if [ -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
+        if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+            echo 'OK: existing real sqlite3 matches image pin and loads'
+            return 0
+        fi
+    elif seed_sqlite3_present "$seed_d" && [ ! -L "$seed_d" ]; then
+        echo "ERROR: unexpected seed sqlite3 destination type: $seed_d" >&2
+        return 1
+    fi
+    seed_s="$(mktemp -d "$DST/node_modules/.osi-sqlite3-seed-stage.XXXXXX" 2>/dev/null || true)"
+    if [ -z "$seed_s" ] || [ ! -d "$seed_s" ] || [ -L "$seed_s" ]; then
+        echo 'ERROR: could not allocate seed sqlite3 stage' >&2
+        return 1
+    fi
+    if ! printf '%s\n' 'osi-sqlite3-seed-stage-v2' > "$seed_s/.owner"; then
+        echo "ERROR: seed stage marker write failed: $seed_s" >&2
+        return 1
+    fi
+    seed_candidate="$seed_s/candidate"
+    seed_copy_ok=0
+    if cp -a "$SQLITE_SRC" "$seed_candidate"; then seed_copy_ok=1; fi
+    seed_marker="$seed_candidate/.osi-sqlite3-candidate-owner"
+    if seed_sqlite3_present "$seed_marker"; then
+        echo "ERROR: copied seed candidate already contains an ownership marker: $seed_marker" >&2
+        return 1
+    fi
+    if [ "$seed_copy_ok" != 1 ] || ! seed_sqlite3_loads "$seed_candidate" >/dev/null 2>&1; then
+        if seed_sqlite3_present "$seed_candidate" &&
+           { ! rm -rf "$seed_candidate" || seed_sqlite3_present "$seed_candidate"; }; then
+            echo "ERROR: seed copy/probe failed and candidate cleanup may be partial: $seed_candidate" >&2
+            return 1
+        fi
+        seed_candidate="$seed_s/link"
+        if ! ln -s "$SQLITE_SRC" "$seed_candidate" ||
+           ! seed_sqlite3_loads "$seed_candidate" >/dev/null 2>&1; then
+            if ! rm -rf "$seed_s" || seed_sqlite3_present "$seed_s"; then
+                echo "ERROR: seed link failure and stage cleanup may be partial: $seed_s" >&2
+            else
+                echo 'ERROR: verified firmware-link fallback unavailable' >&2
+            fi
+            return 1
+        fi
+        echo 'WARN: seed copy failed or did not load under installed peers; verified firmware symlink is temporary and npm can retire it' >&2
+    fi
+    seed_b="$(mktemp -d "$DST/node_modules/.osi-sqlite3-seed-rollback.XXXXXX" 2>/dev/null || true)"
+    if [ -z "$seed_b" ] || [ ! -d "$seed_b" ] || [ -L "$seed_b" ]; then
+        echo "ERROR: could not allocate seed rollback; stage retained at $seed_s" >&2
+        return 1
+    fi
+    if ! printf '%s\n' 'osi-sqlite3-seed-v2' > "$seed_b/.owner" ||
+       ! seed_sqlite3_id "$seed_candidate" > "$seed_b/.candidate-id"; then
+        echo "ERROR: seed ownership metadata failed; inspect $seed_b and $seed_s" >&2
+        return 1
+    fi
+    if [ -d "$seed_candidate" ] && [ ! -L "$seed_candidate" ]; then
+        if ! seed_sqlite3_new_exact_file "$seed_marker" "$seed_b"; then
+            echo "ERROR: seed candidate marker failed; inspect $seed_b and $seed_s" >&2
+            return 1
+        fi
+    fi
+    if seed_sqlite3_present "$seed_d"; then
+        if [ ! -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
+            echo "ERROR: unexpected seed destination before swap: $seed_d" >&2
+            return 1
+        fi
+        if ! mv "$seed_d" "$seed_b/original"; then
+            echo "ERROR: seed old-path rename reported failure; inspect $seed_d, $seed_b/original and $seed_s" >&2
+            seed_sqlite3_report_paths "$seed_d" "$seed_b/original" "$seed_candidate" "$seed_b/.owner"
+            return 1
+        fi
+        if seed_sqlite3_present "$seed_d" || ! seed_sqlite3_present "$seed_b/original"; then
+            echo "ERROR: seed old-path rename left ambiguous state: $seed_b" >&2
+            return 1
+        fi
+    fi
+    if seed_sqlite3_present "$seed_d"; then
+        echo "ERROR: seed destination appeared before promotion: $seed_d" >&2
+        return 1
+    fi
+    if ! mv "$seed_candidate" "$seed_d"; then
+        echo "ERROR: seed candidate rename reported failure; inspect $seed_candidate, $seed_d and $seed_b" >&2
+        seed_sqlite3_report_paths "$seed_candidate" "$seed_d" "$seed_b/original" "$seed_b/.owner"
+        return 1
+    fi
+    if seed_sqlite3_present "$seed_candidate" || ! seed_sqlite3_owned_final "$seed_b"; then
+        echo "ERROR: seed promotion left ambiguous state: $seed_b" >&2
+        return 1
+    fi
+    if [ "$(seed_sqlite3_version "$seed_d")" != "$SEED_PIN" ] ||
+       ! seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+        echo "ERROR: seed final pin/load failed; rollback retained at $seed_b" >&2
+        seed_sqlite3_rollback_failed_final "$seed_b"
+        return 1
+    fi
+    if ! rm -rf "$seed_s"; then
+        echo "ERROR: seed stage cleanup may be partial: $seed_s" >&2
+        return 1
+    fi
+    if ! rm -rf "$seed_b"; then
+        echo "ERROR: verified seed final but backup cleanup may be partial: $seed_b" >&2
+        return 1
+    fi
+    if [ -d "$seed_d" ] && [ ! -L "$seed_d" ] &&
+       ! rm -f "$seed_d/.osi-sqlite3-candidate-owner"; then
+        echo "ERROR: verified seed final but orphan marker cleanup failed: $seed_d" >&2
+        return 1
+    fi
+    echo "OK: seeded verified sqlite3 at $seed_d"
+    return 0
+}
+seed_native_sqlite3 || exit 1
+# END native sqlite3 seed
 
 for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-watermark-binding osi-command-ledger osi-scoped-access-commands osi-zone-commands osi-device-commands osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-radio-helper osi-network-api osi-installation-location-helper osi-installation-helper osi-history-router osi-health-helper osi-lib osi-module-defaults osi-journal osi-journal-replication osi-device-writer osi-uplink-dedup-guard osi-uc512-normalize osi-lsn50-normalize osi-matric-potential osi-sdi12-normalize osi-sdi12-commissioning osi-sdi12-recipe osi-sdi12-reassemble osi-valve-control osi-irrigation-policy osi-system-settings osi-scope-helper osi-rejection-recovery osi-entity-name osi-weather-provider osi-crop-kc osi-station-hours osi-rain osi-agronomy-daily osi-watermark-helper; do
     if [ -d "$SRC/$module" ]; then
@@ -47,22 +557,6 @@ for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-wate
     fi
 done
 
-# A COPY, not a symlink. npm's arborist reads the tree off disk on every
-# deploy; the shipped package-lock.json declares sqlite3 as a registry
-# package, so a symlink here reads as a Link where the lockfile says registry,
-# and npm retires it and re-extracts the tarball -- which on armv7l + musl
-# means `prebuild-install || node-gyp rebuild` with no prebuilt and no Python,
-# i.e. a failed deploy. A real directory holding the locked version is left
-# alone. This script re-runs after a sysupgrade, so it is also what keeps the
-# state from reverting. deploy.sh materialises the symlink on images already
-# in the field; see its "Native sqlite3 (F148)" block.
-SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3
-if [ -d "$SQLITE_SRC" ]; then
-    if ! cp -a "$SQLITE_SRC" "$DST/node_modules/sqlite3"; then
-        rm -rf "$DST/node_modules/sqlite3"
-        ln -s "$SQLITE_SRC" "$DST/node_modules/sqlite3"
-    fi
-fi
 
 chown -R node-red:node-red "$DST" 2>/dev/null || true
 
