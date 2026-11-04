@@ -17,6 +17,7 @@ const INSTALLATION_LOCATION_BINDING = Object.freeze({
   module: 'installation-location',
 });
 const ENTITY_NAME_BINDING = Object.freeze({ variable: 'entityName', module: 'entity-name' });
+const IRRIGATION_POLICY_BINDING = Object.freeze({ variable: 'osiIrrigationPolicy', module: 'osi-irrigation-policy' });
 const CHIRPSTACK_BINDING = Object.freeze({ variable: 'chirpstack', module: 'chirpstack' });
 const CHIRPSTACK_DIRECT_BINDING = Object.freeze({ variable: 'chirpstack', module: 'osi-chirpstack-helper' });
 
@@ -30,6 +31,12 @@ const TASK9_OSI_LIB_NODE_POLICIES = Object.freeze({
   'command-dedupe-dispatch': Object.freeze({
     funcSha256: '2eb3841c0c2769e5745af445779a2181a15f74ddc7055cc87da3b2261aa04b23',
     bindings: Object.freeze([DB_BINDING, JOURNAL_BINDING, LEDGER_BINDING]),
+  }),
+  's2120-unclaim-gate': Object.freeze({
+    // Issue #233 Phase A: runs before command-dedupe-dispatch. Only a cloud UNCLAIM_DEVICE loads
+    // the irrigation-policy owner (routes.s2120UnclaimGate); every other command loads nothing.
+    funcSha256: 'eb729e540155777de07271c4c7f232de5d997420306ab625c115ff8321413c8f',
+    bindings: Object.freeze([IRRIGATION_POLICY_BINDING]),
   }),
   'journal-command-apply-fn': Object.freeze({
     funcSha256: 'b4a36cd22082c8a93aac0f7946c9dcb124cef568402a939983aed12238cded72',
