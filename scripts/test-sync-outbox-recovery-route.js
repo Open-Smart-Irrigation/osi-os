@@ -46,7 +46,9 @@ async function runGuardWithRealScope(role, authorization) {
   scope._resetForTests();
   class AuthDatabase {
     async get(sql) {
-      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'user-1' };
+      if (sql.includes('id = ? AND username = ?')) {
+        return { id: 7, username: 'operator', role, disabled_at: null, user_uuid: 'user-1' };
+      }
       if (sql.includes('FROM users WHERE user_uuid = ?')) {
         return { id: 7, username: 'operator', role, disabled_at: null, user_uuid: 'user-1' };
       }

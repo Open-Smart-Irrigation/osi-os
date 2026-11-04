@@ -7,6 +7,7 @@ const test = require('node:test');
 
 const {
   verifyAnalysisRouterImplementation,
+  verifyHistoryRouterImplementation,
 } = require('./verify-history-api-contract');
 
 const FLOW_PATH = path.resolve(
@@ -40,4 +41,28 @@ test('analysis contract rejects removal of zone-scope propagation', () => {
     failures.some((failure) => failure.includes('analysis /channels')),
     failures.join('\n')
   );
+});
+
+test('gateway history contract requires the fresh token-bound admin call', () => {
+  const flows = loadFlows();
+  const moduleSource = fs.readFileSync(path.resolve(__dirname, '..',
+    'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-history-router/index.js'),
+    'utf8');
+  const freshCall = "await scope.assertAuthenticatedRole(db, principal, 'admin', { scopedMode: true });";
+  const oldCall = "await scope.assertRole(db, user.user_uuid, 'admin', { scopedMode: true });";
+  const router = flows.find((node) => node.id === 'history-api-router-fn');
+  assert.ok(router);
+  assert.equal(router.func.split(freshCall).length - 1, 1);
+  const failures = [];
+  verifyHistoryRouterImplementation(flows, failures, moduleSource);
+  assert.ok(!failures.some((failure) =>
+    failure.includes('gateway history uses fresh token-bound admin role (P2)')),
+  failures.join('\n'));
+
+  router.func = router.func.replace(freshCall, oldCall);
+  const revertedFailures = [];
+  verifyHistoryRouterImplementation(flows, revertedFailures, moduleSource);
+  assert.ok(revertedFailures.some((failure) =>
+    failure.includes('gateway history uses fresh token-bound admin role (P2)')),
+  revertedFailures.join('\n'));
 });
