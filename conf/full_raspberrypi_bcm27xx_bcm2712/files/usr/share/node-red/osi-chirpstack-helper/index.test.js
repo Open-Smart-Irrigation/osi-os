@@ -874,6 +874,28 @@ function channelState(serviceClient) {
 // #522: grpc-js rejects a header value with control or non-ASCII characters and
 // quotes the whole `Bearer <token>` value in its error. The helper must replace
 // that message so a malformed key never reaches a log. Synthetic markers only.
+const FIXED_METADATA_ERROR_522 = 'CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata';
+
+function assertSafeMetadataError522(caught, marker) {
+  assert.equal(caught.message, FIXED_METADATA_ERROR_522);
+  assert.equal(caught.cause, undefined, 'the grpc-js error is not attached');
+  const stack = caught.stack;
+  assert.equal(typeof stack, 'string', 'the error stack is text');
+  assert.ok(!stack.includes(marker), 'the key is not in the stack');
+  for (const key of Reflect.ownKeys(caught)) {
+    const descriptor = Object.getOwnPropertyDescriptor(caught, key);
+    assert.ok(descriptor, 'each own error key has a descriptor');
+    if (!Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      assert.equal(key, 'stack', 'only stack may be an own accessor');
+      continue;
+    }
+    const value = descriptor.value;
+    if (typeof value === 'string' || Buffer.isBuffer(value)) {
+      assert.ok(!String(value).includes(marker), 'marker absent from direct own error data');
+    }
+  }
+}
+
 for (const [label, apiKey, marker] of [
   ['an ANSI colour code', '\x1b[32mSYNTHETIC_ESC_KEY_522\x1b[0m', 'SYNTHETIC_ESC_KEY_522'],
   ['a tab', 'SYNTHETIC_TAB_KEY_522\tsuffix', 'SYNTHETIC_TAB_KEY_522'],
@@ -887,12 +909,36 @@ for (const [label, apiKey, marker] of [
       caught = error;
     }
     assert.ok(caught, 'createClient must throw');
-    assert.equal(caught.message, 'CHIRPSTACK_API_KEY contains characters not allowed in gRPC metadata');
-    assert.equal(caught.cause, undefined, 'the grpc-js error is not attached');
-    assert.ok(!caught.stack.includes(marker), 'the key is not in the stack');
-    assert.ok(!JSON.stringify(caught).includes(marker), 'the key is not in any own property');
+    assertSafeMetadataError522(caught, marker);
   });
 }
+
+test('metadata error oracle rejects hidden direct leaks and other accessors', () => {
+  const marker = 'SYNTHETIC_METADATA_ORACLE_522';
+  const hidden = new Error(FIXED_METADATA_ERROR_522);
+  Object.defineProperty(hidden, 'hidden', { value: marker, enumerable: false });
+  assert.throws(() => assertSafeMetadataError522(hidden, marker),
+    /marker absent from direct own error data/);
+
+  const bytes = new Error(FIXED_METADATA_ERROR_522);
+  Object.defineProperty(bytes, Symbol('hidden'), { value: Buffer.from(marker), enumerable: false });
+  assert.throws(() => assertSafeMetadataError522(bytes, marker),
+    /marker absent from direct own error data/);
+
+  let getterCalls = 0;
+  const otherAccessor = new Error(FIXED_METADATA_ERROR_522);
+  Object.defineProperty(otherAccessor, 'hidden', {
+    get() { getterCalls += 1; return marker; }
+  });
+  assert.throws(() => assertSafeMetadataError522(otherAccessor, marker),
+    /only stack may be an own accessor/);
+  assert.equal(getterCalls, 0, 'an unexpected metadata getter is not invoked');
+
+  const leakingStack = { message: FIXED_METADATA_ERROR_522 };
+  Object.defineProperty(leakingStack, 'stack', { get() { return marker; } });
+  assert.throws(() => assertSafeMetadataError522(leakingStack, marker),
+    /the key is not in the stack/);
+});
 
 test('createClient still accepts a printable ASCII API key', () => {
   const client = createClient({ apiUrl: 'http://127.0.0.1:1', apiKey: 'eyJhbGciOiJIUzI1NiJ9.synthetic.key-522_x' });
