@@ -1047,14 +1047,15 @@ for (const profile of PROFILES) {
       { id: 'relative_humidity', field: 'relative_humidity', unit: '%' },
       { id: 'light_lux', field: 'light_lux', unit: 'lux' },
       { id: 'rain_mm_per_hour', field: 'rain_mm_per_hour', unit: 'mm/h' },
+      { id: 'rain_mm_delta', field: 'rain_mm_delta', unit: 'mm' },
     ];
     const gauges = Array.from({ length: 9 }, (_, index) => ({
       deveui: `A84041000000C${String(index + 1).padStart(3, '0')}`,
       type_id: 'AQUASCOPE_LORAIN',
     }));
-    // 30 days hourly = 720 buckets. 9 gauges x 2 LoRain channels x 720 =
-    // 12,960 points fits the 30,000 budget; 9 x 5 card channels x 720 =
-    // 32,400 does not.
+    // 30 days hourly = 720 buckets. 9 gauges x 2 LoRain channels (temperature,
+    // rainfall amount; a LoRain has no rate) x 720 = 12,960 points fits the
+    // 30,000 budget; 9 x 6 card channels x 720 = 38,880 does not.
     const query = {
       zoneId: 1,
       cardType: 'environment',
@@ -1078,7 +1079,7 @@ for (const profile of PROFILES) {
         .filter((entry) => entry.sourceKey === device.deveui)
         .map((entry) => entry.channelKey)
         .sort();
-      assert.deepEqual(channelKeys, ['ambient_temperature', 'rain_mm_per_hour']);
+      assert.deepEqual(channelKeys, ['ambient_temperature', 'rain_mm_delta']);
     }
     assert.ok(aggregate.sourceAggregates.every((entry) => entry.buckets.length === 720));
 
@@ -1089,13 +1090,13 @@ for (const profile of PROFILES) {
       maxPointsPerSeries: undefined,
       maxPointsTotal: undefined,
     });
-    assert.equal(unbudgeted.sourceAggregates.length, 45);
+    assert.equal(unbudgeted.sourceAggregates.length, 54);
     const untyped = await helper.aggregateDeviceData({ all() { return []; } }, {
       ...query,
       sourceDevices: [{ deveui: gauges[0].deveui }],
       deveuis: [gauges[0].deveui],
     });
-    assert.equal(untyped.sourceAggregates.length, 5);
+    assert.equal(untyped.sourceAggregates.length, 6);
   });
 
   test(`${profile}: a Kiwi without Chameleon gets no SWT3 series on the interactive path`, async () => {
@@ -1145,7 +1146,7 @@ for (const profile of PROFILES) {
       ['Kiwi', 'environment', { type_id: 'KIWI_SENSOR' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
       ['temperature LSN50', 'environment', { type_id: 'DRAGINO_LSN50', temp_enabled: 1 }, ['ext_temperature_c', 'rain_mm_per_hour']],
       ['S2120', 'environment', { type_id: 'SENSECAP_S2120' }, ['ambient_temperature', 'relative_humidity', 'light_lux', 'rain_mm_per_hour']],
-      ['LoRain', 'environment', { type_id: 'AQUASCOPE_LORAIN' }, ['ambient_temperature', 'rain_mm_per_hour']],
+      ['LoRain', 'environment', { type_id: 'AQUASCOPE_LORAIN' }, ['ambient_temperature']],
       ['Clover', 'environment', { type_id: 'TEKTELIC_CLOVER' }, ['ambient_temperature', 'relative_humidity', 'light_lux']],
     ];
     const seriesSet = async (device, cardType, budget) => {

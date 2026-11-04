@@ -107,6 +107,8 @@ jobs:
         run: node --test scripts/test-rain-history-route.js
       - name: Read-only historical rain difference report
         run: node --test scripts/test-rain-history-diff.js
+      - name: Migration 0078 clears only the LoRain legacy rain-rate estimates
+        run: node --test scripts/test-lorain-legacy-rate-migration.js
       - name: History source guards (soil depth export, filtered mixed-device exports), both profiles
         run: node --test scripts/test-history-source-guards.js
       - run: node --test scripts/test-health-helper.js

@@ -4,8 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 
 /**
- * Rain presentation strings (LoRain card "Last report" tile, the Data view's legacy-estimate
- * switch and suffix, the "reports received" tooltip note, the CSV quality-columns switch): present in all seven bundles with
+ * Rain presentation strings (LoRain card "Last report" tile, the "reports received" tooltip
+ * note, the CSV quality-columns switch): present in all seven bundles with
  * the English placeholders, translated in the five European locales, and English in Luganda
  * until the human pass (docs/i18n/pending-luganda-translations.md).
  */
@@ -18,8 +18,6 @@ const KEYS: Array<[string, string]> = [
   ['devices', 'loRain.tips_one'],
   ['devices', 'loRain.tips_other'],
   ['devices', 'loRain.tipsUnavailable'],
-  ['common', 'analysis.tray.showLegacy'],
-  ['common', 'analysis.legacyEstimate'],
   ['common', 'analysis.tooltip.reportsReceived_one'],
   ['common', 'analysis.tooltip.reportsReceived_other'],
   ['common', 'analysis.export.qualityColumns'],
