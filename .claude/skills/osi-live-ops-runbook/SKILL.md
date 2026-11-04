@@ -111,6 +111,10 @@ docs list the customer hosts; this repo never names them.
   or default to the test host `server.opensmartirrigation.org` instead.
 - The test host can carry production gateway data (noted 2026-10-22); treat
   data-changing operations there as production-affecting.
+- The scheduled fleet-check agent has a narrow standing exception: read-only GETs
+  of the sync-health and dead-letter admin views on `osicloud.ch` as its
+  `FLEET_READER` account, and its fixed read-only SSH checks on the gateways in
+  the private inventory. It covers that agent only, not an interactive session.
 
 This gate is about the cloud counterpart, not the edge gateways — but it governs the
 same class of decision this skill is otherwise all about, so it is repeated here as
