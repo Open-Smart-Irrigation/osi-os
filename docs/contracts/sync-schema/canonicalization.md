@@ -268,26 +268,19 @@ with a canonical form beyond the general rules above:
 cloud full-parity Task P4-E1) fields with a canonical form beyond the general
 rules above:
 
-- `archived_at` — UTC instant, canonical millisecond-precision ISO. This
-  table (`valve_actuation_expectations`) has no `sync_version`/`updated_at`
-  bookkeeping column of its own (unlike `ValveSettings`), so the cloud
-  applier is last-write-wins on this field instead, the same role
-  `ValveRuntime.as_of` plays. Unlike `as_of` (stamped from wall-clock `now`
-  at emission time), `archived_at` is deterministic from the row's OWN
-  terminal timestamps — `COALESCE(observed_close_at, expected_close_at,
-  commanded_at)` — never wall-clock `now`: a terminal row never changes
-  again, so a repeated emission (bootstrap replay, a later trigger-backfill
-  touching the same row) must resolve to the SAME `archived_at` rather than
-  drift forward on every re-run.
-  **Tie-break rule (diverges from `ValveRuntime.as_of`):** because a
-  correction re-emit ties on `archived_at` instead of advancing past it, the
-  cloud applier MUST use `>=` (a later-arriving event with an EQUAL
-  `archived_at` still wins and replaces the row already applied), not a
-  strict `>`. `as_of` stays strict-`>` (P3-E1 ruling) because it is a fresh
-  wall-clock read every emission and effectively never ties; `archived_at`
-  is deliberately reused verbatim across corrections, so it needs the
-  opposite tie behavior to let a correction (e.g. `runTriggerBackfill`
-  fixing `estimated_gross_liters` on an already-archived row) actually land.
+- `archived_at` — UTC instant, canonical millisecond-precision ISO. The current
+  edge producer derives it from the row's `observed_close_at` when present,
+  otherwise `commanded_at`. `expected_close_at` remains the separate planned
+  endpoint and does not order archive updates. The producer never uses wall-clock
+  `now` for this field. Re-emitting an unchanged row gives the same `archived_at`.
+  A later observed close may advance it; a correction to another scalar field
+  may leave it unchanged. This table (`valve_actuation_expectations`) has no
+  `sync_version`/`updated_at` bookkeeping column of its own, so both cloud
+  application paths compare `archived_at` to the stored value. An incoming
+  strictly older value is ignored. On an equal value, the later-arriving
+  payload applies, allowing a corrected trigger or volume field to land.
+  `ValveRuntime.as_of` differs on the producer side: the edge reads it fresh
+  from the wall clock at each emission, so it effectively never ties.
 - `status` — the edge panel's 8-state vocabulary, restricted to its 5
   terminal values (`COMPLETED`, `CANCELLED`, `COMMAND_FAILED`,
   `OPEN_TIMEOUT`, `CLOSE_TIMEOUT`); `PENDING_OPEN`/`RUNNING`/`UNKNOWN` never
