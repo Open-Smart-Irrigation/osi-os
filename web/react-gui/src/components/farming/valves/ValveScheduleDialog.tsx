@@ -206,6 +206,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const deleteInFlight = useRef(false);
   const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
+  const scheduleCloseRef = useRef<HTMLButtonElement | null>(null);
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const selectedRow = open && deleteSelection?.valveEui === valve.deviceEui
     ? data?.schedules.find((schedule) => schedule.scheduleUuid === deleteSelection.scheduleUuid)
@@ -259,6 +260,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       document.removeEventListener('focusin', keepFocusInside);
       document.removeEventListener('keydown', loopFocus, true);
       if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+      else if (scheduleCloseRef.current?.isConnected) scheduleCloseRef.current.focus();
     };
   }, [confirmationOpen, deleteSelection]);
 
@@ -484,6 +486,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
           <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('scheduleDialog.title', { name: valve.name })}</h2>
           <button
             type="button"
+            ref={scheduleCloseRef}
             onClick={onClose}
             aria-label={tc('close')}
             className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)]"
@@ -842,7 +845,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                 valve: valve.name,
               })}
             </p>
-            <p className="mt-1 whitespace-nowrap text-xs text-[var(--text-tertiary)]">
+            <p className="mt-1 break-words text-xs text-[var(--text-tertiary)]">
               {scheduleSummary(pendingDelete, valve.timezone, td, i18n?.language)}
             </p>
             <div className="mt-3 flex flex-wrap justify-end gap-2">

@@ -199,6 +199,36 @@ describe('ValveScheduleDialog delete confirmation', () => {
     expect(within(confirm).getByText('Tue · 06:00–06:30 · 30 min')).toBeInTheDocument();
   });
 
+  it.each(['success', 'failure'] as const)('keeps focus on the surviving close button during and after delete %s', async (outcome) => {
+    const user = userEvent.setup();
+    const rows = responseWithTwoWeeklyRows();
+    let settle: () => void = () => {};
+    const pending = new Promise<void>((resolve) => { settle = resolve; });
+    schedulesMock.mockResolvedValueOnce(rows).mockResolvedValue({ ...rows, schedules: rows.schedules.slice(1) });
+    deleteScheduleMock.mockImplementationOnce(async () => {
+      await pending;
+      if (outcome === 'failure') throw new Error('delete failed');
+      return { pushesQueued: 1 };
+    });
+    const onChanged = vi.fn();
+    renderDialog(makeValve(), onChanged);
+    const confirm = await openDeleteConfirmation('Morning soak');
+    const close = screen.getByRole('button', { name: 'close' });
+    await user.click(within(confirm).getByRole('button', { name: 'Yes, delete' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(close).toHaveFocus();
+    await act(async () => { settle(); await pending; });
+    if (outcome === 'success') {
+      await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText('Morning soak')).not.toBeInTheDocument();
+    } else {
+      await screen.findByText('Could not delete the schedule.');
+      expect(onChanged).not.toHaveBeenCalled();
+    }
+    expect(close).toHaveFocus();
+    expect(deleteScheduleMock).toHaveBeenCalledExactlyOnceWith('0016C001F1000001', 'sched-a');
+  });
+
   it('cancel closes only the confirmation, keeps the dialog open, makes no request and restores focus to the trigger', async () => {
     schedulesMock.mockResolvedValue(responseWithTwoWeeklyRows());
     renderDialog();
