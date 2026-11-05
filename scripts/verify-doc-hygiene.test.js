@@ -106,6 +106,22 @@ test('the ValveCard fixture path is scanned and its reserved example EUI passes'
   assert.equal(isFakeEui(actual), true, 'ValveCard fixture EUI must be accepted by the built-in predicate');
 });
 
+test('the top-level web/react-gui Markdown guides are scanned, nested ones are not', () => {
+  const sentinel = '0016C001F1A7B3D9';
+  const files = {
+    'web/react-gui/BACKEND_README.md': `gateway ${sentinel}\n`,
+    'web/react-gui/FARMING_MODULE_GUIDE.md': `gateway ${sentinel}\n`,
+    'web/react-gui/DESIGN.md': `gateway ${sentinel}\n`,
+    'web/react-gui/demo/README.md': `gateway ${sentinel}\n`,
+  };
+  const r = run(repo(files), []);
+  assert.equal(r.code, 1, r.out);
+  for (const p of ['web/react-gui/BACKEND_README.md', 'web/react-gui/FARMING_MODULE_GUIDE.md', 'web/react-gui/DESIGN.md']) {
+    assert.match(r.out, new RegExp(`^${p}:1: eui64$`, 'm'));
+  }
+  assert.doesNotMatch(r.out, /demo\/README\.md/);
+});
+
 const FAIL_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or add or raise an entry in scripts/verify-doc-hygiene-allowlist.json with a reason';
 const STDIN_HINT = 'verify-doc-hygiene: use an example value from AGENTS.md, or reword the text';
 
