@@ -21,10 +21,18 @@ function listSourceFiles(dir: string): string[] {
 // white in light and #04100E in dark, so it keeps light mode as it was. A wash
 // such as bg-[var(--primary)]/10 is not a fill and may carry any text colour.
 const PRIMARY_FILL = /(?:^|[\s:])bg-\[var\(--(?:primary|primary-hover|focus)\)\](?![/\w-])/;
+// These fills are bright in both themes, so white fails on them in light as
+// well: --warn-border is 2.15, --success-border and --toggle-on are 3.30 in
+// light and 2.28 in dark, bg-yellow-600 is 2.93. --on-primary is white in
+// light, so it fails here too. Text on them uses --on-warn or --on-success.
+const BRIGHT_FILL =
+  /(?:^|[\s:])bg-(?:\[var\(--(?:warn-border|success-border|toggle-on)\)\]|yellow-600)(?![/\w-])/;
 const WHITE_TEXT = /(?:^|[\s:])text-white(?![\w-])/;
+const ON_PRIMARY_TEXT = /(?:^|[\s:])text-\[var\(--on-primary\)\](?![\w-])/;
 
-function pairsWhiteOnPrimary(classes: string): boolean {
-  return PRIMARY_FILL.test(classes) && WHITE_TEXT.test(classes);
+function pairsWhiteOnFill(classes: string): boolean {
+  if (PRIMARY_FILL.test(classes) && WHITE_TEXT.test(classes)) return true;
+  return BRIGHT_FILL.test(classes) && (WHITE_TEXT.test(classes) || ON_PRIMARY_TEXT.test(classes));
 }
 
 // Reads real string nodes rather than source lines, so a comment cannot trip
@@ -47,15 +55,15 @@ function findOffendingLines(fileName: string, source: string): number[] {
   };
 
   const visit = (node: ts.Node) => {
-    if (ts.isStringLiteralLike(node) && pairsWhiteOnPrimary(node.text)) report(node);
+    if (ts.isStringLiteralLike(node) && pairsWhiteOnFill(node.text)) report(node);
     if (ts.isTemplateExpression(node)) {
       // `text-white ${active ? 'bg-[var(--primary)]' : 'bg-red-600'}` splits the
       // pair across the template and a branch, so check each branch with both.
       const fixed = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(' ');
-      if (pairsWhiteOnPrimary(fixed)) report(node);
+      if (pairsWhiteOnFill(fixed)) report(node);
       for (const span of node.templateSpans) {
         for (const literal of nestedStrings(span.expression)) {
-          if (pairsWhiteOnPrimary(`${fixed} ${literal.text}`)) report(literal);
+          if (pairsWhiteOnFill(`${fixed} ${literal.text}`)) report(literal);
         }
       }
     }
@@ -65,7 +73,7 @@ function findOffendingLines(fileName: string, source: string): number[] {
   return [...lines];
 }
 
-test('no class string puts text-white on a --primary fill', () => {
+test('no class string puts white text on a fill it cannot be read on', () => {
   const offenders: string[] = [];
   for (const filePath of listSourceFiles(srcRoot)) {
     const lines = findOffendingLines(filePath, fs.readFileSync(filePath, 'utf8'));
@@ -84,6 +92,11 @@ test('the guard catches each way a class string can pair the two', () => {
   assert.ok(flagged('<b className={`bg-[var(--primary)] ${size} text-white`} />;'));
   assert.ok(flagged(`<b className="bg-red-600 hover:bg-[var(--primary-hover)] text-white" />;`));
   assert.ok(flagged(`const trigger = 'bg-[var(--focus)] text-white';`));
+  assert.ok(flagged(`<b className="rounded-lg bg-[var(--warn-border)] px-4 text-white" />;`));
+  assert.ok(flagged('<b className={`px-3 ${on ? "bg-[var(--toggle-on)] text-white" : ""}`} />;'));
+  assert.ok(flagged(`<b className="bg-[var(--success-border)] hover:bg-green-700 text-white" />;`));
+  assert.ok(flagged(`<b className="bg-yellow-600 hover:bg-yellow-700 text-white" />;`));
+  assert.ok(flagged(`<b className="bg-[var(--warn-border)] text-[var(--on-primary)]" />;`));
 });
 
 test('the guard leaves other backgrounds and readable pairs alone', () => {
@@ -95,4 +108,9 @@ test('the guard leaves other backgrounds and readable pairs alone', () => {
   assert.ok(!flagged(`const fill = 'bg-[var(--primary)]'; const label = 'text-white';`));
   assert.ok(!flagged('<b className={`px-3 ${open ? "bg-[var(--primary)] text-[var(--on-primary)]" : "bg-red-600 text-white"}`} />;'));
   assert.ok(!flagged(`// bg-[var(--primary)] text-white was the old pairing\nconst a = 1;`));
+  assert.ok(!flagged(`<b className="bg-[var(--warn-border)] text-[var(--on-warn)]" />;`));
+  assert.ok(!flagged(`<b className="bg-[var(--toggle-on)] text-[var(--on-success)]" />;`));
+  assert.ok(!flagged(`<b className="border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-text)]" />;`));
+  // JournalMarkerLane pairs --on-primary with category fills such as sky-600.
+  assert.ok(!flagged('<b className={`rounded-full ${"bg-sky-600"} text-[var(--on-primary)]`} />;'));
 });

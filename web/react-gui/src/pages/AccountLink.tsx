@@ -364,7 +364,7 @@ export const AccountLink: React.FC = () => {
                     {!showReauth && (
                       <button
                         onClick={() => setShowReauth(true)}
-                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold px-4 py-2 rounded-lg transition-colors"
+                        className="bg-[var(--warn-border)] hover:opacity-90 text-[var(--on-warn)] font-bold px-4 py-2 rounded-lg transition-colors"
                       >
                         {t('reauth.button')}
                       </button>

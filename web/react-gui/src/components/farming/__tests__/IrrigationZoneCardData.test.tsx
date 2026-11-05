@@ -201,8 +201,8 @@ describe('IrrigationZoneCard Data entry', () => {
     expect(dataLink).toHaveClass(
       'touch-target',
       'bg-[var(--success-border)]',
-      'hover:bg-green-700',
-      'text-white',
+      'hover:opacity-90',
+      'text-[var(--on-success)]',
       'px-4',
       'py-2',
       'rounded-lg',

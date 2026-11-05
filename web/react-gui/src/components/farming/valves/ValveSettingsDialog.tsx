@@ -203,9 +203,9 @@ export const ValveSettingsDialog: React.FC<ValveSettingsDialogProps> = ({ valve,
                 type="button"
                 onClick={() => void handleClose()}
                 disabled={busy}
-                className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
                 {t('settingsDialog.closeConfirm')}
               </button>
               <button
