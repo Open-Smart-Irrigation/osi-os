@@ -109,7 +109,7 @@ Response: Success status
 
 ```typescript
 {
-  deveui: "0123456789ABCDEF",
+  deveui: "A840410000000001",
   name: "North Field",
   type_id: "KIWI_SENSOR",
   last_seen: "2025-12-14T10:30:00Z",

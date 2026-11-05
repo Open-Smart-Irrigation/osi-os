@@ -35,7 +35,7 @@ set -f
 SCANNER_PATH=scripts/verify-doc-hygiene.js
 ALLOWLIST_PATH=scripts/verify-doc-hygiene-allowlist.json
 # Must equal SCOPE in scripts/verify-doc-hygiene.js (a test checks this).
-SCOPE_PATHS='README.md AGENTS.md CLAUDE.md CHANGELOG.md docs .claude/skills .github analysis web/react-gui/src/components/farming/__tests__/ValveCard.test.tsx'
+SCOPE_PATHS='README.md AGENTS.md CLAUDE.md CHANGELOG.md docs .claude/skills .github analysis web/react-gui/BACKEND_README.md web/react-gui/FARMING_MODULE_GUIDE.md web/react-gui/DESIGN.md web/react-gui/src/components/farming/__tests__/ValveCard.test.tsx'
 PRIVATE_PATHS='docs/policy docs/customers docs/gateways docs/customer-operations docs/releases docs/reviews docs/records docs/archive'
 
 # Refs are named in messages by the short id of the pushed commit, never by
