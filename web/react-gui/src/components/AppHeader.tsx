@@ -146,7 +146,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 aria-current={tab.active ? 'page' : undefined}
                 className={`rounded-md px-5 py-2 text-[15px] font-semibold transition-colors ${
                   tab.active
-                    ? 'bg-[var(--primary)] text-white shadow'
+                    ? 'bg-[var(--primary)] text-[var(--on-primary)] shadow'
                     : 'text-[var(--text-tertiary)] hover:text-[var(--text)]'
                 }`}
               >

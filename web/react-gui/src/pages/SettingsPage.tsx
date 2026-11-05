@@ -587,7 +587,7 @@ export function SettingsPage() {
               aria-disabled={!canSaveTimezone || !systemSettingsWritable}
               aria-describedby={systemSettingsWritable ? undefined : 'system-settings-admin-only-hint'}
               title={systemSettingsAdminOnlyTitle}
-              className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="min-h-11 rounded-lg bg-[var(--primary)] px-5 py-2 text-sm font-bold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {timezoneSaving ? t('timeZoneSaving') : t('timeZoneSave')}
             </button>

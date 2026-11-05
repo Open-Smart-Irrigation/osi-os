@@ -302,7 +302,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             onClick={primaryAction.onClick}
             disabled={busy}
             aria-describedby={isPendingCommand ? cancelHelpId : undefined}
-            className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <Spinner />}
             {primaryAction.label}
@@ -337,7 +337,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               onKeyDown={onMenuTriggerKeyDown}
               title={t('more')}
               className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                menuOpen ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
+                menuOpen ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
               }`}
             >
               ⋯

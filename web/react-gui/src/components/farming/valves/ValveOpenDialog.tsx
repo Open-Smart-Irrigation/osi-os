@@ -102,7 +102,7 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
               disabled={busy}
               className={`flex min-h-[44px] flex-1 items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 minutes === chip
-                  ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                  ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                   : 'border-[var(--border)] bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
               }`}
             >
@@ -155,9 +155,9 @@ export const ValveOpenDialog: React.FC<ValveOpenDialogProps> = ({ valve, open, o
             type="button"
             onClick={handleSubmit}
             disabled={!isValid || busy}
-            className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+            {busy && <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />}
             {t('openDialog.confirm', { minutes: isValid ? minutes : minutesInput })}
           </button>
         </div>

@@ -657,7 +657,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         onClick={() => toggleWeekday(d)}
                         className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors sm:min-h-0 sm:min-w-0 sm:px-2.5 ${
                           weekly.days.includes(d)
-                            ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                            ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                             : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]'
                         }`}
                       >
@@ -721,7 +721,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       type="button"
                       onClick={() => void saveWeekly()}
                       disabled={!isWeeklyValid || savingWeekly}
-                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingWeekly
                         ? t('scheduleDialog.saving')
@@ -803,7 +803,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       type="button"
                       onClick={() => void saveOnce()}
                       disabled={!isOnceValid || savingOnce}
-                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingOnce
                         ? t('scheduleDialog.saving')
