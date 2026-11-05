@@ -395,7 +395,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
               type="button"
               onClick={() => { setConfirmDelete(false); onDelete(); }}
               disabled={busy}
-              className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy && <Spinner />}
               {t('deleteConfirmButton')}

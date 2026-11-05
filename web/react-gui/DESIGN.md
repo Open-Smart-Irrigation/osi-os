@@ -72,6 +72,8 @@ Each tone is a wash background, a dark text colour and a saturated border. Sourc
 | `--error-text` | `#7F1D1D` | `#FEE2E2` |
 | `--danger-fg` | `#DC2626` | `#F87171` |
 
+A solid `--warn-border`, `--success-border` or `--toggle-on` fill is bright in both themes, so white text fails on it. Text on those fills uses `--on-warn` or `--on-success`, both `#04100E` in both themes. They are defined in `src/index.css`, not in `tokens.css`.
+
 Rule from the source comment: the error pair "follows the success/warn convention (wash bg + dark text) so bare text-[var(--error-text)] reads on light surfaces". There is no `--error-border`. Error banners and chips use `--danger-fg` for the border.
 
 ### Soil water
@@ -179,6 +181,11 @@ These WCAG 2 ratios were computed from the hex values for this document. The sou
 | `--soil-dry` on `--card` (light) | 3.76 |
 | `--on-primary` on `--primary` (dark) | 10.39 |
 | `#FFFFFF` on `--primary` (dark) | 1.86 |
+| `--on-warn` on `--warn-border` (both) | 9.01 |
+| `--on-success` on `--success-border` and `--toggle-on` (light) | 5.87 |
+| `--on-success` on `--success-border` and `--toggle-on` (dark) | 8.49 |
+| `#FFFFFF` on `--warn-border` (both) | 2.15 |
+| `#FFFFFF` on `--success-border` and `--toggle-on` (light, dark) | 3.30, 2.28 |
 
 Use `--on-primary` on `--primary`, because plain white fails in dark. `--soil-wet` and `--soil-dry` are below 4.5 on `--card`. `SwtStatusIndicator` uses them for the chip border and dot while the chip text stays `--text`. `--primary` on `--surface` is 4.39: the GUI uses it for `text-2xl` water figures, and also for the small `text-xs` "Local only" chip. Its eyebrow sits on `--card`, at 5.17. For new work, put small `--primary` text on `--card`, not `--surface`.
 
@@ -319,7 +326,7 @@ Classes from the source, with layout-only utilities left out in places. The rend
 
 **Empty state** (`src/ui-core/EmptyState.tsx`): `text-center py-12 bg-[var(--surface)] rounded-xl border-2`. Title `text-2xl font-bold`.
 
-**Toggle and live dot:** `--toggle-on` and `--toggle-off`. `StregaValveCard.tsx` pulses the open dot with `animate-pulse`.
+**Toggle and live dot:** `--toggle-on` and `--toggle-off`. Text on a `--toggle-on` fill uses `--on-success`. `StregaValveCard.tsx` pulses the open dot with `animate-pulse`.
 
 ### Charts
 
@@ -350,7 +357,7 @@ These are recorded, not resolved, except where stated.
 | `--header-subtext` | `#475569` | `#C3CCC7` |
 
 2. **Header style.** The `src/index.css` comment calls ui-core's header "canonical white/glass", and `.glass-chrome`, `.glass-tabs` and `.glass-tab` exist in `src/ui-core/primitives.css`. No edge component outside `ui-core` uses those classes: the edge header and tab bar are solid.
-3. **`text-white` against `--on-primary`.** Resolved by the fix committed with this file. White on dark `--primary` is 1.86:1. Of the 106 source lines that set `bg-[var(--primary)]`, 100 now use `--on-primary` and none use `text-white`. The other 6 are two `/10` washes, three fills with no text, and the journal cluster style, which sets `--on-primary` on another line. `tests/primaryTextContrast.test.ts` fails on any class string that pairs a `--primary` fill with `text-white`.
+3. **`text-white` against `--on-primary`.** Resolved by the fix committed with this file. White on dark `--primary` is 1.86:1. Of the 106 source lines that set `bg-[var(--primary)]`, 100 now use `--on-primary` and none use `text-white`. The other 6 are two `/10` washes, three fills with no text, and the journal cluster style, which sets `--on-primary` on another line. `tests/primaryTextContrast.test.ts` fails on any class string that pairs a `--primary` fill with `text-white`. It also fails on white or `--on-primary` text on a `--warn-border`, `--success-border` or `--toggle-on` fill, or on the raw yellow-600 fill the account page used before `--on-warn`.
 4. **Dry soil colour.** `SwtStatusIndicator` shows dry in red `--soil-dry`, and `HistoryMonthCalendarView` shows `dry_stress` in amber `--cal-warn-*`.
 5. **Input border.** `FormField` and its comment use `--field-border` with `py-4`. `Login.tsx` uses `--border` with `py-3`.
 6. **Touch target minimum.** `.touch-target` and `FARMING_MODULE_GUIDE.md` say 48px. `.glass-tab` and many controls use 44px.
@@ -358,7 +365,7 @@ These are recorded, not resolved, except where stated.
 8. **Stale guide.** `FARMING_MODULE_GUIDE.md` describes "Dark background (slate-900/slate-800)" and "White text". Tokens and render are light-first with dark text.
 9. **`src/App.css` is not imported.** `src/main.jsx` imports only `src/index.css`, and nothing imports `App.css`. Its 8/12px radii and `.metric-card` patterns do not reach the rendered GUI, so no values here come from it.
 10. **Hard-coded colours outside tokens.** Tailwind palette classes appear in components, such as `bg-slate-900` on the Account button, `bg-emerald-700` on Data, `bg-sky-700` on Network, and `bg-blue-50 text-blue-800` on the Soil tension chip. That chip stays light in dark mode. `src/analysis/echartsOptions.ts` hard-codes `#475569`, `#6e7079` and `#464646`, which are not theme-aware.
-11. **Preset coverage.** `src/ui-core/tailwind-preset.js` does not expose `--on-primary`, `--field-border`, `--info-*`, `--cal-*`, `--glass-*` or `--chrome-*`. The GUI reaches them with `var()`. The preset's `farm-*` colours are unused in `.tsx` files.
+11. **Preset coverage.** `src/ui-core/tailwind-preset.js` does not expose `--on-primary`, `--on-warn`, `--on-success`, `--field-border`, `--info-*`, `--cal-*`, `--glass-*` or `--chrome-*`. The GUI reaches them with `var()`. The preset's `farm-*` colours are unused in `.tsx` files.
 
 ## Not specified in the GUI
 

@@ -19,6 +19,21 @@ html[data-theme='dark'] {
   --header-subtext: #B7E4DA;
 }
 
+/* Text on a solid --warn-border, --success-border or --toggle-on fill. Those
+   fills are bright in both themes, so white fails on them (2.15 on amber, 2.28
+   to 3.30 on green). --on-success serves --toggle-on too: today it equals
+   --success-border in both themes. Edge-only for now; osi-server has the same
+   fills, so these may move into ui-core/tokens.css later. */
+:root {
+  --on-warn: #04100E;
+  --on-success: #04100E;
+}
+
+html[data-theme='dark'] {
+  --on-warn: #04100E;
+  --on-success: #04100E;
+}
+
 /* Custom base styles */
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
