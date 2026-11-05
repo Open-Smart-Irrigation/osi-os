@@ -97,6 +97,42 @@ test('dark theme body text clears AA on every surface token', () => {
   assertReadable("html[data-theme='dark']");
 });
 
+/**
+ * Text on a solid status fill. --warn-border, --success-border and --toggle-on
+ * are bright in both themes, so white fails on them; index.css adds the dark
+ * --on-* tokens. --toggle-on is its own pair even though one token serves it,
+ * so a later change to --toggle-on alone still fails here.
+ */
+const FILL_TEXT_PAIRS: Array<[fill: string, text: string]> = [
+  ['--primary', '--on-primary'],
+  ['--warn-border', '--on-warn'],
+  ['--success-border', '--on-success'],
+  ['--toggle-on', '--on-success'],
+];
+
+function assertFillTextReadable(selector: string) {
+  const tokens = effectiveTokens(selector);
+  for (const [fill, text] of FILL_TEXT_PAIRS) {
+    const background = tokens.get(fill);
+    const foreground = tokens.get(text);
+    assert.ok(background, `${selector} declares no ${fill}`);
+    assert.ok(foreground, `${selector} declares no ${text}`);
+    const ratio = contrast(foreground, background);
+    assert.ok(
+      ratio >= AA_BODY_TEXT,
+      `${selector} ${text} (${foreground}) on ${fill} (${background}) is ${ratio.toFixed(2)}:1, below ${AA_BODY_TEXT}:1`,
+    );
+  }
+}
+
+test('light theme text clears AA on every solid fill token', () => {
+  assertFillTextReadable(':root');
+});
+
+test('dark theme text clears AA on every solid fill token', () => {
+  assertFillTextReadable("html[data-theme='dark']");
+});
+
 test('the ratio maths matches the published WCAG examples', () => {
   assert.equal(Number(contrast('#FFFFFF', '#000000').toFixed(2)), 21);
   assert.equal(Number(contrast('#777777', '#FFFFFF').toFixed(2)), 4.48);

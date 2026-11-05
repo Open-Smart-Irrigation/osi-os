@@ -862,7 +862,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                 type="button"
                 onClick={confirmDelete}
                 disabled={deleting}
-                className="min-h-[44px] rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className="min-h-[44px] rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {t('scheduleDialog.deleteConfirmButton')}
               </button>
