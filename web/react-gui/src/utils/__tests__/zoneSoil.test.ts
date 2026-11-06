@@ -851,7 +851,7 @@ describe('summarizeZoneSoil WATERMARK provenance', () => {
     expect(summarizeZoneSoil([device({ type_id: 'DRAGINO_SDI12', last_seen: FRESH,
       latest_data: { vwc_1: 28 } })], NOW).includesWatermark).toBe(false);
     expect(summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', last_seen: FRESH,
-      latest_data: { swt_1: null, watermark: watermark(FRESH, 70, null) } })], NOW).toMatchObject({
+      latest_data: { swt_1: null, watermark: watermark(FRESH, 70, null) } })], NOW)).toMatchObject({
       value: null, channel: null, invalid: false, includesWatermark: false,
     });
     const faultedWithPeer = summarizeZoneSoil([
