@@ -180,10 +180,12 @@ describe('DraginoTempCard WATERMARK probe section', () => {
   });
 
   it('keeps the family notice for missing WATERMARK channels and read-only cards', () => {
+    const latestWatermark = watermarkDevice.latest_data?.watermark;
+    if (!latestWatermark) throw new Error('WATERMARK fixture is missing');
     render(<DraginoTempCard removeContext="farm" readOnly device={{
       ...watermarkDevice,
       latest_data: { ...watermarkDevice.latest_data, watermark: {
-        ...watermarkDevice.latest_data?.watermark,
+        ...latestWatermark,
         channels: [
           { status: 'calibration_required', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null },
           { status: 'open', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null },
