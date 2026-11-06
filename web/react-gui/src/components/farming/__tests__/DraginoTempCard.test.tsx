@@ -9,6 +9,7 @@ const STATUS_LABELS: Record<string, string> = {
   'history.soil.state.wet': 'Wet',
   'history.soil.state.moist': 'Moist',
   'history.soil.state.dry': 'Dry',
+  'watermark.automation.phase1Notice': 'Phase 1 automation does not use WATERMARK readings to decide irrigation.',
 };
 
 vi.mock('react-i18next', () => ({
@@ -156,6 +157,9 @@ describe('DraginoTempCard WATERMARK probe section', () => {
     expect(screen.getByText('0.0 kPa')).toBeInTheDocument();
     expect(screen.getByText(/16\.8/)).toBeInTheDocument();
     expect(screen.queryByText(/19\.9/)).not.toBeInTheDocument();
+    expect(screen.getByText('Phase 1 automation does not use WATERMARK readings to decide irrigation.')).toBeInTheDocument();
+    expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
   });
 
   it('renders no WATERMARK section when latest_data.watermark is absent', () => {
@@ -173,6 +177,38 @@ describe('DraginoTempCard WATERMARK probe section', () => {
     }} />);
     expect(screen.queryByText('Chameleon SWT')).not.toBeInTheDocument();
     expect(screen.getByText('soilTension.sectionTitle')).toBeInTheDocument();
+  });
+
+  it('keeps the family notice for missing WATERMARK channels and read-only cards', () => {
+    render(<DraginoTempCard removeContext="farm" readOnly device={{
+      ...watermarkDevice,
+      latest_data: { ...watermarkDevice.latest_data, watermark: {
+        ...watermarkDevice.latest_data?.watermark,
+        channels: [
+          { status: 'calibration_required', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null },
+          { status: 'open', kpa: null, kpa_upper_bound: null, r_solved: null, r_upper_bound: null, offset_mv: null },
+        ],
+      } },
+    }} />);
+    expect(screen.getByText('Phase 1 automation does not use WATERMARK readings to decide irrigation.')).toBeInTheDocument();
+    expect(screen.getByText('watermark.status.calibration_required')).toBeInTheDocument();
+    expect(screen.getByText('watermark.status.open')).toBeInTheDocument();
+    expect(screen.queryByText('Dry')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /deviceCard\.settings/ })).not.toBeInTheDocument();
+  });
+
+  it('keeps the family notice and values for a legacy Chameleon-flag-on WATERMARK device', () => {
+    render(<DraginoTempCard removeContext="farm" device={{
+      ...watermarkDevice,
+      chameleon_enabled: 1,
+      chameleon_swt1_depth_cm: 5,
+      chameleon_swt2_depth_cm: 15,
+      chameleon_swt3_depth_cm: 30,
+    }} />);
+    expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
+    expect(screen.getByText('Dry')).toBeInTheDocument();
+    expect(screen.getByText('Phase 1 automation does not use WATERMARK readings to decide irrigation.')).toBeInTheDocument();
+    expect(screen.queryByText('Chameleon SWT')).not.toBeInTheDocument();
   });
 
   it('still shows the Chameleon SWT block for a Chameleon device without watermark', () => {
