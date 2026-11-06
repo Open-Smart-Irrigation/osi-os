@@ -743,6 +743,9 @@ export const IrrigationZoneCard: React.FC<IrrigationZoneCardProps> = ({
                 {soilTriggerProbeLine && (
                   <p className="text-sm font-semibold text-[var(--warn-text)]">{soilTriggerProbeLine}</p>
                 )}
+                {soilShowsValue && soilNow.includesWatermark && (
+                  <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('watermark.automation.zonePhase1Notice')}</p>
+                )}
               </div>
             )}
             {hasDendroDevices && (

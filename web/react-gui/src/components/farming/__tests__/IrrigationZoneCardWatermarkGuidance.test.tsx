@@ -155,6 +155,7 @@ describe('IrrigationZoneCard WATERMARK guidance', () => {
     expect(tile.getByText('70.0 kPa')).toBeInTheDocument();
     expect(tile.getByText('Dry')).toBeInTheDocument();
     expect(tile.getByText(WATERMARK_NOTICE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Devices in this zone:/ }));
     expect(screen.getAllByText(DEVICE_NOTICE)).toHaveLength(1);
     expect(screen.getByTestId('lsn50-card')).toBeInTheDocument();
   });
@@ -171,8 +172,9 @@ describe('IrrigationZoneCard WATERMARK guidance', () => {
     expect(tile.getByText('Moist')).toBeInTheDocument();
     expect(tile.queryByText(WATERMARK_NOTICE)).not.toBeInTheDocument();
     expect(tile.queryByText('At or past the trigger')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Devices in this zone:/ }));
     expect(screen.getByText(DEVICE_NOTICE)).toBeInTheDocument();
-    expect(screen.getByTestId('lsn50-card')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lsn50-card')).toHaveLength(2);
   });
 
   it('updates zone guidance with the displayed provenance on rerender', async () => {
@@ -217,8 +219,9 @@ describe('IrrigationZoneCard WATERMARK guidance', () => {
     expect(tile.getByText('Moist')).toBeInTheDocument();
     expect(tile.getByText('Below the trigger')).toBeInTheDocument();
     expect(tile.queryByText(WATERMARK_NOTICE)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Devices in this zone:/ }));
     expect(screen.getByText(DEVICE_NOTICE)).toBeInTheDocument();
-    expect(screen.getByTestId('lsn50-card')).toBeInTheDocument();
+    expect(screen.getAllByTestId('lsn50-card')).toHaveLength(2);
   });
 
   it('shows the zone note when a fresh WATERMARK value outranks a stale Chameleon one', async () => {
@@ -233,6 +236,7 @@ describe('IrrigationZoneCard WATERMARK guidance', () => {
     expect(tile.getByText('Dry')).toBeInTheDocument();
     expect(tile.getByText('At or past the trigger')).toBeInTheDocument();
     expect(tile.getByText(WATERMARK_NOTICE)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Devices in this zone:/ }));
     expect(screen.getAllByText(DEVICE_NOTICE)).toHaveLength(1);
   });
 
@@ -248,6 +252,7 @@ describe('IrrigationZoneCard WATERMARK guidance', () => {
     expect(tile.getByText('Moist')).toBeInTheDocument();
     expect(tile.getByText(WATERMARK_NOTICE)).toBeInTheDocument();
     expect(tile.getByText('Trigger probe: invalid reading')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Devices in this zone:/ }));
     expect(screen.getByText(DEVICE_NOTICE)).toBeInTheDocument();
   });
 });

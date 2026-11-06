@@ -987,6 +987,10 @@
     "resistance": "Resistência {{value}}",
     "resistanceUpTo": "Resistência ≤ {{value}}",
     "offset": "Desvio {{value}} mV",
+    "automation": {
+      "phase1Notice": "A automação da fase 1 não utiliza leituras WATERMARK para decidir se deve irrigar.",
+      "zonePhase1Notice": "Este valor inclui leituras WATERMARK. A automação da fase 1 não utiliza essas leituras para decidir se deve irrigar."
+    },
     "soilTempNotMeasured": "Temperatura do solo não medida",
     "dieTemp": "Placa {{value}} °C",
     "supply": "Alimentação {{value}} V",

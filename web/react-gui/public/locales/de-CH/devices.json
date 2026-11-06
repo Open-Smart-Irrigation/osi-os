@@ -987,6 +987,10 @@
     "resistance": "Widerstand {{value}}",
     "resistanceUpTo": "Widerstand ≤ {{value}}",
     "offset": "Sensor-Offset {{value}} mV",
+    "automation": {
+      "phase1Notice": "Die Bewässerungsautomatik der Phase 1 verwendet WATERMARK-Messwerte nicht für die Entscheidung, ob bewässert wird.",
+      "zonePhase1Notice": "Dieser Wert umfasst WATERMARK-Messwerte. Die Bewässerungsautomatik der Phase 1 verwendet diese Messwerte nicht für die Bewässerungsentscheidung."
+    },
     "soilTempNotMeasured": "Bodentemperatur nicht gemessen",
     "dieTemp": "Platine {{value}} °C",
     "supply": "Versorgung {{value}} V",

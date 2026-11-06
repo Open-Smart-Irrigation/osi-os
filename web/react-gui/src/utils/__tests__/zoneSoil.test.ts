@@ -843,7 +843,7 @@ describe('summarizeZoneSoil WATERMARK provenance', () => {
     expect(summarizeZoneSoil([device({ last_seen: FRESH, latest_data: { swt_1: 1_000_000 } })], NOW, 'swt_1'))
       .toMatchObject({ value: 1_000_000, channel: 'swt_1', stale: false, invalid: false, includesWatermark: false });
     expect(summarizeZoneSoil([device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001 } })], NOW, 'swt_1'))
-      .toMatchObject({ value: null, channel: null, stale: false, invalid: true, includesWatermark: false });
+      .toMatchObject({ value: null, channel: null, stale: true, invalid: true, includesWatermark: false });
   });
 
   it('defaults provenance off for absent, invalid and volumetric summaries', () => {
