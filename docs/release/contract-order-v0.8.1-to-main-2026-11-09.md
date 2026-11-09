@@ -50,7 +50,7 @@ gate); **value-only** changes values or display with no shape change;
 | sync-schema: `canonicalization.md`, `resources.schema.json` `archived_at` | Snapshot producers derive `archived_at` from `observed_close_at`, else `commanded_at`, no longer `expected_close_at`. Edge a4d4d3f8c (#572). The SWT pF section is relabelled legacy (55b3d4b7b, #503). | value-only (archive); docs-only (pF section) | Appliers unchanged: both paths ignore a strictly older value and apply an equal one. Test mirror 6e42a93a (#395). | None | None. Residual: a cloud row that already holds a legacy `archived_at` taken from `expected_close_at` is later than the new `commanded_at` value, so the new snapshot is ignored and that row does not converge. Correcting those rows is separate work (#331 stays open). | No |
 | sync-schema: `README.md`; rainfall: `zone-day-projection.md`, `README.md` | `ZONE_ENVIRONMENT_APPENDED`, bootstrap and history rows gain `rain_coverage`, `rain_selected_deveui`, `rain_policy_version`, `rain_quality_reasons`, `rain_received_mm`; `rainfall_mm` is null unless coverage is `complete`, and a present null replaces the stored amount. Contract f6380b888 (#489), cc4269b89 (#493); edge emission 044a182b0 (#497). All after the v0.8.1 tag. | edge-sends | Yes: receiver and Flyway `V2026_10_10_001` in 26d81145 (#366). | None | Cloud first, hard. An older cloud does not reject the rows; it reads `rainfall_mm: null` as "keep the previous value" and a new row as 0 mm, so cloud rain and advice go wrong without an error. | No (the order is stated only in the contract and the sync-schema README) |
 | rainfall: `rain-resolution-policy.md` | One rain-resolution order for edge and cloud advice. 98fd1fee1 (#492). | value-only | Cloud consumers 8288a4a6 (#368). | None | Either order. From 8288a4a6 the cloud advice reads rain the same way the edge does. | No |
-| rainfall: `lorain.md` | Owner decision replaces D4: elapsed-time LoRain rates are cleared. Edge migration 0078 (data) nulls them; the device_data update trigger queues each cleared row as a history correction. d1cc14b7d (#584). | value-only (data) | Yes: Flyway `V2026_10_30_001` clears the cloud copy. 3f670d6e9 (#396), today's server head. | None | Either order. An older cloud stores the corrected nulls and still offers the emptied channel until 3f670d6e9. | No |
+| rainfall: `lorain.md` | Owner decision replaces D4: elapsed-time LoRain rates are cleared. Edge migration 0078 (data) nulls them; the device_data update trigger queues each cleared row as a history correction. d1cc14b7d (#584). | value-only (data) | Yes: Flyway `V2026_10_30_001` clears the cloud copy. 3f670d6e9 (#396), today's server head. | None | Gateways before 3f670d6e9, or in the same release window. Edge first: an older cloud stores the corrected nulls and still offers the emptied channel until 3f670d6e9. Cloud first: a v0.8.1 gateway still writes the elapsed-time rate (the edge writer stopped in 1a2ad3412, #488), so rows it sends after the one-time Flyway clear keep it in the cloud, not shown or exported, until that gateway's 0078 re-sends them cleared. | No |
 | sync-schema: `journal-mutation-rejection-v1.schema.json`, `-golden.json` | Receipt definition for the journal V2 mutation 400 body. 25658521a (#574). | docs-only | Absent on the server; no producer or consumer in either repo. | n/a | None | No |
 | radio-observations: `v1.md` | Tester GPS decoded only for `RAK10701_FIELD_TESTER` fPort-1 frames; capture flag on only for `1`/`true`. 56a660982 (#398). | value-only | n/a (no shape change) | None | None | No |
 | swt-water-status: `README.md`, `vectors.json` | Display bands to 1,000,000 kPa; stale-reading pill. 945027b1f (#508). | value-only (display) | `vectors.json` byte-identical on the server. | None | None | No |
@@ -60,7 +60,7 @@ gate); **value-only** changes values or display with no shape change;
 
 ## CHANGELOG gap
 
-`CHANGELOG.md` `[Unreleased]` has no "Upgrade notes" section. The only
+`CHANGELOG.md` `[Unreleased]` at f360e9eba had no "Upgrade notes" section. The only
 contract-related entry is the `PAUSE_IRRIGATION_POLICY` null entry under
 "Changed", and it names no order. `docs/versioning-workflow.md` requires the
 upgrade notes to name the order for every change that widens what either side
@@ -70,7 +70,10 @@ sends. Before the release, the notes need at least:
 - zone-day rain quality fields, cloud first (26d81145 or later, hard);
 - Tensiomark observations and layout, cloud first (0534ae13 or later, soft);
 - the three conditional commands, capability-gated by the cloud, no gateway-first step;
+- LoRain rain rates, gateways before or with osi-server 3f670d6e9 (#396);
 - the `archived_at` residual for cloud rows that hold a legacy future value.
+
+The change that adds this report writes those notes under `[Unreleased]`.
 
 ## Release order
 
@@ -79,7 +82,8 @@ revision at or after 460c424b (#389, 2026-10-27), the lowest revision that
 passes the pre-flight gate `verify-sync-op-parity.js`. It contains every
 cloud-first receiver in the table.
 Current server main (3f670d6e9) also passes and adds the LoRain cloud cleanup
-(#396). 26d81145 (#366, 2026-10-10) is the data-safety floor. Below it, the zone-day
+(#396); after that deploy, upgrade LoRain gateways in the same release window
+(see the LoRain row). 26d81145 (#366, 2026-10-10) is the data-safety floor. Below it, the zone-day
 rain fields leave wrong rain on the cloud with no error. Between 26d81145 and
 460c424b, delivery keeps working: conditional events wait in the outbox and
 Tensiomark observations wait until 0534ae13. Parity still fails there, and a

@@ -7,6 +7,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Upgrade notes
+- **Cloud first: OSI Server at osi-server `460c424b` (#389) or later before
+  any linked gateway takes this release.** The edge adds four sync event ops
+  for conditional irrigation (`IRRIGATION_POLICY_UPSERTED`,
+  `IRRIGATION_POLICY_RUNTIME_CHANGED`,
+  `IRRIGATION_POLICY_VALVE_RUNTIME_CHANGED`,
+  `IRRIGATION_POLICY_DECISION_UPSERTED`) and links `VALVE_SCHEDULE` payloads
+  to a policy. `460c424b` is the lowest osi-server revision whose
+  `EdgeSyncService.java` passes `scripts/verify-sync-op-parity.js`; osi-server
+  `main` at `3f670d6e` also passes. The gateway sends these events only while
+  the cloud reports `conditional_irrigation_v1`, and it re-reads that every
+  sync cycle. On an older cloud nothing is rejected: the events wait in the
+  outbox and go out after the cloud upgrade, without a re-link. Linking or
+  re-linking a gateway that holds a live conditional policy fails closed on
+  an older cloud. To check a cloud, take the SHA from its
+  `BACKEND_IMAGE_TAG=sha-<short>` and run
+  `git -C <osi-server> merge-base --is-ancestor 460c424b <sha>`. If that
+  fails, deploy the cloud (versioning workflow Step 6) before the release is
+  published and before any linked gateway is upgraded. Per-contract detail:
+  [docs/release/contract-order-v0.8.1-to-main-2026-11-09.md](docs/release/contract-order-v0.8.1-to-main-2026-11-09.md).
+- **Never below osi-server `26d81145` (#366): zone-day rain goes wrong
+  without an error.** `ZONE_ENVIRONMENT_APPENDED`, bootstrap and history rows
+  now carry `rain_coverage`, `rain_selected_deveui`, `rain_policy_version`,
+  `rain_quality_reasons` and `rain_received_mm`, and `rainfall_mm` is null
+  unless the day's coverage is `complete`. A cloud before `26d81145` accepts
+  these rows, but it reads a null `rainfall_mm` as "keep the stored amount"
+  and a new row as 0 mm. Its rain history and irrigation advice are then
+  wrong, and nothing reports it. `460c424b` from the previous note includes
+  this receiver; this floor applies only when a cloud cannot reach
+  `460c424b` before the gateways are upgraded.
+- **The three new cloud commands need no gateway-first step.**
+  `UPSERT_IRRIGATION_POLICY`, `PAUSE_IRRIGATION_POLICY` and
+  `RETRY_IRRIGATION_VALVE` widen what the cloud sends, which would normally
+  mean gateways first. OSI Server from `460c424b` delivers them only to a
+  gateway that reports `conditional_irrigation_v1`. A 0.8.1 gateway never
+  reports it and receives none of them.
+- **Tensiomark observations wait for osi-server `0534ae13` (#372).** The new
+  `tensiomark_observations` history table needs the cloud's mirror. An older
+  cloud answers `REJECTED_PERMANENT` with `unsupported_table`; the gateway
+  leaves that table's cursor where it was, keeps the observations pending
+  until the cloud is upgraded, and keeps sending the other history tables.
+  The Tensiomark channel layout on a device (`sdi12_channel_layout_json`) is
+  stored by an older cloud but not interpreted.
+- **LoRain rain rates: upgrade LoRain gateways before osi-server `3f670d6e`
+  (#396) reaches their cloud, or in the same release window.** Edge
+  migration `0078` (risk `data`) clears the rain rate and 10-minute value
+  that earlier releases computed from the time between two reports. On a
+  linked gateway the `device_data` update trigger queues each cleared row,
+  and the gateway re-sends it to the cloud as a history correction. #396
+  clears the cloud's copy once (Flyway `V2026_10_30_001`) and removes the
+  "Show legacy estimates" switch. A 0.8.1 gateway still writes these rates,
+  so rows it sends after that cloud migration keep them until the gateway's
+  own `0078` runs and re-sends them cleared. The cloud no longer shows or
+  exports LoRain rate channels, so nothing displays them in between. In the
+  other order, an older cloud stores the cleared rows and shows an empty
+  legacy channel behind the switch until it takes #396.
+- **Valve actuation `archived_at`: no deploy order, one residual (#572).**
+  Gateway snapshots now take `archived_at` from `observed_close_at`, else
+  `commanded_at`, and no longer from `expected_close_at`. The cloud appliers
+  ignore a strictly older value. A cloud row that already holds an
+  `archived_at` taken from `expected_close_at` is later than the new value,
+  so it keeps it and does not converge. Correcting those rows is open as
+  #331.
+- **Re-run a failed deploy on a 0.8.1 gateway before leaving the site.**
+  Until the module-staging fix for #603 lands, a `deploy.sh` run on a 0.8.1
+  gateway that exits 1 can leave the 0.8.1 flows running on the new helper
+  modules, so run it again
+  ([docs/operations/deploy-module-ordering-audit-2026-11-09.md](docs/operations/deploy-module-ordering-audit-2026-11-09.md),
+  section 5).
+
 ### Changed
 - **Conditional irrigation: the lifecycle service owns device unclaim.** A
   local `DELETE /api/devices/:deveui` and a cloud `UNCLAIM_DEVICE` now both
