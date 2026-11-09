@@ -62,6 +62,27 @@ test('0078 clears only the LoRain elapsed-time estimates', () => {
   }
 });
 
+// On a linked gateway the device_data update trigger queues each cleared row
+// for the history correction phase, so the edge re-sends it to the cloud; the
+// rows it leaves alone are not queued.
+test('0078 queues only the cleared rows for history correction on a linked gateway', () => {
+  const db = seeded();
+  try {
+    db.exec("INSERT INTO sync_link_state (peer_node, linked, gateway_device_eui, updated_at) "
+      + "VALUES ('cloud', 1, '0016C001F1000001', '2026-10-01T00:00:00.000Z')");
+    db.exec(MIGRATION);
+    const cleared = db.prepare('SELECT id FROM device_data WHERE deveui = ? AND recorded_at = ?')
+      .get(LORAIN, '2026-10-01T10:00:00.000Z').id;
+    assert.deepEqual(db.prepare('SELECT table_name, row_key, change_kind, source_row_id, status '
+      + 'FROM sync_history_dirty_keys').all().map((r) => ({ ...r })), [{
+      table_name: 'device_data', row_key: `DEVICE_DATA|0016C001F1000001|${cleared}`,
+      change_kind: 'correction', source_row_id: cleared, status: 'pending',
+    }]);
+  } finally {
+    db.close();
+  }
+});
+
 test('0078 is a no-op when run again', () => {
   const db = seeded();
   try {
