@@ -4,7 +4,10 @@
 // #521: the local admin password reset refuses linked (auth_mode='server')
 // accounts with a stable 409 and keeps working for local accounts.
 //
-// Runs the shipped flow functions of both maintained profiles. Requests go
+// Runs the shipped flow functions of both maintained profiles. The reset
+// itself lives in osi-local-password-reset, which the account router loads
+// through osiLib.require('local-password-reset'); the named mutants below
+// mutate that module's source. Requests go
 // over loopback HTTP into a dispatcher that follows each `http in` node's
 // wires to its `http response` node; that last node is emulated (status from
 // the node or msg.statusCode, node headers, JSON body). This is not
@@ -249,7 +252,10 @@ async function fixture(profile, options = {}) {
     scope._resetForTests();
     const out = await executeFunction(node, {
       msg, env: envValues, db, nodeRedModules,
-      osiLibModules: { installation, scope: scopeObserved },
+      osiLibModules: {
+        installation, scope: scopeObserved,
+        ...(options.resetModule ? { 'local-password-reset': options.resetModule } : {}),
+      },
       libOverrides: { osiDb: helper, bcrypt },
     });
     control.warnings.push(...out.warnings);
@@ -959,18 +965,28 @@ for (const profile of PROFILES) {
     }
   });
 
+  test(`[${profile}] the router delegates the reset to osi-local-password-reset`, TEST, async () => {
+    const { flowsPath } = profilePaths(profile);
+    const router = JSON.parse(fs.readFileSync(flowsPath, 'utf8')).find((node) => node.id === 'scoped-admin-account-router');
+    assert.match(router.func, /osiLib\.require\('local-password-reset'\)/);
+    assert.match(router.func, /\.resetLocalPassword\(\{ db, scope, bcrypt, auth, actor, userUuid, body, now, node \}\)/);
+    assert.doesNotMatch(router.func, /password_hash=\?/, 'no reset UPDATE left in the router');
+    assert.doesNotMatch(router.func, /db\.transaction\(/, 'no reset transaction left in the router');
+    assert.ok(router.libs.some((lib) => lib.var === 'osiLib' && lib.module === 'osi-lib'), 'osiLib is bound');
+  });
+
   // ---- Composition with #520 (conditional). On a base without
   // users.local_auth_generation the sentinel passes and the three cases skip.
   // Once the column exists, the router must carry the generation check and
   // all three cases run; an allowlist alone cannot pass them.
-  test(`[${profile}] #520 composition sentinel: a generation column requires the router generation check`, TEST, async () => {
+  test(`[${profile}] #520 composition sentinel: a generation column requires the reset module generation check`, TEST, async () => {
     const f = await fixture(profile);
     try {
-      const router = f.byId.get('scoped-admin-account-router').func;
+      const reset = fs.readFileSync(path.join(profilePaths(profile).nodeRedModules, 'osi-local-password-reset', 'index.js'), 'utf8');
       if (f.hasGeneration) {
-        assert.match(router, /local_auth_generation/, 'the composed router rechecks the actor generation inside the reset transaction');
+        assert.match(reset, /local_auth_generation/, 'the composed reset module rechecks the actor generation inside the reset transaction');
       } else {
-        assert.doesNotMatch(router, /local_auth_generation/, 'no generation reference without the column');
+        assert.doesNotMatch(reset, /local_auth_generation/, 'no generation reference without the column');
       }
     } finally {
       await f.cleanup();
@@ -1048,8 +1064,21 @@ for (const profile of PROFILES) {
 }
 
 // ---- Named mutants (bcm2712): each applies one reviewed regression to the
-// shipped router text and shows that the oracle above would catch it.
+// shipped osi-local-password-reset source (M8: the router text) and shows that
+// the oracle above would catch it.
 const ROUTER_ID = 'scoped-admin-account-router';
+function mutatedModule(find, replace) {
+  const { nodeRedModules } = profilePaths('bcm2712');
+  const file = path.join(nodeRedModules, 'osi-local-password-reset', 'index.js');
+  const source = fs.readFileSync(file, 'utf8');
+  const occurrences = source.split(find).length - 1;
+  assert.equal(occurrences, 1, `mutant anchor occurs exactly once: ${find.slice(0, 60)}`);
+  const mutated = new Module(file, module);
+  mutated.filename = file;
+  mutated.paths = Module._nodeModulePaths(path.dirname(file));
+  mutated._compile(source.replace(find, () => replace), file);
+  return mutated.exports;
+}
 function mutatedFlows(find, replace) {
   const { flowsPath } = profilePaths('bcm2712');
   const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
@@ -1105,7 +1134,7 @@ const MUTANTS = [
   },
   {
     name: 'M2 preflight removed, linked targets are hashed',
-    find: "      if (preflight !== 'local') return refuse(preflight);\n", replace: '',
+    find: "    if (preflight !== 'local') return refuse(preflight);\n", replace: '',
     fired: [],
     target: (f) => f.linkedV2.user_uuid,
     expect: (r, f) => r.status === 409 && r.payload.code === LINKED.code && f.bcryptCalls().length === 0,
@@ -1113,8 +1142,8 @@ const MUTANTS = [
   },
   {
     name: 'M3 old UUID-only UPDATE without the transaction recheck',
-    find: "        if (target !== 'local') return target;\n        await tx.run(\n          \"UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=? AND auth_mode='local'\",",
-    replace: "        await tx.run(\n          \"UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=?\",",
+    find: "      if (target !== 'local') return target;\n      await tx.run(\n        \"UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=? AND auth_mode='local'\",",
+    replace: "      await tx.run(\n        \"UPDATE users SET password_hash=?,updated_at=?,sync_version=sync_version+1 WHERE user_uuid=?\",",
     arrange: (f) => f.hook({ name: 'm3-linked-after-preflight', method: 'all', match: PREFLIGHT_SQL, after: () => f.db.prepare("UPDATE users SET auth_mode='server' WHERE user_uuid=?").run(f.researcher.user_uuid) }),
     fired: ['m3-linked-after-preflight'],
     target: (f) => f.researcher.user_uuid,
@@ -1149,8 +1178,8 @@ const MUTANTS = [
   },
   {
     name: 'M7 linked refusal thrown into the catch instead of answered',
-    find: "      if (preflight !== 'local') return refuse(preflight);\n",
-    replace: "      if (preflight === 'server') throw Object.assign(new Error('linked'), { statusCode: 409, code: 'linked_account_password_reset_unsupported' });\n      if (preflight !== 'local') return refuse(preflight);\n",
+    find: "    if (preflight !== 'local') return refuse(preflight);\n",
+    replace: "    if (preflight === 'server') throw Object.assign(new Error('linked'), { statusCode: 409, code: 'linked_account_password_reset_unsupported' });\n    if (preflight !== 'local') return refuse(preflight);\n",
     fired: [],
     target: (f) => f.linkedV2.user_uuid,
     expect: (r) => r.status === 409 && r.payload.code === LINKED.code,
@@ -1182,15 +1211,15 @@ const MUTANTS = [
 
 for (const mutant of MUTANTS) {
   test(`mutant ${mutant.name} is detected`, TEST, async () => {
-    for (const flows of [null, mutatedFlows(mutant.find, mutant.replace)]) {
-      const f = await standard('bcm2712', flows ? { flows } : {});
+    for (const resetModule of [null, mutatedModule(mutant.find, mutant.replace)]) {
+      const f = await standard('bcm2712', resetModule ? { resetModule } : {});
       try {
         f.clearLog();
         if (mutant.arrange) mutant.arrange(f);
         const result = await direct(f, mutant.target(f));
-        if (!flows) {
-          assert.ok(completed(result), `shipped router completes (${describe(result)})`);
-          assert.ok(mutant.expect(result, f), `shipped router meets the oracle (${describe(result)})`);
+        if (!resetModule) {
+          assert.ok(completed(result), `shipped reset completes (${describe(result)})`);
+          assert.ok(mutant.expect(result, f), `shipped reset meets the oracle (${describe(result)})`);
           assert.deepEqual(f.control.fired, mutant.fired, 'shipped run: the arranged hooks fired');
         } else if (mutant.deadlock) {
           assert.equal(result, 'timeout', `the mutant deadlocks on the queued facade (${describe(result)})`);

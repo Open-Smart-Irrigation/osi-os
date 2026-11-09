@@ -40,6 +40,8 @@ const NAME_TO_PATH = {
   // Authorization cache must have one module instance. Flow consumers load it
   // only through osiLib.require('scope'), never with a bare/relative require.
   'scope': 'osi-scope-helper',
+  // #521: the admin password reset, called only by scoped-admin-account-router.
+  'local-password-reset': 'osi-local-password-reset',
   'rejection-recovery': 'osi-rejection-recovery',
   'dendro-analytics': 'osi-dendro-analytics',
   'zone-env': 'osi-zone-env',

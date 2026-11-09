@@ -36,6 +36,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
     'installation',
     'installation-location',
     'journal-replication',
+    'local-password-reset',
     'lsn50-normalize',
     'network-api',
     'osi-command-ledger',
@@ -75,6 +76,7 @@ test('NAME_TO_PATH is exported and lists all launch entries', () => {
   assert.equal(osiLib.NAME_TO_PATH['watermark-helper'], 'osi-watermark-helper');
   assert.equal(osiLib.NAME_TO_PATH['rejection-recovery'], 'osi-rejection-recovery');
   assert.equal(osiLib.NAME_TO_PATH['scope'], 'osi-scope-helper');
+  assert.equal(osiLib.NAME_TO_PATH['local-password-reset'], 'osi-local-password-reset');
   assert.equal(osiLib.NAME_TO_PATH['scoped-access-commands'], 'osi-scoped-access-commands');
   assert.equal(osiLib.NAME_TO_PATH['osi-system-settings'], 'osi-system-settings');
   assert.equal(osiLib.NAME_TO_PATH['lsn50-normalize'], 'osi-lsn50-normalize');
