@@ -53,7 +53,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               <HeaderMenu
                 label={t('add')}
                 className="w-[calc(50%-4px)] sm:w-auto"
-                triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white text-lg px-6 py-3"
+                triggerClassName="bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] text-lg px-6 py-3"
                 align="left"
                 items={[
                   { key: 'zone', label: t('addMenu.zone'), onSelect: onAddZone },

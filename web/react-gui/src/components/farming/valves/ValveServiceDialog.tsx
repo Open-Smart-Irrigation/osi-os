@@ -317,7 +317,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             type="button"
             onClick={applyInterval}
             disabled={busy}
-            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyCommand === 'interval' && <Spinner />}
             {t('serviceDialog.interval.apply')}
@@ -342,7 +342,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             type="button"
             onClick={applyModel}
             disabled={busy}
-            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyCommand === 'model' && <Spinner />}
             {t('serviceDialog.model.apply')}
@@ -368,7 +368,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
             type="button"
             onClick={applyMagnet}
             disabled={busy}
-            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busyCommand === 'magnet' && <Spinner />}
             {t('serviceDialog.magnet.apply')}
