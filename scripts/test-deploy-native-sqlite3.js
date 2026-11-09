@@ -833,18 +833,27 @@ test('R2 RED broken matching-version real directory repairs before npm on imposs
   assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
 });
 test('R2 RED absent seed source preserves both installed entries', () => {
-  const gw = makeGateway('real-with-binary');
-  const { d, original } = r2OldBytes(gw);
-  const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
-  fs.mkdirSync(peer, { recursive: true });
-  fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
-  const r = r2SeedHarness(gw, { firmware: false });
-  assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/); // P predicts SEED_RC=0
-  assert.match(r.stdout, /AFTER_SEED/);
-  assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
-  assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
-  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+  // P deletes both entries and exits 0. A module that matches the pin and
+  // loads is accepted before the source is read (R10); a broken one refuses.
+  for (const state of ['real-with-binary', 'real-without-binary']) {
+    const gw = makeGateway(state);
+    const { d, original } = r2OldBytes(gw);
+    const peer = path.join(gw.proj, 'node_modules', 'node-red-node-sqlite');
+    fs.mkdirSync(peer, { recursive: true });
+    fs.writeFileSync(path.join(peer, 'peer.txt'), 'peer bytes\n');
+    const r = r2SeedHarness(gw, { firmware: false });
+    assert.equal(r.status, 0, state + '\n' + r.stderr);
+    if (state === 'real-with-binary') {
+      assert.match(r.stdout, /OK: existing real sqlite3 matches image pin and loads/, state);
+      assert.match(r.stdout, /SEED_RC=0/, state);
+    } else {
+      assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, state);
+    }
+    assert.match(r.stdout, /AFTER_SEED/, state);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original, state);
+    assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n', state);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), [], state);
+  }
 });
 test('R2 broken matching-version real directory refuses a failed repair even when reinstall is viable', () => {
   const gw = makeGateway('real-without-binary');
@@ -1063,7 +1072,14 @@ test('R2 seed source mismatch and invalid image pins preserve both entries', () 
     }
     const r = r2SeedHarness(gw, { sourceLock: lock });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+    if (fault === 'wrong-source-version') {
+      // The healthy module at the image pin is accepted before the firmware
+      // module is read (R10); the pin errors below still refuse first.
+      assert.match(r.stdout, /OK: existing real sqlite3 matches image pin and loads/);
+      assert.match(r.stdout, /SEED_RC=0/);
+    } else {
+      assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/);
+    }
     assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original);
     assert.equal(fs.readFileSync(path.join(peer, 'peer.txt'), 'utf8'), 'peer bytes\n');
     assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
@@ -2157,6 +2173,58 @@ test('R9 seed converges after power loss at every step of its cleanup', () => {
     assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false, label);
     assert.equal(fs.existsSync(path.join(d, 'original.txt')), false, label);
     assert.equal(requireSqlite3(gw.proj).status, 0, label);
+  }
+});
+
+// R10: the seed accepts a module that already matches the image pin and
+// loads before it reads the firmware module, which is only its copy source.
+// A broken firmware module beside a healthy module (one kept across
+// sysupgrade) used to refuse at every boot, and each refusing boot re-copied
+// the image's codecs, edge-channels.json and node_modules.
+function r10BreakFirmware(gw, fault) {
+  if (fault === 'missing') return { firmware: false };
+  if (fault === 'wrong-version') {
+    const pkg = path.join(gw.fwSqlite, 'package.json');
+    const parsed = JSON.parse(fs.readFileSync(pkg, 'utf8'));
+    parsed.version = '5.1.8';
+    fs.writeFileSync(pkg, JSON.stringify(parsed));
+  } else {
+    fs.rmSync(path.join(gw.fwSqlite, BINDING_REL));
+  }
+  return {};
+}
+const R10_FIRMWARE_ERRORS = {
+  missing: /firmware sqlite3 source missing or not a real directory/,
+  'wrong-version': /firmware sqlite3 source version mismatch/,
+  'no-load': /firmware sqlite3 source does not open :memory:/,
+};
+
+test('R10 seed accepts a healthy module whatever state the firmware module is in', () => {
+  for (const fault of Object.keys(R10_FIRMWARE_ERRORS)) {
+    const gw = makeGateway('real-with-binary');
+    const { d, original } = r2OldBytes(gw);
+    const r = r2SeedHarness(gw, r10BreakFirmware(gw, fault));
+    assert.equal(r.status, 0, fault + '\n' + r.stderr);
+    assert.match(r.stdout, /OK: existing real sqlite3 matches image pin and loads/, fault);
+    assert.match(r.stdout, /SEED_RC=0/, fault);
+    assert.doesNotMatch(r.stderr, /firmware sqlite3 source/, fault);
+    assert.equal(fs.lstatSync(d).isDirectory(), true, fault);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original, fault);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), [], fault);
+    assert.equal(requireSqlite3(gw.proj).status, 0, fault);
+  }
+});
+
+test('R10 seed still refuses a broken module when the firmware module cannot replace it', () => {
+  for (const [fault, message] of Object.entries(R10_FIRMWARE_ERRORS)) {
+    const gw = makeGateway('real-without-binary');
+    const { d, original } = r2OldBytes(gw);
+    const r = r2SeedHarness(gw, r10BreakFirmware(gw, fault));
+    assert.equal(r.status, 0, fault + '\n' + r.stderr);
+    assert.match(r.stdout, /SEED_RC=[1-9][0-9]*/, fault);
+    assert.match(r.stderr, message, fault);
+    assert.deepEqual(fs.readFileSync(path.join(d, 'original.txt')), original, fault);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), [], fault);
   }
 });
 

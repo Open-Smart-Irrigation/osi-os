@@ -441,6 +441,21 @@ seed_native_sqlite3() {
     fi
     seed_sqlite3_scan_stage || return 1
     seed_sqlite3_pin || return 1
+    # A healthy module is accepted before the firmware module is checked: the
+    # firmware module is only the copy source. Checking it first made an image
+    # with a broken firmware module refuse at every boot beside a working
+    # module (one kept across sysupgrade, for example), and each such boot
+    # copied the image's codecs, edge-channels.json and node_modules over the
+    # deployed ones.
+    if [ -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
+        if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
+            echo 'OK: existing real sqlite3 matches image pin and loads'
+            return 0
+        fi
+    elif seed_sqlite3_present "$seed_d" && [ ! -L "$seed_d" ]; then
+        echo "ERROR: unexpected seed sqlite3 destination type: $seed_d" >&2
+        return 1
+    fi
     if [ ! -d "$SQLITE_SRC" ] || [ -L "$SQLITE_SRC" ]; then
         echo 'ERROR: firmware sqlite3 source missing or not a real directory' >&2
         return 1
@@ -451,15 +466,6 @@ seed_native_sqlite3() {
     fi
     if ! seed_sqlite3_loads "$SQLITE_SRC" >/dev/null 2>&1; then
         echo 'ERROR: firmware sqlite3 source does not open :memory:' >&2
-        return 1
-    fi
-    if [ -d "$seed_d" ] && [ ! -L "$seed_d" ]; then
-        if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
-            echo 'OK: existing real sqlite3 matches image pin and loads'
-            return 0
-        fi
-    elif seed_sqlite3_present "$seed_d" && [ ! -L "$seed_d" ]; then
-        echo "ERROR: unexpected seed sqlite3 destination type: $seed_d" >&2
         return 1
     fi
     seed_s="$(mktemp -d "$DST/node_modules/.osi-sqlite3-seed-stage.XXXXXX" 2>/dev/null || true)"
