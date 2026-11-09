@@ -430,7 +430,20 @@ const CASES = [
 // observations never drive irrigation, whatever the device flags say.
 
 const SCHEDULER_QUERY_ID = 'd0b2b1c1a937e16d';
-const INTERLOCK_LINE = '    AND NOT EXISTS (SELECT 1 FROM watermark_readings wr WHERE wr.device_data_id = dd.id)';
+// Issue #356 nests the SWT query; the interlock sits in its innermost WHERE.
+const INTERLOCK_LINE = '          AND NOT EXISTS (SELECT 1 FROM watermark_readings wr WHERE wr.device_data_id = dd.id)';
+
+// Issue #356: the legacy threshold scheduler counts a Chameleon-enabled LSN50
+// row only through its chameleon_reading_links row. Each scheduler fixture row
+// gets a clean diagnostic linked by id, so the WATERMARK interlock alone keeps a
+// WATERMARK row out and the Chameleon row still counts.
+function linkCleanDiagnostic(native, deviceDataId) {
+  const row = native.prepare('SELECT deveui, recorded_at FROM device_data WHERE id = ?').get(deviceDataId);
+  const readingId = Number(native.prepare(
+    'INSERT INTO chameleon_readings (deveui, recorded_at, i2c_missing, timeout, data_invalid, ch1_open, ch2_open, ch3_open) VALUES (?, ?, 0, 0, 0, 0, 0, 0)'
+  ).run(row.deveui, row.recorded_at).lastInsertRowid);
+  native.prepare('INSERT INTO chameleon_reading_links (chameleon_reading_id, device_data_id) VALUES (?, ?)').run(readingId, deviceDataId);
+}
 
 // seed-blank.sql + one zone holding the DRAGINO_LSN50 with chameleon_enabled = 1,
 // and two device_data rows in the last hour: A (swt_1 = 60, WATERMARK, linked
@@ -447,6 +460,8 @@ function schedulerDb() {
   const insertDd = native.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
   const rowA = Number(insertDd.run(DEVEUI, at(40), 60).lastInsertRowid);
   const rowB = Number(insertDd.run(DEVEUI, at(20), 30).lastInsertRowid);
+  linkCleanDiagnostic(native, rowA);
+  linkCleanDiagnostic(native, rowB);
   native.prepare(
     "INSERT INTO watermark_readings (deveui, recorded_at, device_data_id, payload_hex, frame_status, conversion_version) VALUES (?, ?, ?, 'a203', 'accepted', 'wm-lsn50-p3-v1')"
   ).run(DEVEUI, at(40), rowA);
@@ -485,6 +500,8 @@ CASES.push({
     const insertDd = native.prepare('INSERT INTO device_data (deveui, recorded_at, swt_1) VALUES (?, ?, ?)');
     const rejected = Number(insertDd.run(DEVEUI, at(30), 90).lastInsertRowid);
     const clipped = Number(insertDd.run(DEVEUI, at(10), 11.2).lastInsertRowid);
+    linkCleanDiagnostic(native, rejected);
+    linkCleanDiagnostic(native, clipped);
     const link = native.prepare(
       'INSERT INTO watermark_readings (deveui, recorded_at, device_data_id, payload_hex, frame_status, conversion_version) VALUES (?, ?, ?, ?, ?, ?)'
     );
@@ -501,7 +518,7 @@ CASES.push({
 });
 
 CASES.push({
-  name: '(g) scheduler query: the interlock line is the only change vs ' + BASE_REF + ' for every metric, DENDRO included',
+  name: '(g) scheduler query: one interlock line per SWT metric, none for DENDRO, and no drift vs ' + BASE_REF + ' beyond the issue #356 SWT rewrite',
   async run() {
     const head = headNode(SCHEDULER_QUERY_ID);
     const base = baseNode(SCHEDULER_QUERY_ID);
@@ -516,6 +533,14 @@ CASES.push({
       // something once this branch merges and BASE_REF becomes HEAD.
       const interlock = lines.filter((l) => l === INTERLOCK_LINE).length;
       assert.equal(interlock, metric === 'DENDRO' ? 0 : 1, metric + ': interlock line count');
+      // Issue #356 rewrote the SWT topic (durable Chameleon link, per-source
+      // domains); scripts/test-unified-soil-tension-scheduler.js carries that
+      // behaviour. Against a BASE_REF from before the rewrite only DENDRO is
+      // compared; once BASE_REF carries the link, every metric is frozen again.
+      if (headTopic.includes('chameleon_reading_links') && !baseTopic.includes('chameleon_reading_links')) {
+        assert.notEqual(metric, 'DENDRO', metric + ': the DENDRO topic never carries the link');
+        continue;
+      }
       // Filter both sides so the case still holds once BASE_REF carries the interlock itself.
       // Once this branch merges, BASE_REF *is* HEAD and this half of the
       // assertion becomes a freeze on the query text rather than a diff

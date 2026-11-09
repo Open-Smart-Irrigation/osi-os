@@ -14,6 +14,10 @@ const flowPath = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx
 const nodeRedRoot = path.resolve(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share', 'node-red');
 const rainHelperPath = path.join(nodeRedRoot, 'osi-rain', 'index.js');
 const rainHelperSource = fs.readFileSync(rainHelperPath, 'utf8');
+// Issue #356: the Chameleon insert and backfill bodies and the scheduler SWT query
+// live in these modules; their function nodes only delegate.
+const chameleonHelperSource = fs.readFileSync(path.join(nodeRedRoot, 'osi-chameleon-helper', 'index.js'), 'utf8');
+const schedulerMeanQuerySource = fs.readFileSync(path.join(nodeRedRoot, 'osi-scheduler-mean-query', 'index.js'), 'utf8');
 const journalCommandsPath = path.join(nodeRedRoot, 'osi-journal', 'commands.js');
 const journalCommandsSource = fs.readFileSync(journalCommandsPath, 'utf8');
 const commandLedgerPath = path.join(nodeRedRoot, 'osi-command-ledger', 'index.js');
@@ -2527,7 +2531,8 @@ expectIncludes('Apply Config', 'const stemChange = dendro.computeDendroStemChang
 expectIncludes('Apply Config', 'd.dendroStemChangeUm = stemChange.stemChangeUm;', 'stores the baseline-relative stem change alongside mechanical position');
 expectIncludes('Apply Config', 'dendro_baseline_pending = 0,', 'clears the pending-baseline flag when a new valid stem-change baseline is persisted');
 expectIncludesById('lsn50-config-query-fn', 'dendro_baseline_calibration_signature,', 'keeps LSN50 config SELECT valid before the Chameleon calibration-status subquery');
-expectIncludes('Insert Chameleon Reading', 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'INSERT INTO chameleon_readings', 'persists decoded Chameleon readings locally');
+expectIncludes('Insert Chameleon Reading', 'await chameleon.insertReadingWithLink(db, row)', 'writes the Chameleon diagnostic through osi-chameleon-helper');
 expectIncludes('Insert Chameleon Reading', 'if (!d || d.isChameleon !== true) return msg;', 'passes non-Chameleon LSN50 payloads downstream');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadingsRows = await q([', 'loads bootstrap Chameleon history before reordering it');
 expectIncludes('Build Cloud Bootstrap', 'const chameleonReadings = chameleonReadingsRows.slice().reverse();', 'replays bootstrap Chameleon history oldest-to-newest');
@@ -2543,7 +2548,14 @@ expectLibById('lsn50-apply-config', 'chameleon', 'osi-chameleon-helper', 'import
 expectIncludesById('lsn50-apply-config', 'await loadChameleonCalibration(d.chameleonArrayId)', 'loads Chameleon calibration through the async SQLite helper in Apply Config');
 expectExcludesById('lsn50-apply-config', 'chameleon.calibrationFromArrayId(cdb', 'does not call the synchronous Chameleon calibration helper with osi-db-helper');
 expectLibById('chameleon-readings-insert-fn', 'osiDb', 'osi-db-helper', 'imports osi-db-helper in Insert Chameleon Reading');
-expectIncludesById('chameleon-readings-insert-fn', 'calibration_status)', 'persists Chameleon calibration_status when inserting readings');
+expectLibById('chameleon-readings-insert-fn', 'chameleon', 'osi-chameleon-helper', 'imports osi-chameleon-helper in Insert Chameleon Reading');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'calibration_status)', 'persists Chameleon calibration_status when inserting readings');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'const inserted = await t.get(READING_INSERT_SQL, row.params);', 'inserts the Chameleon diagnostic inside the facade transaction');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'await t.run(LINK_INSERT_SQL, [readingId, row.deviceDataId]);', 'links the diagnostic to its device_data row in the same transaction');
+expectLibById('d20948dd9120a3d2', 'chameleon', 'osi-chameleon-helper', 'imports osi-chameleon-helper in calibration-local-backfill');
+expectIncludesById('d20948dd9120a3d2', 'await chameleon.backfillLocalCalibration(db, msg.calibrated || []);', 'calibration-local-backfill delegates to osi-chameleon-helper');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'JOIN chameleon_readings cr ON cr.id = l.chameleon_reading_id AND cr.deveui = dd.deveui ', 'backfills a linked row only from its own linked diagnostic');
+expectFileIncludes('osi-chameleon-helper/index.js', chameleonHelperSource, 'UPDATE device_data SET swt_1 = ?, swt_2 = ?, swt_3 = ? WHERE id = ?', 'backfills device_data by row id');
 expectWireById('lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', 'routes LSN50 flow through Chameleon insert');
 expectWireById('chameleon-readings-insert-fn', 'dendro-readings-insert-fn', 'passes Chameleon insert output to dendrometer insert');
 expectLibById('8809bb5239dfb3d4', 'dendro', 'osi-dendro-helper', 'imports osi-dendro-helper in Build Telemetry');
@@ -2865,9 +2877,29 @@ expectIncludesById('bf93cd55db0eb57f', 'deleted_at IS NULL', 'chameleon-depth-sa
 expectIncludesById('bf93cd55db0eb57f', 'user_id = ?', 'chameleon-depth-save limits depth updates to the authenticated user');
 expectIncludesById('bf93cd55db0eb57f', 'if (changes === 0)', 'chameleon-depth-save returns 404 when no device row was updated');
 expectIncludesById('bf93cd55db0eb57f', "Device not found", 'chameleon-depth-save reports missing devices honestly');
-expectIncludesById('d0b2b1c1a937e16d', 'COALESCE(dd.swt_3, NULL)', 'scheduler can evaluate Chameleon SWT channel 3');
-expectIncludesById('d0b2b1c1a937e16d', "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
-expectIncludesById('d0b2b1c1a937e16d', 'CASE WHEN dd.swt_3 IS NULL THEN 0 ELSE 1 END', 'scheduler SWT average counts Chameleon channel 3 only when present');
+// Issue #356: the legacy threshold scheduler query reads each channel raw, keeps it
+// only for an eligible row and channel inside its source's domain, and associates a
+// Chameleon diagnostic only through chameleon_reading_links. The node builds the
+// DENDRO query and the cutoff and delegates the SWT query to osi-scheduler-mean-query;
+// these pin that split and the query shape. scripts/test-unified-soil-tension-scheduler.js
+// carries the behaviour.
+expectLibById('d0b2b1c1a937e16d', 'osiLib', 'osi-lib', 'scheduler query node loads its SWT query builder via osi-lib');
+expectIncludesById('d0b2b1c1a937e16d', 'const meanQuery = osiLib.require("scheduler-mean-query");', 'scheduler query node loads osi-scheduler-mean-query');
+expectIncludesById('d0b2b1c1a937e16d', 'if (!meanQuery.ok) { node.error(', 'scheduler query node sends no query when the builder cannot load');
+expectIncludesById('d0b2b1c1a937e16d', 'msg.topic = meanQuery.value.buildSwtMeanQuery(metric, zoneId, cutoffIso);', 'scheduler query node delegates the SWT query');
+expectExcludesById('d0b2b1c1a937e16d', 'FROM devices ds', 'an inline SWT query in the scheduler query node');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'if (metric === "SWT_WM3" || metric === "SWT_3") rowValue = "v3";', 'scheduler can evaluate Chameleon SWT channel 3');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'dd.swt_3 AS raw3', 'scheduler reads canonical SWT channel 3, which has no legacy alias');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, "CASE WHEN row_ok = 1 AND ch3_ok = 1 AND typeof(raw3) IN ('integer','real') AND raw3 BETWEEN 0 AND max_kpa THEN raw3 END AS v3", 'scheduler keeps SWT channel 3 only for an eligible row and channel, as a number inside its source domain');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, "ds.type_id = 'DRAGINO_LSN50' AND COALESCE(ds.chameleon_enabled,0) = 1", 'scheduler includes Chameleon-enabled LSN50 devices');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, '* 1.0 / ((v1 IS NOT NULL) + (v2 IS NOT NULL) + (v3 IS NOT NULL))', 'scheduler SWT average counts Chameleon channel 3 only when eligible');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, "CASE WHEN ds.type_id = 'DRAGINO_LSN50' THEN 300 ELSE 1000000 END AS max_kpa", 'scheduler bounds Chameleon at 300 kPa and KIWI, CLOVER and SDI-12 at 1,000,000 kPa');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'LEFT JOIN chameleon_reading_links crl', 'scheduler joins the durable Chameleon diagnostic link');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'ON crl.device_data_id = dd.id', 'scheduler links a diagnostic by device_data row id');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'ON cr.id = crl.chameleon_reading_id AND cr.deveui = dd.deveui', 'scheduler reads only the linked diagnostic of the same device');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'WHEN cr.id IS NOT NULL AND cr.i2c_missing IS NOT 1 AND cr.timeout IS NOT 1 AND cr.data_invalid IS NOT 1 THEN 1', 'scheduler counts a Chameleon row only with a clean linked diagnostic');
+expectFileIncludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'AND NOT EXISTS (SELECT 1 FROM watermark_readings wr WHERE wr.device_data_id = dd.id)', 'scheduler keeps the WATERMARK interlock');
+expectFileExcludes('osi-scheduler-mean-query/index.js', schedulerMeanQuerySource, 'cr.recorded_at = dd.recorded_at', 'timestamp association of a Chameleon diagnostic');
 expectIncludesById('dendro-history-fn', 'osiHistory.legacySensorHistory', 'routes legacy dendro history through the history helper rollup path');
 expectIncludesById('dendro-history-fn', "mode: 'dendro'", 'preserves dendrometer history response shape through helper dendro mode');
 expectIncludesById('dendro-history-fn', 'userId: historyUserId', 'preserves owner scoping for legacy dendro history and delegates scoped access separately');
