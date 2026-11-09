@@ -131,13 +131,6 @@ const SCOPED_ACCESS_COMMANDS = [
   'UPSERT_USER_PLOT_ASSIGNMENT',
   'UPSERT_USER_ZONE_ASSIGNMENT',
 ];
-const SCOPED_ACCESS_EVENT_OPS = [
-  'USER_PLOT_ASSIGNMENT_DELETED',
-  'USER_PLOT_ASSIGNMENT_UPSERTED',
-  'USER_UPSERTED',
-  'USER_ZONE_ASSIGNMENT_DELETED',
-  'USER_ZONE_ASSIGNMENT_UPSERTED',
-];
 // Conditional irrigation (owner, feat/conditional-irrigation): edge-staged policy ops with a
 // cloud applier on osi-server feat/conditional-irrigation (IrrigationPolicyApplier,
 // IrrigationPolicyRuntimeApplier).

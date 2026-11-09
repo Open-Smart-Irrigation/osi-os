@@ -64,25 +64,6 @@ const EXACT_JOURNAL_EVENT_OPS = [
   ...EXACT_EDGE_MODULE_OPS,
   ...EXACT_EDGE_DEFERRED_OPS,
 ];
-// Scoped-access outbox events (port/wave3-edge-scope): USER_UPSERTED and the zone/plot
-// assignment upsert/delete events emitted by the migration-owned triggers in
-// 0044__scoped_access_schema.sql (trg_dp_users_outbox_*, trg_dp_user_zone_assign_outbox_*,
-// trg_dp_user_plot_assign_outbox_*). These are SQL-owned (see SQL_OWNED_EVENT_OPS below),
-// not edgeModuleOwned/edgeDeferred -- the triggers are structurally present in schema
-// unconditionally, gated at the data layer by the scoped_access_emit.enabled row (default
-// 0) rather than by absence from a source. ACTIVATED: osi-server 28d7ef3c ("decouple
-// mirror-write appliers") added ScopedAccessUserApplier,
-// ScopedAccessZoneAssignmentApplier and ScopedAccessPlotAssignmentApplier in
-// org.osi.server.scopedaccessmirror, all implementing SyncEventApplier. They became
-// visible here when the applier scan widened from the sync package to the whole
-// application package, so this list left EXACT_CLOUD_DEFERRED_EVENT_OPS in that commit.
-const EXACT_SCOPED_ACCESS_EVENT_OPS = [
-  'USER_PLOT_ASSIGNMENT_DELETED',
-  'USER_PLOT_ASSIGNMENT_UPSERTED',
-  'USER_UPSERTED',
-  'USER_ZONE_ASSIGNMENT_DELETED',
-  'USER_ZONE_ASSIGNMENT_UPSERTED',
-];
 // Wave 3 zone/weather/calibration sync port (AgroLink 64d72f90 + ae9741880 +
 // 33eb12b94, renumbered migrations 0047/0049): SQL-owned outbox events
 // emitted by trg_sync_zone_irrigation_calibration_outbox_au and
@@ -225,7 +206,10 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0025__valve_settings_sync_triggers.sql, not by flows.json.
   'VALVE_SETTINGS_UPSERTED',
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_users_outbox_* triggers, not by
-  // flows.json. Cloud handling is active (see EXACT_SCOPED_ACCESS_EVENT_OPS).
+  // flows.json. The triggers ship unconditionally and are gated at the data layer
+  // by the scoped_access_emit.enabled row (default 0). Cloud handling is active:
+  // osi-server 28d7ef3c added the org.osi.server.scopedaccessmirror appliers for
+  // USER_UPSERTED and the zone/plot assignment ops below, so they are not cloud-deferred.
   'USER_UPSERTED',
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_zone_assign_outbox_* triggers.
   'USER_ZONE_ASSIGNMENT_UPSERTED',
