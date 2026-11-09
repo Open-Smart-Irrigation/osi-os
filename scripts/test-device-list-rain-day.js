@@ -11,15 +11,25 @@
 // (YYYY-MM-DD), rain_day_timezone and rain_day_timezone_basis. The browser
 // never decides the day.
 //
+// The harness resolves an osiLib name it does not know as `osi-<name>`, which
+// hid #564: no osi-lib registry listed 'history-helper', so on a gateway the
+// lookup failed and the three fields were never sent. The production-registry
+// tests below load each profile's own osi-lib and run that profile's Merge Data.
+//
 // Run: node --test scripts/test-device-list-rain-day.js
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const path = require('node:path');
-const { executeFunction, loadNode, seedTestDb } = require('./lib/flow-node-harness');
+const { executeFunction, facadeDb, loadNode, seedTestDb } = require('./lib/flow-node-harness');
 
 const HISTORY_HELPER = path.join(__dirname, '..', 'conf', 'full_raspberrypi_bcm27xx_bcm2712', 'files', 'usr', 'share',
   'node-red', 'osi-history-helper', 'index.js');
+
+const PROFILES = ['bcm2712', 'bcm2709'].map((soc) => {
+  const share = path.join(__dirname, '..', 'conf', `full_raspberrypi_bcm27xx_${soc}`, 'files', 'usr', 'share');
+  return { soc, flows: path.join(share, 'flows.json'), nodeRed: path.join(share, 'node-red') };
+});
 
 const LORAIN = 'A840410000000001';
 const S2120 = 'A840410000000002';
@@ -188,3 +198,142 @@ test('an unloadable history helper leaves the fields absent and warns once', asy
     db.close();
   }
 });
+
+// A fresh copy of the profile's osi-lib with its gateway base pointed at the
+// profile's node-red tree: the real NAME_TO_PATH and the real loader, never the
+// harness's `osi-<name>` fallback. Every name the node asks for is recorded.
+function productionOsiLib(profile) {
+  const index = path.join(profile.nodeRed, 'osi-lib', 'index.js');
+  const savedBase = process.env.OSI_LIB_BASE;
+  process.env.OSI_LIB_BASE = profile.nodeRed;
+  delete require.cache[require.resolve(index)];
+  let lib;
+  try {
+    lib = require(index); // eslint-disable-line global-require
+  } finally {
+    if (savedBase === undefined) delete process.env.OSI_LIB_BASE;
+    else process.env.OSI_LIB_BASE = savedBase;
+    delete require.cache[require.resolve(index)];
+  }
+  const requested = [];
+  return {
+    requested,
+    osiLib: {
+      require(name) {
+        const result = lib.require(name);
+        requested.push({ name, result });
+        return result;
+      },
+    },
+  };
+}
+
+// osiDb whose handles count their closes; every handle shares the in-memory db.
+function countingOsiDb(db) {
+  const handles = { opened: [], closed: 0 };
+  function Database(file) {
+    handles.opened.push(file);
+    const facade = facadeDb(db);
+    return {
+      ...facade,
+      close(callback) {
+        handles.closed += 1;
+        return facade.close(callback);
+      },
+    };
+  }
+  return { handles, osiDb: { Database } };
+}
+
+async function runProductionMerge(profile, db, latest = LATEST) {
+  const node = loadNode('merge-device-data', profile.flows);
+  const { requested, osiLib } = productionOsiLib(profile);
+  const { handles, osiDb } = countingOsiDb(db);
+  const msg = { devices_to_format: formattedDevices(db), payload: latest.map((row) => ({ ...row })) };
+  const out = await executeFunction(node, { msg, db, libOverrides: { osiLib, osiDb } });
+  const byEui = new Map(out.result.payload.map((device) => [device.deveui, device]));
+  return { out, byEui, requested, handles };
+}
+
+function assertRainDay(latest, day, timezone, basis, label) {
+  assert.equal(latest.rain_day, day, label);
+  assert.equal(latest.rain_day_timezone, timezone, label);
+  assert.equal(latest.rain_day_timezone_basis, basis, label);
+}
+
+function assertNoRainDay(latest, label) {
+  for (const field of ['rain_day', 'rain_day_timezone', 'rain_day_timezone_basis']) {
+    assert.equal(field in latest, false, `${label}: ${field}`);
+  }
+}
+
+for (const profile of PROFILES) {
+  test(`${profile.soc}: Merge Data dates rain through the production osi-lib registry`, async () => {
+    const db = seed();
+    try {
+      const { out, byEui, requested, handles } = await runProductionMerge(profile, db);
+      assert.deepEqual(out.errors, []);
+      assert.deepEqual(out.warnings, []);
+      assert.equal(out.result.statusCode, 200);
+
+      const history = requested.filter((call) => call.name === 'history-helper');
+      assert.equal(history.length, 1);
+      assert.equal(history[0].result.ok, true, history[0].result.error);
+      // eslint-disable-next-line global-require
+      assert.equal(history[0].result.value, require(path.join(profile.nodeRed, 'osi-history-helper')));
+
+      assertRainDay(byEui.get(LORAIN).latest_data, '2026-07-02', 'Europe/Zurich', 'zone', 'LoRain');
+      assertRainDay(byEui.get(S2120).latest_data, '2026-07-02', 'Europe/Zurich', 'weather_station_zone', 'S2120');
+      assertRainDay(byEui.get(LSN50_RAIN).latest_data, '2026-07-01', 'UTC', 'unassigned_default', 'LSN50 rain');
+      assertRainDay(byEui.get(LORAIN_CET).latest_data, '2026-07-02', 'CET', 'abbreviation', 'LoRain CET');
+      assertNoRainDay(byEui.get(KIWI).latest_data, 'KIWI');
+      assertNoRainDay(byEui.get(LSN50_PLAIN).latest_data, 'LSN50 without rain gauge');
+
+      assert.equal(byEui.get(LORAIN).latest_data.rain_mm_today, 1.2);
+      assert.equal(byEui.get(S2120).latest_data.rain_mm_today, 4.0);
+      assert.equal(byEui.get(LSN50_RAIN).latest_data.rain_mm_today, 0.4);
+
+      // S2120 zone enrichment and the rain lookup each open and close one handle.
+      assert.deepEqual(handles.opened, ['/data/db/farming.db', '/data/db/farming.db']);
+      assert.equal(handles.closed, handles.opened.length);
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile.soc}: production registry keeps a null amount null and a real zero zero`, async () => {
+    const db = seed();
+    try {
+      const latest = LATEST.map((row) => {
+        if (row.deveui === LORAIN) return { ...row, rain_mm_today: null };
+        if (row.deveui === S2120) return { ...row, rain_mm_today: 0 };
+        return row;
+      });
+      const { out, byEui } = await runProductionMerge(profile, db, latest);
+      assert.deepEqual(out.warnings, []);
+      assert.equal(byEui.get(LORAIN).latest_data.rain_mm_today, null);
+      assertRainDay(byEui.get(LORAIN).latest_data, '2026-07-02', 'Europe/Zurich', 'zone', 'LoRain null amount');
+      assert.equal(byEui.get(S2120).latest_data.rain_mm_today, 0);
+      assertRainDay(byEui.get(S2120).latest_data, '2026-07-02', 'Europe/Zurich', 'weather_station_zone', 'S2120 zero');
+    } finally {
+      db.close();
+    }
+  });
+
+  test(`${profile.soc}: production registry leaves an invalid or missing timestamp undated`, async () => {
+    const db = seed();
+    try {
+      const latest = LATEST
+        .filter((row) => row.deveui !== S2120)
+        .map((row) => (row.deveui === LORAIN ? { ...row, last_uplink_at: 'not-a-timestamp' } : row));
+      const { out, byEui, handles } = await runProductionMerge(profile, db, latest);
+      assert.deepEqual(out.warnings, []);
+      assertNoRainDay(byEui.get(LORAIN).latest_data, 'invalid timestamp');
+      assertNoRainDay(byEui.get(S2120).latest_data, 'no latest row');
+      assertRainDay(byEui.get(LSN50_RAIN).latest_data, '2026-07-01', 'UTC', 'unassigned_default', 'LSN50 rain');
+      assert.equal(handles.closed, handles.opened.length);
+    } finally {
+      db.close();
+    }
+  });
+}

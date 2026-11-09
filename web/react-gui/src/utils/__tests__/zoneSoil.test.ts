@@ -715,3 +715,181 @@ describe('summarizeZoneSoil stale trigger probe and probe naming', () => {
     ], NOW).probeNames).toEqual([]);
   });
 });
+
+describe('summarizeZoneSoil WATERMARK provenance', () => {
+  const watermark = (recordedAt: string, channel1: number | null, channel2: number | null) => ({
+    recorded_at: recordedAt,
+    supply_mv: null,
+    soil_temp_c: null,
+    soil_temp_source: null,
+    die_temp_c: null,
+    channels: [
+      watermarkChannel({ status: 'ok', kpa: channel1 }),
+      watermarkChannel({ status: 'ok', kpa: channel2 }),
+    ] as WatermarkLatest['channels'],
+  });
+
+  it('marks only the selected channel and selected mean contributors', () => {
+    const zone = [
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 10, swt_2: 30 } }),
+      device({ deveui: 'WATERMARK', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: 70, swt_2: null, watermark: watermark(FRESH, 70, null) } }),
+    ];
+
+    expect(summarizeZoneSoil(zone, NOW, 'swt_1')).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 40, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: null, includesWatermark: true,
+    });
+    expect(summarizeZoneSoil(zone, NOW, 'swt_2')).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 30, channel: 'swt_2',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: null, includesWatermark: false,
+    });
+    expect(summarizeZoneSoil(zone, NOW, 'mean')).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 110 / 3, channel: 'mean',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: [],
+      staleTrigger: null, invalidTrigger: null, includesWatermark: true,
+    });
+  });
+
+  it('does not mark WATERMARK provenance on a non-selected channel', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 20 } }),
+      device({ deveui: 'WATERMARK', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: null, swt_2: 70, watermark: watermark(FRESH, null, 70) } }),
+    ], NOW, 'swt_1');
+    expect(status).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 20, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: null, includesWatermark: false,
+    });
+  });
+
+  it('uses the fresh bucket when deciding provenance and retains WATERMARK provenance for stale fallback', () => {
+    const freshChameleonAndStaleWatermark = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'OLD-WATERMARK', type_id: 'DRAGINO_LSN50', last_seen: STALE,
+        latest_data: { swt_1: 90, watermark: watermark(STALE, 90, null) } }),
+    ], NOW, 'swt_1');
+    expect(freshChameleonAndStaleWatermark).toMatchObject({
+      value: 30, channel: 'swt_1', observedAt: FRESH, stale: false,
+      invalid: false, includesWatermark: false,
+    });
+
+    const staleWatermarkOnly = summarizeZoneSoil([device({
+      type_id: 'DRAGINO_LSN50', last_seen: STALE,
+      latest_data: { swt_1: 90, watermark: watermark(STALE, 90, null) },
+    })], NOW, 'swt_1');
+    expect(staleWatermarkOnly).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 1, value: 90, channel: 'swt_1',
+      observedAt: STALE, stale: true, invalid: false, includesWatermark: true,
+    });
+  });
+
+  it('marks provenance when a fresh WATERMARK reading outranks a stale Chameleon one', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'WATERMARK', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: 90, watermark: watermark(FRESH, 90, null) } }),
+      device({ deveui: 'OLD-CHAMELEON', last_seen: STALE, latest_data: { swt_1: 30 } }),
+    ], NOW, 'swt_1');
+    expect(status).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 90, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: null, includesWatermark: true,
+    });
+  });
+
+  it('keeps stale WATERMARK provenance off a current fallback channel and preserves the trigger warning', () => {
+    const status = summarizeZoneSoil([
+      device({ deveui: 'CURRENT', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'OLD-WATERMARK', type_id: 'DRAGINO_LSN50', last_seen: STALE,
+        latest_data: { swt_2: 90, watermark: watermark(STALE, null, 90) } }),
+    ], NOW, 'swt_2');
+    expect(status).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 30, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: { channel: 'swt_2', observedAt: STALE }, invalidTrigger: null, includesWatermark: false,
+    });
+  });
+
+  it('follows the fallback contributors and preserves the invalid-trigger warning when the requested channel is invalid', () => {
+    const watermarkFallback = summarizeZoneSoil([
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'WATERMARK', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: 70, swt_2: 1_000_001, watermark: watermark(FRESH, 70, 1_000_001) } }),
+    ], NOW, 'swt_2');
+    expect(watermarkFallback).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 50, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: { channel: 'swt_2', observedAt: FRESH }, includesWatermark: true,
+    });
+
+    const chameleonFallback = summarizeZoneSoil([
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'WATERMARK', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: null, swt_2: 1_000_001, watermark: watermark(FRESH, null, 1_000_001) } }),
+    ], NOW, 'swt_2');
+    expect(chameleonFallback).toMatchObject({
+      hasSensor: true, quantity: 'tension', sensorCount: 2, value: 30, channel: 'swt_1',
+      depthCm: null, observedAt: FRESH, stale: false, invalid: false, probeNames: ['Sensor'],
+      staleTrigger: null, invalidTrigger: { channel: 'swt_2', observedAt: FRESH }, includesWatermark: false,
+    });
+  });
+
+  it('keeps measured zero and range endpoints valid without inventing WATERMARK provenance', () => {
+    expect(summarizeZoneSoil([device({ last_seen: FRESH, latest_data: { swt_1: 0 } })], NOW, 'swt_1'))
+      .toMatchObject({ value: 0, channel: 'swt_1', stale: false, invalid: false, includesWatermark: false });
+    expect(summarizeZoneSoil([device({ last_seen: FRESH, latest_data: { swt_1: 1_000_000 } })], NOW, 'swt_1'))
+      .toMatchObject({ value: 1_000_000, channel: 'swt_1', stale: false, invalid: false, includesWatermark: false });
+    expect(summarizeZoneSoil([device({ last_seen: FRESH, latest_data: { swt_1: 1_000_001 } })], NOW, 'swt_1'))
+      .toMatchObject({ value: null, channel: null, stale: true, invalid: true, includesWatermark: false });
+  });
+
+  it('defaults provenance off for absent, invalid and volumetric summaries', () => {
+    expect(summarizeZoneSoil([], NOW).includesWatermark).toBe(false);
+    expect(summarizeZoneSoil([device({ type_id: 'DRAGINO_SDI12', last_seen: FRESH,
+      latest_data: { vwc_1: 28 } })], NOW).includesWatermark).toBe(false);
+    expect(summarizeZoneSoil([device({ type_id: 'DRAGINO_LSN50', last_seen: FRESH,
+      latest_data: { swt_1: null, watermark: watermark(FRESH, 70, null) } })], NOW)).toMatchObject({
+      value: null, channel: null, invalid: false, includesWatermark: false,
+    });
+    const faultedWithPeer = summarizeZoneSoil([
+      device({ deveui: 'FAULTED-WATERMARK', type_id: 'DRAGINO_LSN50', last_seen: FRESH, latest_data: {
+        swt_1: null, watermark: watermarkLatest(watermarkChannel({ status: 'open' }), watermarkChannel({ status: 'ok' })),
+      } }),
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+    ], NOW, 'swt_1');
+    expect(faultedWithPeer).toMatchObject({
+      value: 30, channel: 'swt_1', stale: false, invalid: false, includesWatermark: false,
+    });
+  });
+
+  it('does not mark provenance for non-finite or out-of-range WATERMARK samples, with a peer and without one', () => {
+    const nonFiniteWithPeer = summarizeZoneSoil([
+      device({ deveui: 'WATERMARK-NAN', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: Number.NaN, watermark: watermark(FRESH, Number.NaN, null) } }),
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+    ], NOW, 'swt_1');
+    expect(nonFiniteWithPeer).toMatchObject({
+      value: 30, channel: 'swt_1', observedAt: FRESH, stale: false, invalid: false,
+      invalidTrigger: null, includesWatermark: false,
+    });
+    expect(summarizeZoneSoil([device({ deveui: 'WATERMARK-NAN', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+      latest_data: { swt_1: Number.NaN, watermark: watermark(FRESH, Number.NaN, null) } })], NOW, 'swt_1'))
+      .toMatchObject({ value: null, channel: null, invalid: true, includesWatermark: false });
+
+    const outOfRangeWithPeer = summarizeZoneSoil([
+      device({ deveui: 'CHAMELEON', last_seen: FRESH, latest_data: { swt_1: 30 } }),
+      device({ deveui: 'WATERMARK-HIGH', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+        latest_data: { swt_1: 1_000_001, watermark: watermark(FRESH, 1_000_001, null) } }),
+    ], NOW, 'swt_1');
+    expect(outOfRangeWithPeer).toMatchObject({
+      value: 30, channel: 'swt_1', observedAt: FRESH, stale: false, invalid: false,
+      invalidTrigger: null, includesWatermark: false,
+    });
+    expect(summarizeZoneSoil([device({ deveui: 'WATERMARK-HIGH', type_id: 'DRAGINO_LSN50', chameleon_enabled: 0, last_seen: FRESH,
+      latest_data: { swt_1: 1_000_001, watermark: watermark(FRESH, 1_000_001, null) } })], NOW, 'swt_1'))
+      .toMatchObject({ value: null, channel: null, invalid: true, includesWatermark: false });
+  });
+});

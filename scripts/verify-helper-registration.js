@@ -7,8 +7,11 @@
 // `file:` deps ∪ non-codec osi-lib NAME_TO_PATH entries) need all three surfaces;
 // codec NAME_TO_PATH entries ride the wholesale codecs copy and only need their
 // deploy.sh fetch line + the file on disk.
+// It also checks the caller side: every name a function node passes to its
+// osi-lib loader must be a NAME_TO_PATH key (checkCallerNames, #564).
 const fs = require('fs');
 const path = require('path');
+const { maskNonCode } = require('./verify-flows-output-arity');
 
 const PROFILES = [
   'conf/full_raspberrypi_bcm27xx_bcm2712',
@@ -129,6 +132,68 @@ function checkCodecs({ nameToPath, deploySource, codecsDir }) {
   return issues;
 }
 
+// Caller names (#564): Merge Data called osiLib.require('history-helper'),
+// a name no NAME_TO_PATH listed. The loader answered "unknown osi-lib module"
+// on every gateway and GET /api/devices dropped rain_day while the package
+// itself shipped, because the surface checks above start from the registry
+// and never read the callers.
+//
+// Method: a loader is any variable a function node's `libs` binds to osi-lib.
+// maskNonCode (the tokenizer verify-flows-output-arity.js uses; no JS parser
+// is vendored here) blanks strings, comments and regex literals, so a call
+// quoted in a comment or a string does not count. The argument is then read
+// from the original source and must be one plain string literal; anything
+// else fails, because its name cannot be checked.
+// Blind spots: an alias (`const L = osiLib; L.require(...)`), bracket access
+// (`osiLib['require'](...)`), and osiLib used in a node whose libs do not
+// declare it are not seen.
+const CALLER_SOURCE_FIELDS = ['func', 'initialize', 'finalize'];
+const PLAIN_NAME_ARGUMENT = /^\s*(?:'([^'\\\n]*)'|"([^"\\\n]*)"|`([^`\\$]*)`)\s*\)/;
+
+function osiLibLoaderVars(node) {
+  return (Array.isArray(node.libs) ? node.libs : [])
+    .filter((lib) => lib && lib.module === 'osi-lib' && typeof lib.var === 'string' && lib.var)
+    .map((lib) => lib.var);
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function checkCallerNames({ flows, nameToPath }) {
+  const issues = [];
+  let calls = 0;
+  for (const node of flows) {
+    if (!node || node.type !== 'function') continue;
+    const loaders = osiLibLoaderVars(node);
+    if (loaders.length === 0) continue;
+    const label = node.id + ' (' + (node.name || 'unnamed') + ')';
+    for (const field of CALLER_SOURCE_FIELDS) {
+      const source = node[field];
+      if (typeof source !== 'string' || !source) continue;
+      const masked = maskNonCode(source);
+      for (const loader of loaders) {
+        const call = new RegExp('(?<![\\w$.])' + escapeRegExp(loader) + '\\s*\\??\\.\\s*require\\s*\\(', 'g');
+        for (const match of masked.matchAll(call)) {
+          calls += 1;
+          const rest = source.slice(match.index + match[0].length);
+          const literal = rest.match(PLAIN_NAME_ARGUMENT);
+          if (!literal) {
+            issues.push(label + ' ' + field + ': ' + loader + '.require argument is not one plain string literal: ' +
+              JSON.stringify(rest.slice(0, 40)));
+            continue;
+          }
+          const name = literal[1] ?? literal[2] ?? literal[3];
+          if (!Object.prototype.hasOwnProperty.call(nameToPath, name)) {
+            issues.push(label + ' ' + field + ": '" + name + "' is not a NAME_TO_PATH key");
+          }
+        }
+      }
+    }
+  }
+  return { issues, calls };
+}
+
 function inspectModuleDir(nodeRedDir, name, warn = console.warn) {
   const dir = path.join(nodeRedDir, name);
   if (!fs.existsSync(dir)) return { hasDir: false };
@@ -167,6 +232,11 @@ function run() {
       if (issues.length) failures.push(...issues.map((i) => '[' + profile + '] ' + i));
       else console.log('OK [' + profile + '] ' + name);
     }
+    const flows = JSON.parse(fs.readFileSync(path.join(repo, profile, 'files/usr/share/flows.json'), 'utf8'));
+    const callers = checkCallerNames({ flows, nameToPath });
+    if (callers.calls === 0) failures.push('[' + profile + '] caller scan found no osi-lib require calls');
+    if (callers.issues.length) failures.push(...callers.issues.map((i) => '[' + profile + '] ' + i));
+    else console.log('OK [' + profile + '] ' + callers.calls + ' osi-lib caller names are registered');
     const codecIssues = checkCodecs({ nameToPath, deploySource, codecsDir: path.join(nodeRedDir, 'codecs') });
     if (codecIssues.length) failures.push(...codecIssues.map((i) => '[' + profile + '] ' + i));
     else console.log('OK [' + profile + '] codec NAME_TO_PATH entries');
@@ -179,4 +249,6 @@ function run() {
 }
 
 if (require.main === module) run();
-module.exports = { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, STAGED_DELIVERY };
+module.exports = {
+  collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, checkCallerNames, STAGED_DELIVERY,
+};

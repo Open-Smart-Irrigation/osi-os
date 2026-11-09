@@ -7,7 +7,10 @@ import type { WatermarkChannelLatest } from '../../../types/farming';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, opts?: Record<string, unknown>) => {
-      const labels: Record<string, string> = { 'history.soil.state.wet': 'Wet', 'history.soil.state.moist': 'Moist', 'history.soil.state.dry': 'Dry' };
+      const labels: Record<string, string> = {
+        'history.soil.state.wet': 'Wet', 'history.soil.state.moist': 'Moist', 'history.soil.state.dry': 'Dry',
+        'watermark.automation.phase1Notice': 'Phase 1 automation does not use WATERMARK readings to decide irrigation.',
+      };
       if (labels[key]) return labels[key];
       return opts ? `${key}:${JSON.stringify(opts)}` : key;
     },
@@ -27,6 +30,16 @@ describe('WatermarkProbeSection', () => {
     ]} />);
     expect(screen.getByText('56.4 kPa')).toBeInTheDocument();
     expect(screen.getByText('Dry')).toBeInTheDocument();
+  });
+
+  it('shows the phase-one notice even when every WATERMARK reading is missing', () => {
+    render(<WatermarkProbeSection {...base} soilTempC={null} probes={[
+      { channel: 1 as const, depthCm: null, reading: null },
+      { channel: 2 as const, depthCm: null, reading: null },
+    ]} />);
+    expect(screen.getByText('Phase 1 automation does not use WATERMARK readings to decide irrigation.')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByText('Wet')).not.toBeInTheDocument();
   });
 
   it('shows the canonical clipped estimate as ordinary SWT', () => {

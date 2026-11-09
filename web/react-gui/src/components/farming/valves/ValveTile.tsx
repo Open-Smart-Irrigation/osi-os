@@ -1,4 +1,4 @@
-import React, { useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ValveSummary } from '../../../types/farming';
 import { deriveValveGlyphState } from './valveState';
@@ -84,11 +84,82 @@ export const ValveTile: React.FC<ValveTileProps> = ({
   const clock = (iso: string) => formatTime(iso, i18n?.language, { timeZone: valve.timezone }) ?? '—';
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useDismissOnPointerDown(menuRef, () => setMenuOpen(false));
+  const menuContainerRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const focusLastMenuItem = useRef(false);
+  const menuId = useId();
+  const menuTriggerId = useId();
+  useDismissOnPointerDown(menuContainerRef, () => setMenuOpen(false));
 
 
   const glyph = deriveValveGlyphState(valve, nowMs);
+  const menuItems = () =>
+    Array.from(
+      menuContainerRef.current?.querySelectorAll<HTMLButtonElement>(
+        'button[role="menuitem"]:not(:disabled)',
+      ) ?? [],
+    );
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const items = menuItems();
+    const target = focusLastMenuItem.current ? items[items.length - 1] : items[0];
+    target?.focus();
+    focusLastMenuItem.current = false;
+  }, [menuOpen]);
+
+  const focusMenuTrigger = () => {
+    if (menuTriggerRef.current?.isConnected) menuTriggerRef.current.focus();
+  };
+
+  const closeMenu = (restoreFocus = false) => {
+    setMenuOpen(false);
+    if (restoreFocus) focusMenuTrigger();
+  };
+
+  const onMenuClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('[role="menuitem"]')) focusMenuTrigger();
+  };
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeMenu(true);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const items = menuItems();
+    if (items.length === 0) return;
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const direction = event.key === 'ArrowDown' ? 1 : -1;
+    const nextIndex = (currentIndex + direction + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
+  const onMenuTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'Escape' && menuOpen) {
+      event.preventDefault();
+      closeMenu();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const focusLast = event.key === 'ArrowUp';
+    if (menuOpen) {
+      const items = menuItems();
+      items[focusLast ? items.length - 1 : 0]?.focus();
+      return;
+    }
+    focusLastMenuItem.current = focusLast;
+    setMenuOpen(true);
+  };
+
+  const onMenuBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (menuContainerRef.current && nextTarget && menuContainerRef.current.contains(nextTarget)) return;
+    setMenuOpen(false);
+  };
   const isPendingCommand = valve.activeActuation?.reconciliationState === 'PENDING_OBSERVATION';
   // #171 item 2: a valve that has never reported must not render as "closed and fine".
   // Only overrides the label when the glyph would otherwise resolve to a plain "closed" --
@@ -231,7 +302,7 @@ export const ValveTile: React.FC<ValveTileProps> = ({
             onClick={primaryAction.onClick}
             disabled={busy}
             aria-describedby={isPendingCommand ? cancelHelpId : undefined}
-            className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-w-0 flex-1 min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy && <Spinner />}
             {primaryAction.label}
@@ -252,23 +323,31 @@ export const ValveTile: React.FC<ValveTileProps> = ({
           >
             {t('schedule')}
           </button>
-          <div className="relative shrink-0">
+          <div ref={menuContainerRef} onBlur={onMenuBlur} onClickCapture={onMenuClickCapture} className="relative shrink-0">
             <button
+              ref={menuTriggerRef}
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
               disabled={busy}
+              id={menuTriggerId}
               aria-label={t('more')}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuId}
+              onKeyDown={onMenuTriggerKeyDown}
               title={t('more')}
               className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-[var(--border)] px-2.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                menuOpen ? 'bg-[var(--primary)] text-white' : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
+                menuOpen ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-[var(--card)] text-[var(--text)] hover:bg-[var(--secondary-bg)]'
               }`}
             >
               ⋯
             </button>
             {menuOpen && (
               <div
-                ref={menuRef}
+                id={menuId}
                 role="menu"
+                aria-labelledby={menuTriggerId}
+                onKeyDown={onMenuKeyDown}
                 className="absolute right-0 top-full z-20 mt-1 w-52 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-xl"
               >
                 <MenuItem
@@ -343,6 +422,7 @@ const MenuItem: React.FC<{ label: string; onClick: () => void; disabled?: boolea
   <button
     type="button"
     role="menuitem"
+    tabIndex={-1}
     onClick={onClick}
     disabled={disabled}
     className="flex min-h-[44px] w-full items-center rounded-md px-3 py-2 text-left text-sm text-[var(--text)] transition-colors hover:bg-[var(--card)] disabled:cursor-not-allowed disabled:opacity-50"

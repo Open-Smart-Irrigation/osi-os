@@ -1004,6 +1004,13 @@ async function planConfigQuery(t, deveui, fPort, state, nowMs) {
   return { requestedAt: new Date(nowMs).toISOString(), buildDate };
 }
 
+// The LoRain thermistor sits on the gauge's circuit board. An open or shorted
+// thermistor decodes to -273.1 C; a value outside the Build Telemetry bounds
+// (-50..100 C) is stored as null rather than as a reading.
+function loRainHousingTemperature(value) {
+  return Number.isFinite(value) && value >= -50 && value <= 100 ? value : null;
+}
+
 // Ingest one LoRain uplink inside the caller's transaction: claim the
 // observation identity, re-assess the affected frames, persist the telemetry
 // row, link it, and update the zone days. Any throw rolls all of it back.
@@ -1048,8 +1055,8 @@ async function ingestLoRainUplink(t, uplink, opts = {}) {
     rainToday = await loRainDayTotal(t, id.deveui, device.zone_id === undefined ? null : device.zone_id, win.startIso, win.endIso, id.receivedAt);
   }
   const o = uplink.object || {};
-  const temperature = Number.isFinite(o.ambient_temperature) ? o.ambient_temperature
-    : (Number.isFinite(o.temperature_C) ? o.temperature_C : null);
+  const temperature = loRainHousingTemperature(Number.isFinite(o.ambient_temperature) ? o.ambient_temperature
+    : (Number.isFinite(o.temperature_C) ? o.temperature_C : null));
   await t.run(
     'INSERT INTO device_data (deveui, recorded_at, ambient_temperature, bat_v, rain_tips_delta, rain_mm_delta, rain_mm_per_hour, '
     + 'rain_mm_per_10min, rain_mm_today, counter_interval_seconds, rain_delta_status) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)',

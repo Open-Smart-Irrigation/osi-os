@@ -12,10 +12,52 @@ the valve is designed to self-close, and sending an unexpected CLOSE is not
 a supported operational pattern. If you need to end an irrigation early,
 that's a cancel, not a close (next paragraph).
 
-**Operator cancel:** `POST /api/v1/valves/:deveui/cancel`
-(`flows.json`, url `/api/v1/valves/:deveui/cancel`) flushes the pending
-ChirpStack device downlink queue and marks the most recent active
-`valve_actuation_expectations` row `CANCELLED`.
+**Operator cancel:** `POST /api/v1/valves/:deveui/cancel` and the local
+alias `POST /api/valve/:deveui/cancel` both feed `cancel-strega-actuation-fn`
+in `flows.json`, which calls `cancelActuation` and `cancelHttpResponse` in
+`osi-valve-control/cancel.js` with the ChirpStack transport. Cancel tries to
+stop an open that has not started running; it never closes a valve that is
+already open. The outcome below says whether the cancel proved that the open
+was stopped.
+
+The target must be an active `valve_actuation_expectations` row
+(`PENDING_OBSERVATION` or `OBSERVED_RUNNING`) with a positive
+`commanded_duration_seconds` that is not a report-only row. A body
+`expectation_id` names it: an unknown id answers 404 `no_active_actuation`,
+and a known row that is not such a target answers 409
+`actuation_not_active`. Without an id exactly one candidate may exist: none
+answers 404 `no_active_actuation`, two or more answer 409
+`ambiguous_actuation`. The route never picks the newest row.
+
+The outcome follows the target's transport evidence:
+
+- `cancelled` (200): the open provably never reached ChirpStack (a local
+  reservation, or an enqueue that failed or was rejected before acceptance).
+  Nothing is flushed. The row becomes `CANCELLED`, and `devices.target_state`
+  becomes `CLOSED` only when no other actuation on the valve is still active.
+  The reply's `confirmation` field still reads `queue_flushed`; its
+  `queue_scope` is `not_queued`.
+- `already_running` (409, error `actuation_handed_off`): the row is
+  `OBSERVED_RUNNING`, so there is no pending command and nothing is flushed.
+- `handed_off` (409): the open may have been sent. A completed whole-queue
+  flush ends here, as does a lost enqueue answer or a flush an earlier cancel
+  already completed, because a pre-flush queue read cannot prove the open
+  undelivered.
+- `uncertain` (503, `transport_uncertain`): the flush failed or its outcome
+  is unknown.
+
+For every outcome except `cancelled` the cancel does not mark the row
+`CANCELLED` and does not change `devices.target_state`; the expectation keeps
+being observed. A completed whole-queue flush can also remove other queued
+work on the valve, and the cancel does not queue that work again. The reply's
+`collateral` lists the other owners recorded in the flush intent, each with
+`in_queue` from the queue snapshot read before the flush: true when the
+snapshot still held that owner's item unsent, false when it did not, null when
+the owner had no queue id or no array snapshot was available. The read and the
+flush are separate calls, so this is snapshot evidence, not confirmation that
+an item was deleted or never delivered, and a failed or unknown flush can
+return it too. This paragraph covers the REST route only; the unclaim path
+(`cancelForUnclaim`) and other callers have their own rules.
 
 **Expectation lifecycle:** `valve_actuation_expectations` (verified schema,
 `database/seed-blank.sql`) records `commanded_at`, `commanded_duration_seconds`,

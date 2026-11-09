@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { useTranslation } from 'react-i18next';
 import type { ValveSchedule, ValveSummary, ValveWeekdayPush, ValvePlanError } from '../../../types/farming';
@@ -13,6 +13,23 @@ export interface ValveScheduleDialogProps {
   onClose: () => void;
   onChanged: () => void;
   onOpenPolicyEditor?: (schedule: ValveSchedule) => void;
+}
+
+interface DeleteSelection {
+  valveEui: string;
+  scheduleUuid: string;
+  content: string;
+}
+
+function deletionContent(schedule: ValveSchedule): string {
+  // Compare values, not object identity: an unchanged SWR refresh is still the same selection.
+  return JSON.stringify([
+    schedule.scheduleUuid, schedule.deviceEui, schedule.kind, schedule.label,
+    schedule.weekdaysMask, schedule.startTime, schedule.fireAt, schedule.durationMinutes,
+    schedule.timezone, schedule.enabled, schedule.onceState, schedule.dispatchState,
+    schedule.dispatchCommandId, schedule.dispatchCreatedAt, schedule.dispatchAttemptedAt,
+    schedule.syncVersion, schedule.conditionPolicyUuid, schedule.effectiveFrom, schedule.execution,
+  ]);
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -136,6 +153,14 @@ function pushBadgeLabel(row: ValveWeekdayPush | null, timeZone: string, t: Trans
   return t('scheduleDialog.push.QUEUED');
 }
 
+// One-line readable identity of a saved row, shown under the row label and reused verbatim
+// by the delete confirmation so both surfaces can never drift apart.
+function scheduleSummary(schedule: ValveSchedule, timeZone: string, t: Translate, language: string | undefined): string {
+  return schedule.kind === 'WEEKLY'
+    ? `${sortWeekdaysForDisplay(weekdaysFromMask(schedule.weekdaysMask ?? 0)).map((d) => t(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
+    : `${schedule.fireAt ? formatDateTime(schedule.fireAt, timeZone, language) : '—'} · ${schedule.durationMinutes} min`;
+}
+
 interface WeeklyFormState {
   days: number[];
   startTime: string;
@@ -172,6 +197,27 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
   const [editingWeeklyUuid, setEditingWeeklyUuid] = useState<string | null>(null);
   const [editingOnceUuid, setEditingOnceUuid] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  // A delete is never sent on the row's first tap: the row opens a confirmation bound to
+  // the displayed valve EUI + schedule UUID, and only an explicit confirmation dispatches.
+  const [deleteSelection, setDeleteSelection] = useState<DeleteSelection | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  // Synchronous re-entry guard: a second activation of the confirm control must be
+  // ignored even before React rerenders with the disabled button.
+  const deleteInFlight = useRef(false);
+  const deleteButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
+  const scheduleCloseRef = useRef<HTMLButtonElement | null>(null);
+  const confirmDialogRef = useRef<HTMLDivElement | null>(null);
+  const selectedRow = open && deleteSelection?.valveEui === valve.deviceEui
+    ? data?.schedules.find((schedule) => schedule.scheduleUuid === deleteSelection.scheduleUuid)
+    : undefined;
+  const pendingDelete = selectedRow && !isConditionalSchedule(selectedRow)
+    && deletionContent(selectedRow) === deleteSelection?.content ? selectedRow : null;
+  const confirmationOpen = pendingDelete !== null;
+
+  useEffect(() => {
+    if (deleteSelection && !confirmationOpen) setDeleteSelection(null);
+  }, [deleteSelection, confirmationOpen]);
 
   useEffect(() => {
     if (open) {
@@ -182,24 +228,64 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
       setRowError(null);
       setEditingWeeklyUuid(null);
       setEditingOnceUuid(null);
+      setDeleteSelection(null);
+      deleteButtonRefs.current.clear();
     }
   }, [open, valve.deviceEui]);
+
+  // Keep keyboard navigation within the two confirmation actions. Remove the trap before
+  // returning focus, and only restore a trigger that still belongs to the mounted list.
+  useEffect(() => {
+    if (!confirmationOpen || !deleteSelection) return;
+    const dialog = confirmDialogRef.current;
+    if (!dialog) return;
+    const trigger = deleteButtonRefs.current.get(deleteSelection.scheduleUuid);
+    const keepFocusInside = (event: FocusEvent) => {
+      if (event.target instanceof Node && !dialog.contains(event.target)) confirmCancelRef.current?.focus();
+    };
+    const loopFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const actions = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+      if (!actions.length) return;
+      event.preventDefault();
+      const current = actions.indexOf(document.activeElement as HTMLButtonElement);
+      const next = current < 0 ? (event.shiftKey ? actions.length - 1 : 0)
+        : (current + (event.shiftKey ? -1 : 1) + actions.length) % actions.length;
+      actions[next]?.focus();
+    };
+    document.addEventListener('focusin', keepFocusInside);
+    document.addEventListener('keydown', loopFocus, true);
+    confirmCancelRef.current?.focus();
+    return () => {
+      document.removeEventListener('focusin', keepFocusInside);
+      document.removeEventListener('keydown', loopFocus, true);
+      if (trigger?.isConnected && !trigger.disabled) trigger.focus();
+      else if (scheduleCloseRef.current?.isConnected) scheduleCloseRef.current.focus();
+    };
+  }, [confirmationOpen, deleteSelection]);
+
+  const closeDeleteConfirm = () => setDeleteSelection(null);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        // Escape dismisses the innermost surface only: while a delete confirmation is
+        // open it closes the confirmation, never the schedule dialog behind it.
+        if (confirmationOpen) closeDeleteConfirm();
+        else onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, confirmationOpen]);
 
   if (!open) return null;
 
   const titleId = `valve-schedule-title-${valve.deviceEui}`;
+  const deleteConfirmTitleId = `valve-schedule-delete-title-${valve.deviceEui}`;
+  const deleteConfirmBodyId = `valve-schedule-delete-body-${valve.deviceEui}`;
 
   const afterMutation = async () => {
     await mutate();
@@ -348,8 +434,23 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
     } catch (err) {
       setRowError(err instanceof ValvePlanConflictError ? describeConflict(err.details, td) : t('scheduleDialog.deleteFailed'));
     } finally {
+      deleteInFlight.current = false;
+      setDeleting(false);
       setRowBusyUuid(null);
     }
+  };
+
+  const confirmDelete = () => {
+    if (deleteInFlight.current) return;
+    const schedule = pendingDelete;
+    if (!schedule) {
+      closeDeleteConfirm();
+      return;
+    }
+    deleteInFlight.current = true;
+    setDeleting(true);
+    closeDeleteConfirm();
+    void deleteRow(schedule);
   };
 
   const weeklyLiters = isWeeklyValid ? estimateLiters(valve.flowRateLpm, weeklyDurationNum) : null;
@@ -385,6 +486,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
           <h2 id={titleId} className="text-lg font-semibold text-[var(--text)]">{t('scheduleDialog.title', { name: valve.name })}</h2>
           <button
             type="button"
+            ref={scheduleCloseRef}
             onClick={onClose}
             aria-label={tc('close')}
             className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl leading-none text-[var(--text-tertiary)] transition-colors hover:bg-[var(--secondary-bg)] hover:text-[var(--text)]"
@@ -475,9 +577,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                             {schedule.label ?? (schedule.kind === 'WEEKLY' ? t('scheduleDialog.addWeekly') : t('scheduleDialog.addOnce'))}
                           </p>
                           <p className="truncate text-xs text-[var(--text-tertiary)]">
-                            {schedule.kind === 'WEEKLY'
-                              ? `${sortWeekdaysForDisplay(weekdaysFromMask(schedule.weekdaysMask ?? 0)).map((d) => td(`weekdays.${d}`)).join(', ')} · ${schedule.startTime ? `${schedule.startTime}–${windowEnd(schedule.startTime, schedule.durationMinutes)}` : '—'} · ${schedule.durationMinutes} min`
-                              : `${schedule.fireAt ? formatDateTime(schedule.fireAt, valve.timezone, i18n?.language) : '—'} · ${schedule.durationMinutes} min`}
+                            {scheduleSummary(schedule, valve.timezone, td, i18n?.language)}
                           </p>
                           {schedule.kind === 'ONCE' && schedule.dispatchState && (
                             <p className={`truncate text-xs ${schedule.dispatchState === 'UNKNOWN' ? 'font-semibold text-[var(--warn-text)]' : 'text-[var(--text-tertiary)]'}`}>
@@ -518,8 +618,19 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                               </button>
                               <button
                                 type="button"
-                                onClick={() => void deleteRow(schedule)}
-                                disabled={rowBusyUuid === schedule.scheduleUuid}
+                                ref={(el) => {
+                                  if (el) deleteButtonRefs.current.set(schedule.scheduleUuid, el);
+                                  else deleteButtonRefs.current.delete(schedule.scheduleUuid);
+                                }}
+                                onClick={() => {
+                                  if (deleteInFlight.current) return;
+                                  setDeleteSelection({
+                                    valveEui: valve.deviceEui,
+                                    scheduleUuid: schedule.scheduleUuid,
+                                    content: deletionContent(schedule),
+                                  });
+                                }}
+                                disabled={deleting || rowBusyUuid === schedule.scheduleUuid}
                                 className="flex min-h-[44px] items-center px-1.5 text-xs font-semibold text-[var(--warn-text)] underline disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:px-0"
                               >
                                 {t('scheduleDialog.delete')}
@@ -546,7 +657,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                         onClick={() => toggleWeekday(d)}
                         className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full border px-3 py-1 text-xs font-semibold transition-colors sm:min-h-0 sm:min-w-0 sm:px-2.5 ${
                           weekly.days.includes(d)
-                            ? 'border-[var(--primary)] bg-[var(--primary)] text-white'
+                            ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]'
                             : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text)]'
                         }`}
                       >
@@ -610,7 +721,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       type="button"
                       onClick={() => void saveWeekly()}
                       disabled={!isWeeklyValid || savingWeekly}
-                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingWeekly
                         ? t('scheduleDialog.saving')
@@ -692,7 +803,7 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
                       type="button"
                       onClick={() => void saveOnce()}
                       disabled={!isOnceValid || savingOnce}
-                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="min-h-[44px] w-full rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-[var(--on-primary)] transition-colors hover:bg-[var(--primary-hover)] disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {savingOnce
                         ? t('scheduleDialog.saving')
@@ -705,6 +816,60 @@ export const ValveScheduleDialog: React.FC<ValveScheduleDialogProps> = ({ valve,
           )}
         </div>
       </div>
+
+      {pendingDelete && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onClick={(event) => {
+            // Dismissing the confirmation by its own backdrop must close only the
+            // confirmation; the click never reaches the dialog backdrop underneath.
+            event.stopPropagation();
+            closeDeleteConfirm();
+          }}
+        >
+          <div
+            ref={confirmDialogRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={deleteConfirmTitleId}
+            aria-describedby={deleteConfirmBodyId}
+            className="w-full max-w-md rounded-xl border border-[var(--warn-border)] bg-[var(--surface)] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 id={deleteConfirmTitleId} className="text-base font-semibold text-[var(--warn-text)]">
+              {t('scheduleDialog.deleteConfirmTitle')}
+            </h3>
+            <p id={deleteConfirmBodyId} className="mt-1 text-sm text-[var(--text)]">
+              {t('scheduleDialog.deleteConfirmBody', {
+                schedule: pendingDelete.label ?? (pendingDelete.kind === 'WEEKLY' ? t('scheduleDialog.addWeekly') : t('scheduleDialog.addOnce')),
+                valve: valve.name,
+              })}
+            </p>
+            <p className="mt-1 break-words text-xs text-[var(--text-tertiary)]">
+              {scheduleSummary(pendingDelete, valve.timezone, td, i18n?.language)}
+            </p>
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <button
+                ref={confirmCancelRef}
+                type="button"
+                onClick={closeDeleteConfirm}
+                disabled={deleting}
+                className="min-h-[44px] rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2 text-sm font-semibold text-[var(--text)] transition-colors hover:bg-[var(--secondary-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="min-h-[44px] rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {t('scheduleDialog.deleteConfirmButton')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

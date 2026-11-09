@@ -14,6 +14,8 @@ __pycache__/
 
 # Contract-gate dependencies installed by `npm ci --prefix scripts`
 /scripts/node_modules
+# History response fixture runtime installed by `npm ci --prefix scripts/fixtures/history-response-runtime`
+/scripts/fixtures/history-response-runtime/node_modules
 
 # Hidden files
 /.*

@@ -283,9 +283,6 @@
         "nearTrigger": "Proche du seuil de déclenchement",
         "belowTrigger": "Sous le seuil de déclenchement",
         "title": "Sol maintenant",
-        "wet": "Humide",
-        "moderate": "Modéré",
-        "dry": "Sec",
         "volumetric": "Teneur en eau volumique",
         "noReadingSince": "Aucune mesure depuis {{since}}",
         "noReadingYet": "Aucune mesure pour l'instant",
@@ -990,6 +987,10 @@
     "resistance": "Résistance {{value}}",
     "resistanceUpTo": "Résistance ≤ {{value}}",
     "offset": "Décalage {{value}} mV",
+    "automation": {
+      "phase1Notice": "L’automatisation de phase 1 n’utilise pas les mesures WATERMARK pour décider de l’irrigation.",
+      "zonePhase1Notice": "Cette valeur inclut des mesures WATERMARK. L’automatisation de phase 1 ne les utilise pas pour décider de l’irrigation."
+    },
     "soilTempNotMeasured": "Température du sol non mesurée",
     "dieTemp": "Carte {{value}} °C",
     "supply": "Alimentation {{value}} V",
@@ -1051,7 +1052,9 @@
     "lastReport": "Dernier relevé",
     "tips_one": "{{count}} basculement",
     "tips_other": "{{count}} basculements",
-    "tipsUnavailable": "Nombre de basculements indisponible"
+    "tipsUnavailable": "Nombre de basculements indisponible",
+    "temperature": "Température du boîtier du pluviomètre",
+    "temperatureHint": "Mesurée dans le boîtier, pas la température de l’air · dernier relevé {{time}}"
   },
   "zoneRainGauge": {
     "label": "Pluviomètre de cette zone",

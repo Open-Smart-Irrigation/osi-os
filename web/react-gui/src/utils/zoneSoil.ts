@@ -59,6 +59,8 @@ export interface ZoneSoilStatus {
   observedAt: string | null;
   /** Configured and reporting, but the newest uplink predates the freshness window. */
   stale: boolean;
+  /** The selected numeric value includes an accepted WATERMARK-linked SWT sample. */
+  includesWatermark: boolean;
   /** No eligible value is available, and at least one measurement is invalid or faulted. */
   invalid: boolean;
   /**
@@ -91,6 +93,7 @@ const ABSENT: ZoneSoilStatus = {
   depthCm: null,
   observedAt: null,
   stale: false,
+  includesWatermark: false,
   invalid: false,
   probeNames: [],
   staleTrigger: null,
@@ -234,6 +237,7 @@ function summarizeVolumetric(devices: Device[], nowMs: number): ZoneSoilStatus {
     depthCm: null,
     observedAt,
     stale: !Number.isFinite(observedMs) || nowMs - observedMs > SENSOR_FRESHNESS_WINDOW_MS,
+    includesWatermark: false,
     invalid: reportedCount > 0 && usableValues.length === 0,
     probeNames: [],
     staleTrigger: null,
@@ -258,10 +262,11 @@ interface TensionBucket {
   observedAt: Map<SoilChannel, string | null>;
   depths: Map<SoilChannel, number | null>;
   names: Map<SoilChannel, string[]>;
+  watermarkChannels: Set<SoilChannel>;
 }
 
 function emptyTensionBucket(): TensionBucket {
-  return { values: new Map(), observedAt: new Map(), depths: new Map(), names: new Map() };
+  return { values: new Map(), observedAt: new Map(), depths: new Map(), names: new Map(), watermarkChannels: new Set() };
 }
 
 function chameleonChannelFaulted(device: Device, channel: SoilChannel): boolean {
@@ -304,8 +309,10 @@ function appendTension(
   observedAt: string | null | undefined,
   depth: number | null,
   name: string | null | undefined,
+  includesWatermark: boolean,
 ) {
   bucket.values.set(channel, [...(bucket.values.get(channel) ?? []), value]);
+  if (includesWatermark) bucket.watermarkChannels.add(channel);
   const trimmed = typeof name === 'string' ? name.trim() : '';
   const names = bucket.names.get(channel) ?? [];
   if (trimmed && !names.includes(trimmed)) bucket.names.set(channel, [...names, trimmed]);
@@ -349,7 +356,7 @@ function summarizeTension(
         continue;
       }
       if (!fresh && !isHistorical) continue;
-      appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel), device.name);
+      appendTension(fresh ? current : historical, channel, raw, device.last_seen, probeDepthCm(device, channel), device.name, device.latest_data?.watermark != null);
     }
   }
 
@@ -375,6 +382,9 @@ function summarizeTension(
   const staleTrigger = triggerElsewhere && !invalidTrigger && historicalAvailable.includes(requested)
     ? { channel: requested, observedAt: historical.observedAt.get(requested) ?? null }
     : null;
+  const includesWatermark = channel === 'mean'
+    ? available.some((candidate) => bucket.watermarkChannels.has(candidate))
+    : channel !== null && bucket.watermarkChannels.has(channel);
 
   return {
     hasSensor: true,
@@ -385,6 +395,7 @@ function summarizeTension(
     depthCm: channel && channel !== 'mean' ? bucket.depths.get(channel) ?? null : null,
     observedAt: resolvedObservedAt,
     stale: !usingCurrent,
+    includesWatermark,
     invalid: hasInvalidReading && currentAvailable.length === 0 && historicalAvailable.length === 0,
     probeNames: channel && channel !== 'mean' ? bucket.names.get(channel) ?? [] : [],
     staleTrigger,

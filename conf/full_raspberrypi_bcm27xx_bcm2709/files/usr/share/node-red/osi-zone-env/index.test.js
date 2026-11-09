@@ -76,6 +76,20 @@ test('metric extraction and local environment assembly preserve current shape', 
   assert.equal(local.observedAt, '2026-07-11T09:50:00.000Z');
 });
 
+test('rain gauge and valve housing climate stay out of the zone local environment', () => {
+  const local = ZE.buildLocalEnvironment([
+    { deveui: 'A840410000000002', name: 'Kiwi', type_id: 'KIWI_SENSOR', recorded_at: '2026-07-11T09:50:00.000Z', ambient_temperature: 21, relative_humidity: 60 },
+    // A sunlit gauge housing and a buried valve box: neither is field air.
+    { deveui: 'A840410000000003', name: 'Gauge', type_id: 'AQUASCOPE_LORAIN', recorded_at: '2026-07-11T09:55:00.000Z', ambient_temperature: 38 },
+    { deveui: 'A840410000000004', name: 'Valve', type_id: 'STREGA_VALVE', recorded_at: '2026-07-11T09:58:00.000Z', ambient_temperature: 12, relative_humidity: 98 },
+  ], '2026-07-11T10:00:00.000Z');
+  assert.equal(local.sensorCount, 1);
+  assert.deepEqual(local.devices.map((d) => d.deviceEui), ['A840410000000002']);
+  assert.equal(local.metrics.find((m) => m.key === 'air_temperature_c').median, 21);
+  assert.equal(local.metrics.find((m) => m.key === 'relative_humidity_pct').median, 60);
+  assert.equal(local.observedAt, '2026-07-11T09:50:00.000Z');
+});
+
 test('configuration, display, and drift helpers preserve current behavior', () => {
   assert.deepEqual(ZE.resolveLocation({
     latitude: 46.8,

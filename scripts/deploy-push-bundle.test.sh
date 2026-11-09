@@ -7,6 +7,11 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 pusher="$script_dir/deploy-push-bundle.sh"
+# The test driver is POSIX sh; the workstation uploader requires Bash.
+command -v bash >/dev/null 2>&1 || {
+  echo 'deploy-push-bundle.test: bash is required for the uploader' >&2
+  exit 127
+}
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -41,9 +46,31 @@ printf 'A%.0s' $(seq 1 5000) > "$bundle"
 sha256sum "$bundle" | cut -d ' ' -f1 > "$work/sha.txt"
 printf '%s  %s\n' "$(cat "$work/sha.txt")" "$(basename "$bundle")" > "$bundle.sha256"
 
+case "${DEPLOY_TEST_EXPECT_SH:-}" in
+  dash|ash)
+    if SSH_CMD="$ssh_stub" REPO_ROOT="$fixture_repo" REMOTE_TMP="$remote_tmp" \
+        sh "$pusher" test-host "$bundle" >"$work/wrong-shell.out" 2>&1; then
+      echo 'wrong-interpreter control unexpectedly passed' >&2
+      exit 1
+    fi
+    grep -Eqi 'syntax error|unexpected|bad substitution|pipefail' "$work/wrong-shell.out" || {
+      echo 'wrong-interpreter failure did not identify the shell boundary' >&2
+      cat "$work/wrong-shell.out" >&2
+      exit 1
+    }
+    [ ! -e "$remote_tmp/$(basename "$bundle")" ] || {
+      echo 'wrong-interpreter control reached the upload stub' >&2
+      exit 1
+    }
+    echo 'wrong-interpreter control: OK'
+    ;;
+  '') ;;
+  *) echo 'DEPLOY_TEST_EXPECT_SH must be dash or ash' >&2; exit 2 ;;
+esac
+
 push() {
   SSH_CMD="$ssh_stub" REPO_ROOT="$fixture_repo" REMOTE_TMP="$remote_tmp" \
-    sh "$pusher" "test-host" "$bundle" "$@"
+    bash "$pusher" "test-host" "$bundle" "$@"
 }
 
 echo "=== fresh upload streams the whole bundle and invokes deploy-offline.sh ==="
@@ -94,7 +121,7 @@ echo "=== deploy-offline.sh's exit code propagates ==="
 : > "$run_log"
 set +e
 STUB_DEPLOY_OFFLINE_EXIT=0 SSH_CMD="$ssh_stub" REPO_ROOT="$fixture_repo" REMOTE_TMP="$remote_tmp" \
-  sh "$pusher" "test-host" "$bundle" >/dev/null 2>&1
+  bash "$pusher" "test-host" "$bundle" >/dev/null 2>&1
 rc_zero=$?
 set -e
 [ "$rc_zero" = "0" ] || { echo "expected exit 0 to propagate" >&2; exit 1; }
@@ -102,7 +129,7 @@ set -e
 rm -f "$remote_bundle" "$remote_bundle.sha256"
 set +e
 STUB_DEPLOY_OFFLINE_EXIT=9 SSH_CMD="$ssh_stub" REPO_ROOT="$fixture_repo" REMOTE_TMP="$remote_tmp" \
-  sh "$pusher" "test-host" "$bundle" >/dev/null 2>&1
+  bash "$pusher" "test-host" "$bundle" >/dev/null 2>&1
 rc_nine=$?
 set -e
 [ "$rc_nine" = "9" ] || { echo "expected exit 9 to propagate, got $rc_nine" >&2; exit 1; }
@@ -110,7 +137,7 @@ echo "OK"
 
 echo "=== missing bundle fails clearly ==="
 if push_missing=$(SSH_CMD="$ssh_stub" REPO_ROOT="$fixture_repo" REMOTE_TMP="$remote_tmp" \
-    sh "$pusher" "test-host" "$work/nope.tar.gz" 2>&1); then
+    bash "$pusher" "test-host" "$work/nope.tar.gz" 2>&1); then
   echo "expected failure for a missing bundle" >&2
   exit 1
 fi

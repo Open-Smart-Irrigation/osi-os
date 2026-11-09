@@ -283,9 +283,6 @@
         "nearTrigger": "Cerca del umbral de activación",
         "belowTrigger": "Por debajo del umbral de activación",
         "title": "Suelo ahora",
-        "wet": "Húmedo",
-        "moderate": "Moderado",
-        "dry": "Seco",
         "volumetric": "Contenido volumétrico de agua",
         "noReadingSince": "Sin lecturas desde {{since}}",
         "noReadingYet": "Todavía sin lecturas",
@@ -990,6 +987,10 @@
     "resistance": "Resistencia {{value}}",
     "resistanceUpTo": "Resistencia ≤ {{value}}",
     "offset": "Desplazamiento {{value}} mV",
+    "automation": {
+      "phase1Notice": "La automatización de la fase 1 no utiliza las lecturas WATERMARK para decidir si se debe regar.",
+      "zonePhase1Notice": "Este valor incluye lecturas WATERMARK. La automatización de la fase 1 no utiliza esas lecturas para decidir si se debe regar."
+    },
     "soilTempNotMeasured": "Temperatura del suelo no medida",
     "dieTemp": "Placa {{value}} °C",
     "supply": "Alimentación {{value}} V",
@@ -1051,7 +1052,9 @@
     "lastReport": "Último registro",
     "tips_one": "{{count}} basculación",
     "tips_other": "{{count}} basculaciones",
-    "tipsUnavailable": "Número de basculaciones no disponible"
+    "tipsUnavailable": "Número de basculaciones no disponible",
+    "temperature": "Temperatura de la carcasa del pluviómetro",
+    "temperatureHint": "Medida dentro de la carcasa, no es la temperatura del aire · último informe {{time}}"
   },
   "zoneRainGauge": {
     "label": "Pluviómetro de esta zona",

@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 import { ValveTile } from '../ValveTile';
 import type { ValveSummary } from '../../../../types/farming';
@@ -101,8 +102,9 @@ function makeValve(overrides: Partial<ValveSummary> = {}): ValveSummary {
   };
 }
 
-function renderTile(overrides: Partial<ValveSummary> = {}, callbackOverrides: Partial<ComponentProps<typeof ValveTile>> = {}) {
+function renderTile(overrides: Partial<ValveSummary> = {}, callbackOverrides: Partial<ComponentProps<typeof ValveTile>> = {}, after?: ReactNode) {
   return render(
+    <>
     <ValveTile
       valve={makeValve(overrides)}
       nowMs={Date.now()}
@@ -120,8 +122,32 @@ function renderTile(overrides: Partial<ValveSummary> = {}, callbackOverrides: Pa
       onRename={vi.fn()}
       busy={false}
       {...callbackOverrides}
-    />,
+    />
+    {after}
+    </>
   );
+}
+
+function makeActionSpies() {
+  return {
+    onOpen: vi.fn(),
+    onSchedule: vi.fn(),
+    onCancel: vi.fn(),
+    onSkipToday: vi.fn(),
+    onPause: vi.fn(),
+    onResume: vi.fn(),
+    onResend: vi.fn(),
+    onSettings: vi.fn(),
+    onService: vi.fn(),
+    onDelete: vi.fn(),
+    onRename: vi.fn(),
+  };
+}
+
+function expectNoValveActions(actions: ReturnType<typeof makeActionSpies>) {
+  for (const callback of Object.values(actions)) {
+    expect(callback).not.toHaveBeenCalled();
+  }
 }
 
 describe('ValveTile touch targets', () => {
@@ -148,6 +174,23 @@ describe('ValveTile touch targets', () => {
     for (const item of screen.getAllByRole('menuitem')) {
       expect(item).toHaveClass('min-h-[44px]');
     }
+  });
+});
+
+describe('ValveTile overflow menu pointer behavior (#162)', () => {
+  it('closes the second More activation after pointerdown plus click without firing an action', () => {
+    const actions = makeActionSpies();
+    renderTile({}, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expectNoValveActions(actions);
   });
 });
 
@@ -466,5 +509,176 @@ describe('ValveTile cancel help (D04)', () => {
   it('shows no cancel help while nothing is pending', () => {
     renderTile();
     expect(screen.queryByRole('button', { name: 'About cancel' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ValveTile overflow menu keyboard and focus (#162)', () => {
+  it('dismisses with Escape after focus returns to the More trigger', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({}, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    await user.click(trigger);
+    expect(screen.getByRole('menu', { name: 'More' })).toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+    expectNoValveActions(actions);
+  });
+
+  it('names the menu and wraps through enabled items, skipping native disabled Skip today', () => {
+    const actions = makeActionSpies();
+    renderTile({ schedulerStatus: 'SKIP_TODAY' }, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    expect(trigger.getAttribute('aria-controls')).toBeTruthy();
+
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const menu = screen.getByRole('menu', { name: 'More' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(menu).toHaveAttribute('id', trigger.getAttribute('aria-controls'));
+    expect(menu).toHaveAttribute('aria-labelledby', trigger.id);
+    const skip = screen.getByRole('menuitem', { name: 'Skip today' });
+    const pause = screen.getByRole('menuitem', { name: 'Pause schedules' });
+    const remove = screen.getByRole('menuitem', { name: 'Delete valve' });
+    expect(skip).toBeDisabled();
+    expect(pause).toHaveFocus();
+
+    fireEvent.keyDown(pause, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(menu).not.toBeInTheDocument();
+    expect(pause).not.toBeInTheDocument();
+    expect(remove).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    const reopenedMenu = screen.getByRole('menu', { name: 'More' });
+    const reopenedPause = screen.getByRole('menuitem', { name: 'Pause schedules' });
+    const reopenedRemove = screen.getByRole('menuitem', { name: 'Delete valve' });
+    expect(reopenedMenu).not.toBe(menu);
+    expect(reopenedRemove).toHaveFocus();
+    fireEvent.keyDown(reopenedRemove, { key: 'ArrowDown' });
+    expect(reopenedPause).toHaveFocus();
+    fireEvent.keyDown(reopenedPause, { key: 'ArrowUp' });
+    expect(reopenedRemove).toHaveFocus();
+    expectNoValveActions(actions);
+  });
+
+  it('dismisses on disabled Skip today and activates enabled items after reopening', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({ schedulerStatus: 'SKIP_TODAY' }, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+
+    await user.click(trigger);
+    const pause = screen.getByRole('menuitem', { name: 'Pause schedules' });
+    const skip = screen.getByRole('menuitem', { name: 'Skip today' });
+    expect(pause).toHaveFocus();
+    expect(skip).toBeDisabled();
+    await user.click(skip);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(pause).not.toHaveFocus();
+    expectNoValveActions(actions);
+
+    await user.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'Pause schedules' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(actions.onPause).toHaveBeenCalledTimes(1);
+    expect(actions.onSkipToday).not.toHaveBeenCalled();
+
+    await user.click(trigger);
+    expect(screen.getByRole('menuitem', { name: 'Pause schedules' })).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('menuitem', { name: 'Resend plan' })).toHaveFocus();
+    await user.keyboard(' ');
+    expect(actions.onResend).toHaveBeenCalledTimes(1);
+    expect(actions.onPause).toHaveBeenCalledTimes(1);
+    expect(actions.onSkipToday).not.toHaveBeenCalled();
+    for (const [name, callback] of Object.entries(actions)) {
+      if (name !== 'onPause' && name !== 'onResend') {
+        expect(callback).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('closes on Escape, returns focus to the trigger and runs no action', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({}, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    await user.click(trigger);
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expectNoValveActions(actions);
+  });
+
+  it('lets Shift+Tab and Tab leave normally, closing only after focus leaves the wrapper', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({}, actions, <button type="button">After valve tile</button>);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    const schedule = screen.getByRole('button', { name: 'Schedule' });
+
+    await user.click(trigger);
+    await user.tab({ shift: true });
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    await user.tab({ shift: true });
+    expect(schedule).toHaveFocus();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'After valve tile' })).toHaveFocus();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expectNoValveActions(actions);
+  });
+
+  it('closes on outside Schedule pointerdown without stealing focus or cancelling its one activation', async () => {
+    const user = userEvent.setup();
+    const actions = makeActionSpies();
+    renderTile({}, actions);
+    const trigger = screen.getByRole('button', { name: 'More' });
+    const schedule = screen.getByRole('button', { name: 'Schedule' });
+    await user.click(trigger);
+    await user.click(schedule);
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(schedule).toHaveFocus();
+    expect(actions.onSchedule).toHaveBeenCalledTimes(1);
+    for (const [name, callback] of Object.entries(actions)) {
+      if (name !== 'onSchedule') expect(callback).not.toHaveBeenCalled();
+    }
+  });
+
+  it('focuses the connected More trigger before invoking Settings', async () => {
+    const user = userEvent.setup();
+    let trigger: HTMLButtonElement | null = null;
+    let connectedAtCall = false;
+    let focusedAtCall = false;
+    const onSettings = vi.fn(() => {
+      connectedAtCall = Boolean(trigger?.isConnected);
+      focusedAtCall = document.activeElement === trigger;
+    });
+    const actions = { ...makeActionSpies(), onSettings };
+    renderTile({}, actions);
+    trigger = screen.getByRole<HTMLButtonElement>('button', { name: 'More' });
+    await user.click(trigger);
+    await user.click(screen.getByRole('menuitem', { name: 'Settings' }));
+
+    expect(actions.onSettings).toHaveBeenCalledTimes(1);
+    expect(connectedAtCall).toBe(true);
+    expect(focusedAtCall).toBe(true);
+    for (const [name, callback] of Object.entries(actions)) {
+      if (name !== 'onSettings') expect(callback).not.toHaveBeenCalled();
+    }
   });
 });

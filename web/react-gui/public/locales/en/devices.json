@@ -280,9 +280,6 @@
         "nearTrigger": "Approaching the trigger",
         "belowTrigger": "Below the trigger",
         "title": "Soil now",
-        "wet": "Wet",
-        "moderate": "Moderate",
-        "dry": "Dry",
         "volumetric": "Volumetric water content",
         "noReadingSince": "No reading since {{since}}",
         "noReadingYet": "No reading yet",
@@ -987,6 +984,10 @@
     "resistance": "Resistance {{value}}",
     "resistanceUpTo": "Resistance ≤ {{value}}",
     "offset": "Offset {{value}} mV",
+    "automation": {
+      "phase1Notice": "Phase 1 automation does not use WATERMARK readings to decide irrigation.",
+      "zonePhase1Notice": "This value includes WATERMARK readings. Phase 1 automation does not use those readings to decide irrigation."
+    },
     "soilTempNotMeasured": "Soil temperature not measured",
     "dieTemp": "Board {{value}} °C",
     "supply": "Supply {{value}} V",
@@ -1048,7 +1049,9 @@
     "lastReport": "Last report",
     "tips_one": "{{count}} tip",
     "tips_other": "{{count}} tips",
-    "tipsUnavailable": "Tip count unavailable"
+    "tipsUnavailable": "Tip count unavailable",
+    "temperature": "Gauge housing temperature",
+    "temperatureHint": "Measured inside the gauge, not air temperature · last report {{time}}"
   },
   "zoneRainGauge": {
     "label": "Rain gauge for this zone",

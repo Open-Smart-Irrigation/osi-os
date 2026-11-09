@@ -788,9 +788,9 @@ async function assertFarmWideWrite(db, principal) {
   }
 }
 
-// A final without a plot is a new farm-wide record when it is created, or
-// when an update turns a draft or a plot entry into one. Changes to an
-// existing farm-wide final keep the #403 rule (its writer or an admin).
+// A final without a plot is new when created or converted from a draft or plot.
+// With scoped access on, farm-wide finals require the farm owner or an admin,
+// including existing finals; farm-wide drafts retain writer/admin access.
 async function createsFarmWideFinal(db, mode, entryUuid) {
   if (mode !== 'update') return true;
   const existing = await dbGet(

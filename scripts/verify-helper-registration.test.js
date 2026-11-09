@@ -4,7 +4,9 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir } = require('./verify-helper-registration');
+const {
+  collectHelperNames, checkRegistryParity, checkSurfaces, checkCodecs, inspectModuleDir, checkCallerNames,
+} = require('./verify-helper-registration');
 
 const NAME_TO_PATH = {
   'history-sync': 'osi-history-sync-helper',
@@ -159,4 +161,106 @@ test('checkSurfaces: the staged path is accepted only for the module it delivers
 test('the shipped deploy.sh delivers the command ledger through the staged path', () => {
   const deploySource = fs.readFileSync(path.join(__dirname, '..', 'deploy.sh'), 'utf8');
   assert.deepEqual(checkSurfaces(ledgerFixtures(deploySource)), []);
+});
+
+// Caller names (#564): a function node's osiLib.require('<name>') must name a
+// key of its profile's NAME_TO_PATH. Merge Data asked for 'history-helper',
+// which no registry listed, and every gateway silently dropped rain_day.
+const CALLER_REGISTRY = { rain: 'osi-rain', 'history-helper': 'osi-history-helper' };
+const OSI_LIB = [{ var: 'osiLib', module: 'osi-lib' }];
+
+function fnNode(func, extra = {}) {
+  return { id: 'n1', type: 'function', name: 'Node One', func, libs: OSI_LIB, ...extra };
+}
+
+function callerIssues(nodes, nameToPath = CALLER_REGISTRY) {
+  return checkCallerNames({ flows: nodes, nameToPath });
+}
+
+test('checkCallerNames: registered names pass and every call is counted', () => {
+  const result = callerIssues([fnNode([
+    "const a = osiLib.require('rain');",
+    'const b = osiLib . require ( "history-helper" );',
+    'const c = osiLib?.require(`rain`);',
+  ].join('\n'))]);
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.calls, 3);
+});
+
+test('checkCallerNames: an unregistered name fails with node and name', () => {
+  const result = callerIssues([fnNode("const h = osiLib.require('history-helper');")], { rain: 'osi-rain' });
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /n1 \(Node One\)/);
+  assert.match(result.issues[0], /'history-helper' is not a NAME_TO_PATH key/);
+});
+
+test('checkCallerNames: a misspelled name fails', () => {
+  const result = callerIssues([fnNode("const h = osiLib.require('history-helpr');")]);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /'history-helpr'/);
+});
+
+test('checkCallerNames: the loader variable is whatever libs binds to osi-lib', () => {
+  const renamed = fnNode("lib.require('nope'); osiLib.require('also-nope');", {
+    libs: [{ var: 'lib', module: 'osi-lib' }],
+  });
+  const result = callerIssues([renamed]);
+  assert.equal(result.calls, 1);
+  assert.equal(result.issues.length, 1);
+  assert.match(result.issues[0], /'nope'/);
+
+  const notALoader = fnNode("osiDb.require('nope');", { libs: [{ var: 'osiDb', module: 'osi-db-helper' }] });
+  assert.deepEqual(callerIssues([notALoader]), { issues: [], calls: 0 });
+});
+
+test('checkCallerNames: comments, strings and other require methods do not count', () => {
+  const result = callerIssues([fnNode([
+    "// osiLib.require('nope-line-comment')",
+    "/* osiLib.require(\"nope-block-comment\") */",
+    "const s = \"osiLib.require('nope-string')\";",
+    "const t = `osiLib.require('nope-template')`;",
+    "const fs = require('fs');",
+    "other.require('nope-other');",
+    "myosiLib.require('nope-prefix');",
+    "x.osiLib.require('nope-member');",
+    "osiLib.requireAll('nope-method');",
+    "const ok = osiLib.require('rain');",
+  ].join('\n'))]);
+  assert.deepEqual(result, { issues: [], calls: 1 });
+});
+
+test('checkCallerNames: a name that is not one plain string literal fails', () => {
+  for (const call of [
+    'osiLib.require(name)',
+    "osiLib.require('ra' + 'in')",
+    'osiLib.require(`${name}`)',
+    "osiLib.require('rain', extra)",
+    "osiLib.require('ra\\x69n')",
+  ]) {
+    const result = callerIssues([fnNode(call + ';')]);
+    assert.equal(result.issues.length, 1, call);
+    assert.match(result.issues[0], /not one plain string literal/, call);
+  }
+});
+
+test('checkCallerNames: initialize and finalize are scanned; other node types are not', () => {
+  const result = callerIssues([
+    fnNode("osiLib.require('rain');", { initialize: "osiLib.require('nope-init');", finalize: "osiLib.require('nope-final');" }),
+    { id: 'c1', type: 'comment', func: "osiLib.require('nope-comment-node');", libs: OSI_LIB },
+  ]);
+  assert.equal(result.calls, 3);
+  assert.equal(result.issues.length, 2);
+  assert.match(result.issues.join(' '), /initialize.*'nope-init'/);
+  assert.match(result.issues.join(' '), /finalize.*'nope-final'/);
+});
+
+test('every shipped osi-lib caller names a registered module, in both profiles', () => {
+  for (const soc of ['bcm2712', 'bcm2709']) {
+    const share = path.join(__dirname, '..', 'conf', `full_raspberrypi_bcm27xx_${soc}`, 'files', 'usr', 'share');
+    const flows = JSON.parse(fs.readFileSync(path.join(share, 'flows.json'), 'utf8'));
+    const { NAME_TO_PATH: nameToPath } = require(path.join(share, 'node-red', 'osi-lib')); // eslint-disable-line global-require
+    const result = checkCallerNames({ flows, nameToPath });
+    assert.deepEqual(result.issues, [], soc);
+    assert.ok(result.calls > 0, soc + ': the scan found no osi-lib calls');
+  }
 });
