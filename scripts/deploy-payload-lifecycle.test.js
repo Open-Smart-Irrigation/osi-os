@@ -802,3 +802,64 @@ printf '%s\\n' reruns-ok
     run.cleanup();
   }
 });
+
+// Stages the real module files the way deploy.sh fetches them, flips, and
+// requires every staged entry point and file through /srv/node-red/<module>
+// and node_modules/<module>. Each must load exactly as it does from the repo
+// tree; a '../<name>' that misses inside payloads/<stamp>/modules/ shows up
+// here as MODULE_NOT_FOUND.
+test('every shipped helper module loads through the payload links as it does from the repo', () => {
+  const NODE_RED = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red';
+  const root = fakeRoot();
+  try {
+    const fetch = new RegExp(String.raw`"${NODE_RED}/([^"]+)" \\\n\s+"([^"]+)"`, 'g');
+    for (const [, rel, destination] of DEPLOY.matchAll(fetch)) {
+      let target = null;
+      if (destination.startsWith('$MODULE_STAGE/')) target = path.join(root, 'payloads', 'S', 'modules', destination.slice('$MODULE_STAGE/'.length));
+      else if (destination.startsWith('$COMMAND_LEDGER_STAGE/')) target = path.join(root, destination.slice('$COMMAND_LEDGER_STAGE/'.length));
+      else if (destination.startsWith('/srv/node-red/')) target = path.join(root, destination.slice('/srv/node-red/'.length));
+      if (!target) continue;
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(path.join(REPO, NODE_RED, rel), target);
+    }
+    swap.stagePayload(root, 'S', flows(root, 'S'));
+    const names = swap.sealModules(root, 'S');
+    swap.flipTo(root, 'S');
+    fs.mkdirSync(path.join(root, 'node_modules'));
+    for (const entry of fs.readdirSync(path.join(REPO, NODE_RED, 'node_modules'))) {
+      if (!entry.startsWith('osi-')) fs.symlinkSync(fs.realpathSync(path.join(REPO, NODE_RED, 'node_modules', entry)), path.join(root, 'node_modules', entry));
+    }
+    for (const name of names) fs.symlinkSync(path.join('..', name), path.join(root, 'node_modules', name));
+    const entries = [];
+    for (const name of names) {
+      entries.push(name);
+      for (const file of fs.readdirSync(path.join(root, 'payloads', 'S', 'modules', name))) {
+        if (file.endsWith('.js') || file.endsWith('.json')) entries.push(path.join(name, file));
+      }
+    }
+    const loadAll = (base, list = entries) => {
+      const result = spawnSync(process.execPath, ['-e', `
+        const path = require('path'); const out = {};
+        for (const entry of JSON.parse(process.argv[2])) {
+          try { require(path.join(process.argv[1], entry)); out[entry] = 'ok'; }
+          catch (error) { out[entry] = (error.code || 'error') + ': ' + String(error.message).split('\\n')[0]; }
+        }
+        process.stdout.write(JSON.stringify(out));
+        process.exit(0);
+      `, base, JSON.stringify(list)], { encoding: 'utf8', env: { ...process.env, OSI_LIB_BASE: base } });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    const staged = loadAll(root);
+    const viaNodeModules = loadAll(path.join(root, 'node_modules'), names);
+    const repo = loadAll(path.join(REPO, NODE_RED));
+    assert.ok(names.length >= 44 && entries.length > 150, `staged ${names.length} modules, ${entries.length} entries`);
+    assert.ok(names.includes('osi-journal') && names.includes('osi-sdi12-normalize'));
+    const differ = entries.filter((entry) => staged[entry] !== repo[entry]).map((entry) => `${entry}: ${staged[entry]} (repo: ${repo[entry]})`)
+      .concat(names.filter((name) => viaNodeModules[name] !== repo[name]).map((name) => `node_modules/${name}: ${viaNodeModules[name]} (repo: ${repo[name]})`));
+    assert.deepEqual(differ, []);
+    assert.ok(Object.values(repo).filter((value) => value === 'ok').length > 150, 'the comparison must exercise loadable modules');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
