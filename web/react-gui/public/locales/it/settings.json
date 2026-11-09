@@ -105,5 +105,13 @@
     "revokeError": "Impossibile revocare l'autorizzazione.",
     "kindZone": "zona",
     "kindPlot": "particella"
+  },
+  "users": {
+    "linkedSignIn": "Accesso collegato",
+    "linkedResetGuidance": "Le modifiche della password di questo account seguono la procedura di recupero approvata dell'identità collegata. Chiedi i passaggi corretti all'amministratore dell'identità collegata.",
+    "signInUnknown": "Tipo di accesso non disponibile. Rivolgiti all'amministratore del gateway.",
+    "linkedResetRefused": "Questo account usa l'accesso collegato, quindi la sua password non può essere reimpostata su questo gateway. Chiedi la procedura di recupero approvata all'amministratore dell'identità collegata.",
+    "resetError": "Impossibile reimpostare la password.",
+    "resetRefreshFailed": "La reimpostazione della password è stata inviata, ma non è stato possibile ricaricare l'elenco utenti. La reimpostazione potrebbe essere già stata applicata; ricarica la pagina prima di riprovare."
   }
 }

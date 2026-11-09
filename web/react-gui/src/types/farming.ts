@@ -291,12 +291,17 @@ export interface User {
   token: string;
 }
 
+/** How an account signs in; `server` is linked sign-in through the cloud (#521). */
+export type AdminAuthMode = 'local' | 'server' | 'unknown';
+
 export interface AdminUser {
   username: string;
   user_uuid: string;
   role: 'admin' | 'researcher' | 'viewer';
   disabled_at: string | null;
   created_at: string;
+  /** Normalized in services/api.ts; rows from an older gateway read as unknown. */
+  auth_mode: AdminAuthMode;
 }
 
 export interface DeviceCatalogItem {
