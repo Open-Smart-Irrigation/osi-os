@@ -401,11 +401,14 @@ it:
   rollback entry`, `ERROR: sqlite3 rollback owner metadata is incomplete beside
   an owned final`, or a message ending in `preserving both` or `preserving both
   for inspection`.
-- The seed exits 1 at boot and skips the `osi-*` helper copy. OpenWrt deletes a
-  uci-defaults script only when it exits 0, so
-  `/etc/uci-defaults/98_osi_node_red_seed` still present after boot means the
-  seed refused or asked for a retry. A retry clears on the next boot; a
-  refusal repeats.
+- The seed exits 1 at boot. OpenWrt deletes a uci-defaults script only when
+  it exits 0, so `/etc/uci-defaults/98_osi_node_red_seed` still present after
+  boot means the seed refused or asked for a retry. A retry clears on the next
+  boot; a refusal repeats. The seed copies the image's `osi-*` helpers,
+  codecs, `edge-channels.json` and `node_modules` once per image install, at
+  its first boot, and records that in `/etc/osi-node-red-seed.copied`; while
+  that file exists, the later runs copy nothing, so a deploy made between two
+  refusing boots keeps what it installed.
 
 Both tools print `STATE: <kind> <path>` lines for the paths involved, where
 `<kind>` is `symlink`, `directory`, `file`, `fifo`, `other` or `absent`.
@@ -506,12 +509,13 @@ other than the pin there: npm retires a symlinked `sqlite3` and reinstalls an
 off-pin one, which fails on 32-bit ARM with musl where no prebuilt exists.
 
 After clearing, run the deploy. If the seed was refusing, it runs again at the
-next boot. If a deploy has run since the seed started refusing, that boot also
-copies the image's `osi-*` helpers, codecs and `edge-channels.json` over the
-deployed ones (flows.json stays), so run the deploy once more after it. The
-seed accepts a `sqlite3` that matches the image pin and opens `:memory:`
-before it reads the firmware module, so after step 3 it stops refusing even on
-an image whose firmware module is broken.
+next boot, finishes its `sqlite3` step, removes `/etc/osi-node-red-seed.copied`
+and leaves the deployed helpers, codecs and `edge-channels.json` alone. Do not
+delete that file while the seed is still refusing: the next boot would copy
+the image over the deployed files. The seed accepts a `sqlite3` that matches
+the image pin and opens `:memory:` before it reads the firmware module, so
+after step 3 it stops refusing even on an image whose firmware module is
+broken.
 
 ### Live valve testing (STREGA)
 

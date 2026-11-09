@@ -2289,3 +2289,197 @@ test('R10 seed flushes the stage owner before its copy and all metadata before t
   assert.match(lines[3], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
   assert.match(lines[4], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
 });
+
+// R11: the whole seed script, booted the way OpenWrt runs a uci-defaults
+// script, `( . ./file ) && rm -f "$file"`: exit 0 removes it, any other
+// status keeps it for the next boot. The image's helpers, codecs,
+// edge-channels.json and node_modules are copied once per image install, so a
+// deploy between two refusing boots keeps what it installed.
+const R11_HELPERS = ['osi-lib', 'osi-db-helper'];
+function r11Image(gw) {
+  const img = path.join(gw.root, 'image');
+  fs.mkdirSync(path.join(img, 'codecs'), { recursive: true });
+  fs.mkdirSync(path.join(img, 'node_modules'), { recursive: true });
+  fs.copyFileSync(writeLockFixture(gw, LOCKED_VERSION), path.join(img, 'package-lock.json'));
+  fs.writeFileSync(path.join(img, 'flows.json'), 'image\n');
+  fs.writeFileSync(path.join(img, 'edge-channels.json'), 'image\n');
+  fs.writeFileSync(path.join(img, 'codecs', 'kiwi.js'), 'image\n');
+  for (const h of R11_HELPERS) {
+    fs.mkdirSync(path.join(img, h), { recursive: true });
+    fs.writeFileSync(path.join(img, h, 'index.js'), 'image\n');
+    fs.symlinkSync('../' + h, path.join(img, 'node_modules', h));
+  }
+  return img;
+}
+function r11Script(gw, opts = {}) {
+  let s = fs.readFileSync(path.join(REPO, 'conf', 'full_raspberrypi_bcm27xx_bcm2712',
+    'files/etc/uci-defaults/98_osi_node_red_seed'), 'utf8');
+  const img = path.join(gw.root, 'image');
+  const fw = opts.firmware === false
+    ? path.join(gw.root, 'firmware-that-was-removed', 'sqlite3') : gw.fwSqlite;
+  for (const [from, to, n] of [
+    ['\nSRC=/usr/share/node-red\n', '\nSRC=' + r2Quote(img) + '\n', 1],
+    ['\nDST=/srv/node-red\n', '\nDST=' + r2Quote(gw.proj) + '\n', 1],
+    ['/usr/share/flows.json', r2Quote(path.join(img, 'flows.json')), 2],
+    ['\n    SQLITE_SRC=/usr/lib/node/node-red/node_modules/node-red-node-sqlite/node_modules/sqlite3\n',
+      '\n    SQLITE_SRC=' + r2Quote(fw) + '\n', 1],
+    ['\nSEED_COPIED=/etc/osi-node-red-seed.copied\n',
+      '\nSEED_COPIED=' + r2Quote(r11Marker(gw)) + '\n', 1],
+  ]) {
+    assert.equal(s.split(from).length, n + 1, 'seed text count: ' + from.trim());
+    s = s.split(from).join(to);
+  }
+  const p = path.join(gw.root, '98_osi_node_red_seed');
+  fs.writeFileSync(p, s);
+  return p;
+}
+function r11Marker(gw) { return path.join(gw.root, 'etc', 'osi-node-red-seed.copied'); }
+function r11Boot(gw, opts) {
+  fs.mkdirSync(path.join(gw.root, 'etc'), { recursive: true });
+  return spawnSync('sh', [r11Script(gw, opts)], { encoding: 'utf8' });
+}
+// What deploy.sh leaves behind: helper sources, codecs and edge-channels.json
+// written under /srv/node-red, npm's links for the helpers, and flows.json
+// flipped to a payload symlink. `sqlite3: true` stands for npm installing the
+// locked module on aarch64, which deploy allows when the firmware module is
+// unusable.
+function r11Deploy(gw, opts = {}) {
+  const p = gw.proj;
+  for (const h of R11_HELPERS) {
+    fs.mkdirSync(path.join(p, h), { recursive: true });
+    fs.writeFileSync(path.join(p, h, 'index.js'), 'deployed\n');
+    fs.rmSync(path.join(p, 'node_modules', h), { recursive: true, force: true });
+    fs.symlinkSync('../' + h, path.join(p, 'node_modules', h));
+  }
+  fs.mkdirSync(path.join(p, 'codecs'), { recursive: true });
+  fs.writeFileSync(path.join(p, 'codecs', 'kiwi.js'), 'deployed\n');
+  fs.writeFileSync(path.join(p, 'edge-channels.json'), 'deployed\n');
+  if (opts.flip !== false) {
+    const stamp = path.join(p, 'payloads', '20261109T000000Z');
+    fs.mkdirSync(stamp, { recursive: true });
+    fs.writeFileSync(path.join(stamp, 'flows.json'), 'deployed\n');
+    fs.rmSync(path.join(p, 'flows.json'), { force: true });
+    fs.symlinkSync('payloads/20261109T000000Z/flows.json', path.join(p, 'flows.json'));
+  }
+  if (opts.sqlite3) {
+    const d = path.join(p, 'node_modules', 'sqlite3');
+    fs.rmSync(d, { recursive: true, force: true });
+    fs.mkdirSync(d, { recursive: true });
+    extractTarball(path.join(p, gw.tarballs.sqlite3), d);
+    writeBinding(d);
+  }
+}
+// Which copy each runtime file holds: 'image' or 'deployed'.
+function r11Copies(gw) {
+  const p = gw.proj;
+  const read = f => fs.readFileSync(path.join(p, f), 'utf8').trim();
+  const out = {
+    flows: read('flows.json'),
+    channels: read('edge-channels.json'),
+    codec: read(path.join('codecs', 'kiwi.js')),
+  };
+  for (const h of R11_HELPERS) {
+    out[h] = read(path.join(h, 'index.js'));
+    out['node_modules/' + h] = read(path.join('node_modules', h, 'index.js'));
+  }
+  return out;
+}
+function r11All(copy, flows) {
+  const out = { flows: flows || copy, channels: copy, codec: copy };
+  for (const h of R11_HELPERS) { out[h] = copy; out['node_modules/' + h] = copy; }
+  return out;
+}
+
+test('R11 fresh image: the first boot seeds sqlite3 and copies the image', () => {
+  const gw = makeGateway('absent');
+  r11Image(gw);
+  const r = r11Boot(gw);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /OK: seeded verified sqlite3/);
+  assert.deepEqual(r11Copies(gw), r11All('image'));
+  assert.equal(fs.existsSync(r11Marker(gw)), false, 'a successful seed removes its marker');
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+});
+
+test('R11 deploy while the seed refuses on a broken firmware module keeps the deployed helpers', () => {
+  // aarch64: deploy lets npm install the locked sqlite3 when the firmware
+  // module is missing, off-pin or does not load. The next boot accepts that
+  // module (R10) and must not put the image's helpers beside deployed flows.
+  for (const [fault, message] of Object.entries(R10_FIRMWARE_ERRORS)) {
+    const gw = makeGateway('absent');
+    r11Image(gw);
+    const opts = r10BreakFirmware(gw, fault);
+    const first = r11Boot(gw, opts);
+    assert.equal(first.status, 1, fault + '\n' + first.stdout + first.stderr);
+    assert.match(first.stderr, message, fault);
+    assert.deepEqual(r11Copies(gw), r11All('image'), fault);
+    assert.equal(fs.existsSync(r11Marker(gw)), true, fault);
+    r11Deploy(gw, { sqlite3: true });
+    const second = r11Boot(gw, opts);
+    assert.equal(second.status, 0, fault + '\n' + second.stdout + second.stderr);
+    assert.match(second.stdout, /OK: existing real sqlite3 matches image pin and loads/, fault);
+    assert.deepEqual(r11Copies(gw), r11All('deployed'), fault);
+    assert.equal(fs.lstatSync(path.join(gw.proj, 'flows.json')).isSymbolicLink(), true, fault);
+    assert.equal(fs.existsSync(r11Marker(gw)), false, fault);
+    assert.equal(requireSqlite3(gw.proj).status, 0, fault);
+  }
+});
+
+test('R11 refusing boots after the first copy nothing, and a hand-placed module ends them', () => {
+  // 32-bit ARM with musl: deploy refuses at materialisation after it wrote
+  // the helpers, codecs and edge-channels.json, and the flows are not
+  // flipped. The seed keeps refusing until an operator places the module.
+  const gw = makeGateway('absent');
+  r11Image(gw);
+  const first = r11Boot(gw, { firmware: false });
+  assert.equal(first.status, 1, first.stdout + first.stderr);
+  r11Deploy(gw, { flip: false });
+  for (let boot = 2; boot <= 3; boot++) {
+    const r = r11Boot(gw, { firmware: false });
+    assert.equal(r.status, 1, 'boot ' + boot + '\n' + r.stdout + r.stderr);
+    assert.match(r.stderr, /firmware sqlite3 source missing or not a real directory/);
+    assert.deepEqual(r11Copies(gw), r11All('deployed', 'image'), 'boot ' + boot);
+  }
+  const d = path.join(gw.proj, 'node_modules', 'sqlite3');
+  copyDir(gw.fwSqlite, d);
+  const last = r11Boot(gw, { firmware: false });
+  assert.equal(last.status, 0, last.stdout + last.stderr);
+  assert.match(last.stdout, /OK: existing real sqlite3 matches image pin and loads/);
+  assert.deepEqual(r11Copies(gw), r11All('deployed', 'image'));
+  assert.equal(fs.existsSync(r11Marker(gw)), false);
+});
+
+test('R11 a seed retry boot after a deploy does not copy the image again', () => {
+  // A metadata-only seed rollback is what a power cut early in an earlier
+  // seed swap leaves. The first boot copies, clears it and asks for a retry;
+  // deploy may run before the retry boot, which then only seeds sqlite3.
+  const gw = makeGateway('absent');
+  r11Image(gw);
+  const b = path.join(gw.proj, 'node_modules', '.osi-sqlite3-seed-rollback.AAAAAA');
+  fs.mkdirSync(b);
+  fs.writeFileSync(path.join(b, '.owner'), 'osi-sqlite3-seed-v2\n');
+  const first = r11Boot(gw);
+  assert.equal(first.status, 1, first.stdout + first.stderr);
+  assert.match(first.stderr, /WARN: cleared marker-only seed backup; retry seed/);
+  assert.deepEqual(r11Copies(gw), r11All('image'));
+  r11Deploy(gw);
+  const second = r11Boot(gw);
+  assert.equal(second.status, 0, second.stdout + second.stderr);
+  assert.match(second.stdout, /OK: seeded verified sqlite3/);
+  assert.deepEqual(r11Copies(gw), r11All('deployed'));
+  assert.equal(fs.existsSync(r11Marker(gw)), false);
+  assert.equal(requireSqlite3(gw.proj).status, 0);
+});
+
+test('R11 sysupgrade copies the new image at its first boot and keeps the deployed flows', () => {
+  // sysupgrade keeps /srv and drops the /etc marker, as on main: the first
+  // boot of the new image copies its helpers, codecs and edge-channels.json.
+  const gw = makeGateway('real-with-binary');
+  r11Image(gw);
+  r11Deploy(gw);
+  const r = r11Boot(gw);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /OK: existing real sqlite3 matches image pin and loads/);
+  assert.deepEqual(r11Copies(gw), r11All('image', 'deployed'));
+  assert.equal(fs.existsSync(r11Marker(gw)), false);
+});

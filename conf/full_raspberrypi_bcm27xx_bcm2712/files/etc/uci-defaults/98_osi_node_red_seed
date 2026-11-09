@@ -23,17 +23,44 @@ if [ -f "$SRC/package-lock.json" ] && [ ! -f "$DST/package-lock.json" ]; then
     cp "$SRC/package-lock.json" "$DST/package-lock.json"
 fi
 
-if [ -f "$SRC/edge-channels.json" ]; then
+# The image's helpers, codecs, edge-channels.json and node_modules are copied
+# once per image install, at its first boot, before the sqlite3 block can
+# refuse. A refusing seed exits 1 and runs again at every boot, and a deploy
+# can run between two of those boots: copying again would put the image's
+# helpers and codecs beside the deployed flows.json. The marker sits in /etc,
+# which a reflash or sysupgrade does not keep, and the sync puts the copies on
+# disk before it. A successful seed removes it.
+SEED_COPIED=/etc/osi-node-red-seed.copied
+if [ -e "$SEED_COPIED" ]; then SEED_COPY=0; else SEED_COPY=1; fi
+
+if [ "$SEED_COPY" = 1 ] && [ -f "$SRC/edge-channels.json" ]; then
     cp "$SRC/edge-channels.json" "$DST/edge-channels.json"
 fi
 
-if [ -d "$SRC/codecs" ]; then
+if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/codecs" ]; then
     mkdir -p "$DST/codecs"
     cp -a "$SRC/codecs/." "$DST/codecs/"
 fi
 
-if [ -d "$SRC/node_modules" ]; then
+if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/node_modules" ]; then
     cp -a "$SRC/node_modules/." "$DST/node_modules/"
+fi
+
+for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-watermark-binding osi-command-ledger osi-scoped-access-commands osi-zone-commands osi-device-commands osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-radio-helper osi-network-api osi-installation-location-helper osi-installation-helper osi-history-router osi-health-helper osi-lib osi-module-defaults osi-journal osi-journal-replication osi-device-writer osi-uplink-dedup-guard osi-uc512-normalize osi-lsn50-normalize osi-matric-potential osi-sdi12-normalize osi-sdi12-commissioning osi-sdi12-recipe osi-sdi12-reassemble osi-valve-control osi-irrigation-policy osi-system-settings osi-scope-helper osi-local-password-reset osi-scheduler-mean-query osi-rejection-recovery osi-entity-name osi-weather-provider osi-crop-kc osi-station-hours osi-rain osi-agronomy-daily osi-watermark-helper; do
+    if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/$module" ]; then
+        rm -rf "$DST/$module" "$DST/node_modules/$module"
+        cp -a "$SRC/$module" "$DST/$module"
+        cp -a "$SRC/$module" "$DST/node_modules/$module"
+    fi
+done
+
+if [ "$SEED_COPY" = 1 ]; then
+    if ! sync; then
+        echo 'WARN: sync failed before recording the image copy' >&2
+    fi
+    if ! touch "$SEED_COPIED"; then
+        echo "WARN: could not write $SEED_COPIED; a refusing seed copies the image again at the next boot" >&2
+    fi
 fi
 
 # Native sqlite must come from the OpenWrt package built for the target CPU.
@@ -48,12 +75,8 @@ fi
 # also refuses, before any change, while a deploy rollback entry exists.
 # A refusal, or a recovery step that asks for a retry, exits 1: the
 # rest of this script is skipped for this boot and OpenWrt keeps the defaults
-# script, so it runs again on the next boot.
-# Skipping the osi-* helper copy is deliberate. A refusing seed runs on every
-# boot, so copying the image's helpers then would overwrite the helpers a
-# later deploy installed at each reboot, while flows.json is copied only when
-# absent. Without sqlite3, osi-db-helper fails to load and every function
-# node that binds it fails with it, whichever helper versions are on disk.
+# script, so it runs again on the next boot. Those later runs skip the image
+# copy above.
 # Operator steps for a retained rollback: osi-live-ops-runbook, repair.md.
 # BEGIN native sqlite3 seed
 seed_sqlite3_report_paths() {
@@ -582,15 +605,7 @@ seed_native_sqlite3() {
 }
 seed_native_sqlite3 || exit 1
 # END native sqlite3 seed
-
-for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-watermark-binding osi-command-ledger osi-scoped-access-commands osi-zone-commands osi-device-commands osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-radio-helper osi-network-api osi-installation-location-helper osi-installation-helper osi-history-router osi-health-helper osi-lib osi-module-defaults osi-journal osi-journal-replication osi-device-writer osi-uplink-dedup-guard osi-uc512-normalize osi-lsn50-normalize osi-matric-potential osi-sdi12-normalize osi-sdi12-commissioning osi-sdi12-recipe osi-sdi12-reassemble osi-valve-control osi-irrigation-policy osi-system-settings osi-scope-helper osi-local-password-reset osi-scheduler-mean-query osi-rejection-recovery osi-entity-name osi-weather-provider osi-crop-kc osi-station-hours osi-rain osi-agronomy-daily osi-watermark-helper; do
-    if [ -d "$SRC/$module" ]; then
-        rm -rf "$DST/$module" "$DST/node_modules/$module"
-        cp -a "$SRC/$module" "$DST/$module"
-        cp -a "$SRC/$module" "$DST/node_modules/$module"
-    fi
-done
-
+rm -f "$SEED_COPIED"
 
 chown -R node-red:node-red "$DST" 2>/dev/null || true
 
