@@ -49,6 +49,12 @@ fi
 # A refusal, or a recovery step that asks for a retry, exits 1: the
 # rest of this script is skipped for this boot and OpenWrt keeps the defaults
 # script, so it runs again on the next boot.
+# Skipping the osi-* helper copy is deliberate. A refusing seed runs on every
+# boot, so copying the image's helpers then would overwrite the helpers a
+# later deploy installed at each reboot, while flows.json is copied only when
+# absent. Without sqlite3, osi-db-helper fails to load and every function
+# node that binds it fails with it, whichever helper versions are on disk.
+# Operator steps for a retained rollback: osi-live-ops-runbook, repair.md.
 # BEGIN native sqlite3 seed
 seed_sqlite3_report_paths() {
     for seed_report in "$@"; do

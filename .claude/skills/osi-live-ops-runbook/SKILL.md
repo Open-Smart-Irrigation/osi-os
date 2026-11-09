@@ -165,7 +165,10 @@ artifact or a failed `verify-communication-contract.js` run; `/srv/node-red/payl
 on a different filesystem than `/srv/node-red` (the symlink flip can't be atomic);
 integrity-check failure on the seed DB; `farming.db` absent while WAL/SHM/journal
 sidecars are present; `npm install` failing; the `sqlite3` CLI unavailable and not
-installable via `opkg`; Node-RED failing to stop within 30s before a migration;
+installable via `opkg`; a native `sqlite3` module rollback folder under
+`/srv/node-red/node_modules/` that deploy cannot prove is its own (operator
+steps: `references/repair.md`, "Native sqlite3 rollback folders block deploy or
+the seed"); Node-RED failing to stop within 30s before a migration;
 a pre-migration checkpoint/integrity-check failure; a migration failure (Node-RED
 is restarted before the script exits — except `migrate-cli.js` exit code 3, a
 backup-restore integrity failure, which leaves Node-RED stopped); a failed
