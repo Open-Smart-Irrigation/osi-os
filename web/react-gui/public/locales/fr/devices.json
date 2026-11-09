@@ -987,6 +987,10 @@
     "resistance": "Résistance {{value}}",
     "resistanceUpTo": "Résistance ≤ {{value}}",
     "offset": "Décalage {{value}} mV",
+    "automation": {
+      "phase1Notice": "L’automatisation de phase 1 n’utilise pas les mesures WATERMARK pour décider de l’irrigation.",
+      "zonePhase1Notice": "Cette valeur inclut des mesures WATERMARK. L’automatisation de phase 1 ne les utilise pas pour décider de l’irrigation."
+    },
     "soilTempNotMeasured": "Température du sol non mesurée",
     "dieTemp": "Carte {{value}} °C",
     "supply": "Alimentation {{value}} V",

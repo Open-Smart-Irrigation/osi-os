@@ -51,5 +51,12 @@ export function WatermarkProbeSection({ probes, soilTempC, onOpenHistory }: Wate
       }
       : null,
   }));
-  return <SoilTensionReadings family={t('soilTension.family.watermark')} probes={tiles} />;
+  return (
+    <div>
+      <SoilTensionReadings family={t('soilTension.family.watermark')} probes={tiles} />
+      <p className="mt-2 text-sm text-[var(--text-secondary)]">
+        {t('watermark.automation.phase1Notice')}
+      </p>
+    </div>
+  );
 }
