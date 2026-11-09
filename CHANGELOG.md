@@ -22,6 +22,21 @@ coverage per zone day and the single selected gauge per zone that 0.8.1
 announced for 0.9.0 ship in this release.
 
 ### Upgrade notes
+- **Valve gateways: bench pass before farm gateways (#506).** This release
+  changes how valve plans reach a STREGA valve: one full plan snapshot per
+  edit instead of re-sent queued configuration. The change ships with the
+  author's deploy statement unresolved: a GEN1 (SV1) farm gateway takes it
+  only after a bench pass on a test gateway that includes a ChirpStack
+  restart, and a GEN2 (SV2) gateway only after hardware gate 4 confirms the
+  one-byte zero-window frame for an emptied day (or the owner adopts the
+  `80` clear-prefix interim, `app_settings` `valve_gen2_snapshot_clear_prefix`
+  = `1`). The bench list is in the #506 description. Deploy this release to
+  the valve-equipped test gateway first and run that list before any farm
+  gateway with valves.
+- **Gateways still on 0.7.0 upgrade too.** The notes above assume 0.8.1. A
+  gateway at 0.7.0 (migration head 68) also takes `0069` and `0070` in the
+  same deploy; nothing else differs, and `deploy.sh` captures its live
+  helper modules into the previous payload the same way.
 - **Cloud first: OSI Server at osi-server `460c424b` (#389) or later before
   any linked gateway takes this release.** The edge adds four sync event ops
   for conditional irrigation (`IRRIGATION_POLICY_UPSERTED`,
