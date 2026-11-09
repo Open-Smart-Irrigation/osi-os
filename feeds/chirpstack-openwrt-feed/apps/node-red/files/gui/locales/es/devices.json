@@ -113,6 +113,9 @@
     "yesRemove": "Sí, eliminar",
     "removing": "Eliminando...",
     "failedToRemove": "Error al eliminar el dispositivo",
+    "removedClearingScheduled": "Válvula eliminada. Su programa semanal se está borrando; hasta que la válvula lo confirme, puede seguir ejecutando su programa.",
+    "removedClearingFailed": "Válvula eliminada, pero no se pudo borrar su programa semanal. La válvula puede seguir ejecutando su programa.",
+    "removedNoticeOk": "OK",
     "lastSeen": "Visto hace {{minutes}} minutos",
     "actuationFeedback": {
       "closed": "Cerrada",
@@ -280,14 +283,15 @@
         "nearTrigger": "Cerca del umbral de activación",
         "belowTrigger": "Por debajo del umbral de activación",
         "title": "Suelo ahora",
-        "wet": "Húmedo",
-        "moderate": "Moderado",
-        "dry": "Seco",
         "volumetric": "Contenido volumétrico de agua",
         "noReadingSince": "Sin lecturas desde {{since}}",
         "noReadingYet": "Todavía sin lecturas",
         "invalidReading": "Lectura no válida",
-        "lastValid": "Última válida {{value}} · {{time}}"
+        "lastValid": "Última válida {{value}} · {{time}}",
+        "depthSuffix": "({{depth}} cm)",
+        "lastReading": "Última lectura {{since}}",
+        "triggerProbeLastReading": "Sonda de activación: última lectura {{since}}",
+        "triggerProbeInvalid": "Sonda de activación: lectura no válida"
       },
       "rainFromStation": "Medida en la estación MeteoSwiss {{station}} (a {{distance}} km)",
       "rainFromWeather": "De los datos meteorológicos (no medida)",
@@ -436,6 +440,9 @@
       "lastSevenDaysHelpLabel": "Acerca de los últimos 7 días",
       "setupRequiredHelpLabel": "Por qué falta el riego efectivo",
       "rainSourceHelpLabel": "De dónde procede este valor de lluvia",
+      "rainSoFar": "hasta ahora",
+      "utcDay": "día UTC",
+      "rainReceivedOnly": "solo {{value}} recibidos (día incompleto)",
       "demandNoSource": "ninguna fuente meteorológica para este día",
       "demandMixedStation": "horas de dos estaciones de MeteoSwiss",
       "demandUnknownStation": "estación de MeteoSwiss desconocida para estas horas",
@@ -448,12 +455,17 @@
         "cloud": "ET0 del modelo meteorológico Open-Meteo (no medida en esta finca); OSI Cloud aplica el coeficiente de cultivo"
       },
       "modelAccuracyNote": "La ET0 de un modelo puede diferir un 10-20 % de una estación local en un solo día, sobre todo en días nublados o ventosos y en montaña; los totales semanales coinciden mejor.",
-      "meteoswissCloudNote": "Esta zona usa MeteoSwiss en el gateway; el historial propio de OSI Cloud usa Open-Meteo hasta que el historial de MeteoSwiss esté disponible en la nube."
+      "meteoswissCloudNote": "Esta zona usa MeteoSwiss en el gateway; el historial propio de OSI Cloud usa Open-Meteo hasta que el historial de MeteoSwiss esté disponible en la nube.",
+      "rainCoverage": {
+        "providerPartial": "Cantidad del proveedor — cobertura parcial",
+        "receivedOnlyLabel": "solo recibido (día incompleto)"
+      }
     },
     "generatedAt": "Generado {{time}}",
     "sectionTitle": "Entorno y previsión meteorológica",
     "loading": "Cargando datos ambientales…",
     "loadFailed": "No se pudieron cargar los datos ambientales",
+    "noData": "Todavía no hay datos del entorno.",
     "tabs": {
       "water": "Agua",
       "soil": "Suelo",
@@ -657,7 +669,8 @@
       "longitudeRange": "La longitud debe estar entre -180 y 180.",
       "flowRateRequired": "El caudal (L/min) es necesario para guardar la calibración del riego.",
       "flowRatePositive": "El caudal (L/min) debe ser mayor que 0.",
-      "saveFailed": "No se pudo guardar"
+      "saveFailed": "No se pudo guardar",
+      "rainChoiceSaveFailed": "No se guardó la elección del pluviómetro. Revise la selección e inténtelo de nuevo."
     },
     "weatherProvider": "Proveedor meteorológico",
     "weatherProviderHelpLabel": "Acerca del proveedor meteorológico",
@@ -672,7 +685,13 @@
     "stageStartedOn": "Inicio de la etapa",
     "stageStartedOnHelpLabel": "Acerca de la fecha de inicio de la etapa",
     "stageStartedOnHelp": "La fecha en que comenzó la etapa actual (día 1). En las etapas de desarrollo y final de temporada, el Kc sigue la curva FAO-56 a partir de esta fecha; en las demás etapas se mantiene en el valor de la etapa. La etapa nunca avanza por sí sola: tras la duración típica para este cultivo ({{days}} días), el Kc se queda en el valor final de la etapa hasta que elija la etapa siguiente. Tras la caída de las hojas o la cosecha, elija Reposo (Kc 0,25, suelo desnudo); en primavera, elija Etapa inicial con la fecha de brotación. Los cambios de cultivo, etapa o fecha de inicio se aplican a los días calculados después del cambio. Déjelo vacío para usar el valor de tabla de la etapa.",
-    "stageStartedOnHelpNoLength": "La fecha en que comenzó la etapa actual (día 1). En las etapas de desarrollo y final de temporada, el Kc sigue la curva FAO-56 a partir de esta fecha; en las demás etapas se mantiene en el valor de la etapa. La etapa nunca avanza por sí sola: tras la duración típica para este cultivo, el Kc se queda en el valor final de la etapa hasta que elija la etapa siguiente. Tras la caída de las hojas o la cosecha, elija Reposo (Kc 0,25, suelo desnudo); en primavera, elija Etapa inicial con la fecha de brotación. Los cambios de cultivo, etapa o fecha de inicio se aplican a los días calculados después del cambio. Déjelo vacío para usar el valor de tabla de la etapa."
+    "stageStartedOnHelpNoLength": "La fecha en que comenzó la etapa actual (día 1). En las etapas de desarrollo y final de temporada, el Kc sigue la curva FAO-56 a partir de esta fecha; en las demás etapas se mantiene en el valor de la etapa. La etapa nunca avanza por sí sola: tras la duración típica para este cultivo, el Kc se queda en el valor final de la etapa hasta que elija la etapa siguiente. Tras la caída de las hojas o la cosecha, elija Reposo (Kc 0,25, suelo desnudo); en primavera, elija Etapa inicial con la fecha de brotación. Los cambios de cultivo, etapa o fecha de inicio se aplican a los días calculados después del cambio. Déjelo vacío para usar el valor de tabla de la etapa.",
+    "partialSave": {
+      "saved": "Guardado:",
+      "config": "Configuración de la zona",
+      "calibration": "Calibración del riego",
+      "location": "Ubicación de la zona"
+    }
   },
   "irrigationOutcomes": {
     "title": "Riegos recientes",
@@ -719,14 +738,56 @@
     "rollbackRequestAccepted": "Solicitud de reversión aceptada (versión {{version}}; {{status}}).",
     "degraded": "Configuración de adquisición degradada",
     "active": "Configuración de adquisición activa",
-    "deploymentStatus": "Configuración de adquisición: {{status}}"
+    "deploymentStatus": "Configuración de adquisición: {{status}}",
+    "tensiomark": {
+      "title": "Interpretación Tensiomark",
+      "qualification": "Las lecturas están en pF y la temperatura se informa primero. El rango de calibración no está verificado.",
+      "calibrationRange": "Rango de calibración: no verificado",
+      "addSensor": "Añadir sensor",
+      "confirmation": "Confirmo que el sensor informa primero la temperatura y después el pF.",
+      "confirmRequired": "Antes de guardar, confirme que el sensor informa primero la temperatura y después el pF.",
+      "saved": "Configuración Tensiomark guardada. El rango de calibración no está verificado.",
+      "address": "Dirección",
+      "channel": "Canal",
+      "identity": "Identidad",
+      "depthCmLabel": "Profundidad (cm)",
+      "addressAria": "Dirección Tensiomark {{row}}",
+      "channelAria": "Canal Tensiomark {{row}}",
+      "identityAria": "Identidad Tensiomark {{row}}",
+      "depthAria": "Profundidad Tensiomark {{row}} (cm)",
+      "identityExample": "p. ej. {{address}}11TENSIOMARK_2Vh_10A00001",
+      "removeSensor": "Eliminar",
+      "removeSensorAria": "Eliminar sensor Tensiomark {{row}}",
+      "errors": {
+        "sensorCount": "Configure uno o dos sensores Tensiomark.",
+        "addressInvalid": "Sensor {{row}}: la dirección debe ser una letra o un dígito.",
+        "channelInvalid": "Sensor {{row}}: elija el canal 1 o 2.",
+        "identityInvalid": "Sensor {{row}}: la identidad debe ser {{address}}11TENSIOMARK_2Vh_10A seguida de cinco dígitos.",
+        "depthInvalid": "Sensor {{row}}: deje la profundidad vacía si se desconoce, o introduzca centímetros enteros de 1 a 1000.",
+        "calibrationInvalid": "Sensor {{row}}: el rango de calibración debe seguir sin verificar.",
+        "duplicateAddress": "Sensor {{row}}: otro sensor ya usa la dirección {{address}}.",
+        "duplicateIdentity": "Sensor {{row}}: otro sensor ya usa esta identidad.",
+        "duplicateChannel": "Sensor {{row}}: otro sensor ya usa el canal {{channel}}."
+      }
+    }
   },
   "sdi12Soil": {
     "removeConfirm": "¿Eliminar este dispositivo?",
     "removeSubtitle": "El dispositivo se desvinculará de tu cuenta.",
     "yesRemove": "Sí, eliminar",
     "removing": "Eliminando...",
-    "failedToRemove": "Error al eliminar el dispositivo"
+    "failedToRemove": "Error al eliminar el dispositivo",
+    "badge": "SDI-12",
+    "noProfile": "Sin perfil de sonda",
+    "detecting": "Detectando la sonda (pendiente)",
+    "invalidLayout": "La configuración de canales Sentek guardada no es válida. Abra la configuración del dispositivo y guarde una configuración válida antes de confiar en las lecturas del suelo.",
+    "status": {
+      "pending_identify": "Identificando",
+      "identified": "Identificada",
+      "unmatched": "No reconocida",
+      "manual": "Definida manualmente",
+      "unknown": "Estado desconocido"
+    }
   },
   "deviceRemoval": {
     "titleZone": "¿Retirar de esta zona?",
@@ -857,7 +918,60 @@
     "sectionExtractionWindows": "Ventanas de extracción",
     "sectionTwdMethod": "Método TWD",
     "sectionSdVpdCorrelation": "Correlación SD-VPD",
-    "sectionLatestReasoningTrace": "Último rastro de razonamiento"
+    "sectionLatestReasoningTrace": "Último rastro de razonamiento",
+    "tabScheduling": "Programación avanzada",
+    "tabAnalysis": "Análisis avanzado",
+    "phenologyDescription": "La fase fenológica ajusta los umbrales de estrés a la fase de crecimiento actual. La clave de calibración selecciona umbrales TWD absolutos específicos de la especie.",
+    "stressTriggerLevel": "Nivel de activación por estrés",
+    "stressLevel": {
+      "low": "Bajo — primeros indicios de estrés",
+      "medium": "Medio — estrés moderado (recomendado)",
+      "high": "Alto — estrés significativo",
+      "conservative": "Conservador — solo estrés intenso"
+    },
+    "stressLevelOther": "Nivel {{level}}",
+    "baseDuration": "Duración base",
+    "responseModeOption": {
+      "proportional": "Proporcional — ajustar la duración al nivel de estrés",
+      "fixed": "Fijo — usar siempre la duración base",
+      "aggressive": "Agresivo — ampliar mucho con estrés alto"
+    },
+    "lastTriggered": "Última activación",
+    "never": "Nunca",
+    "status": "Estado",
+    "weatherControlled": "Controlado por la integración meteorológica",
+    "noSchedule": "No hay programación",
+    "rainSuppressionDescription": "La supresión se levanta cuando el episodio de lluvia sale de la ventana meteorológica móvil. Se comprueba la recuperación del árbol antes de reanudar cualquier aumento del riego.",
+    "recoveryDescription": "Después de un riego, una espera de recuperación de 24 h comprueba si ha disminuido el déficit hídrico del árbol antes del amanecer (TWD-night) antes de emitir el siguiente aumento del riego. Evita el exceso de riego tras episodios de emergencia.",
+    "aggregationDescription": "El estrés de la zona se calcula como la mediana (limpia con MAD) de todos los árboles supervisados. Los árboles atípicos (IQR × 1,5) se excluyen de la recomendación, pero siguen visibles por árbol. Los días de baja confianza (marcas QA: pico de lluvia, señal plana, pérdida de señal) se excluyen de la agregación.",
+    "timezoneExample": "p. ej., Europe/Rome",
+    "timezoneSaveFailed": "No se pudo guardar.",
+    "dmaxWindow": "Ventana d_max (antes del amanecer)",
+    "dminWindow": "Ventana d_min (mediodía)",
+    "localWindow": "{{start}} – {{end}} hora local",
+    "method": "Método",
+    "stepwiseEnvelope": "Envolvente escalonada (Peters et al. 2025)",
+    "twdDescription": "La envolvente de ventana móvil registra el diámetro máximo del tallo antes del amanecer dentro del periodo de cálculo (365 días). TWD-night = envelopeRef − d_max. TWD-day = envelopeRef − d_min. Se usan umbrales absolutos (µm); la calibración específica de la especie se aplica mediante la clave de calibración indicada.",
+    "baselineR2": "R² de referencia",
+    "rolling14DayR2": "R² móvil de 14 días",
+    "sdVpdStatusLabel": "Estado SD-VPD",
+    "sdVpdStatus": {
+      "coupled": "Acoplado",
+      "decoupled": "Desacoplado",
+      "insufficient_data": "Datos insuficientes"
+    },
+    "vpdOverrides": "Ajustes por VPD",
+    "vpdOverrideCounts": "{{downgraded}} reducidos / {{upgraded}} aumentados",
+    "sdVpdDescription": "La amplitud diaria del diámetro del tallo (SDA = d_max − d_min) se correlaciona con el VPD máximo diario para detectar respuestas de estrés anómalas. La recomendación más reciente de la zona resume tanto el acoplamiento SD-VPD móvil como los ajustes del estrés basados en VPD.",
+    "insufficientData": "Datos insuficientes",
+    "diagnosticsUnavailable": "No disponible en los diagnósticos de recomendaciones",
+    "loadingRecommendations": "Cargando recomendaciones…",
+    "computedAt": "Calculado el",
+    "usableTrees": "Árboles utilizables",
+    "lowConfidenceTrees": "Árboles con baja confianza",
+    "outlierFiltered": "Atípicos excluidos",
+    "zoneConfidence": "Confianza de la zona",
+    "noRecommendations": "Aún no se han calculado recomendaciones para esta zona. Ejecute el cálculo dendrométrico o espere al proceso diario de las 08:00 UTC."
   },
   "lsn50Mode": {
     "mod3Description": "Tres canales ADC más modo I2C.",
@@ -868,15 +982,15 @@
     "chameleonNeedsMod3": "Chameleon SWT solo puede activarse cuando MOD3 esté activo."
   },
   "watermark": {
-    "sectionTitle": "Tensión hídrica del suelo WATERMARK",
-    "probe": "Sonda {{n}}",
-    "depthUnset": "Profundidad no definida",
     "wet": "Húmedo",
     "wetUpTo": "≤ {{value}}",
     "resistance": "Resistencia {{value}}",
     "resistanceUpTo": "Resistencia ≤ {{value}}",
     "offset": "Desplazamiento {{value}} mV",
-    "soilTemp": "Suelo {{value}} °C",
+    "automation": {
+      "phase1Notice": "La automatización de la fase 1 no utiliza las lecturas WATERMARK para decidir si se debe regar.",
+      "zonePhase1Notice": "Este valor incluye lecturas WATERMARK. La automatización de la fase 1 no utiliza esas lecturas para decidir si se debe regar."
+    },
     "soilTempNotMeasured": "Temperatura del suelo no medida",
     "dieTemp": "Placa {{value}} °C",
     "supply": "Alimentación {{value}} V",
@@ -938,6 +1052,50 @@
     "lastReport": "Último registro",
     "tips_one": "{{count}} basculación",
     "tips_other": "{{count}} basculaciones",
-    "tipsUnavailable": "Número de basculaciones no disponible"
+    "tipsUnavailable": "Número de basculaciones no disponible",
+    "temperature": "Temperatura de la carcasa del pluviómetro",
+    "temperatureHint": "Medida dentro de la carcasa, no es la temperatura del aire · último informe {{time}}"
+  },
+  "zoneRainGauge": {
+    "label": "Pluviómetro de esta zona",
+    "helpLabel": "Acerca del pluviómetro",
+    "help": "Cuando varios pluviómetros informan para esta zona, la lluvia diaria de la zona procede del pluviómetro que elija aquí. La lluvia de dos pluviómetros nunca se suma. Un cambio recalcula los últimos 30 días.",
+    "notChosen": "— Ningún pluviómetro elegido —",
+    "optionShared": "{{name}} (estación meteorológica compartida)",
+    "optionSuggested": "{{label}} — sugerido",
+    "ambiguous": "Dos pluviómetros informan para esta zona. Hasta que elija uno, la zona no tiene lluvia medida.",
+    "loadFailed": "No se pudieron cargar los pluviómetros de esta zona.",
+    "banner": "Dos pluviómetros informan para esta zona. Elija uno en la configuración de la zona.",
+    "automaticOption": "Automático: {{name}}",
+    "automaticOnlyCandidate": "Se usa automáticamente {{name}}, el único pluviómetro de esta zona.",
+    "bannerReadOnly": "Pida a alguien que pueda editar esta zona que elija un pluviómetro en la configuración de la zona."
+  },
+  "soilTension": {
+    "sectionTitle": "Tensión hídrica del suelo",
+    "channel": "Tensión del suelo {{channel}}",
+    "depthCm": "({{depth}} cm)",
+    "soilTemp": "Suelo {{value}} °C",
+    "soilTempSeries": "Temperatura del suelo {{channel}}",
+    "invalidReading": "Lectura no válida",
+    "noReadings": "No hay lecturas del suelo disponibles.",
+    "family": {
+      "watermark": "WATERMARK",
+      "tensiomark": "Tensiomark"
+    }
+  },
+  "deviceCard": {
+    "footer": {
+      "lastSeenJustNow": "Visto ahora mismo",
+      "lastSeenMinutes": "Visto hace {{count}} min",
+      "lastSeenHours": "Visto hace {{count}} h",
+      "lastSeenAt": "Visto el {{date}}",
+      "neverSeen": "Nunca visto",
+      "battery": "Batería",
+      "batteryLow": "Batería baja"
+    },
+    "settings": "Configuración del dispositivo",
+    "closeSettings": "Cerrar configuración del dispositivo",
+    "zones": "Zonas:",
+    "noZones": "Sin zonas asignadas"
   }
 }

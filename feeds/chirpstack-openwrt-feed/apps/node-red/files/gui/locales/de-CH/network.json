@@ -47,7 +47,9 @@
       "legendWeak": "Schwach",
       "noPosition": "Für das Gateway ist keine Position erfasst; der Rundgang wird ohne Bezugspunkt gezeichnet.",
       "noPoints": "Keine Beobachtung in diesem Zeitfenster trägt eine Position.",
-      "captureOff": "Die Funkaufzeichnung ist auf diesem Gateway ausgeschaltet; es werden keine Abdeckungspunkte erfasst."
+      "captureOff": "Die Funkaufzeichnung ist auf diesem Gateway ausgeschaltet; es werden keine Abdeckungspunkte erfasst.",
+      "noGpsFix": "Kein GPS-Fix",
+      "noGpsFixHint": "Der Feldtester hat noch keinen GPS-Fix, deshalb werden seine Uplinks nicht gezeichnet. Bringen Sie ihn ins Freie mit freier Sicht zum Himmel und warten Sie, bis er Satelliten anzeigt. Punkte erscheinen, sobald Fixes eintreffen."
     }
   }
 }

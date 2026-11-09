@@ -63,8 +63,7 @@
       "reason": {
         "unsupported": "Tewagirwa",
         "available_no_recent_data": "Tewali biwandiiko bipya"
-      },
-      "showLegacy": "Show legacy estimates"
+      }
     },
     "range": {
       "label": "Ekiseera ky'okwekenneenya",
@@ -85,13 +84,17 @@
       "overlaid": "Ebiteekeddwa wamu",
       "smallMultiples": "Ebifaananyi ebitono ebingi"
     },
+    "autoStack": {
+      "note": "Shown stacked: at this width the unit axes leave too little room for the chart.",
+      "showOverlaid": "Show overlaid anyway"
+    },
     "toggle": {
       "normalize": "Kiteekemu omutindo"
     },
     "export": {
       "csv": "Gyamu CSV",
       "png": "Gyamu PNG",
-      "allZonesCsv": "Gyamu CSV ya zone zonna",
+      "allZonesCsv": "Export all zones CSV",
       "allZonesCsvBusy": "Exporting…",
       "qualityColumns": "Include quality columns",
       "errors": {
@@ -132,8 +135,7 @@
       "partialDays": " ({{count}} of {{expected}} d)",
       "reportsReceived_one": " · {{count}} report received",
       "reportsReceived_other": " · {{count}} reports received"
-    },
-    "legacyEstimate": "legacy estimate"
+    }
   },
   "restart": {
     "gateway_identity_change": "Endagamuntu ya getwaya etereezeddwa. Empeereza zijja kuddamu okutandika mu sikonda {{count}}.",
