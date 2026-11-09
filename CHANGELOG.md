@@ -7,6 +7,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.8.2] — 2026-11-09
+
+Ordered schema migrations `0071__rain_observations.sql` to
+`0079__chameleon_reading_links.sql` (nine) are new since 0.8.1, so the
+migration head moves from 70 to 79. `0078` is a `data` migration; the other
+eight are `additive`. Five helper modules are new in the payload:
+`osi-rain`, `osi-matric-potential`, `osi-irrigation-policy`,
+`osi-scheduler-mean-query` and `osi-local-password-reset`. `deploy.sh`
+installs them with the flows (see the helper-module note below). The rain
+coverage per zone day and the single selected gauge per zone that 0.8.1
+announced for 0.9.0 ship in this release.
+
 ### Upgrade notes
 - **Cloud first: OSI Server at osi-server `460c424b` (#389) or later before
   any linked gateway takes this release.** The edge adds four sync event ops
@@ -81,18 +95,80 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ([deploy runbook](.claude/skills/osi-live-ops-runbook/references/deploy.md),
   "Helper modules in the payload";
   [audit](docs/operations/deploy-module-ordering-audit-2026-11-09.md)).
+- **Conditional irrigation cannot be switched on in this release (#515).**
+  The shipped flows pass the policy service no valve qualification, so
+  saving a policy that is enabled and attached to a schedule is refused with
+  HTTP 503 `qualification_unavailable`. The refusal rolls the whole save
+  back: the zone keeps its fixed schedules, and the valve keeps its plan and
+  keeps watering. Once the gateway clock is trusted, the policy editor shows
+  "Qualification: unavailable". A cloud `UPSERT_IRRIGATION_POLICY` that
+  enables a policy is not applied either. A disabled policy can still be
+  saved. Gen1 and Gen2 hardware qualification is open
+  ([conditional irrigation](docs/operations/conditional-irrigation.md)).
+- **Luganda: the owner accepted English text for this release.** On
+  2026-11-09 the owner accepted the English source text, for 0.8.2, for the
+  keys listed in
+  [docs/i18n/pending-luganda-translations.md](docs/i18n/pending-luganda-translations.md):
+  the "Release gate" section (device card footer keys that replaced human
+  Luganda) and the keys added by #599, #585 and #569. This meets that
+  section's gate, so 0.8.2 may go to a gateway whose interface runs in
+  Luganda. A human Luganda pass follows in a later release.
+- **Expect history repair uploads after the upgrade (#507).** The first
+  history manifest pass compares segments that 0.8.1 never compared (see
+  Fixed). It takes about 5 minutes per 500 segments, about 5.5 hours for
+  33,000. A mismatch queues repair keys, at most 2,000 per table, and they
+  drain at 50 keys per table per sync tick through the history batch upload.
+- **Valve plans after a database restore (#506).** Press "Re-send plan to
+  valve" on each valve after restoring `farming.db` from a backup: the
+  restored ledger can describe a plan the valve does not hold, and nothing
+  re-sends a plan on its own (see the plan snapshot entry under Changed).
+
+### Added
+- **Conditional irrigation, set up but not active (#515).** A zone can carry
+  an irrigation policy that decides at each scheduled opportunity whether to
+  water, from soil tension (Wet 20 kPa, Moist 30 kPa, Dry 50 kPa or a custom
+  value), VWC or a dendrometer condition. Crossing a threshold never starts a
+  run by itself. Without selected schedules the farmer picks a daily start
+  time. The local resource is `/api/irrigation-zones/:id/irrigation-policy`;
+  the cloud edits it with `UPSERT_IRRIGATION_POLICY`,
+  `PAUSE_IRRIGATION_POLICY` and `RETRY_IRRIGATION_VALVE`. Migrations `0076`
+  and `0077` add the tables and sync triggers. Activation is refused in
+  this release; see the upgrade note.
+- **Rain coverage per zone day and one rain gauge per zone (#488, #490,
+  #493, #494, #497, #547).** Every LoRain and S2120 uplink is recorded once
+  in `rain_observations` (migration `0071`), keyed by ChirpStack's
+  `deduplicationId`. A repeated delivery, also after a restart, and a
+  confirmed-uplink retransmission count once. A different payload under the
+  same identity is quarantined, and a frame without that identity is stored
+  but never counted. Each zone day now carries a coverage (migration
+  `0072`): a measured 0 mm stays 0, missing evidence stays unknown, and an
+  incomplete day keeps what was received as a lower bound, shown as
+  "received only". When two gauges in a zone qualify, nothing adds them: the
+  zone asks for one to be chosen in its settings, and a change recomputes
+  the last 30 days. A gauge chosen automatically because it is the only one
+  is named in the settings, and a failed gauge save after the other settings
+  saved keeps the dialog open with a retry message. Migration `0073` sends
+  the quality fields to the cloud (see the cloud-first notes above).
+- **SDI-12 Tensiomark probes (#503, #525).** The SDI-12 card commissions a
+  Tensiomark through versioned probe profiles, with a validated layout per
+  sensor (address, channel, depth). The gateway converts the probe's pF into
+  canonical kPa in `swt_N` with the `osi-matric-potential` conversion the
+  cloud also uses, and keeps each observation in `tensiomark_observations`
+  (migrations `0074` and `0075`), which syncs as a history table (see the
+  Tensiomark note above). The soil tension display range widens to 0 to
+  1,000,000 kPa, and CSV v1 soil-tension pF cells carry full precision,
+  formatted like the cloud export. A legacy `PUT /sdi12/config` with
+  `probe_profile: TENSIOMARK` and no layout is refused with HTTP 400 instead
+  of clearing the layout. #525 makes commissioning call the ChirpStack
+  helper methods that exist; before, every apply and rollback failed before
+  it reached the device.
+- **Read-only rain history comparison (#498).**
+  `scripts/rain-history-diff.js` reads a retained copy of `farming.db` and
+  writes per-device and zone-day CSV with summaries. It gives numeric
+  differences only where gauge and period provenance supports them, and it
+  refuses a live database path or its SQLite sidecars.
 
 ### Changed
-- **Conditional irrigation: the lifecycle service owns device unclaim.** A
-  local `DELETE /api/devices/:deveui` and a cloud `UNCLAIM_DEVICE` now both
-  run in the conditional lifecycle service, which detaches the device under
-  its `sync_version` fence, cancels queued opens without a CLOSE, and queues
-  the plan-clearing snapshot on the valve writer. The cleanup outcome keeps
-  the vocabulary below (`valve_cleanup` on the HTTP body, `valveCleanup` on
-  the ACK, now with `final`), but the cloud ACK result is `APPLIED`, the
-  clearing outcome is `clearing_scheduled`, and a cleanup that finishes after
-  the ACK is sent as a second, final ACK row. The earlier cloud cleanup node
-  and its route are removed.
 - **A cancelled open that was handed to ChirpStack keeps the valve reserved.**
   The cancel still flushes the device queue and never sends a CLOSE, but a
   queue read taken before the flush no longer counts as proof that the open
@@ -102,27 +178,117 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `valve_busy` until the first open's bounded duration has passed. Only an open
   that never reached ChirpStack is cancelled outright. An unclaim reports the
   same outcome in `in_flight_cancel`.
-- **Valve plan snapshots go out through the ChirpStack transport only.** The
-  CMD-04 snapshot path no longer falls back to MQTT downlinks: without a
-  transport, snapshots stay pending and STREGA writes fail closed.
-
+- **One full plan snapshot per valve edit (#506, #515).** A schedule add,
+  edit or delete, "Re-send plan to valve", pause, skip today, resume and
+  unclaim each send the valve its complete current plan. 0.8.1 re-sent older
+  queued plan rows after a queue flush. Edits less than 30 s apart produce
+  one snapshot, sent 30 to 90 s after the last edit and at most 5 minutes
+  after the first; the valve tick runs every 60 s instead of 600 s. A GEN1
+  snapshot is up to 8 downlinks (status, then seven weekdays) and Class A
+  delivers one downlink per uplink, so it takes about 8 uplink intervals; a
+  pause, one downlink before, is now a full snapshot. A valve with no weekly
+  schedule and no plan history gets the status only, so a plan programmed
+  over Bluetooth is not wiped. A newer snapshot supersedes older rows still
+  waiting for an ACK. A row the valve may not hold (unacknowledged after
+  24 hours, or removed by a cancel or unclaim flush) shows "Device may not
+  hold this plan" on the valve tile, and nothing re-sends it: "Re-send plan
+  to valve" is the recovery. Snapshots go out through the ChirpStack API
+  only, with no MQTT fallback; without it they stay pending and STREGA
+  writes fail closed. A GEN2 empty day is sent as a zero-window frame;
+  `app_settings` key `valve_gen2_snapshot_clear_prefix` set to `1` sends the
+  whole-plan clear `80` first (default off). An older cloud shows the new
+  lost slots as failed.
 - **Sync contract: a cloud `PAUSE_IRRIGATION_POLICY` may carry
   `expected_policy_version: null`.** The field stays required. Null pauses the
   version that is current on the gateway, also while a newer edit is still
   pending on the valve or was not applied; an integer still has to match the
   current version or the pause is refused as a version conflict.
+- **Irrigation advice reads rain by evidence, not by amount (#492, #496).**
+  Dendrometer advice and the Water tab take a certified local gauge day
+  first, so a measured dry day wins over provider rain. Next comes a
+  received amount of 5 mm or more as a lower bound: it may start rain
+  suppression but never proves a dry day. Then provider rain, measured by a
+  station before modelled, over the hours of the farm day that have passed.
+  Otherwise the rain is unknown: that never starts suppression, and the zone
+  verdict is shown with `rain_unknown`. Before this release a measured 0 mm
+  day fell through to provider rain, and a provider's 6 mm could start
+  suppression on a dry day. The rules are in
+  [docs/contracts/rainfall/rain-resolution-policy.md](docs/contracts/rainfall/rain-resolution-policy.md).
+- **Threshold scheduling counts a Chameleon reading only through its link
+  to the raw reading (#573).** Migration `0079` adds
+  `chameleon_reading_links`, and ingest writes the reading, its raw
+  diagnostic and the link in one transaction. The scheduler leaves out a
+  Chameleon reading without a link, a reading flagged I2C, timeout or
+  data-invalid, and a channel flagged open, and it counts a Chameleon
+  channel only from 0 to 300 kPa. Readings stored before the upgrade have no
+  link, so a Chameleon zone's one-hour mean starts with the first reading
+  after the upgrade. If the new query module does not load, the zone is not
+  evaluated and no valve opens. KIWI, CLOVER and SDI-12 keep the 0 to
+  1,000,000 kPa range, and the Water card display is unchanged.
+- **The LoRain rate and 10-minute value are gone from the Data view
+  (#584).** Migration `0078` clears them (see the LoRain note above), and the
+  "Show legacy estimates" switch and its "(legacy estimate)" label are
+  removed. A saved view that held the rate opens without it and keeps the
+  rain amount.
+- **Soil cards (#500, #508, #510, #599).** The Wet, Moist and Dry pill shows
+  on the latest stored reading at any age, and the card states that age;
+  0.8.1 hid the pill after 3 hours. A stale Water card reading keeps its
+  value and pill under "No reading since …". The status dot gets a fill
+  level, so the three states differ without colour. WATERMARK and Tensiomark
+  readings share one soil tension layout, and LSN50 and SDI-12 cards get the
+  "Last seen" footer. Device and zone cards say that automatic irrigation
+  does not use WATERMARK readings.
+- **VWC rows in the CSV export carry their depth (#509).** A `vwc_N` or
+  `soil_vic_N` row takes its depth from the Sentek layout when the depth map
+  has none, and is labelled `VWC 20cm` or `VIC 12.5cm`. **Values change** in
+  the `series_label` column.
+- **Environment tab (#581, #582, #583).** It opens on Weather when current
+  conditions or a forecast can be shown, otherwise on the first of Water,
+  Soil, Sensors or Agronomy that has data; a tab the user picked stays
+  picked across refreshes. Tabs are at least 48 px high and wrap their
+  labels on a narrow card. Fallback banners are translated from a new
+  `display.fallbackReasonCode`, and the environment summary adds an ordered
+  `reasonCodes` list next to the English drift `reason`.
+- **Valve schedule dialogs (#560, #593, #595).** Deleting a valve schedule
+  asks for confirmation and names the valve and schedule. A rejected
+  schedule lists every conflict instead of the first. The valve overflow
+  menu no longer reopens on a second click on "More", and it takes arrow
+  keys and Escape.
+- **Migration files are checked before the database is touched (#528).**
+  The migration runner, the deploy staging, retry, reconciliation and
+  rebuild tools accept only the exact set of migration files listed in
+  `CHECKSUMS.json`, with matching SHA-256, and refuse before any bookkeeping,
+  backup pruning or SQL. The operator still has to deliver the files from a
+  trusted checkout or bundle:
+  [docs/operations/migration-manifest-trust.md](docs/operations/migration-manifest-trust.md).
+- **Faster migration step (#577).** The runner reads the schema fingerprint
+  PRAGMAs in four queries instead of one `sqlite3` process per table and
+  index. A replay of all migrations went from 201 s to 8 s on the CI host,
+  and the deploy's migration step uses the same runner.
+- **`scripts/verify-sync-op-parity.js` counts every cloud event applier
+  (#602).** The release pre-flight check from the first upgrade note only
+  looked for appliers next to `EdgeSyncService.java`, so a cloud without the
+  journal or scoped-access appliers could still pass. It now scans the
+  whole server source tree.
+- **Repair runbook corrections (#571, #548).** The live-ops references no
+  longer describe editing a linked password verifier by hand or applying
+  raw seed SQL. A backup counts only when the flows, settings, credentials
+  and GUI copies all succeed, and a requested ChirpStack edit stops before
+  any write, because the optional raw ChirpStack copy is not a rollback
+  backup. The pre-ledger catch-up runbook is now a general guide.
 
 ### Fixed
 - **A valve unclaimed from the cloud now gets the same plan-clearing push as
-  a local delete.** A cloud `UNCLAIM_DEVICE` cleared the device owner and
-  zone and acknowledged success, but never ran the valve plan cleanup the
-  local device delete runs, so an unclaimed STREGA valve kept executing the
-  weekly plan stored in its firmware. The cloud path now runs the same
-  cleanup after the detach: it cancels an in-flight actuation without sending
-  a CLOSE, tombstones the schedules and queues the plan that clears the
-  valve. Like the local path, it flushes the device's whole ChirpStack queue,
-  and reports that. The valve may still hold its plan until it receives the
-  clearing push; nothing confirms that it did.
+  a local delete (#504, #515).** In 0.8.1 a cloud `UNCLAIM_DEVICE` cleared
+  the device owner and zone and acknowledged success, but never ran the
+  valve plan cleanup the local device delete runs, so an unclaimed STREGA
+  valve kept executing the weekly plan stored in its firmware. Both paths
+  now run in the conditional lifecycle service. It detaches the device,
+  cancels queued opens without sending a CLOSE, tombstones the schedules and
+  queues the snapshot that clears the valve, which the valve tick sends 30
+  to 90 s later. Like the local path, the cloud path flushes the device's
+  whole ChirpStack queue. The valve may still hold its plan until it
+  receives the clearing push; nothing confirms that it did.
 - **A replayed cloud unclaim no longer detaches a re-claimed device.** The
   detach is now fenced on `sync_version`, like zone assignment and removal: a
   command older than the device's current version changes nothing and is
@@ -132,18 +298,101 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   can be refused; retry once the gateway has synced.
 - **Unclaim reports what happened to the valve plan.** Both unclaim paths now
   report one cleanup outcome: `not_applicable`, `not_attempted` (for example
-  a missing helper module), `failed`, `clearing_not_sent` (no
-  `CHIRPSTACK_APP_ACTUATORS`), `clearing_scheduled` (the valve tick sends the
-  clearing snapshot 30-90 s later), `clearing_sent` or `no_plan_to_clear`, with
-  `may_still_hold_plan` and `plan_clear_confirmed: false`. The valve has no
-  read-back, so a sent clearing plan is not reported as a cleared plan. The
-  local `DELETE /api/devices/:deveui` still answers 200 when the device was
-  removed and adds `valve_cleanup` to the body. The cloud ACK keeps
-  `result: SUCCESS` for the detach and adds `valveCleanup` and, for a valve,
-  `reason`. OSI Server stores both in the command's ACK payload and detail
-  but does not display them yet, so the cloud shows a removal with an
-  unconfirmed or failed cleanup as a plain removal; no cloud change is needed
-  to accept the fields.
+  a refused version fence), `failed`, `no_plan_to_clear` or
+  `clearing_scheduled`, with `may_still_hold_plan` and
+  `plan_clear_confirmed: false`. The valve has no read-back, so a scheduled
+  clearing plan is not reported as a cleared plan. The local
+  `DELETE /api/devices/:deveui` still answers 200 when the device was
+  removed, adds `valve_cleanup` to the body, and its message says when the
+  clear is still on its way or failed. The cloud ACK result is `APPLIED`,
+  with `valveCleanup` (including `final`) and `reason`; a cleanup that
+  finishes after the ACK goes out as a second, final ACK row. No cloud
+  change is needed to accept the fields.
+- **History repair reaches every segment (#507).** The gateway sent the
+  cloud the same first 500 history segments every 5 minutes, so a segment
+  after position 500 was never compared or repaired. The manifest now pages
+  through all segments with a stored cursor; the request, the 500-segment
+  page and the 5-minute cadence are unchanged. After a repair batch, new
+  rows of that table go out within two turns. See the upgrade note on the
+  first pass.
+- **History charts keep each physical sensor as its own trace (#502).**
+  History reads and charts could join readings of different sensors into
+  one line, with jumps that no sensor measured. Series are now keyed by
+  device and channel through raw reads, retained history, the API and the
+  GUI; a missing bucket stays a gap and zero stays a measurement. An
+  interactive request is capped at 30,000 points in total; above that the
+  chart offers another source, a shorter range or a coarser step instead of
+  drawing part of the data.
+- **Two rain counter uplinks in flight no longer count the same rise twice
+  (#490).** The S2120 counter read, the `device_data` insert and the zone
+  rain update were separate steps: with 100 stored, readings of 101 and 102
+  were counted as 1 and 2 mm. They now run in one transaction, as does the
+  LSN50 MOD9 tip counter. A counter frame older than the latest reading is
+  stored with `late_counter_frame` and never counted.
+- **Provider rain on a day with a midnight clock change (#497).** The
+  forecast now uses the same zone-day boundaries as the rest of the rain
+  code. On such a day it had counted the hour before midnight and 24 hours
+  instead of 23.
+- **LoRain and STREGA housing temperature no longer counts as zone air
+  temperature (#585).** The LoRain temperature comes from a thermistor on
+  the gauge's circuit board and the STREGA reading from the valve enclosure,
+  and both were averaged into the zone's air temperature and from there
+  into VPD and dew point. The zone environment now leaves both out. The
+  LoRain card labels the value "Gauge housing temperature" with the time of
+  the last report, and ingest stores a LoRain temperature outside -50 to
+  100 °C as empty, which catches the -273.1 °C of an open or shorted
+  thermistor. Stored values are not rewritten.
+- **The valve safety CLOSE no longer refuses on some uptime readings
+  (#587).** A valid `/proc/uptime` value such as `2.01` became
+  2009.9999999999998 ms in floating point, and the integer receipt check
+  then refused the CLOSE. The reader now takes the decimal digits as whole
+  milliseconds.
+- **Removing an S2120 from a zone removes its weather link (#588).** The
+  zone kept using the detached station. Only that station and zone pair is
+  removed, with its sync event in the same transaction; the primary
+  assignment and other links stay. A cloud unclaim of an S2120 removes its
+  weather links before the unclaim event and records the decision with its
+  acknowledgement, so a replay gets the same answer.
+- **RAK10701 field tester (#398).** The gateway recognises a tester by its
+  device type instead of its ChirpStack profile, so a Clover uplink can no
+  longer be decoded as a tester position, and a valve in the tester
+  application no longer gets a tester reply on fPort 2, the STREGA
+  timed-action port. A frame with zeroed coordinates is no GPS fix. A reply
+  that misses its uplink's downlink window expires instead of going out
+  after the next uplink. The Network page marks a row without a position
+  "No GPS fix" and says the tester needs a clear sky.
+- **Chart axes fit their labels (#511).** Axis titles could fall off the
+  canvas, and right-hand axes were squeezed into a fixed margin. Axis bands
+  are now sized to their tick labels, small multiples drop to one column
+  below 520 px, and an overlaid chart stacks its series when the plot is too
+  narrow to read.
+- **Per-zone history CSV is served as CSV (#561).** The export answered
+  `application/json` around CSV bytes; it now answers
+  `text/csv; charset=utf-8`.
+- **The device list shows rain-day dates again (#586).** The flow asked for
+  a helper module that the shipped registry did not map, so rain-day data
+  was missing from the device list.
+- **Native SQLite module recovery (#570).** An interrupted restore of the
+  `sqlite3` module by `deploy.sh` or the first-boot seed could leave the
+  original under the final path, and the other tool could then delete it.
+  Each tool now refuses before touching the module while the other's
+  rollback entry exists.
+- **Readable button labels (#596, #598).** White text on the dark-mode
+  primary colour (1.86:1) moves to the theme's near-black, 10.39:1; this
+  covers Sign In, the Add menu, the active tab and the main valve buttons.
+  Labels on amber confirm buttons, the green schedule toggle, the zone
+  card's "Data" link and the "Re-authenticate" button get the same
+  near-black in both themes.
+- **Translations (#559, #563, #592, #594).** The Advanced Schedule drawer is
+  translated in every interface language, and the valve-control setting in
+  Spanish, Italian and Portuguese. New Luganda keys ship the English text
+  and are listed in `docs/i18n/pending-luganda-translations.md`.
+- **Journal times in the repeated hour (#543).** An untouched default time
+  in the capture and copy forms no longer becomes ambiguous during the hour
+  that repeats when clocks go back.
+- **Pasted device credentials (#544).** A DevEUI or AppKey pasted with
+  spaces into either registration form was cut at the field length before
+  validation; spaces are now removed first.
 
 ### Security
 - **Self-registration only creates the first account (#468).** With
@@ -175,6 +424,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `scripts/account-recovery.js`, run on the gateway, changes the role or
   disabled state of one selected account, or creates a named recovery
   admin, in a single checked transaction.
+- **Scoped admin actions read the current role (#575).** With
+  `OSI_SCOPED_ACCESS` on, an admin guard could keep authorizing an account
+  demoted after its role was cached. Each token-bound admin decision now
+  reads the current user row and refuses a disabled or deleted account, and
+  a scope load started before a change can no longer refill the cache. The
+  history admin path uses the same check.
+- **A linked account's password is not reset locally (#569).** A linked
+  account signs in with its linked credential, so the admin password reset
+  reported success without changing that login. The reset now changes only
+  local accounts and refuses a linked one with 409
+  `linked_account_password_reset_unsupported`; the Users page offers the
+  form only for local accounts and points to recovery through the linked
+  identity.
+- **Reference-tree flag bound to its owner (#523).** With
+  `OSI_SCOPED_ACCESS` off, a signed-in user could change another owner's
+  reference-tree flag. The route now binds its lookup and its update to the
+  signed-in owner and answers 404 when ownership changes in between. The
+  valve API also closes its ChirpStack client after each request that
+  flushed a queue.
+- **Credential env files are written with mode 0600 (#527, #532).**
+  `.chirpstack.env` and the other credential env files could keep a wider
+  mode through a repair or replacement. They are now written complete
+  through a temporary file at mode 0600, with a raw backup kept, and a
+  failure on the credential file stops the deploy's provisioning step.
+- **The ChirpStack API key stays out of error output (#530).** A failed
+  `create-api-key` CLI call in the bootstrap printed the CLI output and the
+  error message, and a key with characters that gRPC metadata refuses made
+  grpc-js quote the whole `Bearer` value. Both now fail with a fixed message
+  that carries neither.
 
 ---
 
