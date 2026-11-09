@@ -165,7 +165,7 @@ export JWT_SECRET=your-secure-secret-key
 
 ### Development
 ```bash
-cd /Users/silvanimhof/IdeaProjects/osi-os/web/react-gui
+cd web/react-gui
 npm run dev
 ```
 Access at: `http://localhost:3000/gui/`
