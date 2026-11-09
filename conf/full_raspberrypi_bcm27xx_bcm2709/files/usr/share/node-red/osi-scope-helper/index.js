@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const CACHE_TTL_MS = 30000;
 const cache = new Map();
+const pendingLoads = new Map();
 const WEATHER_TYPE_IDS = new Set(['SENSECAP_S2120', 'AQUASCOPE_LORAIN']);
 // Soil sensors whose depth and calibration settings their owner or an admin
 // may still change after the sensor has left every zone (allowUnassignedOwner
@@ -154,23 +155,47 @@ async function loadScope(db, userUuid) {
 async function resolveScope(db, userUuid, { scopedMode } = {}) {
   if (!isScopedMode() && scopedMode !== true) {
     return {
-      role: 'admin',
-      disabled: false,
-      wildcard: true,
-      zoneUuids: null,
-      plotUuids: null,
+      role: 'admin', disabled: false, wildcard: true,
+      zoneUuids: null, plotUuids: null,
     };
   }
-  const hit = cache.get(userUuid);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.scope;
-  const scope = await loadScope(db, userUuid);
-  cache.set(userUuid, { at: Date.now(), scope });
-  return scope;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const hit = cache.get(userUuid);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.scope;
+
+    let pending = pendingLoads.get(userUuid);
+    if (!pending) {
+      pending = new Set();
+      pendingLoads.set(userUuid, pending);
+    }
+    const ticket = { invalidated: false };
+    pending.add(ticket);
+    try {
+      const scope = await loadScope(db, userUuid);
+      if (ticket.invalidated) continue;
+      cache.set(userUuid, { at: Date.now(), scope });
+      return scope;
+    } finally {
+      pending.delete(ticket);
+      if (pending.size === 0 && pendingLoads.get(userUuid) === pending) {
+        pendingLoads.delete(userUuid);
+      }
+    }
+  }
+  throw httpError(503, 'scope changed during read');
 }
 
 function invalidateScope(userUuid) {
-  if (userUuid) cache.delete(userUuid);
-  else cache.clear();
+  if (userUuid) {
+    cache.delete(userUuid);
+    const pending = pendingLoads.get(userUuid);
+    if (pending) for (const ticket of pending) ticket.invalidated = true;
+    return;
+  }
+  cache.clear();
+  for (const pending of pendingLoads.values()) {
+    for (const ticket of pending) ticket.invalidated = true;
+  }
 }
 
 // Mutation-capable roles per the users.role CHECK constraint (migration 0033:
@@ -263,15 +288,38 @@ async function assertEnabledAccount(db, userUuid, options) {
 }
 
 async function assertAuthenticatedRole(db, auth, role, options) {
-  if (!auth || !Number.isFinite(Number(auth.userId)) || !String(auth.username || '').trim()) {
+  if (!auth || !Number.isFinite(Number(auth.userId)) ||
+      !String(auth.username || '').trim()) {
     throw httpError(401, 'Unauthorized');
   }
-  const user = await db.get(
-    'SELECT user_uuid FROM users WHERE id = ? AND username = ? LIMIT 1',
-    [Number(auth.userId), String(auth.username).trim()]
-  );
+  let user;
+  try {
+    user = await db.get(
+      'SELECT id, username, role, disabled_at, user_uuid FROM users WHERE id = ? AND username = ? LIMIT 1',
+      [Number(auth.userId), String(auth.username).trim()]
+    );
+  } catch (error) {
+    const unavailable = httpError(500, 'authorization database read failed');
+    unavailable.cause = error;
+    throw unavailable;
+  }
   if (!user || !user.user_uuid) throw httpError(401, 'Unauthorized');
-  return assertRole(db, user.user_uuid, role, options);
+  if (!isScopedMode() && (!options || options.scopedMode !== true)) {
+    return {
+      role: 'admin', disabled: false, wildcard: true,
+      zoneUuids: null, plotUuids: null,
+    };
+  }
+  if (user.disabled_at) throw httpError(403, 'account disabled');
+  if (user.role !== role) throw httpError(403, 'insufficient role');
+  return {
+    role: user.role,
+    username: user.username,
+    disabled: false,
+    wildcard: false,
+    zoneUuids: null,
+    plotUuids: null,
+  };
 }
 
 async function authorizeAdminRead(options = {}) {
@@ -339,7 +387,7 @@ async function resolveZoneUuidById(db, zoneId) {
 }
 
 function _resetForTests() {
-  cache.clear();
+  invalidateScope();
 }
 
 module.exports = {

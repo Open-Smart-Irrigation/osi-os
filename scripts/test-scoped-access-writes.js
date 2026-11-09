@@ -3891,3 +3891,509 @@ test('admin system writes: flag off, every request passes on untouched without l
     }
   }
 });
+
+const path434 = require('node:path');
+const profileNames434 = ['bcm2712', 'bcm2709'];
+const gateway434 = 'A840410000000042';
+const card434 = gateway434 + ':gateway:hub';
+const adminRoutes434 = [
+  { id: 'account-link-admin-write-guard', method: 'POST', path: '/api/account-link' },
+  { id: 'account-unlink-admin-write-guard', method: 'DELETE', path: '/api/account-link' },
+  { id: 'sync-force-admin-write-guard', method: 'POST', path: '/api/sync/force' },
+  { id: 'get-gateway-location-auth-fn', method: 'GET',
+    path: `/api/gateways/${gateway434}/location`, params: { gatewayEui: gateway434 } },
+  { id: 'history-rollups-admin-write-guard', method: 'POST', path: '/api/history/rollups/run' },
+  { id: 'database-download-admin-read-guard', method: 'GET', path: '/download/database' },
+  { id: 'sync-state-admin-read-guard', method: 'GET', path: '/api/sync/state' },
+  { id: 'system-stats-admin-read-guard', method: 'GET', path: '/api/system/stats' },
+  { id: 'fieldtest-download-admin-read-guard', method: 'GET', path: '/download-fieldtest' },
+  { id: 'sync-outbox-recover-admin-guard', method: 'POST', path: '/api/sync/outbox/recover' },
+];
+const diagnosticsGlobals434 = {
+  fs: {
+    existsSync: () => false,
+    readFileSync(filePath) {
+      if (String(filePath).includes('/thermal/')) return '42000\n';
+      if (String(filePath).endsWith('/period')) return '100\n';
+      if (String(filePath).endsWith('/duty_cycle')) return '50\n';
+      return '';
+    },
+    readdirSync: () => [],
+    accessSync() { const error = new Error('not found'); error.code = 'ENOENT'; throw error; },
+  },
+  os: {
+    loadavg: () => [0.1, 0.2, 0.3],
+    totalmem: () => 1024 * 1024 * 1024,
+    freemem: () => 512 * 1024 * 1024,
+    cpus: () => [{}, {}],
+  },
+};
+
+function profile434(name) {
+  const root = path434.resolve(__dirname, '..');
+  return {
+    name,
+    flowPath: path434.join(root, `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share/flows.json`),
+    scope: require(path434.join(root,
+      `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share/node-red/osi-scope-helper`)),
+  };
+}
+
+function req434(id, username, method, routePath, params = {}, body = {}) {
+  return scopedRequest(id, username, method, routePath, params, body);
+}
+
+async function run434(profile, nodeId, db, msg, extra = {}) {
+  return executeFunction(loadNode(nodeId, profile.flowPath), {
+    msg, db,
+    env: { ...ENV, DEVICE_EUI: '0016C001F1000001' },
+    osiLibModules: { scope: profile.scope },
+    ...extra,
+  });
+}
+
+async function warm434(profile, db, uuid = 'u-admin') {
+  return profile.scope.resolveScope(facadeDb(db), uuid, { scopedMode: true });
+}
+
+test('R1 all ten scoped admin guards reject warm-cache demotion and disablement',
+  { concurrency: false }, async () => {
+    for (const name of profileNames434) for (const route of adminRoutes434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const allowedMsg = req434(1, 'admin1', route.method, route.path, route.params || {});
+        const allowed = await run434(profile, route.id, db, allowedMsg);
+        assert.strictEqual(allowed.result[0], allowedMsg, `${name}/${route.id}: valid admin reaches handler`);
+        assert.equal(allowed.result[1], null, `${name}/${route.id}: valid admin has no refusal`);
+        assert.equal(allowed.result[0].statusCode, undefined, `${name}/${route.id}: guard did not answer route`);
+        if (route.id === 'sync-outbox-recover-admin-guard') {
+          assert.equal(allowed.result[0]._recoveryActor, 'admin1');
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    for (const name of profileNames434) for (const route of adminRoutes434) for (const change of [
+      "UPDATE users SET role='viewer' WHERE id=1",
+      "UPDATE users SET disabled_at='2026-10-26' WHERE id=1",
+    ]) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        await warm434(profile, db);
+        db.exec(change);
+        const out = await run434(profile, route.id, db,
+          req434(1, 'admin1', route.method, route.path, route.params || {}));
+        assert.equal(out.result[0], null, `${name}/${route.id}: no success output`);
+        assert.equal(out.result[1].statusCode, 403, `${name}/${route.id}: denied output`);
+        assert.equal(out.result[1]._recoveryActor, undefined);
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+  });
+
+test('R2 reboot scheduling and fan writes occur only after a fresh admin decision',
+  { concurrency: false }, async () => {
+    const realTimer = global.setTimeout;
+    const scheduled = [];
+    const execs = [];
+    const fanWrites = [];
+    const fakeCp = { exec: (command) => { execs.push(command); } };
+    const fakeFanFs = { ...fakeFsRawPwmReadFailures,
+      writeFileSync(name, value) {
+        fanWrites.push([name, value]);
+        return fakeFsRawPwmReadFailures.writeFileSync(name, value);
+      },
+    };
+    global.setTimeout = (fn, ms) => { scheduled.push({ fn, ms }); return scheduled.length; };
+    try {
+      for (const name of profileNames434) for (const kind of ['demoted', 'disabled', 'db-fault']) {
+        const profile = profile434(name);
+        profile.scope._resetForTests();
+        const db = seedScopedDb();
+        try {
+          await warm434(profile, db);
+          if (kind === 'demoted') db.exec("UPDATE users SET role='viewer' WHERE id=1");
+          if (kind === 'disabled') db.exec("UPDATE users SET disabled_at='2026-10-26' WHERE id=1");
+          const faultDb = { get: async () => { throw new Error('fixture-db-fault'); },
+            close: (cb) => cb() };
+          const overrides = kind === 'db-fault'
+            ? { osiDb: { Database: function Database() { return faultDb; } } } : {};
+          const timerBefore = scheduled.length;
+          const execBefore = execs.length;
+          const writeBefore = fanWrites.length;
+          const reboot = await run434(profile, 'sys-reboot-fn', db,
+            req434(1, 'admin1', 'POST', '/api/system/reboot'),
+            { globals: { cp: fakeCp, fs: fakeFanFs }, libOverrides: overrides });
+          assert.equal(reboot.result.statusCode, kind === 'db-fault' ? 500 : 403);
+          assert.equal(scheduled.length, timerBefore, `${name}/${kind}: no reboot timer`);
+          assert.equal(execs.length, execBefore, `${name}/${kind}: no reboot execution`);
+          const fan = await run434(profile, 'sys-fan-fn', db,
+            req434(1, 'admin1', 'POST', '/api/system/fan', {}, { speed: 100 }),
+            { globals: { cp: fakeCp, fs: fakeFanFs }, libOverrides: overrides });
+          assert.equal(fan.result.statusCode, kind === 'db-fault' ? 500 : 403);
+          assert.equal(fanWrites.length, writeBefore, `${name}/${kind}: no fan write`);
+        } finally { db.close(); profile.scope._resetForTests(); }
+      }
+      for (const name of profileNames434) {
+        const profile = profile434(name);
+        profile.scope._resetForTests();
+        const db = seedScopedDb();
+        try {
+          const before = scheduled.length;
+          const out = await run434(profile, 'sys-reboot-fn', db,
+            req434(1, 'admin1', 'POST', '/api/system/reboot'),
+            { globals: { cp: fakeCp, fs: fakeFanFs } });
+          assert.equal(out.result.statusCode, 200);
+          assert.equal(scheduled.length, before + 1);
+          assert.equal(scheduled[before].ms, 3000);
+          const execBefore = execs.length;
+          scheduled[before].fn();
+          assert.deepEqual(execs.slice(execBefore), ['reboot']);
+          const fan = await run434(profile, 'sys-fan-fn', db,
+            req434(1, 'admin1', 'POST', '/api/system/fan', {}, { speed: 100 }),
+            { globals: { cp: fakeCp, fs: fakeFanFs } });
+          assert.equal(fan.result.statusCode, 200);
+          assert.ok(fanWrites.length > 0);
+        } finally { db.close(); profile.scope._resetForTests(); }
+      }
+    } finally { global.setTimeout = realTimer; }
+  });
+
+test('R3 account status and improvement admin GETs reject stale role; viewer filing remains',
+  { concurrency: false }, async () => {
+    for (const name of profileNames434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const allowedStatus = await run434(profile, 'al-status-decode', db,
+          req434(1, 'admin1', 'GET', '/api/account-link/status'));
+        assert.ok(allowedStatus.result[0], `${name}: valid status GET reaches its query`);
+        assert.equal(allowedStatus.result[1], null);
+        assert.ok(Array.isArray(allowedStatus.result[0].payload));
+        for (const routePath of ['/api/improvement-requests',
+          '/api/improvement-requests/diagnostics-preview']) {
+          const allowedRead = await run434(profile, 'improvement-requests-api-router', db,
+            req434(1, 'admin1', 'GET', routePath), { globals: diagnosticsGlobals434 });
+          assert.equal(allowedRead.result.statusCode, 200,
+            `${name}/${routePath}: valid admin GET reaches response`);
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    for (const name of profileNames434) for (const change of [
+      "UPDATE users SET role='viewer' WHERE id=1",
+      "UPDATE users SET disabled_at='2026-10-26' WHERE id=1",
+    ]) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        await warm434(profile, db);
+        db.exec(change);
+        const status = await run434(profile, 'al-status-decode', db,
+          req434(1, 'admin1', 'GET', '/api/account-link/status'));
+        assert.equal(status.result[0], null);
+        assert.equal(status.result[1].statusCode, 403);
+        for (const routePath of ['/api/improvement-requests',
+          '/api/improvement-requests/diagnostics-preview']) {
+          const read = await run434(profile, 'improvement-requests-api-router', db,
+            req434(1, 'admin1', 'GET', routePath), { globals: diagnosticsGlobals434 });
+          assert.equal(read.result.statusCode, 403);
+          assert.equal(read.result.payload.generated_at, undefined);
+          assert.ok(!Array.isArray(read.result.payload));
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    for (const name of profileNames434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      const body = { type: 'bug', severity: 'annoying', area: 'system',
+        title: 'Visible issue', description: 'A reproducible fixture issue.',
+        consent_public: true, consent_diagnostics: false };
+      try {
+        const before = db.prepare('SELECT COUNT(*) AS n FROM improvement_requests').get().n;
+        const filed = await run434(profile, 'improvement-requests-api-router', db,
+          req434(3, 'view1', 'POST', '/api/improvement-requests', {}, body));
+        assert.equal(filed.result.statusCode, 201);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM improvement_requests').get().n, before + 1);
+        db.exec("UPDATE users SET disabled_at='2026-10-26' WHERE id=3");
+        profile.scope.invalidateScope('u-view1');
+        const denied = await run434(profile, 'improvement-requests-api-router', db,
+          req434(3, 'view1', 'POST', '/api/improvement-requests', {}, body));
+        assert.equal(denied.result.statusCode, 403);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM improvement_requests').get().n, before + 1);
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+  });
+
+test('R4 gateway history GET PUT POST reject demoted admin before context or preference writes',
+  { concurrency: false }, async () => {
+    const cases = [
+      ['GET', `/api/history/gateways/${gateway434}/cards`, { gatewayEui: gateway434 }, {}],
+      ['PUT', `/api/history/gateways/${gateway434}/cards/${card434}/preferences`,
+        { gatewayEui: gateway434, cardId: card434 }, { pinned: true, manualOrder: 2 }],
+      ['POST', `/api/history/gateways/${gateway434}/cards/${card434}/opened`,
+        { gatewayEui: gateway434, cardId: card434 }, {}],
+    ];
+    for (const name of profileNames434) for (const [method, routePath, params, body] of cases) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      db.prepare('UPDATE irrigation_zones SET gateway_device_eui=? WHERE id=2').run(gateway434);
+      try {
+        db.prepare(`INSERT INTO history_card_preferences
+          (user_id,owner_user_uuid,scope_type,gateway_eui,card_id,pinned,manual_order,open_count,updated_at)
+          VALUES (1,'u-admin','gateway',?,?,0,1,0,'2026-01-01')`)
+          .run(gateway434, card434);
+        const beforeCount = db.prepare('SELECT COUNT(*) AS n FROM history_card_preferences').get().n;
+        const allowed = await run434(profile, 'history-api-router-fn', db,
+          req434(1, 'admin1', method, routePath, params, body));
+        assert.equal(allowed.result.statusCode, 200, `${name}/${method}: valid card route succeeds`);
+        const preference = db.prepare(`SELECT pinned,manual_order,open_count,last_opened_at
+          FROM history_card_preferences WHERE user_id=1 AND gateway_eui=? AND card_id=?`)
+          .get(gateway434, card434);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM history_card_preferences').get().n,
+          beforeCount, `${name}/${method}: existing preference reused`);
+        if (method === 'PUT') {
+          assert.deepEqual({ pinned: preference.pinned, manual_order: preference.manual_order,
+            open_count: preference.open_count },
+          { pinned: 1, manual_order: 2, open_count: 0 });
+        } else if (method === 'POST') {
+          assert.equal(preference.open_count, 1);
+          assert.ok(preference.last_opened_at, `${name}: opened timestamp recorded`);
+        } else {
+          assert.equal(preference.pinned, 0);
+          assert.equal(preference.open_count, 0);
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    for (const name of profileNames434) for (const [method, routePath, params, body] of cases)
+    for (const change of ["UPDATE users SET role='viewer' WHERE id=1",
+      "UPDATE users SET disabled_at='2026-10-26' WHERE id=1"]) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      db.exec(`UPDATE irrigation_zones SET gateway_device_eui='${gateway434}' WHERE id=2`);
+      try {
+        const current = await run434(profile, 'history-api-router-fn', db,
+          req434(1, 'admin1', 'GET', `/api/history/gateways/${gateway434}/cards`,
+            { gatewayEui: gateway434 }));
+        assert.equal(current.result.statusCode, 200, `${name}: valid gateway context`);
+        db.prepare(`INSERT OR REPLACE INTO history_card_preferences
+          (user_id,owner_user_uuid,scope_type,gateway_eui,card_id,pinned,manual_order,open_count,updated_at)
+          VALUES (1,'u-admin','gateway',?,?,0,1,0,'2026-01-01')`)
+          .run(gateway434, card434);
+        const preferenceSql = `SELECT pinned,manual_order,open_count,updated_at
+          FROM history_card_preferences WHERE user_id=1 AND gateway_eui=? AND card_id=?`;
+        const before = db.prepare(preferenceSql).get(gateway434, card434);
+        const beforeCount = db.prepare('SELECT COUNT(*) AS n FROM history_card_preferences').get().n;
+        profile.scope._resetForTests();
+        await warm434(profile, db);
+        db.exec(change);
+        const baseFacade = facadeDb(db);
+        const gatewayReads = [];
+        const watched = { ...baseFacade,
+          get(sql, params, cb) {
+            if (String(sql).includes('gateway_device_eui')) gatewayReads.push(sql);
+            return baseFacade.get(sql, params, cb);
+          },
+          all(sql, params, cb) {
+            if (String(sql).includes('gateway_device_eui')) gatewayReads.push(sql);
+            return baseFacade.all(sql, params, cb);
+          } };
+        const out = await run434(profile, 'history-api-router-fn', db,
+          req434(1, 'admin1', method, routePath, params, body),
+          { libOverrides: { osiDb: { Database: function Database() { return watched; } } } });
+        assert.equal(out.result.statusCode, 403, `${name}/${method}: fresh admin role`);
+        assert.equal(gatewayReads.length, 0, `${name}/${method}: no gateway context read`);
+        assert.deepEqual(db.prepare(preferenceSql).get(gateway434, card434), before,
+          `${name}/${method}: existing preference unchanged`);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM history_card_preferences').get().n,
+          beforeCount, `${name}/${method}: no preference insert`);
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    for (const name of profileNames434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const zone = await run434(profile, 'history-api-router-fn', db,
+          req434(2, 'res1', 'GET', '/api/history/zones/2/cards', { zoneId: '2' }));
+        assert.equal(zone.result.statusCode, 200, `${name}: zone history remains account-wide`);
+        db.exec(`CREATE TABLE IF NOT EXISTS history_workspaces (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL, owner_user_uuid TEXT, zone_id INTEGER,
+          name TEXT NOT NULL, workspace_json TEXT NOT NULL,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        INSERT INTO history_workspaces(user_id,owner_user_uuid,zone_id,name,workspace_json,created_at,updated_at)
+        VALUES(1,'u-admin',2,'Foreign','{}','2026-01-01','2026-01-01');`);
+        const foreign = await run434(profile, 'history-api-router-fn', db,
+          req434(2, 'res1', 'PUT', '/api/history/workspaces/1', { id: '1' },
+            { name: 'Changed' }));
+        assert.equal(foreign.result.statusCode, 404);
+        assert.equal(db.prepare('SELECT name FROM history_workspaces WHERE id=1').get().name, 'Foreign');
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+  });
+
+test('R5 supported local and cloud mutations invalidate target or all pending loads',
+  { concurrency: false }, async () => {
+    for (const name of profileNames434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      try {
+        const created = await run434(profile, 'scoped-admin-account-router', db,
+          req434(1, 'admin1', 'POST', '/api/users', {},
+            { username: 'second-admin', password: 'temporary-pass', role: 'admin' }));
+        assert.equal(created.result.statusCode, 201);
+        const uuid = created.result.payload.user_uuid;
+        for (const [routePath, body, expectedRole, disabled] of [
+          [`/api/users/${uuid}/role`, { role: 'viewer' }, 'viewer', false],
+          [`/api/users/${uuid}/disabled`, { disabled: true }, 'viewer', true],
+          [`/api/users/${uuid}/role`, { role: 'admin' }, 'admin', true],
+          [`/api/users/${uuid}/disabled`, { disabled: false }, 'admin', false],
+        ]) {
+          const warm = await warm434(profile, db, uuid);
+          const out = await run434(profile, 'scoped-admin-account-router', db,
+            req434(1, 'admin1', 'PUT', routePath, { uuid }, body));
+          assert.equal(out.result.statusCode, 200);
+          const row = db.prepare('SELECT role,disabled_at FROM users WHERE user_uuid=?').get(uuid);
+          assert.equal(row.role, expectedRole);
+          assert.equal(Boolean(row.disabled_at), disabled);
+          const after = await warm434(profile, db, uuid);
+          assert.notStrictEqual(after, warm, 'supported mutation invalidates cached object');
+          assert.equal(after.role, expectedRole);
+          assert.equal(after.disabled, disabled);
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+
+      const commandDb = seedScopedDb();
+      const userUuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const gateway = '0016C001F1000001';
+      const commandId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+      commandDb.prepare("INSERT INTO users(username,password_hash,created_at,user_uuid,role,sync_version) VALUES('field-user','h','2026-01-01',?,'admin',1)").run(userUuid);
+      const commandFacade = facadeDb(commandDb);
+      const entered = (() => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; })();
+      const release = (() => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; })();
+      const loadingDb = { ...commandFacade,
+        async get(sql, params) {
+          const row = await commandFacade.get(sql, params);
+          if (sql.includes('WHERE user_uuid = ?') && params[0] === userUuid) {
+            entered.resolve(); await release.promise;
+          }
+          return row;
+        } };
+      const envelope = {
+        commandId: 434, commandType: 'UPSERT_SCOPED_USER',
+        payload: { command_id: commandId, command_type: 'UPSERT_SCOPED_USER',
+          effect_key: `scoped_user:${userUuid}:1`,
+          user: { user_uuid: userUuid, gateway_device_eui: gateway,
+            username: 'field-user', role: 'viewer', disabled_at: null,
+            base_sync_version: 1, password_hash: null } },
+      };
+      let invalidations = 0;
+      const trackedScope = { invalidateScope() {
+        invalidations += 1; profile.scope.invalidateScope();
+      } };
+      try {
+        const waiting = profile.scope.resolveScope(loadingDb, userUuid, { scopedMode: true });
+        await entered.promise;
+        const commands = require(path434.resolve(__dirname, '..',
+          `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share/node-red/osi-scoped-access-commands`));
+        const applied = await commands.applyScopedAccessCommand(commandFacade, envelope,
+          { gateway_device_eui: gateway, scope_helper: trackedScope });
+        assert.equal(applied.ack.result, 'APPLIED');
+        assert.equal(invalidations, 1);
+        assert.equal(commandDb.prepare('SELECT role FROM users WHERE user_uuid=?').get(userUuid).role, 'viewer');
+        release.resolve();
+        assert.equal((await waiting).role, 'viewer');
+        assert.equal((await profile.scope.resolveScope(commandFacade, userUuid, { scopedMode: true })).role, 'viewer');
+        const conflict = await commands.applyScopedAccessCommand(commandFacade,
+          { ...envelope, commandId: 435, payload: { ...envelope.payload,
+            command_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' } },
+          { gateway_device_eui: gateway, scope_helper: trackedScope });
+        assert.equal(conflict.ack.result, 'CONFLICT');
+        assert.equal(invalidations, 1);
+        assert.equal(commandDb.prepare('SELECT role FROM users WHERE user_uuid=?').get(userUuid).role, 'viewer');
+        const replay = await commands.applyScopedAccessCommand(commandFacade, envelope,
+          { gateway_device_eui: gateway, scope_helper: trackedScope });
+        assert.equal(replay.ack.result, 'APPLIED');
+        assert.equal(invalidations, 2, 'stored APPLIED replay retains shipped invalidation');
+      } finally {
+        release.resolve(); commandDb.close(); profile.scope._resetForTests();
+        require(path434.resolve(__dirname, '..',
+          `conf/full_raspberrypi_bcm27xx_${name}/files/usr/share/node-red/osi-scoped-access-commands`))._resetForTests();
+      }
+    }
+  });
+
+test('R6 flag-off guards and full-scope wildcard keep their old bearer boundary',
+  { concurrency: false }, async () => {
+    const oldFlag = process.env.OSI_SCOPED_ACCESS;
+    const realTimer = global.setTimeout;
+    const scheduled = [];
+    process.env.OSI_SCOPED_ACCESS = '';
+    global.setTimeout = (fn, ms) => { scheduled.push({ fn, ms }); return scheduled.length; };
+    try {
+    for (const name of profileNames434) {
+      const profile = profile434(name);
+      profile.scope._resetForTests();
+      const db = seedScopedDb();
+      const forbiddenLib = { require() { throw new Error('flag-off scope helper touched'); } };
+      try {
+        for (const route of adminRoutes434) {
+          const out = await run434(profile, route.id, db,
+            req434(3, 'view1', route.method, route.path, route.params || {}),
+            { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+              libOverrides: { osiLib: forbiddenLib } });
+          assert.notEqual(out.result[0], null, `${name}/${route.id}: flag-off pass`);
+          assert.equal(out.result[1], null);
+        }
+        const wildcardDb = { get() { throw new Error('flag-off read'); },
+          all() { throw new Error('flag-off read'); } };
+        const wildcard = await profile.scope.resolveScope(wildcardDb, 'u-view1', { scopedMode: false });
+        assert.equal(wildcard.wildcard, true);
+        const forbiddenGlobals = { cp: { exec() { throw new Error('reboot callback ran'); } },
+          fs: fakeFsNoFanHardware };
+        const reboot = await run434(profile, 'sys-reboot-fn', db,
+          req434(3, 'view1', 'POST', '/api/system/reboot'),
+          { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+            globals: forbiddenGlobals, libOverrides: { osiLib: forbiddenLib } });
+        assert.equal(reboot.result.statusCode, 200);
+        assert.equal(scheduled.at(-1).ms, 3000);
+        const fan = await run434(profile, 'sys-fan-fn', db,
+          req434(3, 'view1', 'POST', '/api/system/fan', {}, { speed: 100 }),
+          { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+            globals: forbiddenGlobals, libOverrides: { osiLib: forbiddenLib } });
+        assert.equal(fan.result.statusCode, 503, 'no simulated fan hardware after bearer passes');
+        for (const id of ['system-stats-admin-read-guard', 'fieldtest-download-admin-read-guard']) {
+          const route = adminRoutes434.find((candidate) => candidate.id === id);
+          const msg = req434(3, 'view1', route.method, route.path, route.params || {});
+          msg.req.headers.authorization = 'Bearer invalid';
+          const refused = await run434(profile, id, db, msg,
+            { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+              libOverrides: { osiLib: forbiddenLib } });
+          assert.equal(refused.result[0], null);
+          assert.equal(refused.result[1].statusCode, 401);
+        }
+        for (const id of ['sys-reboot-fn', 'sys-fan-fn']) {
+          const bad = req434(3, 'view1', 'POST', '/api/system/reboot', {}, { speed: 100 });
+          bad.req.headers.authorization = 'Bearer invalid';
+          const refused = await run434(profile, id, db, bad,
+            { env: { AUTH_TOKEN_SECRET: AUTH_SECRET, OSI_SCOPED_ACCESS: '0' },
+              globals: forbiddenGlobals, libOverrides: { osiLib: forbiddenLib } });
+          assert.equal(refused.result.statusCode, 401);
+        }
+      } finally { db.close(); profile.scope._resetForTests(); }
+    }
+    } finally {
+      global.setTimeout = realTimer;
+      if (oldFlag === undefined) delete process.env.OSI_SCOPED_ACCESS;
+      else process.env.OSI_SCOPED_ACCESS = oldFlag;
+    }
+  });

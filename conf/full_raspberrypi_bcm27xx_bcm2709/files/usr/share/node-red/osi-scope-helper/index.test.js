@@ -3,6 +3,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const scope = require('./index.js');
+const { DatabaseSync } = require('node:sqlite');
+const path = require('node:path');
 
 function fakeDb(handlers) {
   const calls = [];
@@ -187,16 +189,13 @@ test('concurrent auth-secret resolution reuses the one persisted secret', async 
 
 test('assertAuthenticatedRole binds token id and username before checking role', async () => {
   const db = fakeDb({
-    get: (sql) => {
-      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'u-admin' };
-      return {
-        id: 7,
-        username: 'admin',
-        role: 'admin',
-        disabled_at: null,
-        user_uuid: 'u-admin',
-      };
-    },
+    get: () => ({
+      id: 7,
+      username: 'admin',
+      role: 'admin',
+      disabled_at: null,
+      user_uuid: 'u-admin',
+    }),
     all: () => [],
   });
   await scope.assertAuthenticatedRole(
@@ -227,16 +226,13 @@ test('authorizeAdminRead verifies, authorizes, and closes its database handle', 
   const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
   let closeCalls = 0;
   const db = fakeDb({
-    get: (sql) => {
-      if (sql.includes('id = ? AND username = ?')) return { user_uuid: 'u-admin' };
-      return {
-        id: 7,
-        username: 'admin',
-        role: 'admin',
-        disabled_at: null,
-        user_uuid: 'u-admin',
-      };
-    },
+    get: () => ({
+      id: 7,
+      username: 'admin',
+      role: 'admin',
+      disabled_at: null,
+      user_uuid: 'u-admin',
+    }),
     all: () => [],
   });
   db.close = (callback) => {
@@ -524,4 +520,374 @@ test('canMutate is an allowlist: only admin/researcher, everything else (includi
   assert.equal(scope.canMutate(''), false);
   assert.equal(scope.canMutate(null), false);
   assert.equal(scope.canMutate(undefined), false);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function observedFacade(raw) {
+  const calls = [];
+  const gates = [];
+  let nextGetError = null;
+  let closeError = null;
+  let closeCount = 0;
+  return {
+    calls,
+    get closeCount() { return closeCount; },
+    pauseNextScopeUserGet() {
+      const entered = deferred();
+      const release = deferred();
+      gates.push({ entered, release });
+      return { entered: entered.promise, release: () => release.resolve() };
+    },
+    rejectNextGet(error) { nextGetError = error; },
+    failClose(error) { closeError = error; },
+    async get(sql, params = []) {
+      calls.push({ method: 'get', sql, params: [...params] });
+      if (nextGetError) {
+        const error = nextGetError;
+        nextGetError = null;
+        throw error;
+      }
+      const row = raw.prepare(sql).get(...params);
+      if (sql === 'SELECT id, username, role, disabled_at, user_uuid FROM users WHERE user_uuid = ?' && gates.length) {
+        const gate = gates.shift();
+        gate.entered.resolve(row);
+        await gate.release.promise;
+      }
+      return row;
+    },
+    async all(sql, params = []) {
+      calls.push({ method: 'all', sql, params: [...params] });
+      return raw.prepare(sql).all(...params);
+    },
+    close(callback) {
+      closeCount += 1;
+      callback(closeError);
+    },
+  };
+}
+
+function signedToken(userId, username, secret, exp = Date.now() + 60000) {
+  const payload = Buffer.from(JSON.stringify({ userId, username, exp })).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return 'Bearer ' + payload + '.' + signature;
+}
+
+const ISSUE434_SECRET = 'issue-434-test-secret';
+const ISSUE434_USER_SQL =
+  'SELECT id, username, role, disabled_at, user_uuid FROM users WHERE id = ? AND username = ? LIMIT 1';
+
+function fixture434() {
+  const raw = new DatabaseSync(':memory:');
+  raw.exec(`
+    CREATE TABLE users(id INTEGER, username TEXT, role TEXT, disabled_at TEXT, user_uuid TEXT);
+    CREATE TABLE irrigation_zones(user_id INTEGER, deleted_at TEXT, zone_uuid TEXT);
+    CREATE TABLE user_zone_assignments(user_uuid TEXT, deleted_at TEXT, zone_uuid TEXT);
+    CREATE TABLE journal_plots(owner_user_uuid TEXT, deleted_at TEXT, plot_uuid TEXT);
+    CREATE TABLE user_plot_assignments(user_uuid TEXT, deleted_at TEXT, plot_uuid TEXT);
+    INSERT INTO users VALUES(7,'admin','admin',NULL,'u-admin');
+    INSERT INTO users VALUES(8,'other','viewer',NULL,'u-other');
+  `);
+  const observed = observedFacade(raw);
+  const Database = function Database() { return observed; };
+  const options = (authorization = signedToken(7, 'admin', ISSUE434_SECRET), extra = {}) => ({
+    Database, authorization, configuredSecret: ISSUE434_SECRET, ...extra,
+  });
+  return {
+    raw, observed, options,
+    close() { scope._resetForTests(); raw.close(); },
+  };
+}
+
+function userGets434(f) {
+  return f.observed.calls.filter((call) => call.method === 'get' &&
+    call.sql.includes('FROM users'));
+}
+
+test('H1 fresh admin read rejects a warm-cache demotion', { concurrency: false }, async () => {
+  const f = fixture434();
+  try {
+    await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    f.observed.calls.length = 0;
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    await assert.rejects(scope.authorizeAdminRead(f.options()), (e) => e.status === 403);
+    assert.deepEqual(f.observed.calls, [{ method: 'get', sql: ISSUE434_USER_SQL, params: [7, 'admin'] }]);
+    assert.equal(f.observed.closeCount, 1);
+  } finally { f.close(); }
+});
+
+test('H2 disabled and restored roles are read on each admin request', { concurrency: false }, async () => {
+  const f = fixture434();
+  try {
+    await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    f.observed.calls.length = 0;
+    f.raw.exec("UPDATE users SET disabled_at='2026-10-26' WHERE id=7");
+    await assert.rejects(scope.authorizeAdminRead(f.options()), (e) => e.status === 403);
+    f.raw.exec("UPDATE users SET disabled_at=NULL WHERE id=7");
+    assert.equal((await scope.authorizeAdminRead(f.options())).role, 'admin');
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    await assert.rejects(scope.authorizeAdminRead(f.options()), (e) => e.status === 403);
+    f.raw.exec("UPDATE users SET role='admin' WHERE id=7");
+    assert.equal((await scope.authorizeAdminRead(f.options())).role, 'admin');
+    assert.equal(f.observed.closeCount, 4);
+    assert.equal(userGets434(f).filter((c) => c.sql === ISSUE434_USER_SQL).length, 4);
+  } finally { f.close(); }
+});
+
+test('H3 admin read uses one bound user statement and no scope tables even on cache hit', { concurrency: false }, async () => {
+  const f = fixture434();
+  try {
+    for (let i = 0; i < 2; i += 1) {
+      const before = f.observed.calls.length;
+      const result = await scope.authorizeAdminRead(f.options());
+      assert.deepEqual(f.observed.calls.slice(before),
+        [{ method: 'get', sql: ISSUE434_USER_SQL, params: [7, 'admin'] }],
+        `call ${i + 1}: one bound get and zero all`);
+      assert.deepEqual({ role: result.role, username: result.username, wildcard: result.wildcard,
+        zoneUuids: result.zoneUuids, plotUuids: result.plotUuids },
+      { role: 'admin', username: 'admin', wildcard: false, zoneUuids: null, plotUuids: null });
+      if (i === 0) {
+        await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+        f.observed.calls.length = 0;
+      }
+    }
+    assert.deepEqual(f.observed.calls,
+      [{ method: 'get', sql: ISSUE434_USER_SQL, params: [7, 'admin'] }]);
+    assert.equal(f.observed.closeCount, 2);
+  } finally { f.close(); }
+});
+
+test('H4 token and current id plus username binding reject missing identities', { concurrency: false }, async () => {
+  const invalid = [null, 'Bearer x', 'Bearer x.forged',
+    signedToken(7, 'admin', ISSUE434_SECRET, Date.now() - 1000)];
+  for (const authorization of invalid) {
+    const f = fixture434();
+    let opens = 0;
+    try {
+      await assert.rejects(scope.authorizeAdminRead({ ...f.options(authorization),
+        Database: function Database() { opens += 1; return f.observed; } }),
+      (e) => e.status === 401);
+      assert.equal(opens, 0);
+      assert.equal(f.observed.calls.length, 0);
+      assert.equal(f.observed.closeCount, 0);
+    } finally { f.close(); }
+  }
+  for (const [sql, token] of [
+    ["DELETE FROM users WHERE id=7", signedToken(7, 'admin', ISSUE434_SECRET)],
+    ['', signedToken(7, 'old-name', ISSUE434_SECRET)],
+    ['', signedToken(9, 'admin', ISSUE434_SECRET)],
+    ["UPDATE users SET user_uuid=NULL WHERE id=7", signedToken(7, 'admin', ISSUE434_SECRET)],
+  ]) {
+    const f = fixture434();
+    try {
+      if (sql) f.raw.exec(sql);
+      await assert.rejects(scope.authorizeAdminRead(f.options(token)), (e) => e.status === 401);
+      assert.equal(f.observed.calls.length, 1);
+      assert.equal(f.observed.calls[0].sql, ISSUE434_USER_SQL);
+      assert.equal(f.observed.calls[0].params.length, 2);
+      assert.equal(f.observed.closeCount, 1);
+    } finally { f.close(); }
+  }
+});
+
+test('H5 disabled, viewer, researcher and unknown roles all fail closed', { concurrency: false }, async () => {
+  for (const [role, disabled] of [['viewer', null], ['researcher', null],
+    ['unknown-role', null], ['admin', '2026-10-26']]) {
+    const f = fixture434();
+    try {
+      f.raw.prepare('UPDATE users SET role=?, disabled_at=? WHERE id=7').run(role, disabled);
+      await assert.rejects(scope.authorizeAdminRead(f.options()), (e) => e.status === 403);
+      assert.deepEqual(f.observed.calls, [{ method: 'get', sql: ISSUE434_USER_SQL, params: [7, 'admin'] }]);
+      assert.equal(f.observed.closeCount, 1);
+    } finally { f.close(); }
+  }
+});
+
+test('H6 query cause and close warning remain observable', { concurrency: false }, async () => {
+  const f = fixture434();
+  const cause = new Error('fixture-read-failed');
+  const warnings = [];
+  try {
+    f.observed.rejectNextGet(cause);
+    await assert.rejects(scope.authorizeAdminRead(f.options()),
+      (e) => e.status === 500 && e.statusCode === 500 && e.cause === cause);
+    assert.equal(f.observed.closeCount, 1);
+    assert.equal(f.observed.calls.filter((c) => c.method === 'all').length, 0);
+    assert.equal((await scope.authorizeAdminRead(f.options())).role, 'admin');
+    assert.equal(f.observed.closeCount, 2);
+    f.observed.failClose(new Error('fixture-close-failed'));
+    assert.equal((await scope.authorizeAdminRead(f.options(undefined,
+      { warn: (message) => warnings.push(message) }))).role, 'admin');
+    assert.equal(f.observed.closeCount, 3);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /fixture-close-failed/);
+    assert.equal(userGets434(f).filter((c) => c.sql === ISSUE434_USER_SQL).length, 3);
+  } finally { f.close(); }
+});
+
+test('H7 per-user invalidation discards old result for cache and waiter', { concurrency: false }, async () => {
+  const f = fixture434();
+  const gate = f.observed.pauseNextScopeUserGet();
+  try {
+    const waiting = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    await gate.entered;
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    scope.invalidateScope('u-admin');
+    gate.release();
+    assert.equal((await waiting).role, 'viewer');
+    assert.equal((await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true })).role, 'viewer');
+    assert.equal(userGets434(f).length, 2);
+  } finally { gate.release(); f.close(); }
+});
+
+test('H8 global invalidation discards old result for cache and waiter', { concurrency: false }, async () => {
+  const f = fixture434();
+  const gate = f.observed.pauseNextScopeUserGet();
+  try {
+    const waiting = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    await gate.entered;
+    f.raw.exec("UPDATE users SET disabled_at='2026-10-26' WHERE id=7");
+    scope.invalidateScope();
+    gate.release();
+    assert.equal((await waiting).disabled, true);
+    await assert.rejects(scope.assertRole(f.observed, 'u-admin', 'admin', { scopedMode: true }),
+      (e) => e.status === 403);
+    assert.equal(userGets434(f).length, 2);
+  } finally { gate.release(); f.close(); }
+});
+
+test('H9 old-last load cannot overwrite a newer published scope', { concurrency: false }, async () => {
+  for (const globalClear of [false, true]) {
+    const f = fixture434();
+    const gate = f.observed.pauseNextScopeUserGet();
+    try {
+      const old = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+      await gate.entered;
+      f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+      scope.invalidateScope(globalClear ? undefined : 'u-admin');
+      const newer = await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+      assert.equal(newer.role, 'viewer');
+      gate.release();
+      assert.strictEqual(await old, newer);
+      assert.strictEqual(await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true }), newer);
+      assert.equal(userGets434(f).length, 2);
+    } finally { gate.release(); f.close(); }
+  }
+});
+
+test('H10 second invalidation ends after two loads; route 500 mappings are explicit', { concurrency: false }, async () => {
+  const f = fixture434();
+  const first = f.observed.pauseNextScopeUserGet();
+  const second = f.observed.pauseNextScopeUserGet();
+  try {
+    const waiting = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    await first.entered;
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    scope.invalidateScope('u-admin');
+    first.release();
+    // Both outcomes settle this race, so the test never waits on a barrier
+    // that the code under test does not open.
+    const afterFirst = await Promise.race([
+      waiting.then(() => 'settled', () => 'settled'),
+      second.entered.then(() => 'retried'),
+    ]);
+    assert.equal(afterFirst, 'retried', 'an invalidated first load must not settle the original request');
+    scope.invalidateScope('u-admin');
+    second.release();
+    await assert.rejects(waiting, (e) => e.status === 503 && e.statusCode === 503);
+    assert.equal(userGets434(f).length, 2);
+    assert.equal((await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true })).role, 'viewer');
+    assert.equal(userGets434(f).length, 3);
+  } finally { first.release(); second.release(); f.close(); }
+
+  const root = path.resolve(__dirname, '../../../../../../../');
+  const { executeFunction, loadNode, makeAuthHeader, seedScopedDb } =
+    require(path.join(root, 'scripts/lib/scoped-access-harness'));
+  const profile = __dirname.includes('bcm2709') ? 'bcm2709' : 'bcm2712';
+  const flowPath = path.join(root, `conf/full_raspberrypi_bcm27xx_${profile}/files/usr/share/flows.json`);
+  const raw = seedScopedDb();
+  const changed = Object.assign(new Error('scope changed during read'), { status: 503, statusCode: 503 });
+  const injected = { ...scope,
+    resolveScope: async () => { throw changed; },
+    assertEnabledAccount: async () => { throw changed; } };
+  const env = { OSI_SCOPED_ACCESS: '1', AUTH_TOKEN_SECRET: 'scoped-access-test-secret' };
+  const msg = { authUserId: 1, authUsername: 'admin1', req: { headers: {
+    authorization: makeAuthHeader({ userId: 1, username: 'admin1' }) } } };
+  try {
+    const me = await executeFunction(loadNode('api-me-fn', flowPath),
+      { msg, db: raw, env, osiLibModules: { scope: injected } });
+    assert.equal(me.result.statusCode, 500);
+    assert.deepEqual(me.result.payload, { message: 'unable to resolve scope' });
+    const sdi = await executeFunction(loadNode('sdi12-profiles-scope-fn', flowPath), {
+      msg: { req: { method: 'GET', path: '/api/sdi12/probe-profiles', headers: {
+        authorization: makeAuthHeader({ userId: 1, username: 'admin1' }) }, params: {} } },
+      db: raw, env, osiLibModules: { scope: injected },
+    });
+    assert.equal(sdi.result[0], null);
+    assert.equal(sdi.result[1].statusCode, 500);
+    assert.deepEqual(sdi.result[1].payload, { message: 'Unable to authorize SDI-12 profiles' });
+  } finally { raw.close(); scope._resetForTests(); }
+});
+
+test('H11 same-user waiters and unrelated-user cache isolation', { concurrency: false }, async () => {
+  const f = fixture434();
+  const first = f.observed.pauseNextScopeUserGet();
+  const second = f.observed.pauseNextScopeUserGet();
+  try {
+    const a = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    const b = scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    await Promise.all([first.entered, second.entered]);
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    scope.invalidateScope('u-admin');
+    first.release(); second.release();
+    assert.deepEqual([(await a).role, (await b).role], ['viewer', 'viewer']);
+    const adminCached = await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    const other = await scope.resolveScope(f.observed, 'u-other', { scopedMode: true });
+    const before = userGets434(f).length;
+    scope.invalidateScope('u-admin');
+    assert.notStrictEqual(await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true }), adminCached);
+    assert.equal(userGets434(f).length, before + 1);
+    assert.strictEqual(await scope.resolveScope(f.observed, 'u-other', { scopedMode: true }), other);
+    assert.equal(userGets434(f).length, before + 1);
+    scope.invalidateScope();
+    assert.notStrictEqual(await scope.resolveScope(f.observed, 'u-other', { scopedMode: true }), other);
+    assert.equal(userGets434(f).length, before + 2);
+  } finally { first.release(); second.release(); f.close(); }
+});
+
+test('H12 TTL boundary, failed load, and flag-off wildcard remain bounded', { concurrency: false }, async () => {
+  const f = fixture434();
+  const realNow = Date.now;
+  const oldFlag = process.env.OSI_SCOPED_ACCESS;
+  let now = 1000000;
+  try {
+    Date.now = () => now;
+    const original = await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true });
+    now += 29999;
+    assert.strictEqual(await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true }), original);
+    f.raw.exec("UPDATE users SET role='viewer' WHERE id=7");
+    now += 1;
+    assert.equal((await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true })).role, 'viewer');
+    assert.equal(userGets434(f).length, 2);
+    scope.invalidateScope('u-admin');
+    f.observed.rejectNextGet(new Error('load failed'));
+    await assert.rejects(scope.resolveScope(f.observed, 'u-admin', { scopedMode: true }), /load failed/);
+    assert.equal((await scope.resolveScope(f.observed, 'u-admin', { scopedMode: true })).role, 'viewer');
+    assert.equal(userGets434(f).length, 4);
+    process.env.OSI_SCOPED_ACCESS = '';
+    const before = f.observed.calls.length;
+    const wildcard = await scope.resolveScope(f.observed, 'u-admin', { scopedMode: false });
+    assert.equal(wildcard.wildcard, true);
+    assert.equal(wildcard.role, 'admin');
+    assert.equal(f.observed.calls.length, before);
+  } finally {
+    Date.now = realNow;
+    if (oldFlag === undefined) delete process.env.OSI_SCOPED_ACCESS;
+    else process.env.OSI_SCOPED_ACCESS = oldFlag;
+    f.close();
+  }
 });
