@@ -743,7 +743,7 @@ function r2OptionalDeployHelpers() {
     'native_sqlite3_owned_final', 'native_sqlite3_recovery_lock',
     'native_sqlite3_recover_early', 'native_sqlite3_rollback_failed_final',
     'native_sqlite3_unrepaired', 'native_sqlite3_owner_prefix',
-    'native_sqlite3_clear_metadata_backup']
+    'native_sqlite3_clear_metadata_backup', 'native_sqlite3_remove_backup']
     .filter(n => new RegExp('^' + n + '\\(\\) \\{', 'm').test(DEPLOY))
     .map(extractFunction);
 }
@@ -2041,5 +2041,121 @@ test('R7 an interrupted swap is left for the tool that made it', () => {
     }
     assert.equal(requireSqlite3(gw.proj).status, 0, firstTool);
     for (const p of ['.osi-sqlite3-rollback.', '.osi-sqlite3-seed-rollback.']) assert.deepEqual(r2Names(gw, p), [], firstTool);
+  }
+});
+
+// R9: rollback directories and seed stages are removed in the reverse of the
+// order they were filled, owner line last. A recursive rm of the whole entry
+// unlinks children in readdir order, and power lost after .owner went but
+// before the original or the identity went leaves an entry both scanners
+// refuse on every later run. These hooks log every rm/rmdir that names such
+// an entry and, with stopAfter, perform the Nth one and then end the shell
+// the way a power cut would.
+function r9TeardownHooks(logFile, pattern, stopAfter) {
+  const q = r2Quote(logFile);
+  const stop = stopAfter
+    ? ` if [ "$(( $(wc -l < ${q}) ))" -ge ${stopAfter} ]; then echo TEARDOWN_INTERRUPT >&2; exit 26; fi;`
+    : '';
+  return ['rm', 'rmdir'].map(cmd =>
+    `${cmd}() { case "$*" in *${pattern}*) command ${cmd} "$@" || return $?;` +
+    ` printf '%s\\n' "${cmd} $*" >> ${q};${stop} return 0 ;; esac; command ${cmd} "$@"; }`);
+}
+function r9Lines(logFile) {
+  return fs.readFileSync(logFile, 'utf8').trim().split('\n');
+}
+
+test('R9 deploy removes the rollback original before its owner line', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  const log = path.join(gw.root, 'teardown.log');
+  const r = r2DeployCall(gw, { shellHooks: r9TeardownHooks(log, '/.osi-sqlite3-rollback.') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /MATERIALIZE_RC=0/);
+  assert.match(r.stdout, /VERIFY_RC=0/);
+  const b = String.raw`.*/\.osi-sqlite3-rollback\.[^/ ]+`;
+  const lines = r9Lines(log);
+  assert.equal(lines.length, 3, lines.join('\n'));
+  assert.match(lines[0], new RegExp(`^rm -rf ${b}/original$`));
+  assert.match(lines[1], new RegExp(`^rm -f ${b}/\\.owner$`));
+  assert.match(lines[2], new RegExp(`^rmdir ${b}$`));
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-rollback.'), []);
+});
+
+test('R9 deploy converges after power loss inside rollback cleanup', () => {
+  // Step 2 (owner unlinked, rmdir not yet run) is not covered: an empty
+  // rollback beside an owned final is refused, as it was before R9.
+  for (const stopAfter of [1, 3]) {
+    const label = `stop after teardown step ${stopAfter}`;
+    const gw = makeGateway('real-without-binary');
+    const { d } = r2OldBytes(gw);
+    const log = path.join(gw.root, 'teardown.log');
+    const first = r2DeployCall(gw, { shellHooks: r9TeardownHooks(log, '/.osi-sqlite3-rollback.', stopAfter) });
+    assert.equal(first.status, 26, label + '\n' + first.stderr);
+    assert.match(first.stderr, /TEARDOWN_INTERRUPT/, label);
+    assert.equal(requireSqlite3(gw.proj).status, 0, label);
+    const names = r2Names(gw, '.osi-sqlite3-rollback.');
+    if (stopAfter === 1) {
+      assert.equal(names.length, 1, label);
+      assert.deepEqual(fs.readdirSync(path.join(gw.proj, 'node_modules', names[0])), ['.owner'], label);
+    } else {
+      assert.deepEqual(names, [], label);
+    }
+    const retry = r4Preflight(gw);
+    assert.equal(retry.status, 0, label + '\n' + retry.stderr);
+    if (stopAfter === 1) assert.match(retry.stderr, /verified interrupted sqlite3 promotion/, label);
+    const final = r2DeployCall(gw);
+    assert.equal(final.status, 0, label + '\n' + final.stderr);
+    assert.match(final.stdout, /PREFLIGHT_RC=0/, label);
+    assert.match(final.stdout, /MATERIALIZE_RC=0/, label);
+    assert.match(final.stdout, /VERIFY_RC=0/, label);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-'), [], label);
+    assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false, label);
+  }
+});
+
+test('R9 seed removes stage and rollback entries owner line last', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  const log = path.join(gw.root, 'teardown.log');
+  const r = r2SeedHarness(gw, { shellHooks: r9TeardownHooks(log, '/.osi-sqlite3-seed-') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=0/);
+  const s = String.raw`.*/\.osi-sqlite3-seed-stage\.[^/ ]+`;
+  const b = String.raw`.*/\.osi-sqlite3-seed-rollback\.[^/ ]+`;
+  const lines = r9Lines(log);
+  assert.equal(lines.length, 6, lines.join('\n'));
+  assert.match(lines[0], new RegExp(`^rm -rf ${s}/candidate ${s}/link$`));
+  assert.match(lines[1], new RegExp(`^rm -f ${s}/\\.owner$`));
+  assert.match(lines[2], new RegExp(`^rmdir ${s}$`));
+  assert.match(lines[3], new RegExp(`^rm -rf ${b}/original$`));
+  assert.match(lines[4], new RegExp(`^rm -f ${b}/\\.candidate-id ${b}/\\.owner$`));
+  assert.match(lines[5], new RegExp(`^rmdir ${b}$`));
+  assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), []);
+});
+
+test('R9 seed converges after power loss at every step of its cleanup', () => {
+  for (let stopAfter = 1; stopAfter <= 6; stopAfter++) {
+    const label = `stop after teardown step ${stopAfter}`;
+    const gw = makeGateway('real-without-binary');
+    const { d } = r2OldBytes(gw);
+    const log = path.join(gw.root, 'teardown.log');
+    const first = r2SeedHarness(gw, { shellHooks: r9TeardownHooks(log, '/.osi-sqlite3-seed-', stopAfter) });
+    assert.equal(first.status, 26, label + '\n' + first.stderr);
+    assert.match(first.stderr, /TEARDOWN_INTERRUPT/, label);
+    assert.equal(requireSqlite3(gw.proj).status, 0, label);
+    // Each later run is a fresh boot. Recovery may ask for one retry.
+    let boots = 0;
+    let r;
+    do {
+      r = r2SeedHarness(gw);
+      boots++;
+      assert.equal(r.status, 0, label + '\n' + r.stderr);
+      assert.doesNotMatch(r.stderr, /ambiguous|unowned|preserving both/, label);
+    } while (!/SEED_RC=0/.test(r.stdout) && boots < 3);
+    assert.match(r.stdout, /SEED_RC=0/, label + '\n' + r.stderr);
+    assert.deepEqual(r2Names(gw, '.osi-sqlite3-seed-'), [], label);
+    assert.equal(fs.existsSync(path.join(d, '.osi-sqlite3-candidate-owner')), false, label);
+    assert.equal(fs.existsSync(path.join(d, 'original.txt')), false, label);
+    assert.equal(requireSqlite3(gw.proj).status, 0, label);
   }
 });

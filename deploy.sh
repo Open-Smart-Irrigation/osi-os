@@ -871,6 +871,16 @@ native_sqlite3_clear_metadata_backup() {
     return 0
 }
 
+# Removes rollback directory $1 in the reverse of the order it was filled:
+# the original, then the owner line, then the directory. A plain rm -rf
+# follows readdir order, and power lost after it unlinked .owner but before
+# it finished the original leaves an unowned rollback that every later deploy
+# and seed refuses. Cut short here, the directory still reads as owned, or as
+# owner metadata only. rmdir refuses an entry this tool did not put there.
+native_sqlite3_remove_backup() {
+    rm -rf "$1/original" && rm -f "$1/.owner" && rmdir "$1"
+}
+
 native_sqlite3_owned_final() {
     ns_final="$NODE_RED_ROOT/node_modules/sqlite3"
     [ -d "$ns_final" ] && [ ! -L "$ns_final" ] || return 1
@@ -926,7 +936,7 @@ native_sqlite3_recover_early() {
     fi
     if native_sqlite3_present "$ns_o" && ! native_sqlite3_present "$ns_d"; then
         native_sqlite3_restore_original "$ns_o" "$ns_d" || return 1
-        if ! rm -rf "$NS_B"; then
+        if ! native_sqlite3_remove_backup "$NS_B"; then
             echo "ERROR: sqlite3 rollback cleanup failed; inspect surviving paths in $NS_B" >&2
             return 1
         fi
@@ -943,7 +953,7 @@ native_sqlite3_recover_early() {
     fi
     native_sqlite3_recovery_lock || return 1
     if [ "$(native_sqlite3_pkg_version "$ns_d")" = "$NS_LOCKED" ] && native_sqlite3_dir_loads "$ns_d" >/dev/null 2>&1; then
-        if ! rm -rf "$NS_B"; then
+        if ! native_sqlite3_remove_backup "$NS_B"; then
             echo "ERROR: verified sqlite3 is installed but old backup cleanup partially failed; inspect $NS_B" >&2
             return 1
         fi
@@ -961,7 +971,7 @@ native_sqlite3_recover_early() {
     if native_sqlite3_present "$ns_o"; then
         native_sqlite3_restore_original "$ns_o" "$ns_d" || return 1
     fi
-    if ! rm -rf "$NS_B"; then
+    if ! native_sqlite3_remove_backup "$NS_B"; then
         echo "ERROR: sqlite3 rollback cleanup may be partial; inspect $NS_B" >&2
         return 1
     fi
@@ -985,7 +995,7 @@ native_sqlite3_rollback_failed_final() {
     if native_sqlite3_present "$native_failed_b/original"; then
         native_sqlite3_restore_original "$native_failed_b/original" "$native_failed_d" || return 1
     fi
-    if ! rm -rf "$native_failed_b"; then
+    if ! native_sqlite3_remove_backup "$native_failed_b"; then
         echo "ERROR: sqlite3 rollback cleanup may be partial: $native_failed_b" >&2
         return 1
     fi
@@ -1232,7 +1242,7 @@ materialize_native_sqlite3() {
         native_sqlite3_rollback_failed_final "$mns_backup"
         return 1
     fi
-    if ! rm -rf "$mns_backup"; then
+    if ! native_sqlite3_remove_backup "$mns_backup"; then
         echo "ERROR: verified sqlite3 installed but rollback cleanup may be partial: $mns_backup" >&2
         return 1
     fi

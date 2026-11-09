@@ -233,6 +233,17 @@ seed_sqlite3_clear_metadata_backup() {
     fi
     return 0
 }
+# Remove a rollback directory or stage in the reverse of the order it was
+# filled, owner line last. A plain rm -rf follows readdir order, and power
+# lost after it unlinked .owner but before the rest leaves an entry that the
+# scanners refuse on every boot. rmdir refuses an entry the seed did not put
+# there.
+seed_sqlite3_remove_backup() {
+    rm -rf "$1/original" && rm -f "$1/.candidate-id" "$1/.owner" && rmdir "$1"
+}
+seed_sqlite3_remove_stage() {
+    rm -rf "$1/candidate" "$1/link" && rm -f "$1/.owner" && rmdir "$1"
+}
 seed_sqlite3_owned_final() {
     seed_d="$DST/node_modules/sqlite3"
     seed_sqlite3_exact_id_file "$1/.candidate-id" || return 1
@@ -275,7 +286,7 @@ seed_sqlite3_recover() {
     fi
     if seed_sqlite3_present "$seed_o" && ! seed_sqlite3_present "$seed_d"; then
         seed_sqlite3_restore_original "$seed_o" "$seed_d" || return 1
-        if ! rm -rf "$SEED_B"; then
+        if ! seed_sqlite3_remove_backup "$SEED_B"; then
             echo "ERROR: seed backup cleanup may be partial: $SEED_B" >&2
             return 1
         fi
@@ -292,7 +303,7 @@ seed_sqlite3_recover() {
     fi
     seed_sqlite3_pin || return 1
     if [ "$(seed_sqlite3_version "$seed_d")" = "$SEED_PIN" ] && seed_sqlite3_loads "$seed_d" >/dev/null 2>&1; then
-        if ! rm -rf "$SEED_B"; then
+        if ! seed_sqlite3_remove_backup "$SEED_B"; then
             echo "ERROR: verified seed final but backup cleanup may be partial: $SEED_B" >&2
             return 1
         fi
@@ -311,7 +322,7 @@ seed_sqlite3_recover() {
     if seed_sqlite3_present "$seed_o"; then
         seed_sqlite3_restore_original "$seed_o" "$seed_d" || return 1
     fi
-    if ! rm -rf "$SEED_B"; then
+    if ! seed_sqlite3_remove_backup "$SEED_B"; then
         echo "ERROR: seed rollback cleanup may be partial: $SEED_B" >&2
         return 1
     fi
@@ -334,7 +345,7 @@ seed_sqlite3_rollback_failed_final() {
     if seed_sqlite3_present "$seed_failed_b/original"; then
         seed_sqlite3_restore_original "$seed_failed_b/original" "$seed_failed_d" || return 1
     fi
-    if ! rm -rf "$seed_failed_b"; then
+    if ! seed_sqlite3_remove_backup "$seed_failed_b"; then
         echo "ERROR: seed rollback cleanup may be partial: $seed_failed_b" >&2
         return 1
     fi
@@ -384,7 +395,7 @@ seed_sqlite3_scan_stage() {
             fi
         fi
         echo "WARN: removing seed stage left by an earlier attempt: $seed_s" >&2
-        if ! rm -rf "$seed_s" || seed_sqlite3_present "$seed_s"; then
+        if ! seed_sqlite3_remove_stage "$seed_s" || seed_sqlite3_present "$seed_s"; then
             echo "ERROR: seed stage cleanup failed or was partial: $seed_s" >&2
             return 1
         fi
@@ -471,7 +482,7 @@ seed_native_sqlite3() {
         seed_candidate="$seed_s/link"
         if ! ln -s "$SQLITE_SRC" "$seed_candidate" ||
            ! seed_sqlite3_loads "$seed_candidate" >/dev/null 2>&1; then
-            if ! rm -rf "$seed_s" || seed_sqlite3_present "$seed_s"; then
+            if ! seed_sqlite3_remove_stage "$seed_s" || seed_sqlite3_present "$seed_s"; then
                 echo "ERROR: seed link failure and stage cleanup may be partial: $seed_s" >&2
             else
                 echo 'ERROR: verified firmware-link fallback unavailable' >&2
@@ -530,11 +541,11 @@ seed_native_sqlite3() {
         seed_sqlite3_rollback_failed_final "$seed_b"
         return 1
     fi
-    if ! rm -rf "$seed_s"; then
+    if ! seed_sqlite3_remove_stage "$seed_s"; then
         echo "ERROR: seed stage cleanup may be partial: $seed_s" >&2
         return 1
     fi
-    if ! rm -rf "$seed_b"; then
+    if ! seed_sqlite3_remove_backup "$seed_b"; then
         echo "ERROR: verified seed final but backup cleanup may be partial: $seed_b" >&2
         return 1
     fi
