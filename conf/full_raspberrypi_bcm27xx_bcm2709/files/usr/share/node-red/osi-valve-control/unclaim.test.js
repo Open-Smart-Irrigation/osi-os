@@ -266,7 +266,7 @@ test('deploy.sh ships unclaim.js, or a deployed gateway cannot load osi-valve-co
   // cloud-commands.js/cancel.js/runtime.js fetch lines already guard against by hand --
   // verify-helper-registration.js only checks whole modules, never files inside one.
   const deploySh = fs.readFileSync(path.resolve(__dirname, '../../../../../../../deploy.sh'), 'utf8');
-  assert.ok(deploySh.includes('/srv/node-red/osi-valve-control/unclaim.js'),
+  assert.ok(deploySh.includes('$MODULE_STAGE/osi-valve-control/unclaim.js'),
     'deploy.sh must carry a fetch_required line for osi-valve-control/unclaim.js');
 });
 

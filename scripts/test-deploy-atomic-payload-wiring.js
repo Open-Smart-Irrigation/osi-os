@@ -408,7 +408,7 @@ test('the image seed leaves payload-linked helper modules alone and seeds the re
     fs.symlinkSync(path.join('..', 'osi-lib'), path.join(dst, 'node_modules', 'osi-lib'));
     fs.mkdirSync(path.join(dst, 'osi-journal'));
     fs.writeFileSync(path.join(dst, 'osi-journal', 'index.js'), '// osi-journal stale\n');
-    const result = spawnSync('sh', ['-c', `set -eu\nSRC=${JSON.stringify(src)}\nDST=${JSON.stringify(dst)}\n${loop[0]}`], { encoding: 'utf8' });
+    const result = spawnSync('sh', ['-c', `set -eu\nSEED_COPY=1\nSRC=${JSON.stringify(src)}\nDST=${JSON.stringify(dst)}\n${loop[0]}`], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.readlinkSync(path.join(dst, 'osi-lib')), path.join('payloads', 'S', 'modules', 'osi-lib'));
     assert.equal(fs.readlinkSync(path.join(dst, 'node_modules', 'osi-lib')), path.join('..', 'osi-lib'));

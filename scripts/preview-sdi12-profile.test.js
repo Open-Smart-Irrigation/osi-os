@@ -115,7 +115,7 @@ test('every documented example has explicit provenance and independently pinned 
 
 test('the extra runtime file is fetched to its exact module path and profile mirrors match', () => {
   const deploy = fs.readFileSync(path.join(root, 'deploy.sh'), 'utf8');
-  assert.match(deploy, /fetch_required "osi-sdi12-normalize configuration\.js" \\\n\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-sdi12-normalize\/configuration\.js" \\\n\s+"\/srv\/node-red\/osi-sdi12-normalize\/configuration\.js"/);
+  assert.match(deploy, /fetch_required "osi-sdi12-normalize configuration\.js" \\\n\s+"conf\/full_raspberrypi_bcm27xx_bcm2712\/files\/usr\/share\/node-red\/osi-sdi12-normalize\/configuration\.js" \\\n\s+"\$MODULE_STAGE\/osi-sdi12-normalize\/configuration\.js"/);
   for (const file of ['index.js', 'configuration.js', 'configuration.test.js']) {
     assert.equal(fs.readFileSync(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712', profilePath, file), 'utf8'),
       fs.readFileSync(path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709', profilePath, file), 'utf8'));
