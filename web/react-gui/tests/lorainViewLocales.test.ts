@@ -18,6 +18,8 @@ const KEYS: Array<[string, string]> = [
   ['devices', 'loRain.tips_one'],
   ['devices', 'loRain.tips_other'],
   ['devices', 'loRain.tipsUnavailable'],
+  ['devices', 'loRain.temperature'],
+  ['devices', 'loRain.temperatureHint'],
   ['common', 'analysis.tray.showLegacy'],
   ['common', 'analysis.legacyEstimate'],
   ['common', 'analysis.tooltip.reportsReceived_one'],

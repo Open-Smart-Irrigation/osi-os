@@ -264,6 +264,10 @@ function aggregateMetric(spec, deviceObservations) {
   };
 }
 
+// Temperature and humidity measured inside a device's own housing (the LoRain
+// thermistor on its circuit board, the STREGA valve box) are not field climate.
+const HOUSING_CLIMATE_TYPE_IDS = new Set(['AQUASCOPE_LORAIN', 'STREGA_VALVE']);
+
 function buildLocalEnvironment(deviceRows, nowIso) {
   const thresholdMs = 3 * 60 * 60 * 1000;
   const nowMs = new Date(nowIso).getTime();
@@ -272,6 +276,7 @@ function buildLocalEnvironment(deviceRows, nowIso) {
   let freshSensorCount = 0;
   let staleSensorCount = 0;
   for (const row of deviceRows || []) {
+    if (HOUSING_CLIMATE_TYPE_IDS.has(String((row && row.type_id) || '').trim().toUpperCase())) continue;
     const metrics = extractMetrics(row || {});
     if (!Object.keys(metrics).length) continue;
     const deviceObservedAt = trimToNull(row.recorded_at);
