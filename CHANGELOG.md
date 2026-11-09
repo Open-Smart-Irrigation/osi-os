@@ -70,12 +70,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `archived_at` taken from `expected_close_at` is later than the new value,
   so it keeps it and does not converge. Correcting those rows is open as
   #331.
-- **Re-run a failed deploy on a 0.8.1 gateway before leaving the site.**
-  Until the module-staging fix for #603 lands, a `deploy.sh` run on a 0.8.1
-  gateway that exits 1 can leave the 0.8.1 flows running on the new helper
-  modules, so run it again
-  ([docs/operations/deploy-module-ordering-audit-2026-11-09.md](docs/operations/deploy-module-ordering-audit-2026-11-09.md),
-  section 5).
+- **A failed deploy now rolls the helper modules back with the flows (#603).**
+  `deploy.sh` stages the `osi-*` helper modules in the payload and switches
+  them with `flows.json` and the GUI, so a deploy that exits 1 on a 0.8.1
+  gateway leaves the 0.8.1 flows on the 0.8.1 modules. Its first run copies
+  the live 0.8.1 modules into the retained payload and refuses, before
+  anything is stopped, if a module changed after an earlier attempt copied
+  it. A run with an older `deploy.sh` that exits 1 can still leave the 0.8.1
+  flows on the new modules: re-run it before leaving the site
+  ([deploy runbook](.claude/skills/osi-live-ops-runbook/references/deploy.md),
+  "Helper modules in the payload";
+  [audit](docs/operations/deploy-module-ordering-audit-2026-11-09.md)).
 
 ### Changed
 - **Conditional irrigation: the lifecycle service owns device unclaim.** A
