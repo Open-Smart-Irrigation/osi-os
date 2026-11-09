@@ -8,6 +8,10 @@ This report stands alone. It replaces plans r1 to r3 as the text the committed p
 
 Next: a fresh independent Sol source review. After acceptance comes the parent-owned plan-only commit (stage M), then the three-provider council on that commit. This revision between review rounds is not a council round.
 
+## Renumbering to 0079 (2026-11-09)
+
+Main merged #584 as `d1cc14b7d`, which took ordered migration 0078 (`0078__clear_lorain_legacy_rain_rate.sql`). The coordinator decided to rebase this branch onto that main and renumber, which replaces the rule below that execution stops instead of picking 0079. The migration is now `0079__chameleon_reading_links.sql`. Its second line reads `-- 0079:`, so its bytes and its `CHECKSUMS.json` entry are new; the SQL statements are unchanged. The seven bundled images were rebuilt with `node scripts/build-seed-db.js` and are stamped at head 79. The trigger owners in `verify-runtime-schema-parity.js` and the exact migration lists in the head-pin tests name 79. The packet files under `issue-356-chameleon-reading-links/` still name 0078; they are the reviewed history and stay unchanged. The edits to the retired `verify-flows-size-ratchet-allowances.json` were dropped, because flow growth now needs an entry in `scripts/flows-growth-exceptions.json` at the base ref.
+
 ## Current-main rebinding (2026-10-29)
 
 This section governs the execution binding. The Status paragraphs above, the stage M section and the r3 response tables record the P-based history and stay as written.
