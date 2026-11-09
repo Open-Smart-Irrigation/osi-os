@@ -3,7 +3,10 @@
 // Legacy threshold scheduler: which SWT values may reach "Decide + build
 // actuator cmd". Runs the shipped query builder and decision node of both
 // maintained profiles against the real seed schema (database/seed-blank.sql).
-// No output wire is followed and no event SQL is executed.
+// The query node loads its SWT query from that profile's
+// osi-scheduler-mean-query; every case also runs the module directly and
+// must read the same row. No output wire is followed and no event SQL is
+// executed.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -16,6 +19,11 @@ const PROFILES = {
   bcm2712: path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json'),
   bcm2709: path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/flows.json'),
 };
+const MODULE_DIRS = {
+  bcm2712: path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query'),
+  bcm2709: path.join(root, 'conf/full_raspberrypi_bcm27xx_bcm2709/files/usr/share/node-red/osi-scheduler-mean-query'),
+};
+const meanQueryModule = (profile) => require(MODULE_DIRS[profile]); // eslint-disable-line global-require
 const QUERY_ID = 'd0b2b1c1a937e16d';
 const DECISION_ID = '5f0d2b7e9b9b1b3a';
 const KIWI = 'A840410000000011';
@@ -66,16 +74,37 @@ function chameleonRow(db, values, flags = CLEAN) {
   return dataId;
 }
 
-async function schedule(profile, db, metric) {
-  const flowsPath = PROFILES[profile];
-  const buildQuery = new Function('msg', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
-  const zone = {
+// The shipped query node with its libs bound: osiLib serves this profile's
+// osi-scheduler-mean-query unless a test passes its own loader.
+function queryNode(profile, osiLib) {
+  const loader = osiLib || { require: (name) => (name === 'scheduler-mean-query'
+    ? { ok: true, value: meanQueryModule(profile) } : { ok: false, error: 'unexpected module ' + name }) };
+  const errors = [];
+  const node = { error: (m) => errors.push(String(m)), warn: (m) => errors.push(String(m)) };
+  const fn = new Function('msg', 'node', 'osiLib', loadNode(QUERY_ID, PROFILES[profile]).func); // eslint-disable-line no-new-func
+  return { build: (msg) => fn(msg, node, loader), errors };
+}
+
+function zoneRow(metric) {
+  return {
     zone_id: 1, zone_name: 'Z One', user_id: 1, scheduling_mode: 'local', trigger_metric: metric,
     threshold_kpa: 50, duration_minutes: 10, enabled: 1, last_triggered_at: null,
     enabled_scope_holders: 1, valve_deveui: VALVE, shared_environment_json: null,
   };
-  const query = buildQuery({ payload: zone });
+}
+
+async function schedule(profile, db, metric) {
+  const flowsPath = PROFILES[profile];
+  const zone = zoneRow(metric);
+  const { build, errors } = queryNode(profile);
+  const query = build({ payload: zone });
+  assert.deepEqual(errors, []);
   const row = { ...db.prepare(query.topic).get() };
+  // The module on its own, with the node's cutoff, reads the same row.
+  const cutoffIso = query.topic.match(/dd\.recorded_at >= '([^']+)'/)[1];
+  const direct = meanQueryModule(profile).buildSwtMeanQuery(metric, 1, cutoffIso);
+  assert.equal(direct, query.topic, 'the node sends the module query unchanged');
+  assert.deepEqual({ ...db.prepare(direct).get() }, row);
   const { result } = await executeFunction(loadNode(DECISION_ID, flowsPath), { msg: { payload: [row], zone: query.zone }, db });
   return { row, result };
 }
@@ -200,10 +229,58 @@ for (const profile of Object.keys(PROFILES)) {
   }
 
   test(`${profile}: the query associates diagnostics only through chameleon_reading_links`, () => {
-    const func = loadNode(QUERY_ID, PROFILES[profile]).func;
-    assert.match(func, /LEFT JOIN chameleon_reading_links crl\s+ON crl\.device_data_id = dd\.id/);
-    assert.doesNotMatch(func, /recorded_at\s*=\s*dd\.recorded_at|dd\.recorded_at\s*=\s*cr\.recorded_at/);
-    assert.doesNotMatch(func, /FROM chameleon_readings[^)]*ORDER BY/);
+    const source = fs.readFileSync(path.join(MODULE_DIRS[profile], 'index.js'), 'utf8');
+    for (const sql of [source, meanQueryModule(profile).buildSwtMeanQuery('SWT_AVG', 1, minutesAgo(60))]) {
+      assert.match(sql, /LEFT JOIN chameleon_reading_links crl\s+ON crl\.device_data_id = dd\.id/);
+      assert.doesNotMatch(sql, /recorded_at\s*=\s*dd\.recorded_at|dd\.recorded_at\s*=\s*cr\.recorded_at/);
+      assert.doesNotMatch(sql, /FROM chameleon_readings[^)]*ORDER BY/);
+    }
+    // The node carries no SWT query of its own.
+    assert.doesNotMatch(loadNode(QUERY_ID, PROFILES[profile]).func, /FROM devices ds|chameleon_readings/);
+  });
+
+  // Fail closed: without the module the node sends no SWT query, so the zone
+  // is not evaluated and no valve opens. DENDRO does not need the module.
+  test(`${profile}: a query builder that cannot load sends no SWT query and reports it`, () => {
+    const calls = [];
+    const missing = { require: (name) => { calls.push(name); return { ok: false, error: 'injected load failure' }; } };
+    for (const metric of ['SWT_1', 'SWT_2', 'SWT_3', 'SWT_AVG', 'SWT_WM1']) {
+      const { build, errors } = queryNode(profile, missing);
+      const msg = { payload: zoneRow(metric) };
+      assert.equal(build(msg), null, metric + ': no message');
+      assert.equal(msg.topic, undefined, metric + ': no topic');
+      assert.deepEqual(errors, ['scheduler-mean-query unavailable: injected load failure'], metric);
+    }
+    assert.deepEqual([...new Set(calls)], ['scheduler-mean-query']);
+    calls.length = 0;
+    const { build, errors } = queryNode(profile, missing);
+    const dendro = build({ payload: { ...zoneRow('DENDRO') } });
+    assert.match(dendro.topic, /FROM zone_daily_recommendations/);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(calls, [], 'DENDRO never loads the SWT query builder');
+  });
+
+  test(`${profile}: osi-scheduler-mean-query refuses values it cannot interpolate safely`, () => {
+    const { buildSwtMeanQuery } = meanQueryModule(profile);
+    const cutoff = '2026-11-09T09:00:00.000Z';
+    for (const zoneId of [NaN, Infinity, '1', null, undefined, '1; DROP TABLE devices']) {
+      assert.throws(() => buildSwtMeanQuery('SWT_1', zoneId, cutoff), TypeError, String(zoneId));
+    }
+    for (const bad of ['2026-11-09 09:00:00', '2026-11-09T09:00:00Z', "2026-11-09T09:00:00.000Z' OR 1=1 --", null, Date.parse(cutoff)]) {
+      assert.throws(() => buildSwtMeanQuery('SWT_1', 1, bad), TypeError, String(bad));
+    }
+    const sql = buildSwtMeanQuery('SWT_1', 7, cutoff);
+    assert.match(sql, /WHERE ds\.irrigation_zone_id = 7\n/);
+    assert.match(sql, /AND dd\.recorded_at >= '2026-11-09T09:00:00\.000Z'\n/);
+  });
+
+  test(`${profile}: osi-scheduler-mean-query maps each metric to its channel value`, () => {
+    const { buildSwtMeanQuery } = meanQueryModule(profile);
+    const selected = (metric) => buildSwtMeanQuery(metric, 1, minutesAgo(60)).match(/SELECT recorded_at, (.+) AS row_value/)[1];
+    for (const metric of ['SWT_1', 'SWT_WM1', 'DENDRO', '', 'UNKNOWN', 'swt_2']) assert.equal(selected(metric), 'v1', metric);
+    for (const metric of ['SWT_2', 'SWT_WM2']) assert.equal(selected(metric), 'v2', metric);
+    for (const metric of ['SWT_3', 'SWT_WM3']) assert.equal(selected(metric), 'v3', metric);
+    assert.match(selected('SWT_AVG'), /^CASE WHEN \(v1 IS NOT NULL\) \+ \(v2 IS NOT NULL\) \+ \(v3 IS NOT NULL\) = 0 THEN NULL ELSE /);
   });
 }
 
@@ -211,4 +288,10 @@ test('both profiles ship the same query and decision bodies', () => {
   for (const id of [QUERY_ID, DECISION_ID]) {
     assert.equal(loadNode(id, PROFILES.bcm2709).func, loadNode(id, PROFILES.bcm2712).func, id);
   }
+  assert.deepEqual(loadNode(QUERY_ID, PROFILES.bcm2709).libs, loadNode(QUERY_ID, PROFILES.bcm2712).libs);
+  assert.equal(
+    fs.readFileSync(path.join(MODULE_DIRS.bcm2709, 'index.js'), 'utf8'),
+    fs.readFileSync(path.join(MODULE_DIRS.bcm2712, 'index.js'), 'utf8'),
+    'osi-scheduler-mean-query'
+  );
 });

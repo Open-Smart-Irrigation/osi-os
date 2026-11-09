@@ -10,6 +10,9 @@
 // result. The sqlite3 binding is replaced by a node:sqlite adapter, as in
 // scripts/test-lsn50-counter-concurrency.js. "Apply Config" is unchanged by
 // #356 and is not driven here: each message carries the fields it produces.
+// The insert and backfill bodies live in osi-chameleon-helper and the SWT
+// query in osi-scheduler-mean-query; the module cases at the end call those
+// functions directly through the same real facade.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const Module = require('node:module');
@@ -160,7 +163,7 @@ function runtime(profile, dbPath) {
     assert.deepEqual(persisted.calibrated, [ARRAY]);
     assert.equal(await backfill(persisted), null);
   }
-  return { deliver, write, insert, calibrate, facade, errors, warnings };
+  return { deliver, write, insert, persist, calibrate, facade, errors, warnings, chameleon: modules.chameleon };
 }
 
 // formattedData as "Apply Config" leaves it for a Chameleon uplink.
@@ -200,7 +203,11 @@ const APPEND_EVENTS_SQL = "SELECT COUNT(*) AS n FROM sync_outbox WHERE upper(op)
 
 async function schedule(profile, dbPath, metric = 'SWT_1') {
   const flowsPath = profilePaths(profile).flows;
-  const buildQuery = new Function('msg', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
+  const meanQuery = require(path.join(profilePaths(profile).nodeRed, 'osi-scheduler-mean-query'));
+  const osiLib = { require: (name) => (name === 'scheduler-mean-query' ? { ok: true, value: meanQuery } : { ok: false, error: name }) };
+  const node = { error(m) { throw new Error('query node error: ' + m); } };
+  const queryFn = new Function('msg', 'node', 'osiLib', loadNode(QUERY_ID, flowsPath).func); // eslint-disable-line no-new-func
+  const buildQuery = (msg) => queryFn(msg, node, osiLib);
   const zone = {
     zone_id: 1, zone_name: 'Z One', user_id: 1, scheduling_mode: 'local', trigger_metric: metric,
     threshold_kpa: 50, duration_minutes: 10, enabled: 1, last_triggered_at: null,
@@ -465,6 +472,100 @@ for (const profile of PROFILES) {
   });
 }
 
+// Module functions called directly, through the real osi-db-helper facade.
+const LINK_COUNT_SQL = 'SELECT COUNT(*) AS n FROM chameleon_reading_links';
+const READING_COUNT_SQL = 'SELECT COUNT(*) AS n FROM chameleon_readings';
+async function canonicalRow(facade, devEui = EUI_A) {
+  return Number((await facade.get('INSERT INTO device_data (deveui, recorded_at) VALUES (?, ?) RETURNING id', [devEui, T0])).id);
+}
+
+for (const profile of PROFILES) {
+  test(`${profile}: buildReadingRow maps one message to the 29 insert parameters and a link id`, () => {
+    const { chameleon } = runtime(profile, seedFile());
+    const row = chameleon.buildReadingRow(chameleonUplink({ devEui: ' a840410000000001 ', deviceDataId: 7, chameleonArrayId: ARRAY.toLowerCase() }));
+    assert.equal(row.deveui, EUI_A);
+    assert.equal(row.deviceDataId, 7);
+    assert.equal(row.statusFlags, 0);
+    assert.equal(row.params.length, 29);
+    assert.deepEqual(row.params.slice(0, 5), [EUI_A, T0, 1, 0, 0]);
+    assert.equal(row.params[20], ARRAY, 'array id normalized');
+    for (const bad of [0, -1, '5', 5.5, null, undefined, Number.MAX_SAFE_INTEGER + 1]) {
+      assert.equal(chameleon.buildReadingRow(chameleonUplink({ deviceDataId: bad })).deviceDataId, null, String(bad));
+    }
+    const faulted = chameleon.buildReadingRow(chameleonUplink({ chameleonTimeout: 1, chameleonStatusFlags: null }));
+    assert.equal(faulted.statusFlags, null);
+    assert.equal(faulted.params[4], 1, 'data_invalid');
+    assert.deepEqual([faulted.params[13], faulted.params[14], faulted.params[20]], [null, null, null], 'temp, resistance and array id cleared');
+  });
+
+  test(`${profile}: insertReadingWithLink writes the diagnostic and its link in one transaction`, async () => {
+    const dbPath = seedFile();
+    const { chameleon, facade } = runtime(profile, dbPath);
+    const dataId = await canonicalRow(facade);
+    const outcome = await chameleon.insertReadingWithLink(facade, chameleon.buildReadingRow(chameleonUplink({ deviceDataId: dataId })));
+    assert.ok(Number.isSafeInteger(outcome.readingId));
+    assert.equal(outcome.linkError, null);
+    const linked = snapshot(dbPath, LINKED_SQL);
+    assert.equal(linked.length, 1);
+    assert.deepEqual([linked[0].device_data_id, linked[0].reading_id, linked[0].r1_ohm_comp], [dataId, outcome.readingId, 1000]);
+  });
+
+  test(`${profile}: insertReadingWithLink without a device_data id stores an unlinked diagnostic`, async () => {
+    const dbPath = seedFile();
+    const { chameleon, facade } = runtime(profile, dbPath);
+    const outcome = await chameleon.insertReadingWithLink(facade, chameleon.buildReadingRow(chameleonUplink({})));
+    assert.ok(Number.isSafeInteger(outcome.readingId));
+    assert.equal(outcome.linkError, null);
+    assert.equal(snapshot(dbPath, READING_COUNT_SQL)[0].n, 1);
+    assert.equal(snapshot(dbPath, LINK_COUNT_SQL)[0].n, 0);
+  });
+
+  test(`${profile}: insertReadingWithLink keeps the diagnostic and returns the refusal of a cross-device link`, async () => {
+    const dbPath = seedFile();
+    const { chameleon, facade } = runtime(profile, dbPath);
+    const otherId = await canonicalRow(facade, EUI_B);
+    const outcome = await chameleon.insertReadingWithLink(facade, chameleon.buildReadingRow(chameleonUplink({ deviceDataId: otherId })));
+    assert.ok(Number.isSafeInteger(outcome.readingId));
+    assert.ok(outcome.linkError instanceof Error, String(outcome.linkError));
+    assert.equal(snapshot(dbPath, READING_COUNT_SQL)[0].n, 1, 'diagnostic kept');
+    assert.equal(snapshot(dbPath, LINK_COUNT_SQL)[0].n, 0);
+  });
+
+  test(`${profile}: insertReadingWithLink rejects and writes nothing while another node holds a transaction`, async () => {
+    const dbPath = seedFile();
+    const { chameleon, facade } = runtime(profile, dbPath);
+    const dataId = await canonicalRow(facade);
+    await facade.run('BEGIN IMMEDIATE');
+    await assert.rejects(chameleon.insertReadingWithLink(facade, chameleon.buildReadingRow(chameleonUplink({ deviceDataId: dataId }))), /transaction within a transaction/);
+    await facade.run('COMMIT');
+    assert.equal(snapshot(dbPath, READING_COUNT_SQL)[0].n, 0);
+    assert.equal(snapshot(dbPath, LINK_COUNT_SQL)[0].n, 0);
+  });
+
+  test(`${profile}: backfillLocalCalibration fills linked rows from their own diagnostics and an unlinked row by device and time`, async () => {
+    const dbPath = seedFile({ sql: storedRows([{ r1: 20000, r2: 30000 }, { r1: 100000, r2: 60000 }, { r1: 80000, r2: 40000, link: false }]) });
+    const rt = runtime(profile, dbPath);
+    await rt.persist({ payload: { calibrations: [CALIBRATION], not_found: [] } });
+    await rt.chameleon.backfillLocalCalibration(rt.facade, [ARRAY.toLowerCase(), 'not-an-array-id']);
+    for (const row of snapshot(dbPath, LINKED_SQL)) {
+      assert.equal(row.swt_1, row.r1_ohm_comp / 1000, JSON.stringify(row));
+      assert.equal(row.swt_2, row.r2_ohm_comp / 1000, JSON.stringify(row));
+    }
+    assert.deepEqual(snapshot(dbPath, 'SELECT swt_1, swt_2 FROM device_data ORDER BY id').map((r) => [r.swt_1, r.swt_2]), [[20, 30], [100, 60], [80, 40]]);
+  });
+
+  test(`${profile}: backfillLocalCalibration opens no transaction for an empty list and rejects inside another node's transaction`, async () => {
+    const dbPath = seedFile({ sql: storedRows([{ r1: 20000, r2: 30000 }]) });
+    const rt = runtime(profile, dbPath);
+    await rt.persist({ payload: { calibrations: [CALIBRATION], not_found: [] } });
+    await rt.facade.run('BEGIN IMMEDIATE');
+    await rt.chameleon.backfillLocalCalibration(rt.facade, []);
+    await assert.rejects(rt.chameleon.backfillLocalCalibration(rt.facade, [ARRAY]), /transaction within a transaction/);
+    await rt.facade.run('COMMIT');
+    assert.deepEqual(snapshot(dbPath, 'SELECT swt_1 FROM device_data'), [{ swt_1: null }], 'nothing filled');
+  });
+}
+
 // The link needs d.deviceDataId from Normalize + Write on the same message. A
 // parallel or reordered wire would leave every diagnostic unlinked, and the
 // scheduler would then ignore every Chameleon row.
@@ -482,5 +583,21 @@ test('both profiles wire Normalize + Write to Insert Chameleon Reading in series
 test('both profiles ship the same ingest and calibration bodies', () => {
   for (const id of ['460e0bfd95f89e67', 'lsn50-zone-agg-fn', 'chameleon-readings-insert-fn', '51c0ae3799c97131', 'd20948dd9120a3d2']) {
     assert.equal(loadNode(id, profilePaths('bcm2709').flows).func, loadNode(id, profilePaths('bcm2712').flows).func, id);
+  }
+  for (const file of ['osi-chameleon-helper/index.js', 'osi-scheduler-mean-query/index.js']) {
+    assert.equal(fs.readFileSync(path.join(profilePaths('bcm2709').nodeRed, file), 'utf8'),
+      fs.readFileSync(path.join(profilePaths('bcm2712').nodeRed, file), 'utf8'), file);
+  }
+});
+
+// The insert and backfill nodes only delegate; the bodies are the module's.
+test('the insert and backfill nodes call osi-chameleon-helper and carry no SQL of their own', () => {
+  for (const profile of PROFILES) {
+    const insertFunc = loadNode('chameleon-readings-insert-fn', profilePaths(profile).flows).func;
+    const backfillFunc = loadNode('d20948dd9120a3d2', profilePaths(profile).flows).func;
+    assert.match(insertFunc, /const row = chameleon\.buildReadingRow\(d\);/);
+    assert.match(insertFunc, /await chameleon\.insertReadingWithLink\(db, row\)/);
+    assert.match(backfillFunc, /await chameleon\.backfillLocalCalibration\(db, msg\.calibrated \|\| \[\]\)/);
+    for (const func of [insertFunc, backfillFunc]) assert.doesNotMatch(func, /INSERT INTO|UPDATE device_data|SELECT /);
   }
 });

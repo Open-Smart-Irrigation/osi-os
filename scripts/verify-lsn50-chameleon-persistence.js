@@ -8,7 +8,11 @@ const vm = require('vm');
 const repoRoot = path.resolve(__dirname, '..');
 const flowsPath = path.join(repoRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/flows.json');
 const flows = JSON.parse(fs.readFileSync(flowsPath, 'utf8'));
-const chameleonHelper = require(path.join(repoRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper'));
+const chameleonHelperPath = path.join(repoRoot, 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-chameleon-helper');
+const chameleonHelper = require(chameleonHelperPath);
+// Issue #356: the insert body (row mapping, diagnostic insert and link) lives
+// in osi-chameleon-helper; "Insert Chameleon Reading" delegates to it.
+const chameleonHelperSource = fs.readFileSync(path.join(chameleonHelperPath, 'index.js'), 'utf8');
 
 function nodeById(id) {
   const node = flows.find((entry) => entry.id === id);
@@ -115,18 +119,20 @@ assertIncludes(apply, 'd.dendroCalibrationMissing = false;\n    flow.set(prevKey
 
 const chameleonInsert = funcOf('chameleon-readings-insert-fn');
 assertIncludes(chameleonInsert, 'if (!d || d.isChameleon !== true) return msg;', 'insert passes non-chameleon payloads downstream');
-assertIncludes(chameleonInsert, 'INSERT INTO chameleon_readings', 'insert function writes chameleon table');
-assertIncludes(chameleonInsert, 'r1_ohm_comp', 'insert stores compensated resistance');
-assertIncludes(chameleonInsert, 'r1_ohm_raw', 'insert stores raw resistance');
-assertIncludes(chameleonInsert, 'payload_b64', 'insert stores raw payload for replay');
-assertIncludes(chameleonInsert, 'rawPayloadB64 is ChirpStack data.data', 'insert documents payload_b64 replay semantics');
-assertIncludes(chameleonInsert, 'const statusFlags = toInt(d.chameleonStatusFlags);', 'insert normalizes status flags once');
-assertIncludes(chameleonInsert, 'const dataInvalidFlag = dataInvalid ? 1 : 0;', 'insert stores computed data_invalid');
-assertIncludes(chameleonInsert, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
+assertIncludes(chameleonInsert, 'const row = chameleon.buildReadingRow(d);', 'insert maps the message through osi-chameleon-helper');
+assertIncludes(chameleonInsert, 'await chameleon.insertReadingWithLink(db, row)', 'insert writes through osi-chameleon-helper');
 assertIncludes(chameleonInsert, "statusFlags == null ? 'grey' : (statusFlags ? 'yellow' : 'green')", 'insert status handles unknown flags');
 assertIncludes(chameleonInsert, 'return msg;', 'insert function passes through downstream flow');
-assertIncludes(chameleonInsert, 'INSERT INTO chameleon_reading_links', 'insert links its diagnostic to the uplink device_data row');
-assertIncludes(chameleonInsert, 'await db.transaction(', 'insert writes the diagnostic and its link in one scoped transaction');
+assertIncludes(chameleonHelperSource, 'INSERT INTO chameleon_readings', 'insert function writes chameleon table');
+assertIncludes(chameleonHelperSource, 'r1_ohm_comp', 'insert stores compensated resistance');
+assertIncludes(chameleonHelperSource, 'r1_ohm_raw', 'insert stores raw resistance');
+assertIncludes(chameleonHelperSource, 'payload_b64', 'insert stores raw payload for replay');
+assertIncludes(chameleonHelperSource, 'rawPayloadB64 is ChirpStack data.data', 'insert documents payload_b64 replay semantics');
+assertIncludes(chameleonHelperSource, 'const statusFlags = toInt(d.chameleonStatusFlags);', 'insert normalizes status flags once');
+assertIncludes(chameleonHelperSource, 'const dataInvalidFlag = dataInvalid ? 1 : 0;', 'insert stores computed data_invalid');
+assertIncludes(chameleonHelperSource, 'const tempInvalid = dataInvalid || toInt(d.chameleonTempFault) === 1;', 'insert explicitly nulls temp_c on temp_fault');
+assertIncludes(chameleonHelperSource, 'INSERT INTO chameleon_reading_links', 'insert links its diagnostic to the uplink device_data row');
+assertIncludes(chameleonHelperSource, 'return db.transaction(', 'insert writes the diagnostic and its link in one scoped transaction');
 
 const dendroInsert = funcOf('dendro-readings-insert-fn');
 assertIncludes(dendroInsert, 'd.dendroValid === null', 'dendrometer insert skips chameleon frames via dendroValid null guard');
