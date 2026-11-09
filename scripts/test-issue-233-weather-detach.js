@@ -408,6 +408,26 @@ async function detachCase(profile, spec, policy) {
       assertOneResponse(repeated, 404, 'D01 repeated detach');
       assert.equal(weatherEvents(f.first).length, 1);
     }
+    if (spec.id === 'D06' && !policy) {
+      // Re-attach after a single-zone detach: the weather pair through the helper the PUT
+      // weather-assignment route uses, then the primary through the lifecycle owner.
+      const facade = productionFacade(f.first);
+      const weather = require(path.join(profile.nodeRedModules, 'osi-device-commands/weather.js'));
+      const reattached = await weather.replaceLocalWeatherStationZones(
+        facade, { device_eui: DEVICE, zone_uuids: [Z1] }, { gateway_device_eui: GATEWAY });
+      assert.equal(reattached.sync_version, 5, 'D06 re-attach advances the weather version past the detach');
+      assert.deepEqual(assignments(f.first), [1], 'D06 re-attach restores the weather pair');
+      const reattachEvents = weatherEvents(f.first);
+      assert.equal(reattachEvents.length, 2, 'D06 re-attach emits one more weather set event');
+      assert.deepEqual(reattachEvents[1].zone_uuids, [Z1]);
+      const reassigned = await require(path.join(profile.nodeRedModules, 'osi-irrigation-policy')).applyLifecycleMutation({
+        db: facade, operation: 'device_assign', deviceEui: DEVICE, zoneId: 1,
+        actor: { user_id: 1 }, now: new Date().toISOString()
+      });
+      assert.equal(Number(reassigned.status || 200), 200, 'D06 primary re-assign');
+      assert.equal(deviceState(f.first).irrigation_zone_id, 1, 'D06 re-assign restores the primary zone');
+      assert.equal(deviceState(f.first).sync_version, 9, 'D06 re-assign advances the device version');
+    }
   } finally {
     f.close();
   }
