@@ -398,7 +398,8 @@ it:
 
 - `deploy.sh` stops before its first write with `ERROR: seed sqlite3 rollback
   present`, `ERROR: unowned sqlite3 rollback entry`, `ERROR: ambiguous sqlite3
-  rollback entry`, or a message ending in `preserving both` or `preserving both
+  rollback entry`, `ERROR: sqlite3 rollback owner metadata is incomplete beside
+  an owned final`, or a message ending in `preserving both` or `preserving both
   for inspection`.
 - The seed exits 1 at boot and skips the `osi-*` helper copy. OpenWrt deletes a
   uci-defaults script only when it exits 0, so
@@ -445,6 +446,34 @@ check() { node -p 'require(process.argv[1] + "/package.json").version' "$1" &&
 check "$NM/sqlite3"
 ```
 
+Two power-loss windows end in a refusal even when nothing else went wrong.
+Recognise them on disk:
+
+- Deploy cleanup cut after it removed `.owner` and before it removed the
+  folder. Deploy stops with `ERROR: sqlite3 rollback owner metadata is
+  incomplete beside an owned final`. An empty `.osi-sqlite3-rollback.XXXXXX/`
+  sits beside a `sqlite3/` whose marker names that folder. Deploy verified that
+  `sqlite3` before the cleanup started; if `check "$NM/sqlite3"` passes, follow
+  step 1 below. The seed clears its own form of this state without help.
+
+  ```sh
+  ls -A "$NM"/.osi-sqlite3-rollback.*/            # prints nothing
+  cat "$NM/sqlite3/.osi-sqlite3-candidate-owner"  # prints that folder's path
+  ```
+
+- Removal of a failed candidate cut short. `sqlite3/` is a partial copy
+  without its marker, beside a rollback folder that still holds `.owner` and
+  `original` (the seed's also `.candidate-id`). Deploy stops with `ERROR:
+  sqlite3 final path is not owned by rollback <folder>; preserving both`; the
+  seed with `ERROR: unowned final sqlite3 beside retained seed original`.
+  `check "$NM/sqlite3"` fails; run `check` on `<folder>/original` and on the
+  firmware module to choose between steps 2 and 3.
+
+  ```sh
+  ls -A "$NM/sqlite3"                    # no .osi-sqlite3-candidate-owner
+  ls -A "$NM"/.osi-sqlite3-*rollback.*/  # .owner and original
+  ```
+
 Pick exactly one of these, in this order:
 
 1. The final path is healthy and has no `original` entry. Keep it. Remove the
@@ -463,7 +492,8 @@ Pick exactly one of these, in this order:
    ```sh
    [ -e "$NM/sqlite3" ] || [ -L "$NM/sqlite3" ] && mv "$NM/sqlite3" "$NM/.osi-hold-sqlite3"
    mv "$NM/.osi-hold-sqlite3/original" "$NM/sqlite3"      # original was nested in the final path
-   # or: mv "$NM/.osi-sqlite3-rollback.XXXXXX/original" "$NM/sqlite3"
+   # or: mv "$NM/.osi-sqlite3-rollback.XXXXXX/original" "$NM/sqlite3"       # deploy rollback
+   # or: mv "$NM/.osi-sqlite3-seed-rollback.XXXXXX/original" "$NM/sqlite3"  # seed rollback
    ```
 
    Then remove the remaining folders as in step 1 and run the deploy. Remove
@@ -478,7 +508,10 @@ off-pin one, which fails on 32-bit ARM with musl where no prebuilt exists.
 After clearing, run the deploy. If the seed was refusing, it runs again at the
 next boot. If a deploy has run since the seed started refusing, that boot also
 copies the image's `osi-*` helpers, codecs and `edge-channels.json` over the
-deployed ones (flows.json stays), so run the deploy once more after it.
+deployed ones (flows.json stays), so run the deploy once more after it. The
+seed accepts a `sqlite3` that matches the image pin and opens `:memory:`
+before it reads the firmware module, so after step 3 it stops refusing even on
+an image whose firmware module is broken.
 
 ### Live valve testing (STREGA)
 
