@@ -1004,11 +1004,6 @@ async function planConfigQuery(t, deveui, fPort, state, nowMs) {
   return { requestedAt: new Date(nowMs).toISOString(), buildDate };
 }
 
-// Ingest one LoRain uplink inside the caller's transaction: claim the
-// observation identity, re-assess the affected frames, persist the telemetry
-// row, link it, and update the zone days. Any throw rolls all of it back.
-// uplink = { deveui, eventId, devAddr, fCnt, time, fPort, data, object,
-// applicationId }; opts = { nowMs, pinnedBuilds, configQueryEnabled }.
 // The LoRain thermistor sits on the gauge's circuit board. An open or shorted
 // thermistor decodes to -273.1 C; a value outside the Build Telemetry bounds
 // (-50..100 C) is stored as null rather than as a reading.
@@ -1016,6 +1011,11 @@ function loRainHousingTemperature(value) {
   return Number.isFinite(value) && value >= -50 && value <= 100 ? value : null;
 }
 
+// Ingest one LoRain uplink inside the caller's transaction: claim the
+// observation identity, re-assess the affected frames, persist the telemetry
+// row, link it, and update the zone days. Any throw rolls all of it back.
+// uplink = { deveui, eventId, devAddr, fCnt, time, fPort, data, object,
+// applicationId }; opts = { nowMs, pinnedBuilds, configQueryEnabled }.
 async function ingestLoRainUplink(t, uplink, opts = {}) {
   const nowMs = Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   const pinnedBuilds = opts.pinnedBuilds || PINNED_LORAIN_BUILDS;
