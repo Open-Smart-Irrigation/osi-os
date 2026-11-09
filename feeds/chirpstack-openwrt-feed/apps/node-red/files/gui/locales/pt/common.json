@@ -63,8 +63,7 @@
       "reason": {
         "unsupported": "Não suportado",
         "available_no_recent_data": "Sem dados recentes disponíveis"
-      },
-      "showLegacy": "Mostrar estimativas do método anterior"
+      }
     },
     "range": {
       "label": "Intervalo de análise",
@@ -84,6 +83,10 @@
       "stacked": "Empilhado",
       "overlaid": "Sobreposto",
       "smallMultiples": "Múltiplos pequenos"
+    },
+    "autoStack": {
+      "note": "Mostrado empilhado: nesta largura, os eixos das unidades deixam pouco espaço para o gráfico.",
+      "showOverlaid": "Mostrar sobreposto mesmo assim"
     },
     "toggle": {
       "normalize": "Normalizar"
@@ -132,8 +135,7 @@
       "partialDays": " ({{count}} de {{expected}} d)",
       "reportsReceived_one": " · {{count}} registo recebido",
       "reportsReceived_other": " · {{count}} registos recebidos"
-    },
-    "legacyEstimate": "estimativa, método anterior"
+    }
   },
   "restart": {
     "gateway_identity_change": "Identidade do gateway atualizada. Os serviços serão reiniciados dentro de {{count}} s.",

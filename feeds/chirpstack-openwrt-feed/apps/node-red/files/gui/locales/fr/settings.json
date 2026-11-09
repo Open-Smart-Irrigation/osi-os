@@ -105,5 +105,13 @@
     "revokeError": "L'autorisation n'a pas pu être révoquée.",
     "kindZone": "zone",
     "kindPlot": "parcelle"
+  },
+  "users": {
+    "linkedSignIn": "Connexion liée",
+    "linkedResetGuidance": "Les changements de mot de passe de ce compte passent par la procédure de récupération approuvée de l'identité liée. Demandez les étapes à suivre à l'administrateur de l'identité liée.",
+    "signInUnknown": "Type de connexion indisponible. Adressez-vous à l'administrateur de la passerelle.",
+    "linkedResetRefused": "Ce compte utilise une connexion liée : son mot de passe ne peut pas être réinitialisé sur cette passerelle. Demandez la procédure de récupération approuvée à l'administrateur de l'identité liée.",
+    "resetError": "Le mot de passe n'a pas pu être réinitialisé.",
+    "resetRefreshFailed": "La réinitialisation du mot de passe a été envoyée, mais la liste des utilisateurs n'a pas pu être rechargée. La réinitialisation a peut-être déjà été appliquée ; rechargez la page avant de réessayer."
   }
 }
