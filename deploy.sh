@@ -2429,11 +2429,11 @@ fetch_required "osi-local-password-reset index.js" \
 
 fetch_required "osi-scheduler-mean-query package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query/package.json" \
-    "/srv/node-red/osi-scheduler-mean-query/package.json"
+    "$MODULE_STAGE/osi-scheduler-mean-query/package.json"
 
 fetch_required "osi-scheduler-mean-query index.js" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scheduler-mean-query/index.js" \
-    "/srv/node-red/osi-scheduler-mean-query/index.js"
+    "$MODULE_STAGE/osi-scheduler-mean-query/index.js"
 
 fetch_required "osi-scope-helper package.json" \
     "conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red/osi-scope-helper/package.json" \
