@@ -39,77 +39,110 @@ function normalizeDbArgs(params, callback) {
   return { params: params || [], callback };
 }
 
-function facadeDb(db) {
+function captureDbOutcome(db, method, sql, params, decision) {
+  if (decision.kind === 'synthetic_busy') {
+    const error = new Error('SQLITE_BUSY: database is locked');
+    error.code = 'SQLITE_BUSY';
+    return {
+      kind: 'synthetic_busy', operationCount: 0, value: undefined,
+      error,
+    };
+  }
+  if (decision.kind !== 'execute') throw new Error('unknown DB gate outcome');
+  try {
+    return {
+      kind: 'completed_operation', operationCount: 1,
+      value: db.prepare(sql)[method](...params), error: null,
+    };
+  } catch (error) {
+    return { kind: 'completed_operation', operationCount: 1, value: undefined, error };
+  }
+}
+
+function facadeDb(db, dbCallGate) {
+  function invoke(method, sql, params, callback) {
+    const decision = dbCallGate
+      ? dbCallGate.select({ method, sql, params })
+      : { kind: 'execute', hold: false };
+    if (dbCallGate && dbCallGate.rawStart) dbCallGate.rawStart(decision);
+    const capture = () => captureDbOutcome(db, method, sql, params, decision);
+    const outcome = dbCallGate && dbCallGate.withCallScope
+      ? dbCallGate.withCallScope(decision.callId, capture)
+      : capture();
+    const delivery = dbCallGate && dbCallGate.deliver
+      ? dbCallGate.deliver(decision, outcome, { method, sql, params })
+      : Promise.resolve(outcome);
+    if (callback) {
+      delivery.then((captured) => {
+        if (captured.error) {
+          if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, captured.error, 'facade_callback');
+          callback(captured.error);
+        }
+        else if (method === 'run') callback.call(captured.value, null);
+        else callback(null, captured.value);
+      }, (error) => {
+        if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, error, 'facade_callback_rejection');
+        callback(error);
+      });
+      return undefined;
+    }
+    return delivery.then((captured) => {
+      if (captured.error) {
+        if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, captured.error, 'facade_promise_rejection');
+        throw captured.error;
+      }
+      return captured.value;
+    }, (error) => {
+      if (dbCallGate && dbCallGate.errorDelivered) dbCallGate.errorDelivered(decision, error, 'facade_promise_rejection');
+      throw error;
+    });
+  }
   return {
     all(sql, params, callback) {
       const args = normalizeDbArgs(params, callback);
-      try {
-        const rows = db.prepare(sql).all(...args.params);
-        if (args.callback) {
-          args.callback(null, rows);
-          return undefined;
-        }
-        return Promise.resolve(rows);
-      } catch (error) {
-        if (args.callback) {
-          args.callback(error);
-          return undefined;
-        }
-        return Promise.reject(error);
-      }
+      return invoke('all', sql, args.params, args.callback);
     },
     get(sql, params, callback) {
       const args = normalizeDbArgs(params, callback);
-      try {
-        const row = db.prepare(sql).get(...args.params);
-        if (args.callback) {
-          args.callback(null, row);
-          return undefined;
-        }
-        return Promise.resolve(row);
-      } catch (error) {
-        if (args.callback) {
-          args.callback(error);
-          return undefined;
-        }
-        return Promise.reject(error);
-      }
+      return invoke('get', sql, args.params, args.callback);
     },
     run(sql, params, callback) {
       const args = normalizeDbArgs(params, callback);
-      try {
-        const result = db.prepare(sql).run(...args.params);
-        if (args.callback) {
-          args.callback.call(result, null);
-          return undefined;
-        }
-        return Promise.resolve(result);
-      } catch (error) {
-        if (args.callback) {
-          args.callback(error);
-          return undefined;
-        }
-        return Promise.reject(error);
-      }
+      return invoke('run', sql, args.params, args.callback);
     },
     close(callback) {
       // Every function-node `new Database()` is a separate live handle on the
       // Pi. The in-memory harness shares one handle, so per-node close is a
       // no-op and the test closes the backing DatabaseSync explicitly.
-      if (callback) callback();
-      return Promise.resolve();
+      const decision = dbCallGate
+        ? dbCallGate.select({ method: 'close', sql: '', params: [] })
+        : { kind: 'execute', hold: false };
+      if (decision.kind !== 'execute') throw new Error('close gate must be success-only');
+      const outcome = { kind: 'completed_operation', operationCount: 0, value: undefined, error: null };
+      if (dbCallGate && dbCallGate.rawStart) dbCallGate.rawStart(decision);
+      const delivery = dbCallGate && dbCallGate.deliver
+        ? dbCallGate.deliver(decision, outcome, { method: 'close', sql: '', params: [] })
+        : Promise.resolve(outcome);
+      if (callback) {
+        delivery.then(() => callback(), callback);
+        return undefined;
+      }
+      return delivery.then(() => undefined);
     },
     async transaction(fn) {
       // Matches the production osiDb.Database facade's promise-based
       // db.transaction(async (tx) => {...}) used by osi-command-ledger,
       // osi-device-commands, and the STREGA cancel/dedupe paths.
       db.exec('BEGIN IMMEDIATE');
+      if (dbCallGate && dbCallGate.transactionEvent) dbCallGate.transactionEvent('begin');
       try {
         const result = await fn(this);
         db.exec('COMMIT');
+        if (dbCallGate && dbCallGate.transactionEvent) dbCallGate.transactionEvent('commit');
         return result;
       } catch (error) {
         db.exec('ROLLBACK');
+        if (dbCallGate && dbCallGate.transactionEvent) dbCallGate.transactionEvent('rollback', error);
         throw error;
       }
     },
@@ -158,17 +191,22 @@ async function executeFunction(node, options) {
     msg,
     env = {},
     flowState = {},
+    flowStore: suppliedFlowStore,
     globals = {},
     db,
+    dbCallGate,
     osiLibModules = {},
     libOverrides = {},
     nodeRedModules = NODE_RED_MODULES,
   } = options;
   const errors = [];
   const warnings = [];
-  const flowStore = new Map(Object.entries(flowState));
+  const flowStore = suppliedFlowStore === undefined
+    ? new Map(Object.entries(flowState))
+    : suppliedFlowStore;
+  if (!(flowStore instanceof Map)) throw new TypeError('flowStore must be a Map');
   const globalStore = new Map();
-  const databaseFacade = facadeDb(db);
+  const databaseFacade = facadeDb(db, dbCallGate);
   const sandbox = {
     msg,
     node: {
@@ -281,6 +319,7 @@ function seedScopedDb(valveEui = 'VALVE1') {
 
 module.exports = {
   executeFunction,
+  captureDbOutcome,
   facadeDb,
   loadNode,
   makeAuthHeader,
