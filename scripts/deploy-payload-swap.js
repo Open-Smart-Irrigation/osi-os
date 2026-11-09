@@ -33,11 +33,42 @@ function legacyCapturePath(root) {
   return path.join(payloadsRoot(root), '.legacy-capture.json');
 }
 
+// Helper modules (issue #603). Each payload carries the osi-* modules deploy.sh
+// fetched for it under modules/<name>/, and /srv/node-red/<name> is a link into
+// the active payload, switched by flipTo() with flows and GUI. modules.json
+// lists the payload's module set; a modules/ directory without it is a
+// half-fetched payload and is never activated.
+const MODULE_NAME = /^osi-[a-z0-9][a-z0-9-]*$/;
+// These stay live directories outside every payload: deploy.sh activates the
+// command-ledger pair on its own path, after the schema migration commits.
+// Payload modules reach them with require('../<name>'), which Node resolves
+// from the payload copy's real path, so every payload's modules/ links back.
+const LIVE_MODULES = ['osi-command-ledger', 'osi-watermark-binding'];
+
+function modulesDir(root, stamp) {
+  return path.join(payloadDir(root, stamp), 'modules');
+}
+
+function moduleManifestPath(root, stamp) {
+  return path.join(payloadDir(root, stamp), 'modules.json');
+}
+
+function moduleLink(root, name) {
+  return path.join(root, name);
+}
+
+function moduleTarget(root, stamp, name) {
+  return path.join(modulesDir(root, stamp), name);
+}
+
 function hashFile(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function hashTree(root) {
+// followLinks hashes a symlink as the file or directory it points to, so a
+// dereferenced copy of a module hashes like the original. The GUI evidence
+// keeps the strict form: its digests are stored in .legacy-capture.json.
+function hashTree(root, { followLinks = false, label = 'legacy capture: unsupported GUI entry' } = {}) {
   const hash = crypto.createHash('sha256');
   const walk = (current, relative) => {
     const entries = fs.readdirSync(current, { withFileTypes: true })
@@ -45,14 +76,19 @@ function hashTree(root) {
     for (const entry of entries) {
       const childRelative = relative ? path.join(relative, entry.name) : entry.name;
       const child = path.join(current, entry.name);
-      hash.update(`${entry.isDirectory() ? 'd' : 'f'}:${childRelative}\n`);
-      if (entry.isDirectory()) walk(child, childRelative);
-      else if (entry.isFile()) hash.update(fs.readFileSync(child));
-      else throw new Error(`legacy capture: unsupported GUI entry: ${child}`);
+      const stat = followLinks && entry.isSymbolicLink() ? fs.statSync(child) : entry;
+      hash.update(`${stat.isDirectory() ? 'd' : 'f'}:${childRelative}\n`);
+      if (stat.isDirectory()) walk(child, childRelative);
+      else if (stat.isFile()) hash.update(fs.readFileSync(child));
+      else throw new Error(`${label}: ${child}`);
     }
   };
   walk(root, '');
   return hash.digest('hex');
+}
+
+function hashModule(dir) {
+  return hashTree(dir, { followLinks: true, label: 'module capture: unsupported entry' });
 }
 
 function legacyEvidence(flowsPath, guiRoot) {
@@ -148,6 +184,270 @@ function restoreFlippedEntry(result) {
   fs.rmSync(result.link, { force: true, recursive: true });
 }
 
+function absent(error) {
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR';
+}
+
+function lstatOrNull(target) {
+  try {
+    return fs.lstatSync(target);
+  } catch (error) {
+    if (absent(error)) return null;
+    throw error;
+  }
+}
+
+function statOrNull(target) {
+  try {
+    return fs.statSync(target);
+  } catch (error) {
+    if (absent(error)) return null;
+    throw error;
+  }
+}
+
+function isDirectory(target) {
+  const stat = statOrNull(target);
+  return Boolean(stat && stat.isDirectory());
+}
+
+function isFile(target) {
+  const stat = statOrNull(target);
+  return Boolean(stat && stat.isFile());
+}
+
+function assertModuleName(name, label) {
+  if (typeof name !== 'string' || !MODULE_NAME.test(name)) {
+    throw new Error(`${label}: invalid module name: ${JSON.stringify(name)}`);
+  }
+}
+
+// null when the payload has no module set (a payload from before #603).
+function readModuleManifest(root, stamp) {
+  const file = moduleManifestPath(root, stamp);
+  if (!fs.existsSync(file)) return null;
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`module manifest unreadable: ${file}: ${error.message}`);
+  }
+  if (!manifest || manifest.format !== 1 || !Array.isArray(manifest.modules) ||
+      !manifest.captured || typeof manifest.captured !== 'object' || Array.isArray(manifest.captured)) {
+    throw new Error(`module manifest malformed: ${file}`);
+  }
+  for (const name of manifest.modules) assertModuleName(name, `module manifest ${file}`);
+  return manifest;
+}
+
+function writeModuleManifest(root, stamp, manifest) {
+  const target = moduleManifestPath(root, stamp);
+  const ordered = { format: 1, modules: [...manifest.modules].sort(), captured: {} };
+  for (const name of Object.keys(manifest.captured).sort()) ordered.captured[name] = manifest.captured[name];
+  const temp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    fs.writeFileSync(temp, `${JSON.stringify(ordered)}\n`, { flag: 'wx' });
+    fs.renameSync(temp, target);
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+  return ordered;
+}
+
+// The payload a /srv/node-red/<name> link points into, read from the link
+// text so a dangling link is still recognised; null for anything else.
+function moduleLinkStamp(root, name) {
+  const link = moduleLink(root, name);
+  const stat = lstatOrNull(link);
+  if (!stat || !stat.isSymbolicLink()) return null;
+  const resolved = path.resolve(path.dirname(link), fs.readlinkSync(link));
+  const parts = path.relative(payloadsRoot(root), resolved).split(path.sep);
+  if (parts.length !== 3 || parts[1] !== 'modules' || parts[2] !== name ||
+      !parts[0] || parts[0] === '..' || parts[0].startsWith('.')) return null;
+  return parts[0];
+}
+
+// name -> stamp for every /srv/node-red/osi-* link into a payload.
+function payloadModuleLinks(root) {
+  const links = new Map();
+  let entries;
+  try {
+    entries = fs.readdirSync(root);
+  } catch (error) {
+    if (absent(error)) return links;
+    throw error;
+  }
+  for (const name of entries) {
+    if (!MODULE_NAME.test(name)) continue;
+    const stamp = moduleLinkStamp(root, name);
+    if (stamp) links.set(name, stamp);
+  }
+  return links;
+}
+
+function ensureLiveModuleLinks(root, stamp) {
+  const dir = modulesDir(root, stamp);
+  for (const name of LIVE_MODULES) {
+    const link = path.join(dir, name);
+    const expected = path.relative(dir, moduleLink(root, name));
+    const stat = lstatOrNull(link);
+    if (!stat) {
+      fs.symlinkSync(expected, link);
+    } else if (!stat.isSymbolicLink() || fs.readlinkSync(link) !== expected) {
+      throw new Error(`${link} must be a link to the live ${name}, which stays outside the payload`);
+    }
+  }
+}
+
+function moduleSetComplete(root, stamp, manifest) {
+  for (const name of manifest.modules) {
+    const target = moduleTarget(root, stamp, name);
+    const stat = lstatOrNull(target);
+    if (!stat || !stat.isDirectory() || !isFile(path.join(target, 'package.json'))) return false;
+  }
+  for (const name of LIVE_MODULES) {
+    const dir = modulesDir(root, stamp);
+    const stat = lstatOrNull(path.join(dir, name));
+    if (!stat || !stat.isSymbolicLink() ||
+        fs.readlinkSync(path.join(dir, name)) !== path.relative(dir, moduleLink(root, name))) return false;
+  }
+  return true;
+}
+
+// Seals the modules deploy.sh fetched into payloads/<stamp>/modules/: every
+// entry is a module directory with a package.json, the live command-ledger
+// links are added, and modules.json records the set.
+function sealModules(root, stamp) {
+  const dir = modulesDir(root, stamp);
+  if (!isDirectory(dir)) throw new Error(`sealModules: no staged modules in ${dir}`);
+  if (fs.existsSync(moduleManifestPath(root, stamp))) {
+    throw new Error(`sealModules: payload ${stamp} is already sealed`);
+  }
+  const names = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (LIVE_MODULES.includes(entry.name)) {
+      if (entry.isSymbolicLink()) continue;
+      throw new Error(`sealModules: ${entry.name} was staged, but it stays outside the payload`);
+    }
+    assertModuleName(entry.name, 'sealModules');
+    if (!entry.isDirectory()) throw new Error(`sealModules: ${entry.name} is not a module directory`);
+    if (!isFile(path.join(dir, entry.name, 'package.json'))) {
+      throw new Error(`sealModules: ${entry.name} has no package.json`);
+    }
+    names.push(entry.name);
+  }
+  if (!names.length) throw new Error(`sealModules: no staged modules in ${dir}`);
+  ensureLiveModuleLinks(root, stamp);
+  return writeModuleManifest(root, stamp, { modules: names, captured: {} }).modules;
+}
+
+// Copies each live module the new payload replaces into the previous payload,
+// so a switch back restores it. Only real directories (or links that lead
+// outside payloads/) are captured; a link into a payload is already part of
+// one. Mirrors legacyCaptureStamp(): a module captured by an earlier attempt
+// must still match its recorded digest. Returns one line per action.
+function captureModules(root, prevStamp, deployStamp) {
+  const next = readModuleManifest(root, deployStamp);
+  if (!next) throw new Error(`captureModules: payload ${deployStamp} has no sealed module set`);
+  if (!isDirectory(payloadDir(root, prevStamp))) throw new Error(`captureModules: payload missing: ${prevStamp}`);
+  const prev = readModuleManifest(root, prevStamp);
+  const manifest = prev ? { modules: [...prev.modules], captured: { ...prev.captured } } : { modules: [], captured: {} };
+  const dir = modulesDir(root, prevStamp);
+  const lines = [];
+  let changed = !prev;
+  fs.mkdirSync(dir, { recursive: true });
+  for (const name of next.modules) {
+    const live = moduleLink(root, name);
+    const stat = lstatOrNull(live);
+    if (!stat || (stat.isSymbolicLink() && moduleLinkStamp(root, name))) continue;
+    if (!isDirectory(live)) throw new Error(`captureModules: live module is not a directory: ${live}`);
+    const liveHash = hashModule(live);
+    const target = moduleTarget(root, prevStamp, name);
+    if (manifest.modules.includes(name)) {
+      if (manifest.captured[name] !== undefined) {
+        if (manifest.captured[name] !== liveHash) {
+          throw new Error(`captureModules: refusing to recapture changed live module ${name} after a prior attempt (payloads/${prevStamp}/modules/${name} holds the earlier copy)`);
+        }
+      } else if (!isDirectory(target) || hashModule(target) !== liveHash) {
+        lines.push(`WARN: ${name} is a directory in ${root} that differs from payloads/${prevStamp}/modules/${name}; the flip replaces it, and a switch back restores the payload copy`);
+      }
+      continue;
+    }
+    const temp = path.join(dir, `.${name}.capture-${process.pid}-${Date.now()}`);
+    try {
+      copyTree(live, temp);
+      if (hashModule(temp) !== liveHash) throw new Error(`captureModules: ${live} changed while it was copied`);
+      fs.rmSync(target, { recursive: true, force: true });
+      fs.renameSync(temp, target);
+    } finally {
+      fs.rmSync(temp, { recursive: true, force: true });
+    }
+    manifest.modules.push(name);
+    manifest.captured[name] = liveHash;
+    changed = true;
+    lines.push(`OK: captured ${name} into payloads/${prevStamp}/modules/${name}`);
+  }
+  ensureLiveModuleLinks(root, prevStamp);
+  if (changed) writeModuleManifest(root, prevStamp, manifest);
+  return lines.join('\n');
+}
+
+// npm install runs before Node-RED stops and needs every file: dependency on
+// disk. A module the gateway does not have yet gets a link into the staged
+// payload now; the flows that run until the flip cannot reference it. A link
+// left by an earlier deploy that exited before cleaning up counts as absent.
+function linkNewModules(root, stamp, prevStamp = '') {
+  const next = readModuleManifest(root, stamp);
+  if (!next) throw new Error(`linkNewModules: payload ${stamp} has no sealed module set`);
+  const prev = prevStamp ? readModuleManifest(root, prevStamp) : null;
+  const lines = [];
+  for (const name of next.modules) {
+    const link = moduleLink(root, name);
+    const stat = lstatOrNull(link);
+    const linked = stat && stat.isSymbolicLink() ? moduleLinkStamp(root, name) : null;
+    if (stat && (!linked || linked === stamp || linked === prevStamp || (prev && prev.modules.includes(name)))) continue;
+    atomicSymlink(link, moduleTarget(root, stamp, name), `link new module ${name}`);
+    lines.push(`OK: ${stat ? 'relinked' : 'linked'} ${name} -> payloads/${stamp}/modules/${name} (absent before this deploy)`);
+  }
+  return lines.join('\n');
+}
+
+function removeModuleLinksInto(root, stamp) {
+  for (const [name, linked] of payloadModuleLinks(root)) {
+    if (linked === stamp) fs.rmSync(moduleLink(root, name), { force: true });
+  }
+}
+
+// Which module links a flip to <stamp> switches and which it removes.
+function moduleFlipPlan(root, stamp) {
+  const manifest = readModuleManifest(root, stamp);
+  const linked = payloadModuleLinks(root);
+  if (!manifest) {
+    if (fs.existsSync(modulesDir(root, stamp))) {
+      throw new Error(`flipTo: payload ${stamp} has an unsealed modules directory`);
+    }
+    if (linked.size) {
+      throw new Error(`flipTo: payload ${stamp} carries no helper modules, but ${[...linked.keys()].sort().join(', ')} link into payloads`);
+    }
+    return { link: [], unlink: [] };
+  }
+  if (!moduleSetComplete(root, stamp, manifest)) {
+    throw new Error(`flipTo: staged helper modules incomplete in ${modulesDir(root, stamp)}`);
+  }
+  return {
+    link: manifest.modules,
+    unlink: [...linked.keys()].filter((name) => !manifest.modules.includes(name)).sort(),
+  };
+}
+
+// True when every module link matches the payload's module set.
+function modulesActive(root, stamp, manifest) {
+  const names = manifest ? manifest.modules : [];
+  const linked = payloadModuleLinks(root);
+  return names.every((name) => linked.get(name) === stamp) &&
+    [...linked.keys()].every((name) => names.includes(name));
+}
+
 function resolveStamp(root, link, expectedChild) {
   let resolved;
   let payloadRoot;
@@ -168,6 +468,25 @@ function guiStamp(root, guiRoot) {
   return resolveStamp(root, guiLink(guiRoot), 'gui');
 }
 
+function restoreSwitched(switched) {
+  const failures = [];
+  for (const entry of [...switched].reverse()) {
+    try {
+      if (entry.removedLink !== undefined) {
+        if (!lstatOrNull(entry.link)) fs.symlinkSync(entry.removedLink, entry.link);
+      } else {
+        restoreFlippedEntry(entry);
+      }
+    } catch (error) {
+      failures.push(`${entry.link}: ${error.message}`);
+    }
+  }
+  return failures;
+}
+
+// Switches flows, the GUI and the helper modules to <stamp>. Every target is
+// checked before the first link moves; if any switch fails, the ones already
+// made are put back and the error names any that could not be.
 function flipTo(root, stamp, guiRoot = null) {
   const flowTarget = path.join(payloadDir(root, stamp), 'flows.json');
   if (!fs.existsSync(flowTarget)) {
@@ -177,18 +496,36 @@ function flipTo(root, stamp, guiRoot = null) {
       !fs.statSync(guiPayloadDir(root, stamp)).isDirectory())) {
     throw new Error(`flipTo: staged GUI payload missing: ${guiPayloadDir(root, stamp)}`);
   }
-  const flow = atomicSymlink(flowsLink(root), flowTarget, 'flows flip', { keepBackup: Boolean(guiRoot) });
-  if (!guiRoot) return { flowsLink: flow.link, target: flow.target };
+  const modules = moduleFlipPlan(root, stamp);
+  const switched = [];
+  let flow;
   let gui;
   try {
-    gui = atomicSymlink(guiLink(guiRoot), guiPayloadDir(root, stamp), 'GUI flip', { keepBackup: true });
+    flow = atomicSymlink(flowsLink(root), flowTarget, 'flows flip', { keepBackup: true });
+    switched.push(flow);
+    if (guiRoot) {
+      gui = atomicSymlink(guiLink(guiRoot), guiPayloadDir(root, stamp), 'GUI flip', { keepBackup: true });
+      switched.push(gui);
+    }
+    for (const name of modules.link) {
+      switched.push(atomicSymlink(moduleLink(root, name), moduleTarget(root, stamp, name), `module flip ${name}`, { keepBackup: true }));
+    }
+    for (const name of modules.unlink) {
+      const link = moduleLink(root, name);
+      const removedLink = fs.readlinkSync(link);
+      fs.unlinkSync(link);
+      switched.push({ link, removedLink, backup: null });
+    }
   } catch (error) {
-    restoreFlippedEntry(flow);
+    const failures = restoreSwitched(switched);
+    if (failures.length) error.message += `; could not restore: ${failures.join('; ')}`;
     throw error;
   }
-  discardBackup(flow.backup);
-  discardBackup(gui.backup);
-  return { flowsLink: flow.link, guiLink: gui.link, target: flow.target, guiTarget: gui.target };
+  for (const entry of switched) discardBackup(entry.backup);
+  const result = { flowsLink: flow.link, target: flow.target };
+  if (gui) Object.assign(result, { guiLink: gui.link, guiTarget: gui.target });
+  if (modules.link.length || modules.unlink.length) result.modules = modules;
+  return result;
 }
 
 function currentStamp(root) {
@@ -205,12 +542,20 @@ function currentPair(root, guiRoot) {
 function verifyPair(root, stamp, guiRoot) {
   const flowsTarget = path.join(payloadDir(root, stamp), 'flows.json');
   const guiTarget = guiPayloadDir(root, stamp);
-  return fs.existsSync(flowsTarget) && fs.statSync(flowsTarget).isFile() &&
-    fs.existsSync(guiTarget) && fs.statSync(guiTarget).isDirectory() &&
-    (!guiRoot || (() => {
-      const pair = currentPair(root, guiRoot);
-      return pair && pair.flows === stamp && pair.gui === stamp && pair.compatible;
-    })());
+  if (!(fs.existsSync(flowsTarget) && fs.statSync(flowsTarget).isFile() &&
+      fs.existsSync(guiTarget) && fs.statSync(guiTarget).isDirectory())) return false;
+  let manifest;
+  try {
+    manifest = readModuleManifest(root, stamp);
+  } catch (_) {
+    return false; // a malformed module manifest is not a verified payload
+  }
+  if (!manifest && fs.existsSync(modulesDir(root, stamp))) return false;
+  if (manifest && !moduleSetComplete(root, stamp, manifest)) return false;
+  if (!guiRoot) return true;
+  const pair = currentPair(root, guiRoot);
+  return Boolean(pair && pair.flows === stamp && pair.gui === stamp && pair.compatible) &&
+    modulesActive(root, stamp, manifest);
 }
 
 function captureGui(root, stamp, guiRoot) {
@@ -272,10 +617,14 @@ function deactivate(root, stamp, guiRoot = null) {
   const current = currentStamp(root);
   if (current === stamp) fs.rmSync(flowsLink(root), { force: true });
   if (guiRoot && guiStamp(root, guiRoot) === stamp) fs.rmSync(guiLink(guiRoot), { force: true });
+  removeModuleLinksInto(root, stamp);
 }
 
+// Also removes module links into the payload: the links linkNewModules made
+// for modules the gateway did not have before this deploy.
 function discardPayload(root, stamp) {
   if (currentStamp(root) === stamp) throw new Error(`discardPayload: payload is still live: ${stamp}`);
+  removeModuleLinksInto(root, stamp);
   fs.rmSync(payloadDir(root, stamp), { recursive: true, force: true });
 }
 
@@ -362,6 +711,7 @@ function prunePayloads(root, keepN) {
   if (current) {
     keep.add(current);
   }
+  for (const linked of payloadModuleLinks(root).values()) keep.add(linked);
   const removed = [];
   for (const stamp of stamps) {
     if (keep.has(stamp)) {
@@ -374,7 +724,11 @@ function prunePayloads(root, keepN) {
 }
 
 module.exports = {
+  LIVE_MODULES,
   stagePayload,
+  sealModules,
+  captureModules,
+  linkNewModules,
   flipTo,
   currentStamp,
   guiStamp,
