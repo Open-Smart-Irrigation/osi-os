@@ -430,7 +430,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                   type="button"
                   onClick={sendTimedAction}
                   disabled={busy}
-                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'timed' && <Spinner />}
                   {t('serviceDialog.timed.confirmButton')}
@@ -499,7 +499,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                   type="button"
                   onClick={sendPartialOpening}
                   disabled={busy}
-                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'partial' && <Spinner />}
                   {t('serviceDialog.partial.confirmButton')}
@@ -573,7 +573,7 @@ export const ValveServiceDialog: React.FC<ValveServiceDialogProps> = ({ valve, o
                   type="button"
                   onClick={sendFlushing}
                   disabled={busy}
-                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex min-h-[44px] items-center gap-2 rounded-lg bg-[var(--warn-border)] px-4 py-2 text-sm font-semibold text-[var(--on-warn)] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busyCommand === 'flush' && <Spinner />}
                   {t('serviceDialog.flush.confirmButton')}

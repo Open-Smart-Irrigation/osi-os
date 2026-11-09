@@ -1042,7 +1042,7 @@ export const StregaValveCard: React.FC<StregaValveCardProps> = ({
           <button
             onClick={() => { if (!confirmOpen) { setConfirmOpen(true); return; } setConfirmOpen(false); void handleOpen(); }}
             disabled={loading !== null}
-            className={`mt-1 w-full ${confirmOpen ? 'bg-[var(--warn-border)]' : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)]'} disabled:bg-[var(--border)] text-[var(--on-primary)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2`}
+            className={`mt-1 w-full ${confirmOpen ? 'bg-[var(--warn-border)] text-[var(--on-warn)]' : 'bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)]'} disabled:bg-[var(--border)] font-bold text-base py-3 touch-target rounded-lg transition-colors disabled:cursor-not-allowed disabled:text-[var(--text-disabled)] flex items-center justify-center gap-2`}
           >
             {loading === 'OPEN' ? (
               <>
