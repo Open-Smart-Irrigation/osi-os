@@ -803,6 +803,55 @@ printf '%s\\n' reruns-ok
   }
 });
 
+// A sysupgrade keeps /srv (flows.json and the module links) but not the GUI
+// link under /usr/lib, so the next deploy takes the legacy capture path and
+// its previous payload has no module set of its own.
+test('after a sysupgrade the legacy capture keeps the linked modules for a rollback', () => {
+  const run = runModuleDeploy(`
+stage_new_deploy first
+stop_for_migration
+commit_migration
+flip_new
+restart_node_red
+rm "$GUI_ROOT"
+mkdir -p "$GUI_ROOT"
+printf '%s\\n' image > "$GUI_ROOT/index.html"
+DEPLOY_STAMP=second
+MODULE_STAGE="$PAYLOADS_ROOT/$DEPLOY_STAMP/modules"
+swap_call stagePayload "$DEPLOY_STAMP" "$SWAP_ROOT/new-flows.json" "$SWAP_ROOT/src-new-gui" >/dev/null
+PREV_STAMP="$(swap_call currentStamp || true)"
+PREV_GUI_STAMP="$(swap_call guiStamp "$GUI_ROOT" || true)"
+PREV_CAPTURED=0
+${fragment('# legacy payload capture begin\n', '# legacy payload capture end').replaceAll('/srv/node-red/flows.json', '$SWAP_ROOT/flows.json')}
+[ "$PREV_STAMP" = second-previous ] && [ "$PREV_CAPTURED" = 1 ]
+for module in osi-a osi-b osi-c; do write_module "$MODULE_STAGE/$module" "\${module#osi-}@second"; done
+${fragment('# module payload staging begin\n', '# module payload staging end')}
+[ "$(readlink "$SWAP_ROOT/osi-a")" = payloads/first/modules/osi-a ]
+[ "$(readlink "$SWAP_ROOT/osi-c")" = payloads/first/modules/osi-c ]
+PAYLOAD_FLIPPED=0
+DB_MIGRATION_COMMITTED=0
+write_payload_compatibility "$PREV_STAMP"
+stop_for_migration
+if (deploy_exit_handler 1); then exit 41; else rc=$?; fi
+[ "$rc" = 1 ]
+printf '%s\\n' sysupgrade-rollback-ok
+`);
+  try {
+    assert.equal(run.result.status, 0, `stdout=${run.result.stdout}\nstderr=${run.result.stderr}`);
+    assert.match(run.result.stdout, /sysupgrade-rollback-ok/);
+    assert.match(run.result.stdout, /OK: captured existing flows\+GUI pair as payloads\/second-previous/);
+    assert.match(run.result.stdout, /OK: captured osi-a into payloads\/second-previous\/modules\/osi-a/);
+    assert.doesNotMatch(run.result.stdout, /relinked/, 'no live module moves to the new payload before the stop');
+    assert.match(run.result.stderr, /OK: rollback Node-RED readiness confirmed/);
+    assert.deepEqual(run.markers(), { 'osi-a': 'a@first', 'osi-b': 'b@first', 'osi-c': 'c@first' },
+      'the rollback restarts the deployed flows on the modules they ran with');
+    assert.deepEqual(swap.currentPair(run.root, run.guiRoot), { flows: 'second-previous', gui: 'second-previous', compatible: true });
+    assert.equal(run.state('node-red.state'), '1');
+  } finally {
+    run.cleanup();
+  }
+});
+
 // Stages the real module files the way deploy.sh fetches them, flips, and
 // requires every staged entry point and file through /srv/node-red/<module>
 // and node_modules/<module>. Each must load exactly as it does from the repo

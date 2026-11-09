@@ -347,10 +347,11 @@ function sealModules(root, stamp) {
 }
 
 // Copies each live module the new payload replaces into the previous payload,
-// so a switch back restores it. Only real directories (or links that lead
-// outside payloads/) are captured; a link into a payload is already part of
-// one. Mirrors legacyCaptureStamp(): a module captured by an earlier attempt
-// must still match its recorded digest. Returns one line per action.
+// so a switch back restores it. Real directories (or links that lead outside
+// payloads/) are captured; a link into a payload only when the previous
+// payload has no module set yet. Mirrors legacyCaptureStamp(): a module
+// captured by an earlier attempt must still match its recorded digest.
+// Returns one line per action.
 function captureModules(root, prevStamp, deployStamp) {
   const next = readModuleManifest(root, deployStamp);
   if (!next) throw new Error(`captureModules: payload ${deployStamp} has no sealed module set`);
@@ -364,7 +365,15 @@ function captureModules(root, prevStamp, deployStamp) {
   for (const name of next.modules) {
     const live = moduleLink(root, name);
     const stat = lstatOrNull(live);
-    if (!stat || (stat.isSymbolicLink() && moduleLinkStamp(root, name))) continue;
+    if (!stat) continue;
+    // A link into a payload is part of that payload's module set, unless the
+    // previous payload has no module set of its own: the legacy capture after
+    // a sysupgrade (it keeps /srv and with it the module links, but not the
+    // GUI link) or flows switched by an older deploy.sh. Those flows run the
+    // linked copy, so it is captured like a real directory. A dangling link
+    // is a module the running flows do not have.
+    const linked = stat.isSymbolicLink() ? moduleLinkStamp(root, name) : null;
+    if (linked && (prev || linked === prevStamp || !isDirectory(live))) continue;
     if (!isDirectory(live)) throw new Error(`captureModules: live module is not a directory: ${live}`);
     const liveHash = hashModule(live);
     const target = moduleTarget(root, prevStamp, name);

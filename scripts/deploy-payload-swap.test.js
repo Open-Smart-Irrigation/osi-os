@@ -577,6 +577,49 @@ test('captureModules keeps a payload-staged copy over a real directory and warns
   assert.deepEqual(loadMarkers(root, ['osi-a']), { 'osi-a': 'osi-a@prev' });
 });
 
+test('captureModules copies linked modules when the previous payload has no module set', (t) => {
+  for (const kind of ['sysupgrade', 'older deploy.sh']) {
+    const root = moduleRoot(t);
+    const guiRoot = path.join(root, 'gui');
+    stageWithModules(root, 'deployed', { 'osi-a': '', 'osi-b': '' });
+    flipTo(root, 'deployed', guiRoot);
+    let prevStamp;
+    if (kind === 'sysupgrade') {
+      // A sysupgrade keeps /srv, so flows.json and the module links, but not
+      // the GUI link under /usr/lib. deploy.sh then captures the flows and the
+      // image GUI as a new <stamp>-previous payload.
+      fs.rmSync(guiRoot);
+      writeModule(guiRoot, 'image-gui');
+      prevStamp = 'new-previous';
+      captureExisting(root, prevStamp, path.join(root, 'flows.json'), guiRoot);
+    } else {
+      // An older deploy.sh writes the modules through the links and switches
+      // only flows and GUI to a payload without modules.
+      fs.writeFileSync(path.join(root, 'osi-a', 'index.js'), 'exports.marker = "osi-a@older";\n');
+      prevStamp = 'older';
+      stagePayload(root, prevStamp, fakeFlowsSrcAt(root, prevStamp), fakeGuiSrcAt(root, prevStamp));
+      for (const link of [path.join(root, 'flows.json'), guiRoot]) fs.rmSync(link);
+      fs.symlinkSync(path.join('payloads', prevStamp, 'flows.json'), path.join(root, 'flows.json'));
+      fs.symlinkSync(path.join('payloads', prevStamp, 'gui'), guiRoot);
+    }
+    const running = loadMarkers(root, ['osi-a', 'osi-b']);
+    stageWithModules(root, 'new', { 'osi-a': '', 'osi-b': '', 'osi-c': '' });
+
+    const report = swap.captureModules(root, prevStamp, 'new');
+    assert.match(report, /captured osi-a/, kind);
+    assert.match(report, /captured osi-b/, kind);
+    assert.equal(swap.captureModules(root, prevStamp, 'new'), '', `${kind}: a retry is a no-op`);
+    assert.match(swap.linkNewModules(root, 'new', prevStamp), /^OK: linked osi-c [^\n]*$/, `${kind}: only the absent module is linked`);
+    assert.deepEqual(loadMarkers(root, ['osi-a', 'osi-b']), running, `${kind}: the running flows keep their modules until the flip`);
+
+    flipTo(root, 'new', guiRoot);
+    flipTo(root, prevStamp, guiRoot);
+    assert.equal(verifyPair(root, prevStamp, guiRoot), true, kind);
+    assert.deepEqual(loadMarkers(root, ['osi-a', 'osi-b', 'osi-c']), { ...running, 'osi-c': 'ERROR MODULE_NOT_FOUND' },
+      `${kind}: a switch back restores the modules the previous flows ran`);
+  }
+});
+
 test('linkNewModules links absent modules into the staged payload and repairs stale pre-links', (t) => {
   const root = moduleRoot(t);
   stageWithModules(root, 'prev', { 'osi-a': '' });
