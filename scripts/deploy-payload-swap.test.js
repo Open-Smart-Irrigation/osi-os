@@ -609,6 +609,12 @@ test('captureModules copies linked modules when the previous payload has no modu
     assert.match(report, /captured osi-a/, kind);
     assert.match(report, /captured osi-b/, kind);
     assert.equal(swap.captureModules(root, prevStamp, 'new'), '', `${kind}: a retry is a no-op`);
+    const liveA = path.join(root, 'osi-a', 'index.js');
+    const bytesA = fs.readFileSync(liveA);
+    fs.writeFileSync(liveA, 'exports.marker = "osi-a@written-between-attempts";\n');
+    assert.throws(() => swap.captureModules(root, prevStamp, 'new'), /refusing to recapture changed live module osi-a/,
+      `${kind}: a retry refuses a linked module that changed after its capture`);
+    fs.writeFileSync(liveA, bytesA);
     assert.match(swap.linkNewModules(root, 'new', prevStamp), /^OK: linked osi-c [^\n]*$/, `${kind}: only the absent module is linked`);
     assert.deepEqual(loadMarkers(root, ['osi-a', 'osi-b']), running, `${kind}: the running flows keep their modules until the flip`);
 

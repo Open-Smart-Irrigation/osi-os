@@ -370,10 +370,11 @@ function captureModules(root, prevStamp, deployStamp) {
     // previous payload has no module set of its own: the legacy capture after
     // a sysupgrade (it keeps /srv and with it the module links, but not the
     // GUI link) or flows switched by an older deploy.sh. Those flows run the
-    // linked copy, so it is captured like a real directory. A dangling link
-    // is a module the running flows do not have.
+    // linked copy, so it is captured like a real directory, and a retry checks
+    // it against the recorded digest. A dangling link is a module the running
+    // flows do not have.
     const linked = stat.isSymbolicLink() ? moduleLinkStamp(root, name) : null;
-    if (linked && (prev || linked === prevStamp || !isDirectory(live))) continue;
+    if (linked && ((prev && prev.captured[name] === undefined) || linked === prevStamp || !isDirectory(live))) continue;
     if (!isDirectory(live)) throw new Error(`captureModules: live module is not a directory: ${live}`);
     const liveHash = hashModule(live);
     const target = moduleTarget(root, prevStamp, name);
