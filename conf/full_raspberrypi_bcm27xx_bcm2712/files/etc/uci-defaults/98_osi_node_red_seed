@@ -471,6 +471,11 @@ seed_native_sqlite3() {
         echo "ERROR: seed stage marker write failed: $seed_s" >&2
         return 1
     fi
+    # The stage scan refuses a payload beside an incomplete owner line, so the
+    # line must be on disk before the copy starts.
+    if ! sync; then
+        echo 'WARN: sync failed; the seed stage owner may not survive a power loss' >&2
+    fi
     seed_candidate="$seed_s/candidate"
     seed_copy_ok=0
     if cp -a "$SQLITE_SRC" "$seed_candidate"; then seed_copy_ok=1; fi
@@ -512,6 +517,12 @@ seed_native_sqlite3() {
             echo "ERROR: seed candidate marker failed; inspect $seed_b and $seed_s" >&2
             return 1
         fi
+    fi
+    # Recovery reads the owner line, the identity, the marker and the copied
+    # files after the renames below. Without a flush, power loss can keep a
+    # committed rename while those bytes are still unwritten.
+    if ! sync; then
+        echo 'WARN: sync failed; the seed sqlite3 swap may not survive a power loss' >&2
     fi
     if seed_sqlite3_present "$seed_d"; then
         if [ ! -d "$seed_d" ] && [ ! -L "$seed_d" ]; then

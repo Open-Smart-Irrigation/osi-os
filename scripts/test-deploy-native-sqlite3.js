@@ -2159,3 +2159,65 @@ test('R9 seed converges after power loss at every step of its cleanup', () => {
     assert.equal(requireSqlite3(gw.proj).status, 0, label);
   }
 });
+
+// R10: the bytes recovery reads after a rename (owner lines, the seed
+// identity, the candidate marker, the copied files) are flushed before the
+// rename. The hooks log each sync with the metadata files on disk at that
+// moment, every mv naming a sqlite3 path and every cp into a stage.
+function r10DurabilityHooks(logFile, root) {
+  const q = r2Quote(logFile);
+  const nm = r2Quote(path.join(root, 'node_modules'));
+  const files = ['.osi-sqlite3-*/.owner', '.osi-sqlite3-*/.candidate-id',
+    '.osi-sqlite3-*/.osi-sqlite3-candidate-owner', '.osi-sqlite3-*/candidate/.osi-sqlite3-candidate-owner']
+    .map(g => `${nm}/${g}`).join(' ');
+  return [
+    `sync() { command sync "$@" || return $?; { printf 'sync'; for f in ${files}; do` +
+    ` [ -f "$f" ] && printf ' %s=%s' "\${f##*/}" "$(cat "$f")"; done; printf '\\n'; } >> ${q}; }`,
+    `mv() { case "$*" in *sqlite3*) printf '%s\\n' "mv $*" >> ${q} ;; esac; command mv "$@"; }`,
+    `cp() { case "$*" in *osi-sqlite3-*stage*) printf '%s\\n' "cp $*" >> ${q} ;; esac; command cp "$@"; }`,
+  ];
+}
+
+test('R10 deploy flushes owner, marker and staged copy before the swap renames', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  const log = path.join(gw.root, 'durability.log');
+  const r = r2DeployCall(gw, { shellHooks: r10DurabilityHooks(log, gw.proj) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /MATERIALIZE_RC=0/);
+  assert.match(r.stdout, /VERIFY_RC=0/);
+  assert.doesNotMatch(r.stderr, /WARN: sync failed/);
+  const b = String.raw`\S*/\.osi-sqlite3-rollback\.[^/ ]+`;
+  const s = String.raw`\S*/\.osi-sqlite3-stage\.[^/ ]+`;
+  const lines = r9Lines(log);
+  assert.equal(lines.length, 4, lines.join('\n'));
+  assert.match(lines[0], new RegExp(`^cp -a \\S+ ${s}/$`));
+  assert.match(lines[1], /^sync /);
+  assert.match(lines[1], / \.owner=osi-sqlite3-deploy-v2( |$)/);
+  assert.match(lines[1], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
+  assert.match(lines[2], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
+  assert.match(lines[3], new RegExp(`^mv ${s} \\S+/node_modules/sqlite3$`));
+});
+
+test('R10 seed flushes the stage owner before its copy and all metadata before the swap renames', () => {
+  const gw = makeGateway('real-without-binary');
+  r2OldBytes(gw);
+  const log = path.join(gw.root, 'durability.log');
+  const r = r2SeedHarness(gw, { shellHooks: r10DurabilityHooks(log, gw.proj) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /SEED_RC=0/);
+  assert.doesNotMatch(r.stderr, /WARN: sync failed/);
+  const b = String.raw`\S*/\.osi-sqlite3-seed-rollback\.[^/ ]+`;
+  const s = String.raw`\S*/\.osi-sqlite3-seed-stage\.[^/ ]+`;
+  const lines = r9Lines(log);
+  assert.equal(lines.length, 5, lines.join('\n'));
+  assert.equal(lines[0], 'sync .owner=osi-sqlite3-seed-stage-v2');
+  assert.match(lines[1], new RegExp(`^cp -a \\S+ ${s}/candidate$`));
+  assert.match(lines[2], /^sync /);
+  assert.match(lines[2], / \.owner=osi-sqlite3-seed-v2 /);
+  assert.match(lines[2], / \.owner=osi-sqlite3-seed-stage-v2( |$)/);
+  assert.match(lines[2], / \.candidate-id=[0-9]+:[0-9]+:[0-9]+( |$)/);
+  assert.match(lines[2], new RegExp(` \\.osi-sqlite3-candidate-owner=${b}( |$)`));
+  assert.match(lines[3], new RegExp(`^mv \\S+/node_modules/sqlite3 ${b}/original$`));
+  assert.match(lines[4], new RegExp(`^mv ${s}/candidate \\S+/node_modules/sqlite3$`));
+});

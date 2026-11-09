@@ -1208,6 +1208,12 @@ materialize_native_sqlite3() {
         echo "ERROR: sqlite3 ownership marker failed; inspect $mns_backup and $mns_stage" >&2
         return 1
     fi
+    # Recovery reads .owner, the marker and the staged files after the renames
+    # below. Without a flush, power loss can keep a committed rename while
+    # those bytes are still unwritten on the SD card.
+    if ! sync; then
+        echo 'WARN: sync failed; the sqlite3 swap may not survive a power loss' >&2
+    fi
     if native_sqlite3_present "$mns_path"; then
         if [ ! -d "$mns_path" ] && [ ! -L "$mns_path" ]; then
             echo "ERROR: unexpected sqlite3 destination before swap: $mns_path" >&2
