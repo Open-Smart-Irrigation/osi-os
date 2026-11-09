@@ -455,14 +455,25 @@ Pick exactly one of these, in this order:
    deploy straight away: its materialisation copies the firmware module into
    place before npm runs. Until then a Node-RED restart has no database
    driver.
-3. The firmware module is missing or broken. Move a healthy retained original
-   into place with `mv` (same filesystem, so the module is not copied), after
-   moving the failed final path into `$BK`; then remove the remaining folders
-   as in step 1. If no candidate is healthy, stop: the gateway needs an image
+3. The firmware module is missing or broken. Put a healthy retained original
+   at the final path with `mv` inside `node_modules`, so the checked directory
+   moves intact. First move the final path aside to a dot name that neither
+   tool scans and npm ignores, then move the original in from where it is:
+
+   ```sh
+   [ -e "$NM/sqlite3" ] || [ -L "$NM/sqlite3" ] && mv "$NM/sqlite3" "$NM/.osi-hold-sqlite3"
+   mv "$NM/.osi-hold-sqlite3/original" "$NM/sqlite3"      # original was nested in the final path
+   # or: mv "$NM/.osi-sqlite3-rollback.XXXXXX/original" "$NM/sqlite3"
+   ```
+
+   Then remove the remaining folders as in step 1 and run the deploy. Remove
+   `$NM/.osi-hold-sqlite3` after the deploy prints `OK: require('sqlite3')
+   resolves`. If no candidate is healthy, stop: the gateway needs an image
    whose firmware module loads.
 
-Do not copy a module in by hand with `cp`; npm retires a module whose version or
-layout does not match the lockfile.
+Never leave `sqlite3` as a symlink to a retained copy, and never put a version
+other than the pin there: npm retires a symlinked `sqlite3` and reinstalls an
+off-pin one, which fails on 32-bit ARM with musl where no prebuilt exists.
 
 After clearing, run the deploy. If the seed was refusing, it runs again at the
 next boot. If a deploy has run since the seed started refusing, that boot also
