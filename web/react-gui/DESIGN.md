@@ -245,7 +245,7 @@ The logo's sampled colours, about `#84A366` green and `#369BCA` blue, are **not 
 
 Not specified in the GUI: dark-background or single-colour logo variants, a wordmark, an SVG, clear space, minimum size, and logo licence terms separate from the repo's MIT `LICENSE`.
 
-The product name appears as "Open Smart Irrigation" (`index.html` title), "Open Smart Irrigation Dashboard" (dashboard title) and "OSI OS v0.8.1 (Alpha)" (login heading).
+The product name appears as "Open Smart Irrigation" (`index.html` title), "Open Smart Irrigation Dashboard" (dashboard title) and "OSI OS v0.8.2 (Alpha)" (login heading).
 
 ## Imagery and iconography
 
