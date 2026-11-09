@@ -208,8 +208,9 @@ const SQL_OWNED_EVENT_OPS = new Set([
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_users_outbox_* triggers, not by
   // flows.json. The triggers ship unconditionally and are gated at the data layer
   // by the scoped_access_emit.enabled row (default 0). Cloud handling is active:
-  // osi-server 28d7ef3c added the org.osi.server.scopedaccessmirror appliers for
-  // USER_UPSERTED and the zone/plot assignment ops below, so they are not cloud-deferred.
+  // osi-server e0f114cf added the appliers for USER_UPSERTED and the zone/plot
+  // assignment ops below (28d7ef3c moved them to org.osi.server.scopedaccessmirror;
+  // both are in v0.8.0), so they are not cloud-deferred.
   'USER_UPSERTED',
   // Emitted by 0044__scoped_access_schema.sql's trg_dp_user_zone_assign_outbox_* triggers.
   'USER_ZONE_ASSIGNMENT_UPSERTED',
@@ -1424,8 +1425,23 @@ function findJavaMethodBody(source, methodName) {
 // appliers live in org.osi.server.journal and org.osi.server.scopedaccessmirror).
 // Each declares its ops via supportedOps(); those must count as server-supported
 // ops too, or parity checks report a false gap for dispatched ops.
+// An abstract class never reaches the registry, so it is skipped. A concrete
+// class without @Component/@Service is an error rather than a count: counting
+// it could pass a server that never registers the applier.
+const SYNC_EVENT_APPLIER_CLASS = /\b((?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\s+)*)class\s+\w+[^{;]*?\bimplements\b[^{;]*\bSyncEventApplier\b/;
+const SPRING_COMPONENT_ANNOTATION = /@(?:Component|Service)\b/;
+
 function extractSyncEventApplierOps(source) {
   if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
+  const declaration = SYNC_EVENT_APPLIER_CLASS.exec(source);
+  if (!declaration) return { ops: [], error: 'implements SyncEventApplier but the class declaration was not recognised' };
+  if (/\babstract\b/.test(declaration[1])) return null;
+  const header = source.slice(0, declaration.index)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/[^\n]*/g, '');
+  if (!SPRING_COMPONENT_ANNOTATION.test(header.slice(header.lastIndexOf(';') + 1))) {
+    return { ops: [], error: 'implements SyncEventApplier but has no @Component or @Service annotation, so the registry may not inject it' };
+  }
   const body = findJavaMethodBody(source, 'supportedOps');
   if (body === null) return { ops: [], error: 'implements SyncEventApplier but supportedOps() method body not found' };
   return { ops: [...new Set(extractQuotedConstants(body))], error: null };

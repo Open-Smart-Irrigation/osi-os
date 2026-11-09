@@ -121,7 +121,7 @@ const JOURNAL_EVENT_OPS = [
   'JOURNAL_PLOT_GROUP_UPSERTED',
 ];
 // Scoped-access admin commands stay cloud-deferred; their outbox events are active since
-// osi-server 28d7ef3c added the scopedaccessmirror appliers -- see the long-form rationale
+// osi-server e0f114cf added the scoped-access appliers -- see the long-form rationale
 // next to the matching EXACT_ constants in verify-sync-op-parity.js.
 const SCOPED_ACCESS_COMMANDS = [
   'DELETE_USER_PLOT_ASSIGNMENT',
@@ -429,6 +429,7 @@ class EdgeSyncService {
 }
 `);
   fs.writeFileSync(path.join(path.dirname(serverSource), 'GatewayLocationApplier.java'), `
+@Component
 class GatewayLocationApplier implements SyncEventApplier {
   public Set<String> supportedOps() {
     return Set.of("GATEWAY_LOCATION_UPSERTED");
@@ -495,6 +496,33 @@ class JournalEntryService {
   assert.deepEqual(result.applierFiles, [path.join('journal', 'JournalEntryApplier.java')]);
 });
 
+test('server extractor skips abstract appliers and rejects unregistered ones', () => {
+  const serverSource = writeServerPackageFixture({
+    'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
+    'sync/BaseApplier.java': `
+package org.osi.server.sync;
+/** Shared helper; @Component on subclasses only. */
+public abstract class BaseApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("ABSTRACT_ONLY_OP"); }
+}
+`,
+    'zone/UnregisteredApplier.java': `
+package org.osi.server.zone;
+// @Component is missing on purpose.
+public class UnregisteredApplier implements SyncEventApplier {
+  public Set<String> supportedOps() { return Set.of("UNREGISTERED_OP"); }
+}
+`,
+  });
+
+  const result = extractServerOps(serverSource);
+
+  assert.deepEqual(result.ops, ['DEVICE_DATA_APPENDED']);
+  assert.deepEqual(result.applierFiles, []);
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /^zone[\\/]UnregisteredApplier\.java: .*no @Component or @Service annotation/);
+});
+
 test('parity counts switch and applier ops and still fails an op with neither', () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-op-parity-'));
   const schemaPath = path.join(fixtureRoot, 'events.schema.json');
@@ -503,6 +531,7 @@ test('parity counts switch and applier ops and still fails an op with neither', 
     'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
     'zone/ZoneConfigApplier.java': `
 package org.osi.server.zone;
+@Component
 public class ZoneConfigApplier implements SyncEventApplier {
   public Set<String> supportedOps() { return Set.of("ZONE_CONFIG_UPSERTED"); }
 }
@@ -544,6 +573,7 @@ public class ZoneConfigApplier implements SyncEventApplier {
   assert.match(result.message, /^ {2}2 server ops; 1 via EdgeSyncService switch, 1 via SyncEventApplier classes in 1 file$/m);
 
   fs.writeFileSync(path.join(path.dirname(serverSource), '..', 'zone', 'ZoneDeleteApplier.java'), `
+@Component
 public class ZoneDeleteApplier implements SyncEventApplier {
   public Set<String> supportedOps() { return Set.of("ZONE_DELETED"); }
 }
