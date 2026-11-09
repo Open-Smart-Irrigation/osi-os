@@ -133,6 +133,8 @@ For valves, add:
 
 ### Prerequisites
 
+All commands in this section run from the `web/react-gui` directory of the repository.
+
 **1. Database Setup**
 
 The database `farming.db` is already included with sample data. No setup needed!
@@ -165,7 +167,6 @@ export JWT_SECRET=your-secure-secret-key
 
 ### Development
 ```bash
-cd web/react-gui
 npm run dev
 ```
 Access at: `http://localhost:3000/gui/`
