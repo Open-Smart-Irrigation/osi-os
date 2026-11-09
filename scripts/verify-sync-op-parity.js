@@ -1431,14 +1431,19 @@ function findJavaMethodBody(source, methodName) {
 const SYNC_EVENT_APPLIER_CLASS = /\b((?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\s+)*)class\s+\w+[^{;]*?\bimplements\b[^{;]*\bSyncEventApplier\b/;
 const SPRING_COMPONENT_ANNOTATION = /@(?:Component|Service)\b/;
 
+function stripJavaComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
 function extractSyncEventApplierOps(source) {
-  if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(source)) return null;
-  const declaration = SYNC_EVENT_APPLIER_CLASS.exec(source);
+  // Match declarations on comment-free text so Javadoc that mentions
+  // "implements SyncEventApplier" is neither counted nor reported.
+  const code = stripJavaComments(source);
+  if (!/\bimplements\b[^{;]*\bSyncEventApplier\b/.test(code)) return null;
+  const declaration = SYNC_EVENT_APPLIER_CLASS.exec(code);
   if (!declaration) return { ops: [], error: 'implements SyncEventApplier but the class declaration was not recognised' };
   if (/\babstract\b/.test(declaration[1])) return null;
-  const header = source.slice(0, declaration.index)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/\/\/[^\n]*/g, '');
+  const header = code.slice(0, declaration.index);
   if (!SPRING_COMPONENT_ANNOTATION.test(header.slice(header.lastIndexOf(';') + 1))) {
     return { ops: [], error: 'implements SyncEventApplier but has no @Component or @Service annotation, so the registry may not inject it' };
   }

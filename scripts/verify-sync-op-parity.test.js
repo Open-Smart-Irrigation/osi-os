@@ -496,7 +496,7 @@ class JournalEntryService {
   assert.deepEqual(result.applierFiles, [path.join('journal', 'JournalEntryApplier.java')]);
 });
 
-test('server extractor skips abstract appliers and rejects unregistered ones', () => {
+test('server extractor skips abstract appliers and Javadoc mentions, rejects unregistered ones', () => {
   const serverSource = writeServerPackageFixture({
     'sync/EdgeSyncService.java': PACKAGE_FIXTURE_SERVICE,
     'sync/BaseApplier.java': `
@@ -504,6 +504,15 @@ package org.osi.server.sync;
 /** Shared helper; @Component on subclasses only. */
 public abstract class BaseApplier implements SyncEventApplier {
   public Set<String> supportedOps() { return Set.of("ABSTRACT_ONLY_OP"); }
+}
+`,
+    'sync/ApplierRegistryNotes.java': `
+package org.osi.server.sync;
+/**
+ * Every bean that implements SyncEventApplier is folded into appliersByOp.
+ */
+final class ApplierRegistryNotes {
+  Set<String> supportedOps() { return Set.of("DOC_ONLY_OP"); }
 }
 `,
     'zone/UnregisteredApplier.java': `
