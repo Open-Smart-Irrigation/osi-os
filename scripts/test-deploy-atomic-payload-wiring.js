@@ -9,8 +9,10 @@ const deploy = fs.readFileSync(path.resolve(__dirname, '..', 'deploy.sh'), 'utf8
 
 const NODE_RED_ROOT = 'conf/full_raspberrypi_bcm27xx_bcm2712/files/usr/share/node-red';
 
+// Helper modules are fetched into the payload deploy.sh stages ($MODULE_STAGE,
+// payloads/<stamp>/modules); the command ledger into its own pinned stage.
 const MODULE_DESTINATION_ROOTS = {
-  'osi-journal': '/srv/node-red',
+  'osi-journal': '$MODULE_STAGE',
   'osi-command-ledger': '$COMMAND_LEDGER_STAGE',
 };
 
@@ -139,6 +141,11 @@ test('module destination fence rejects live, wrong-stage, and cross-module desti
       moduleName: 'osi-journal',
       filename: 'index.js',
       badDestination: '$COMMAND_LEDGER_STAGE/osi-journal/index.js',
+    },
+    {
+      moduleName: 'osi-journal',
+      filename: 'index.js',
+      badDestination: '/srv/node-red/osi-journal/index.js',
     },
   ];
 
@@ -289,4 +296,84 @@ test('missing legacy GUI skips retained capture so the staged pair can activate'
 test('post-flip restart decision uses the pre-activation state', () => {
   assert.match(deploy, /PAYLOAD_WAS_FLIPPED="\$PAYLOAD_FLIPPED"/);
   assert.match(deploy, /if \[ "\$PAYLOAD_WAS_FLIPPED" != "1" \]; then/);
+});
+
+// Issue #603: a module written into /srv/node-red before the payload flip
+// changes what the previous flows load, and no rollback restored it.
+const { LIVE_MODULES } = require('./deploy-payload-swap');
+const MODULE_FETCH = new RegExp(String.raw`fetch_required "[^"]*" \\\n\s+"${NODE_RED_ROOT}/(osi-[a-z0-9-]+)/([^"]+)" \\\n\s+"([^"]+)"`, 'g');
+
+function moduleFetches(source) {
+  return [...source.matchAll(MODULE_FETCH)].map(([, name, file, destination]) => ({ name, file, destination }));
+}
+
+test('deploy.sh fetches every helper module into the staged payload, never into /srv/node-red', () => {
+  assert.match(deploy, /^MODULE_STAGE="\$PAYLOADS_ROOT\/\$DEPLOY_STAMP\/modules"$/m);
+  const fetches = moduleFetches(deploy);
+  const staged = fetches.filter(({ name }) => !LIVE_MODULES.includes(name));
+  assert.ok(staged.length > 100, `expected the full module block, parsed ${staged.length}`);
+  const wrong = staged.filter(({ name, file, destination }) => destination !== `$MODULE_STAGE/${name}/${file}`);
+  assert.deepEqual(wrong, [], 'every helper-module fetch must land in $MODULE_STAGE/<module>/<file>');
+  assert.doesNotMatch(deploy, /"\/srv\/node-red\/osi-/, 'no osi-* module file may be written in place');
+  for (const name of LIVE_MODULES) {
+    assert.ok(fetches.filter((f) => f.name === name).every((f) => f.destination.startsWith('$COMMAND_LEDGER_STAGE/')),
+      `${name} stays on the command-ledger staging path`);
+  }
+  // The fence catches a doctored in-place destination.
+  const doctored = deploy.replace('"$MODULE_STAGE/osi-valve-control/index.js"', '"/srv/node-red/osi-valve-control/index.js"');
+  assert.notEqual(doctored, deploy);
+  assert.deepEqual(moduleFetches(doctored).filter(({ name, file, destination }) =>
+    !LIVE_MODULES.includes(name) && destination !== `$MODULE_STAGE/${name}/${file}`).map((f) => f.name), ['osi-valve-control']);
+});
+
+test('deploy.sh seals, captures and links helper modules before npm install and the Node-RED stop', () => {
+  const prevIdx = indexOf('PREV_STAMP="$(swap_call currentStamp || true)"');
+  const lastModuleFetch = Math.max(...[...deploy.matchAll(MODULE_FETCH)]
+    .filter((m) => m[3].startsWith('$MODULE_STAGE/')).map((m) => m.index));
+  const begin = indexOf('# module payload staging begin');
+  const sealIdx = indexOf('swap_call sealModules "$DEPLOY_STAMP"');
+  const captureIdx = indexOf('swap_call captureModules "$PREV_STAMP" "$DEPLOY_STAMP"');
+  const linkIdx = indexOf('swap_call linkNewModules "$DEPLOY_STAMP" "${PREV_STAMP:-}"');
+  const end = indexOf('# module payload staging end');
+  const npmIdx = indexOf('npm install --omit=dev --no-fund --no-audit');
+  const migrationIdx = indexOf('run_schema_migration || exit 1');
+  assert.ok(prevIdx < lastModuleFetch && lastModuleFetch < begin, 'the previous payload is known before the module block ends');
+  assert.ok(begin < sealIdx && sealIdx < captureIdx && captureIdx < linkIdx && linkIdx < end,
+    'seal, then capture into the previous payload, then link new modules');
+  assert.ok(end < npmIdx && npmIdx < migrationIdx, 'npm install needs every file: dependency, before the stop');
+});
+
+test('deploy-time ChirpStack provisioning loads the helper staged with the new payload', () => {
+  for (const marker of ['--repair-soil-profiles; then', 'CHIRPSTACK_API_KEY="$cs_api_key"']) {
+    const idx = indexOf(marker);
+    const line = deploy.slice(deploy.lastIndexOf('\n', idx) + 1, deploy.indexOf('\n', idx));
+    assert.match(line, /OSI_CHIRPSTACK_HELPER="\$MODULE_STAGE\/osi-chirpstack-helper" node \/srv\/node-red\/chirpstack-bootstrap\.js/, line);
+  }
+  for (const copy of ['scripts', `${NODE_RED_ROOT}`, NODE_RED_ROOT.replace('bcm2712', 'bcm2709')]) {
+    const bootstrap = fs.readFileSync(path.resolve(__dirname, '..', copy, 'chirpstack-bootstrap.js'), 'utf8');
+    assert.match(bootstrap, /if \(process\.env\.OSI_CHIRPSTACK_HELPER\) \{\n\s+return require\(path\.resolve\(process\.env\.OSI_CHIRPSTACK_HELPER\)\);/, copy);
+  }
+});
+
+// A payload module resolves require('../<name>') from its real path inside
+// payloads/<stamp>/modules/, so <name> must be staged with it or be one of the
+// live modules each payload links back to.
+test('every relative cross-module require resolves inside the payload module set', () => {
+  const staged = new Set(moduleFetches(deploy).map(({ name }) => name).filter((name) => !LIVE_MODULES.includes(name)));
+  const root = path.resolve(__dirname, '..', NODE_RED_ROOT);
+  const unresolved = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(file); continue; }
+      if (!entry.name.endsWith('.js') || entry.name.endsWith('.test.js') || entry.name === 'test-helpers.js') continue;
+      const source = fs.readFileSync(file, 'utf8');
+      for (const [, sibling] of source.matchAll(/require\(\s*['"]\.\.\/(osi-[a-z0-9-]+)/g)) {
+        if (!staged.has(sibling) && !LIVE_MODULES.includes(sibling)) unresolved.push(`${path.relative(root, file)} -> ${sibling}`);
+      }
+    }
+  };
+  for (const name of staged) walk(path.join(root, name));
+  assert.ok(staged.has('osi-journal') && staged.has('osi-valve-control'));
+  assert.deepEqual(unresolved, []);
 });

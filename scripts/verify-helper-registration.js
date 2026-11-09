@@ -98,15 +98,20 @@ function checkSurfaces({ name, packageJson, packageLock, seedSource, deploySourc
   if (!loop || !loop[1].split(/\s+/).includes(name)) {
     issues.push(name + ': missing from 98_osi_node_red_seed module-copy loop');
   }
-  const direct = ['package.json', 'index.js'].filter((file) => deploySource.includes('/srv/node-red/' + name + '/' + file));
+  // deploy.sh fetches each helper module into the payload it stages
+  // ($MODULE_STAGE is payloads/<stamp>/modules); flipTo() then links
+  // /srv/node-red/<name> into the active payload. A fetch straight into
+  // /srv/node-red/<name> does not count: it would change the modules the
+  // running flows use before the payload flip (#603).
+  const direct = ['package.json', 'index.js'].filter((file) => deploySource.includes('"$MODULE_STAGE/' + name + '/' + file + '"'));
   const staged = direct.length === 2 ? null : stagedDeliveryIssues(name, deploySource);
   const stagedReferenced = staged && Object.keys(STAGED_DELIVERY[name].pins)
     .some((file) => deploySource.includes(STAGED_DELIVERY[name].stageDir + '/' + name + '/' + file));
   if (stagedReferenced) {
     issues.push(...staged);
   } else {
-    if (!direct.includes('package.json')) issues.push(name + ': missing package.json fetch_required in deploy.sh');
-    if (!direct.includes('index.js')) issues.push(name + ': missing index.js fetch_required in deploy.sh');
+    if (!direct.includes('package.json')) issues.push(name + ': missing package.json fetch_required in deploy.sh (into $MODULE_STAGE)');
+    if (!direct.includes('index.js')) issues.push(name + ': missing index.js fetch_required in deploy.sh (into $MODULE_STAGE)');
   }
   if (!moduleDir.hasDir) {
     issues.push(name + ': module directory missing');
