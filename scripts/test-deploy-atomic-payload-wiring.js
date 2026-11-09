@@ -300,7 +300,7 @@ test('post-flip restart decision uses the pre-activation state', () => {
 
 // Issue #603: a module written into /srv/node-red before the payload flip
 // changes what the previous flows load, and no rollback restored it.
-const { LIVE_MODULES } = require('./deploy-payload-swap');
+const { LIVE_MODULES, LIVE_ENTRIES } = require('./deploy-payload-swap');
 const MODULE_FETCH = new RegExp(String.raw`fetch_required "[^"]*" \\\n\s+"${NODE_RED_ROOT}/(osi-[a-z0-9-]+)/([^"]+)" \\\n\s+"([^"]+)"`, 'g');
 
 function moduleFetches(source) {
@@ -355,10 +355,11 @@ test('deploy-time ChirpStack provisioning loads the helper staged with the new p
   }
 });
 
-// A payload module resolves require('../<name>') from its real path inside
-// payloads/<stamp>/modules/, so <name> must be staged with it or be one of the
-// live modules each payload links back to.
-test('every relative cross-module require resolves inside the payload module set', () => {
+// A payload module resolves require('../<name>') and __dirname-relative
+// '../<name>' paths from its real path inside payloads/<stamp>/modules/, so
+// <name> must be staged with it or be one of the live entries each payload
+// links back to (the command-ledger pair, codecs/, edge-channels.json).
+test('every parent-relative path in a helper module resolves inside the payload module set', () => {
   const staged = new Set(moduleFetches(deploy).map(({ name }) => name).filter((name) => !LIVE_MODULES.includes(name)));
   const root = path.resolve(__dirname, '..', NODE_RED_ROOT);
   const unresolved = [];
@@ -368,14 +369,17 @@ test('every relative cross-module require resolves inside the payload module set
       if (entry.isDirectory()) { if (entry.name !== 'node_modules') walk(file); continue; }
       if (!entry.name.endsWith('.js') || entry.name.endsWith('.test.js') || entry.name === 'test-helpers.js') continue;
       const source = fs.readFileSync(file, 'utf8');
-      for (const [, sibling] of source.matchAll(/require\(\s*['"]\.\.\/(osi-[a-z0-9-]+)/g)) {
-        if (!staged.has(sibling) && !LIVE_MODULES.includes(sibling)) unresolved.push(`${path.relative(root, file)} -> ${sibling}`);
+      for (const [, sibling] of source.matchAll(/['"`]\.\.\/([^'"`/]+)/g)) {
+        if (!staged.has(sibling) && !LIVE_ENTRIES.includes(sibling)) unresolved.push(`${path.relative(root, file)} -> ${sibling}`);
       }
     }
   };
   for (const name of staged) walk(path.join(root, name));
   assert.ok(staged.has('osi-journal') && staged.has('osi-valve-control'));
   assert.deepEqual(unresolved, []);
+  for (const entry of LIVE_ENTRIES.filter((name) => !LIVE_MODULES.includes(name))) {
+    assert.match(deploy, new RegExp(`"/srv/node-red/${entry.replace('.', '\\.')}[/"]`), `${entry} must still be written in place`);
+  }
 });
 
 // The image seed runs on first boot and again after a sysupgrade. It must not

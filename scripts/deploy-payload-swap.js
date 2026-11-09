@@ -41,9 +41,14 @@ function legacyCapturePath(root) {
 const MODULE_NAME = /^osi-[a-z0-9][a-z0-9-]*$/;
 // These stay live directories outside every payload: deploy.sh activates the
 // command-ledger pair on its own path, after the schema migration commits.
-// Payload modules reach them with require('../<name>'), which Node resolves
-// from the payload copy's real path, so every payload's modules/ links back.
 const LIVE_MODULES = ['osi-command-ledger', 'osi-watermark-binding'];
+// Everything a payload module reaches through '../<name>' without it being a
+// staged module: the command-ledger pair, plus the codecs and
+// edge-channels.json that deploy.sh still writes in place
+// (osi-sdi12-normalize requires '../edge-channels.json', osi-valve-control
+// falls back to '../codecs/'). Node resolves those paths from the payload
+// copy's real path, so every payload's modules/ links each one back.
+const LIVE_ENTRIES = [...LIVE_MODULES, 'codecs', 'edge-channels.json'];
 
 function modulesDir(root, stamp) {
   return path.join(payloadDir(root, stamp), 'modules');
@@ -287,7 +292,7 @@ function payloadModuleLinks(root) {
 
 function ensureLiveModuleLinks(root, stamp) {
   const dir = modulesDir(root, stamp);
-  for (const name of LIVE_MODULES) {
+  for (const name of LIVE_ENTRIES) {
     const link = path.join(dir, name);
     const expected = path.relative(dir, moduleLink(root, name));
     const stat = lstatOrNull(link);
@@ -305,7 +310,7 @@ function moduleSetComplete(root, stamp, manifest) {
     const stat = lstatOrNull(target);
     if (!stat || !stat.isDirectory() || !isFile(path.join(target, 'package.json'))) return false;
   }
-  for (const name of LIVE_MODULES) {
+  for (const name of LIVE_ENTRIES) {
     const dir = modulesDir(root, stamp);
     const stat = lstatOrNull(path.join(dir, name));
     if (!stat || !stat.isSymbolicLink() ||
@@ -315,8 +320,8 @@ function moduleSetComplete(root, stamp, manifest) {
 }
 
 // Seals the modules deploy.sh fetched into payloads/<stamp>/modules/: every
-// entry is a module directory with a package.json, the live command-ledger
-// links are added, and modules.json records the set.
+// entry is a module directory with a package.json, the links to the live
+// entries are added, and modules.json records the set.
 function sealModules(root, stamp) {
   const dir = modulesDir(root, stamp);
   if (!isDirectory(dir)) throw new Error(`sealModules: no staged modules in ${dir}`);
@@ -325,7 +330,7 @@ function sealModules(root, stamp) {
   }
   const names = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (LIVE_MODULES.includes(entry.name)) {
+    if (LIVE_ENTRIES.includes(entry.name)) {
       if (entry.isSymbolicLink()) continue;
       throw new Error(`sealModules: ${entry.name} was staged, but it stays outside the payload`);
     }
@@ -725,6 +730,7 @@ function prunePayloads(root, keepN) {
 
 module.exports = {
   LIVE_MODULES,
+  LIVE_ENTRIES,
   stagePayload,
   sealModules,
   captureModules,

@@ -381,11 +381,12 @@ all restore (or remove) the modules with the flows. `node_modules/<module>`
 stays `../<module>`, so function-node `libs` follow the link.
 
 Not in the payload: `osi-command-ledger` and `osi-watermark-binding` keep
-their own staged activation after the migration commit (above). Each payload's
-`modules/` holds a link back to them, because payload modules require
-`../osi-command-ledger`. `package.json`, `package-lock.json`,
-`edge-channels.json`, the codecs and `chirpstack-bootstrap.js` are still
-written in place. The Gen2 provisioning and the Kiwi/Clover repair that
+their own staged activation after the migration commit (above), and
+`package.json`, `package-lock.json`, `edge-channels.json`, the codecs and
+`chirpstack-bootstrap.js` are still written in place. Each payload's
+`modules/` links back to the ledger pair, `codecs/` and `edge-channels.json`,
+because payload modules reach them through `../` paths (for example
+`osi-sdi12-normalize` requires `../edge-channels.json`). The Gen2 provisioning and the Kiwi/Clover repair that
 `deploy.sh` runs before the flip load the staged `osi-chirpstack-helper`
 (`OSI_CHIRPSTACK_HELPER`).
 

@@ -319,6 +319,10 @@ function moduleRoot(t) {
   writeModule(path.join(root, 'osi-command-ledger'), 'ledger-live', "exports.binding = require('../osi-watermark-binding/canonicalization');\n");
   fs.mkdirSync(path.join(root, 'osi-watermark-binding'));
   fs.writeFileSync(path.join(root, 'osi-watermark-binding', 'canonicalization.js'), "module.exports = 'binding-live';\n");
+  // Runtime files deploy.sh still writes in place.
+  fs.mkdirSync(path.join(root, 'codecs'));
+  fs.writeFileSync(path.join(root, 'codecs', 'decoder.js'), '// live codec\n');
+  fs.writeFileSync(path.join(root, 'edge-channels.json'), '{"channels":"live"}\n');
   return root;
 }
 
@@ -377,7 +381,8 @@ test('sealModules records the staged module set and links the live command-ledge
   assert.deepEqual(sealed, ['osi-a', 'osi-b']);
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'payloads', 'new', 'modules.json'), 'utf8'));
   assert.deepEqual(manifest, { format: 1, modules: ['osi-a', 'osi-b'], captured: {} });
-  for (const name of ['osi-command-ledger', 'osi-watermark-binding']) {
+  assert.deepEqual([...swap.LIVE_ENTRIES].sort(), ['codecs', 'edge-channels.json', 'osi-command-ledger', 'osi-watermark-binding']);
+  for (const name of swap.LIVE_ENTRIES) {
     const link = path.join(root, 'payloads', 'new', 'modules', name);
     assert.equal(fs.readlinkSync(link), path.join('..', '..', '..', name));
     assert.equal(fs.realpathSync(link), fs.realpathSync(path.join(root, name)));
@@ -396,6 +401,11 @@ test('sealModules refuses a module without package.json and a staged command-led
   writeModule(path.join(root, 'payloads', 'ledger', 'modules', 'osi-command-ledger'), 'staged');
   assert.throws(() => swap.sealModules(root, 'ledger'), /osi-command-ledger.*outside the payload/);
   assert.equal(fs.existsSync(path.join(root, 'payloads', 'ledger', 'modules.json')), false);
+
+  stagePayload(root, 'codecs', fakeFlowsSrcAt(root, 'codecs'));
+  writeModule(path.join(root, 'payloads', 'codecs', 'modules', 'osi-a'), 'a');
+  fs.mkdirSync(path.join(root, 'payloads', 'codecs', 'modules', 'codecs'));
+  assert.throws(() => swap.sealModules(root, 'codecs'), /codecs.*outside the payload/);
 });
 
 test('flipTo switches helper modules with flows and GUI, and rollback restores them', (t) => {
@@ -426,7 +436,12 @@ test('node_modules links and relative requires follow the active payload', (t) =
     'osi-a': "exports.sibling = require('../osi-b').marker;\nexports.ledger = require('../osi-command-ledger');\n",
     'osi-b': '',
   });
-  stageWithModules(root, 'new', { 'osi-a': "exports.sibling = require('../osi-b').marker;\n", 'osi-b': '' });
+  stageWithModules(root, 'new', {
+    'osi-a': "exports.sibling = require('../osi-b').marker;\n" +
+      "exports.channels = require('../edge-channels.json').channels;\n" +
+      "exports.codec = require('fs').readFileSync(require('path').resolve(__dirname, '../codecs/decoder.js'), 'utf8');\n",
+    'osi-b': '',
+  });
   // npm creates node_modules/<module> -> ../<module> for each file: dependency.
   fs.mkdirSync(path.join(root, 'node_modules'));
   for (const name of ['osi-a', 'osi-b']) fs.symlinkSync(path.join('..', name), path.join(root, 'node_modules', name));
@@ -442,9 +457,10 @@ test('node_modules links and relative requires follow the active payload', (t) =
     'a staged module reaches its own siblings and the single live command-ledger instance');
 
   flipTo(root, 'new', path.join(root, 'gui'));
-  out = probe("require(path.join(root, 'node_modules', 'osi-a')).sibling");
+  out = probe("(({ sibling, channels, codec }) => [sibling, channels, codec])(require(path.join(root, 'node_modules', 'osi-a')))");
   assert.equal(out.status, 0, out.stderr);
-  assert.equal(JSON.parse(out.stdout), 'osi-b@new');
+  assert.deepEqual(JSON.parse(out.stdout), ['osi-b@new', 'live', '// live codec\n'],
+    'edge-channels.json and the codecs stay in place and are reached from the payload');
 });
 
 test('a failed module switch restores flows, GUI and the modules already switched', (t) => {
