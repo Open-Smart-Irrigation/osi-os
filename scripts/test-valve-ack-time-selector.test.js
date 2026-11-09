@@ -1,7 +1,11 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { waitForDropPlan } = require('../tests/silvan/cases/V2-valve-acks');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const v2 = require('../tests/silvan/cases/V2-valve-acks');
+const { waitForDropPlan } = v2;
 
 const EUI = '0016C001F1000001';
 const QUEUE = '2026-05-01 12:00:00';
@@ -36,6 +40,18 @@ test('explicit offsets compare as the same UTC instants', async () => {
   const equal = record('2026-05-01T14:00:00+02:00');
   const later = record('2026-05-01T14:00:00.001+02:00');
   assert.equal(await select(QUEUE, [before, equal, later]), later);
+});
+
+test('negative offsets add to local time, including across midnight', async () => {
+  const before = record('2026-05-01T09:59:59.999-02:00');
+  const equal = record('2026-05-01T10:00:00-02:00');
+  const later = record('2026-05-01T10:00:00.001-02:00');
+  assert.equal(await select(QUEUE, [before, equal, later]), later);
+
+  const lastDay = record('2026-04-30T21:29:59.999-02:30');
+  const midnight = record('2026-04-30T21:30:00-02:30');
+  const nextDay = record('2026-04-30T21:30:00.001-02:30');
+  assert.equal(await select('2026-05-01 00:00:00', [lastDay, midnight, nextDay]), nextDay);
 });
 
 test('SQLite fractions preserve millisecond order', async () => {
@@ -98,6 +114,18 @@ test('invalid queue and observer fields reject visibly', async () => {
   }
 });
 
+test('minute and second rollover rejects instead of normalizing forward', async () => {
+  const valid = record('2026-05-01T12:00:00.001Z');
+  for (const invalid of ['2026-05-01 11:60:00', '2026-05-01 11:59:60']) {
+    await assert.rejects(select(invalid, [valid]), /invalid queue/);
+  }
+  for (const invalid of [
+    '2026-05-01T12:60:00.000Z', '2026-05-01T12:00:60.000Z', '2026-05-01T12:00:00+00:60',
+  ]) {
+    await assert.rejects(select(QUEUE, [record(invalid), valid]), /invalid observer/);
+  }
+});
+
 function delayedObserver(deliveries) {
   const downlinks = [];
   const waiters = [];
@@ -144,4 +172,89 @@ test('valid delayed observer record resolves through the selector promise', asyn
   assert.equal(
     await waitForDropPlan(delayedObserver([valid]), EUI, QUEUE, new Set()), valid
   );
+});
+
+// Drives the case's run() with offline stand-ins for every ctx service, so the
+// drop step's prior-record snapshot is checked against the schedule edit order.
+function fakeRunContext(runDir) {
+  const downlinks = [];
+  const events = [];
+  const expectations = new Map();
+  let dropEdited = false;
+  const plan = (at, fPort, bytesHex) => {
+    const downlink = record(at, { fPort, bytesHex });
+    downlinks.push(downlink);
+    return downlink;
+  };
+  const fresh = { at: '2026-05-01T12:00:01.000Z', fPort: 14, bytesHex: 'FRESH' };
+  const observer = {
+    get downlinks() {
+      events.push(dropEdited ? 'snapshot-after-drop-edit' : 'snapshot-before-drop-edit');
+      return downlinks.slice();
+    },
+    downlinksFor: (eui) => downlinks.filter((d) => d.deveui === eui),
+    waitForDownlink: async (predicate, timeoutMs) => {
+      assert.equal(timeoutMs, 15000);
+      return downlinks.find(predicate) || null;
+    },
+    setBehaviour() {},
+    answer() {},
+    uplinksSent: [],
+  };
+  const rest = {
+    post: async (route) => {
+      if (route === '/api/irrigation-zones') return { status: 201, body: { id: 7 } };
+      // Seen before the drop edit, yet later than the drop cutoff: only the snapshot excludes it.
+      plan('2026-05-01T12:00:00.500Z', 15, 'PRIOR');
+      return { status: 201, body: { schedule_uuid: 'sched-1' } };
+    },
+    put: async (route, body) => {
+      if (body && String(body.label).startsWith('drop ')) {
+        events.push('drop-edit');
+        dropEdited = true;
+        plan(fresh.at, fresh.fPort, fresh.bytesHex);
+      }
+      return { status: route.includes('/strega/timed-action') ? 202 : 200, body: {} };
+    },
+    get: async () => ({ status: 200, body: { valves: [] } }),
+    del: async () => ({ status: 200 }),
+  };
+  const ctx = {
+    rest, observer, runDir,
+    ssh: {
+      sql: async () => [{ fport: 15, state: 'QUEUED', ack_status: null, queued_at: QUEUE }],
+      sqlOne: async () => null,
+    },
+    ev: { note() {}, artifact() {}, cleanupStep() {} },
+    U: { stregaGen1WeekdayAck: () => ({}) },
+    profiles: {},
+    freshDeveui: () => EUI,
+    createSimDevice: async () => ({ status: 201 }),
+    deleteSimDevice: async () => {},
+    deleteZone: async () => {},
+    publishActuatorUplink() {},
+    expect: (label, ok, detail) => expectations.set(label, { ok, detail }),
+    expectStatus() {},
+    until: async (probe) => {
+      const value = await probe();
+      if (!value) throw new Error('offline until: no value');
+      return value;
+    },
+    sleep: async () => {},
+  };
+  return { ctx, events, expectations, fresh };
+}
+
+test('drop step snapshots prior downlinks before the schedule edit', async () => {
+  const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v2-ack-selector-'));
+  const { ctx, events, expectations, fresh } = fakeRunContext(runDir);
+  try {
+    await v2.run(ctx);
+    await v2.cleanup(ctx);
+  } finally {
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+  assert.deepEqual(events, ['snapshot-before-drop-edit', 'drop-edit']);
+  const emitted = expectations.get('a plan downlink is still emitted when the valve is silent');
+  assert.deepEqual(emitted, { ok: true, detail: { fPort: fresh.fPort, hex: fresh.bytesHex } });
 });
