@@ -2409,6 +2409,64 @@ test('cloned ingress mutant: removing the shared-key read changes the discrimina
   });
 });
 
+// Regression mutants: put the pre-#388 pattern back (the ingress node stores the
+// request in flow context, the node after the SQLite hop reads it back) and run the
+// same interleaving the isolation tests use. The tests are only evidence if this
+// shape makes A lose its own target.
+function sharedContextMutant(writerId, writerAnchor, writeLine, readerId, readerAnchor, readLine) {
+  const writer = flowNode(writerId);
+  const reader = flowNode(readerId);
+  assert.ok(writer.func.includes(writerAnchor), 'mutant anchor present in ' + writerId);
+  assert.ok(reader.func.includes(readerAnchor), 'mutant anchor present in ' + readerId);
+  return new Map([
+    [writerId, { ...writer, func: writer.func.replace(writerAnchor, writeLine + '\n' + writerAnchor) }],
+    [readerId, { ...reader, func: reader.func.replace(readerAnchor, readLine) }],
+  ]);
+}
+
+test('shared-context mutant: valve request read back from flow context moves A onto B\'s valve', async () => {
+  const overrides = sharedContextMutant(
+    ID.valveAuth, "msg.topic = 'SELECT id FROM users", "flow.set('valve_cmd_request', msg.osi.request);",
+    ID.valveCheck, 'const request = (msg.osi || {}).request;',
+    "const request = flow.get('valve_cmd_request'); msg.osi = { request };"
+  );
+  await withRuntime({ scoped: false, functionOverrides: overrides }, async (rt) => {
+    rt.inject('A', ID.valveHttp, valveMsg('A', { eui: VALVE_A, minutes: 12 }));
+    rt.inject('B', ID.valveHttp, valveMsg('B', { eui: VALVE_B, minutes: 3 }));
+    await rt.runUntil('A', ID.valveUserDb);
+    await rt.run('B');
+    await rt.run('A');
+    assertValveAccepted(rt, 'B', { eui: VALVE_B, minutes: 3 });
+    const aLookup = rt.lane('A').sql.filter((entry) => entry.node === ID.valveDeviceDb);
+    assert.equal(aLookup.length, 1);
+    assert.match(aLookup[0].topic, new RegExp("WHERE deveui = '" + VALVE_B + "'"), 'A borrowed B\'s target');
+    assert.throws(() => assertValveAccepted(rt, 'A', { eui: VALVE_A, minutes: 12 }), assert.AssertionError,
+      'the isolation assertion rejects the crossed request');
+    rt.tabContext.get('device-api-tab').delete('valve_cmd_request');
+  });
+});
+
+test('shared-context mutant: schedule request read back from flow context fails A\'s write', async () => {
+  const overrides = sharedContextMutant(
+    ID.schedVerify, '  msg.topic = `SELECT iz.id, iz.zone_uuid', "  flow.set('sched_request', msg.osi.request);",
+    'd7e5c762c820aa16', 'const request = (msg.osi || {}).request;',
+    "const request = flow.get('sched_request'); msg.osi = { request };"
+  );
+  await withRuntime({ scoped: false, functionOverrides: overrides }, async (rt, db) => {
+    rt.inject('A', ID.schedHttp, scheduleMsg('A', SCHEDULE.A));
+    rt.inject('B', ID.schedHttp, scheduleMsg('B', SCHEDULE.B));
+    await rt.runUntil('A', ID.schedZoneDb);
+    await rt.run('B');
+    await rt.run('A');
+    assertScheduleApplied(rt, db, 'B', SCHEDULE.B);
+    assert.throws(() => assertScheduleApplied(rt, db, 'A', SCHEDULE.A), assert.AssertionError,
+      'the isolation assertion rejects the crossed request');
+    const response = onlyResponse(rt, 'A');
+    assert.notEqual(response.statusCode, 200, 'A must not report success for B\'s request');
+    rt.tabContext.get('device-api-tab').delete('sched_request');
+  });
+});
+
 test('schedule lifecycle route stores the updated row and source-triggered sync event', async () => {
   await withRuntime({ scoped: false }, async (rt, db) => {
     rt.inject('A', ID.schedHttp, scheduleMsg('A', SCHEDULE.A));
