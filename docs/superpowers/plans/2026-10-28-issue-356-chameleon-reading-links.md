@@ -12,6 +12,12 @@ Next: a fresh independent Sol source review. After acceptance comes the parent-o
 
 Main merged #584 as `d1cc14b7d`, which took ordered migration 0078 (`0078__clear_lorain_legacy_rain_rate.sql`). The coordinator decided to rebase this branch onto that main and renumber, which replaces the rule below that execution stops instead of picking 0079. The migration is now `0079__chameleon_reading_links.sql`. Its second line reads `-- 0079:`, so its bytes and its `CHECKSUMS.json` entry are new; the SQL statements are unchanged. The seven bundled images were rebuilt with `node scripts/build-seed-db.js` and are stamped at head 79. The trigger owners in `verify-runtime-schema-parity.js` and the exact migration lists in the head-pin tests name 79. The packet files under `issue-356-chameleon-reading-links/` still name 0078; they are the reviewed history and stay unchanged. The edits to the retired `verify-flows-size-ratchet-allowances.json` were dropped, because flow growth now needs an entry in `scripts/flows-growth-exceptions.json` at the base ref.
 
+## Move into modules (2026-11-09)
+
+The coordinator took no growth exception, so the new logic left `flows.json`. The SWT query of "Build mean query (last hour, all datapoints)" is now `buildSwtMeanQuery(metric, zoneId, cutoffIso)` in a new `osi-scheduler-mean-query` module, which the node loads with `osiLib.require('scheduler-mean-query')`. The node keeps the DENDRO query and the cutoff; if the module cannot load, it logs `node.error` and sends no query. The insert and backfill bodies are `buildReadingRow`, `insertReadingWithLink` and `backfillLocalCalibration` in `osi-chameleon-helper`. "LSN50 Normalize + Write" lost the #356 comment and a shorter MOD9 comment. No node is larger than on main, and the per-profile total fell from 1,617,597 to 1,613,686.
+
+The SQL, the parameter order and the log text are copied unchanged. A scratch comparison ran the reviewed node bodies and the new node-plus-module pairs on both profiles over 678 inputs (every metric, malformed zone ids, 26 message variants, injected BEGIN, insert and link failures) and found identical topics, statement sequences, parameters, status, warnings and errors. New behaviour: the module refuses a non-finite zone id or a cutoff that is not an ISO-8601 UTC timestamp, which the node never passes.
+
 ## Current-main rebinding (2026-10-29)
 
 This section governs the execution binding. The Status paragraphs above, the stage M section and the r3 response tables record the P-based history and stay as written.
