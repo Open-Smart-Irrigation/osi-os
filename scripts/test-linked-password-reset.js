@@ -250,13 +250,21 @@ async function fixture(profile, options = {}) {
 
   async function runNode(node, msg, envValues) {
     scope._resetForTests();
+    const libOverrides = { osiDb: helper, bcrypt };
+    // A gateway whose osi-local-password-reset failed to load: the router
+    // still gets the scope helper; every other name fails.
+    if (options.resetUnavailable && node.id === 'scoped-admin-account-router') {
+      libOverrides.osiLib = {
+        require: (name) => (name === 'scope' ? { ok: true, value: scopeObserved } : { ok: false, error: `synthetic load failure: ${name}` }),
+      };
+    }
     const out = await executeFunction(node, {
       msg, env: envValues, db, nodeRedModules,
       osiLibModules: {
         installation, scope: scopeObserved,
         ...(options.resetModule ? { 'local-password-reset': options.resetModule } : {}),
       },
-      libOverrides: { osiDb: helper, bcrypt },
+      libOverrides,
     });
     control.warnings.push(...out.warnings);
     control.errors.push(...out.errors);
@@ -679,6 +687,40 @@ for (const profile of PROFILES) {
         }
         assert.equal(new Set(bodies).size, 1, `${label}: identical answer for local, linked and missing targets`);
       }
+      assert.equal(f.bcryptCalls().length, 0);
+      assert.deepEqual(f.snapshot(), before);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  test(`[${profile}] a reset module that failed to load answers 503 only after the flag and authorization checks`, TEST, async () => {
+    const f = await standard(profile, { resetUnavailable: true });
+    try {
+      const researcherToken = await f.tokenFor('research1');
+      const before = f.snapshot();
+      f.clearLog();
+      const unavailable = { message: 'Password reset unavailable' };
+      const cases = [
+        ['flag off', { token: f.token, scoped: false }, NEW_PASSWORD, 404, { message: 'Not found' }],
+        ['no bearer', { token: null }, NEW_PASSWORD, 401],
+        ['researcher', { token: researcherToken }, NEW_PASSWORD, 403, { message: 'Forbidden' }],
+        ['admin', { token: f.token }, NEW_PASSWORD, 503, unavailable],
+        ['admin, short password', { token: f.token }, 'short', 503, unavailable],
+      ];
+      for (const [label, opts, password, status, body] of cases) {
+        const texts = [];
+        for (const uuid of [f.researcher.user_uuid, f.linkedV2.user_uuid, 'no-such-user']) {
+          const answer = await f.reset(opts.token, uuid, { password }, { scoped: opts.scoped !== false });
+          assert.equal(answer.status, status, `${label} -> ${uuid}`);
+          if (body) assert.deepEqual(answer.body, body, `${label} -> ${uuid}`);
+          texts.push(answer.text);
+        }
+        assert.equal(new Set(texts).size, 1, `${label}: identical answer for local, linked and missing targets`);
+      }
+      const warned = f.control.warnings.filter((w) => /reset module unavailable: synthetic load failure/.test(w));
+      assert.equal(warned.length, 6, 'one warning per 503');
+      assert.ok(!f.control.warnings.some((w) => w.includes(NEW_PASSWORD)), 'no warning carries the password');
       assert.equal(f.bcryptCalls().length, 0);
       assert.deepEqual(f.snapshot(), before);
     } finally {
