@@ -48,6 +48,13 @@ fi
 
 for module in osi-chameleon-helper osi-chirpstack-helper osi-cloud-http osi-watermark-binding osi-command-ledger osi-scoped-access-commands osi-zone-commands osi-device-commands osi-db-helper osi-dendro-helper osi-dendro-analytics osi-zone-env osi-history-helper osi-history-sync-helper osi-radio-helper osi-network-api osi-installation-location-helper osi-installation-helper osi-history-router osi-health-helper osi-lib osi-module-defaults osi-journal osi-journal-replication osi-device-writer osi-uplink-dedup-guard osi-uc512-normalize osi-lsn50-normalize osi-matric-potential osi-sdi12-normalize osi-sdi12-commissioning osi-sdi12-recipe osi-sdi12-reassemble osi-valve-control osi-irrigation-policy osi-system-settings osi-scope-helper osi-local-password-reset osi-scheduler-mean-query osi-rejection-recovery osi-entity-name osi-weather-provider osi-crop-kc osi-station-hours osi-rain osi-agronomy-daily osi-watermark-helper; do
     if [ "$SEED_COPY" = 1 ] && [ -d "$SRC/$module" ]; then
+        # A deploy keeps its helper modules in payloads/<stamp>/modules/ and
+        # links $DST/$module into the active payload. Leave that link and the
+        # node_modules entry alone, so the deployed flows keep the modules
+        # that shipped with them; the image copy goes only where none exists.
+        if [ -L "$DST/$module" ]; then
+            continue
+        fi
         rm -rf "$DST/$module" "$DST/node_modules/$module"
         cp -a "$SRC/$module" "$DST/$module"
         cp -a "$SRC/$module" "$DST/node_modules/$module"

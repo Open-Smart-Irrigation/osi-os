@@ -377,3 +377,41 @@ test('every relative cross-module require resolves inside the payload module set
   assert.ok(staged.has('osi-journal') && staged.has('osi-valve-control'));
   assert.deepEqual(unresolved, []);
 });
+
+// The image seed runs on first boot and again after a sysupgrade. It must not
+// replace a module a deploy linked into its payload, or the deployed flows
+// would boot on the image's modules.
+test('the image seed leaves payload-linked helper modules alone and seeds the rest', () => {
+  const os = require('node:os');
+  const { spawnSync } = require('node:child_process');
+  const seeds = ['bcm2712', 'bcm2709'].map((profile) => fs.readFileSync(path.resolve(__dirname, '..',
+    `conf/full_raspberrypi_bcm27xx_${profile}/files/etc/uci-defaults/98_osi_node_red_seed`), 'utf8'));
+  assert.equal(seeds[0], seeds[1], 'both profiles ship the same seed');
+  const loop = seeds[0].match(/^for module in [^\n]+; do\n[\s\S]*?\ndone\n/m);
+  assert.ok(loop, 'seed module loop must stay extractable');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'osi-seed-modules-'));
+  try {
+    const src = path.join(root, 'usr-share');
+    const dst = path.join(root, 'srv');
+    for (const name of ['osi-lib', 'osi-journal', 'osi-rain']) {
+      fs.mkdirSync(path.join(src, name), { recursive: true });
+      fs.writeFileSync(path.join(src, name, 'index.js'), `// ${name} image\n`);
+    }
+    fs.mkdirSync(path.join(dst, 'payloads', 'S', 'modules', 'osi-lib'), { recursive: true });
+    fs.writeFileSync(path.join(dst, 'payloads', 'S', 'modules', 'osi-lib', 'index.js'), '// osi-lib deployed\n');
+    fs.symlinkSync(path.join('payloads', 'S', 'modules', 'osi-lib'), path.join(dst, 'osi-lib'));
+    fs.mkdirSync(path.join(dst, 'node_modules'));
+    fs.symlinkSync(path.join('..', 'osi-lib'), path.join(dst, 'node_modules', 'osi-lib'));
+    fs.mkdirSync(path.join(dst, 'osi-journal'));
+    fs.writeFileSync(path.join(dst, 'osi-journal', 'index.js'), '// osi-journal stale\n');
+    const result = spawnSync('sh', ['-c', `set -eu\nSRC=${JSON.stringify(src)}\nDST=${JSON.stringify(dst)}\n${loop[0]}`], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readlinkSync(path.join(dst, 'osi-lib')), path.join('payloads', 'S', 'modules', 'osi-lib'));
+    assert.equal(fs.readlinkSync(path.join(dst, 'node_modules', 'osi-lib')), path.join('..', 'osi-lib'));
+    assert.equal(fs.readFileSync(path.join(dst, 'osi-lib', 'index.js'), 'utf8'), '// osi-lib deployed\n');
+    assert.equal(fs.readFileSync(path.join(dst, 'osi-journal', 'index.js'), 'utf8'), '// osi-journal image\n');
+    assert.equal(fs.readFileSync(path.join(dst, 'node_modules', 'osi-rain', 'index.js'), 'utf8'), '// osi-rain image\n');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
